@@ -136,7 +136,7 @@
        (is (= (:seon.cost/transactions fourth) (:seon.cost/transactions fifth)) "accounting adds no transaction")
        (is (<= (:seon.cost/calls fifth) (* 1.1 (:seon.cost/calls fourth))) "accounting adds no armed calls")))))
 
-(deftest ^{:seon/tasks #{'seon.batch/a-reply-compares-its-live-cost-with-main}} a-reply-shows-its-live-cost-against-main-at-once
+(deftest a-reply-shows-its-live-cost-against-main-at-once
   (support/with-running-agent
    (fn [running agent-id _]
      (answer running agent-id "sci" "(in-ns 'request.cost.live) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")

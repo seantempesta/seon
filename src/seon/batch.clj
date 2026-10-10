@@ -218,6 +218,43 @@
     (merge counts {:seon.cost/ms elapsed
                    :seon.cost/stages (assoc stages :unattributed remainder)})))
 
+(defn- hundredths
+  "A value to 0.01, the precision a cost comparison shows."
+  {:malli/schema [:=> [:cat number?] :double]}
+  [x]
+  (/ (Math/round (* 100.0 (double x))) 100.0))
+
+(defn cost-diff
+  "The request's live values beside main's stored ones (`stored`: symbol ->
+  [digest self-us]): one comparison per interpreted live definition (the
+  agent's own: :interpreted, and :new when main stores nothing for it), and
+  per compiled one main stores a value for whose digest differs (:changed) or
+  whose per-call self time moved by the factor `hysteresis` either way. A
+  compiled definition main has no value for is left out: on a branch that is
+  most platform code, on every reply. Reads nothing stored itself."
+  {:malli/schema [:=> [:cat :seon.cost/live
+                       [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]
+                       :seon.config.fn.cost/hysteresis]
+                  :seon.cost/diff]}
+  [live stored hysteresis]
+  (into []
+        (keep (fn [{:seon.fn.cost/keys [sym digest scope self-us]}]
+                (let [[main-digest main-us] (get stored sym)
+                      ratio (when (and main-us (pos? main-us)) (/ self-us main-us))
+                      flags (cond-> #{}
+                              (nil? main-us) (conj :new)
+                              (and main-us (not= digest main-digest)) (conj :changed)
+                              (= :seon.profile/context scope) (conj :interpreted))]
+                  (when (and (or main-us (= :seon.profile/context scope))
+                             (or (seq flags) (and ratio (or (>= ratio hysteresis) (<= ratio (/ 1.0 hysteresis))))))
+                    (cond-> {:seon.cost.comparison/subject sym
+                             :seon.cost.comparison/measure :self-us
+                             :seon.cost.comparison/live (hundredths self-us)
+                             :seon.cost.comparison/flags flags}
+                      main-us (assoc :seon.cost.comparison/main (hundredths main-us))
+                      ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))
+        live))
+
 (defn arm-measures
   "The allocation and CPU time of the forms' evaluation arms (each arm's
   platform worker and the platform threads that adopted it), summed; a measure

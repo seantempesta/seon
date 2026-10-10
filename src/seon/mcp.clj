@@ -251,6 +251,34 @@
   [started]
   (/ (- (System/nanoTime) started) 1e6))
 
+(defn- dial
+  "`dial` of `cluster-name`'s effective configuration on `database`, else its
+  shipped default when that configuration is refused or leaves it undecided."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string :qualified-keyword] :seon.schema/value]}
+  [database cluster-name dial-key]
+  (let [effective (config/effective database cluster-name)]
+    (if-some [value (when-not (:seon.error/at effective) (get effective dial-key))]
+      value
+      (get config/defaults dial-key))))
+
+(defn- with-diff
+  "The request's cost with its live values (`:seon.cost/live`) replaced by
+  their comparison with main's stored cost entities (`:seon.cost/diff`,
+  `seon.batch/cost-diff`): one query on `main` by the live symbols. Main
+  storing none, or not yet declaring them, compares every value as new."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string]] :map]}
+  [cost main cluster-name]
+  (let [live (:seon.cost/live cost)
+        cost (dissoc cost :seon.cost/live)]
+    (if (and (seq live) main cluster-name)
+      (let [rows (db/q '[:find ?s ?d ?us :in $ [?s ...]
+                         :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
+                       main (mapv :seon.fn.cost/sym live))
+            stored (if (db/read-refusal? rows) {} (into {} (map (fn [[s d us]] [s [d us]])) rows))
+            diff (seon.batch/cost-diff live stored (dial main cluster-name :seon.config.fn.cost/hysteresis))]
+        (cond-> cost (seq diff) (assoc :seon.cost/diff diff)))
+      cost)))
+
 (defn- sci-run
   "One ordinary SCI run of the agent (`evaluate-source!`, segmented as code):
   the texts, whether any failed, and the wall ms of each stage the run's pass
@@ -329,7 +357,9 @@
                true]))]
       [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))
        (merge (profile/sink-counts (:seon.batch/sink world))
-              (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch))))])))
+              (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch)))
+              {:seon.cost/live (profile/live-costs (:seon.batch/sink world)
+                                                   (dial (db/db connection) cluster-name :seon.config.test.cost/top))})])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
@@ -372,9 +402,11 @@
           [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {} nil]
           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
           :else (sci-run custody code namespace-name cluster-name))]
-    [(conj texts (printed {:seon.repl/request (assoc (seon.batch/request-cost started (merge stages run-stages) counts)
-                                                   :seon.cost/jvm-window
-                                                   (seon.batch/jvm-window counters (seon.batch/jvm-counters)))}
+    [(conj texts (printed {:seon.repl/request (-> (seon.batch/request-cost started (merge stages run-stages) counts)
+                                                  (with-diff (some-> (get-in found [:seon.turn.loop/cluster :seon.db/connection]) db/db)
+                                                             cluster-name)
+                                                  (assoc :seon.cost/jvm-window
+                                                         (seon.batch/jvm-window counters (seon.batch/jvm-counters))))}
                           code nil cluster-name))
      failed?]))
 

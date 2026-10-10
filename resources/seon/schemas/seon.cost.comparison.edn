@@ -17,4 +17,4 @@
  [:enum {:description ":new main stores no value; :changed the definition digest differs from main's; :interpreted the live value is an interpreted body's, guidance only (the compiled merge check judges); :over-budget a schema's generator or validator exceeds its dial."}
   :new :changed :interpreted :over-budget]
  :flags
- [:set {:description "Why the comparison is shown; empty never occurs for a shown entry."} :seon.cost.comparison/flag]}
+ [:set {:description "Why the comparison is shown besides its ratio; empty when the ratio alone moved past :seon.config.fn.cost/hysteresis."} :seon.cost.comparison/flag]}

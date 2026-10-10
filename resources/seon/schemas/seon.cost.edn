@@ -33,7 +33,8 @@
   [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
   [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
-  [:seon.cost/step {:optional true} :seon.cost/step]]
+  [:seon.cost/step {:optional true} :seon.cost/step]
+  [:seon.cost/live {:optional true} :seon.cost/live]]
  :seon.cost/step
  [:map {:description "The agent's turn step as the proc thread counted it: bytes allocated and CPU time between the step's start and its end, on a platform thread (exact, unlike a virtual thread, which has no counter). Producer: seon.flow/var-process. Consumer: the reply."}
   [:seon.cost/alloc-mb :seon.cost/alloc-mb]
