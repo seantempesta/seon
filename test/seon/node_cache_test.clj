@@ -6,8 +6,7 @@
             [seon.render.value :as value]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.cluster.store/the-node-cache-counts-nodes-not-bytes}}
-  a-warm-redefinition-loads-only-changed-index-paths
+(deftest a-warm-redefinition-loads-only-changed-index-paths
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [call (fn [code]

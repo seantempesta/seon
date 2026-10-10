@@ -1,0 +1,5 @@
+[#:seon.task{:name "no-test-redefines-a-var"
+             :kind :function
+             :intent "AGENTS.md forbids `with-redefs`, `alter-var-root`, `intern` and `load-file` over any Var in tests. The census `seon.test-census-test/no-test-redefines-a-var` reads test/ and script/ with edamame (`seon.census/scan`) and answers each top-level form using one of them (red at 4027882d4 plus the census: 177 sites in 75 of 406 files). Done when every site injects its effect as a world value (a declared request key or a world member supplied by schema name) or is deleted, and the census answers []."
+             :must-read #{seon.test.runner/run-vars! seon.census/scan}
+             :evidence #{"docs/research/agent-platform/2026-10-10/laws-without-proofs.md"}}]

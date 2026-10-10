@@ -322,3 +322,23 @@
                                                      :seon.task/agent [:seon.agent/id "cheap"] :seon.task/branch :main}))]
        (is (:seon.task/assignment (:seon.profile/value measured)))
        (is (< (:seon.profile/alloc-bytes measured) (* 8 1024 1024)) "one assignment allocates under 8 MB")))))
+
+(defn- ignored-roots
+  "The directories `.gitignore` names at the root, as path prefixes."
+  []
+  (->> (str/split-lines (slurp ".gitignore"))
+       (filter #(and (str/ends-with? % "/") (not (str/starts-with? % "#"))))
+       (map #(str/replace % #"^/" ""))
+       vec))
+
+(deftest ^{:seon/tasks #{'seon.task/a-task-evidence-path-names-no-gitignored-file}}
+  a-task-evidence-path-names-no-gitignored-file
+  (let [ignored (ignored-roots)
+        entries (for [file (sort-by #(.getName ^java.io.File %) (.listFiles (io/file "resources/seon/tasks")))
+                      entry (edn/read-string (slurp file))
+                      path (:seon.task/evidence entry)]
+                  {:file (.getPath ^java.io.File file) :task (:seon.task/name entry) :path path})
+        offending (filter (fn [{:keys [path]}] (some #(str/starts-with? path %) ignored)) entries)]
+    (is (some #{"tmp/"} ignored) "the census read the ignored directories")
+    (is (> (count entries) 100) "the census read the task evidence")
+    (is (= [] (vec offending)) "each site is a task whose evidence names a gitignored path")))

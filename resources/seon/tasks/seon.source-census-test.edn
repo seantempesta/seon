@@ -1,0 +1,10 @@
+[#:seon.task{:name "source-text-carries-no-date-or-file-line"
+             :kind :function
+             :intent "AGENTS.md: no dates, measurements, history or `file:line` in source. The census `seon.source-census-test/source-text-carries-no-date-or-file-line` reads src comments and docstrings with rewrite-clj (`seon.census/prose`) and lists each top-level form whose comment or docstring has an ISO date or a `<name>.clj:<n>` citation (red: 186 forms with a date, 118 with a citation). Done when the dates and citations move to Git, profile evidence or the owning spec, and the census answers []."
+             :must-read #{seon.census/prose}
+             :evidence #{"docs/research/agent-platform/2026-10-10/laws-without-proofs.md"}}
+ #:seon.task{:name "no-timeout-or-limit-is-a-hardcoded-number"
+             :kind :function
+             :intent "AGENTS.md: every size, count, byte budget, timeout and threshold is a dial; a hardcoded policy number is a defect. The census `seon.source-census-test/no-timeout-or-limit-is-a-hardcoded-number` lists each src top-level constant whose name carries ms, bytes, limit, seconds, timeout, threshold, deadline, budget or bound and is a numeric literal, and each `(or x n)` defaulting such an x to a nonzero literal (red: 36 sites in 19 files, among them `seon.cluster.process/subprocess-cleanup-ms` and `seon.health` 900). Done when each is a config dial read through the configuration it applied (or a justified entry removed from the census with its reason), and the census answers []."
+             :must-read #{seon.cluster.process/subprocess-cleanup-ms seon.config/defaults}
+             :evidence #{"docs/research/agent-platform/2026-10-10/laws-without-proofs.md"}}]
