@@ -555,7 +555,10 @@
      :seon.sci.reader/aliases aliases
      :seon.sci.reader/refers refers
      ::imports imports
-     ::requires requires}))
+     ::requires requires
+     ;; the named fixtures `use-fixtures` keeps in the namespace table
+     ;; (`seon.sci.lookup/agent-record-fixtures`)
+     ::fixtures (get-in @(:env ctx) [:namespaces namespace-name :seon.ns/fixtures] {})}))
 
 (defn- one-event
   [source namespace-name ctx max-source]
@@ -645,8 +648,10 @@
   [{aliases :seon.sci.reader/aliases
     imports ::imports
     refers :seon.sci.reader/refers
-    requires ::requires}]
-  {:seon.ns/requires
+    requires ::requires
+    fixtures ::fixtures}]
+  {:seon.ns/fixtures (seon.fn/fixture-components fixtures)
+   :seon.ns/requires
    (set requires)
    :seon.ns/aliases
    (into #{}
@@ -801,10 +806,10 @@
   (when (or changed?
             (not= (select-keys before [:seon.sci.reader/aliases
                                       :seon.sci.reader/refers
-                                      ::imports ::requires])
+                                      ::imports ::requires ::fixtures])
                   (select-keys after [:seon.sci.reader/aliases
                                      :seon.sci.reader/refers
-                                     ::imports ::requires])))
+                                     ::imports ::requires ::fixtures])))
     (let [rows (binding-rows after)]
       (program/declaration-row
        projection
@@ -2406,6 +2411,21 @@
                  :seon.error/expected :seon.sci.eval/acyclic-bindings})))
         (sort-by (comp str key) cycle)))
 
+(defn- install-fixtures!
+  "Restore on `ctx` the fixtures `namespace-name`'s entity in `db` names
+  (`:seon.ns/fixtures`), through the context's own `use-fixtures`, as loading
+  its file would; nil."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :symbol] :nil]}
+  [ctx db namespace-name]
+  (let [{fixtures :seon.ns/fixtures} (db/pull db [{:seon.ns/fixtures [:seon.ns.fixture/runs :seon.ns.fixture/position
+                                                                      :seon.ns.fixture/function]}]
+                                              [:seon.ns/name namespace-name])]
+    (doseq [[runs held] (group-by :seon.ns.fixture/runs fixtures)]
+      (sci/binding [sci/ns (context-namespace ctx namespace-name)]
+        (sci/eval-form ctx (list* 'clojure.test/use-fixtures runs
+                                  (map :seon.ns.fixture/function (sort-by :seon.ns.fixture/position held)))))))
+  nil)
+
 (defn- install-selected!
   "Interpret `function-rows` and `test-rows` on `ctx`, each namespace after the
   ones it binds, advancing the acquisition `state`; the acquisition, its
@@ -2514,6 +2534,7 @@
              order)]
         ;; Tests resolve only after every namespace's functions and exact
         ;; bindings are present. This makes renamed `deftest` deterministic.
+        (let [installed
         (reduce
          (fn [state namespace-name]
            (reduce
@@ -2526,7 +2547,11 @@
                     :seon.test/ns [:seon.ns/name namespace-name]})
                  (sort-by first (get test-rows-by-ns namespace-name)))))
          functions-installed
-         order)))))
+         order)]
+        ;; Fixtures name functions and run around tests: they install last.
+        (doseq [namespace-name order]
+          (install-fixtures! ctx db namespace-name))
+        installed)))))
 
 (defn- namespace-row
   "A pulled namespace row carrying its source, admission and authorship."

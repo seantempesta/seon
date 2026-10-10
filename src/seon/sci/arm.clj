@@ -93,12 +93,13 @@
 
 (defn changed-namespaces
   "Namespaces whose resolver state changed: aliases, refers, imports,
-  requires or types. SCI's cached namespace object and private interns are
+  requires or types, or whose named fixtures did (`seon.sci.lookup/agent-record-fixtures`). SCI's cached namespace object and private interns are
   not declarations. Admitted definitions contribute their namespace through
   `seon.turn.batch/derive-form`, independently of this resolver observation."
   {:malli/schema [:=> [:cat [:map-of :symbol :map] [:map-of :symbol :map]] [:set :symbol]]}
   [before after]
-  (let [resolver-keys [:aliases :imports :refers :refer :required-namespaces :types]]
+  (let [resolver-keys [:aliases :imports :refers :refer :required-namespaces :types
+                       :seon.ns/fixtures]]
     (into #{}
           (keep (fn [[n m]]
                   (let [previous (get before n)]

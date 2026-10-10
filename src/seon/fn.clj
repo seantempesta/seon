@@ -1,6 +1,7 @@
 (ns seon.fn
   "Build-time indexing of the Clojure program graph without evaluation."
   (:require [clojure.edn :as edn]
+            [edamame.core :as edamame]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -196,9 +197,57 @@
 
 (declare task-links)
 
+(defn- fixture-symbol
+  "The function `fixture`, an argument of a `use-fixtures` call in
+  `namespace-name`, names through the namespace's aliases and refers (`context`);
+  nil for an anonymous fixture, which is no data."
+  {:malli/schema [:=> [:cat :map :symbol :any] [:maybe :qualified-symbol]]}
+  [{:keys [aliases refers]} namespace-name fixture]
+  (when (symbol? fixture)
+    (if-let [prefix (some-> (namespace fixture) symbol)]
+      (symbol (str (get aliases prefix prefix)) (name fixture))
+      (get refers fixture (symbol (str namespace-name) (name fixture))))))
+
+(defn- namespace-fixtures
+  "The named fixtures the file's top-level `use-fixtures` calls among `usages`
+  (its clj-kondo var usages) declare for `namespace-name`, by when they run;
+  a later call for the same time replaces an earlier one, as `use-fixtures` does."
+  {:malli/schema [:=> [:cat :map :map :symbol [:sequential :map]]
+                  [:map-of [:enum :each :once] [:vector :qualified-symbol]]]}
+  [contexts context namespace-name usages]
+  (reduce (fn [fixtures call]
+            ;; a usage that is no call (the name in the `ns` form's :refer) declares nothing
+            (let [form (edamame/parse-string (exact-source contexts call)
+                                             {:all true
+                                              :auto-resolve #(if (= :current %) namespace-name (get (:aliases context) % %))})
+                  [_ fixture-type & named] (when (seq? form) form)
+                  symbols (into [] (keep #(fixture-symbol context namespace-name %)) named)]
+              (cond (not (#{:each :once} fixture-type)) fixtures
+                    (seq symbols) (assoc fixtures fixture-type symbols)
+                    :else (dissoc fixtures fixture-type))))
+          {}
+          (sort-by (juxt ::analyzer/row ::analyzer/col)
+                   (filter #(and (= 'clojure.test (::analyzer/to %)) (= 'use-fixtures (::analyzer/name %))
+                                 (= namespace-name (::analyzer/from %)) (nil? (::analyzer/from-var %)))
+                           usages))))
+
+(defn fixture-components
+  "The `:seon.ns.fixture/binding` components of `fixtures`, the named fixture
+  symbols of each time they run, in order: a file's (`namespace-fixtures`) or an
+  agent context's (`seon.sci.lookup/agent-record-fixtures`)."
+  {:malli/schema [:=> [:cat [:map-of [:enum :each :once] [:sequential :qualified-symbol]]]
+                  [:set :seon.ns.fixture/binding]]}
+  [fixtures]
+  (into #{} (mapcat (fn [[runs functions]]
+                      (map-indexed (fn [position function]
+                                     {:seon.ns.fixture/runs runs :seon.ns.fixture/position position
+                                      :seon.ns.fixture/function function})
+                                   functions)))
+        fixtures))
+
 (defn- namespace-entity
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map] :map]}
-  [projection contexts context entry]
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map [:sequential :map]] :map]}
+  [projection contexts context entry usages]
   (let [namespace-name (::analyzer/name entry)
         {:keys [aliases imports requires] synthetic :seon.fn/synthetic-refers} context
         refers (apply dissoc (:refers context) synthetic)
@@ -227,7 +276,10 @@
              (into #{} (map (fn [[local target]]
                               {:seon.ns.import/local local
                                :seon.ns.import/target-class target})) imports)))
-        entity (merge entity (task-links projection context namespace-name entry))]
+        fixtures (namespace-fixtures contexts context namespace-name usages)
+        entity (cond-> (merge entity (task-links projection context namespace-name entry))
+                 (seq fixtures)
+                 (assoc :seon.ns/fixtures (fixture-components fixtures)))]
     (assoc entity :seon.program/definition-digest
            (program/definition-digest entity))))
 
@@ -1479,12 +1531,13 @@
                     declared-calls)
         references (references-by-caller analysis first-party-functions)
         declared-callers (first-party-function-symbols analysis)
+        usages-by-file (group-by ::analyzer/filename (::analyzer/var-usages analysis))
         unresolved-by-file
         (into {} (map (fn [[filename usages]]
                         [filename (get (references-by-caller
                                         {::analyzer/var-usages usages}
                                         first-party-functions declared-callers) nil)]))
-              (group-by ::analyzer/filename (::analyzer/var-usages analysis)))
+              usages-by-file)
         edges {:calls-by-caller calls-by-caller
                :references references
                :used-keywords used-keywords
@@ -1508,7 +1561,8 @@
                         (var-entity projection contexts namespace-contexts edges entry))
                       (cond-> (namespace-entity projection contexts
                                               (get namespace-contexts (::analyzer/name entry))
-                                              entry)
+                                              entry
+                                              (get usages-by-file (::analyzer/filename entry) []))
                         (seq (get unresolved-by-file (::analyzer/filename entry)))
                         (assoc :seon.fn/unresolved-references
                                (get unresolved-by-file (::analyzer/filename entry)))))]

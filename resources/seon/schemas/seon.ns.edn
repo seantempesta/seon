@@ -1,6 +1,7 @@
 #:seon.ns{:context-relevant? [:boolean {:description "This namespace declares agent-facing context relevance; it never controls callability."}],
           :aliases [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.alias/binding} :seon.db/ref],
           :doc :string,
+          :fixtures [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.fixture/binding} :seon.db/ref],
           :imports [:set #:seon.db{:component true :seon.db/component-schema :seon.ns.import/binding} :seon.db/ref],
           :name
           [:symbol
@@ -24,6 +25,7 @@
             :seon.schema.admission/source]
            [:seon.ns/source {:optional true} :seon.ns/source]
            [:seon.ns/doc {:optional true} :seon.ns/doc]
+           [:seon.ns/fixtures {:optional true} :seon.ns/fixtures]
            [:seon.ns/requires {:optional true} :seon.ns/requires]
            [:seon.ns/aliases {:optional true} :seon.ns/aliases]
            [:seon.ns/imports {:optional true} :seon.ns/imports]

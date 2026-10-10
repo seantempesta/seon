@@ -8,6 +8,7 @@
             [malli.core :as m]
             [sci.core :as sci]
             [sci.ctx-store]
+            [sci.lang]
             [sci.impl.namespaces :as sci.namespaces]
             [seon.call-preparation :as call-preparation]
             [seon.db :as db]
@@ -115,17 +116,39 @@
     (clojure.test/do-report summary)
     summary))
 
+(defn- agent-record-fixtures
+  "Hold `fixtures` as the current SCI namespace's `fixture-type` fixtures: in its
+  metadata, where clojure.test/test-vars reads them, and by symbol under
+  `:seon.ns/fixtures` in the context's namespace table, which the namespace's
+  entity records (`:seon.ns.fixture/binding`). A fixture named by a Var is held
+  as that Var, so a redefinition reaches it; an anonymous one is this
+  context's alone."
+  {:malli/schema [:=> [:cat [:enum :once :each] [:sequential ifn?]] :nil]}
+  [fixture-type fixtures]
+  (let [namespace-object @sci/ns
+        named (into [] (keep (fn [fixture]
+                               (when (instance? sci.lang.Var fixture)
+                                 (let [{namespace-name :ns var-name :name} (meta fixture)]
+                                   (symbol (str namespace-name) (str var-name))))))
+                    fixtures)]
+    (alter-meta! namespace-object assoc
+                 (keyword "clojure.test" (str (name fixture-type) "-fixtures")) (vec fixtures))
+    (swap! (:env (sci.ctx-store/get-ctx)) assoc-in
+           [:namespaces (sci/ns-name namespace-object) :seon.ns/fixtures fixture-type] named)
+    nil))
+
 (defn- agent-use-fixtures
-  "Record fixtures on the current SCI namespace, where clojure.test/test-vars reads them."
-  {:malli/schema [:=> [:cat [:enum :once :each] [:* ifn?]] :any]}
-  [fixture-type & fixtures]
-  (alter-meta! @sci/ns assoc
-               (keyword "clojure.test" (str (name fixture-type) "-fixtures")) fixtures))
+  "The agent's `use-fixtures` macro: each fixture written as a symbol is passed
+  as its Var (`agent-record-fixtures`), so the namespace records its name."
+  {:malli/schema [:=> [:cat :any :any [:enum :once :each] [:* :any]] [:sequential :any]]}
+  [_form _env fixture-type & fixtures]
+  (list 'clojure.test/record-fixtures fixture-type
+        (mapv #(if (symbol? %) (list 'var %) %) fixtures)))
 
 (defn agent-test-namespace
   "The clojure.test entries that must see the evaluating context's namespaces."
   [sci-namespace]
-  (into {}
+  (into {'use-fixtures (sci/new-macro-var 'use-fixtures agent-use-fixtures {:ns sci-namespace})}
         (map (fn [[intern-name function]]
                [intern-name (sci/new-var intern-name function {:ns sci-namespace})]))
         {'test-vars agent-test-vars
@@ -135,7 +158,7 @@
          'test-ns agent-test-ns
          'run-tests agent-run-tests
          'do-report agent-do-report
-         'use-fixtures agent-use-fixtures}))
+         'record-fixtures agent-record-fixtures}))
 
 (def ^:private program-documentation-selector
   [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec

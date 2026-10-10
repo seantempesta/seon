@@ -1,0 +1,12 @@
+#:seon.ns.fixture{:binding
+                  [:map
+                   {:seon.db/attributes true,
+                    :description
+                    "One fixture of a namespace, as `use-fixtures` keeps it in the namespace's metadata (:clojure.test/each-fixtures or :clojure.test/once-fixtures): when it runs, its place among the fixtures that run then and the function it names. An anonymous fixture is no data.",
+                    :seon.program/partition :seon.program}
+                   [:seon.ns.fixture/runs :seon.ns.fixture/runs]
+                   [:seon.ns.fixture/position :seon.ns.fixture/position]
+                   [:seon.ns.fixture/function :seon.ns.fixture/function]],
+                  :runs [:enum {:description "When the fixture runs: around :each test, or :once around the namespace's tests (`use-fixtures`'s first argument)."} :each :once],
+                  :position [:int {:min 0 :description "The fixture's place among those that run when it does, from 0: clojure.test composes them in this order."}],
+                  :function [:qualified-symbol {:description "The function the fixture names, fully qualified."}]}
