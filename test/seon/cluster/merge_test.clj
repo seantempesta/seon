@@ -76,7 +76,8 @@
               accepted (source/accept-merge! target store green)]
           (is (true? (:seon.test/passed? green)))
           (is (= {:seon.program/identities #{[:seon.fn/sym (sym "merge-callee")]} :seon.test.run/id (:seon.test.run/id green)
-                  :seon.source/base-commit-id h :seon.source/commit-id (db/commit-id (db/db h-conn))}
+                  :seon.source/base-commit-id h :seon.source/commit-id (db/commit-id (db/db h-conn))
+                  :seon.source/accepted-t (:max-tx (db/db h-conn))}
                  accepted)
               "a plain value naming what merged, never a transaction report")
           (is (= tested (digest h-conn "merge-callee")) "the tested replacement, not C's later edit")
@@ -447,6 +448,94 @@
                "one git commit carries both files")
            (is (= before (git! root "rev-parse" "HEAD^"))))
          (finally (support/delete-root! root)))))))
+
+(defn- writable!
+  "Make the directory `dir` under `root` writable or not: a landing's install there fails while it is not."
+  [root dir writable?]
+  (.setWritable (io/file root dir) writable? false))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-resumes-from-its-recorded-evidence}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and four resumed landings."
+           :seon.test/long-ms 180000}
+  a-landing-stopped-after-acceptance-resumes-to-one-git-commit
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/shape.clj"
+           schema-path "resources/seon/schemas/tq.shape.edn"
+           root (checkout! "land-resume-test" {path shape-source schema-path shape-schemas})
+           schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
+                    "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :int]}\n  [r]\n  (* r r))")
+           merge-row (fn [m] (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed :seon.task/landed-git
+                                                          :seon.task/installed {:seon.task/accepted-tx [:db/id]}]
+                                      [:seon.task/id m]))]
+       (try
+         (let [proposal (proposed! running connection 'tq.shape "area" fix)
+               merge-task (:seon.task/merge proposal)
+               head (git! root "rev-parse" "HEAD")
+               texts #(mapv (fn [p] (slurp (io/file root p))) [schema-path path])
+               original (texts)
+               accepted-tx (volatile! nil)]
+           (testing "a landing whose first file cannot be installed stops after acceptance, recorded and unwritten"
+             (writable! root "resources/seon/schemas" false)
+             (let [refused (source/land! execution proposal root)
+                   row (merge-row merge-task)]
+               (is (= :install-failed (:seon.source/write-back-refused refused)))
+               (is (= :accepted (:seon.task/outcome row)) "the merge task is accepted")
+               (is (:db/id (vreset! accepted-tx (:seon.task/accepted-tx row))) "with the transaction that accepted it")
+               (is (:seon.task/landed row) "and the main commit")
+               (is (nil? (:seon.task/installed row)) "no file is recorded installed")
+               (is (= original (texts)) "nothing is written")
+               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+           (testing "resumed with the second file uninstallable, it writes and records the first file only"
+             (writable! root "resources/seon/schemas" true)
+             (writable! root "test/tq" false)
+             (let [refused (source/land! execution proposal root)
+                   row (merge-row merge-task)]
+               (is (= :install-failed (:seon.source/write-back-refused refused)))
+               (is (= #{schema-path} (set (map first (:seon.task/installed row)))) "the schema resource is recorded installed")
+               (is (not= (first original) (first (texts))) "the schema resource holds the merged schema")
+               (is (= (second original) (second (texts))) "the function's file is unchanged")
+               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+           (testing "resumed with another path staged, both files are written and the commit is refused"
+             (writable! root "test/tq" true)
+             (spit (io/file root "notes.txt") "staged\n")
+             (git! root "add" "notes.txt")
+             (let [refused (source/land! execution proposal root)
+                   row (merge-row merge-task)]
+               (is (= :seon.git/commit-error (:seon.error/type refused)))
+               (is (= #{schema-path path} (set (map first (:seon.task/installed row)))) "both files are recorded installed")
+               (is (nil? (:seon.task/landed-git row)))
+               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
+             (git! root "rm" "-q" "--cached" "notes.txt"))
+           (testing "resumed once more, it commits both files in exactly one git commit and records it"
+             (let [landed (source/land! execution proposal root)
+                   sha (git! root "rev-parse" "HEAD")]
+               (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
+               (is (= sha (:seon.git/commit landed)))
+               (is (= sha (:seon.task/landed-git (merge-row merge-task))) "the git commit is recorded on the merge task")
+               (is (= head (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
+               (is (= #{path schema-path} (set (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" sha)))))
+               (is (str/includes? (slurp (io/file root path)) "(* r r)") "the function's file holds the agent's span")
+               (is (= (:seon.task/landed (merge-row merge-task)) (:seon.source/commit-id landed)) "the acceptance is the one recorded")
+               (is (= #{:write-and-commit} (set (keys (:seon.source/step-ms landed)))) "it neither prepares nor accepts again")
+               (is (= @accepted-tx (:seon.task/accepted-tx (merge-row merge-task))) "the acceptance is never repeated")))
+           (testing "a landed merge task answers its recorded commit and makes none"
+             (let [sha (git! root "rev-parse" "HEAD")
+                   again (source/land! execution proposal root)]
+               (is (= sha (:seon.git/commit again)))
+               (is (= sha (git! root "rev-parse" "HEAD"))))))
+         (finally
+           (writable! root "resources/seon/schemas" true)
+           (writable! root "test/tq" true)
+           (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
   a-landed-merge-is-one-git-commit-of-exactly-its-paths

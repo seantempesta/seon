@@ -100,20 +100,24 @@
               :publish-result [:or :seon.source/published :seon.source/publication-error],
               :file-bytes [:fn {:error/message "must be a byte array"} clojure.core/bytes?],
               :accepted
-              [:map {:description "An accepted merge: the declarations it merged, the branch commit before it, its merge commit and the run that tested it."}
+              [:map {:description "An accepted merge: the declarations it merged, the transaction that merged them on the target (its value before and after are read as of it), or the branch commit before it and its merge commit, and the run that tested it. write-back! reads accepted-t when present, else the two commits."}
                [:seon.program/identities :seon.program/identity-set]
-               [:seon.source/base-commit-id :seon.source/commit-id]
-               [:seon.source/commit-id :seon.source/commit-id]
+               [:seon.source/accepted-t {:optional true} :seon.source/accepted-t]
+               [:seon.source/base-commit-id {:optional true} :seon.source/commit-id]
+               [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                [:seon.test.run/id {:optional true} :seon.test.run/id]],
+              :accepted-t [:and {:description "The target's transaction that accepted a merge: as of it the merged value, as of the one before it the value merged into."} :int],
               :acceptance
               [:map {:description "What a landing's git commit names: the merge task, the run that gated it, the merge commit, and the task and agent when the cluster records them."}
-               [:seon.task/merge :seon.task/merge] [:seon.test.run/id :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
+               [:seon.task/merge :seon.task/merge] [:seon.test.run/id :seon.test.run/id] [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]],
               :step-ms [:map-of {:description "Milliseconds each step of a landing took."} [:enum :prepare :accept :decide :write-and-commit] :int],
               :landed
-              [:map {:description "A landed merge (seon.cluster.source/land!): the acceptance, its merge commit on main, the files written back, the git commit and each step's milliseconds."}
-               [:seon.source/accepted :seon.source/accepted] [:seon.source/commit-id :seon.source/commit-id]
-               [:seon.source/written :seon.source/written] [:seon.git/commit :seon.git/commit]
+              [:map {:description "A landed merge (seon.cluster.source/land!): the acceptance, its merge commit on main, the files written back, the git commit and each step's milliseconds (only the steps this call ran)."}
+               [:seon.source/accepted :seon.source/accepted]
+               [:seon.source/commit-id {:optional true :description "Absent only when a landing stopped between its acceptance and recording the merge commit."} :seon.source/commit-id]
+               [:seon.source/written {:optional true :description "The files this call wrote; absent when a resumed landing found them all written."} :seon.source/written]
+               [:seon.git/commit :seon.git/commit]
                [:seon.source/step-ms :seon.source/step-ms]],
               :proposal
               [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, the digest each merged declaration held on the destination, and the candidate's commit."}
@@ -150,10 +154,14 @@
               [:map
                [:seon.db/connection :seon.db/connection]
                [:seon.source/accepted :seon.source/accepted]
-               [:seon.fn/root :seon.fn/root]],
+               [:seon.fn/root :seon.fn/root]
+               [:seon.task/merge {:optional true :description "The merge task each installed file is recorded on as it is installed (:seon.task/installed)."} :seon.task/merge]
+               [:seon.source/installed {:optional true} :seon.source/installed]],
+              :installed [:map-of {:description "The files a landing already installed, path to candidate digest: a resumed write-back proves and installs only the others."}
+                          :seon.source/path :seon.source/candidate-digest],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
+               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed :not-recorded],
               :write-back-error
               [:and :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
@@ -168,7 +176,7 @@
               :written
               [:map
                [:seon.source/changed-paths :seon.source/changed-paths]
-               [:seon.source/files [:vector {:min 1 :description "One entry per file a write-back installed, in path order: a merge writes each change into its one file."}
+               [:seon.source/files [:vector {:description "One entry per file a write-back installed, in path order: a merge writes each change into its one file. Empty only when a resumed write-back found every file already installed."}
                                     :seon.source/file-written]]],
               :file-written
               [:map
