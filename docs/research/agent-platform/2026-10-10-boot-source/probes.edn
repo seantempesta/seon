@@ -14,7 +14,7 @@
  {:boot-source/form
   (seon.profile/measure
    (fn [] ((var seon.cluster.boot/changed-source-paths)
-           (:seon.store/store (get @seon.operator.runtime/running-instances "default")))))
+           (:seon.store/store (get (deref seon.operator.runtime/running-instances) "default")))))
   :seon.profile/ms 173.08
   :seon.profile/alloc-bytes 176464008
   :seon.profile/alloc-scope :thread
@@ -47,7 +47,7 @@
    :seon.cost/attribution :includes-unrelated-work}}
  :boot-source/warm-stored-schema-inputs
  {:boot-source/form
-  (let [store (:seon.store/store (get @seon.operator.runtime/running-instances "default"))
+  (let [store (:seon.store/store (get (deref seon.operator.runtime/running-instances) "default"))
         database (seon.cluster.source/database store
                    (:seon.source/commit-id (seon.cluster.source/current store)))
         paths (into #{} (seon.db/q (quote [:find [?path ...]
