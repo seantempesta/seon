@@ -91,6 +91,17 @@ With lane sci-tests (e361536a9): non-root agents' tests run interpreted, never l
 root's. Next: chain run 5, the whole loop with no root rescue (task from lane `real-task-pick-2`); then sci-tests slice 2
 (`seon.task/assign!` runs the proofs in the agent's own environment).
 
+**Chain run 5 (2026-10-10, agent `chain5-search-1`): THE WHOLE LOOP, NO ROOT RESCUE.** Task
+`my.program/a-search-snippet-keeps-the-whole-line` (lane real-task-pick-2, 340462543): DeepSeek flash green in 4 calls,
+9.3 s, 13.7k prompt tokens, 0 errors, 0 repeated forms (the namespace line removed the `in-ns` repeats). Its one end
+message reached root (`:seon.task/end :done`, merge task 57f4bf2e4fac); root's block derived `:seon.task/ended`; root
+ran `prepare-merge!` (gate run 74e4621e2005 green, 4.0 s, 1.1 GB), `accept-merge!` (main 6aca2052, 1.0 s, 1.4 GB) and
+`write-back!` (213 ms), reviewed the one-line diff and committed 3c4f94227 by branch evidence. Root's only acts were
+review and the merge decisions. Findings (lane chain5-findings files them with proofs): the cost diff lists unchanged
+interpreted definitions; `jvm-evaluate`'s self time compares different forms; a test wrote into the live root inbox;
+merge cost. Next: run the loop on several tasks, measured round over round (the competency table), and automate root's
+review step.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
