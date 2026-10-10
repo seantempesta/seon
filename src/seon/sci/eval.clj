@@ -2918,28 +2918,33 @@
       (apply (held) args))))
 
 (defn- bind-lazy-members!
-  "Bind each of `members` in `ctx` to its `lazy-root`, creating the Var of one
-  `ctx` does not hold; the macros among them, left unbound for eager
-  interpretation: a macro runs when its callers are analyzed, not called."
+  "Bind each function of `members` in `ctx` to its `lazy-root`, creating the
+  Var of one `ctx` does not hold; answer the rest, left unbound for eager
+  interpretation: a macro runs when its callers are analyzed, not called, and
+  a value definition (its `:seon.fn/arglists` the empty list) is read, never called."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:seqable :qualified-symbol]]
                   [:vector :qualified-symbol]]}
   [ctx database members]
-  (sci.ctx-store/with-ctx ctx
-    (reduce
-     (fn [macros sym]
-       (let [held (sci/resolve ctx sym)]
-         (if (and held (:macro (meta held)))
-           (conj macros sym)
-           (let [namespace-name (symbol (namespace sym))
-                 sci-var (or held
-                             (let [created (sci/new-var (symbol (name sym)) nil
-                                                        {:ns (context-namespace ctx namespace-name)})]
-                               (sci/add-namespace! ctx namespace-name {(symbol (name sym)) created})
-                               created))]
-             (sci/bind-root! ctx sci-var (lazy-root ctx database sym sci-var))
-             macros))))
-     []
-     members)))
+  (let [functions (set (db/q '[:find [?sym ...] :in $ [?sym ...]
+                               :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
+                                      [(not= "()" ?arglists)]]
+                             database (vec members)))]
+    (sci.ctx-store/with-ctx ctx
+      (reduce
+       (fn [eager sym]
+         (let [held (sci/resolve ctx sym)]
+           (if (or (not (functions sym)) (and held (:macro (meta held))))
+             (conj eager sym)
+             (let [namespace-name (symbol (namespace sym))
+                   sci-var (or held
+                               (let [created (sci/new-var (symbol (name sym)) nil
+                                                          {:ns (context-namespace ctx namespace-name)})]
+                                 (sci/add-namespace! ctx namespace-name {(symbol (name sym)) created})
+                                 created))]
+               (sci/bind-root! ctx sci-var (lazy-root ctx database sym sci-var))
+               eager))))
+       []
+       members))))
 
 (defn- interpret-overlay!
   "Interpret the overlay `plan` on `ctx`: its overrides, its namespaces and its
@@ -2967,7 +2972,7 @@
         tests (into [] (remove (comp already-tests first)) tests)
         callers (into [] (remove #(or (already %) (contains? overridden %))) (sort (:seon.fn/affected closure)))
         ;; A host-bound caller keeps the compiled Var the context binds; only
-        ;; the macros among the rest are interpreted now.
+        ;; the macros and value definitions among the rest are interpreted now.
         macros (bind-lazy-members! ctx database
                                    (filter (interpretable-functions database callers) callers))
         added-rows (function-rows-in database (remove interpreted added))
