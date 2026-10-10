@@ -82,6 +82,15 @@ HEAD (run 1b79dec1c743, 32 pass). Gaps it exposed, both on the happy path:
 2. `bin/lane commit --branch-evidence` treats a `.cljc` file as ineligible and falls back to `bin/seon check` with no
    tests named, so the commit was "proven" by boot and lint alone. The fallback must run the tests reaching the change.
 
+**The loop's first links landed (2026-10-10, lane dc-lifecycle; DYNAMIC-CONTEXT stages 1–3).** The block names the
+agent's namespace and teaches that locals need their bindings (34bbd83cb); an agent closes when its task ends, so a
+wake never reopens a finished task (f8b2a26b6); a task that ends sends root one message of references (`:seon.task/end`,
+`:seon.task/merge` when green, the task as `:seon.message/about`), the green end records the agent's proposal, and root's
+block derives `:seon.task/ended` (proofs, errors by signature, calls, tokens, next operations) at render (a9feb9ba4).
+With lane sci-tests (e361536a9): non-root agents' tests run interpreted, never loaded into the shared JVM; jvm mode is
+root's. Next: chain run 5, the whole loop with no root rescue (task from lane `real-task-pick-2`); then sci-tests slice 2
+(`seon.task/assign!` runs the proofs in the agent's own environment).
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
