@@ -357,3 +357,15 @@
                               agent-id running)]
        (is (not (contains? shown :seon.repl/error)) "slurp, spit and file-seq resolve in an agent's context")
        (is (= ["written" 2] (:seon.repl/value shown)) "they read, write and list files as clojure.core does")))))
+
+(deftest ^{:seon/tasks #{'my.program/source-shows-a-function-whole}} source-shows-a-function-whole
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [target 'seon.sci.forgive/scan
+           reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                           "arguments" {"code" (str "(my.program/source '" target ")")
+                                                                        "agent" agent-id "cluster" running}})))
+           shown (support/mcp-reply reply)]
+       (is (empty? (:seon.repl/findings shown)) "a source request is not a large value")
+       (is (= (read-string (:source (program/source (db/db) target))) (:seon.repl/value shown))
+           "the reply shows the whole definition")))))

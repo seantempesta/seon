@@ -3844,6 +3844,9 @@
     ;; estimated tokens from the floor's own cut counts (never a second print),
     ;; the shown tokens, how many cuts it made, and an explicit
     ;; `seon.print/full` opt-in. Queryable; shown only past a declared bound.
+    ;; A VALUE THAT DECLARED ITS OWN BUDGET AND PRINTED WHOLE UNDER IT WAS ASKED
+    ;; FOR (a definition's source): its size is not a misuse measure, so neither
+    ;; the whole-value nor the override size is recorded for the bounds to judge.
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown shown
              :seon.eval/shown-tokens (tokens/estimate shown)}
@@ -3868,7 +3871,10 @@
              (let [diagnostics (mapv flat-diagnostic failures)]
                (try (floor-text request diagnostics)
                     (catch Throwable _ (render.value/core-text diagnostics)))))
-      record (assoc :seon.sci.admit/record record))))
+      record (assoc :seon.sci.admit/record record)
+      (and (instance? clojure.lang.IMeta value) (pos-int? (:seon.print/budget (meta value)))
+           (zero? (:seon.render.value/elisions projection 0)))
+      (dissoc :seon.eval/value-tokens :seon.eval/budget-override))))
 
 (defn shown-failure
   "A failure's shown result: its small error map (`seon.error/reply-value`)

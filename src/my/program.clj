@@ -11,6 +11,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [seon.error :as error]
+            [seon.ai.tokens :as tokens]
             [seon.fn :as function]
             [seon.render.value :as render.value]
                     [seon.cluster.branch :as cluster.branch]
@@ -840,7 +841,10 @@
   (let [entity (declaration database sym)]
     (if (::kind entity)
       (let [src (::source entity)]
-        (cond-> (merge {:sym sym :kind (::kind entity) :source src} (file-line entity))
+        ;; The source is the agent's working medium: its own budget holds the whole text, and the
+        ;; render profile's ceiling still bounds a real monster.
+        (cond-> (vary-meta (merge {:sym sym :kind (::kind entity) :source src} (file-line entity))
+                           assoc :seon.print/budget (+ 64 (tokens/estimate src)))
           (and (:seon.fn/doc entity)
                (not (clojure.string/includes? (str src) (str (:seon.fn/doc entity)))))
           (assoc :doc (:seon.fn/doc entity))

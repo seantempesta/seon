@@ -128,4 +128,8 @@
  #:seon.task{:name "a-test-var-run-at-the-repl-writes-its-fixture-into-my-branch"
              :kind :function
              :intent "Running a fixture test's Var directly at the REPL (`(clojure.test/test-var #'seon.cluster.write-back-test/...)`) transacts its fixture namespaces (`wbadd*.core`) onto the agent's own branch, because `seon.test-support/execution-handle` with no runner handle answers the agent's custody; `my.program/diff` then lists them for write-back and `my.program/remove-ns!` of two tiny namespaces took 1.1 s and 1.5 GB (lane repl-only-3, 2026-10-10). Done when a test body run outside the runner refuses or writes to its own disposable branch."
-             :must-read #{seon.test-support/execution-handle my.program/diff my.program/remove-ns!}}]
+             :must-read #{seon.test-support/execution-handle my.program/diff my.program/remove-ns!}}
+ #:seon.task{:name "source-shows-a-function-whole"
+             :kind :function
+             :intent "`(my.program/source 'seon.sci.forgive/scan)` (about 250 lines, 3,533 value tokens) replied 1,989 shown tokens plus a `:large-value` finding advising the agent to select less, so the agent could not read the function whole or `defn` a corrected version (chain run 2, 2026-10-10). Done when `my.program/source` returns a value declaring its own display budget (`:seon.print/budget` metadata, capped by the render profile's `:seon.render.profile/token-ceiling`), `seon.sci.eval/shown-result` records neither `:seon.eval/value-tokens` nor `:seon.eval/budget-override` for a value that printed whole under its own budget, and the reply shows the whole definition with no finding."
+             :must-read #{my.program/source my.program/render-source-ai seon.sci.eval/shown-result seon.render.value/prepare}}]
