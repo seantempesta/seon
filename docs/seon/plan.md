@@ -29,8 +29,14 @@ Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in
 **Running:**
 - `astra-node-cache`: node cache bounded by bytes. Targets: about 300 MB per warm redefinition, about 2.4 GB and
   830 ms custody on a new agent's first request.
-- `repl-only-3`: the REPL-only acceptance rerun, one ordinary fix (`seon.error/names-in` sort trap) and one
-  host-bound fix.
+- REPL-only acceptance (`repl-only-3`):
+  - Ordinary half PASSED end to end through the REPL with branch evidence (df87cba96, names-in 1,490 → 128
+    distance computations).
+  - Host-bound half NOT yet passed: 31b442840 (write-back helper placement) fell back to `--test`, because branch
+    evidence called `proven-file` unreached, and its subject isn't flagged host-bound. It still gates new
+    platform machinery.
+  - 13 frictions were filed (c9040c2d5).
+  - Cost finding: a `defn` reaching about 13 tests costs 3.4–3.9 s and 4.3–5.5 GB in the test step.
 
 **Next, in order:**
 1. A second chain run with a DeepSeek-flash implementer (`forgive` idempotence, designed-task-examples A).
