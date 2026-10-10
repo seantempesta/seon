@@ -1653,36 +1653,62 @@
             (.close ^java.io.OutputStream (:in holder))
             (deref holder)))))))
 
+(defn- blob-digest
+  "The file digest (`sha-256`) of `path` in `root`'s working tree, or with
+  `rev`, of its blob in that commit; nil when absent."
+  {:malli/schema [:function [:=> [:cat :seon.fn/root :seon.source/path] [:maybe :string]]
+                  [:=> [:cat :seon.fn/root :seon.source/path :string] [:maybe :string]]]}
+  ([root path]
+   (let [file (io/file root (str path))]
+     (when (.isFile file) (sha-256 (Files/readAllBytes (.toPath file))))))
+  ([root path rev]
+   (let [{:keys [exit out]} (process/shell {:dir root :out :bytes :err :string :continue true}
+                                           "git" "cat-file" "blob" (str rev ":" path))]
+     (when (zero? exit) (sha-256 out)))))
+
 (defn- commit-locked
-  "`commit!` under the lane commit lock: the staged-index check, the commit of
-  exactly `paths` and its verification."
-  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] :seon.source/acceptance]
+  "`commit!` under the lane commit lock: the staged-index and proven-bytes
+  checks, the commit of exactly `paths` and its verification: one parent, the
+  previous head, and each written path's blob the proven candidate."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] [:map-of :seon.source/path :string] :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
-  [root paths acceptance]
+  [root paths candidates acceptance]
   (let [staged (git root ["diff" "--cached" "--name-only"])
         other (when (zero? (:exit staged)) (vec (remove (set paths) (remove str/blank? (str/split-lines (:out staged))))))
+        unproven (vec (remove #(and (candidates %) (= (candidates %) (blob-digest root %))) paths))
         before (git root ["rev-parse" "HEAD"])]
     (cond
       (not (zero? (:exit staged))) (commit-refusal paths "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
       (seq other) (commit-refusal paths "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
       (empty? paths) (commit-refusal paths "The landing wrote no path to commit." {:seon.error/offending paths})
+      (seq unproven) (commit-refusal paths "A written path no longer holds the candidate write-back proved; nothing was committed."
+                                     {:seon.error/offending unproven})
       :else
       (let [made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
             after (git root ["rev-parse" "HEAD"])
-            carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])]
+            parents (rest (str/split (:out (git root ["rev-list" "--parents" "-n" "1" (:out after)])) #" "))
+            carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])
+            differing (vec (remove #(= (candidates %) (blob-digest root % (:out after))) paths))]
         (cond
           (not (zero? (:exit made))) (commit-refusal paths "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
+          (not= [(:out before)] parents)
+          (commit-refusal paths "The commit git made is not on the previous head alone; history is not rewritten."
+                          {:seon.error/offending (vec parents) :seon.error/expected [(:out before)] :seon.git/commit (:out after)})
           (not= (set paths) (set (str/split-lines (:out carried))))
           (commit-refusal paths "The commit git made is not exactly the written paths; history is not rewritten."
                           {:seon.error/offending (str/split-lines (:out carried)) :seon.error/expected paths})
+          (seq differing)
+          (commit-refusal paths "The commit git made does not hold the proven candidate bytes; history is not rewritten."
+                          {:seon.error/offending differing :seon.git/commit (:out after)})
           :else {:seon.git/commit (:out after)})))))
 
 (defn commit!
   "Commit exactly the paths `written` installed under the checkout `root` as one git commit
   (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
   `:seon.git/commit`. Refuses, committing nothing, when anything else is staged in the
-  index: the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
-  landings. The check and the commit hold `.git/lane-commit.lock` as `bin/lane commit`
+  index (the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
+  landings) or when a path no longer holds its proven `:seon.source/candidate-digest`.
+  The commit made is verified: the previous head its one parent, each path's blob the candidate. The check and the commit hold `.git/lane-commit.lock` as `bin/lane commit`
   does, so neither interleaves with a concurrent lane commit. A commit git made that is not exactly the written paths on the previous head
   is answered as a refusal naming what it carries; history is never rewritten.
 
@@ -1691,8 +1717,9 @@
   {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
   [root written acceptance]
-  (let [paths (vec (:seon.source/changed-paths written))]
-    (call-with-commit-lock root paths #(commit-locked root paths acceptance))))
+  (let [paths (vec (:seon.source/changed-paths written))
+        candidates (into {} (map (juxt :seon.source/path :seon.source/candidate-digest)) (:seon.source/files written))]
+    (call-with-commit-lock root paths #(commit-locked root paths candidates acceptance))))
 
 (defn- acceptance-names
   "The task, agent and merge task an accepted landing names, read on the cluster `database`."

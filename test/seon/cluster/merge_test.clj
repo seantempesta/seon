@@ -8,6 +8,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [hasch.core :as hasch]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.host :as host]
             [seon.cluster.registry :as registry]
@@ -281,6 +282,12 @@
     (git! root "commit" "-q" "-m" "fixture")
     root))
 
+(defn- written-file
+  "One write-back entry naming `text` as the candidate installed at `path`, by its digest."
+  [path text]
+  {:seon.source/path path :seon.source/base-digest "x" :seon.source/replaced []
+   :seon.source/candidate-digest (hasch/hash->str (hasch/sha256 (.getBytes ^String text "UTF-8")))})
+
 (defn- agent-eval
   "The last reply item of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
   [running agent-id code]
@@ -445,8 +452,7 @@
         acceptance {:seon.task/sym 'tq.land/area :seon.task/merge "0123456789ab" :seon.agent/id "land-agent"
                     :seon.test.run/id "abcdef012345" :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
         written {:seon.source/changed-paths ["src/a.clj"]
-                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
-                                      :seon.source/replaced []}]}]
+                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}]
     (try
       (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
       (spit (io/file root "src/b.clj") "(ns b)\n(def y 2)\n")
@@ -479,8 +485,7 @@
         acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
                     :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
         written {:seon.source/changed-paths ["src/a.clj"]
-                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
-                                      :seon.source/replaced []}]}
+                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}
         holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
                                 "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
                                 (str root "/.git/lane-commit.lock"))]
@@ -498,3 +503,25 @@
       (finally
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-commits-exactly-its-proven-bytes}}
+  a-path-changed-after-write-back-refuses-the-commit
+  ;; commit! commits the bytes write-back proved, never whatever the path holds later
+  (let [root (checkout! "land-bytes-test" {"src/a.clj" "(ns a)\n"})
+        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
+                    :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
+        written {:seon.source/changed-paths ["src/a.clj"]
+                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}]
+    (try
+      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n(def edited-later 2)\n")
+      (let [head (git! root "rev-parse" "HEAD")
+            refused (source/commit! root written acceptance)]
+        (is (= :seon.git/commit-error (:seon.error/type refused)))
+        (is (= ["src/a.clj"] (:seon.error/offending refused)) "naming the path whose bytes are not the proven candidate")
+        (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
+      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
+      (let [head (git! root "rev-parse" "HEAD")
+            sha (:seon.git/commit (source/commit! root written acceptance))]
+        (is (= head (git! root "rev-parse" (str sha "^"))) "the proven bytes commit on the previous head")
+        (is (= "(ns a)\n(def x 1)" (git! root "show" (str sha ":src/a.clj")))))
+      (finally (support/delete-root! root)))))
