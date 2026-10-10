@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.agent :as agent]
+            [seon.cluster.host :as host]
             [seon.context :as context]
             [seon.db :as db]
             [seon.instrument :as instrument]
@@ -194,3 +195,20 @@
   (let [answer (context/model-context (db/db *connection*) {:seon.boot/cluster-name "unrendered"} "unrendered")]
     (is (= :seon.render/request-error (:seon.error/type answer)))
     (is (not (contains? answer :seon.ai/system)) "never the printed help map as the system message")))
+
+(deftest the-block-shows-the-agents-cost-against-main
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     ;; main: a branch off the commit the agent was acquired at, so it holds none of the agent's definitions, named as root's home
+     (let [parent (test-support/execution-handle connection)
+           home (agent/acquire-context! parent nil {:seon.agent/isolate? true :seon.cluster.registry/from (:seon.source/commit-id parent)})]
+       (try
+         (db/transact! connection [[:db.fn/call #'host/home-call "root" (:seon.agent/branch home) 'user (:seon.cluster/name parent)]])
+         (shown running agent-id "(in-ns 'ctx.cost) (defn summed \"Sum.\" {:malli/schema [:=> [:cat :int] :int]} [n] (reduce + (map identity (vec (range n))))) (dotimes [_ 30] (summed 5000))")
+         (let [entries (:seon.context/cost (block running agent-id))
+               entry (first (filter #(= 'ctx.cost/summed (:seon.cost.comparison/subject %)) entries))]
+           (is (some? entry) "the function the agent defined and ran is in its block")
+           (is (= :self-us (:seon.cost.comparison/measure entry)))
+           (is (contains? (:seon.cost.comparison/flags entry) :new) "main stores nothing for it")
+           (is (<= (count entries) 10) "at most the top dial"))
+         (finally (agent/release-context! home)))))))

@@ -31,8 +31,10 @@
                 [:seon.context/task {:optional true} :seon.context/task]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
+                [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
                 [:seon.context/turns :seon.context/turns]],
+               :cost [:vector {:description "The branch's stored function costs whose digest differs from main's beside main's value, most self time spent first, at most :seon.config.test.cost/top. Producer: seon.context/current-state."} :seon.cost/comparison]
                :exchanges :seon.ai/exchanges
                :model-context
                [:map {:description "What one model pass sends: (help)'s shown text as the system message, the agent's own model exchanges, then the current-state block's shown text."}
@@ -46,5 +48,6 @@
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
+                [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
                 [:seon.context/turns :seon.context/turns]]}

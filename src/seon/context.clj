@@ -4,8 +4,10 @@
   `model-context` is the one assembler: `(help)` as the system message, the
   agent's own model exchanges, then the block. Nothing of it is stored; an
   attempt records the basis it was assembled at."
-  (:require [seon.bootstrap :as bootstrap]
+  (:require [seon.batch :as batch]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster.message :as message]
+            [seon.config :as config]
             [seon.error.refusal]
             [seon.eval]
             [seon.render]
@@ -181,18 +183,45 @@
       handled
       (into [] (remove (comp (set handled) :my.message/id)) items))))
 
+(defn- branch-cost
+  "The branch's `:seon.fn.cost/entity` values whose digest differs from main's (or main
+  stores none), as `seon.batch/cost-diff` comparisons: the most self time spent first,
+  at most `:seon.config.test.cost/top`. Main is the task home (`seon.task/home`). Nil on
+  main itself, the branch stores none or its program declares no cost entities."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cost/diff]]}
+  [database]
+  (let [main (some-> (task/home database) db/db)
+        rows (when main (db/q database '[:find ?s ?d ?sc ?c ?us ?t
+                                         :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/scope ?sc]
+                                         [?e :seon.fn.cost/calls ?c] [?e :seon.fn.cost/self-us ?us] [?e :seon.fn.cost/total-us ?t]]))]
+    (when (seq rows)
+      (when-not (db/read-refusal? rows)
+        (let [stored (db/q main '[:find ?s ?d ?us :in $ [?s ...]
+                                  :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
+                          (mapv first rows))
+              stored (when-not (db/read-refusal? stored) (into {} (map (fn [[s d us]] [s [d us]])) stored))
+              live (->> rows
+                        (map (fn [[sym digest scope calls self-us total-us]]
+                               #:seon.fn.cost{:sym sym :digest digest :scope scope :calls calls :self-us self-us :total-us total-us}))
+                        (remove #(= (:seon.fn.cost/digest %) (first (get stored (:seon.fn.cost/sym %)))))
+                        (sort-by #(- (* (:seon.fn.cost/calls %) (:seon.fn.cost/self-us %)))))
+              diff (batch/cost-diff (vec live) (or stored {}) (:seon.config.fn.cost/hysteresis config/defaults))]
+          (not-empty (into [] (take (:seon.config.test.cost/top config/defaults)) diff)))))))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status (`:done` once every
   proof is green, then `:capped` with no turns left, else `:working`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
-  instant and content.
+  instant and content. `:seon.context/cost` holds the branch's stored function costs
+  that differ from main's (`branch-cost`).
 
   ## Costs
 
-  One assignment query, one task pull, the turn count, one pull per unread message and
-  one query of the agent's handled messages."
+  One assignment query, one task pull, the turn count, one pull per unread message,
+  one query of the agent's handled messages, one scan of the branch's cost entities
+  and one query of main's for them."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/current-state :seon.error/value]]}
   [database agent-id]
@@ -202,6 +231,7 @@
         proven (when held (proofs database (:seon.task/sym held)))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items) items (unshown database agent-id items)))
+        cost (branch-cost database)
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven unread] reads))
@@ -212,6 +242,7 @@
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
           (seq reads) (assoc :seon.context/must-reads reads)
+          cost (assoc :seon.context/cost cost)
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
                                                     :seon.render/operations ['(my.message/inbox)]})))))
 
@@ -220,7 +251,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------
