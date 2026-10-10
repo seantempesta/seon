@@ -60,6 +60,12 @@ Open: two reds on clean HEAD (`seon.config-test/the-default-document-has-one-can
 `seon.db-test/equal-declaration-content-shares-one-projection-across-values`) to classify; boot readiness 15.6 s on
 18919b663 against 5–9 s earlier.
 
+**Chain run 3 result (2026-10-10, agent `chain3-slug-1`, branch `:agent-6c8a0df7e53b`): GREEN.** DeepSeek flash took
+`seon.competency/slug-removes-edge-hyphens` red → green in 1 model call, 4.7 s, 1,337 prompt tokens, 0 errors, no root
+rescue: read `comp.text/slug`, redefined it, proof green. One reply repeated its `in-ns`/`defn` pair (4 repeated forms).
+Not merged: `comp.text` is a bench fixture. Next: chain run 4 on a small real owner with a known bad input, through
+review, write-back and root's merge (lane `real-task-pick` proposes candidates).
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
