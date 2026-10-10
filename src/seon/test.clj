@@ -122,10 +122,10 @@
       (finally (.setContextClassLoader thread previous))))))
 
 (def ^:dynamic *member*
-  "The execution handle of the member whose host (JVM) test body runs on this
-  thread, bound by `seon.test/run` around that body exactly as clojure.test
-  binds `*testing-vars*`. Canonical fixtures branch off it. Nil outside a
-  member body; an agent (SCI) body reaches its branch through custody instead."
+  "The execution handle of the member whose test body runs on this thread,
+  compiled or interpreted, bound by `seon.test/run` around that body exactly
+  as clojure.test binds `*testing-vars*`. Canonical fixtures branch off it.
+  Nil outside a member body."
   nil)
 
 (def ^:private acquire-context!
@@ -304,8 +304,11 @@
                            (:seon.config.test.cost/top custody)
                            (fn [sink] (binding [seon.batch/*world* (some-> seon.batch/*world* (assoc :seon.batch/sink sink))]
                           ;; Stored results are the record: a member's report lines are not the evaluation's `:out`.
+                          ;; Both bodies read their member: an interpreted body's
+                          ;; `*member*` is SCI's copy, which reads this binding.
                           (with-bindings {(:context @attempt-writers) context
-                                          #'clojure.test/*test-out* (java.io.Writer/nullWriter)}
+                                          #'clojure.test/*test-out* (java.io.Writer/nullWriter)
+                                          #'*member* member}
                           (with-test-loader
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed (it may evaluate its own SCI
@@ -317,8 +320,7 @@
                               ;; (`seon.instrument/calling-environment`), so a body
                               ;; that switches custody (a fixture branch) is
                               ;; supplied its own branch, never a start-of-body value.
-                              (binding [*member* member
-                                        kernel/*host-world* (:seon.sci.eval/ctx custody)]
+                              (binding [kernel/*host-world* (:seon.sci.eval/ctx custody)]
                                 (runner/run-var! test-var (select-keys member [:seon.db/connection])))
                               ;; The SCI arm interrupts interpreted bodies at the
                               ;; declared per-test bound; `duration-failures` fails

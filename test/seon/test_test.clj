@@ -337,3 +337,21 @@
     (is (= 1 (:seon.test/executed-count result)))
     (is (true? (:seon.test/passed? result)))
     (is (< (:seon.profile/alloc-bytes measured) 100000000))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-problems-derivation-calls-db-with-no-connection}
+           :seon.test/long "One isolated member acquisition and one canonical problems fixture (measured 1,572 ms run on default)."
+           :seon.test/long-ms 15000}
+  a-member-body-reads-its-member
+  ;; seon.problems-test's `world-namespaces` reads the member's connection from
+  ;; `seon.test/*member*`; run outside any member (as a REPL check is), an
+  ;; interpreted body read nil and called `seon.db/db` with it.
+  (let [execution (assoc (test-support/execution-handle nil) :seon.agent/id "member-body-reads-its-member")
+        result (binding [sut/*member* nil]
+                 (sut/run {:seon.test/execution execution
+                           :seon.test/recording-connection (:seon.db/connection execution)
+                           :seon.test/policy :named
+                           :seon.test/rerun? true
+                           :seon.test/changed ['seon.problems-test/a-resolved-fault-stays-closed-until-it-recurs]}))]
+    (is (= 1 (:seon.test/executed-count result)))
+    (is (true? (:seon.test/passed? result)) "the body finds its member's connection")))
+
