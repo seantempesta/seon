@@ -304,6 +304,21 @@
        (evaluate running agent-id "(my.test/check {})")
        (is (:seon.task/assignment (assign)))))))
 
+(deftest ^{:seon/tasks #{'seon.task/assignment-requires-an-observed-failing-proof}} a-proof-run-that-errors-refuses-assignment-by-name
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
+                                            :seon.task/name "prove" :seon.task/kind :function :seon.task/intent "Prove."}))
+           _ (evaluate running agent-id
+                       (str "(ns tq.a (:require [clojure.test :refer [deftest is]])) "
+                            "(deftest ^{:seon/tasks #{'tq.a/prove}} proves (is (= 1 2)))"))
+           refused (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                                  :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                                  :seon.task/branch :no-such-branch})]
+       (is (= :proof-run-failed (:seon.task/refused refused)) "an infrastructure failure is refused by its own name")
+       (is (nil? (:seon.task/assignment refused)) "and never assigned as work")
+       (is (nil? (:seon.task/assigned (task/assignment (db/db connection) agent-id :no-such-branch))))))))
+
 (deftest an-assignment-offers-no-merge-request
   (test-support/with-running-agent
    (fn [running agent-id connection]

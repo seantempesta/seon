@@ -15,7 +15,8 @@
 
 (set! *warn-on-reflection* true)
 
-(deftest ^{:seon.test/fixture-observation "The test observes prompt acquisition under instrumentation installed by a real development-cluster boot."
+(deftest ^{:seon/tasks #{'seon.task/an-assignment-proof-run-reads-the-program-its-own-world-loaded}
+           :seon.test/fixture-observation "The test observes prompt acquisition under instrumentation installed by a real development-cluster boot."
            :seon.test/long "One real development-cluster boot (store, program adoption, Flow graph) and one instrumented turn; measured 49.9 s with two other JVMs running, boot dominates (task seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds)."
            :seon.test/long-ms 90000} an-instrumented-dev-cluster-builds-an-attempt-ready-prompt
   ;; OWN NOTHING GLOBAL (AGENTS §5). Booting a real development cluster arms

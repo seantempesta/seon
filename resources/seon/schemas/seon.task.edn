@@ -120,11 +120,11 @@
              [:seon.render/operations :seon.render/operations]]
  :occurrences [:int {:min 0 :description "How often the faults a task answers occurred, summed."}]
  :decided [:map {:description "A merge task root closed, with its outcome."} [:seon.task/id :seon.task/id] [:seon.task/outcome :seon.task/outcome]]
+ :proof-run [:and {:description "The error that kept the task's proofs from running in the agent's world at assignment: the infrastructure failure that refused :proof-run-failed, never work."} :seon.schema/value]
  :assignment-view [:map {:description "An assignment as root's assign! answers it: the task, the agent and its branch, and the agent's proposal offered: it runs once a deftest naming the task (^{:seon/tasks #{'ns/task-name}}) passes on the branch."}
                    [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                    [:seon.agent/id :seon.agent/id] [:seon.task/branch :seon.task/branch]
-                   [:seon.test.run/id {:optional true :description "The run of the task's proofs in the agent's world at assignment, recorded on its branch."} :seon.test.run/id]
-                   [:seon.task/proof-run-error {:optional true :description "Why the task's proofs could not run in the agent's world at assignment; the assignment stands, since nothing proved them green."} :seon.error/value]
+                   [:seon.test.run/id {:description "The run of the task's proofs in the agent's world at assignment, recorded on its branch."} :seon.test.run/id]
                    [:seon.render/operations :seon.render/operations]]
  :proposal-view [:map [:seon.task/proposal :seon.task/proposal] [:seon.task/merge :seon.task/merge]
                  [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
@@ -163,7 +163,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :invalid-name :duplicate-name :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :no-proofs :no-world :proofs-green :unproven :claimed :no-current-step]
+           :unknown-task :unassigned :revised-since-assignment :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven :claimed :no-current-step]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base
