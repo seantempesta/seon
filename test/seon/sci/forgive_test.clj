@@ -4,8 +4,12 @@
   text's length."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [are deftest is]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [edamame.core :as edamame]
             [seon.sci.forgive :as forgive]
+            [seon.test-support :as test-support]
             [seon.turn :as turn]))
 
 (deftest recorded-replies-read-into-the-same-segments
@@ -170,3 +174,61 @@
     :code  "(def a 1)\n(def b 2) (def c 3)"                [{:line 1 :column 1} {:line 2 :column 1} {:line 2 :column 11}]
     :reply "Prose\n(def a 1)\nmore\n(def b 2) (foo ]"      [{:line 2 :column 1} {:line 4 :column 1} {:line 4 :column 11}]
     :reply "(+ 1 2) ; x\n  (def c 3) (str \"a\" #\"b\")"   [{:line 1 :column 1} {:line 2 :column 3} {:line 2 :column 13}]))
+
+;;; Forgiving the forgiven text changes nothing
+
+(def ^:private pinned-texts
+  "Past bug inputs and edge cases, checked first by every property below."
+  ["a]a" "1]2" "('" "(\\" "" "(" ")" "(]" "[(])" "\"abc" "(f a]b)" "(+ 1 2) [3" ":k]:j" "#{1 2" "x\ny\n]\nz"])
+
+(def ^:private text-gen
+  "Trial i runs at size i, so the pinned texts run first, in order; then texts of delimiter-heavy pieces."
+  (gen/sized (fn [size]
+               (if (< size (count pinned-texts))
+                 (gen/return (nth pinned-texts size))
+                 (gen/fmap #(apply str %)
+                           (gen/vector (gen/elements ["(" ")" "[" "]" "{" "}" "\"" " " "a" ":k" "\n" ";" "\\" "#" "'" "x/y" "1"])))))))
+
+(defn- unrepair
+  "The text before forgiving: each repair undone, last position first."
+  [{:seon.batch/keys [text repairs]}]
+  (reduce (fn [^String t {:seon.batch/keys [at inserted dropped]}]
+            (let [t (if inserted (str (subs t 0 at) (subs t (+ at (count inserted)))) t)]
+              (if dropped (str (subs t 0 at) dropped (subs t at)) t)))
+          text
+          (rseq (vec (sort-by :seon.batch/at repairs)))))
+
+(defn- forgiving-again-changes-nothing?
+  "Forgiving the forgiven text repairs nothing and keeps its text and spans."
+  [text]
+  (let [once (forgive/forgive text :code)
+        twice (forgive/forgive (:seon.batch/text once) :code)]
+    (and (= (:seon.batch/text once) (:seon.batch/text twice))
+         (not (find twice :seon.batch/repairs))
+         (= (:seon.batch/spans once) (:seon.batch/spans twice)))))
+
+(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-text-changes-nothing}}
+  a-stray-closer-keeps-tokens-apart
+  ;; A dropped closer is replaced by a space; a dangling quote or backslash stays outside the inserted closer.
+  (are [text forgiven-text spans] (= [forgiven-text spans]
+                                     ((juxt :seon.batch/text :seon.batch/spans) (forgive/forgive text :code)))
+    "a]a"        "a a"         [[0 1 1 1] [2 3 1 3]]
+    "1]2"        "1 2"         [[0 1 1 1] [2 3 1 3]]
+    "(f a]b)"    "(f a b)"     [[0 7 1 1]]
+    "(+ 1 2) [3" "(+ 1 2) [3]" [[0 7 1 1] [8 11 1 9]]
+    ""           ""            []
+    "('"         "()'"         [[0 2 1 1] [2 3 1 3]]
+    "(\\"        "()\\"        [[0 2 1 1] [2 3 1 3]]))
+
+(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-text-changes-nothing}}
+  forgiving-forgiven-text-changes-nothing
+  (test-support/assert-check!
+   (tc/quick-check 300 (prop/for-all [text text-gen] (forgiving-again-changes-nothing? text))
+                   :seed 20261010 :max-size 40)))
+
+(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-text-changes-nothing}}
+  the-repairs-account-for-every-change
+  ;; Model: undoing the recorded repairs gives back the agent's text, so no fix goes unrecorded.
+  (test-support/assert-check!
+   (tc/quick-check 300 (prop/for-all [text text-gen] (= text (unrepair (forgive/forgive text :code))))
+                   :seed 20261010 :max-size 40)))

@@ -13,4 +13,9 @@
             :must-read
             #{seon.sci.forgive/comment-of seon.sci.forgive/segments},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "forgiving-forgiven-text-changes-nothing"
+            :kind :function
+            :intent "`seon.sci.forgive/forgive` is idempotent: forgiving its `:seon.batch/text` again yields no `:seon.batch/repairs` and the same `:seon.batch/spans`. Today a dropped stray closer joins tokens (\"a]a\" -> \"aa\"), a quote before an inserted closer falls outside every span (\"('\"), and a closer inserted after a lone backslash becomes a character literal (\"(\\\\\"). Every change stays recorded as a `:seon.batch/repair` (a replaced closer carries both `:seon.batch/dropped` and `:seon.batch/inserted`). The fix lands in `seon.sci.forgive/scan`, which `seon.sci.forgive/forgive` calls; the consumers `seon.sci.forgive/step` and `seon.sci.forgive/segments` read the `:seon.batch/forgiven` it answers."
+            :must-read #{seon.sci.forgive/forgive seon.sci.forgive/scan seon.sci.forgive/step seon.sci.forgive/segments}
+            :evidence #{"docs/research/agent-platform/2026-10-10/designed-task-examples.md"}}]
