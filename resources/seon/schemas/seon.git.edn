@@ -1,4 +1,5 @@
 #:seon.git{:commit [:string {:min 40 :max 40 :description "A git commit's full sha, as `git rev-parse` prints it: the commit a landing made (seon.cluster.source/commit!)."}],
+           :head [:string {:min 40 :max 40 :description "The checkout's HEAD commit a landing writes against, as `git rev-parse` prints it: each file it writes must hold its blob there (seon.cluster.source/write-and-commit!)."}],
            :paths [:vector {:description "The checkout-relative paths a landing asked git to commit."} :seon.source/path],
            :commit-refused [:enum {:description "Why seon.cluster.source/commit! committed nothing or could not verify its commit."}
                             :no-git-dir :lock-not-taken :index-unreadable :other-staged :nothing-written :unproven :commit-failed

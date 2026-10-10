@@ -719,8 +719,10 @@
                _ (.setWritable (io/file root "test/tq") true false)
                [{stuck :seon.task/merge}] (end-messages (db/db connection) first-agent)
                original (slurp (io/file root path))
-               ;; a hand edit of the declaration the stopped landing writes: resuming it is a conflict
-               _ (spit (io/file root path) (str/replace original base-area hand-area))]
+               ;; a committed hand edit of the declaration the stopped landing writes: resuming it is a conflict
+               ;; (an uncommitted one only waits for its commit, seon.cluster.source/a-landing-never-commits-edits-it-did-not-prove)
+               _ (spit (io/file root path) (str/replace original base-area hand-area))
+               _ (git! root "commit" "-q" "-m" "hand edit" "--" path)]
            (testing "the next end retries the transient refusal; met by the hand edit, it records a refusal awaiting root"
              (let [second-agent (:seon.agent/id (branch-agent! running connection 'tqo.endo "area"))
                    second-execution (fixed-end! running second-agent 'tqo.endo area)
@@ -734,8 +736,9 @@
                (is (= [other] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" "HEAD")))
                    "its commit is exactly its own file")))
            (testing "a later landing in the same file is refused naming the stuck one, which is not retried"
-             ;; the file is restored, so a retry of the stuck landing would now land
+             ;; the file is restored and committed, so a retry of the stuck landing would now land
              (spit (io/file root path) original)
+             (git! root "commit" "-q" "-m" "restore" "--" path)
              (let [head (git! root "rev-parse" "HEAD")
                    third-agent (:seon.agent/id (branch-agent! running connection 'tq.endh "side"))
                    third-execution (fixed-end! running third-agent 'tq.endh side)

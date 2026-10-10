@@ -156,12 +156,13 @@
                [:seon.source/accepted :seon.source/accepted]
                [:seon.fn/root :seon.fn/root]
                [:seon.task/merge {:optional true :description "The merge task each installed file is recorded on as it is installed (:seon.task/installed)."} :seon.task/merge]
-               [:seon.source/installed {:optional true} :seon.source/installed]],
+               [:seon.source/installed {:optional true} :seon.source/installed]
+               [:seon.git/head {:optional true :description "A landing's HEAD commit: a file to write whose bytes differ from its blob there is refused :uncommitted-edits."} :seon.git/head]],
               :installed [:map-of {:description "The files a landing already installed, path to candidate digest: a resumed write-back proves and installs only the others."}
                           :seon.source/path :seon.source/candidate-digest],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed :not-recorded :blocked],
+               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed :not-recorded :blocked :uncommitted-edits],
               :write-back-error
               [:and :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]

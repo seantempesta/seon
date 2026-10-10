@@ -1554,25 +1554,58 @@
                         (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
                     [] (sort-by key groups)))))
 
+(defn- blob-digest
+  "The file digest (`sha-256`) of `path` in `root`'s working tree, or with
+  `rev`, of its blob in that commit; nil when absent."
+  {:malli/schema [:function [:=> [:cat :seon.fn/root :seon.source/path] [:maybe :string]]
+                  [:=> [:cat :seon.fn/root :seon.source/path :string] [:maybe :string]]]}
+  ([root path]
+   (let [file (io/file root (str path))]
+     (when (.isFile file) (sha-256 (Files/readAllBytes (.toPath file))))))
+  ([root path rev]
+   (let [{:keys [exit out]} (process/shell {:dir root :out :bytes :err :string :continue true}
+                                           "git" "cat-file" "blob" (str rev ":" path))]
+     (when (zero? exit) (sha-256 out)))))
+
 (defn- installed-tx
   "Transaction data recording on `merge-task` that the file at `path` holds its proven `candidate-digest`."
   {:malli/schema [:=> [:cat :seon.task/merge :seon.source/path :seon.source/candidate-digest] :seon.store/transaction-data]}
   [merge-task path candidate-digest]
   [[:db/add [:seon.task/id merge-task] :seon.task/installed [path candidate-digest]]])
 
+(defn- uncommitted-paths
+  "Each of `paths` whose bytes in the checkout `root` differ from its blob in
+  the commit `head` (`digests` names a path's bytes when they were read
+  already, else they are read now), in path order."
+  {:malli/schema [:=> [:cat :seon.fn/root :seon.git/head [:map-of :seon.source/path :string] [:set :seon.source/path]]
+                  [:vector :seon.source/path]]}
+  [root head digests paths]
+  (vec (sort (remove #(= (or (digests %) (blob-digest root %)) (blob-digest root % head)) paths))))
+
 (defn- write-back-commits
   "`write-back!` between the accepted merge's `before` and `after` values: the
   files of `installed` (path to candidate digest, already written) are skipped,
-  and each file installed is recorded on `merge-task` when one is named."
+  and each file installed is recorded on `merge-task` when one is named. With
+  the commit `head`, every other file must hold exactly its blob there, both
+  before it is proven and as it was proven, so the candidate is that blob plus
+  the merge's declarations and nothing uncommitted rides along."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
-                       :seon.db/database-value :seon.fn/root [:maybe :seon.task/merge] :seon.source/installed]
+                       :seon.db/database-value :seon.fn/root [:maybe :seon.task/merge] :seon.source/installed
+                       [:maybe :seon.git/head]]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [connection accepted before after root merge-task installed]
+  [connection accepted before after root merge-task installed head]
   (let [identities (:seon.program/identities accepted)
         merged (held-digests after identities)
         moved (moved-digests merged (held-digests (db/db connection) identities))
         remaining (into #{} (remove #(contains? installed (change-path before %))) identities)
-        proven (when (empty? moved) (if (seq remaining) (proven-files before after remaining root) []))
+        dirty (when (and head (empty? moved))
+                (uncommitted-paths root head {} (into #{} (keep #(change-path before %)) remaining)))
+        proven (when (and (empty? moved) (empty? dirty)) (if (seq remaining) (proven-files before after remaining root) []))
+        ;; a file edited between that check and its proof read was proven from the edit
+        dirty (if (and head (vector? proven))
+                (uncommitted-paths root head (into {} (map (juxt :seon.source/path :seon.source/base-digest)) proven)
+                                   (into #{} (map :seon.source/path) proven))
+                dirty)
         disk-digest #(sha-256 (Files/readAllBytes (.toPath (io/file root (str (:seon.source/path %))))))
         changed (when (vector? proven) (first (remove #(= (:seon.source/base-digest %) (disk-digest %)) proven)))
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
@@ -1582,6 +1615,9 @@
                           {:seon.error/member :seon.source/accepted
                            :seon.error/expected (select-keys merged moved)
                            :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})
+      (seq dirty)
+      (write-back-refusal :uncommitted-edits "A file this landing writes holds edits git HEAD does not; nothing was written. It lands once those edits are committed."
+                          {:seon.source/path (first dirty) :seon.error/offending dirty})
       (:seon.error/at proven) proven
       changed
       (write-back-refusal :file-changed "The file changed while the candidate was proven."
@@ -1638,7 +1674,9 @@
   candidate to the file's other declarations unchanged and the merge commit's
   digests for the written ones. Every file's disk bytes are checked again, then each
   candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
-  publication owner.
+  publication owner. With `:seon.git/head` (a landing's commit), a file to
+  write whose bytes differ from its blob in that commit, before or as it is
+  proven, refuses `:uncommitted-edits` naming the paths, and nothing is written.
 
   `:seon.fn/root` is the checkout's absolute path (`seon.fs/checkout-root?`);
   a relative path or one inside a `data/source` archive is refused as
@@ -1649,7 +1687,7 @@
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
   [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root
-    merge-task :seon.task/merge installed :seon.source/installed}]
+    merge-task :seon.task/merge installed :seon.source/installed head :seon.git/head}]
   ;; An accepting transaction is read through the target's retained history; two
   ;; commit ids (a branch beside its head, `my.program/write-branch!`) as commits.
   (let [t (:seon.source/accepted-t accepted)
@@ -1663,7 +1701,7 @@
       (if (some nil? [before after])
         (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
                             {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
-        (write-back-commits connection accepted before after root merge-task (or installed {}))))
+        (write-back-commits connection accepted before after root merge-task (or installed {}) head)))
       (finally (when-not t (run! #(some-> % d/release-materialized-db) [before after]))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1727,19 +1765,6 @@
           (finally
             (.close ^java.io.OutputStream (:in holder))
             (deref holder)))))))
-
-(defn- blob-digest
-  "The file digest (`sha-256`) of `path` in `root`'s working tree, or with
-  `rev`, of its blob in that commit; nil when absent."
-  {:malli/schema [:function [:=> [:cat :seon.fn/root :seon.source/path] [:maybe :string]]
-                  [:=> [:cat :seon.fn/root :seon.source/path :string] [:maybe :string]]]}
-  ([root path]
-   (let [file (io/file root (str path))]
-     (when (.isFile file) (sha-256 (Files/readAllBytes (.toPath file))))))
-  ([root path rev]
-   (let [{:keys [exit out]} (process/shell {:dir root :out :bytes :err :string :continue true}
-                                           "git" "cat-file" "blob" (str rev ":" path))]
-     (when (zero? exit) (sha-256 out)))))
 
 (defn- commit-locked
   "`commit!` under the lane commit lock: the staged-index and proven-bytes
@@ -1812,6 +1837,9 @@
   answered with nothing written, and a resumed call whose files were all
   written answers the commit its history already holds for the merge task.
   Without one, the request's `:seon.source/installed` names the files written.
+  A file to write that holds edits the checkout's HEAD does not (a lane's
+  uncommitted work, a hand edit) refuses `:uncommitted-edits` and nothing is
+  written or committed; a file this landing installed earlier is not one.
   Answers `{:seon.source/written … :seon.git/commit …}`, the write-back's
   refusal, or the commit's refusal carrying `:seon.source/written`.
 
@@ -1830,9 +1858,14 @@
          (let [recorded (when merge-task (recorded-landing (db/db connection) merge-task))
                landed-git (:seon.task/landed-git recorded)
                installed (if merge-task (:seon.source/installed recorded) (or (:seon.source/installed request) {}))
-               written (if landed-git
-                         {:seon.source/changed-paths [] :seon.source/files []}
-                         (write-back! (assoc request :seon.source/installed installed)))
+               head (git root ["rev-parse" "--verify" "HEAD"])
+               written (cond
+                         landed-git {:seon.source/changed-paths [] :seon.source/files []}
+                         (not (zero? (:exit head)))
+                         (commit-refusal [] :no-git-dir "The checkout's HEAD commit could not be read; nothing was written."
+                                         {:seon.error/offending (:err head)})
+                         ;; the files written hold their HEAD blobs, so the commit carries only what the merge proved
+                         :else (write-back! (assoc request :seon.source/installed installed :seon.git/head (:out head))))
                candidates (into installed (map (juxt :seon.source/path :seon.source/candidate-digest))
                                 (:seon.source/files written))
                paths (vec (sort (keys candidates)))
@@ -1898,9 +1931,10 @@
 
 (def ^:private transient-refusals
   "The landing refusal reasons a later attempt clears by itself: a file or fact
-  that could not be written, the git directory, lock or index held or busy, a
-  failed `git commit`. Retrying any other reason meets it again until root decides."
-  #{:install-failed :not-recorded :no-git-dir :lock-not-taken :index-unreadable :other-staged :commit-failed})
+  that could not be written, a file holding edits its owner has not committed
+  yet, the git directory, lock or index held or busy, a failed `git commit`.
+  Retrying any other reason meets it again until root decides."
+  #{:install-failed :not-recorded :uncommitted-edits :no-git-dir :lock-not-taken :index-unreadable :other-staged :commit-failed})
 
 (defn landing-refusal-reason
   "The reason a landing's `refused` value names: its write-back or commit refusal reason, or nil."

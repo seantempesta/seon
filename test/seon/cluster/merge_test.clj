@@ -698,6 +698,46 @@
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-never-commits-edits-it-did-not-prove}}
+  a-landing-into-a-file-with-uncommitted-edits-waits-for-their-commit
+  ;; a lane's uncommitted edits in a file a landing writes never ride in the landing's commit
+  (let [path "src/tq/clean.clj"
+        head-text "(ns tq.clean)\n\n(defn f\n  \"One.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  1)\n"
+        merged-text (str/replace head-text "  1)" "  2)")
+        foreign "\n(defn h\n  \"A lane's uncommitted edit.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  3)\n"
+        root (checkout! "land-clean-test" {path head-text})
+        file (io/file root path)
+        connection (:seon.db/connection (support/execution-handle nil))
+        declare! (fn [text]
+                   (spit file text)
+                   (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+                     (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+                     (db/commit-id (db/db connection))))
+        base (declare! head-text)
+        merged (declare! merged-text)
+        accepted {:seon.program/identities #{[:seon.fn/sym 'tq.clean/f]} :seon.source/base-commit-id base :seon.source/commit-id merged}
+        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345" :seon.source/commit-id merged}
+        land #(source/write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root} acceptance)]
+    (try
+      (testing "a file holding edits git HEAD does not is refused, unwritten and uncommitted"
+        (spit file (str head-text foreign))
+        (let [head (git! root "rev-parse" "HEAD")
+              refused (land)]
+          (is (= :uncommitted-edits (:seon.source/write-back-refused refused)))
+          (is (= [path] (:seon.error/offending refused)) "naming the path")
+          (is (= (str head-text foreign) (slurp file)) "the file is unwritten")
+          (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+      (testing "once the file's owner commits its edits, the landing commits exactly that commit's blob plus the merge"
+        (git! root "commit" "-q" "-m" "the lane's edit" "--" path)
+        (let [owner (git! root "rev-parse" "HEAD")
+              landed (land)
+              sha (git! root "rev-parse" "HEAD")]
+          (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
+          (is (= sha (:seon.git/commit landed)))
+          (is (= owner (git! root "rev-parse" "HEAD^")) "one commit on the owner's")
+          (is (= (str merged-text foreign) (str (git! root "show" (str sha ":" path)) "\n")) "the owner's edit beside the merged declaration")))
+      (finally (support/delete-root! root)))))
+
 (deftest ^{:seon/tasks #{'seon.task/one-open-proposal-per-assignment}
            :seon.test/long "One own-branch agent's first request, assignment and two proposal runs."
            :seon.test/long-ms 120000}
