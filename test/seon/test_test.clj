@@ -6,6 +6,7 @@
             [seon.config :as config]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
@@ -318,3 +319,21 @@
                          [:seon.test.run/id (get-in request [:seon.test.run/provenance :seon.test.run/id])])]
          (is (integer? (get-in entity [:seon.test.run/selection-tx :db/id])))
          (is (not (seq (:seon.test.run/members entity)))))))))
+
+(deftest ^{:seon/tasks #{'seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte}}
+  one-interpreted-test-run-allocates-a-bounded-multiple-of-its-body
+  ;; The body allocates about 6.5 MB; forking a member and interpreting its
+  ;; namespace's rows is bounded by the test, not the program: 100 MB. The
+  ;; first run acquires the JVM's cluster base once; the second is measured.
+  (let [execution (assoc (test-support/execution-handle nil) :seon.agent/id "one-interpreted-test")
+        run! #(sut/run {:seon.test/execution execution
+                        :seon.test/recording-connection (:seon.db/connection execution)
+                        :seon.test/policy :named
+                        :seon.test/rerun? true
+                        :seon.test/changed ['seon.id-test/a-host-object-has-no-identity]})
+        _ (run!)
+        measured (profile/measure run!)
+        result (:seon.profile/value measured)]
+    (is (= 1 (:seon.test/executed-count result)))
+    (is (true? (:seon.test/passed? result)))
+    (is (< (:seon.profile/alloc-bytes measured) 100000000))))

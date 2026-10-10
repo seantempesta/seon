@@ -2152,12 +2152,16 @@
           ;; execution's acquisition of the candidate serves the world: no
           ;; whole-program acquisition per request.
           _ (sci.eval/program-equal! database candidate)
-          ;; The candidate's program from its definitions: the cluster base with
-          ;; the candidate's changes interpreted on a fork (`sci.eval/base-ctx`),
-          ;; never the agent's live context, whose inherited bodies may call a Var
-          ;; its fork replaced (interim until context-owned SCI Var bindings:
+          ;; The candidate's program: the execution's program-only base when it
+          ;; already acquired the candidate, else the cluster base with the
+          ;; candidate's changes interpreted on a fork (`sci.eval/base-ctx`).
+          ;; Never the agent's live context, whose inherited bodies may call a
+          ;; Var its fork replaced (interim until context-owned SCI Var bindings:
           ;; `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`).
-          source (sci.eval/base-ctx candidate)
+          held (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution))
+          source (if (and held (sci.eval/acquired-database? held candidate))
+                   held
+                   (sci.eval/base-ctx candidate))
           environment (or (env/of execution)
                           (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))
           ;; Acquired once on a fork, never on the execution's own context:

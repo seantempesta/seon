@@ -2582,3 +2582,16 @@
        (eval/enter-namespace! ctx (quote seon.db-test))
        (is (eval/source-namespace? ctx (quote seon.db-test)))
        (is (map? @(sci/resolve ctx 'seon.db-test/fixture-projection)))))))
+
+(deftest ^{:seon/tasks #{'seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte}}
+  a-branch-that-wrote-no-program-keeps-the-program-of-the-commit-it-opened-at
+  (let [handle (test-support/execution-handle nil)
+        base (:seon.sci.eval/base-ctx handle)
+        parent (db/db (:seon.db/connection handle))
+        member (agent/acquire-context! handle nil {:seon.agent/isolate? true})]
+    (try
+      (is (eval/acquired-database? base parent))
+      ;; The member's first commit wrote only its fork entity, on its own connection.
+      (is (not= (db/commit-id parent) (db/commit-id (db/db (:seon.db/connection member)))))
+      (is (eval/acquired-database? base (db/db (:seon.db/connection member))))
+      (finally (agent/release-context! member)))))

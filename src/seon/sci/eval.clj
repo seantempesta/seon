@@ -3348,8 +3348,11 @@
   conservative revision on a schema or unknown change
   (`reference-code/datahike/src/datahike/query.cljc:2568-2589`); its query cache
   carries results across commits by comparing exactly these members
-  (`source-context-unchanged?`, `:2963-2975`). Revisions are comparable within
-  one connection generation, which the basis names."
+  (`datahike.query/source-context-unchanged?`). Each revision is a commit id:
+  a connection opens with that commit as its conservative revision
+  (`datahike.connector/connect`), so an attribute's revision, else the
+  conservative one, names a commit whose datoms of that attribute equal this
+  value's, on any connection (`datahike.db/advance-cache-context`)."
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (select-keys (:cache-context database)
@@ -3359,10 +3362,22 @@
                 :datahike.cache/attribute-revisions]))
 
 (defn- program-basis
-  "A revision basis restricted to the attributes an acquisition reads."
-  {:malli/schema [:=> [:cat :map [:set :qualified-keyword]] :map]}
-  [basis attributes]
-  (update basis :datahike.cache/attribute-revisions select-keys attributes))
+  "Each attribute an acquisition reads with the commit its datoms equal: its own
+  revision, else the conservative one. Equal bases hold equal datoms of those
+  attributes, whichever connection produced them."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword]] [:map-of :qualified-keyword [:maybe :uuid]]]}
+  [{revisions :datahike.cache/attribute-revisions conservative :datahike.cache/conservative-revision} attributes]
+  (into {} (map (fn [attribute] [attribute (get revisions attribute conservative)])) attributes))
+
+(defn- inherited-basis
+  "`basis` over the identity remembered for the commit its conservative revision
+  names: a branch opened at a known commit keeps that commit's program, plus the
+  attributes it wrote since."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{conservative :datahike.cache/conservative-revision :as basis}]
+  (if-let [opened (some-> conservative (->> (cache/lookup program-identity-cache)) deref)]
+    (update opened :datahike.cache/attribute-revisions merge (:datahike.cache/attribute-revisions basis))
+    basis))
 
 (defn- remember-program-identity!
   "Record a commit's revision basis unless its commit already has one."
@@ -3376,14 +3391,16 @@
   Memoized by commit id, which names one immutable root
   (`reference-code/datahike/src/datahike/db.cljc:385`): a branch opened at a commit
   reads the basis its parent recorded when the commit landed
-  (`watch-program-identity!`), so its program compares with the parent's. A commit
+  (`watch-program-identity!`), so its program compares with the parent's, and a
+  commit written there keeps that program for every attribute it did not write
+  (`inherited-basis`). A commit
   proven program-equal to an acquired value takes that value's basis
   (`acquired-database?`). Compare two identities through `program-basis` over the
   acquisition attributes. A value without committed identity has none."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :map]]}
   [database]
   (when-let [commit-id (commit-id-of database)]
-    (remember-program-identity! commit-id (revision-basis database))))
+    (remember-program-identity! commit-id (inherited-basis (revision-basis database)))))
 
 (defn- watch-program-identity!
   "Record each committed value's revision basis as its commit lands.
@@ -3541,8 +3558,8 @@
                       acquired (program-identity previous)]
                   (or (= (program-basis acquired attributes)
                          (program-basis (program-identity database) attributes))
-                      ;; The basis carries connection and generation, so this
-                      ;; equality also proves one lineage.
+                      ;; Equal effective revisions name commits with equal
+                      ;; datoms of every acquisition attribute.
                       (when (= (program-basis (revision-basis database) attributes)
                                (program-basis (revision-basis previous) attributes))
                         ;; A branch opened at this commit reads the acquired
