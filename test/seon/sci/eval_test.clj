@@ -2618,6 +2618,20 @@
        (is (= 1 (:seon.test/pass-count result)))))))
 
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-docstring-only-change-lands-without-interpreting-its-namespace}}
+  a-compiled-var-in-a-context-carries-its-contract
+  ;; seon.instrument-test reads `(:malli/schema (meta #'seon.problems/open-faults))`;
+  ;; interpreted, it read the context's copy of the compiled Var, which lacked
+  ;; it, and `seon.schema/contract-product` refused schema nil.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           copied (meta (sci/resolve ctx 'seon.db/db))]
+       (is (some? (:malli/schema (meta #'db/db))))
+       (is (= (:malli/schema (meta #'db/db)) (:malli/schema copied))
+           "the context's Var answers the compiled Var's contract")
+       (is (not (contains? copied :test)))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-test-namespace-runs-without-its-fixtures}}
   an-interpreted-namespace-runs-its-fixture-around-a-deftest
   (test-support/with-database

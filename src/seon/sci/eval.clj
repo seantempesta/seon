@@ -237,17 +237,21 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- copy-host-var
-  "Copy a loaded JVM Var into SCI at its root.
+  "Copy a loaded JVM Var into SCI at its root, with its metadata.
 
   SCI's `copy-var*` copies `@host-var` (`reference-code/sci/src/sci/core.cljc:137`),
   which for a dynamic Var bound on this thread is the binding: a base context
   derived under an evaluation would keep that evaluation's `seon.db/*read-database*`,
-  and the memoized base would pin its branch's node cache."
+  and the memoized base would pin its branch's node cache. It copies only a
+  few metadata keys; the rest (its contract, `:malli/schema`) is the Var's
+  own data a reader expects, as the compiled Var answers. `:test` stays
+  behind: a copied test Var would run its compiled body in this context."
   {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
   [^clojure.lang.Var host-var sci-namespace]
   (let [copied (sci/copy-var* host-var sci-namespace)]
     (when (.getThreadBinding host-var)
       (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
+    (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %))
     copied))
 
 
