@@ -46,4 +46,8 @@
              :kind :function
              :intent "`seon.test.reach-test/tests-reaching-answers-the-tests-whose-closure-holds-the-target` is red at default f54e73c83 without any branch change (lane reach-transitive, run 45031177abb8, 2026-10-09; also red in the check of c5826eb62's candidate, which does not touch seon.test.runner): `(seon.test.runner/tests-reaching database [seon.id-test/data-shape-and-explicit-length-determine-identity seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing] 'seon.id/id)` answers `#{}` while `seon.test.runner/reach-memberships` of the same tests holds `seon.id/id` for the first. Either `seon.test.runner/reach-graph`'s reversed edges drop the path memberships follow, or the test's assumption is retired; classify by the commit that changed it and fix the owner or the test. Done when that test is green."
              :must-read #{seon.test.runner/tests-reaching seon.test.runner/reach-graph seon.test.runner/reach-memberships}}
-]
+
+ #:seon.task{:name "a-private-callee-of-a-reached-function-is-unreached"
+             :kind :function
+             :intent "`my.program/tests-reaching` of `seon.cluster.source/write-back!` lists 11 gating tests, but `seon.cluster.source/proven-file` (called by `seon.cluster.source/proven-files`, called by `seon.cluster.source/write-back-commits`, called by write-back!) has none, so `bin/lane evidence` answers `unreached [seon.cluster.source/proven-file]` and a REPL-proven write-back change must take the throwaway check (lane repl-only-3, commit 31b442840, 2026-10-10); `my.test/check` with it changed answers `:seon.test/unreached`. Done when the reach of a test calling write-back! includes proven-file."
+             :must-read #{seon.test.runner/tests-reaching seon.fn/tests-reaching seon.cluster.branch-evidence/branch-evidence}}]

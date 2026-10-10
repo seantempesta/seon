@@ -124,4 +124,8 @@
  #:seon.task{:name "write-branch-identities-take-tuples-and-the-docs-do-not-say"
              :kind :function
              :intent "`:seon.program/identities` of `my.program/write-branch!` and `my.test/check` is `:seon.program/identity-set` (a set of `:seon.program/declaration-identity`, resources/seon/schemas/seon.program.edn), and lane loop-prove (86b7cdbbe, 2026-10-10) found it takes tuples where its prose and `my.program/diff` sections show symbols; the refusal showed a generated example rather than a valid one. Done when the docstring example of `my.program/write-branch!` passes a real identity copied from `my.program/diff`, and a symbol where a tuple is expected is refused naming the tuple shape."
-             :must-read #{my.program/write-branch! my.program/diff}}]
+             :must-read #{my.program/write-branch! my.program/diff}}
+ #:seon.task{:name "a-test-var-run-at-the-repl-writes-its-fixture-into-my-branch"
+             :kind :function
+             :intent "Running a fixture test's Var directly at the REPL (`(clojure.test/test-var #'seon.cluster.write-back-test/...)`) transacts its fixture namespaces (`wbadd*.core`) onto the agent's own branch, because `seon.test-support/execution-handle` with no runner handle answers the agent's custody; `my.program/diff` then lists them for write-back and `my.program/remove-ns!` of two tiny namespaces took 1.1 s and 1.5 GB (lane repl-only-3, 2026-10-10). Done when a test body run outside the runner refuses or writes to its own disposable branch."
+             :must-read #{seon.test-support/execution-handle my.program/diff my.program/remove-ns!}}]
