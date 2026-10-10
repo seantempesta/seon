@@ -10,21 +10,24 @@
 
 (defn- check-now
   "Run the tests named in `tests`, else those reaching `changed` (else my program's change), as one request;
-  a change no test reaches names it unreached. A named test always runs or answers its recorded result."
+  a change no test reaches names it unreached. A named test always runs or answers its recorded result, unless
+  `rerun?` asks it to run again."
   {:malli/schema [:=> [:cat :my.program/context :seon.db/connection [:or :nil :seon.test/changed]
-                       [:or :nil [:vector :seon.test/sym]]]
+                       [:or :nil [:vector :seon.test/sym]] :boolean]
                   [:or :seon.test/run-result :my.test/unreached-result :seon.error/value]]}
-  [context connection changed tests]
+  [context connection changed tests rerun?]
   (if (seq tests)
-    (seon.test/run {:seon.test/execution context :seon.test/recording-connection connection
-                    :seon.test/policy :named :seon.test/identities (set tests)})
+    (seon.test/run (cond-> {:seon.test/execution context :seon.test/recording-connection connection
+                            :seon.test/policy :named :seon.test/identities (set tests)}
+                     rerun? (assoc :seon.test/rerun? true)))
     (let [changed (or (not-empty changed) (seon.test/changes context connection))]
       (if (:seon.error/at changed)
         changed
-        (let [result (seon.test/run {:seon.test/execution context
-                                     :seon.test/recording-connection connection
-                                     :seon.test/policy :named
-                                     :seon.test/changed (vec changed)})]
+        (let [result (seon.test/run (cond-> {:seon.test/execution context
+                                             :seon.test/recording-connection connection
+                                             :seon.test/policy :named
+                                             :seon.test/changed (vec changed)}
+                                      rerun? (assoc :seon.test/rerun? true)))]
           (if (and (nil? (:seon.error/at result))
                    (empty? (:seon.test/results result))
                    (not-any? result [:seon.test/pending :seon.test/unfinished :seon.test/recording-refusal
@@ -44,7 +47,8 @@
   answers its recorded result. My acquired context and
   connection are supplied by call preparation. Each reaching test runs on its
   own branch off my current commit, isolated from my writes and from the
-  other tests; its result is recorded on my connection. `:seon.test/passed?`
+  other tests; its result is recorded on my connection. `:seon.test/rerun? true`
+  runs them again instead of answering recorded results. `:seon.test/passed?`
   is true only when every reaching test has green evidence. Failure data
   names the test and its claim. A name an earlier form of this same request
   defined has no facts until the request records: the answer lists it under
@@ -61,10 +65,11 @@
         named (or tests (:seon.test/changed request))
         after (filterv (or defined #{}) named)
         now (vec (remove (set after) named))
-        [changed tests] (if tests [nil now] [now nil])]
-    (cond (empty? after) (check-now context connection changed tests)
+        [changed tests] (if tests [nil now] [now nil])
+        rerun? (true? (:seon.test/rerun? request))]
+    (cond (empty? after) (check-now context connection changed tests rerun?)
           (empty? now) {:my.test/after-recording after}
-          :else (assoc (check-now context connection changed tests) :my.test/after-recording after))))
+          :else (assoc (check-now context connection changed tests rerun?) :my.test/after-recording after))))
 
 (defn check-platform
   "Prove my branch's host-bound change in a JVM loaded from it and record the

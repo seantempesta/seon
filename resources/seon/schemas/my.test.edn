@@ -4,6 +4,7 @@
   [:my.program/context :my.program/context]
   [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test/identities {:optional true :description "Tests to run themselves, instead of those reaching a change."} [:set :seon.test/sym]]
+  [:seon.test/rerun? {:optional true :description "Run the tests again instead of answering their recorded results."} :boolean]
   [:seon.batch/defined {:optional true} :seon.batch/defined]]
  :my.test/check-platform-request
  [:map {:description "My branch's host-bound change to prove in a JVM loaded from it: call preparation supplies my context and writer; the tests default to those reaching my change, the declarations to my whole branch difference."}

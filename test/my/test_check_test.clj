@@ -50,6 +50,23 @@
        (is (= [(symbol namespace-name "f-test")] (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/red]))
            "the test step ran the reaching test after recording, in the same reply")))))
 
+(deftest ^{:seon/tasks #{'my.test/check-reruns-on-request}}
+  a-check-asking-to-rerun-runs-its-recorded-green-again
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [check (fn [rerun?]
+                   (answered (str "(select-keys (my.test/check {:seon.test/identities #{'seon.id-test/a-host-object-has-no-identity}"
+                                  (when rerun? " :seon.test/rerun? true")
+                                  "}) [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])")
+                             agent-id running))
+           first-run (check false)
+           reused (check false)
+           rerun (check true)]
+       (is (true? (:seon.test/passed? first-run)))
+       (is (= 1 (:seon.test/reused-count reused)) "an unchanged check answers its recorded green")
+       (is (= 1 (:seon.test/executed-count rerun)) "a check asking to rerun runs the test again")
+       (is (= 0 (:seon.test/reused-count rerun)))))))
+
 (defn- edited-defn
   "`source`, a `(defn name doc attr-map [args] body)` form, with docstring `doc`,
   and with a `nil` form before its body when `body?`."
