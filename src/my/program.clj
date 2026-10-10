@@ -21,6 +21,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.source :as source]
             [seon.fault :as fault]
+            [seon.sci.lookup]
             [seon.flow :as work]
             [seon.test]
             [malli.error]))
@@ -77,6 +78,7 @@
                      {:seon.error/message (str "No program declaration names " subject ".")
          :seon.program/not-found subject
          :seon.error/expected (subject-identities subject)
+         :seon.error/fix "Name a declared function or test as a qualified symbol, 'seon.turn/open?; a namespace as a symbol, 'seon.turn; a schema as a keyword, :seon.turn/id."
          :seon.error/data {:seon.db/basis-t (db/basis-t database)}})] (throw (ex-info (:seon.error/message refusal) refusal)))))
 
 (defn- names-through
@@ -134,40 +136,50 @@
                      :seon.program/call-sites (vec (mapcat site-of sorted pulled))
                      :seon.fn/declared-arities declared})))
 
+(defn- read-request
+  "The request map of a read called with a request map or a bare subject (under `subject-key`); a request without `:seon.db/db` reads the calling evaluation's current database."
+  {:malli/schema [:=> [:cat :qualified-keyword [:or :map :symbol :qualified-keyword]] :map]}
+  [subject-key argument]
+  (let [request (if (map? argument) argument {subject-key argument})]
+    (cond-> request (not (contains? request :seon.db/db)) (assoc :seon.db/db (db/db)))))
+
 (defn callers
   "Read each direct caller once, as a call site with its declaration span and recorded call arity, and the subject's declared arities once.
 
-  Empty groups are absent; unknown coverage remains explicit.
+  Empty groups are absent; unknown coverage remains explicit. A bare subject reads the current database.
   Example:
-  (my.program/callers {:seon.program/subject 'seon.turn/open?})"
-  {:malli/schema [:=> [:cat :my.program/subject-request]
+  (my.program/callers 'seon.turn/open?)"
+  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
+                                 :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
-  [{database :seon.db/db subject :seon.program/subject :as request}]
-  (read-result request 'my.program/callers
-               #(let [{identity :seon.program/identity entities :seon.program/entities}
-                      (locate database subject)]
-                  (merge (observation database subject identity)
-                         (dissoc (caller-data database subject (first entities)) :seon.program/callers)))))
+  [argument]
+  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
+    (read-result request 'my.program/callers
+                 #(let [{identity :seon.program/identity entities :seon.program/entities}
+                        (locate database subject)]
+                    (merge (observation database subject identity)
+                           (dissoc (caller-data database subject (first entities)) :seon.program/callers))))))
 
 (defn tests-reaching
   "Read the current gate set, derived by seon.fn/gate-set.
 
   This is current test selection, not recorded reach from a past test run.
   Example:
-  (my.program/tests-reaching {:seon.program/subject 'seon.turn/open?})"
-  {:malli/schema [:=> [:cat :my.program/subject-request]
+  (my.program/tests-reaching 'seon.turn/open?)"
+  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
+                                 :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
-  [{database :seon.db/db subject :seon.program/subject :as request}]
-  (read-result request 'my.program/tests-reaching
-               #(let [{identity :seon.program/identity} (locate database subject)]
-                  (merge (observation database subject identity)
-                         (present-groups
-                          {:seon.program/gating
-                           (mapv symbol (let [result (function/gate-set
-                                                  database subject)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result)))})))))
+  [argument]
+  (let [{database :seon.db/db subject :seon.program/subject :as request} (read-request :seon.program/subject argument)]
+    (read-result request 'my.program/tests-reaching
+                 #(let [{identity :seon.program/identity} (locate database subject)]
+                    (merge (observation database subject identity)
+                           (present-groups
+                            {:seon.program/gating
+                             (mapv symbol (let [result (function/gate-set
+                                                    database subject)]
+                                            (if (:seon.db/invalid-read result)
+                                              (throw (ex-info (:seon.error/message result) result)) result)))}))))))
 
 (defn- key-data
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key :int] :map]}
@@ -206,17 +218,19 @@
 
   Mentions are membership evidence only, never a read or write claim.
   Example:
-  (my.program/reads-key {:seon.schema/key :seon.db/connection})"
-  {:malli/schema [:=> [:cat :my.program/key-request]
+  (my.program/reads-key :seon.db/connection)"
+  {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.schema/key :seon.schema/key]]
+                                 :seon.schema/key]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
-  [{database :seon.db/db schema-key :seon.schema/key :as request}]
-  (read-result request 'my.program/reads-key
-               #(let [{identity :seon.program/identity entities :seon.program/entities} (locate database schema-key)]
-                  (-> (merge (observation database schema-key identity)
-                             (key-data database schema-key (first entities)))
-                      (update :seon.program/unknown conj
-                              {:seon.program/gap :keyword-mentions
-                               :seon.program/message "Constructed keywords and reads not declared in contracts are unknown; mentions never block retraction."})))))
+  [argument]
+  (let [{database :seon.db/db schema-key :seon.schema/key :as request} (read-request :seon.schema/key argument)]
+    (read-result request 'my.program/reads-key
+                 #(let [{identity :seon.program/identity entities :seon.program/entities} (locate database schema-key)]
+                    (-> (merge (observation database schema-key identity)
+                               (key-data database schema-key (first entities)))
+                        (update :seon.program/unknown conj
+                                {:seon.program/gap :keyword-mentions
+                                 :seon.program/message "Constructed keywords and reads not declared in contracts are unknown; mentions never block retraction."}))))))
 
 (defn- render-referrers
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] :seon.program/render-declared-by]}
@@ -847,12 +861,31 @@
          (sort-by first)
          (take 5) (mapv second))))
 
-(defn source
-  "Read one declaration's source, docstring, contract and location, for a function or a test.
+(defn- not-found
+  "The refusal for a subject nothing names: the nearest declared symbols for a qualified symbol, and the forms that work."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] :seon.program/not-found-error]}
+  [database subject]
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
+    {:seon.error/message "No program declaration, namespace or schema names that subject."
+     :seon.program/not-found subject
+     :seon.error/expected (if (qualified-symbol? subject) (nearest database subject) [])
+     :seon.error/fix "Name a function or test as a qualified symbol, (my.program/source 'seon.task/create!); a namespace as a symbol, (my.program/source 'seon.task); a schema as a keyword, (my.program/source :seon.task/id)."}))
 
-  Example:
-  (my.program/source 'seon.task/create!)
-  Errors: an unknown symbol returns a not-found error with the nearest symbols under :seon.error/expected."
+(defn- namespace-declarations
+  "A namespace's declared function and test symbols, or its not-found refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  [:or [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
+                        [:seon.program/tests [:vector :qualified-symbol]]]
+                   :seon.program/not-found-error]]}
+  [database namespace-name]
+  (if-let [entity (db/q database '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]] namespace-name)]
+    {:seon.ns/name namespace-name
+     :seon.program/functions (vec (sort (names-through database :seon.fn/ns entity :seon.fn/sym)))
+     :seon.program/tests (vec (sort (names-through database :seon.test/ns entity :seon.test/sym)))}
+    (not-found database namespace-name)))
+
+(defn- declaration-source
+  "One declaration's source map, or the not-found refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :my.program/declaration-source :seon.program/not-found-error]]}
   [database sym]
@@ -868,10 +901,27 @@
           (assoc :doc (:seon.fn/doc entity))
           (:seon.fn/spec entity) (assoc :contract (read-string (:seon.fn/spec entity)))
           (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
-        {:seon.error/message "No program declaration names that symbol."
-         :seon.program/not-found sym
-         :seon.error/expected (nearest database sym)}))))
+      (not-found database sym))))
+
+(defn source
+  "Read a declaration's source, a schema keyword's definition or a namespace's declarations.
+
+  Example:
+  (my.program/source 'seon.task/create!)
+  (my.program/source :seon.task/id)
+  (my.program/source 'seon.task)
+  Errors: an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
+                  [:or :my.program/declaration-source :seon.sci.eval/schema-doc
+                   [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
+                    [:seon.program/tests [:vector :qualified-symbol]]]
+                   :seon.program/not-found-error]]}
+  [database subject]
+  (cond
+    (keyword? subject) (let [found (seon.sci.lookup/schema-documentation database subject subject)]
+                         (if (:form found) found (not-found database subject)))
+    (simple-symbol? subject) (namespace-declarations database subject)
+    :else (declaration-source database subject)))
 
 (defn render-source-ai
   "A declaration's source as its own text: the code an agent can copy into a `defn`

@@ -300,7 +300,7 @@
 
 (deftest source-shows-the-docstring-once-inside-the-source
   (let [found (program/source (db/db) 'my.program/source)]
-    (is (clojure.string/includes? (:source found) "Read one declaration's source") "the source carries its docstring")
+    (is (clojure.string/includes? (:source found) "Read a declaration's source") "the source carries its docstring")
     (is (not (contains? found :doc)) "the docstring is not repeated beside the source")
     (is (= 'my.program/source (:sym found)))))
 
@@ -369,3 +369,22 @@
        (is (empty? (:seon.repl/findings shown)) "a source request is not a large value")
        (is (= (read-string (:source (program/source (db/db) target))) (:seon.repl/value shown))
            "the reply shows the whole definition")))))
+
+(deftest ^{:seon/tasks #{'my.program/a-bare-subject-is-a-valid-read-request}} a-bare-subject-is-a-valid-read-request
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "program-read-fixture")
+     (doseq [[call check message]
+             [[#(program/callers 'seon.turn/open?) #(seq (:seon.program/call-sites %)) "a bare symbol names the subject of callers"]
+              [#(program/tests-reaching 'seon.turn/open?) #(seq (:seon.program/gating %)) "a bare symbol names the subject of tests-reaching"]
+              [#(program/reads-key :seon.db/connection) #(= [:seon.schema/key :seon.db/connection] (:seon.program/identity %)) "a bare key names the subject of reads-key"]
+              [#(program/callers {:seon.program/subject 'seon.turn/open?}) #(seq (:seon.program/call-sites %)) "a request map without a database still answers"]
+              [#(program/callers {:seon.db/db (db/db connection) :seon.program/subject 'seon.turn/open?}) #(seq (:seon.program/call-sites %)) "a request map with its database still answers"]
+              [#(program/source (db/db connection) :seon.ref/section-error) #(and (= :seon.ref/section-error (:key %)) (vector? (:form %))) "a schema keyword answers its definition, as doc does"]
+              [#(program/source (db/db connection) 'my.program) #(and (= 'my.program (:seon.ns/name %)) (some #{'my.program/source} (:seon.program/functions %))) "a namespace symbol answers its declarations"]
+              [#(program/source (db/db connection) 'my.program-test) #(some #{'my.program-test/a-bare-subject-is-a-valid-read-request} (:seon.program/tests %)) "a test namespace lists its tests"]
+              [#(program/source (db/db connection) 'seon.turn/open?) #(= 'seon.turn/open? (:sym %)) "a qualified symbol still answers its source"]
+              [#(program/source (db/db connection) :no.such/key) #(and (= :no.such/key (:seon.program/not-found %)) (string? (:seon.error/fix %))) "an unknown schema key names the form that works"]
+              [#(program/source (db/db connection) 'no.such/thing) #(and (= 'no.such/thing (:seon.program/not-found %)) (string? (:seon.error/fix %))) "an unknown symbol names the form that works"]
+              [#(program/callers {:seon.db/db (db/db connection) :seon.program/subject 'no.such/thing}) #(and (= 'no.such/thing (:seon.program/not-found %)) (string? (:seon.error/fix %))) "a read of an unknown subject names the form that works"]]]
+       (is (check (call)) message)))))
