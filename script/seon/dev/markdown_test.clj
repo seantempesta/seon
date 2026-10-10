@@ -218,7 +218,8 @@
                          stale "abcd` beside `reference-code/datahike`.\n")))]
         (is (true? (::md/valid? result)))))))
 
-(deftest repository-dependency-pins-are-current-test
+(deftest ^{:seon/tasks #{'seon.dev.markdown/repository-doc-lints-are-red-on-head}}
+  repository-dependency-pins-are-current-test
   (let [result
         (md/validate-repository-pins
          {::md/repository-root (System/getProperty "user.dir")})]
@@ -319,7 +320,8 @@
       (is (= [::authority-subjects-absent]
              (mapv ::rule (authority-errors [])))))))
 
-(deftest historical-prd-authorities-fail-closed-test
+(deftest ^{:seon/tasks #{'seon.dev.markdown/repository-doc-lints-are-red-on-head}}
+  historical-prd-authorities-fail-closed-test
   (let [errors (authority-errors (repository-prd-authorities))]
     (is (empty? errors)
         "Localized PRD authority violations")))

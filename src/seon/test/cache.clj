@@ -12,7 +12,7 @@
 
 (def graph-roots
   "Roots containing indexed program files and nonindexed fixtures."
-  ["src" "test"])
+  ["src" "test" "script"])
 
 (def ^:private inventory-bound-ms
   "Bound for Git's local file inventory, matching the existing issue-history

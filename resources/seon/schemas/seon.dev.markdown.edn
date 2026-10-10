@@ -1,0 +1,90 @@
+#:seon.dev.markdown{:heading
+                    [:map
+                     [:seon.dev.markdown/level [:int {:min 1 :max 6}]]
+                     [:seon.dev.markdown/text :string]
+                     [:seon.dev.markdown/line [:int {:min 1}]]]
+                    :link
+                    [:map
+                     [:seon.dev.markdown/type [:enum :wikilink :markdown :bare-url]]
+                     [:seon.dev.markdown/target [:string {:min 1}]]
+                     [:seon.dev.markdown/text {:optional true} :string]
+                     [:seon.dev.markdown/line [:int {:min 1}]]]
+                    :section
+                    [:map
+                     [:seon.dev.markdown/heading :seon.dev.markdown/heading]
+                     [:seon.dev.markdown/content :string]
+                     [:seon.dev.markdown/line-start [:int {:min 1}]]
+                     [:seon.dev.markdown/line-end [:int {:min 1}]]]
+                    :document
+                    [:map
+                     [:seon.dev.markdown/content :string]
+                     [:seon.dev.markdown/frontmatter
+                      {:optional true}
+                      [:map-of :keyword :string]]
+                     [:seon.dev.markdown/headings
+                      [:vector :seon.dev.markdown/heading]]
+                     [:seon.dev.markdown/links [:vector :seon.dev.markdown/link]]
+                     [:seon.dev.markdown/sections
+                      [:vector :seon.dev.markdown/section]]]
+                    :violation
+                    [:map
+                     [:seon.dev.markdown/rule :keyword]
+                     [:seon.dev.markdown/severity [:enum :error :warning :info]]
+                     [:seon.dev.markdown/file-path {:optional true} :string]
+                     [:seon.dev.markdown/dependency-path {:optional true} :string]
+                     [:seon.dev.markdown/cited-sha {:optional true} :string]
+                     [:seon.dev.markdown/current-sha {:optional true} :string]
+                     [:seon.dev.markdown/line {:optional true} [:int {:min 1}]]
+                     [:seon.dev.markdown/message :string]
+                     [:seon.dev.markdown/fix {:optional true} :string]]
+                    :violations [:vector :seon.dev.markdown/violation]
+                    :parse-request [:map [:seon.dev.markdown/content :string]]
+                    :validate-request
+                    [:map
+                     [:seon.dev.markdown/content :string]
+                     [:seon.dev.markdown/rules {:optional true} [:set :keyword]]
+                     [:seon.dev.markdown/gitlinks
+                      {:optional true}
+                      [:map-of :string :string]]
+                     [:seon.dev.markdown/vault-root
+                      {:optional true}
+                      [:string {:min 1}]]
+                     [:seon.dev.markdown/file-path
+                      {:optional true}
+                      [:string {:min 1}]]]
+                    :validate-response
+                    [:map
+                     [:seon.dev.markdown/valid? :boolean]
+                     [:seon.dev.markdown/violations :seon.dev.markdown/violations]
+                     [:seon.dev.markdown/document :seon.dev.markdown/document]]
+                    :validate-file-request
+                    [:map
+                     [:seon.dev.markdown/file-path [:string {:min 1}]]
+                     [:seon.dev.markdown/vault-root
+                      {:optional true}
+                      [:string {:min 1}]]
+                     [:seon.dev.markdown/repository-root
+                      {:optional true}
+                      [:string {:min 1}]]]
+                    :validate-repository-pins-request
+                    [:map [:seon.dev.markdown/repository-root [:string {:min 1}]]]
+                    :validate-repository-pins-response
+                    [:map
+                     [:seon.dev.markdown/valid? :boolean]
+                     [:seon.dev.markdown/deleted-paths
+                      {:optional true}
+                      [:vector :string]]
+                     [:seon.dev.markdown/violations :seon.dev.markdown/violations]]
+                    :format-violations-request
+                    [:map
+                     [:seon.dev.markdown/violations :seon.dev.markdown/violations]
+                     [:seon.dev.markdown/max-length
+                      {:optional true}
+                      [:int {:min 1}]]]
+                    :format-violations-response
+                    [:map [:seon.dev.markdown/formatted :string]]
+                    :fix-request [:map [:seon.dev.markdown/content :string]]
+                    :fix-response
+                    [:map
+                     [:seon.dev.markdown/content :string]
+                     [:seon.dev.markdown/fixed-count [:int {:min 0}]]]}

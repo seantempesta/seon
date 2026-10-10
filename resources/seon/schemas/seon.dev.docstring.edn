@@ -1,0 +1,50 @@
+#:seon.dev.docstring{:rule
+                    [:enum
+                     :missing-docstring
+                     :blank-first-line
+                     :first-line-too-long
+                     :no-terminal-punctuation
+                     :comment-shaped-result
+                     :reserved-glyph-literal]
+                    :finding
+                    [:map
+                     [:seon.dev.docstring/fn-name :string]
+                     [:seon.dev.docstring/rule :seon.dev.docstring/rule]
+                     [:seon.dev.docstring/line [:int {:min 1}]]
+                     [:seon.dev.docstring/message :string]
+                     [:seon.dev.docstring/first-line {:optional true} :string]
+                     [:seon.dev.docstring/file-path
+                      {:optional true}
+                      [:string {:min 1}]]]
+                    :findings [:vector :seon.dev.docstring/finding]
+                    :check-source-request
+                    [:map
+                     [:seon.dev.docstring/source :string]
+                     [:seon.dev.docstring/ns-name {:optional true} :string]]
+                    :check-response
+                    [:map
+                     [:seon.dev.docstring/clean? :boolean]
+                     [:seon.dev.docstring/skipped? :boolean]
+                     [:seon.dev.docstring/findings :seon.dev.docstring/findings]]
+                    :check-file-request
+                    [:map [:seon.dev.docstring/file-path [:string {:min 1}]]]
+                    :format-findings-request
+                    [:map
+                     [:seon.dev.docstring/findings :seon.dev.docstring/findings]
+                     [:seon.dev.docstring/max-length
+                      {:optional true}
+                      [:int {:min 1}]]]
+                    :format-findings-response
+                    [:map [:seon.dev.docstring/formatted :string]]
+                    :scan-request
+                    [:map
+                     [:seon.dev.docstring/file-paths
+                      [:vector [:string {:min 1}]]]]
+                    :scan-response
+                    [:map
+                     [:seon.dev.docstring/file-count [:int {:min 0}]]
+                     [:seon.dev.docstring/fn-count [:int {:min 0}]]
+                     [:seon.dev.docstring/finding-count [:int {:min 0}]]
+                     [:seon.dev.docstring/by-rule
+                      [:map-of :seon.dev.docstring/rule :int]]
+                     [:seon.dev.docstring/findings :seon.dev.docstring/findings]]}

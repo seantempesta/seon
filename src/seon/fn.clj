@@ -34,7 +34,7 @@
 
 (def source-roots
   "The Clojure source roots admitted to the program graph."
-  ["src" "test"])
+  ["src" "test" "script"])
 
 (defn- report-index-progress!
   [progress! line]

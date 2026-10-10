@@ -23,92 +23,6 @@
 ;;; Contracts (ordinary Vars keep this Babashka-loadable)
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private heading-schema
-  [:map
-   [::level [:int {:min 1 :max 6}]]
-   [::text :string]
-   [::line [:int {:min 1}]]])
-
-(def ^:private link-schema
-  [:map
-   [::type [:enum :wikilink :markdown :bare-url]]
-   [::target [:string {:min 1}]]
-   [::text {:optional true} :string]
-   [::line [:int {:min 1}]]])
-
-(def ^:private section-schema
-  [:map
-   [::heading #'heading-schema]
-   [::content :string]
-   [::line-start [:int {:min 1}]]
-   [::line-end [:int {:min 1}]]])
-
-(def ^:private document-schema
-  [:map
-   [::content :string]
-   [::frontmatter {:optional true} [:map-of :keyword :string]]
-   [::headings [:vector #'heading-schema]]
-   [::links [:vector #'link-schema]]
-   [::sections [:vector #'section-schema]]])
-
-(def ^:private violation-schema
-  [:map
-   [::rule :keyword]
-   [::severity [:enum :error :warning :info]]
-   [::file-path {:optional true} :string]
-   [::dependency-path {:optional true} :string]
-   [::cited-sha {:optional true} :string]
-   [::current-sha {:optional true} :string]
-   [::line {:optional true} [:int {:min 1}]]
-   [::message :string]
-   [::fix {:optional true} :string]])
-
-(def ^:private violations-schema [:vector #'violation-schema])
-
-(def ^:private parse-request-schema [:map [::content :string]])
-
-(def ^:private validate-request-schema
-  [:map
-   [::content :string]
-   [::rules {:optional true} [:set :keyword]]
-   [::gitlinks {:optional true} [:map-of :string :string]]
-   [::vault-root {:optional true} [:string {:min 1}]]
-   [::file-path {:optional true} [:string {:min 1}]]])
-
-(def ^:private validate-response-schema
-  [:map
-   [::valid? :boolean]
-   [::violations #'violations-schema]
-   [::document #'document-schema]])
-
-(def ^:private validate-file-request-schema
-  [:map
-   [::file-path [:string {:min 1}]]
-   [::vault-root {:optional true} [:string {:min 1}]]
-   [::repository-root {:optional true} [:string {:min 1}]]])
-
-(def ^:private validate-repository-pins-request-schema
-  [:map [::repository-root [:string {:min 1}]]])
-
-(def ^:private validate-repository-pins-response-schema
-  [:map
-   [::valid? :boolean]
-   [::deleted-paths {:optional true} [:vector :string]]
-   [::violations #'violations-schema]])
-
-(def ^:private format-violations-request-schema
-  [:map
-   [::violations #'violations-schema]
-   [::max-length {:optional true} [:int {:min 1}]]])
-
-(def ^:private format-violations-response-schema
-  [:map [::formatted :string]])
-
-(def ^:private fix-request-schema [:map [::content :string]])
-
-(def ^:private fix-response-schema
-  [:map [::content :string] [::fixed-count [:int {:min 0}]]])
-
 ;;; ---------------------------------------------------------------------------
 ;;; Parsing Helpers
 ;;; ---------------------------------------------------------------------------
@@ -1033,7 +947,7 @@
    Example:
      (parse {::content \"---\\ntype: component\\n---\\n# Title\\n\\nBody\"})
    Returns the original content, frontmatter, headings, links, and sections."
-  {:malli/schema [:=> [:cat #'parse-request-schema] #'document-schema]}
+  {:malli/schema [:=> [:cat :seon.dev.markdown/parse-request] :seon.dev.markdown/document]}
   [{::keys [content]}]
   (let [[frontmatter _remaining _fm-end-line] (parse-frontmatter content)
         lines (str/split-lines content)
@@ -1066,7 +980,7 @@
      (validate {::content \"# Test\\n\"})
    Returns validity, violations, and the parsed document."
   {:malli/schema
-   [:=> [:cat #'validate-request-schema] #'validate-response-schema]}
+   [:=> [:cat :seon.dev.markdown/validate-request] :seon.dev.markdown/validate-response]}
   [{::keys [content rules gitlinks vault-root file-path]}]
   (let [[_fm _remaining fm-end-line] (parse-frontmatter content)
         document (parse {::content content})
@@ -1103,7 +1017,7 @@
      (validate-file {::file-path \"docs/seon/components/database.md\"
                      ::vault-root \"docs\"})"
   {:malli/schema
-   [:=> [:cat #'validate-file-request-schema] #'validate-response-schema]}
+   [:=> [:cat :seon.dev.markdown/validate-file-request] :seon.dev.markdown/validate-response]}
   [{::keys [file-path vault-root repository-root]}]
   (let [f (io/file file-path)]
     (if (.exists f)
@@ -1127,8 +1041,8 @@
    participate before a rename is staged."
   {:malli/schema
    [:=>
-    [:cat #'validate-repository-pins-request-schema]
-    #'validate-repository-pins-response-schema]}
+    [:cat :seon.dev.markdown/validate-repository-pins-request]
+    :seon.dev.markdown/validate-repository-pins-response]}
   [{::keys [repository-root]}]
   (try
     (let [gitlinks (repository-gitlinks repository-root)
@@ -1181,8 +1095,8 @@
      (format-violations {::violations [...] ::max-length 500})"
   {:malli/schema
    [:=>
-    [:cat #'format-violations-request-schema]
-    #'format-violations-response-schema]}
+    [:cat :seon.dev.markdown/format-violations-request]
+    :seon.dev.markdown/format-violations-response]}
   [{::keys [violations max-length]}]
   (let [max-len (or max-length 1000)
         by-severity (group-by ::severity violations)
@@ -1232,7 +1146,7 @@
    Example:
      (fix {::content \"# No blank after\\ntext\"})
    Returns the corrected content and the number of formatting fixes."
-  {:malli/schema [:=> [:cat #'fix-request-schema] #'fix-response-schema]}
+  {:malli/schema [:=> [:cat :seon.dev.markdown/fix-request] :seon.dev.markdown/fix-response]}
   [{::keys [content]}]
   (reduce
    (fn [{::keys [content fixed-count]} fix-fn]
