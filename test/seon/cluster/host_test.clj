@@ -21,6 +21,8 @@
             [seon.test-support :as support]
             [seon.turn :as turn]
             [seon.task :as task]
+            [my.agent]
+            [my.message]
             [my.program]))
 
 (def ^:private cluster-name "host")
@@ -685,3 +687,70 @@
                                         ;; so the merge's own candidate check is what answers
                                         ":seon.task/proofs #{} :seon.task/merge \"000000000000\" "
                                         ":seon.source/expected-digests {} :parents #{}}))"))))))))
+
+;;; A restart loses every host and its branch connection while the branch stays
+;;; listed and the agent admitted; `host/stop!` drops exactly that.
+
+(defn- closed-runs-of
+  "The number of closed runs of `agent-id` on `database`."
+  [database agent-id]
+  (or (db/q '[:find (count ?run) . :in $ ?id :where [?agent :seon.agent/id ?id]
+              [?run :seon.turn/agent ?agent] [?run :seon.turn/closed-tx _]]
+            database agent-id)
+      0))
+
+(defn- send-from-cluster!
+  "`my.message/send` from `sender`, created on the cluster, as the cluster's own work."
+  [handle connection sender request]
+  (support/transacted! connection (support/agent-tx @connection sender))
+  (db/call-with-custody {:seon.db/connection connection}
+    #(my.message/send (merge {:seon.db/connection connection :seon.agent/id sender
+                              :seon.agent/context-source handle}
+                             request))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-message-resumes-a-stopped-agent}}
+  a-message-to-a-stopped-admitted-agent-hosts-it-and-its-armer-takes-it
+  (with-host-world {}
+    (fn [{:keys [handle branch! connection]}]
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/sleeper")]
+        (is (= ["1"] (hosted-run! hosted "1")))
+        (is (nil? (host/stop! hosted)))
+        (is (nil? (db/branch-connection (db/db connection) branch)) "the restart dropped the connection")
+        (let [sent (send-from-cluster! handle connection "resume-sender"
+                                       {:my.message/to "mcp/sleeper" :my.message/content "Why?"})
+              resumed (host/hosted handle branch)
+              branch-connection (get-in resumed [:seon.turn.loop/cluster :seon.db/connection])]
+          (is (:seon.message/id sent) "the message was written")
+          (is (some? resumed) "the send hosted the agent on the cluster roster")
+          (when branch-connection
+            (support/await-event! branch-connection ::resumed
+                                  (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/sleeper"))))
+            (is (< 1 (closed-runs-of @branch-connection "mcp/sleeper")) "its armer took the message")))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.host/retiring-a-branch-closes-its-agents-admission}}
+  retiring-a-stopped-agents-branch-closes-its-admission
+  (with-host-world {}
+    (fn [{:keys [handle branch! connection]}]
+      (let [branch (branch!)]
+        (is (nil? (host/stop! (host-on! handle branch "mcp/retiree"))))
+        (is (= {:seon.store/branch branch :my.agent/retired? true}
+               (my.agent/retire-branch! {:seon.store/branch branch}
+                                        {:seon.store/store (:seon.store/store handle) :seon.db/connection connection
+                                         :seon.agent/routing (:seon.agent/routing handle)})))
+        (is (some? (:seon.agent/admission-closed-tx
+                    (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiree"])))
+            "the agent whose home was retired is no longer admitted")))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-message-to-an-agent-whose-branch-is-gone-refuses-by-name}}
+  a-message-to-an-admitted-agent-whose-branch-was-deleted-refuses-branch-absent
+  (with-host-world {}
+    (fn [{:keys [handle branch! connection]}]
+      (let [branch (branch!)]
+        (is (nil? (host/stop! (host-on! handle branch "mcp/orphan"))))
+        ;; the roster deletion alone, as root's retirements before the fix left it
+        (registry/retire-branch! {:seon.store/store (:seon.store/store handle) :seon.store/branch branch})
+        (is (= branch (:seon.cluster.store/branch-absent
+                       (send-from-cluster! handle connection "orphan-sender"
+                                           {:my.message/to "mcp/orphan" :my.message/content "Why?"})))
+            "the send's error names the absent home branch")))))

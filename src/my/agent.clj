@@ -211,12 +211,17 @@
         :else
         (do (doseq [[_ execution] (sort-by (comp :seon.agent/owns-connection? second) held)]
               ((requiring-resolve 'seon.cluster.agent/release-context!) execution))
-            ;; the roster owner's refusal (a connection this process still
-            ;; holds on the branch) is the answer, never an escape
-            (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
-                 {:seon.store/branch lane :my.agent/retired? true}
-                 (catch clojure.lang.ExceptionInfo refused
-                   (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
-                     (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
-                                     {:seon.store/branch lane :seon.error/expected rule})
-                     (throw refused)))))))))
+            ;; an agent homed here that no host retired (none runs after a
+            ;; restart) is closed before its home goes; the writer's refusal is the answer
+            (let [closed ((requiring-resolve 'seon.cluster.host/close-admissions!) (:seon.db/connection context) lane)]
+              (if (:seon.error/at closed)
+                closed
+                ;; the roster owner's refusal (a connection this process still
+                ;; holds on the branch) is the answer, never an escape
+                (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
+                     {:seon.store/branch lane :my.agent/retired? true}
+                     (catch clojure.lang.ExceptionInfo refused
+                       (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
+                         (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
+                                         {:seon.store/branch lane :seon.error/expected rule})
+                         (throw refused)))))))))))

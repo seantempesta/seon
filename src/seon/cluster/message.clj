@@ -861,6 +861,7 @@
       candidate
       (nil? target)
       {:seon.message/unknown-recipient (:my.message/to candidate)
+       :seon.message/home home
        :seon.error/at (java.util.Date.)
        :seon.error/layer :seon.message/delivery
        :seon.error/operation 'seon.cluster.message/send!

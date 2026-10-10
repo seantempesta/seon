@@ -73,27 +73,34 @@ does not fix it, for two reasons:
   branch without closing its admission (suspects: reset, or a lane branch
   retired outside `seon.cluster.host/retire!`).
 
-## Options (owner ruling needed)
+## Ruling (root, 2026-10-10): option 1
 
-1. **Resume is `host!`, on demand at the address.** `send!` (and the outside
-   wake) host an unhosted, admitted recipient whose home is listed, then
-   write.
-   - Needs: the cluster handle and store in the sender's supplied world, or a
-     host-on-demand function on the cluster roster that `send!` calls.
-   - Cost: about 50 ms once per resumed agent; nothing at boot.
-   - Recommended.
-2. **Boot rehosts agents with unanswered work.** For each admitted agent
-   whose home is listed, read `seon.db/branch-database`, which needs no
-   connection. Host only the agents whose wakes are unanswered.
-   - This covers work left before the restart, but not a new message to an
-     idle agent, so option 1 is still needed.
-3. **`branch-connection` opens on demand,** recorded as owned in the cluster
-   roster so that retirement releases it.
-   - The writes succeed, but the agent is still not woken unless the open
-     also starts its armer, which makes it option 1 in a lower layer.
+Resuming is hosting on demand. `my.message/send` takes the cluster handle as
+`:seon.agent/context-source`. It hosts an admitted recipient whose listed home
+no host runs (`seon.cluster.host/host!`), then writes the message. A home that
+is gone from the roster answers `:seon.cluster.store/branch-absent`. Boot does
+nothing new.
 
-Separately, retiring or deleting an agent's home branch must close its
-admission in the same step, or the agent row must stop reading as admitted.
+`my.agent/retire-branch!` closes the admission of every agent homed on the
+branch (`seon.cluster.host/close-admissions!`) before the roster deletion.
+
+Tasks:
+
+- `seon.cluster.host/a-message-resumes-a-stopped-agent`
+- `seon.cluster.host/retiring-a-branch-closes-its-agents-admission`
+- `seon.cluster.host/a-message-to-an-agent-whose-branch-is-gone-refuses-by-name`
+
+Still open:
+
+- **The world does not supply the handle yet.** `seon.batch/world-members`
+  and the turn's world (`seon.turn`) don't carry `:seon.agent/context-source`.
+  So a `my.message/send` evaluated by root still answers
+  `:seon.message/unknown-recipient` with `:seon.message/home`, until the world
+  carries the handle.
+- **A hosted agent's armer doesn't take a message wake.**
+  `seon.cluster.host-test/an-ordinary-message-wakes-the-idle-hosted-agent` is
+  red at HEAD d4ff12e13 (check run e84e6e4fb5d0, the 20 s await). The resume
+  proof's final assertion is red for the same cause.
 
 ## Workaround today (root, JVM mode)
 

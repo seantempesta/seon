@@ -145,6 +145,7 @@
                 [:seon.error/message :seon.error/message]]],
                :blank-content [:= true],
                :unknown-recipient :seon.agent/id,
+               :home [:and {:description "The listed home branch of a message recipient no host runs: hosting it there resumes it (my.message/send)."} :seon.agent/branch],
                :delivery
                [:map
                 [:seon.message/rows :seon.db/tx-data]
@@ -156,6 +157,8 @@
                  "must identify the unknown message recipient"}
                 [:seon.message/unknown-recipient
                  :seon.message/unknown-recipient]
+                [:seon.message/home {:optional true} :seon.message/home]
+                [:seon.cluster.store/branch-absent {:optional true} :seon.cluster.store/branch-absent]
                 [:seon.error/message :seon.error/message]]],
                :limit [:int {:min 0}]
  ; Additive error declaration manifest, 2026-09-18.

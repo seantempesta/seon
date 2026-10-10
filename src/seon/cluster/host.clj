@@ -191,6 +191,25 @@
                   :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
               execution))))
 
+(defn close-admissions!
+  "The entity ids of the agents homed on `branch` whose admission this closed,
+  on `connection`'s rows in one transaction, or the writer's refusal.
+
+  Retiring a branch whose agent is not hosted (every agent after a restart)
+  closes its admission here, so no agent reads as admitted without a home."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/branch]
+                  [:or [:vector :int] :seon.db/transaction-refused-error]]}
+  [connection branch]
+  (let [admitted (vec (db/q '[:find [?agent ...] :in $ ?branch
+                              :where [?agent :seon.agent/branch ?branch]
+                              (not [?agent :seon.agent/admission-closed-tx _])]
+                            (db/db connection) branch))
+        result (when (seq admitted)
+                 (db/call-with-custody {}
+                   #(db/transact! connection
+                      (mapv (fn [eid] [:db/add eid :seon.agent/admission-closed-tx "datomic.tx"]) admitted))))]
+    (if (and result (not (:db-after result))) result admitted)))
+
 (defn retire!
   "Retire a host: close its agent's admission, on its branch row and then its
   cluster row (one transaction each), then `stop!`.

@@ -1,7 +1,8 @@
 (ns ^{:seon.ns/context-relevant? true} my.message
   "The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity."
   (:refer-clojure :exclude [read send])
-  (:require [seon.cluster.message :as message]))
+  (:require [seon.cluster.message :as message]
+            [seon.cluster.registry :as registry]))
 
 (defn inbox
   "Read my unread messages, oldest first.
@@ -55,15 +56,30 @@
   Optional :my.message/assignment names the evaluation assigned for repair,
   independently of the subject. The sender is supplied from my agent identity:
   :seon.message/from alone marks an inside wake, never the subject or assignment.
-  Handling is recorded when the turn settles.
+  Handling is recorded when the turn settles. A recipient on a branch no host
+  runs (every agent after a restart) is hosted first, through the cluster handle
+  supplied as :seon.agent/context-source, so it wakes.
 
   Example:
   (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})"
   {:malli/schema [:=> [:cat :my.message/send-request]
                   [:or :seon.message/message :seon.error/value]]}
-  [request]
-  (message/send! (dissoc request :seon.db/connection :seon.agent/id)
-                 (:seon.db/connection request) (:seon.agent/id request)))
+  [{cluster :seon.agent/context-source connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (let [message (dissoc request :seon.db/connection :seon.agent/id :seon.agent/context-source)
+        sent (message/send! message connection agent-id)
+        home (:seon.message/home sent)]
+    ;; a recipient admitted on a listed branch that no host runs is resumed:
+    ;; hosted on the cluster roster (its armer derives the message), then written to
+    (if-not (and cluster home)
+      sent
+      (if-not (contains? (registry/roster (:seon.store/store cluster)) home)
+        ;; a home the store roster no longer lists can never be hosted again
+        (assoc sent :seon.cluster.store/branch-absent home
+               :seon.error/message "The recipient's home branch is no longer in the store; the message was not sent.")
+        (let [host ((requiring-resolve 'seon.cluster.host/host!)
+                    {:seon.turn.loop/cluster cluster :seon.agent/branch home
+                     :seon.agent/id (:my.message/to request) :seon.ns/name 'user})]
+          (if (:seon.error/at host) host (message/send! message connection agent-id)))))))
 
 (defn decline
   "Send a reason for declining an assignment to its sender.

@@ -38,7 +38,8 @@
               [:my.message/about {:optional true} :my.message/about]
               [:my.message/assignment {:optional true} :my.message/assignment]
               [:seon.db/connection :seon.db/connection]
-              [:seon.agent/id :seon.agent/id]],
+              [:seon.agent/id :seon.agent/id]
+              [:seon.agent/context-source {:optional true :description "The running cluster's handle with its store: a recipient admitted on a listed branch no host runs (every agent after a restart) is hosted through it, then written to."} :seon.agent/context-source]],
  :my.message/decline-request
              [:map
               [:my.message/to :my.message/to]
