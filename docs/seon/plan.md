@@ -36,9 +36,9 @@ Five things matter now; everything else waits on them.
 4. **Default runs HEAD.** Most of wave A's machinery (file rebase, published-archive snapshots, "live after restart",
    templates per slot) exists because default lags HEAD (opus review §3.1). Restart onto HEAD after each landing batch,
    then delete the workarounds.
-5. **Smaller.** src is 91,683 lines against 10,000, and the last window added +1.4k src and +81k docs. Every landing
-   names what it removes. The first deletion is the cost-comparison machinery (~600 lines, §5 step 2). No card lands a
-   new registry, runner, cache or dial until §4 is green and the chain has run twice.
+5. **Correctness and efficiency over size, for now** (owner, 2026-10-10). Temporary growth of the codebase is
+   acceptable; Seon agents trim it later, using the cost data the feedback loop now stores. Every change is judged
+   by whether it is correct and by its measured cost.
 
 ## 3. The method: the chain, run by hand
 
@@ -195,6 +195,10 @@ Each is small, names its proof and what it makes measurably better.
 - 2026-10-10 Merge bases are found by the fork point's `t` and `as-of`, never by walking commits the collection may
   have removed (task `seon.cluster.source/merge-base-survives-collection`). There is no live data to migrate:
   default is nuked and rebuilt after the fix.
+- 2026-10-10 Focus on correctness and efficiency; temporary codebase growth is acceptable, and Seon agents trim the
+  codebase later. Next, in order: the node-cache cut (efficiency, measured by the loop), the REPL-only acceptance
+  rerun, a second chain run with a DeepSeek-flash implementer, then backlog triage. FEEDBACK-LOOP stages 14, 15
+  and 17 wait. At most two or three implementation lanes at once.
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog. Stay on deepseek-flash. Commits 1–3 lines; docs
