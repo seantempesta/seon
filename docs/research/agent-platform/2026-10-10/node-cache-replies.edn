@@ -1,0 +1,308 @@
+; define
+; (in-ns 'node.cache.repro) (defn work {:malli/schema [:=> [:cat :int] :int]} [n] (reduce + (range n))) (dotimes [_ 40] (work 100)) (clojure.test/deftest work-test (clojure.test/is (= 4950 (work 100))))
+#:seon.repl{:result result/ed41e7e066561, :ns node.cache.repro, :ms 0, :alloc-mb 0.9, :value #namespace[node.cache.repro]}
+#:seon.repl{:result result/e296910b7ca3c, :ms 16, :alloc-mb 16.9, :value {:seon.render.var/symbol node.cache.repro/work}}
+#:seon.repl{:result result/ed18cb2470016, :ms 1, :alloc-mb 0.2, :value nil}
+#:seon.repl{:result result/e43cb9beb4238, :ms 15, :alloc-mb 12.7, :value {:seon.render.var/symbol node.cache.repro/work-test}}
+{:seon.turn.loop/tests
+   {:seon.turn.loop/reaching
+      {:seon.test/passed? true, :seon.turn.loop/red []}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 30.6,
+    :calls 59376,
+    :cpu-ms 27.7,
+    :entrance #:seon.cost{:alloc-mb 4.9, :cpu-ms 8.3},
+    :ms 2129.5,
+    :reads 507,
+    :step #:seon.cost{:alloc-mb 2239.5, :cpu-ms 1147.5},
+    :transactions 9,
+    :commit #:seon.cost{:alloc-mb 130.62, :cpu-ms 83.42, :batch-size 1},
+    :diff
+      [#:seon.cost.comparison{:subject node.cache.repro/work,
+        :measure :self-us,
+        :live 11.71,
+        :flags #{:interpreted :new}}
+       #:seon.cost.comparison{:subject seon.db/with-declarations,
+        :measure :self-us,
+        :live 290.14,
+        :flags #{},
+        :main 61.5,
+        :ratio 4.72}
+       #:seon.cost.comparison{:subject seon.db/pull-logical,
+        :measure :self-us,
+        :live 552.88,
+        :flags #{},
+        :main 82.62,
+        :ratio 6.69}
+       #:seon.cost.comparison{:subject node.cache.repro/work-test,
+        :measure :alloc-bytes,
+        :live 6591696.0,
+        :flags #{:new}}],
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2806.270784,
+       :cpu-ms 5086.804},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 25.4,
+       :cpu-ms 3549.2,
+       :gc-ms 517.9,
+       :jit-ms 3017.0},
+    :stages
+      {:apply 50.2,
+       :custody 0.4,
+       :derive 92.5,
+       :evaluate 53.6,
+       :facts 0.7,
+       :fork 9.4,
+       :print 3.5,
+       :read 1.8,
+       :settle 247.0,
+       :test-step 1651.6,
+       :unattributed 18.8},
+    :tests #:seon.cost{:alloc-mb 6.5917, :ms 24.8, :count 1},
+    :writer
+      #:seon.cost{:alloc-mb 399.2119, :cpu-ms 298.37, :transactions 9}}}
+
+; redefine-1
+; (defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 1 (- 1) (reduce + (range n)))) (dotimes [_ 40] (work 100))
+#:seon.repl{:result result/e00cd20ef8902, :ms 16, :alloc-mb 26.2, :value {:seon.render.var/symbol node.cache.repro/work}}
+#:seon.repl{:result result/ef7f75a4d66d0, :ms 1, :alloc-mb 0.2, :value nil}
+{:seon.turn.loop/tests
+   {:seon.turn.loop/reaching
+      {:seon.test/passed? true, :seon.turn.loop/red []}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 26.4,
+    :calls 56208,
+    :cpu-ms 16.6,
+    :entrance #:seon.cost{:alloc-mb 4.8, :cpu-ms 6.3},
+    :ms 1188.7,
+    :reads 381,
+    :step #:seon.cost{:alloc-mb 1883.4, :cpu-ms 850.9},
+    :transactions 5,
+    :commit #:seon.cost{:alloc-mb 87.3877, :cpu-ms 45.25, :batch-size 1},
+    :diff
+      [#:seon.cost.comparison{:subject node.cache.repro/work,
+        :measure :self-us,
+        :live 10.56,
+        :flags #{:interpreted :new}}
+       #:seon.cost.comparison{:subject seon.db/pull-logical,
+        :measure :self-us,
+        :live 399.52,
+        :flags #{},
+        :main 82.62,
+        :ratio 4.84}
+       #:seon.cost.comparison{:subject node.cache.repro/work-test,
+        :measure :alloc-bytes,
+        :live 6376552.0,
+        :flags #{:new}}],
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 2250.042992,
+       :cpu-ms 2658.793},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 20.2,
+       :cpu-ms 1627.2,
+       :gc-ms 471.4,
+       :jit-ms 1186.0},
+    :stages
+      {:apply 59.3,
+       :custody 0.4,
+       :derive 19.2,
+       :evaluate 30.1,
+       :facts 0.6,
+       :fork 9.3,
+       :print 2.5,
+       :read 0.5,
+       :settle 68.3,
+       :test-step 984.7,
+       :unattributed 13.8},
+    :tests #:seon.cost{:alloc-mb 6.3766, :ms 14.9, :count 1},
+    :writer
+      #:seon.cost{:alloc-mb 247.9194, :cpu-ms 129.11, :transactions 5}}}
+
+; redefine-2
+; (defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 2 (- 2) (reduce + (range n)))) (dotimes [_ 40] (work 100))
+#:seon.repl{:result result/e1d575069fedc, :ms 14, :alloc-mb 26.1, :value {:seon.render.var/symbol node.cache.repro/work}}
+#:seon.repl{:result result/e450b1cadcc7c, :ms 0, :alloc-mb 0.2, :value nil}
+{:seon.turn.loop/tests
+   {:seon.turn.loop/reaching
+      {:seon.test/passed? true, :seon.turn.loop/red []}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 26.3,
+    :calls 34109,
+    :cpu-ms 15.7,
+    :entrance #:seon.cost{:alloc-mb 4.6, :cpu-ms 6.1},
+    :ms 903.6,
+    :reads 378,
+    :step #:seon.cost{:alloc-mb 1576.4, :cpu-ms 631.8},
+    :transactions 5,
+    :commit #:seon.cost{:alloc-mb 90.4753, :cpu-ms 49.73, :batch-size 1},
+    :diff
+      [#:seon.cost.comparison{:subject node.cache.repro/work,
+        :measure :self-us,
+        :live 11.27,
+        :flags #{:interpreted :new}}
+       #:seon.cost.comparison{:subject seon.db/pull-logical,
+        :measure :self-us,
+        :live 398.58,
+        :flags #{},
+        :main 82.62,
+        :ratio 4.82}
+       #:seon.cost.comparison{:subject node.cache.repro/work-test,
+        :measure :alloc-bytes,
+        :live 6364472.0,
+        :flags #{:new}}],
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1942.881328,
+       :cpu-ms 2080.534},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 19.5,
+       :cpu-ms 1261.2,
+       :gc-ms 422.9,
+       :jit-ms 769.0},
+    :stages
+      {:apply 4.3,
+       :custody 0.4,
+       :derive 18.3,
+       :evaluate 27.1,
+       :facts 0.3,
+       :fork 10.1,
+       :print 2.5,
+       :read 0.5,
+       :settle 73.2,
+       :test-step 752.4,
+       :unattributed 14.5},
+    :tests #:seon.cost{:alloc-mb 6.3645, :ms 15.5, :count 1},
+    :writer
+      #:seon.cost{:alloc-mb 245.5701, :cpu-ms 131.73, :transactions 5}}}
+
+; redefine-3
+; (defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 3 (- 3) (reduce + (range n)))) (dotimes [_ 40] (work 100))
+#:seon.repl{:result result/e8682ac58ff6c, :ms 13, :alloc-mb 26.2, :value {:seon.render.var/symbol node.cache.repro/work}}
+#:seon.repl{:result result/e241948a3ad34, :ms 0, :alloc-mb 0.2, :value nil}
+{:seon.turn.loop/tests
+   {:seon.turn.loop/reaching
+      {:seon.test/passed? true, :seon.turn.loop/red []}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 26.3,
+    :calls 34053,
+    :cpu-ms 14.2,
+    :entrance #:seon.cost{:alloc-mb 4.6, :cpu-ms 5.7},
+    :ms 850.2,
+    :reads 378,
+    :step #:seon.cost{:alloc-mb 1577.7, :cpu-ms 600.4},
+    :transactions 5,
+    :commit #:seon.cost{:alloc-mb 89.8264, :cpu-ms 46.58, :batch-size 1},
+    :diff
+      [#:seon.cost.comparison{:subject node.cache.repro/work,
+        :measure :self-us,
+        :live 3.71,
+        :flags #{:interpreted :new}}
+       #:seon.cost.comparison{:subject seon.db/pull-logical,
+        :measure :self-us,
+        :live 373.88,
+        :flags #{},
+        :main 82.62,
+        :ratio 4.53}
+       #:seon.cost.comparison{:subject node.cache.repro/work-test,
+        :measure :alloc-bytes,
+        :live 6364408.0,
+        :flags #{:new}}],
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1944.894768,
+       :cpu-ms 1717.182},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 20.7,
+       :cpu-ms 947.5,
+       :gc-ms 452.6,
+       :jit-ms 467.0},
+    :stages
+      {:apply 3.6,
+       :custody 0.4,
+       :derive 18.2,
+       :evaluate 24.3,
+       :facts 0.4,
+       :fork 9.7,
+       :print 2.3,
+       :read 0.4,
+       :settle 70.1,
+       :test-step 706.6,
+       :unattributed 14.2},
+    :tests #:seon.cost{:alloc-mb 6.3644, :ms 13.8, :count 1},
+    :writer
+      #:seon.cost{:alloc-mb 245.7429, :cpu-ms 116.98, :transactions 5}}}
+
+
+; Compiled baseline, run a0e4c829aebc, exact forms in seon.node-cache-test.
+{:node-loads 70,
+ :cache {:nodes 5488},
+ :first
+   #:seon.cost{:step #:seon.cost{:alloc-mb 758.8, :cpu-ms 426.0},
+    :entrance #:seon.cost{:alloc-mb 60.7, :cpu-ms 51.5},
+    :reads 207,
+    :stages {:custody 1.6, :test-step 168.2},
+    :writer
+      #:seon.cost{:alloc-mb 47.4044, :cpu-ms 68.32, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 0.4595, :cpu-ms 0.57, :batch-size 1}},
+ :warm
+   #:seon.cost{:step #:seon.cost{:alloc-mb 258.3, :cpu-ms 177.0},
+    :entrance #:seon.cost{:alloc-mb 3.9, :cpu-ms 5.5},
+    :reads 181,
+    :stages {:custody 0.4, :test-step 65.7},
+    :writer
+      #:seon.cost{:alloc-mb 15.608, :cpu-ms 18.07, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 0.3237, :cpu-ms 0.43, :batch-size 1}},
+ :redefinition
+   #:seon.cost{:step #:seon.cost{:alloc-mb 225.6, :cpu-ms 148.2},
+    :entrance #:seon.cost{:alloc-mb 3.9, :cpu-ms 4.9},
+    :reads 179,
+    :stages {:custody 0.7, :test-step 61.6},
+    :writer
+      #:seon.cost{:alloc-mb 12.8974, :cpu-ms 14.53, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 0.2837, :cpu-ms 0.4, :batch-size 1}}}
+
+; Byte-cache candidate 464d203a3dcf02ad4f3784fc81e8e9e7b03aae69, run 4d86b0baa755.
+{:node-loads 0,
+ :first
+   #:seon.cost{:step #:seon.cost{:alloc-mb 1557.1, :cpu-ms 684.7},
+    :entrance #:seon.cost{:alloc-mb 31.8, :cpu-ms 46.1},
+    :reads 208,
+    :stages {:custody 1.9, :test-step 114.2},
+    :writer
+      #:seon.cost{:alloc-mb 39.0378, :cpu-ms 59.14, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 1.2722, :cpu-ms 1.34, :batch-size 1}},
+ :warm
+   #:seon.cost{:step #:seon.cost{:alloc-mb 239.9, :cpu-ms 155.6},
+    :entrance #:seon.cost{:alloc-mb 3.7, :cpu-ms 4.8},
+    :reads 181,
+    :stages {:custody 0.3, :test-step 48.0},
+    :writer
+      #:seon.cost{:alloc-mb 12.5904, :cpu-ms 13.61, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 0.6751, :cpu-ms 0.71, :batch-size 1}},
+ :redefinition
+   #:seon.cost{:step #:seon.cost{:alloc-mb 164.9, :cpu-ms 110.8},
+    :entrance #:seon.cost{:alloc-mb 3.6, :cpu-ms 4.2},
+    :reads 179,
+    :stages {:custody 0.2, :test-step 45.3},
+    :writer
+      #:seon.cost{:alloc-mb 10.7273, :cpu-ms 11.43, :transactions 1},
+    :commit #:seon.cost{:alloc-mb 0.5898, :cpu-ms 0.65, :batch-size 1}},
+ :cache {:nodes 5468, :weighted-bytes 141587146, :max-bytes 512000000}}

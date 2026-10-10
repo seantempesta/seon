@@ -1,0 +1,217 @@
+diff --git a/config/default.edn b/config/default.edn
+index 0106e9792..f79db4070 100644
+--- a/config/default.edn
++++ b/config/default.edn
+@@ -70,10 +70,9 @@
+  ; hours, with no eviction (docs/research/agent-platform/2026-10-08/dials/dials.md).
+  :seon.config.cache/max-bytes 512000000
+ 
+- ; Unit: materialized index nodes in Datahike's node LRU, shared by every
+- ; connection to the store. 8,192 nodes measured about 4.7 KB each, about
+- ; 39 MB (dials.md); it holds a new branch's whole-program read.
+- :seon.config.db/store-cache-size 8192
++ ; Unit: estimated decoded bytes in Datahike's shared node cache.
++ ; Weak tree references leave strong retention under this byte budget.
++ :seon.config.db/store-cache-bytes 512000000
+ 
+  ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
+  ; display caps were deleted from `seon.sci.admit`; elision happens only at
+diff --git a/resources/seon/schemas/seon.config.db.edn b/resources/seon/schemas/seon.config.db.edn
+index 061b65a53..354478c29 100644
+--- a/resources/seon/schemas/seon.config.db.edn
++++ b/resources/seon/schemas/seon.config.db.edn
+@@ -2,4 +2,4 @@
+                  :write-time-limit-ms [:int {:seon.config/display-label "Database write deadline" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true :seon.config/default 600000 :description "Maximum milliseconds seon.db/transact! waits for Datahike's writer promise. The smallest asserted branch value governs a submission; firing returns :seon.db/write-bound-exceeded with :seon.db/transaction-outcome-unknown true because the queued transaction is not cancelled and may still commit."}]
+                  :snapshot-window-ms [:int {:min 0 :seon.config/optional true :seon.config/dial true :description "Commit snapshot window in milliseconds before the newest observed store head. All branch heads survive. Every cluster configuration must declare this before implicit whole-store collection; the largest window governs. Temporal datoms in retained heads are unaffected."}]
+                  :keep-history? [:boolean #:seon.config{:dial true}]
+-                 :store-cache-size [:int {:min 1 :seon.config/dial true :seon.config/default 8192 :description "Materialized index nodes Datahike's node LRU keeps, shared by every connection to the store; the first connection a process opens sets it. Counted in nodes, not bytes."}]}
++                 :store-cache-bytes [:int {:min 1 :seon.config/optional true :seon.config/dial true :seon.config/default 512000000 :description "Estimated decoded bytes retained by Datahike's shared node cache. Tree child references are weak; the cache controls strong retention. Applied when the process opens the store."}]}
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index 129c885fd..108706121 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -442,7 +442,7 @@
+    (acquire-root-store! store-dir keep-history? false))
+   ([store-dir keep-history? destroy?]
+    (acquire-root-store! store-dir keep-history? destroy? nil))
+-  ([store-dir keep-history? destroy? store-cache-size]
++  ([store-dir keep-history? destroy? store-cache-bytes]
+    (let [store-key (root-store-key store-dir)
+          requested? (not= ::unspecified-history-policy keep-history?)]
+      (locking root-store-holder
+@@ -466,8 +466,8 @@
+          (let [request (cond-> {:seon.store/dir store-key :seon.store/destroy? destroy?}
+                          requested?
+                          (assoc :seon.config.db/keep-history? keep-history?)
+-                         store-cache-size
+-                         (assoc :seon.config.db/store-cache-size store-cache-size))
++                         store-cache-bytes
++                         (assoc :seon.config.db/store-cache-bytes store-cache-bytes))
+                store (store/open-store! request)]
+            (swap! root-store-holder assoc store-key
+                   {:seon.store/store store ::holders 1})
+diff --git a/src/seon/cluster/boot.clj b/src/seon/cluster/boot.clj
+index dccca1ca2..5fc54af7a 100644
+--- a/src/seon/cluster/boot.clj
++++ b/src/seon/cluster/boot.clj
+@@ -173,7 +173,7 @@
+         store (cluster/acquire-root-store! (:seon.boot/store-dir config) keep-history?
+                                            (true? (:seon.store/destroy? config))
+                                            (get-in compiled-config
+-                                                   [:seon.config/effective :seon.config.db/store-cache-size]))
++                                                   [:seon.config/effective :seon.config.db/store-cache-bytes]))
+         instance (publish! (assoc instance :seon.store/store store))
+         _ (cluster/write-advertisement!
+            (cluster/cluster-paths (:seon.boot/root config) cluster-name)
+diff --git a/src/seon/cluster/store.clj b/src/seon/cluster/store.clj
+index 069151863..f8cab30b5 100644
+--- a/src/seon/cluster/store.clj
++++ b/src/seon/cluster/store.clj
+@@ -154,13 +154,13 @@
+   [store-dir]
+   (str (canonical-path store-dir) ".lock"))
+ 
+-(defn- declared-store-cache-size
+-  "The declared default of `:seon.config.db/store-cache-size`, for stores
++(defn- declared-store-cache-bytes
++  "The declared default of `:seon.config.db/store-cache-bytes`, for stores
+   opened without a configuration (boot passes the configured value)."
+-  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
++  {:malli/schema [:=> [:cat] :seon.config.db/store-cache-bytes]}
+   []
+   (-> (io/resource "seon/schemas/seon.config.db.edn") slurp clojure.edn/read-string
+-      :seon.config.db/store-cache-size second :seon.config/default))
++      :seon.config.db/store-cache-bytes second :seon.config/default))
+ 
+ (defn processing-measured
+   "Datahike writer operation `op`, returning its report with
+@@ -190,8 +190,7 @@
+   `:file` backend at the CANONICAL path of `store-dir` (the store id
+   derives from the path, so every spelling of one physical directory
+   must be the ONE store) with LZ4-compressed values, fused persistent-set roots with a 32-entry
+-  diff buffer and a measured 128-way branching factor, a node cache that
+-  holds a branch's whole-program read, retained history by
++  diff buffer and a measured 128-way branching factor, a byte-bounded node cache shared by branches, retained history by
+   the settled default policy, and
+   write-time schema flexibility. Fusion and index settings are
+   creation-only; reopen configurations omit them so Datahike adopts the
+@@ -201,12 +200,12 @@
+    [:function
+     [:=> [:cat :seon.store/dir] [:map]]
+     [:=> [:cat :seon.store/dir :boolean] [:map]]
+-    [:=> [:cat :seon.store/dir :boolean [:int {:min 1}]] [:map]]]}
++    [:=> [:cat :seon.store/dir :boolean :seon.config.db/store-cache-bytes] [:map]]]}
+   ([store-dir]
+    (datahike-configuration store-dir true))
+   ([store-dir keep-history?]
+-   (datahike-configuration store-dir keep-history? (declared-store-cache-size)))
+-  ([store-dir keep-history? store-cache-size]
++   (datahike-configuration store-dir keep-history? (declared-store-cache-bytes)))
++  ([store-dir keep-history? store-cache-bytes]
+    (let [path (canonical-path store-dir)]
+      {:store {:backend :file
+               :path path
+@@ -233,13 +232,9 @@
+       ; Each report carries its processing cost (`processing-measured`);
+       ; the fork keeps these runtime operations out of storage.
+       :writer {:backend :self :write-fn-map write-operations}
+-      ; Every connection to this store shares one LRU of materialized index
+-      ; nodes, keyed by immutable address. It holds a new branch's first
+-      ; whole-program read (an agent's acquisition and first form); below
+-      ; that working set each branch re-reads those nodes from disk into a
+-      ; private copy its tree keeps. Not a creation setting: the first
+-      ; connection a process opens sets it (`:seon.config.db/store-cache-size`).
+-      :store-cache-size store-cache-size
++      ; The shared weighted cache owns decoded-node retention; PSS child
++      ; references are weak when the byte budget is configured.
++      :store-cache-bytes store-cache-bytes
+       :keep-history? keep-history?
+       :fuse-index-roots? true
+       :index-config {; A commit rewrites every leaf it touches whole, in each of
+@@ -559,7 +554,7 @@
+                              [:seon.config.db/keep-history?
+                               {:optional true}
+                               :boolean]
+-                             [:seon.config.db/store-cache-size {:optional true} [:int {:min 1}]]]]
++                             [:seon.config.db/store-cache-bytes {:optional true}]]]
+                   :seon.store/store]}
+   [{store-dir :seon.store/dir :as request}]
+   ;; Before Datahike's first call: its logging goes through Seon's logger.
+@@ -607,8 +602,8 @@
+             requested (:seon.config.db/keep-history? request)
+             creation-configuration
+             (datahike-configuration dir (if requested? requested true)
+-                                    (get request :seon.config.db/store-cache-size
+-                                         (declared-store-cache-size)))
++                                    (get request :seon.config.db/store-cache-bytes
++                                         (declared-store-cache-bytes)))
+             created? (cond
+                        (not exists?)
+                        (do (create-store! dir creation-configuration) true)
+diff --git a/test/seon/cluster/store_test.clj b/test/seon/cluster/store_test.clj
+index 6ee63c1be..8397b3775 100644
+--- a/test/seon/cluster/store_test.clj
++++ b/test/seon/cluster/store_test.clj
+@@ -76,9 +76,9 @@
+         "lock-file derivation failed")))
+ 
+ (deftest the-node-cache-size-is-the-configured-dial
+-  (is (= 8192 (:store-cache-size (store/datahike-configuration "tmp/x/store")))
++  (is (= 512000000 (:store-cache-bytes (store/datahike-configuration "tmp/x/store")))
+       "without a configuration the store takes the dial's declared default")
+-  (is (= 1024 (:store-cache-size (store/datahike-configuration "tmp/x/store" true 1024)))))
++  (is (= 1024 (:store-cache-bytes (store/datahike-configuration "tmp/x/store" true 1024)))))
+ 
+ (deftest configuration-is-the-one-shape
+   (let [configuration (store/datahike-configuration "tmp/x/store")
+diff --git a/test/seon/node_cache_test.clj b/test/seon/node_cache_test.clj
+new file mode 100644
+index 000000000..ad71c74b2
+--- /dev/null
++++ b/test/seon/node_cache_test.clj
+@@ -0,0 +1,45 @@
++(ns seon.node-cache-test
++  (:require [clojure.data.json :as json]
++            [clojure.test :refer [deftest is]]
++            [seon.db :as db]
++            [seon.mcp :as mcp]
++            [seon.render.value :as value]
++            [seon.test-support :as support]))
++
++(deftest ^{:seon/tasks #{'seon.cluster.store/the-node-cache-counts-nodes-not-bytes}}
++  a-warm-redefinition-loads-only-changed-index-paths
++  (support/with-running-agent
++   (fn [running agent-id connection]
++     (let [call (fn [code]
++                  (json/read-str (mcp/call (json/write-str
++                                            {"name" "eval_clj" "arguments"
++                                             {"cluster" running "agent" agent-id "mode" "sci" "code" code}}))))
++           storage (:storage (:store (db/db connection)))
++           first-reply (call "(in-ns 'node.cache.budget) (defn work {:malli/schema [:=> [:cat :int] :int]} [n] (reduce + (range n))) (dotimes [_ 40] (work 100))")
++           warm-reply (call "(defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 1 -1 (reduce + (range n)))) (dotimes [_ 40] (work 100))")
++           before (:reads @(:stats storage))
++           reply (call "(defn work {:malli/schema [:=> [:cat :int] :int]} [n] (+ 2 -2 (reduce + (range n)))) (dotimes [_ 40] (work 100))")
++           reads (- (:reads @(:stats storage)) before)
++           cost (fn [reply]
++                  (let [c (support/mcp-request reply)]
++                    (assoc (select-keys c [:seon.cost/step :seon.cost/entrance :seon.cost/writer :seon.cost/commit :seon.cost/reads])
++                           :seon.cost/stages (select-keys (:seon.cost/stages c) [:custody :test-step]))))]
++         (when-let [path (System/getenv "SEON_NODE_CACHE_EVIDENCE")]
++           (spit path (value/core-text
++                        {:first (cost first-reply)
++                         :warm (cost warm-reply)
++                         :redefinition (cost reply)
++                         :node-loads reads
++                         :cache (let [cache (:cache storage)]
++                                  (if (instance? com.github.benmanes.caffeine.cache.Cache cache)
++                                    (let [cache ^com.github.benmanes.caffeine.cache.Cache cache
++                                          _ (.cleanUp cache)
++                                          eviction (.get (.eviction (.policy cache)))]
++                                      {:nodes (.estimatedSize cache)
++                                       :weighted-bytes (.orElse (.weightedSize eviction) 0)
++                                       :max-bytes (.getMaximum eviction)})
++                                    {:nodes (count @cache)}))})))
++         (is (false? (get reply "isError")))
++         ;; One declaration changes paths in six indexes; each path has at most
++         ;; four levels in this fixture. Both old and new paths may be read.
++         (is (<= reads (* 6 4 2)))))))
