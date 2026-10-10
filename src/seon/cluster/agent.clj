@@ -1023,6 +1023,25 @@
         (settle! previous)
         (throw failure)))))
 
+(defn- adopt-cluster-declarations!
+  "Install on the work branch `connection` the declarations its cluster adopted after it forked; nil.
+
+  The JVM's code writes what the cluster's `projection` declares, so a branch
+  forked before an adoption converges at each acquisition, before any write.
+  A refused adoption throws its error. `seon.cluster` requires this namespace,
+  so its owner is resolved by name."
+  {:malli/schema [:=> [:cat :seon.db/connection [:or :nil :seon.schema/projection]] :nil]}
+  [connection projection]
+  (when projection
+    (let [changes ((requiring-resolve 'seon.cluster/branch-declaration-changes) (db/db connection) projection)]
+      (when (seq changes)
+        (let [result (db/call-with-custody {:seon.db/connection connection}
+                       #(schema/call-with-projection projection
+                          (fn [] (db/transact! connection {:tx-data changes}))))]
+          (when-not (:db-after result)
+            (throw (ex-info "The branch could not adopt its cluster's declarations." result)))))))
+  nil)
+
 (defn acquire-context!
   "Acquire a coherent execution handle without starting any graph.
 
@@ -1138,6 +1157,7 @@
                                                         :seon.agent/branch branch}))))]
                        (when-not (:db-after result)
                          (throw (ex-info "Branch assignment refused." result)))))
+                 _ (adopt-cluster-declarations! connection (db/carried-projection database))
                  selected (db/db connection)
                  base (or (when-not isolated? source-ctx)
                           (:seon.sci.eval/base-ctx previous)

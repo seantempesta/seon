@@ -603,6 +603,19 @@
              (d/datoms database :aevt attribute))))
    [:db/retractEntity attribute]))
 
+(defn- agent-admitted?
+  "True when `attribute`'s `:seon.schema/key` row on this branch was admitted
+  by an agent rather than the packaged population: the agent's program, whose
+  schema change the turn owns."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] :boolean]}
+  [database attribute]
+  (boolean
+   (when (contains? (:schema database) :seon.schema/key)
+     (some (fn [entity]
+             (some #(not= :core (:v %))
+                   (d/datoms database :eavt (:e entity) :seon.schema.admission/source)))
+           (d/datoms database :avet :seon.schema/key attribute)))))
+
 (defn- retired-attributes
   "Installed attributes no declaration in `projection` or the branch still names.
 
@@ -618,8 +631,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
                   [:vector :qualified-keyword]]}
   [database projection]
-  (let [forms (:seon.schema.projection/forms projection)
-        entities? (contains? (:schema database) :seon.schema/key)]
+  (let [forms (:seon.schema.projection/forms projection)]
     ;; Datahike's `:schema` also maps each attribute's entity id to its ident
     ;; (`reference-code/datahike/src/datahike/db/transaction.cljc:120`), so the
     ;; keys mix longs and keywords: select idents BEFORE sorting.
@@ -627,13 +639,7 @@
           (comp
            (remove #(contains? datahike.schema/implicit-schema-spec %))
            (remove #(contains? forms %))
-           (remove (fn [attribute]
-                     (some (fn [entity]
-                             (some #(not= :core (:v %))
-                                   (d/datoms database :eavt (:e entity)
-                                             :seon.schema.admission/source)))
-                           (when entities?
-                             (d/datoms database :avet :seon.schema/key attribute))))))
+           (remove #(agent-admitted? database %)))
           (sort (filter qualified-keyword? (keys (:schema database)))))))
 
 (defn- declared-attributes
@@ -830,6 +836,32 @@
       (schema/projection-cache-value
        projection [::declarations-by-attribute]
        #(into {} (map (juxt :db/ident identity)) declarations))))))
+
+(defn branch-declaration-changes
+  "Transaction data adopting the cluster's declarations on a work branch.
+
+  A branch forked before an adoption lacks what the cluster adopted since,
+  while the JVM's code writes it. Every declaration of the cluster's
+  `projection` adopts in place, as on the cluster (`attribute-change-tx`),
+  except an attribute this branch's agent admitted: the agent's program owns
+  that change. Nothing is retired: the branch's own program may still write
+  an attribute the cluster retired. Converged, it answers [] after comparing
+  each installed attribute with its memoized declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  :seon.store/transaction-data]}
+  [database projection]
+  (let [installed (:schema database)
+        declarations (declared-attributes projection)]
+    (attribute-change-tx
+     database
+     (into []
+           (comp (remove #(= :converged (attribute-adoption (get installed (:db/ident %)) %)))
+                 (map :db/ident)
+                 (remove #(agent-admitted? database %)))
+           declarations)
+     (schema/projection-cache-value
+      projection [::declarations-by-attribute]
+      #(into {} (map (juxt :db/ident identity)) declarations)))))
 
 (defn- retire-attributes!
   "Retract every attribute `projection` retired, with its current data, in one transaction.
@@ -1159,8 +1191,9 @@
   "Install the current additive schema population on one branch.
 
   Registration and database installation are separate in Datahike's
-  `:write` schema mode. Every opened branch therefore passes through this
-  choke point before any domain transaction. Every declaration difference
+  `:write` schema mode. Every cluster branch boot opens therefore passes
+  through this choke point before any domain transaction; a work branch
+  adopts its cluster's declarations at acquisition (`branch-declaration-changes`). Every declaration difference
   adopts in place (`declaration-changes`): missing and accretive declarations
   are transacted, a non-accretive change replaces the attribute and a retired
   attribute is retracted, each with its current data. A converged reopen
