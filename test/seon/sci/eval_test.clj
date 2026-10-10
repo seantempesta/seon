@@ -185,7 +185,7 @@
      (let [changed-sym 'seon.cluster/write-advertisement!
            before (db/db connection)
            source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed-sym]))
-                                     #"^(\(defn-?\s+\S+)" "$1 \"Branch version.\"")
+                                     #"^(\(defn-?\s+\S+)" "$1 ;; Changed on the branch.\n \"Branch version.\"")
            admitted (test-support/program-fn-entity before changed-sym source {:seon.schema.admission/source :agent})
            _ (test-support/transacted!
               connection

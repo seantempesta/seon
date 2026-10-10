@@ -972,7 +972,7 @@
     ;; context's own definition, which survives its first install (AGENTS.md).
     (when-not (and (not (contains? interpreted function-symbol))
                    (not (source-namespace? ctx namespace-name))
-                   (not (overridden-row? loaded (db/pull db '[*] [:seon.fn/sym function-symbol])))
+                   (not (overridden-row? loaded db (db/pull db '[*] [:seon.fn/sym function-symbol])))
                    (or (when (contains? (get-in @(:env ctx) [:namespaces namespace-name])
                                         (symbol (name function-symbol)))
                          ;; Recorded so `acquire!` still carries it once installed.
@@ -1278,18 +1278,36 @@
                      #(* 256 (count %))
                      #(function-digests loaded)))
 
+(defn- behavior-changed?
+  "Whether function `sym` of `database` behaves otherwise than `loaded`'s: the
+  loaded program lacks it or holds it at another behavior digest
+  (`seon.db/behavior-digest`, the digest `seon.test/changes` selects by). A
+  docstring-only change is none: it keeps the compiled Var."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :qualified-symbol] :boolean]}
+  [database loaded sym]
+  (let [behavior (fn [value]
+                   (let [datoms (db/datoms value :avet :seon.fn/sym sym)]
+                     (when (db/read-refusal? datoms)
+                       (throw (ex-info (:seon.error/message datoms) datoms)))
+                     (some->> datoms first :e (db/behavior-digest value))))
+        held (behavior loaded)]
+    (or (nil? held) (not= held (behavior database)))))
+
 (defn- overridden-row?
-  "Whether `row` is this program's own change to the loaded program: a row an
-  agent authored (`:seon.schema.admission/source :agent`) that the loaded
-  program lacks or holds at another digest. A file-derived row that differs
-  was published, not authored here: the branch is behind the loaded program,
+  "Whether `row`, as `database` holds it, is this program's own change to the
+  loaded program: a row an agent authored (`:seon.schema.admission/source
+  :agent`) that the loaded program lacks or holds at another digest and
+  behavior (`behavior-changed?`). A file-derived row that differs was
+  published, not authored here: the branch is behind the loaded program,
   whose compiled Var it runs."
-  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :map] :boolean]}
-  [loaded row]
-  (let [previous (when loaded (db/pull loaded '[*] [:seon.fn/sym (:seon.fn/sym row)]))]
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.db/database-value :map] :boolean]}
+  [loaded database row]
+  (let [sym (:seon.fn/sym row)
+        previous (when loaded (db/pull loaded '[*] [:seon.fn/sym sym]))]
     (and (= :agent (:seon.schema.admission/source row))
          (or (nil? (:seon.fn/sym previous))
-             (not= (row-definition-digest row) (row-definition-digest previous))))))
+             (and (not= (row-definition-digest row) (row-definition-digest previous))
+                  (behavior-changed? database loaded sym))))))
 
 (defn- host-bound-row?
   "Whether the indexer's per-declaration host-binding fact holds for this row.
@@ -1394,7 +1412,7 @@
           ::agent-authored? (= :agent admission)})
         (let [snapshot @(::kernel/program-snapshot ctx)
               interpreted? (or (get (::interpreted snapshot) function-symbol)
-                               (overridden-row? (::loaded-database snapshot) committed))
+                               (overridden-row? (::loaded-database snapshot) db committed))
               host-row (when interpreted?
                          (if (host-bound-row? committed)
                            committed
@@ -1416,7 +1434,7 @@
               unloaded? (source-namespace? ctx namespace-name)
               interpreted? (or interpreted? unloaded?)
               evaluated-row? (boolean (or evaluated? (::evaluated? row)))
-              changed? (overridden-row? (::loaded-database snapshot) committed)
+              changed? (overridden-row? (::loaded-database snapshot) db committed)
               compiled? (and host-row (not changed?) (not unloaded?))
               refusal (when (and host-row (not compiled?) (not unloaded?))
                         (interpretation-error function-symbol
@@ -2613,7 +2631,9 @@
                            all-function-rows)
             overridden
             (into #{} (keep (fn [[sym digest]]
-                              (when (and (authored sym) (not= digest (get loaded-digests sym))) sym)))
+                              (when (and (authored sym) (not= digest (get loaded-digests sym))
+                                         (behavior-changed? db loaded sym))
+                                sym)))
                   branch-digests)
             closure (if (seq overridden)
                       (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})
@@ -2807,7 +2827,9 @@
         ;; `loaded-digests` memoizes any committed value's digests by commit
         held (if (commit-id-of database) (loaded-digests database) (function-digests database))
         overridden (into #{} (keep (fn [{sym :seon.fn/sym :as row}]
-                                     (when (and sym (not= (row-definition-digest row) (get digests sym))) sym)))
+                                     (when (and sym (not= (row-definition-digest row) (get digests sym))
+                                                (behavior-changed? database loaded sym))
+                                       sym)))
                          rows)
         namespace-key (fn [row] [(:seon.ns/source row) (row-bindings row)])
         test-row (fn [row] [(:seon.test/sym row) (:seon.test/source row)

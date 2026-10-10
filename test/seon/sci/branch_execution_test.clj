@@ -57,16 +57,26 @@
         (finally (d/release child))))
     (finally (d/delete-branch! connection branch))))
 
+(defn- branch-edit
+  "`source` with a comment after the defined name: an edit beyond the docstring,
+  so its behavior digest differs (a docstring-only change keeps the compiled Var)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [source]
+  (str/replace-first source #"^(\(defn-?\s+\S+)" "$1 ;; Changed on the branch.\n"))
+
 (defn- agent-revision-tx
-  "An agent's change to each stored declaration in `symbols`: its doc revised,
-  admitted as `:agent` and digested by the canonical `support/revision`. Only an
-  agent-authored row overrides the loaded program (`overridden-row?`, 8cf62cd13);
-  the writer refuses a forged digest (79b6d9abd)."
+  "An agent's change to each stored declaration in `symbols`: its source edited
+  beyond its docstring (`branch-edit`), admitted as `:agent` and digested by
+  the canonical `support/revision`. Only an agent-authored row whose behavior
+  differs overrides the loaded program (`overridden-row?`); the writer refuses a
+  forged digest."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   :seon.store/transaction-data]}
   [database symbols]
   (mapv #(support/revision database [:seon.fn/sym %]
-                           {:seon.fn/doc (str "Changed " %) :seon.schema.admission/source :agent})
+                           {:seon.fn/source (branch-edit (:seon.fn/source (db/pull database [:seon.fn/source]
+                                                                                   [:seon.fn/sym %])))
+                            :seon.schema.admission/source :agent})
         symbols))
 
 (defn- refusal-of
@@ -651,9 +661,7 @@
      (let [changed 'seon.ref/span-candidate
            proof 'seon.ref-test/a-span-of-a-name-and-more-words-is-prose
            before (db/db connection)
-           source (str/replace-first
-                   (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
-                   #"^(\(defn-?\s+\S+)" "$1 \"Branch version.\"")
+           source (branch-edit (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed])))
            _ (support/transacted!
               connection
               (support/replacement-tx before [:seon.fn/sym changed] source
@@ -663,3 +671,37 @@
            "selection stays at the change and its direct callers")
        (is (eval/interpreted-test? ctx proof)
            "the file test three calls from the change runs interpreted on the branch")))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-docstring-only-change-lands-without-interpreting-its-namespace}
+           :seon.test/long "One complete SCI acquisition of the canonical fixture program after one docstring-only agent change."
+           :seon.test/long-ms 8000}
+  a-docstring-only-change-keeps-the-compiled-var
+  ;; Merge task 15b7e49ebafb changed only docstrings in seon.problems; its
+  ;; definition digests differ, its behavior digests do not. Selection
+  ;; (`seon.test/changes`) sees no change, so execution keeps the compiled
+  ;; Vars and runs the reached tests compiled.
+  (support/with-database
+   (fn [connection]
+     (let [changed 'seon.problems/failed-tests
+           proof 'seon.problems-test/a-resolved-fault-stays-closed-until-it-recurs
+           before (db/db connection)
+           source (str/replace-first
+                   (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
+                   #"(?s)\"Current failed executions.*?\"" "\"Current failed executions, docstring revised on the branch.\"")
+           _ (support/transacted!
+              connection
+              (support/replacement-tx before [:seon.fn/sym changed] source
+                                      {:seon.schema.admission/source :agent}))
+           after (db/db connection)
+           ctx (eval/base-ctx after)
+           snapshot @(:seon.sci.kernel/program-snapshot ctx)]
+       (is (not= (:seon.program/definition-digest (db/pull before [:seon.program/definition-digest] [:seon.fn/sym changed]))
+                 (:seon.program/definition-digest (db/pull after [:seon.program/definition-digest] [:seon.fn/sym changed])))
+           "the change is the agent's own: its definition digest differs")
+       (is (= #{} (:seon.sci.eval/overridden (#'eval/overlay-plan after before)))
+           "a branch forked off the loaded program overrides nothing")
+       (is (not (contains? (set (:seon.sci.eval/interpreted snapshot)) changed))
+           "the whole-program acquisition interprets nothing")
+       (is (identical? @(resolve changed) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx changed)))
+           "the changed definition keeps its compiled Var")
+       (is (not (eval/interpreted-test? ctx proof)) "the reached test runs compiled")))))

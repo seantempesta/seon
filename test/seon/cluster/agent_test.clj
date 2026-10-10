@@ -1247,9 +1247,15 @@
                                    (agent-entity connection "fault-a")
                                    (agent-entity connection "fault-b")])
         (test-support/transacted! connection
-                                  [(test-support/revision @connection [:seon.fn/sym subject]
-                                                          {:seon.fn/doc "A changed host-bound entity."
-                                                           :seon.schema.admission/source :agent})])
+                                  ;; an edit beyond the docstring: a docstring-only
+                                  ;; change keeps the compiled Var and refuses nothing
+                                  [(test-support/revision
+                                    @connection [:seon.fn/sym subject]
+                                    {:seon.fn/source (str/replace-first
+                                                      (:seon.fn/source (db/pull @connection [:seon.fn/source]
+                                                                                [:seon.fn/sym subject]))
+                                                      #"^(\(defn-?\s+\S+)" "$1 ;; A changed host-bound entity.\n")
+                                     :seon.schema.admission/source :agent})])
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
                 second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]
