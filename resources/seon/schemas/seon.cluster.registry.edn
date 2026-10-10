@@ -8,7 +8,8 @@
                          [:seon.cluster.registry/from
                           :seon.cluster.registry/from]
                          [:seon.store/branch :seon.store/branch]
-                         [:seon.db/db {:optional true} :seon.db/db]],
+                         [:seon.db/db {:optional true} :seon.db/db]
+                         [:seon.branch/target {:optional true} :seon.branch/target]],
                         :branch-result
                         [:map
                          [:seon.store/branch :seon.store/branch]

@@ -118,8 +118,9 @@
 (defn create-branch!
   "Create a lane branch off my cluster head's current commit.
 
-  The branch inherits every fact up to that commit; my cluster's own branch
-  and an existing name refuse. Returns the branch, the commit it forks and
+  The branch inherits every fact up to that commit and merges toward my
+  branch, or toward my branch's own target when mine is a work branch; my
+  cluster's own branch and an existing name refuse. Returns the branch, the commit it forks and
   that commit's basis. My context is supplied.
 
   Example:
@@ -134,8 +135,11 @@
     :else
     (let [source @connection
           from (db/commit-id source)
+          own (own-branch context)
+          ;; A lane of a work branch merges toward that branch's target.
+          target (or (:seon.branch/target (registry/fork-of source own)) own)
           result (registry/fork! {:seon.store/store store :seon.store/branch lane :seon.cluster.registry/from from
-                                  :seon.db/db source})]
+                                  :seon.db/db source :seon.branch/target target})]
       (cond
         (:seon.error/at result) result
         (:seon.cluster/created? result)

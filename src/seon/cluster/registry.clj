@@ -67,6 +67,7 @@
             [datahike.db.interface :as dbi]
             [seon.cluster.branch :as cluster.branch]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -294,46 +295,106 @@
       (finally (store/release-branch! connection))))
   nil)
 
+(defn fork-of
+  "`branch`'s own fork entity in `database`, or nil when it holds none. Of the
+  fork entities naming `branch`, its own is the one asserted last: an earlier
+  one came down from a retired branch of that name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.branch/fork]]}
+  [database branch]
+  (when-let [named (seq (db/q '[:find ?e ?tx :in $ ?branch :where [?e :seon.branch/name ?branch ?tx]]
+                              database branch))]
+    (db/pull database [:seon.branch/fork-id :seon.branch/name :seon.branch/target :seon.branch/base-t]
+             (first (apply max-key second named)))))
+
+(defn advanced-base-t
+  "The base-t attribute a merge recorded in `target` (a database) for the fork
+  `fork-id`, or nil when no merge advanced it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.branch/fork-id] [:maybe :seon.db/basis-t]]}
+  [target fork-id]
+  (db/q '[:find ?t . :in $ ?id :where [?e :seon.branch/fork-id ?id] [?e :seon.branch/base-t ?t]]
+        target fork-id))
+
+(defn- target-advanced-base-t
+  "`advanced-base-t` of `fork-id` on `target`'s head in `store`; nil when the
+  store holds no such branch."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.branch/fork-id] [:maybe :seon.db/basis-t]]}
+  [store target fork-id]
+  (let [head (branch-commit-id {:seon.store/store store :seon.store/branch target})
+        database (when-not (:seon.error/at head) (d/commit-as-db (:seon.store/connection-object store) head))]
+    (when database
+      (try (advanced-base-t database fork-id)
+           (finally (d/release-materialized-db database))))))
+
 (defn branch-fork-entity
-  "The branch's fork entity: `branch` and its base-t attribute `t`, the
-  branch's own transaction its merge base is as of."
-  {:malli/schema [:=> [:cat :seon.store/branch :seon.db/basis-t] :seon.branch/fork]}
-  [branch t]
-  {:seon.branch/name branch :seon.branch/base-t t})
+  "The fork entity of `branch`, forked from the branch `parent` toward
+  `target` with `database` its value at the fork: a fresh fork id, the target
+  and its base-t attribute. Forked from its target, the base-t is the fork's
+  t. Forked from a work branch toward that branch's own target (a nested
+  fork), it inherits that branch's base toward it (the base a merge advanced,
+  else that branch's own): a t in the history the fork inherited. A parent
+  with no fork entity toward `target` gives no base and refuses by name."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.store/branch :seon.store/branch
+                       :seon.db/database-value]
+                  [:or :seon.branch/fork :seon.error/value]]}
+  [store parent target branch database]
+  (let [inherited (when (not= parent target) (fork-of database parent))]
+    (cond
+      (= parent target)
+      {:seon.branch/fork-id (id/id) :seon.branch/name branch :seon.branch/target target
+       :seon.branch/base-t (db/basis-t database)}
+
+      (= target (:seon.branch/target inherited))
+      {:seon.branch/fork-id (id/id) :seon.branch/name branch :seon.branch/target target
+       :seon.branch/base-t (or (target-advanced-base-t store target (:seon.branch/fork-id inherited))
+                               (:seon.branch/base-t inherited))}
+
+      :else
+      (error.refusal/diagnostic
+       (java.util.Date.) :seon.store/branch 'seon.cluster.registry/branch-fork-entity
+       {:seon.error/message "The parent branch has no fork entity toward this target, so the fork would have no merge base."
+        :seon.error/expected target :seon.error/offending parent :seon.store/branch branch}))))
 
 (defn fork!
   "Create a work branch as `branch!` does and, when this call created it,
-  write in it the branch's fork entity, its base-t attribute the transaction
-  `t` it forked at: its merge base until a merge advances it (`base-t`). A
-  refused write answers the writer's error value."
+  write in it the branch's fork entity (`branch-fork-entity`): its merge base
+  toward `:seon.branch/target` (default: the parent) until a merge advances
+  it. The parent is `::from` when it names a branch, else the branch of the
+  source value `:seon.db/db`. A commit with no source value refuses before
+  creating anything; a fork with no base toward its target, or a refused
+  write, retires the new branch and answers the error value."
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-request]
                   [:or :seon.cluster.registry/branch-result :seon.error/value]]}
-  [{store :seon.store/store branch :seon.store/branch :as request}]
-  (let [result (branch! request)]
+  [{store :seon.store/store branch :seon.store/branch from :seon.cluster.registry/from
+    source-value :seon.db/db target :seon.branch/target :as request}]
+  (let [parent (if (keyword? from) from (get-in source-value [:config :branch]))
+        result (if parent
+                 (branch! (dissoc request :seon.branch/target))
+                 (error.refusal/diagnostic
+                  (java.util.Date.) :seon.store/branch 'seon.cluster.registry/fork!
+                  {:seon.error/message "A fork from a commit names its source value (:seon.db/db), the branch it forks from."
+                   :seon.error/expected :seon.db/db :seon.store/branch branch}))]
     (if-not (:seon.cluster/created? result)
       result
-      (let [connection (store/open-branch! store branch)]
-        (try
-          (let [database (db/db connection)
-                projection (or (db/carried-projection database) (schema/handed-projection)
-                               (schema/projection-from-database database))
-                ;; The new branch's own write, never the caller's custody.
-                written (db/call-with-custody
-                         {:seon.db/connection connection}
-                         #(schema/call-with-projection
-                           projection
-                           (fn [] (db/transact! connection
-                                                {:tx-data [(branch-fork-entity branch (db/basis-t database))]}))))]
-            (if (:db-after written) result written))
-          (finally (store/release-branch! connection)))))))
-
-(defn base-t
-  "The base-t attribute of `branch`'s fork entity in `database`, or nil when
-  `database` holds none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.db/basis-t]]}
-  [database branch]
-  (db/q '[:find ?t . :in $ ?branch :where [?e :seon.branch/name ?branch] [?e :seon.branch/base-t ?t]]
-        database branch))
+      (let [connection (store/open-branch! store branch)
+            written
+            (try
+              (let [database (db/db connection)
+                    fork (branch-fork-entity store parent (or target parent) branch database)
+                    projection (or (db/carried-projection database) (schema/handed-projection)
+                                   (schema/projection-from-database database))]
+                (if (:seon.error/at fork)
+                  fork
+                  ;; The new branch's own write, never the caller's custody.
+                  (db/call-with-custody
+                   {:seon.db/connection connection}
+                   #(schema/call-with-projection
+                     projection
+                     (fn [] (db/transact! connection {:tx-data [fork]}))))))
+              (finally (store/release-branch! connection)))]
+        (if (:db-after written)
+          result
+          (do (retire-branch! {:seon.store/store store :seon.store/branch branch})
+              written))))))
 
 (defn ensure-cluster!
   "Ensure `:cluster-<name>` exists at the requested source commit.

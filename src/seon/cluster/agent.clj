@@ -1092,14 +1092,13 @@
              _ (when (and isolated? (nil? previous) (nil? held-store))
                  (throw (ex-info "Isolated acquisition requires the held store."
                                  {:seon.agent/branch branch})))
+             from (or (:seon.cluster.registry/from options) (db/commit-id database))
              created (when create?
                        (registry/branch!
                         {:seon.store/store held-store
                          :seon.store/branch branch
                          :seon.db/db database
-                         :seon.cluster.registry/from
-                         (or (:seon.cluster.registry/from options)
-                             (db/commit-id database))}))
+                         :seon.cluster.registry/from from}))
              _ (when (and create? (not (:seon.cluster/created? created)))
                  (throw (ex-info "Isolation requires a fresh owned branch."
                                  {:seon.agent/branch branch})))
@@ -1132,7 +1131,9 @@
                  _ (when create?
                      (let [result (db/call-with-custody {}
                                     #(db/transact! connection
-                                      (cond-> [(registry/branch-fork-entity branch (db/basis-t @connection))]
+                                      (cond-> [(let [parent (if (keyword? from) from (get-in database [:config :branch]))
+                                                  fork (registry/branch-fork-entity held-store parent parent branch @connection)]
+                                              (if (:seon.error/at fork) (throw (ex-info "The branch's fork entity was refused." fork)) fork))]
                                         agent-id (conj {:db/id [:seon.agent/id agent-id]
                                                         :seon.agent/branch branch}))))]
                        (when-not (:db-after result)

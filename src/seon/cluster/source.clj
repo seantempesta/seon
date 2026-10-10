@@ -725,35 +725,36 @@
   (assoc (program/digest-map-refusal missing message members) :seon.error/operation 'seon.cluster.source/prepare-merge!))
 
 (defn- branch-base-t
-  "The base-t attribute of `candidate`'s fork entity: the one `head` (the
-  target) holds when a merge advanced it, else the one `branch` wrote at its
-  fork. A base-t past `branch`'s own t names another branch that once had this
-  name; it, and a branch with no fork entity, refuse by name."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch]
+  "The base-t attribute toward `head` (the target's database) of `candidate`'s
+  own fork entity in `branch` (`seon.cluster.registry/fork-of`): the one a
+  merge recorded on the target under that fork's id, else the fork's own. A
+  branch with no fork entity, or one whose target is not `target` (the branch
+  `head` is read from), refuses by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch :seon.store/branch]
                   [:or :seon.db/basis-t :seon.program/digest-map-refusal]]}
-  [branch head candidate]
-  (let [t (or (registry/base-t head candidate) (registry/base-t branch candidate))]
+  [branch head target candidate]
+  (let [fork (registry/fork-of branch candidate)]
     (cond
-      (nil? t)
+      (nil? fork)
       (refused :seon.program/history "The branch has no fork entity, so it has no merge base."
                {:seon.store/branch candidate})
-      (< (db/basis-t branch) t)
-      (refused :seon.program/history
-               "The branch's base-t is past its own t: its fork entity belongs to an earlier branch of this name."
-               {:seon.store/branch candidate :seon.error/offending t})
-      :else t)))
+      (not= target (:seon.branch/target fork))
+      (refused :seon.program/history "The branch's fork entity names another target, so it has no merge base with this one."
+               {:seon.store/branch candidate :seon.error/expected (:seon.branch/target fork) :seon.error/offending target})
+      :else (or (registry/advanced-base-t head (:seon.branch/fork-id fork)) (:seon.branch/base-t fork)))))
 
 (defn- merge-base
-  "`branch` (the database of `candidate`) as of its base-t (`branch-base-t`):
-  its fork, advanced to the merged value by each merge into `head`. It is the
-  branch's own value, not the target's, so the base never mixes another
-  lineage's transaction numbers and holds whatever the target is. Its
+  "`branch` (the database of `candidate`) as of its base-t toward `head`
+  (`branch-base-t`): its fork, advanced to the merged value by each merge. It
+  is the branch's own value, not the target's: the base-t is a t of the
+  history the branch holds (a fork of a work branch inherits that branch's
+  base), so the base never reads another lineage's transaction numbers. Its
   `seon.program/digest-map` reads are slower than a commit's
   (`seon.cluster.source/as-of-merge-base-digest-reads-are-slower`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch :seon.store/branch]
                   [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
-  [branch head candidate]
-  (let [t (branch-base-t branch head candidate)]
+  [branch head target candidate]
+  (let [t (branch-base-t branch head target candidate)]
     (if (:seon.error/at t) t (d/as-of branch t))))
 
 (defn- replacement
@@ -830,24 +831,24 @@
   nil)
 
 (defn compare-branch
-  "Compare `candidate`'s committed program with `head` (a database value) on
-  their merge base: the candidate's changed identities, the base, candidate and
+  "Compare `candidate`'s committed program with `head` (a database value of the
+  branch `target`) on their merge base: the candidate's changed identities, the base, candidate and
   head digest maps and their `seon.program/three-way` classification. The one
   comparison merge and `my.program/diff` share. The base and branch values are
   materialized: the caller releases them. Refusals sit in `:c-id`, `:changed`
   or `:maps`."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value] :map]}
-  [held-store candidate head]
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value :seon.store/branch] :map]}
+  [held-store candidate head target]
   (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
     (if (:seon.error/at c-id)
       {:c-id c-id}
       (let [bound {:seon.program/max-datoms 10000}
             branch (commit-database held-store c-id)
-            base (merge-base branch head candidate)
+            base (merge-base branch head target candidate)
             ;; Only what the candidate changed since its base can merge or
             ;; conflict, read on the candidate's own lineage.
             changed (if (:seon.error/at base) base
-                        (program/changed-identities (branch-base-t branch head candidate) branch bound))
+                        (program/changed-identities (branch-base-t branch head target candidate) branch bound))
             maps (when (set? changed)
                    (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
@@ -888,7 +889,8 @@
   ([source held-store candidate proofs selection] (prepare-merge! source held-store candidate proofs selection nil))
   ([source held-store candidate proofs selection root]
   (let [{:keys [c-id base branch head changed maps three]}
-        (compare-branch held-store candidate (db/db (:seon.db/connection source)))]
+        (let [head (db/db (:seon.db/connection source))]
+          (compare-branch held-store candidate head (get-in head [:config :branch])))]
     (if (:seon.error/at c-id)
       c-id
       (let [
@@ -945,7 +947,8 @@
                                      :seon.task/proofs proofs
                                      :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
                                      ;; The merge advances the branch's base to the value it merged.
-                                     :seon.source/advanced-base (registry/branch-fork-entity candidate (db/basis-t branch)))
+                                     :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
+                                                                       :seon.branch/base-t (db/basis-t branch)))
                         (seq red) (assoc :seon.source/red red)))))
           (finally (release! [base branch]))))))))
 

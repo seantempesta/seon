@@ -114,7 +114,7 @@
                 #(submit! % "(clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
             before (digests entities)
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
             c-conn (:seon.db/connection candidate)]
         (try
@@ -188,7 +188,7 @@
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             before (digests entities)
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
             c-conn (:seon.db/connection candidate)]
         (try
@@ -248,7 +248,7 @@
       (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
             c-conn (:seon.db/connection candidate)]
         (try
@@ -330,7 +330,7 @@
       (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
             c-conn (:seon.db/connection candidate)]
         (try
@@ -385,7 +385,7 @@
       (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             base (db/commit-id (db/db h-conn))
-            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base})
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
             c-conn (:seon.db/connection candidate)]
         (try
@@ -428,7 +428,7 @@
             base (db/commit-id (db/db h-conn))
             base-digests (digests entities)
             write! (fn [branch identity source]
-                     (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.cluster.registry/from base})
+                     (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
                      (let [context (agent/acquire-context! target nil {:seon.agent/branch branch})
                            conn (:seon.db/connection context)]
                        (try

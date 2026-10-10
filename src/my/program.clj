@@ -968,7 +968,7 @@
         home (cluster.branch/cluster-branch cluster)
         head-id (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})
         head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
-        compared (if head (source/compare-branch store held head) {:c-id head-id})
+        compared (if head (source/compare-branch store held head home) {:c-id head-id})
         refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
     (cond-> {:head head :head-id head-id :compared compared}
       refusal (assoc :answer refusal)

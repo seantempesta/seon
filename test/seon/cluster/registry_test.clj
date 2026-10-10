@@ -688,8 +688,8 @@
             (registry/collect! opened (java.util.Date. (+ (System/currentTimeMillis) 60000)) {})
             (let [head (source/commit-database opened (head-of source-branch))
                   branch (source/commit-database opened (head-of lane))
-                  base (#'source/merge-base branch head lane)
-                  compared (source/compare-branch opened lane head)]
+                  base (#'source/merge-base branch head source-branch lane)
+                  compared (source/compare-branch opened lane head source-branch)]
               (try
                 (is (= fork (when-not (:seon.error/at base) (marker-set base)))
                     "the merge base holds exactly what the lane forked from")
@@ -704,14 +704,57 @@
     (fn [opened]
       (registry/branch! {:seon.store/store opened :seon.cluster.registry/from source-branch
                          :seon.store/branch :bare})
-      (let [branch (source/commit-database opened (registry/branch-commit-id {:seon.store/store opened :seon.store/branch :bare}))
-            reused (d/db-with branch [(registry/branch-fork-entity :bare (inc (db/basis-t branch)))])]
+      (let [branch (source/commit-database opened (registry/branch-commit-id {:seon.store/store opened :seon.store/branch :bare}))]
         (try
           (is (= {:seon.program/missing-evidence :seon.program/history :seon.store/branch :bare}
-                 (select-keys (#'source/merge-base branch branch :bare)
-                              [:seon.program/missing-evidence :seon.store/branch]))
-              "a branch with no fork entity has no merge base")
-          (is (= (inc (db/basis-t branch))
-                 (:seon.error/offending (#'source/merge-base branch reused :bare)))
-              "a base-t past the branch's own t names an earlier branch of that name")
+                 (select-keys (#'source/merge-base branch branch source-branch :bare)
+                              [:seon.program/missing-evidence :seon.store/branch])))
           (finally (source/release! [branch])))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
+  a-reused-branch-name-never-takes-the-retired-forks-merged-base
+  ;; Old :lane merges into `src` (its advanced base-t recorded there under its
+  ;; fork id) and retires. A new :lane of the same name forks `src`, inheriting
+  ;; that fork entity; its merge base is its own fork whether the stale base-t
+  ;; lies above its head (the first reuse) or below it (the second, after
+  ;; `src` moved past it).
+  (with-source-store
+    (fn [opened]
+      (let [src-connection (store/open-branch! opened source-branch)
+            head-of #(registry/branch-commit-id {:seon.store/store opened :seon.store/branch %})
+            marker-set #(set (d/q '[:find [?m ...] :where [_ :seon.registry.test/marker ?m]] %))
+            fork-lane! (fn [] (registry/fork! {:seon.store/store opened :seon.cluster.registry/from source-branch
+                                               :seon.store/branch :lane}))
+            on-lane! (fn [markers] (let [c (store/open-branch! opened :lane)]
+                                     (try (run! #(write-marker! c %) markers) (finally (store/release-branch! c)))))
+            base-markers (fn []
+                           (let [head (source/commit-database opened (head-of source-branch))
+                                 branch (source/commit-database opened (head-of :lane))
+                                 base (#'source/merge-base branch head source-branch :lane)]
+                             (try [(registry/fork-of branch :lane) (when-not (:seon.error/at base) (marker-set base))]
+                                  (finally (source/release! [head branch])))))
+            retire! #(registry/retire-branch! {:seon.store/store opened :seon.store/branch :lane})]
+        (try
+          (fork-lane!)
+          (on-lane! (map #(str "old-" %) (range 6)))
+          (let [old (source/commit-database opened (head-of :lane))]
+            (try (test-support/transacted! src-connection
+                                           [(assoc (registry/fork-of old :lane) :seon.branch/base-t (db/basis-t old))])
+                 (finally (source/release! [old]))))
+          (retire!)
+          (testing "the stale base-t lies above the new branch's head"
+            (let [fork (marker-set @src-connection)
+                  _ (fork-lane!)
+                  _ (on-lane! ["new-on-lane"])
+                  [own base] (base-markers)]
+              (is (= :lane (:seon.branch/name own)))
+              (is (= fork base) "the base is the new fork, not the retired branch's merged value")))
+          (retire!)
+          (run! #(write-marker! src-connection (str "src-" %)) (range 10))
+          (testing "the stale base-t lies below the new branch's head"
+            (let [fork (marker-set @src-connection)
+                  _ (fork-lane!)
+                  _ (on-lane! ["newer-on-lane"])
+                  [_ base] (base-markers)]
+              (is (= fork base) "the base is the new fork, not src as of the stale t")))
+          (finally (store/release-branch! src-connection)))))))

@@ -31,7 +31,7 @@
                           (fn-entity h-conn "merge-caller" "(defn merge-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/merge-callee))")])
         _ (write! h-conn [(entity (db/db h-conn) :test "merge-check" "(clojure.test/deftest merge-check (clojure.test/is (= 1 (seon.cluster.merge-test/merge-caller))))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                             :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                             :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
         digest #(:seon.program/definition-digest (db/pull (db/db %1) [:seon.program/definition-digest] [:seon.fn/sym (sym %2)]))
@@ -96,7 +96,7 @@
         _ (write! h-conn [(entity (db/db h-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")
                           (entity (db/db h-conn) :test "merge-other" "(clojure.test/deftest merge-other (clojure.test/is true))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                             :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+                             :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)]
     (try
@@ -117,3 +117,46 @@
       (finally
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
+  a-fork-of-a-work-branch-compares-with-the-target-through-its-parents-changes
+  ;; A forks H and replaces nest-mod and deletes nest-del; B forks A and adds
+  ;; nest-new. B toward H carries A's inherited change and deletion too: B's
+  ;; fork entity inherits A's base toward H, never A's t at B's fork.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        fn-entity #(entity (db/db %1) :fn %2 %3)
+        a (keyword (str "merge-test-a-" (id/id)))
+        b (keyword (str "merge-test-b-" (id/id)))
+        _ (write! h-conn [(fn-entity h-conn "nest-mod" "(defn nest-mod {:malli/schema [:=> [:cat] :int]} [] 1)")
+                          (fn-entity h-conn "nest-del" "(defn nest-del {:malli/schema [:=> [:cat] :int]} [] 2)")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch a
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        a-context (cluster.agent/acquire-context! target nil {:seon.agent/branch a})
+        a-conn (:seon.db/connection a-context)]
+    (try
+      (write! a-conn [(fn-entity a-conn "nest-mod" "(defn nest-mod {:malli/schema [:=> [:cat] :int]} [] 3)")])
+      (support/transacted! a-conn [[:db/retractEntity [:seon.fn/sym (sym "nest-del")]]])
+      (registry/fork! {:seon.store/store store :seon.store/branch b
+                       :seon.cluster.registry/from (db/commit-id (db/db a-conn)) :seon.db/db (db/db a-conn)
+                       :seon.branch/target (get-in (db/db h-conn) [:config :branch])})
+      (let [b-context (cluster.agent/acquire-context! target nil {:seon.agent/branch b})
+            b-conn (:seon.db/connection b-context)]
+        (try
+          (write! b-conn [(fn-entity b-conn "nest-new" "(defn nest-new {:malli/schema [:=> [:cat] :int]} [] 4)")])
+          (let [{:keys [base branch three]} (source/compare-branch store b (db/db h-conn) (get-in (db/db h-conn) [:config :branch]))]
+            (try
+              (is (contains? (set (:seon.program/changed-on-branch three)) [:seon.fn/sym (sym "nest-mod")])
+                  "A's inherited replacement")
+              (is (contains? (set (:seon.program/retracted three)) [:seon.fn/sym (sym "nest-del")])
+                  "A's inherited deletion")
+              (is (contains? (set (:seon.program/added three)) [:seon.fn/sym (sym "nest-new")])
+                  "B's own addition")
+              (finally (source/release! [base branch]))))
+          (finally
+            (cluster.agent/release-context! b-context)
+            (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))
+      (finally
+        (cluster.agent/release-context! a-context)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch a})))))
