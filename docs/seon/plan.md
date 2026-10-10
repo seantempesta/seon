@@ -102,6 +102,14 @@ interpreted definitions; `jvm-evaluate`'s self time compares different forms; a 
 merge cost. Next: run the loop on several tasks, measured round over round (the competency table), and automate root's
 review step.
 
+**Interpreted tests are not yet faithful (2026-10-10, lane sci-tests, bff46841f, `interpreted-tier.md`).** Of 846 tests
+executed interpreted as a non-root agent (partial tier, 600 s cap), 205 are red only when interpreted: 50 redefine Vars
+(the tests break the law; census task), 25 need a `dev/` namespace, 20 use a `def` that failed to interpret as a value,
+17 find SCI `*out*` unbound, 14 `await-event!`, 10 `&env` macros, 7 `proxy`, 46 unclassified. Since e361536a9 agents'
+reaching tests run interpreted, so these are false reds in agents' replies: lane `interp-fidelity` fixes the
+interpreter classes largest first. Lane `assign-proofs` builds `assign!` running the proofs in the agent's own
+environment.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
