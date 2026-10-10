@@ -86,6 +86,24 @@
               (last (keep :seon.repl/value items)))
            "the deftest ran through the recorded test path and answers its summary")))))
 
+(deftest ^{:seon/tasks #{'seon.sci.lookup/an-agent-running-a-recorded-test-gets-its-counts}
+           :seon.test/long "two MCP eval requests on a fresh agent branch, each running a named test through my.test/check"
+           :seon.test/long-ms 15000}
+  an-agent-running-a-named-test-gets-its-counts-every-time
+  ;; seon.competency-test is declared long (excluded from the bulk tier, run by identity) and red here: the
+  ;; agent never defined comp.text. The first run records its result; the second names it again.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [run (fn [] (step (str "(require 'seon.competency-test)"
+                                 " (select-keys (clojure.test/run-test-var #'seon.competency-test/t5-slug-removes-edge-hyphens)"
+                                 "  [:test :fail :error :type])")
+                            agent-id running))
+           runs [(run) (run)]
+           counts (mapv #(last (keep :seon.repl/value %)) runs)]
+       (is (= [[] []] (mapv #(keep :seon.repl/error %) runs)) "each run answers without error")
+       (is (= 1 (:test (first counts))) "the named test ran")
+       (is (= (first counts) (second counts)) "the second run answers the counts the first recorded")))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-an-agent-requires-is-interpreted-not-host-loaded}
            :seon.test/long "one MCP eval request on a fresh agent branch that runs a named test through my.test/check"
            :seon.test/long-ms 15000}

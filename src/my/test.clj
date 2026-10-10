@@ -9,24 +9,29 @@
             [seon.test.platform :as platform]))
 
 (defn- check-now
-  "Run the tests reaching `changed` (else my program's change) as one request; nothing reached names it unreached."
-  {:malli/schema [:=> [:cat :my.program/context :seon.db/connection [:or :nil :seon.test/changed]]
+  "Run the tests named in `tests`, else those reaching `changed` (else my program's change), as one request;
+  a change no test reaches names it unreached. A named test always runs or answers its recorded result."
+  {:malli/schema [:=> [:cat :my.program/context :seon.db/connection [:or :nil :seon.test/changed]
+                       [:or :nil [:vector :seon.test/sym]]]
                   [:or :seon.test/run-result :my.test/unreached-result :seon.error/value]]}
-  [context connection changed]
-  (let [changed (or (not-empty changed) (seon.test/changes context connection))]
-    (if (:seon.error/at changed)
-      changed
-      (let [result (seon.test/run {:seon.test/execution context
-                                   :seon.test/recording-connection connection
-                                   :seon.test/policy :named
-                                   :seon.test/changed (vec changed)})]
-        (if (and (nil? (:seon.error/at result))
-                 (empty? (:seon.test/results result))
-                 (not-any? result [:seon.test/pending :seon.test/unfinished :seon.test/recording-refusal
-                                   :seon.test/destructive-excluded :seon.test/deferred
-                                   :seon.test/long-excluded]))
-          (-> result (dissoc :seon.test/passed?) (assoc :seon.test/unreached (vec changed)))
-          result)))))
+  [context connection changed tests]
+  (if (seq tests)
+    (seon.test/run {:seon.test/execution context :seon.test/recording-connection connection
+                    :seon.test/policy :named :seon.test/identities (set tests)})
+    (let [changed (or (not-empty changed) (seon.test/changes context connection))]
+      (if (:seon.error/at changed)
+        changed
+        (let [result (seon.test/run {:seon.test/execution context
+                                     :seon.test/recording-connection connection
+                                     :seon.test/policy :named
+                                     :seon.test/changed (vec changed)})]
+          (if (and (nil? (:seon.error/at result))
+                   (empty? (:seon.test/results result))
+                   (not-any? result [:seon.test/pending :seon.test/unfinished :seon.test/recording-refusal
+                                     :seon.test/destructive-excluded :seon.test/deferred
+                                     :seon.test/long-excluded]))
+            (-> result (dissoc :seon.test/passed?) (assoc :seon.test/unreached (vec changed)))
+            result))))))
 
 (defn check
   "Check the tests reaching my change as one request and return its answer.
@@ -34,7 +39,9 @@
   My change is `:seon.test/changed` when I name it, otherwise every
   declaration my program holds at another digest than my base: the commit my
   branch was forked at, or on the cluster's own branch the published program
-  (`seon.test/changes`). My acquired context and
+  (`seon.test/changes`). Tests I name under `:seon.test/identities` run
+  themselves instead, declared-long ones included; an unchanged green one
+  answers its recorded result. My acquired context and
   connection are supplied by call preparation. Each reaching test runs on its
   own branch off my current commit, isolated from my writes and from the
   other tests; its result is recorded on my connection. `:seon.test/passed?`
@@ -50,12 +57,14 @@
                   [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
                    :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection defined :seon.batch/defined :as request}]
-  (let [named (:seon.test/changed request)
+  (let [tests (some-> (:seon.test/identities request) sort vec)
+        named (or tests (:seon.test/changed request))
         after (filterv (or defined #{}) named)
-        now (vec (remove (set after) named))]
-    (cond (empty? after) (check-now context connection named)
+        now (vec (remove (set after) named))
+        [changed tests] (if tests [nil now] [now nil])]
+    (cond (empty? after) (check-now context connection changed tests)
           (empty? now) {:my.test/after-recording after}
-          :else (assoc (check-now context connection now) :my.test/after-recording after))))
+          :else (assoc (check-now context connection changed tests) :my.test/after-recording after))))
 
 (defn check-platform
   "Prove my branch's host-bound change in a JVM loaded from it and record the

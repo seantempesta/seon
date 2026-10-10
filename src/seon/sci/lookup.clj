@@ -34,7 +34,7 @@
 
 (defn- agent-test-vars
   "Run `test-vars` and answer the recorded run, nil when none is recorded.
-  A test the database holds runs through `my.test/check` on the agent's branch
+  A test the database holds runs by name through `my.test/check` on the agent's branch
   (an SCI test Var's metadata is the base's stub, without `:test`); a deftest
   this context defined that the database does not hold yet has no evidence to
   record and runs in place. Assertion counts reach the bound report counters."
@@ -48,7 +48,7 @@
       (clojure.test/test-vars in-place))
     (when-let [names (seq (filterv recorded named))]
       (let [check @(sci/resolve (sci.ctx-store/get-ctx) 'my.test/check)
-            run (check {:seon.test/changed (vec names)})
+            run (check {:seon.test/identities (set names)})
             results (:seon.test/results run)]
         (when (and clojure.test/*report-counters* (seq results))
           (dosync
