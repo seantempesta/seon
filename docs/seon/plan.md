@@ -250,7 +250,12 @@ Each is small, names its proof and what it makes measurably better.
   and 17 wait. At most two or three implementation lanes at once.
 - 2026-10-10 Only reliable data is surfaced (owner: "false regressions are the bug"). A number shown or stored as a
   baseline is like-for-like: the same scope (interpreted or compiled), warm, and with enough calls. Otherwise it is
-  an explicit unknown, never a misleading ratio. Lane cost-reliable is auditing and fixing every surfaced number.
+  an explicit unknown, never a misleading ratio. Landed b37a3ff72 and confirmed live: one cost entity per [symbol, scope],
+  each with a cold sample (a definition's first call in the process) and a warm sample. Every comparison is cold to
+  cold or warm to warm, in the same scope, with enough calls; otherwise it is an explicit unknown. Health reads warm;
+  cold cost is its own query. Open: a warm `(+ 1 2)` read 81 ms / 8.6k calls against 65–69 ms / 6.5k earlier
+  (counting overhead or noise; measure it); the cold-calls dial does not yet reach cells from the cluster
+  configuration (task filed).
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog. Stay on deepseek-flash. Commits 1–3 lines; docs
