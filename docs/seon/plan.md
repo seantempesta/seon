@@ -126,6 +126,14 @@ which a branch cannot change. `r2-ref-section` capped (the task's second failure
 messages. Task-design rules learned: a proof reads through the program, never files; a task carries the updates to
 existing tests that assert the old behavior. Lane round2-refine diagnoses and refines all three for round 3.
 
+**Loop round 3 (2026-10-10, refined tasks 1745f48cf, proofs run at assignment 7ce008211): 2 of 3 green, both tasks
+that had failed before** (refinement works). `r3-ref-section` green on the third attempt (12 calls) once the intent named
+both changes; `r3-problems-prose` green (10 calls) once the proof read the program instead of files; `r3-cost-diff`
+capped with 1 of 4 proofs (a larger refined task). Neither green merged: a schema change cannot merge
+(`prepare-merge!` "Only function, test and namespace declarations may change here", lane root-land), and problems-prose
+conflicted with a concurrent landing in the same file (0b50e737d; rerun on the new base). Recurring tool misuse across
+agents: `my.program/callers` given a symbol, `my.program/source` given a keyword; the tools should take what agents pass.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
