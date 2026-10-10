@@ -2257,34 +2257,53 @@
       (and refused (not reason)) (conj (retract :seon.task/refusal-reason))
       (and refused (not blocker)) (conj (retract :seon.task/blocked-by)))))
 
+(defn- landing-exception
+  "The refusal standing for what landing merge task `merge-task` threw (`failure`): a
+  `:seon.source/landing-exception-error` keeping its class and cause chain."
+  {:malli/schema [:=> [:cat :seon.task/merge :seon.error/throwable] :seon.error/base]}
+  [merge-task failure]
+  (seon.error.refusal/error :seon.source/landing-exception-error
+                            {:seon.error/operation `land-end! :seon.error/layer :seon.source/merge
+                             :seon.error/throwable failure :seon.task/merge merge-task}))
+
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
   is open and unrefused, or accepted with no git commit (a landing that stopped after acceptance, which
   `seon.cluster.source/land!` resumes from its record): `seon.cluster.source/land!` into the checkout
   `:seon.config.fs/working-root` through root's world, then record its result on the merge task at the task home
-  (`landing-tx`). Answers the landing, or nil when nothing was landed."
+  (`landing-tx`). Whatever the landing path throws is translated once, here, into a
+  `:seon.source/landing-exception-error` (`landing-exception`) recorded on the merge task like any refusal: before
+  acceptance it waits for root, after acceptance it carries no reason, so the next end retries it. Answers the
+  landing, or nil when nothing was landed."
   {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
   [cluster agent-id proposal]
   (let [database (db/db (:seon.db/connection cluster))
         land? (agent-dial database cluster agent-id :seon.config.root/land?)
-        {outcome :seon.task/outcome refusal :seon.task/refusal git :seon.task/landed-git} proposal]
-    (when (and (true? land?) (:seon.task/merge proposal)
+        merge-task (:seon.task/merge proposal)
+        {outcome :seon.task/outcome refusal :seon.task/refusal git :seon.task/landed-git} proposal
+        record! (fn [home landed] [landed (db/transact! home (landing-tx merge-task landed))])]
+    (when (and (true? land?) merge-task
                (or (and (nil? outcome) (nil? refusal)) (and (= :accepted outcome) (nil? git))))
-      (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
-            ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
-            execution (@cluster-agent-acquire-context!
-                       cluster "root" {:seon.agent/branch (:seon.agent/branch (db/pull database [:seon.agent/branch]
-                                                                                       [:seon.agent/id "root"]))})
-            home (:seon.db/connection execution)
-            ;; the landing is root's work on root's branch: its writes run in that branch's custody
-            [landed recorded]
-            (db/call-with-custody
-             {:seon.db/connection home}
-             #(let [landed (@source-land! execution (select-keys proposal [:seon.task/proposal :seon.task/merge :seon.task/branch
-                                                                           :seon.task/commit :seon.task/proved :seon.task/run-id
-                                                                           :seon.task/program])
-                                          root)]
-                [landed (db/transact! home (landing-tx (:seon.task/merge proposal) landed))]))]
+      (let [[landed recorded]
+            (try
+              (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
+                    ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
+                    execution (@cluster-agent-acquire-context!
+                               cluster "root" {:seon.agent/branch (:seon.agent/branch (db/pull database [:seon.agent/branch]
+                                                                                               [:seon.agent/id "root"]))})
+                    home (:seon.db/connection execution)]
+                ;; the landing is root's work on root's branch: its writes run in that branch's custody
+                (db/call-with-custody
+                 {:seon.db/connection home}
+                 #(record! home (@source-land! execution (select-keys proposal [:seon.task/proposal :seon.task/merge :seon.task/branch
+                                                                                :seon.task/commit :seon.task/proved :seon.task/run-id
+                                                                                :seon.task/program])
+                                               root))))
+              ;; THE LANDING'S ONE TRANSLATION: a throw becomes its typed refusal on the merge task
+              (catch Exception failure
+                (let [home (task/home-connection (:seon.db/connection cluster))]
+                  (db/call-with-custody {:seon.db/connection home}
+                                        #(record! home (landing-exception merge-task failure))))))]
         (if (:db-after recorded) landed recorded)))))
 
 (defn- end-task!
@@ -2323,7 +2342,10 @@
                                   (keep #(land-end! cluster agent-id %)))
                          (concat (remove #(= (:seon.task/merge proposal) (:seon.task/merge %)) (unfinished-landings (db/db home)))
                                  (when (:seon.task/merge proposal) [proposal])))
-            _ (doseq [refused landed :when (and (:seon.error/at refused) (not (:seon.error/message refused)))]
+            ;; a refused record, and a throw the landing translated, are Seon's own failures: faults too
+            _ (doseq [refused landed :when (and (:seon.error/at refused)
+                                                (or (not (:seon.error/message refused))
+                                                    (= :seon.source/landing-exception-error (:seon.error/type refused))))]
                 (fault! `land-end! refused))
             ;; the outcome is written at the task home before the message, so whoever reads the message finds it
             outcome-tx (@context-outcome-tx (db/db connection) agent-id)

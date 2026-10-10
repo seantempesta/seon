@@ -819,3 +819,35 @@
                  :seon.task/red-on-target '[tq.endu/legacy-test]}
                 (select-keys (:seon.task/ended shown) [:seon.task/unverified :seon.task/red-on-target]))
              "root's end summary lists them: the never-run and no-baseline tests unverified, the one red on main red-on-target"))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-landing-that-throws-records-its-refusal-on-the-merge-task}
+           :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, one proposal run, then an end whose landing throws."
+           :seon.test/long-ms 120000}
+  a-landing-that-throws-records-a-typed-refusal-on-its-merge-task
+  (support/with-running-agent
+   (fn [running _ connection]
+     (root-home! connection)
+     (let [path "test/tq/endx.clj"
+           root (support/temp-root "end-throw")]
+       (try
+         (git! root "init" "-q")
+         (git! root "config" "user.email" "end@test.invalid")
+         (git! root "config" "user.name" "end-test")
+         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endx"))
+         ;; a checkout path no file system accepts: resolving it throws inside the landing path
+         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
+                                {:seon.config.root/land? true :seon.config.fs/working-root (str root "\u0000")})
+         (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endx "area")
+               execution (fixed-end! running agent-id 'tq.endx
+                                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+               head (git! root "rev-parse" "HEAD")
+               _ (end! running execution agent-id)
+               [message] (end-messages (db/db connection) agent-id)
+               row (dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/refusal :seon.task/landed-git]
+                                    [:seon.task/id (:seon.task/merge message)])
+                           :db/id)]
+           (is (= :done (:seon.task/end message)) "the task ended green and root holds its end message")
+           (is (= {:seon.task/refusal :seon.source/landing-exception-error} row)
+               "the merge task records the throw as its typed refusal and stays undecided")
+           (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
+         (finally (support/delete-root! root)))))))
