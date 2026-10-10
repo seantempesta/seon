@@ -3787,6 +3787,17 @@
                (profile/transaction-observation {:seon.batch/sink sink} (sink-digests database sink) min-calls min-total-us top))
       [])))
 
+(defn stored-costs
+  "The stored cost entities of `symbols` on `database`, as `seon.batch/cost-diff`'s
+  `stored`: symbol -> [digest self-us]. One query; a refused read answers no costs."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                  [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]]}
+  [database symbols]
+  (let [rows (q '[:find ?s ?d ?us :in $ [?s ...]
+                  :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
+                database (vec symbols))]
+    (if (read-refusal? rows) {} (into {} (map (fn [[s d us]] [s [d us]])) rows))))
+
 (defn- stamp-transaction
   "Attach writer observations once, including the first schema-installing write.
   Agent names are historical observations, not living entity refs. The writing

@@ -187,7 +187,9 @@
                   [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]
-                  [:seon.turn.loop/platform {:optional true} :seon.turn.loop/platform]],
+                  [:seon.turn.loop/platform {:optional true} :seon.turn.loop/platform]
+                  [:seon.cost/tests {:optional true} :seon.cost/tests]
+                  [:seon.cost/live-tests {:optional true} :seon.cost/live-tests]],
                  :tests :seon.turn.loop/test-summary,
                  :stages :seon.cost/stages,
                  :queue

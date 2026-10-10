@@ -282,10 +282,7 @@
                   (seon.batch/test-cost-diff live-tests stored hysteresis)))
         cost (cond-> cost (seq tests) (assoc :seon.cost/diff tests))]
     (if (and (seq live) main cluster-name)
-      (let [rows (db/q '[:find ?s ?d ?us :in $ [?s ...]
-                         :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
-                       main (mapv :seon.fn.cost/sym live))
-            stored (if (db/read-refusal? rows) {} (into {} (map (fn [[s d us]] [s [d us]])) rows))
+      (let [stored (db/stored-costs main (mapv :seon.fn.cost/sym live))
             diff (seon.batch/cost-diff live stored (dial main cluster-name :seon.config.fn.cost/hysteresis))]
         (cond-> cost (seq diff) (update :seon.cost/diff #(into (vec diff) %))))
       cost)))
