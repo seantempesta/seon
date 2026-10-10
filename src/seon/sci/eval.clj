@@ -1740,9 +1740,21 @@
         ;; tests analyzed against its previous Var calling that one: they are
         ;; analyzed again here, as one Clojure Var would be seen.
         (doseq [sym functions
-                :let [before (get previous sym)]
-                :when (and before (not (identical? before (sci/resolve ctx sym))))]
-          (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
+                :let [before (get previous sym)
+                      held (sci/resolve ctx sym)
+                      evaluated (some-> agent-ctx (sci/resolve sym))]]
+          (cond
+            (and before (not (identical? before held)))
+            (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch)))
+            ;; A caller or test `ctx` took from the evaluating context as that
+            ;; context's own Var was analyzed against its Var of `sym`: where
+            ;; `ctx` holds another, that reach calls a root `ctx` never sees
+            ;; redefined, so it is analyzed again against `ctx`'s Vars.
+            (and evaluated held (not (identical? evaluated held)))
+            (reinterpret-reach! ctx db (stale-reach ctx db sym
+                                                    #(and (not (batch %))
+                                                          (some? (sci/resolve ctx %))
+                                                          (identical? (sci/resolve ctx %) (sci/resolve agent-ctx %)))))))
         ;; A caller `ctx` still runs compiled never sees a redefinition: the
         ;; reverse closure of these definitions is bound lazily once, so the
         ;; next eval request calls the branch's program, as one Clojure Var

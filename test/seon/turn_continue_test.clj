@@ -248,6 +248,9 @@
   `replies` until the agent's admission closes; answers the provider's request documents."
   {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]}
   [running agent-id connection replies]
+  ;; root's home is this member's branch, so the end message reaches root inside the fixture and the end closes
+  (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                             (:seon.cluster/name (support/execution-handle nil))]])
   (agent-eval running agent-id "(ns tq.end) (defn area [r] r)")
   (agent-eval running agent-id "(in-ns 'tq.end) (clojure.test/deftest ^{:seon/tasks #{'tq.end/area}} area-test (clojure.test/is (= 25 (tq.end/area 5))))")
   (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
