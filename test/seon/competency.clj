@@ -26,7 +26,8 @@
                 [s]
                 (str/join \"-\" (str/split (str/lower-case (str/trim s)) #\"\\s+\")))"]
     {'seon.competency/slug-has-a-passing-test-prose slug
-     'seon.competency/slug-has-a-passing-test-typed slug}))
+     'seon.competency/slug-has-a-passing-test-typed slug
+     'seon.competency/slug-removes-edge-hyphens slug}))
 
 (def oracles
   "Each task's known solution, as its agent would evaluate it; a task's two wordings share one."
@@ -42,6 +43,12 @@
                    (deftest slug-lowercases
                      (is (= \"hello-world\" (text/slug \"Hello World\")))
                      (is (= \"abc\" (text/slug \"  ABC \"))))"
+        slug-trimmed "(ns comp.text (:require [clojure.string :as str]))
+                      (defn slug
+                        \"A lowercase, dash-separated slug of the title `s`, without edge hyphens.\"
+                        {:malli/schema [:=> [:cat :string] :string]}
+                        [s]
+                        (-> (str/lower-case (str/trim s)) (str/replace #\"\\s+\" \"-\") (str/replace #\"^-+|-+$\" \"\")))"
         aliased "(ns comp.util)
                (defn clamp {:malli/schema [:=> [:cat :int] :int]} [x] (max 0 (min 10 x)))
                (ns comp.app (:require [comp.util :as u]))
@@ -52,6 +59,7 @@
      'seon.competency/quantity-schema-then-function-typed qty
      'seon.competency/slug-has-a-passing-test-prose slug-test
      'seon.competency/slug-has-a-passing-test-typed slug-test
+     'seon.competency/slug-removes-edge-hyphens slug-trimmed
      'seon.competency/app-calls-util-through-an-alias-prose aliased
      'seon.competency/app-calls-util-through-an-alias-typed aliased}))
 

@@ -35,14 +35,15 @@
     (get-in (support/mcp-tests result) [:seon.turn.loop/proofs :seon.test/passed?])))
 
 (defn- red-to-green
-  "Assert that root assigns `prose` and `typed` while their shared proof is red, and that the task's oracle,
+  "Assert that root assigns `prose` and any other wordings while their shared proof is red, and that the task's oracle,
   evaluated by the agent through MCP, turns that proof green in the eval request's automatic test step."
-  {:malli/schema [:=> [:cat :seon.task/sym :seon.task/sym] :nil]}
-  [prose typed]
+  {:malli/schema [:=> [:cat :seon.task/sym [:* :seon.task/sym]] :nil]}
+  [prose & others]
   (support/with-running-agent
    (fn [running agent-id connection]
-     (is (= [nil nil] (mapv #(:seon.task/refused (assigned connection agent-id %)) [prose typed]))
-         "root assigns both wordings while the proof is red")
+     (is (= (repeat (inc (count others)) nil)
+            (map #(:seon.task/refused (assigned connection agent-id %)) (cons prose others)))
+         "root assigns every wording while the proof is red")
      (let [red (proofs-passed? running agent-id (get competency/setups prose "(ns user)"))
            green (proofs-passed? running agent-id (get competency/oracles prose))]
        (is (= [false true] [red green]) "red before the oracle, green in the oracle's own step"))))
@@ -57,6 +58,9 @@
 (deftest t3-goes-red-to-green
   (red-to-green 'seon.competency/slug-has-a-passing-test-prose 'seon.competency/slug-has-a-passing-test-typed))
 
+(deftest t5-goes-red-to-green
+  (red-to-green 'seon.competency/slug-removes-edge-hyphens))
+
 (deftest t4-goes-red-to-green
   (red-to-green 'seon.competency/app-calls-util-through-an-alias-prose
                 'seon.competency/app-calls-util-through-an-alias-typed))
@@ -70,5 +74,6 @@
                              :seon.test/namespaces #{'seon.competency-test}})]
        (is (= [] (:seon.test/results result)) "no proof ran")
        (is (= #{'seon.competency-test/t1-area-is-contracted 'seon.competency-test/t2-quantity-schema-then-function
-                'seon.competency-test/t3-slug-has-a-passing-test 'seon.competency-test/t4-app-calls-util-through-an-alias}
+                'seon.competency-test/t3-slug-has-a-passing-test 'seon.competency-test/t4-app-calls-util-through-an-alias
+                'seon.competency-test/t5-slug-removes-edge-hyphens}
               (set (map :seon.test/sym (:seon.test/long-excluded result)))))))))

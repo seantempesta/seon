@@ -37,4 +37,9 @@
              :kind :namespace
              :intent "Define `comp.util/clamp` contracted `[:=> [:cat :int] :int]`, keeping an integer within 0 to 10, and `comp.app/bounded` with the same contract, in a `comp.app` whose `ns` form requires `comp.util` as `u` and whose body calls `u/clamp`. Done when `seon.competency-test/t4-app-calls-util-through-an-alias` is green: `(mapv comp.app/bounded [15 -3 7])` answers `[10 0 7]` and `(ns-aliases 'comp.app)` maps `u` to `comp.util`."
              :must-read #{}
-             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "slug-removes-edge-hyphens"
+             :kind :function
+             :intent "Redefine `comp.text/slug` in place, keeping its contract `[:=> [:cat :string] :string]`: trim whitespace, lowercase, turn each run of whitespace into one hyphen, remove leading and trailing hyphens, keep interior punctuation. Done when `seon.competency-test/t5-slug-removes-edge-hyphens` is green: `(comp.text/slug \"  --Hello   WORLD--  \")` answers `\"hello-world\"`, `\"---\"` answers `\"\"`, `\" a-b \"` answers `\"a-b\"`, `\"\"` answers `\"\"`, and `\"Hello World\"` and `\"  ABC \"` still answer `\"hello-world\"` and `\"abc\"`."
+             :must-read #{comp.text/slug clojure.string/replace clojure.string/lower-case clojure.string/trim}
+             :evidence #{"docs/research/agent-platform/2026-10-10/astra-chain-friction.md"}}]

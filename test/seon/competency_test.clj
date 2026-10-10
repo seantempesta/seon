@@ -2,7 +2,8 @@
   "Proofs of the seon.competency tasks; each runs as its member on a branch off the run's agent.
   A task's prose and typed wordings share one proof."
   {:seon.test/long "Red until an agent does the task: excluded from the bulk tier, run by identity."}
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.data.json :as json]
+            [clojure.test :refer [are deftest is]]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
@@ -32,6 +33,16 @@
   (let [counters (v "(clojure.test/test-ns 'comp.text-test)")]
     (is (<= 2 (:pass counters 0)) "the agent's tests make two or more passing assertions")
     (is (= [0 0] [(:fail counters 0) (:error counters 0)]))))
+
+(deftest ^{:seon/tasks #{'seon.competency/slug-removes-edge-hyphens}}
+  t5-slug-removes-edge-hyphens
+  (are [title slug] (= slug (v (str "(comp.text/slug " (json/write-str title) ")")))
+      "Hello World" "hello-world"
+      "  ABC " "abc"
+      "  --Hello   WORLD--  " "hello-world"
+      "---" ""
+      " a-b " "a-b"
+      "" ""))
 
 (deftest ^{:seon/tasks #{'seon.competency/app-calls-util-through-an-alias-prose
                          'seon.competency/app-calls-util-through-an-alias-typed}}
