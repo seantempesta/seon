@@ -15,52 +15,42 @@ Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in
 
 ## 0. Where we are (revised in place; last 2026-10-10)
 
-**Landed and confirmed live on default:**
-- FEEDBACK-LOOP stages 1–13 and 16 (card `schedule/cards/FEEDBACK-LOOP.md`). Every reply attributes its cost to
-  entrance, step, writer and commit, plus a labelled shared residual. A warm redefinition reads about 358 MB with
-  97.5% attributed; this morning it read 28 MB.
-- Each reply carries a compact diff to main; the agent's block shows its branch cost; slow paths are one query over
-  `:seon.fn.cost/*` entities.
-- The merge base is recorded by `t`, advanced at each merge, inherited by nested forks and keyed by fork id
-  (d9eb15c05, aa7ffb17f; Astra-reviewed).
-- Write-back refuses a relative or archive root (93d9e4ef6).
-- The Datahike fork's per-batch commit cost (fork cf815730; bump 5acc29e23).
+Read this section as direction, not a ledger: each essential (§2), its status, what blocks it and who works it now.
+History is in git; finished work leaves this section.
 
-- Byte-bounded node cache (fork cb3bce51, 75bd6a23a, 12473ca94; lane astra-node-cache), measured live:
-  - A warm redefinition's step went from about 309 MB / 171 ms CPU to 217–232 MB / 155–180 ms; the JVM window
-    from 358 to 263–283 MB.
-  - A new agent's first request went from 2.37 GB / 830 ms custody to 0.38 GB / 319 ms.
-- Owner ruling, "if it's unchanged it's unchanged": the cost diff compares only definitions changed on the branch
-  (a digest different from main's, or new) and the tests reaching them. An unchanged definition is never an entry.
-  Regressions in unchanged code surface in health and at merge. Landed fde5f1e11, confirmed live: a redefinition's diff shows only its own changed definitions.
+| Essential | Status | Blocked by | Working it now |
+|---|---|---|---|
+| 1 An honest number in every reply | **Done.** FEEDBACK-LOOP stages 1–13 and 16 live: a warm redefinition is about 97% attributed (entrance, step, writer, commit, labelled shared residual); like-for-like cold/warm cost per [symbol scope] (b37a3ff72); the diff shows only changed definitions (fde5f1e11). A fresh agent's warm `(+ 1 2)`: 72–74 ms, 6,668 calls; root's own context: 8,763 calls for the same work. | — | nobody; stages 14, 15, 17 wait (§6) |
+| 2 One task worked end to end through the REPL | **The goal test.** A Claude lane passed the ordinary half (df87cba96). No model agent has yet worked a designed task red → green. | the `forgive` task and its red proofs (in flight) | lane `forgive-proofs` (stages 1, 3, 4); then root launches chain run 2 |
+| 3 Red proofs before any assignment | Not started beyond the cost tasks. | nothing | after chain run 2 shows what a good proof needs |
+| 4 Default runs HEAD | Restart per landing batch is routine; default runs b37a3ff72. Lag workarounds not yet deleted (§5 step 5). | — | — |
+| 5 Correctness and efficiency over size | Node cache by bytes: a new agent's first request 2.37 GB → 0.38 GB; a warm redefinition's step about 217–232 MB. A `defn` reaching about 13 tests still costs 3.4–3.9 s and 4.3–5.5 GB in the test step. | — | — |
 
-**Running:**
-- REPL-only acceptance (`repl-only-3`):
-  - Ordinary half PASSED end to end through the REPL with branch evidence (df87cba96, names-in 1,490 → 128
-    distance computations).
-  - Host-bound half NOT yet passed: 31b442840 (write-back helper placement) fell back to `--test`, because branch
-    evidence called `proven-file` unreached, and its subject isn't flagged host-bound. It still gates new
-    platform machinery.
-  - 13 frictions were filed (c9040c2d5).
-  - Cost finding: a `defn` reaching about 13 tests costs 3.4–3.9 s and 4.3–5.5 GB in the test step.
+**Chain run 2, defined.** Done means: a DeepSeek-flash agent, launched on `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
+with only the context Seon generates, turns its proofs green with no root rescue, and root reviews and merges its
+branch. Its three known defects ("a]a", "('", "(\\") are in designed-task-examples §2. Launch: root's JVM REPL drives
+`seon.competency/start-run!` and `await-runs` (the E1 path, per-branch `no-provider false`, a call cap) but keeps the
+branch for review instead of `launch!`'s retirement. Every friction met is filed; that list decides the next build.
 
-**Next, in order:**
-1. A second chain run with a DeepSeek-flash implementer (`forgive` idempotence, designed-task-examples A).
-2. Backlog triage: prove the top ~30 tasks; the rest go to an unproven backlog.
-3. FEEDBACK-LOOP stages 14, 15 and 17.
-4. Check `seon.db/pull-logical`, which reads about 3× main on agent branches.
+**How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
+"next" for two hours and never started: it had no owner and no first step, each owner observation about the
+instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
+Standing rules:
+- One lane slot always serves essential 2 or 3 (the goal), never the instrument; the head of "next" is always work in
+  flight with a named lane, never a label.
+- An instrument finding is filed and sequenced unless it surfaces false data (that blocks the goal, so it is fixed).
+- Root chores (branch cleanup, measurements) run beside lanes, never ahead of goal work; after a landing root
+  launches the next step in the same turn.
+- Every lane names the essential it serves; at most two or three implementation lanes, on disjoint files.
+- The REPL-only acceptance's host-bound half (31b442840 fell back to `--test`; `proven-file` unreached) still gates
+  new platform machinery.
+- Lanes delete with plain `rm`, never `git rm`, and leave nothing staged; a whole-namespace `--test` on a namespace
+  with declared-long tests is refused (name the vars); a dependency bump lands last in a batch, then a restart.
 
-**Course corrections (root's reflection, 2026-10-10):**
-- Every lane names the essential it serves (§2).
-- The REPL-only acceptance is the gate for new platform machinery. The feedback loop was the owner-sanctioned
-  exception, and that exception is now closed.
-- Most of the day built the instrument. From now on the instrument is used: a model agent working a designed task
-  is the next real test of the goal.
-- At most two or three implementation lanes at a time, on disjoint files, because collisions cost hours today.
-- Lanes delete with plain `rm`, never `git rm`, and leave nothing staged.
-- A whole-namespace `--test` is refused when the namespace has declared-long tests; name the vars instead.
-- A dependency bump blocks every `bin/lane commit` until default restarts; root lands it last in a batch.
-- Codebase growth is acceptable for now (owner); Seon agents trim it later from the stored cost data.
+**Next, in order (after chain run 2):** backlog triage (prove the top ~30 tasks; the rest is an unproven backlog);
+the host-bound acceptance half; FEEDBACK-LOOP stages 14, 15, 17; `seon.db/pull-logical` reading about 3× main on
+agent branches; the cold-calls dial not reaching cells from the cluster configuration (task filed). Beside them:
+retire the leftover agent branches (demo-*, loop-*, *-probe*, repl-only-3*, astra-node-cache*, par-a/b).
 
 ## 1. The goal
 
@@ -108,98 +98,29 @@ options; every friction (a tool missing, a read over a second, a refusal with no
 exact form and reply. The first run is a measurement of the chain itself: how many requests each stage took and where
 the context was missing. That measurement, not a card, decides what gets built next.
 
-## 4. The first task: honest measurement
+## 4. The first task: honest measurement (done)
 
-**Task** `seon.flow/a-reply-accounts-for-the-work-it-caused`. Must-read: `seon.flow/var-process`,
-`seon.flow/graph-executor`, `seon.turn/step`, `seon.batch/request-cost`, `seon.batch/jvm-window`, `seon.db/transact!`,
-`seon.test/measured-body`, `seon.profile/measure`. Evidence: `docs/research/agent-platform/2026-10-10/measurement.md`,
-`one-system.md`, `astra-one-system.md` (stage 2 is done; the three lanes agree on the mechanism).
-
-**Intent.** A reply's `:seon.cost/request` covers the work the request caused: the agent's turn step on a platform
-thread (exact counters), the test bodies it ran (already folded by `seon.test/measured-body`), the writer's processing
-of each of its transactions, and its share of each commit; what remains (GC, JIT, other agents) is shown once as a
-labelled JVM residual. On a quiet JVM the attributed total is within 10% of the JVM window for a redefinition. The
-reply is delivered after accounting, never before.
-
-**Data model** (reuse first). Existing: `:seon.cost/request`, `:seon.cost/ms`, `:seon.cost/calls`, `:seon.cost/reads`,
-`:seon.cost/transactions`, `:seon.cost/stages`, `:seon.cost/jvm-window` (landed cdce8a37e, live after restart),
-`:seon.profile/alloc-bytes`, `:seon.profile/calls`. New names, each with one producer and one consumer:
-`:seon.cost/step` (the proc thread's allocated bytes and CPU ns for the step; producer `seon.flow/var-process`, consumer
-the reply render), `:seon.cost/writer` (sum of `:datahike/processing` over the request's tx reports; producer
-`seon.db/transact!`), `:seon.cost/commit` (the commit cost on each finalized report, with `:seon.cost/batch-size` and
-`:seon.cost/basis :datoms`; producer the Datahike fork's commit loop, modelled on upstream `listen-commits!`),
-`:seon.cost/shared` (JVM window minus attributed parts, plus GC CPU and JIT ms; never apportioned). The scope labels
-`:evaluation-arms-only` and `:unavailable` for step and writer work disappear.
-
-**Interface.**
-- `seon.flow/graph-executor`: `Thread/ofPlatform`, daemon, named by graph and proc; still thread-per-task (no pool, no
-  starvation; about 3 parked threads per agent, 32–90 KB RSS each; no wall difference measured, one-system Q4).
-- `seon.flow/var-process` 4-arity: brackets the step with current-thread counters, folds the world sink, assoc's the
-  cost into each `::replies` value and offers it; the step returns replies as data. The three `async/offer!` sites in
-  `seon.turn/step` go.
-- `seon.cluster.store` writer config gains `:write-fn-map` wrapping `datahike.writing/transact!` and `merge-writer!` with
-  counters; `seon.db/transact!` reads `:datahike/processing` off the report (proven on a disposable store, one-system Q5).
-- Fork (upstreamable, ~30 lines): the commit loop runs `datahike.writing/commit!` synchronously on one
-  `clojure.core.async/thread` and attaches the commit cost to every report in the batch.
-- `seon.sci.kernel/future-call` adds its body thread's delta on exit.
-
-**Proofs** (red before the bodies; all tagged with the task):
-- `seon.request-cost-test/a-redefinitions-reply-accounts-for-the-window`: through the real MCP entrance on a disposable
-  agent (the form of `measurement-probe.clj`), `(:seon.cost/step …)` plus writer and commit shares are at least 90% of
-  the outer `getTotalThreadAllocatedBytes` window; today 28 MB against 2,118 MB.
-- `seon.flow-test/a-proc-thread-is-a-platform-thread`: `(not (.isVirtual (Thread/currentThread)))` inside a step.
-- `seon.db-test/a-transaction-report-carries-its-processing-cost`: one `transact!` on a disposable branch answers
-  `:seon.cost/writer` with positive bytes.
-- `seon.request-cost-test/the-reply-is-offered-after-accounting`: the reply value already carries `:seon.cost/step`
-  when the port receives it.
-- Budget (one `is`): the accounting adds at most two counter pairs per step (0.42 µs each) and zero transactions;
-  asserted as `:seon.profile/calls` unchanged and `:seon.cost/transactions` unchanged on a trivial form.
-
-**Lanes.** Stage 3 and 4: one Sonnet lane (schemas, red tests; ~2 h). Stage 5: one Opus lane (one-path and boot-critical;
-`bin/lane commit --test` naming the four proofs plus `seon.request-cost-test`, `seon.test-cost-test`,
-`seon.eval-alloc-test`; ~1 day including the fork change). Root restarts default onto HEAD once, then the probe is
-repeated live. Better by: the redefinition reply reads about 2 GB, not 28 MB, and names the step as its owner.
-
-**What the honest number will show first** (so the next task is already visible): the step's allocation on a cold
-redefinition is dominated by Datahike index-node restoration under `:test-step` (about 2.1 GB, 1.8 GB with no Seon
-frame in 64 stack frames). That is §5 step 4, not part of this task.
+Worked as the FEEDBACK-LOOP card (`schedule/cards/FEEDBACK-LOOP.md`, stages 1–13 and 16 landed); its design, proofs and
+measurements are there and in git. The step's allocation it predicted was the node cache, since bounded by bytes.
 
 ## 5. Next steps, in order
 
 Each is small, names its proof and what it makes measurably better.
 
-1. **Honest measurement** (§4), then restart default onto HEAD. Better by: reply cost 28 MB → ~2 GB on the same form.
-2. **Latest performance numbers, stored cheaply, and a compact diff to main in every reply** (owner, 2026-10-10).
-   One row per function, test and schema validator holds its latest numbers: calls, CPU, allocation and ms, as a
-   rolling average updated in place. These attributes are declared without history and upserted only when a number
-   moves meaningfully, inside the transaction the request already writes. Slow paths are one query. Main's rows are
-   the same rows read on main, so the diff to main is a join. Each reply and the agent's context show the cost of the
-   request plus a compact diff to main for every function, test and schema it touched, always on. Interpreted
-   numbers on a branch are shown as guidance; the compiled check at merge flags real regressions for root.
-   Schema validation cost is measured per schema, so expensive checks become visible (a database value is checked
-   as a database value, never by walking it). This reshapes `seon.profile.measurement` and COST-REG slice 1 into
-   that one store rather than deleting them. It deletes the per-request upsert of about 300 measurement rows, the
-   7 unused `seon.config.test.cost` dials, `seon.health/definition-comparisons` and the hand-read `ThreadMXBean`
-   test helpers. Better by: "which functions are slow" is one query, and an agent sees its cost delta on every change.
-3. **Second chain run, non-platform**: `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
+1. **Second chain run, non-platform**: `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
    (designed-task-examples A: three defects, red `are` table and seeded idempotence property already written as
    prototypes). Stages 3–4 Sonnet, stage 5 DeepSeek-flash as implementer with a Claude lane watching. Better by: one
    model agent takes a designed task red → green with no root rescue, or the exact friction is filed.
-4. **The 2.1 GB test step** (Astra, performance): name the callers with `-XX:FlightRecorderOptions:stackdepth=256`, then
-   fix the owner (`seon.cluster.store/the-node-cache-counts-nodes-not-bytes` is the likely producer: node cache bounded
-   by bytes, so nodes are not reloaded per request). Proof: a redefinition's `:seon.cost/step` at a budget derived from
-   the work (one fork, one evaluation, one transaction, the reached tests), written by the designer after step 1 shows
-   the real number. Better by: define-and-prove under one second.
-5. **Default runs HEAD per landing batch**, then delete what the lag required: the write-back file rebase's snapshot of
+2. **Default runs HEAD per landing batch**, then delete what the lag required: the write-back file rebase's snapshot of
    the published archive in `my.test/check-platform`, template-per-slot (store identity read from the store record, not
    `nameUUIDFromBytes(path)`), "live after restart" proofs. Better by: `bin/seon check` under 10 s warm (37 s now).
-6. **Ten tasks with red `are` proofs** (Sonnet, ~2 h): root picks ten open tasks with small owners and a known bad
+3. **Ten tasks with red `are` proofs** (Sonnet, ~2 h): root picks ten open tasks with small owners and a known bad
    input; one `are` deftest each, tagged, red on default. Only these ten are assignable. Better by: tasks with a red
    proof 26 → 36.
-7. **A10: a visited test namespace makes every later request 3× slower** (opus review 2.5; 141 ms test step for `(+ 1 2)`).
+4. **A10: a visited test namespace makes every later request 3× slower** (opus review 2.5; 141 ms test step for `(+ 1 2)`).
    Fix at the producer (entered Vars counted as the agent's changes) with a `seon.profile/measure` row on the second
    request. Better by: a trivial form stays at ~70 ms after any `in-ns`.
-8. **Task entity and docs in the database** (§8 Q1–Q2), after the two chain runs show what the agents actually lacked.
+5. **Task entity and docs in the database** (§8 Q1–Q2), after the two chain runs show what the agents actually lacked.
 
 ## 6. Deliberately deferred
 
@@ -253,8 +174,8 @@ Each is small, names its proof and what it makes measurably better.
   an explicit unknown, never a misleading ratio. Landed b37a3ff72 and confirmed live: one cost entity per [symbol, scope],
   each with a cold sample (a definition's first call in the process) and a warm sample. Every comparison is cold to
   cold or warm to warm, in the same scope, with enough calls; otherwise it is an explicit unknown. Health reads warm;
-  cold cost is its own query. Open: a warm `(+ 1 2)` read 81 ms / 8.6k calls against 65–69 ms / 6.5k earlier
-  (counting overhead or noise; measure it); the cold-calls dial does not yet reach cells from the cluster
+  cold cost is its own query. The 81 ms / 8.6k-call reading was root's own context (8,763 calls); a fresh agent's
+  warm `(+ 1 2)` is 72–74 ms / 6,668 calls, so no counting overhead. Open: the cold-calls dial does not yet reach cells from the cluster
   configuration (task filed).
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
