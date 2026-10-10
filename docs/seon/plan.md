@@ -32,7 +32,7 @@ Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in
   - A new agent's first request went from 2.37 GB / 830 ms custody to 0.38 GB / 319 ms.
 - Owner ruling, "if it's unchanged it's unchanged": the cost diff compares only definitions changed on the branch
   (a digest different from main's, or new) and the tests reaching them. An unchanged definition is never an entry.
-  Regressions in unchanged code surface in health and at merge. Lane diff-changed-only is landing this.
+  Regressions in unchanged code surface in health and at merge. Landed fde5f1e11, confirmed live: a redefinition's diff shows only its own changed definitions.
 
 **Running:**
 - REPL-only acceptance (`repl-only-3`):
