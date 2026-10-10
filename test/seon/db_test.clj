@@ -26,6 +26,7 @@
             [seon.fn :as seon.fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -405,6 +406,36 @@
        (is (= 8 (.get meter 0)) "every transaction is charged")
        (is (every? #(= (count %) (:tx-count (first %))) commits) "a commit's batch is the reports that share it")
        (is (<= (- durable 8) (.get meter 3) durable) "the shares add up to the commits, within integer division")))))
+
+(deftest a-stored-cost-is-rechecked-outside-the-top-set
+  (test-support/with-database
+   (fn [connection]
+     (let [sink (seon.batch/sink)
+           world {:seon.batch/sink sink}
+           digest (apply str (repeat 64 "c"))
+           probe 'seon.db-test/cost-cold
+           stored #(:seon.fn.cost/self-us (db/pull (db/db connection) '[:seon.fn.cost/self-us] [:seon.fn.cost/sym %]))
+           work! (fn [sym calls self-us]
+                   (let [^java.util.concurrent.atomic.AtomicLongArray counter
+                         (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest] profile/new-adder)
+                         nanos (long (* calls self-us 1000))]
+                     (.addAndGet counter 0 calls) (.addAndGet counter 1 nanos) (.addAndGet counter 2 nanos)))
+           ;; the probe's work, beside `heavier` new definitions that spend more, then one transaction
+           step! (fn [self-us heavier]
+                   (work! probe 100 self-us)
+                   (when (pos? heavier) (work! 'seon.db-test/cost-light-new 100 self-us))
+                   (dotimes [i heavier] (work! (symbol "seon.db-test" (str "cost-heavy-" i)) 100 400.0))
+                   (binding [seon.batch/*world* world] (db/transact! connection []))
+                   [(stored probe) (stored 'seon.db-test/cost-light-new)])]
+       (clojure.test/are [self-us heavier expected] (= expected (step! self-us heavier))
+         ;; cold: the probe spends 4.6 ms and ranks in the top
+         46.0 0  [46.0 nil]
+         ;; warm (1.5 ms, over the floor) and outside the top, ten heavier:
+         ;; re-checked anyway; a new definition doing the same is not stored
+         15.0 10 [15.0 nil]
+         15.0 10 [15.0 nil])
+       (is (nil? (stored 'seon.db-test/cost-never))
+           "nothing is stored for what never ran")))))
 
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database
