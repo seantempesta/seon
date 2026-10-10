@@ -66,6 +66,17 @@ rescue: read `comp.text/slug`, redefined it, proof green. One reply repeated its
 Not merged: `comp.text` is a bench fixture. Next: chain run 4 on a small real owner with a known bad input, through
 review, write-back and root's merge (lane `real-task-pick` proposes candidates).
 
+**Chain run 4 (2026-10-10, agent `chain4-edn-1`, branch `:agent-e2a7a50d8c07`): GREEN AND LANDED, the first model
+fix to real Seon code.** Task `seon.program/edn-symbol-text-accepts-a-leading-slash` (lane `real-task-pick`, 550b599b4):
+7 calls, 26.5 s, 24k prompt tokens, 1 agent error (a body fragment). Root reviewed the one added condition, wrote the
+branch back as the agent (`my.program/write-branch!`, 367 ms) and committed d3de85d72; proof and reaching test green on
+HEAD (run 1b79dec1c743, 32 pass). Gaps it exposed, both on the happy path:
+1. The agent never proposes the merge: the loop stops calling the model once the proofs are green, so
+   `my.program/propose-merge!` never runs and `prepare-merge!` has nothing to take. The end message to root
+   (DYNAMIC-CONTEXT stage 3) is the merge request.
+2. `bin/lane commit --branch-evidence` treats a `.cljc` file as ineligible and falls back to `bin/seon check` with no
+   tests named, so the commit was "proven" by boot and lint alone. The fallback must run the tests reaching the change.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
