@@ -223,40 +223,104 @@
         (turn/previous-ending-namespace database eid))
       (some-> (:seon.task/sym held) namespace symbol)))
 
+(defn- branch-outcome
+  "What the agent `agent-id` did on `branch-db` toward task `sym`: its model calls and tokens and its proofs'
+  counts and red proofs; an error when a read refuses."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe :seon.task/sym]]
+                  [:or [:map [:seon.task/calls :seon.task/calls] [:seon.task/prompt-tokens :seon.task/prompt-tokens]
+                        [:seon.task/completion-tokens :seon.task/completion-tokens]
+                        [:seon.task/proof-counts {:optional true} :seon.task/proof-counts]
+                        [:seon.task/red-proofs {:optional true} :seon.task/red-proofs]]
+                   :seon.error/value]]}
+  [branch-db agent-id sym]
+  (let [proven (when sym (proofs branch-db sym))
+        attempts (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
+                         :in $ ?agent-id
+                         :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
+                       branch-db agent-id)
+        total #(transduce (keep (comp % second)) + 0 attempts)]
+    (or (some #(when (:seon.error/at %) %) [proven attempts])
+        (cond-> {:seon.task/calls (count (into #{} (map first) attempts))
+                 :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
+                 :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)}
+          proven (assoc :seon.task/proof-counts (:seon.context/counts proven)
+                        :seon.task/red-proofs (into [] (comp (filter #(= :red (:seon.context/proof-status %))) (map :seon.test/sym))
+                                                    (:seon.context/proof-list proven)))))))
+
+(def ^:private proof-count-attributes
+  "The agent attribute recording each proof status's count."
+  {:green :seon.agent/outcome-green :red :seon.agent/outcome-red :pending :seon.agent/outcome-pending})
+
+(defn- outcome-facts
+  "The agent attributes recording `outcome` (a `branch-outcome`)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [outcome]
+  (cond-> {:seon.agent/outcome-calls (:seon.task/calls outcome)
+           :seon.agent/outcome-prompt-tokens (:seon.task/prompt-tokens outcome)
+           :seon.agent/outcome-completion-tokens (:seon.task/completion-tokens outcome)}
+    (seq (:seon.task/red-proofs outcome)) (assoc :seon.agent/outcome-red-proofs (set (:seon.task/red-proofs outcome)))
+    true (into (keep (fn [[status attribute]] (when-let [n (get-in outcome [:seon.task/proof-counts status])] [attribute n])))
+               proof-count-attributes)))
+
+(defn- recorded-outcome
+  "The outcome recorded on agent `agent-id` when its task ended, as a `branch-outcome`; nil when none was."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
+  [database agent-id]
+  (let [row (db/pull database (into [:seon.agent/outcome-calls :seon.agent/outcome-prompt-tokens :seon.agent/outcome-completion-tokens
+                                     :seon.agent/outcome-red-proofs]
+                                    (vals proof-count-attributes))
+                     [:seon.agent/id agent-id])
+        counts (into {} (keep (fn [[status attribute]] (when-let [n (get row attribute)] [status n]))) proof-count-attributes)]
+    (when (and (map? row) (contains? row :seon.agent/outcome-calls))
+      (cond-> {:seon.task/calls (:seon.agent/outcome-calls row)
+               :seon.task/prompt-tokens (:seon.agent/outcome-prompt-tokens row)
+               :seon.task/completion-tokens (:seon.agent/outcome-completion-tokens row)}
+        (seq counts) (assoc :seon.task/proof-counts counts)
+        (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/outcome-red-proofs row))))))))
+
+(defn outcome-tx
+  "Transaction data recording the outcome of the task `agent-id` holds, derived from its branch in `database`
+  (calls, tokens, proof counts and red proofs): what the end summary needs after the branch is retired. Empty
+  when the agent has no branch, no task or its evidence is unreadable, so a summary never reads zeros for evidence
+  that was not there."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.store/transaction-data]}
+  [database agent-id]
+  (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
+        home (if-let [connection (task/home database)] (db/db connection) database)
+        handle (task/agent-task home agent-id)
+        sym (when (string? handle) (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home handle))
+        branch-db (when (keyword? branch) (db/branch-database database branch))
+        outcome (when branch-db (branch-outcome branch-db agent-id sym))]
+    (if (or (nil? outcome) (:seon.error/at outcome))
+      []
+      [(assoc (outcome-facts outcome) :seon.agent/id agent-id)])))
+
 (defn ended
-  "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for, derived now from
-  the ending agent's branch: the task, how it ended, its proofs' counts and red proofs, the agent's errors grouped
-  by signature, its model calls and tokens, the merge task when it ended green, and the operations root takes next."
+  "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
+  ended, its proofs' counts and red proofs, the agent's errors grouped by signature, its model calls and tokens,
+  the merge task when it ended green, and the operations root takes next. The outcome is the one recorded when
+  the task ended, else derived from the agent's branch, else unknown (`:seon.task/outcome-unknown`), never zeros."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
   [database {agent-id :my.message/from task-id :seon.message/about end :seon.task/end merge :seon.task/merge}]
   (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
         home (if-let [connection (task/home database)] (db/db connection) database)
         sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home task-id)
+        recorded (recorded-outcome database agent-id)
         branch-db (when (keyword? branch) (db/branch-database database branch))
-        proven (when (and branch-db sym) (proofs branch-db sym))
-        attempts (when branch-db
-                   (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
-                           :in $ ?agent-id
-                           :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
-                         branch-db agent-id))
-        total #(transduce (keep (comp % second)) + 0 attempts)]
-    (or (some #(when (:seon.error/at %) %) [proven attempts])
-        (cond-> {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
-                 :seon.task/calls (count (into #{} (map first) attempts))
-                 :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
-                 :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)
-                 :seon.render/operations
-                 (cond-> [(list 'seon.context/model-context (list 'seon.db/branch-database (list 'seon.db/db) branch) {} agent-id)]
-                   merge (conj (list 'my.program/prepare-merge! {:seon.task/merge merge}))
-                   sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
-                                                       :seon.task/basis task-id})))}
+        outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))]
+    (or (when (:seon.error/at outcome) outcome)
+        (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
+                        :seon.render/operations
+                        (cond-> [(list 'seon.context/model-context (list 'seon.db/branch-database (list 'seon.db/db) branch) {} agent-id)]
+                          merge (conj (list 'my.program/prepare-merge! {:seon.task/merge merge}))
+                          sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
+                                                              :seon.task/basis task-id})))}
+                       outcome)
+          (nil? outcome) (assoc :seon.task/outcome-unknown true)
           sym (assoc :seon.task/sym sym)
           (keyword? branch) (assoc :seon.agent/branch branch)
           merge (assoc :seon.task/merge merge)
-          proven (assoc :seon.task/proof-counts (:seon.context/counts proven)
-                        :seon.task/red-proofs (into [] (comp (filter #(= :red (:seon.context/proof-status %))) (map :seon.test/sym))
-                                                    (:seon.context/proof-list proven)))
-          (keyword? branch) (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
+          branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the

@@ -7,6 +7,7 @@
             [seon.cluster.host :as host]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.id]
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
             [seon.task :as task]
@@ -223,3 +224,62 @@
      (evaluate running agent-id "(ns tq.cs.elsewhere)")
      (is (= 'tq.cs.elsewhere (get-in (block running agent-id) [:seon.context/turns :seon.context/namespace]))
          "the namespace its latest form ended in"))))
+
+(defn- end-entry
+  "The inbox entry of `agent-id`'s end message about the task `task-id`."
+  {:malli/schema [:=> [:cat :seon.agent/id :string] :my.message/inbox-entry]}
+  [agent-id task-id]
+  {:my.message/id (seon.id/id [agent-id task-id]) :my.message/from agent-id :my.message/at (java.util.Date.)
+   :my.message/content "My task ended: done." :seon.message/about task-id :seon.task/end :done})
+
+(defn- gone-agent!
+  "Create agent `agent-id` on a seeded cluster whose branch is not in the store, as a retired branch is."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
+  [connection agent-id]
+  (test-support/seed-cluster! connection "ctx-ended" {})
+  (test-support/transacted! connection (test-support/agent-tx (db/db connection) agent-id))
+  (test-support/transacted! connection [{:seon.agent/id agent-id :seon.agent/branch :retired-branch}])
+  nil)
+
+(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}}
+  an-ended-summary-survives-retiring-its-branch
+  (test-support/with-database
+   (fn [connection]
+     (gone-agent! connection "ended-gone")
+     (test-support/transacted! connection [{:seon.agent/id "ended-gone" :seon.agent/outcome-calls 7 :seon.agent/outcome-prompt-tokens 900
+                                            :seon.agent/outcome-completion-tokens 80 :seon.agent/outcome-green 1 :seon.agent/outcome-red 2
+                                            :seon.agent/outcome-red-proofs #{'tq.a/one 'tq.a/two}}])
+     (let [ended (context/ended (db/db connection) (end-entry "ended-gone" "0123456789ab"))]
+       (is (= {:seon.task/calls 7 :seon.task/prompt-tokens 900 :seon.task/completion-tokens 80
+               :seon.task/proof-counts {:green 1 :red 2} :seon.task/red-proofs ['tq.a/one 'tq.a/two]}
+              (select-keys ended [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens
+                                  :seon.task/proof-counts :seon.task/red-proofs])))
+       (is (not (contains? ended :seon.task/outcome-unknown)))))))
+
+(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}}
+  an-ended-summary-with-no-evidence-is-unknown-never-zero
+  (test-support/with-database
+   (fn [connection]
+     (gone-agent! connection "ended-unknown")
+     (let [ended (context/ended (db/db connection) (end-entry "ended-unknown" "ba9876543210"))]
+       (is (true? (:seon.task/outcome-unknown ended)))
+       (is (empty? (select-keys ended [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens :seon.task/proof-counts]))
+           "no counts are manufactured for evidence that is gone")
+       (is (= [] (context/outcome-tx (db/db connection) "ended-unknown")) "and nothing is recorded for it")))))
+
+(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}}
+  the-outcome-recorded-at-the-end-equals-the-one-the-branch-shows
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (let [handle (task/agent-task (db/db connection) agent-id)
+           entry (end-entry agent-id handle)
+           from-branch (context/ended (db/db connection) entry)
+           tx (context/outcome-tx (db/db connection) agent-id)
+           _ (test-support/transacted! connection tx)
+           recorded (context/ended (db/db connection) entry)
+           outcome [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens :seon.task/proof-counts :seon.task/red-proofs]]
+       (is (seq tx) "the branch's outcome is recorded")
+       (is (= (select-keys from-branch outcome) (select-keys recorded outcome))
+           "the recorded outcome is what the branch showed")
+       (is (= {:red 1} (:seon.task/proof-counts recorded)) "the task's one proof is red")))))
