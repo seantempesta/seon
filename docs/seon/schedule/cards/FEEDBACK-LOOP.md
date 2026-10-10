@@ -108,8 +108,8 @@ write by `seon.sci.arm/arm!`) resolves its digest from the row that transaction 
 the same attributes on main, from main's own traffic (cost entities are data and never merge as program).
 
 **The comparison.** Subjects: definitions the request defined, its top 10 executed definitions by self time, tests the
-step ran, schemas it measured (≤ ~30 pulls on main: under 1 ms). An entry shows when live is ≥ 1.41× or ≤ 1/1.41 of
-main's, when main has no value (`:new`), when the digest differs (`:changed`), or when a schema is over budget
+step ran, schemas it measured (≤ ~30 pulls on main: under 1 ms). If it is unchanged it is unchanged: only (a) definitions whose digest differs from main's or that main lacks (`:changed`, `:new`) and (b) tests whose reach includes such a definition (shown when live is ≥ 1.41× or ≤ 1/1.41 of
+main's, or main has none) are entries, plus a schema over budget
 (`:over-budget`); a `:seon.profile/context`-scope function is flagged `:interpreted` (an interpreted body costs up to
 280× its compiled self, G4), so it is guidance, and the compiled merge check is where a regression is judged. Each
 entry is a tuple of about 15 tokens; a typical reply carries 0–3 (≤ 50 tokens), a redefinition's at most `top`.

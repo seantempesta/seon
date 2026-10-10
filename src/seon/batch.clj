@@ -260,18 +260,16 @@
   "The request's live values beside main's stored ones (`stored`: symbol ->
   [digest self-us]): one comparison per definition the agent changed (its
   interpreted ones: :interpreted, and :new when main stores nothing for it;
-  a compiled one whose digest differs from main's: :changed), and per
-  unchanged compiled one main stores a value for whose per-call self time grew
-  by the factor `hysteresis`. An unchanged definition that got faster is left
-  out: main's value may be a cold first measurement, and the agent did not
-  cause it. A compiled definition main has no value for is left out too: on a
-  branch that is most platform code, on every reply. Reads nothing stored
-  itself."
+  a compiled one whose digest differs from main's: :changed). An unchanged
+  definition is never an entry, whatever its ratio: its first-call noise is
+  not the agent's change. A compiled definition main has no value for is left
+  out too: on a branch that is most platform code, on every reply. Reads
+  nothing stored itself."
   {:malli/schema [:=> [:cat :seon.cost/live
                        [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]
                        :seon.config.fn.cost/hysteresis]
                   :seon.cost/diff]}
-  [live stored hysteresis]
+  [live stored _hysteresis]
   (into []
         (keep (fn [{:seon.fn.cost/keys [sym digest scope self-us]}]
                 (let [[main-digest main-us] (get stored sym)
@@ -279,9 +277,8 @@
                       flags (cond-> #{}
                               (nil? main-us) (conj :new)
                               (and main-us (not= digest main-digest)) (conj :changed)
-                              (= :seon.profile/context scope) (conj :interpreted))
-                      own? (or (contains? flags :changed) (contains? flags :interpreted))]
-                  (when (or own? (and ratio (>= ratio hysteresis)))
+                              (= :seon.profile/context scope) (conj :interpreted))]
+                  (when (or (contains? flags :changed) (contains? flags :interpreted))
                     (cond-> {:seon.cost.comparison/subject sym
                              :seon.cost.comparison/measure :self-us
                              :seon.cost.comparison/live (hundredths self-us)

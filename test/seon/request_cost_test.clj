@@ -182,7 +182,7 @@
        (is (= :seon.profile/context (:seon.fn.cost/scope stored)) "its cost entity is stored on the branch")
        (is (<= 30 (:seon.fn.cost/calls stored 0)))))))
 
-(deftest an-unchanged-platform-function-that-got-faster-shows-no-entry
+(deftest an-unchanged-platform-function-shows-no-entry
   (let [digest (apply str (repeat 64 "a"))
         other (apply str (repeat 64 "b"))
         live (fn [scope self-us] [{:seon.fn.cost/sym 'seon.schema/projection-cache-value :seon.fn.cost/digest digest
@@ -193,8 +193,9 @@
       ;; main's cold first value, the definition unchanged: an improvement the agent did not cause
       :seon.profile/host 5.0 {'seon.schema/projection-cache-value [digest 46.0]} []
       :seon.profile/host 30.0 {'seon.schema/projection-cache-value [digest 46.0]} []
-      ;; a regression shows for any subject
-      :seon.profile/host 70.0 {'seon.schema/projection-cache-value [digest 46.0]} [#{}]
+      ;; an unchanged definition that got slower is no entry either: only changed and new subjects are compared
+      :seon.profile/host 70.0 {'seon.schema/projection-cache-value [digest 46.0]} []
+      :seon.profile/host 2576.0 {'seon.schema/projection-cache-value [digest 46.0]} []
       ;; an improvement shows for a definition the agent changed
       :seon.profile/host 5.0 {'seon.schema/projection-cache-value [other 46.0]} [#{:changed}]
       :seon.profile/context 5.0 {'seon.schema/projection-cache-value [digest 46.0]} [#{:interpreted}]
