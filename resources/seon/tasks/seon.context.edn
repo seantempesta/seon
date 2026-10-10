@@ -25,4 +25,9 @@
              :intent "`seon.context/current-state` carries no namespace, and `seon.repl/response-entries` shows `:ns` only when a form changed it, so after its first call nothing in the regenerated context says where the agent is: chain run 2's agents re-entered their namespace on 13 of 15 and 9 of 14 calls (DYNAMIC-CONTEXT stage 1). Done when the block's turns section holds `:seon.context/namespace`, the namespace the agent's latest evaluation ended in (`seon.turn/previous-ending-namespace`), else its held task's namespace."
              :must-read #{seon.context/current-state seon.turn/previous-ending-namespace}
              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
-]
+
+ #:seon.task{:name "one-agents-current-state-costs-hundreds-of-megabytes"
+  :kind :function
+  :intent "`seon.context/current-state` for one agent costs about 380 ms and 433 MB on default (lane dc-lifecycle, 2026-10-10, HEAD a6cbe4fcf); it runs once per model call to build the block. What the work must do: read the agent's one-hop attachments (task, its references, latest evaluations, proofs) and render them, proportional to what the block shows, not to the program. Profile it with `seon.profile/measure`, name the armed functions that allocate, fix the owner; done when one agent's block is under 50 ms and 50 MB on default."
+  :must-read #{seon.context/current-state}
+  :evidence #{"docs/seon/plan.md"}}]
