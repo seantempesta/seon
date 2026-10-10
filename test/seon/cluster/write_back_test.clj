@@ -481,3 +481,45 @@
       (finally
         (doseq [b branches] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-root! root)))))
+
+(deftest ^{:seon.test/long "Analyses of a one-file fixture onto H, one branch adding a helper and replacing its caller, and one write-back (one analysis of the candidate)."
+           :seon.test/long-ms 20000}
+  an-added-helper-is-written-before-the-replaced-function-calling-it
+  ;; A branch extracts a helper by `defn`: the new declaration and the
+  ;; replaced function calling it write back together, the helper first, so
+  ;; the candidate analyzes and reindexes to exactly the branch's program.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbadd" suffix ".core"))
+        root (support/temp-root (str "write-back-addition-test-" suffix))
+        path (str "src/wbadd" suffix "/core.clj")
+        helper [:seon.fn/sym (symbol (str fixture-ns) "helper")]
+        caller [:seon.fn/sym (symbol (str fixture-ns) "caller")]
+        c (keyword (str "write-back-addition-c-" suffix))]
+    (io/make-parents (io/file root path))
+    (spit (io/file root path) (fixture-source fixture-ns))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            base (db/commit-id (db/db h-conn))
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) helper "(defn helper\n  \"Add two.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 2))" {}))
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) caller "(defn caller\n  \"Call the helper.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (helper x))" {}))
+          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+                                             :seon.source/accepted {:seon.program/identities #{helper caller}
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})
+                on-disk (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
+            (is (nil? (:seon.source/write-back-refused written)) "the addition and its caller write back")
+            (is (= (mapv #(:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] %)) [helper caller])
+                   (mapv on-disk [helper caller]))
+                "the file reindexed from disk declares the branch's helper and caller"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-root! root)))))

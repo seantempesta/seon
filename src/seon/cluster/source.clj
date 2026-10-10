@@ -1216,10 +1216,17 @@
         from-blank (fn [start] (loop [begin start n 0]
                                  (if (and (< n 2) (pos? begin) (= 10 (aget ^bytes base-bytes (dec begin))))
                                    (recur (dec begin) (inc n)) begin)))
-        edits (fn [] (vec (for [[_ was now] changes]
+        ;; An addition goes before the earliest function or test this write
+        ;; replaces, so a replaced caller naming it follows it; else at the end.
+        anchor (some->> changes
+                        (keep (fn [[_ was now]] (when (and was now (not (:seon.ns/name was))) (first (span-of was)))))
+                        seq (apply min))
+        ;; Additions first: one inserted at the anchor precedes the replacement starting there.
+        edits (fn [] (vec (for [[_ was now] (sort-by (fn [[_ was]] (if was 1 0)) changes)]
                             (cond
                               (and was now) [(span-of was) (source-of now)]
                               was (let [[start stop] (span-of was)] [[(from-blank start) stop] ""])
+                              anchor [[anchor anchor] (str (source-of now) "\n\n")]
                               :else (let [end (alength ^bytes base-bytes)]
                                       [[end end] (str (when-not (= 10 (aget ^bytes base-bytes (dec end))) "\n")
                                                       "\n" (source-of now) "\n")])))))
