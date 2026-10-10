@@ -2595,3 +2595,23 @@
       (is (not= (db/commit-id parent) (db/commit-id (db/db (:seon.db/connection member)))))
       (is (eval/acquired-database? base (db/db (:seon.db/connection member))))
       (finally (agent/release-context! member)))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/sci-out-is-unbound-on-a-test-member-thread}}
+  an-interpreted-test-body-prints-to-the-host-streams
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           evaluation (test-support/evaluate
+                       {:seon.sci.eval/ctx ctx
+                        :seon.cluster.eval/source
+                        "(clojure.test/deftest printing-test (println \"printed\") (binding [*out* *err*] (println \"warned\")) (clojure.test/is true))"
+                        :seon.cluster.eval/ns [:seon.ns/name 'seon.sci.eval-test]
+                        :seon.sci.admit/caps caps
+                        :seon.sci.eval/time-limit-ms 10000})
+           result (eval/run-test
+                   {:seon.sci.eval/ctx ctx
+                    :seon.test/var (:seon.sci.admit/value evaluation)
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.db/connection connection})]
+       (is (= 0 (:seon.test/error-count result)))
+       (is (= 1 (:seon.test/pass-count result)))))))

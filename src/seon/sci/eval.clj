@@ -4653,10 +4653,14 @@
     [:or :seon.test.runner/captured-results :seon.test/not-runnable-error]]}
   [{ctx :seon.sci.eval/ctx test-vars :seon.test/vars
     limit :seon.sci.eval/time-limit-ms :as request}]
-  (kernel/with-arm
-   ctx limit
-   (fn [_]
-     (test.runner/run-vars! test-vars request))))
+  ;; A test body prints to the streams of the thread running it, as a
+  ;; compiled test does: SCI's own *out*, *err* and *in* are unbound there.
+  (let [out *out* err *err* in *in*]
+    (kernel/with-arm
+     ctx limit
+     (fn [_]
+       (sci/binding [sci/out out sci/err err sci/in in]
+         (test.runner/run-vars! test-vars request))))))
 
 (defn run-test
   "Invoke one Var through the selected-Var capture owner under the SCI bound."
