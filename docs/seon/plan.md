@@ -120,10 +120,18 @@ frame in 64 stack frames). That is §5 step 4, not part of this task.
 Each is small, names its proof and what it makes measurably better.
 
 1. **Honest measurement** (§4), then restart default onto HEAD. Better by: reply cost 28 MB → ~2 GB on the same form.
-2. **Delete the cost-comparison machinery** (Sonnet, ~1 h; fable-simplify §3): `seon.profile.measurement` and its schema
-   and test, `seon.health/definition-comparisons` and its schema, 7 of 8 `seon.config.test.cost` dials, the hand-read
-   `ThreadMXBean` in five tests → `seon.profile/measure`. Retire COST-REG slices 2–3 in the card. Better by: src −600,
-   one fewer transaction per request (`a-test-run-upserts-three-hundred-measurement-rows`).
+2. **Latest performance numbers, stored cheaply, and a compact diff to main in every reply** (owner, 2026-10-10).
+   One row per function, test and schema validator holds its latest numbers: calls, CPU, allocation and ms, as a
+   rolling average updated in place. These attributes are declared without history and upserted only when a number
+   moves meaningfully, inside the transaction the request already writes. Slow paths are one query. Main's rows are
+   the same rows read on main, so the diff to main is a join. Each reply and the agent's context show the cost of the
+   request plus a compact diff to main for every function, test and schema it touched, always on. Interpreted
+   numbers on a branch are shown as guidance; the compiled check at merge flags real regressions for root.
+   Schema validation cost is measured per schema, so expensive checks become visible (a database value is checked
+   as a database value, never by walking it). This reshapes `seon.profile.measurement` and COST-REG slice 1 into
+   that one store rather than deleting them. It deletes the per-request upsert of about 300 measurement rows, the
+   7 unused `seon.config.test.cost` dials, `seon.health/definition-comparisons` and the hand-read `ThreadMXBean`
+   test helpers. Better by: "which functions are slow" is one query, and an agent sees its cost delta on every change.
 3. **Second chain run, non-platform**: `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
    (designed-task-examples A: three defects, red `are` table and seeded idempotence property already written as
    prototypes). Stages 3–4 Sonnet, stage 5 DeepSeek-flash as implementer with a Claude lane watching. Better by: one
@@ -180,13 +188,23 @@ Each is small, names its proof and what it makes measurably better.
   only for evidence that would otherwise be lost.
 - 2026-10-09 Budgets with four meters (calls, CPU, allocation, storage) estimated by the designer; the agent pushes back
   with data; root decides; completion is automatic when proofs are green.
+- 2026-10-10 Doc sections are entities identified by path#anchor, with parsed references as facts; files are write-back.
+- 2026-10-10 The database is the source of truth: Seon persists to disk and can start from disk, and the conversions
+  are lossless, proven by a round-trip test (tasks, code, schemas, docs).
+- 2026-10-10 Search: the fork's Lucene secondary index (`:scriptum`) now; EmbeddingGemma vectors (`:proximum`) only
+  after a chain run shows a lexical miss.
+- 2026-10-10 Latest performance numbers are stored per function, test and schema validator, as rolling values
+  updated in place with no history. Every reply carries a compact cost diff to main, always on; live feedback is
+  automated wherever it is cheap.
+- 2026-10-10 Flow procs move to platform threads (tens of KB each, a few per agent). Moving Datahike's writer into
+  Flow is deferred; it is correct as it is.
 - 2026-10-08 A question task declares its answer's Malli schema; the answer is ordinary Datahike data.
 
 ## 8. Open questions for the owner
 
 Each with options and a recommendation; findings are stated as facts checked today.
 
-**Q1. Where do cross-cutting docs live, so agents grepping code see them?**
+**Q1. Where do cross-cutting docs live, so agents grepping code see them?** *Decided 2026-10-10: (a), doc sections as entities.*
 Facts: docstrings are already database facts with full history (`:seon.fn/doc`, `:seon.ns/doc`; 4,234 functions have
 doc history; `seon.sci.arm/arm!`'s docstring has 6 versions since 2026-09-28). `seon.ref` already parses every Markdown
 text once (commonmark, cached by digest) into headings, code spans and links, resolves them, and reports unresolved
@@ -206,7 +224,7 @@ greps them; the database index is what the agent needs. Markdown inside doc enti
 (nextjournal/markdown → hiccup through the one printer's HTML face). What this never builds: a second resolver, a docs
 folder scanner, prose in `ns` forms.
 
-**Q2. What does a task author, and what is derived?**
+**Q2. What does a task author, and what is derived?** *Decided 2026-10-10: the database is the source of truth; files are lossless write-back and boot input (see §7).*
 Recommendation (root's proposal, with one change): authored = `:seon.task/name`, `:seon.task/intent` (one Markdown
 paragraph with typed references), `:seon.task/must-read`, later `:seon.task/depends-on`; derived = proofs (deftests
 tagged with the task), interface (functions tagged), schemas (from those contracts), status (proofs green). No budget
@@ -218,7 +236,7 @@ agents cannot record their output. Options: (a) write-back for task files throug
 (b) the database is the task's home and the EDN file is generated at commit; (c) keep hand-edited files.
 Recommendation: (a); it is the same mechanism functions use.
 
-**Q3. Is full history really kept?**
+**Q3. Is full history really kept?** *Under investigation (lane commit-id-gc): stored commit ids may stop loading after the 1 h window.*
 Verified at the REPL (JVM mode, default): `d/history` sees 819 transactions spanning 265 hours (2026-09-28 to today);
 `d/as-of` at 2026-10-03 answers 5,610 functions against 5,874 now; the last collection (2026-10-09, 4.3 GB reclaimed,
 792,620 objects swept) removed none of it. Why: with `:keep-history? true` retracted datoms live in the temporal
@@ -229,7 +247,7 @@ provenance beyond `:db/txInstant`. `as-of`, `since` and `history` are unaffected
 Options: (a) keep the 1 h window; (b) lengthen it for provenance. Recommendation: (a); nothing we do needs old
 snapshots. Record this in the datahike skill (verify, then cite `datahike.gc/reachable-in-branch`).
 
-**Q4. Search: lexical, semantic or both?**
+**Q4. Search: lexical, semantic or both?** *Decided 2026-10-10: (a) now, (b) later.*
 Facts: our Datahike fork has secondary indexes declared in schema and maintained in-transaction
 (`datahike.index.secondary`): `:scriptum` is Lucene full text with branch-aware copy-on-write
 (`datahike.index.secondary.scriptum`), `:proximum` is an HNSW vector index; `:db.secondary/only` keeps a large value in
@@ -250,14 +268,14 @@ Recommendation: (a) now, one schema declaration and one `my.program/search` face
 only after a chain run shows a discovery the lexical search missed. What this never builds: a Seon search module or a
 sidecar store for vectors.
 
-**Q5. Accept the one-system design as decided?** The writer stays as Datahike's go-loops observed through
+**Q5. Accept the one-system design as decided?** *Decided 2026-10-10: (a); Datahike writer into Flow deferred.* The writer stays as Datahike's go-loops observed through
 `:write-fn-map`; all procs on platform threads; the fork's commit runs synchronously on one platform thread for exact
 commit cost; GC and JIT shown as a labelled residual, never apportioned. Options: (a) accept all four; (b) only the
 turn proc on platform (lift `var-process`'s `:mixed` refusal); (c) keep commit as wall time, labelled shared.
 Recommendation: (a). It is what §4 is written against; (b) saves two threads per agent for a second rule; (c) leaves
 the konserve commit writes (53 MB sampled on one redefinition) unattributed.
 
-**Q6. Rule on the test design.** From fable-simplify: cut COST-REG slices 2–3 and the acceptance key; a stored member cost
+**Q6. Rule on the test design.** *Decided 2026-10-10: proofs as written (an `are` table with the reported input plus counts), and in addition latest numbers stored and a cost diff to main in every reply (§5 step 2).* From fable-simplify: cut COST-REG slices 2–3 and the acceptance key; a stored member cost
 is shown, never red by itself; properties optional (one seeded deftest where a one-line law exists); guards dropped;
 the growth test retired; the proof is an `are` table holding the reported input plus one `is` on a count. Two places I
 disagree with the current rulings and ask for a change: prove ten tasks first, not thirty (ten is one afternoon and
