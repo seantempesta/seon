@@ -242,6 +242,11 @@ rest live in §0 as items 12 (default runs HEAD and the lag workarounds; A10) an
   reaching test green); a DeepSeek root agent handles root's requests, platform work included, through root-specific
   tasks and a root system context that grant it more freedom; DeepSeek agents triage the backlog; paid rounds have
   no cap and report their tokens and cost daily. Designed in card ROOT-AGENT (lane fable-root-agent).
+- 2026-10-10 (root, owner asleep) Test evidence readers accept the agent's own evaluator plus compiled: compiled is
+  the reference semantics and host-bound tasks complete on compiled runs; an interpreted green never counts as root's
+  compiled proof. Fixtures are data: the namespace entity holds its fixture symbols by kind (`:each`, `:once`), written
+  by the REPL's `use-fixtures` and by file indexing; no other unnamed top-level form is kept, so REPL expressions stay
+  ephemeral.
 - 2026-10-10 Owner: when the owner is not actively replying, root decides with the recommended option, proceeds and
   reports the decision; it never blocks lanes on a question.
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
