@@ -1178,20 +1178,20 @@
   (or (:seon.program/definition-digest row) (program/definition-digest row)))
 
 (defn- function-digests
-  "Read stored definition identities in one query; only legacy rows need a pull."
+  "Stored definition identities from two attribute ranges; legacy rows alone need a pull."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:map-of :qualified-symbol :seon.program/definition-digest]]}
   [database]
-  (let [rows (db/q '[:find ?sym ?digest
-                     :where [?row :seon.fn/sym ?sym]
-                            [(get-else $ ?row :seon.program/definition-digest "") ?digest]]
-                   database)]
-    (when (:seon.db/invalid-read rows)
-      (throw (ex-info "Definition identities could not be read." rows)))
-    (into {} (map (fn [[sym digest]]
-                    [sym (if (seq digest) digest
-                           (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))]))
-          rows)))
+  (let [symbols (db/datoms database :aevt :seon.fn/sym)
+        digests (db/datoms database :aevt :seon.program/definition-digest)]
+    (doseq [result [symbols digests]]
+      (when (db/read-refusal? result)
+        (throw (ex-info "Definition identities could not be read." result))))
+    (let [by-entity (into {} (map (juxt :e :v)) digests)]
+      (into {} (map (fn [{entity :e sym :v}]
+                      [sym (or (not-empty (get by-entity entity))
+                               (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))]))
+            symbols))))
 
 (defn- loaded-digests
   "`function-digests` of a loaded program, once per store and commit: every
