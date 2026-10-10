@@ -392,7 +392,8 @@
        "(deftest ^{:seon/tasks #{'tq.shape/area}} area-test (is (= \"25\" (label (area 5)))))\n"))
 
 (def ^:private shape-schemas
-  "#:tq.shape{:radius :int\n           :side   :int}\n")
+  ;; :radius is authored over two lines: a replaced value keeps that layout
+  "#:tq.shape{:radius [:and {:description \"A radius.\"}\n                    :int]\n           :side   :int}\n")
 
 (defn- schema-entities
   "The schema entities publication declares for `forms` over `database`'s projection."
@@ -419,7 +420,7 @@
            entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
            execution (support/running-cluster running)
-           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
+           fix (str "(seon.schema/register! :tq.shape/radius [:and {:description \"A radius.\"} [:int {:min 0}]])\n"
                     "(seon.schema/register! :tq.shape/area [:int {:min 0}])\n"
                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :tq.shape/area]}\n  [r]\n  (* r r))\n"
                     "(defn label\n  \"The area's label.\"\n  {:malli/schema [:=> [:cat :tq.shape/area] :string]}\n  [a]\n  (str a))")]
@@ -435,8 +436,13 @@
            (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
            (is (= #{path schema-path} (set (get-in landed [:seon.source/written :seon.source/changed-paths])))
                "the function's file and its schema resource are written")
-           (is (= {:tq.shape/radius [:int {:min 0}] :tq.shape/side :int :tq.shape/area [:int {:min 0}]} file-schemas)
+           (is (= {:tq.shape/radius [:and {:description "A radius."} [:int {:min 0}]] :tq.shape/side :int
+                   :tq.shape/area [:int {:min 0}]}
+                  file-schemas)
                "the resource declares the replaced and the added schema beside the unchanged one")
+           (is (str/includes? (slurp (io/file root schema-path))
+                              ":radius [:and {:description \"A radius.\"}\n                    [:int {:min 0}]]")
+               "the replaced value keeps its authored layout")
            (is (str/includes? (slurp (io/file root schema-path)) ":side   :int") "an unchanged entry keeps its text")
            (is (= {:tq.shape/radius (held :tq.shape/radius) :tq.shape/area (held :tq.shape/area)}
                   (select-keys published [:tq.shape/radius :tq.shape/area]))

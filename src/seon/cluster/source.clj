@@ -1369,9 +1369,42 @@
   [k]
   (str "resources/" schema.edn/default-resource "/" (namespace k) ".edn"))
 
+(defn- same-value?
+  "Whether the nodes `a` and `b` read as the same value (a node that does not read is never the same)."
+  {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] [:fn rewrite-clj.node/node?]] :boolean]}
+  [a b]
+  (try (= (node/sexpr a) (node/sexpr b)) (catch Exception _ false)))
+
+(defn- relaid
+  "`new` (a parsed value node) in the layout of `old`, the value it replaces:
+  a part reading as before keeps its node, and a collection of the same kind
+  keeps its whitespace and comments between items, recursively, an added item
+  taking the last separator; any other part is `new`'s. Reads as `new`."
+  {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] [:fn rewrite-clj.node/node?]] [:fn rewrite-clj.node/node?]]}
+  [old new]
+  (cond
+    (same-value? old new) old
+    (and (= (node/tag old) (node/tag new)) (#{:vector :list :map :set} (node/tag new)))
+    (let [children (vec (node/children old))
+          at (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
+          items (vec (remove node/whitespace-or-comment? (node/children new)))
+          gaps (mapv (fn [[a b]] (subvec children (inc a) b)) (partition 2 1 at))
+          gap #(get gaps % (or (peek gaps) [(node/spaces 1)]))]
+      (if (empty? at)
+        new
+        (node/replace-children
+         old
+         (-> (subvec children 0 (first at))
+             (into (mapcat (fn [i item]
+                             (cons (if (< i (count at)) (relaid (children (at i)) item) item)
+                                   (when (< i (dec (count items))) (gap i))))
+                           (range) items))
+             (into (subvec children (inc (peek at))))))))
+    :else new))
+
 (defn- schema-entry-edit
   "`children` (a schema resource map node's children) with `k`'s entry set to
-  `form`: its value replaced, its entry and the whitespace before it removed
+  `form`: its value replaced in the old value's layout (`relaid`), its entry and the whitespace before it removed
   when `form` is nil, or, for a new `k`, an entry inserted before the first
   greater key when the keys are sorted, else appended, separated as the
   file's first two entries are. `prefix` is the map's namespace qualifier."
@@ -1389,7 +1422,7 @@
                     [(node/spaces 1)])
         splice (fn [from to nodes] (into (into (subvec children 0 from) nodes) (subvec children to)))]
     (cond
-      (and at form) (assoc children (after-key at) (value-node))
+      (and at form) (assoc children (after-key at) (relaid (nth children (after-key at)) (value-node)))
       at (let [before (last (filter #(< % at) significant))
                value (after-key at)]
            (if before
