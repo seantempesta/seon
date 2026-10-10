@@ -34,6 +34,7 @@
             [seon.render.transcript :as transcript]
             [seon.render.value :as render.value]
             [seon.sci.eval :as eval]
+            [seon.test.runner :as runner]
             [seon.turn]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world])
@@ -270,14 +271,23 @@
   {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string]] :map]}
   [cost main cluster-name]
   (let [live (:seon.cost/live cost)
-        cost (dissoc cost :seon.cost/live)]
+        live-tests (:seon.cost/live-tests cost)
+        cost (dissoc cost :seon.cost/live :seon.cost/live-tests)
+        hysteresis (when (and main cluster-name) (dial main cluster-name :seon.config.fn.cost/hysteresis))
+        tests (when (and (seq live-tests) hysteresis)
+                (let [latest (runner/latest-results main (mapv :seon.test/sym live-tests))
+                      stored (if (:seon.error/at latest)
+                               {}
+                               (into {} (keep (fn [r] (when-some [b (:seon.test.member/alloc-bytes r)] [(:seon.test/sym r) b]))) latest))]
+                  (seon.batch/test-cost-diff live-tests stored hysteresis)))
+        cost (cond-> cost (seq tests) (assoc :seon.cost/diff tests))]
     (if (and (seq live) main cluster-name)
       (let [rows (db/q '[:find ?s ?d ?us :in $ [?s ...]
                          :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
                        main (mapv :seon.fn.cost/sym live))
             stored (if (db/read-refusal? rows) {} (into {} (map (fn [[s d us]] [s [d us]])) rows))
             diff (seon.batch/cost-diff live stored (dial main cluster-name :seon.config.fn.cost/hysteresis))]
-        (cond-> cost (seq diff) (assoc :seon.cost/diff diff)))
+        (cond-> cost (seq diff) (update :seon.cost/diff #(into (vec diff) %))))
       cost)))
 
 (defn- sci-run

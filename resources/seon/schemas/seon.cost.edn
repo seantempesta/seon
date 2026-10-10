@@ -34,7 +34,9 @@
   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
   [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
   [:seon.cost/step {:optional true} :seon.cost/step]
-  [:seon.cost/live {:optional true} :seon.cost/live]]
+  [:seon.cost/live {:optional true} :seon.cost/live]
+  [:seon.cost/tests {:optional true} :seon.cost/tests]
+  [:seon.cost/live-tests {:optional true} :seon.cost/live-tests]]
  :seon.cost/step
  [:map {:description "The agent's turn step as the proc thread counted it: bytes allocated and CPU time between the step's start and its end, on a platform thread (exact, unlike a virtual thread, which has no counter). Producer: seon.flow/var-process. Consumer: the reply."}
   [:seon.cost/alloc-mb :seon.cost/alloc-mb]
@@ -53,6 +55,15 @@
  :seon.cost/live
  [:vector {:description "The request's own per-definition values from its sink: what the reply compares. Producer: seon.profile/live-costs."}
   :seon.fn.cost/entity]
+ :seon.cost/tests
+ [:map {:description "The test step's members this request ran, summed from their cost attributes (:seon.test.member/*): allocation in megabytes on their body threads, wall milliseconds of their bodies, and how many. Producer: seon.turn/test-step. Consumer: the reply."}
+  [:seon.cost/alloc-mb :seon.cost/alloc-mb]
+  [:seon.cost/ms :seon.cost/ms]
+  [:seon.cost/count :seon.cost/count]]
+ :seon.cost/count [:int {:min 0 :description "How many members the test step ran in this request."}]
+ :seon.cost/live-tests
+ [:vector {:description "The members the test step ran in this request, with their cost attributes: what the reply compares with main's latest results for the same tests. Producer: seon.turn/test-step."}
+  [:map [:seon.test/sym :seon.test/sym] [:seon.test.member/alloc-bytes :seon.test.member/alloc-bytes]]]
  :seon.cost/subjects
  [:set {:description "The definitions and tests a request defined or ran, and the schemas it measured: what cost-diff pulls from main by identity."}
   :seon.cost.comparison/subject]
@@ -61,6 +72,7 @@
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
   [:seon.cost/step {:optional true} :seon.cost/step]
+  [:seon.cost/tests {:optional true} :seon.cost/tests]
   [:seon.cost/diff {:optional true} :seon.cost/diff]
   [:seon.cost/stages {:optional true} :seon.cost/stages]
   [:seon.cost/calls {:optional true} :seon.cost/calls]

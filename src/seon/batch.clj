@@ -255,6 +255,28 @@
                       ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))
         live))
 
+(defn test-cost-diff
+  "The tests the request ran (`live`: their members' `:seon.test.member/alloc-bytes`)
+  beside main's latest members' (`stored`: test symbol -> bytes): one comparison
+  per test main stores nothing for (:new) or whose allocation moved by the
+  factor `hysteresis` either way. Reads nothing stored itself."
+  {:malli/schema [:=> [:cat :seon.cost/live-tests [:map-of :qualified-symbol :seon.test.member/alloc-bytes]
+                       :seon.config.fn.cost/hysteresis]
+                  :seon.cost/diff]}
+  [live stored hysteresis]
+  (into []
+        (keep (fn [{sym :seon.test/sym bytes :seon.test.member/alloc-bytes}]
+                (let [main-bytes (get stored sym)
+                      ratio (when (and main-bytes (pos? main-bytes)) (/ (double bytes) main-bytes))]
+                  (when (or (nil? main-bytes) (and ratio (or (>= ratio hysteresis) (<= ratio (/ 1.0 hysteresis)))))
+                    (cond-> {:seon.cost.comparison/subject sym
+                             :seon.cost.comparison/measure :alloc-bytes
+                             :seon.cost.comparison/live (double bytes)
+                             :seon.cost.comparison/flags (if main-bytes #{} #{:new})}
+                      main-bytes (assoc :seon.cost.comparison/main (double main-bytes))
+                      ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))
+        live))
+
 (defn arm-measures
   "The allocation and CPU time of the forms' evaluation arms (each arm's
   platform worker and the platform threads that adopted it), summed; a measure

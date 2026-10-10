@@ -146,13 +146,22 @@
    (fn [running agent-id _]
      (answer running agent-id "sci" "(in-ns 'request.cost.live) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")
      (let [cost (support/mcp-request
-                 (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (reduce + (range 20000)) (inc x))"))
+                 (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (reduce + (range 20000)) (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))) (clojure.test/is (= 2000000 (count (vec (range 2000000))))))"))
            entry (first (filter #(= 'request.cost.live/tiny (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
        (is (some? entry) "the very same reply compares the redefined function")
        (is (= :self-us (:seon.cost.comparison/measure entry)))
        (is (pos? (:seon.cost.comparison/live entry 0.0)) "the live side is the request's own measurement")
        (is (not (contains? entry :seon.cost.comparison/main)) "main stores nothing for a function it has never run")
-       (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry)))))))
+       (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry)))
+       (let [test-entry (first (filter #(= 'request.cost.live/tiny-test (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
+         (is (some? test-entry) "the very same reply compares the test its step ran")
+         (is (= :alloc-bytes (:seon.cost.comparison/measure test-entry)))
+         (is (pos? (:seon.cost.comparison/live test-entry 0.0)) "the live side is the member the step just ran")
+         (is (pos? (:seon.cost.comparison/main test-entry 0.0)) "main's latest member of the same test is the other side")
+         (is (<= 1.41 (:seon.cost.comparison/ratio test-entry 0.0)) "a test that got heavier by the hysteresis factor is shown")
+         (is (empty? (:seon.cost.comparison/flags test-entry))))
+       (is (pos? (get-in cost [:seon.cost/tests :seon.cost/alloc-mb] 0.0)) "the step's members sum")
+       (is (= 1 (get-in cost [:seon.cost/tests :seon.cost/count])))))))
 
 (deftest a-function-defined-and-called-in-one-request-is-compared-and-stored
   (support/with-running-agent

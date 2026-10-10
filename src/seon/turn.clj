@@ -65,6 +65,8 @@
   (delay (requiring-resolve 'seon.context/task-done?)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
+(defonce ^:private test-latest-results
+  (delay (requiring-resolve 'seon.test.runner/latest-results)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-reaching
@@ -5118,10 +5120,28 @@
       reaching (assoc :seon.turn.loop/reaching (request-summary reaching)))))
 
 (defn- shown-tests
-  "The step's `tests` as the reply shows them: the summaries alone, the commit being the queue's."
+  "The step's `tests` as the reply shows them: the summaries alone, the commit being the queue's and the members' cost the cost's."
   {:malli/schema [:=> [:cat :seon.turn.loop/test-summary] :seon.turn.loop/test-summary]}
   [tests]
-  (dissoc tests :seon.source/commit-id))
+  (dissoc tests :seon.source/commit-id :seon.cost/tests :seon.cost/live-tests))
+
+(defn- test-costs
+  "The members `runs` executed in this step, read from the connection's latest results for them: their
+  allocation, in bytes, per test (`:seon.cost/live-tests`) and summed with their wall milliseconds
+  (`:seon.cost/tests`); nil when none carries a cost."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:maybe :map]]]
+                  [:maybe [:map [:seon.cost/tests :seon.cost/tests] [:seon.cost/live-tests :seon.cost/live-tests]]]]}
+  [database runs]
+  (let [symbols (into [] (comp (mapcat executed) (map :seon.test/sym) (distinct)) (remove #(or (nil? %) (:seon.error/at %)) runs))
+        members (when (seq symbols)
+                  (let [latest (@test-latest-results database symbols)]
+                    (when-not (:seon.error/at latest)
+                      (filterv :seon.test.member/alloc-bytes latest))))]
+    (when (seq members)
+      {:seon.cost/live-tests (mapv #(select-keys % [:seon.test/sym :seon.test.member/alloc-bytes]) members)
+       :seon.cost/tests {:seon.cost/alloc-mb (/ (Math/round (* 1e4 (/ (transduce (map :seon.test.member/alloc-bytes) + 0 members) 1e6))) 1e4)
+                         :seon.cost/ms (/ (Math/round (* 10.0 (transduce (map #(:seon.test.member/run-ms % 0.0)) + 0.0 members))) 10.0)
+                         :seon.cost/count (count members)}})))
 
 (defn- ran-something
   "`run` unless it executed nothing and left nothing unrun (the condition `my.test/check-now` reads), else nil:
@@ -5163,7 +5183,9 @@
           platform (when (vector? changed) (platform-proof (db/db connection) changed))
           proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
-      (summary (ran-something proofs) (ran-something (run-reaching execution (max 1 left) changed platform)) platform))
+      (let [reaching (run-reaching execution (max 1 left) changed platform)]
+        (some-> (summary (ran-something proofs) (ran-something reaching) platform)
+                (merge (test-costs (db/db connection) [proofs reaching])))))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error
@@ -5429,6 +5451,8 @@
                                                               (let [sink (:seon.batch/sink seon.batch/*world*)]
                                                                 {:seon.cost/live (profile/live-costs sink (db/sink-digests (db/db connection) sink)
                                                                                                      floor top)})))
+                                                    (and (:seon.cost/tests tests) (:seon.cost/counts report))
+                                                    (update :seon.cost/counts merge (select-keys tests [:seon.cost/tests :seon.cost/live-tests]))
                                                     (and step-cost (:seon.cost/counts report))
                                                     (assoc-in [:seon.cost/counts :seon.cost/step] step-cost))))]
                ;; Run closure is an armer wake because first-agent

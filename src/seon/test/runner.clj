@@ -1419,7 +1419,8 @@
                                :seon.test.member/pass-count :seon.test.member/fail-count
                                :seon.test.member/error-count :seon.test.member/began?
                                :seon.test.member/ended? :seon.test.member/error
-                               :seon.test.member/reach-digest]
+                               :seon.test.member/reach-digest :seon.test.member/calls
+                               :seon.test.member/alloc-bytes :seon.test.member/run-ms]
                               (mapv second current)))]
     (mapv
      (fn [[run] member]
@@ -2020,7 +2021,8 @@
                                     :seon.test/run-at (:seon.test.run/at run)
                                     :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
                                     :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
-                                   (select-keys member [:seon.test.member/reach-digest]))
+                                   (select-keys member [:seon.test.member/reach-digest :seon.test.member/calls
+                                                 :seon.test.member/alloc-bytes :seon.test.member/run-ms]))
                       ;; Reports only: text is built where it is shown
                       ;; (`seon.test/failure-message`), never per read.
                       (seq member-reports)

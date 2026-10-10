@@ -5,8 +5,8 @@
 {:subject
  [:or {:description "What a comparison is about: a function or test symbol, or a schema key."} :qualified-symbol :qualified-keyword]
  :measure
- [:enum {:description "The compared measure: a function's per-call self or inclusive microseconds or its call count (:seon.fn.cost/*). Later stages add the test and schema measures."}
-  :self-us :total-us :calls]
+ [:enum {:description "The compared measure: a function's per-call self or inclusive microseconds or its call count (:seon.fn.cost/*). A test's member allocation in bytes (:seon.test.member/alloc-bytes). Later stages add the schema measures."}
+  :self-us :total-us :calls :alloc-bytes]
  :live
  [:double {:min 0.0 :description "This request's own measurement, read from its sink before anything is stored."}]
  :main

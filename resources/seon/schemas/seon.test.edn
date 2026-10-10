@@ -75,6 +75,9 @@
              [:seon.test/unchanged {:optional true} :seon.test/unchanged]
              [:seon.test/recorded-basis-t {:optional true} :seon.test/recorded-basis-t]
              [:seon.test/run {:optional true} :seon.test/run]
+             [:seon.test.member/calls {:optional true} :seon.test.member/calls]
+             [:seon.test.member/alloc-bytes {:optional true} :seon.test.member/alloc-bytes]
+             [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]
              [:seon.test/failing-assertions
               {:optional true}
               :seon.test/failing-assertions]
