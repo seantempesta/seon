@@ -25,6 +25,15 @@
              :kind :function
              :intent "`seon.cluster.source/land!` answered some refusals without `:seon.error/type` (comparison refusals from `seon.program/digest-map-refusal`, `seon.cluster.source/accept-merge!`'s evidence refusals) and a conflict as a bare `seon.program/three-way` value, so `seon.turn/landing-tx` invented `:seon.source/landing-refused`. Done when each is built by `seon.error.refusal/error` under its variant (`:seon.program/digest-map-refusal`, `:seon.source/test-evidence-error`, `:seon.source/conflict-error`)."
              :must-read #{seon.cluster.source/land! seon.cluster.source/accept-merge! seon.program/digest-map-refusal seon.turn/landing-tx seon.error.refusal/error}}
+ #:seon.task{:name "a-landing-resumes-from-its-recorded-evidence"
+             :kind :function
+             :intent "A landing that stops after `seon.cluster.source/accept-merge!` (write-back or commit refused, a crash) leaves no record a retry can resume from, and `seon.cluster.source/write-back!` reloads its inputs by commit id through `datahike.api/commit-as-db`, which collection may have removed (astra day audit, finding 2c). Done when the accepted merge (its base and merge commit, run, identities) and each completed effect (files installed with their candidate digests, the git commit) are facts on the merge task, the inputs are read through retained lineage (`datahike.api/as-of` at a recorded basis-t) rather than commit ids, and a retry skips what the facts show done: committed answers the commit; installed and uncommitted commits only."
+             :must-read #{seon.cluster.source/land! seon.cluster.source/write-and-commit! seon.cluster.source/write-back! seon.turn/landing-tx}
+             :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md#files-and-git"}}
+ #:seon.task{:name "a-written-schema-keeps-its-authored-layout"
+             :kind :function
+             :intent "`seon.cluster.source/write-back!` writes a replaced schema value as the stored `:seon.schema/form` text on one line (live landing of r3-ref-section's `:seon.ref/section-error` into a checkout copy, 2026-10-10: a three-line entry became one 230-character line). Done when a replaced value keeps the indentation the entry had, e.g. by laying out the new form with the old value's column (rewrite-clj `rewrite-clj.zip/replace` of a node pretty-printed by the value printer's layout), proven by re-reading to the same digest."
+             :must-read #{seon.cluster.source/write-back!}}
  #:seon.task{:name "a-landing-is-one-git-commit"
              :kind :function
              :intent "A landing's files reached git only through `bin/lane commit`, a Claude-lane tool. Done when `seon.cluster.source/commit!` makes one `git commit --only` of exactly the landing's written paths through `babashka.process/shell`, its message naming the task, merge task, agent, gate run and merge commit, and refuses `:seon.git/commit-error` when anything else is staged in the index (the rule `bin/lane commit` enforces)."

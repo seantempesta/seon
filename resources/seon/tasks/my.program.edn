@@ -1,4 +1,8 @@
-[#:seon.task{:name "an-agent-cannot-see-or-choose-its-change"
+[#:seon.task{:name "proposals-refuses-its-own-result-on-main"
+             :kind :function
+             :intent "`(my.program/proposals {:seon.db/db h})` on default's main (2026-10-10, archive 2d19dafb0, JVM mode as root) throws its output contract: entries at [0], [1] and [2] lack `:seon.task/proposal`, `:seon.task/branch`, `:seon.task/commit`, `:seon.task/run-id`, `:seon.task/program` and hold an empty `:seon.task/proved`, so root cannot list proposals. Done when every entry it answers is a proposal of `:seon.task/proposal-view` (or it omits merge tasks with no proposal row), with the regression on a main holding such a merge task."
+             :must-read #{my.program/proposals seon.task/propose! seon.turn/landing-tx}}
+ #:seon.task{:name "an-agent-cannot-see-or-choose-its-change"
              :kind :function
              :intent "(my.program/overrides {}) answers [] on a branch with 21 changed identities; propose-merge! takes only :seon.issue/id, sweeps in drift the branch inherits (my.plan-test/current-refuses-an-unknown-agent-by-name), omits deletions from `:seon.test/changed`, and sends its content as a pr-str string. Selection exists only in root's prepare-merge!."
              :must-read #{my.program/overrides my.program/propose-merge!}
