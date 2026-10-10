@@ -1072,6 +1072,25 @@
                           req nil)
        (eval/shown-result value req nil)))))
 
+(def ^:private ^java.lang.management.ThreadMXBean thread-mx
+  (java.lang.management.ManagementFactory/getThreadMXBean))
+
+(defn- jvm-evaluate
+  "The host evaluation of `form`: its value or error, with the evaluating
+  thread's allocation and CPU as the evaluation `arm-measures` sums; -1 on a
+  thread HotSpot does not count (a virtual thread)."
+  {:malli/schema [:=> [:cat :map :any :any] :map]}
+  [_ form _]
+  (let [bytes0 (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean thread-mx)
+        cpu0 (.getCurrentThreadCpuTime thread-mx)
+        outcome (try {:seon.batch/value (eval form)}
+                     (catch Throwable t {:seon.batch/error t}))
+        bytes1 (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean thread-mx)
+        cpu1 (.getCurrentThreadCpuTime thread-mx)]
+    (assoc outcome :seon.batch/evaluation
+           {:seon.eval/allocated-bytes (if (and (<= 0 bytes0) (<= bytes0 bytes1)) (- bytes1 bytes0) -1)
+            :seon.cost/cpu-ns (if (and (<= 0 cpu0) (<= cpu0 cpu1)) (- cpu1 cpu0) -1)})))
+
 (defn jvm-request
   "Return a host-read/eval pass with render settings acquired from its starting basis."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
@@ -1086,7 +1105,7 @@
      (merge {:seon.batch/basis database
              :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
             :seon.batch/read-next jvm-read-next
-            :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
+            :seon.batch/evaluate jvm-evaluate
             :seon.batch/ns-name (fn [_] (ns-name *ns*))
             :seon.batch/around (fn [{n :seon.batch/start-ns} body]
                                  (binding [*ns* (create-ns n)] (refer-clojure) (body)))

@@ -32,7 +32,11 @@
 (deftest a-jvm-reply-carries-its-request-cost
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [{total :seon.cost/ms stages :seon.cost/stages} (support/mcp-request (answer running agent-id "jvm" "(+ 1 2)"))]
+     (let [{total :seon.cost/ms stages :seon.cost/stages :as cost}
+           (support/mcp-request (answer running agent-id "jvm" "(count (vec (range 100000)))"))]
+       (is (pos? (:seon.cost/alloc-mb cost 0)) "an evaluated form's allocation is measured")
+       (is (contains? cost :seon.cost/cpu-ms) "an evaluated form's CPU time is measured")
+       (is (not (contains? cost :seon.cost/unmeasured)))
        (is (pos? total))
        (is (<= (reduce + (vals stages)) (+ total 0.5)))
        (is (every? #(contains? stages %) [:custody :evaluate :settle :print]))))))
