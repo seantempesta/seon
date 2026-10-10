@@ -212,3 +212,14 @@
            (is (contains? (:seon.cost.comparison/flags entry) :new) "main stores nothing for it")
            (is (<= (count entries) 10) "at most the top dial"))
          (finally (agent/release-context! home)))))))
+
+(deftest ^{:seon/tasks #{'seon.context/the-block-names-no-namespace}}
+  the-block-names-the-agents-current-namespace
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task connection agent-id)
+     (is (= 'tq.cs (get-in (context/current-state (db/db connection) agent-id) [:seon.context/turns :seon.context/namespace]))
+         "an agent that evaluated nothing is in its task's namespace")
+     (evaluate running agent-id "(ns tq.cs.elsewhere)")
+     (is (= 'tq.cs.elsewhere (get-in (block running agent-id) [:seon.context/turns :seon.context/namespace]))
+         "the namespace its latest form ended in"))))

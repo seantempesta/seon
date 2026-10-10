@@ -142,3 +142,14 @@
   (let [lines (:seon.help/lines (seon.bootstrap/help-value (seon.db/db) "help"))]
     (is (some #(clojure.string/includes? % "(deftest ^{:seon/tasks #{'") lines)
         "help teaches a deftest whose name carries :seon/tasks")))
+
+(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-in-ns-first-and-no-probing}}
+  help-teaches-locals-need-their-bindings-not-in-ns
+  (with-help-agent
+   (fn [connection]
+     (let [lines (:seon.help/lines (bootstrap/help-value @connection "help"))
+           defining (first (filter #(some (fn [form] (= 'defn (first form))) (taught-forms %)) lines))]
+       (is (= 'defn (first (first (taught-forms defining)))) "the definition lesson starts with defn, never in-ns")
+       (is (some #(str/includes? % ":seon.context/namespace") lines) "help says the block names the agent's namespace")
+       (is (some #(and (str/includes? % "locals") (str/includes? % "binding")) lines)
+           "help states that a body's locals exist only inside their binding")))))

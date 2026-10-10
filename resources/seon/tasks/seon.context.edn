@@ -20,4 +20,9 @@
              :kind :function
              :intent "(`seon.context/proofs` (`seon.db/db`) 'seon.db/the-missing-connection-refusal-has-no-fix-key) at root's SCI REPL allocated 887 MB in 403 ms for one proof (the :large-allocation finding; fanout-3 run, default 324461975, 2026-10-09); the next call for another one-proof task allocated 48 MB in 24 ms. Done when one task's proofs cost in proportion to its proofs, measured with `seon.profile/measure` on a first call."
              :must-read #{seon.context/proofs}}
+ #:seon.task{:name "the-block-names-no-namespace"
+             :kind :function
+             :intent "`seon.context/current-state` carries no namespace, and `seon.repl/response-entries` shows `:ns` only when a form changed it, so after its first call nothing in the regenerated context says where the agent is: chain run 2's agents re-entered their namespace on 13 of 15 and 9 of 14 calls (DYNAMIC-CONTEXT stage 1). Done when the block's turns section holds `:seon.context/namespace`, the namespace the agent's latest evaluation ended in (`seon.turn/previous-ending-namespace`), else its held task's namespace."
+             :must-read #{seon.context/current-state seon.turn/previous-ending-namespace}
+             :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
 ]

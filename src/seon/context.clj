@@ -210,10 +210,21 @@
             diff (batch/cost-diff (vec live) stored (:seon.config.fn.cost/min-calls effective))]
         (not-empty (into [] (take (:seon.config.test.cost/top effective)) diff))))))
 
+(defn- agent-namespace
+  "The namespace `agent-id` is in: where its latest evaluation ended (its SCI context keeps `*ns*`),
+  else the namespace of the task `held`; nil with neither."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe :seon.context/task]]
+                  [:maybe :seon.ns/name]]}
+  [database agent-id held]
+  (or (when-let [eid (:db/id (db/pull database [:db/id] [:seon.agent/id agent-id]))]
+        (turn/previous-ending-namespace database eid))
+      (some-> (:seon.task/sym held) namespace symbol)))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status (`:done` once every
-  proof is green, then `:capped` with no turns left, else `:working`). Sections are
+  proof is green, then `:capped` with no turns left, else `:working`) and the namespace
+  it is in (`agent-namespace`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
   instant and content. `:seon.context/cost` holds the branch's stored function costs
@@ -234,13 +245,15 @@
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items) items (unshown database agent-id items)))
         cost (branch-cost database)
+        namespace (agent-namespace database agent-id held)
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (cond (all-green? proven) :done
                                                                            (zero? left) :capped
-                                                                           :else :working)))}
+                                                                           :else :working))
+                                       namespace (assoc :seon.context/namespace namespace))}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
           (seq reads) (assoc :seon.context/must-reads reads)
