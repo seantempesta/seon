@@ -2615,3 +2615,14 @@
                     :seon.db/connection connection})]
        (is (= 0 (:seon.test/error-count result)))
        (is (= 1 (:seon.test/pass-count result)))))))
+
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-dev-namespace-test-cannot-run-interpreted-on-a-cluster}}
+  a-test-namespace-requiring-a-dev-namespace-interprets
+  ;; `seon.dev.publication-launch-test` names `seon.operator`'s private
+  ;; `launch-form`; a host copy exposes only public Vars.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)]
+       (eval/enter-namespace! ctx (quote seon.dev.publication-launch-test))
+       (is (ifn? (:test (meta (sci/resolve ctx 'seon.dev.publication-launch-test/launch-loads-the-cluster-without-an-inlined-input-inventory)))))))))
