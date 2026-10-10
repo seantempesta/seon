@@ -15,8 +15,7 @@
   counted callees', from the same two clock reads). `transaction-observation`
   turns a sink's delta into the cost entities the world's next transaction
   carries (`:seon.fn.cost/entity`); `live-costs` reads a request's own sink for
-  its reply; `seon.profile.measurement` stores a definition's buckets when
-  they move.
+  its reply
 
   A host cell belongs to a loaded Var's JVM wrapper and is attributed to no
   cluster. A context cell belongs to one SCI installation's wrapper. Cells are
@@ -45,7 +44,7 @@
             [seon.schema.edn :as schema.edn])
   (:import [java.util Collections IdentityHashMap WeakHashMap]
            [java.util.concurrent ConcurrentHashMap]
-           [java.util.concurrent.atomic AtomicLongArray AtomicReference LongAccumulator LongAdder]
+           [java.util.concurrent.atomic AtomicLongArray LongAccumulator LongAdder]
            [java.util.function LongBinaryOperator Supplier]))
 
 (schema.edn/load! {})
@@ -95,14 +94,6 @@
   [value]
   (instance? ConcurrentHashMap value))
 
-(defn measured-mark?
-  "True for a cell's judged mark (an AtomicReference).
-
-  It holds the counts `significant-tx` last judged, nil before the first."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (instance? AtomicReference value))
-
 (defn counts?
   "True for a counts array: `buckets` histogram counts and the throws, as longs."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
@@ -125,8 +116,7 @@
 ;; from its wrapper's metadata, so a replaced wrapper or a released SCI
 ;; context releases its cell. One key has one cell per scope and context
 ;; (2,563 live cells over 2,560 keys, 2026-09-28). Written at installation
-;; only; read by `cells` and by `significant-tx` for the definitions an
-;; evaluation ran.
+;; only; read by `cells` and `cells-of`.
 (defonce ^:private roster (ConcurrentHashMap.))
 
 (def ^:private ^java.util.function.Function new-member-set
@@ -149,8 +139,7 @@
                         :seon.profile/max-counter (LongAccumulator. longest 0)
                         :seon.profile/entry-counter (LongAdder.)
                         :seon.profile/throw-counts (ConcurrentHashMap.)
-                        :seon.profile/entered (ThreadLocal.)
-                        :seon.profile/measured (AtomicReference.)})]
+                        :seon.profile/entered (ThreadLocal.)})]
     (.add ^java.util.Set (.computeIfAbsent ^ConcurrentHashMap roster
                                            [(:seon.profile/sym created) (:seon.profile/digest created)]
                                            new-member-set)

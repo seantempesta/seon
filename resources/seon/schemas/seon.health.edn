@@ -119,10 +119,9 @@
  ;; seon.health/regressions, never stored. A regression is the named schema a
  ;; comparison satisfies, so it disappears when the numbers recover. Boot
  ;; phases: the newest boot's process record against the newest boot of the
- ;; previous distinct program (published source commit). Definitions: a
- ;; symbol's newest measured digest against its previous one.
- :regressions [:or [:vector {:description "Every comparison of a stored measure's newest value with its value before the change: boot phases per program, definition buckets per digest."}
-                    [:or :seon.health/boot-comparison :seon.health/definition-comparison]]
+ ;; previous distinct program (published source commit).
+ :regressions [:or [:vector {:description "Every comparison of a stored measure's newest value with its value before the change: boot phases per program."}
+                    [:or :seon.health/boot-comparison]]
                :seon.error/value]
  :phase [:qualified-keyword {:description "A boot layer (seon.cluster.boot/boot-layers) whose own cost is compared: its milliseconds since the layer before it; :seon.boot/layers is the whole stored timeline."}]
  :before-ms [:int {:min 0}]
@@ -146,36 +145,6 @@
   [:seon.health/before-process :seon.health/before-process]
   [:seon.health/after-process :seon.health/after-process]
   [:seon.health/changed-at :seon.health/changed-at]]
- :before-bucket [:int {:min 0 :max 39}]
- :after-bucket [:int {:min 0 :max 39}]
- :buckets-up [:int {:description "After bucket minus before bucket: each one is a doubling (at least 1.41x past the measurement's hysteresis)."}]
- :before-calls [:int {:min 0 :description "Calls behind the previous digest's newest measurement."}]
- :before-digest :seon.program/definition-digest
- :after-digest :seon.program/definition-digest
- :before-us [:int {:min 0 :description "The before bucket's upper edge, 2^b ns, in microseconds."}]
- :after-us [:int {:min 0 :description "The after bucket's upper edge, 2^b ns, in microseconds."}]
- :added-ms [:int {:description "The median's move times the newest digest's calls, in milliseconds: (after-us - before-us) x calls / 1000, the time the change adds to the cluster for the work it measured."}]
- :measured
- [:map {:description "The members of a stored measurement the median comparison reads; the tail (p99) and errors are not read."}
-  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
-  [:seon.profile.measurement/digest :seon.profile.measurement/digest]
-  [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
-  [:seon.profile.measurement/calls :seon.profile.measurement/calls]
-  [:seon.profile.measurement/at :seon.profile.measurement/at]]
- :definition-comparison
- [:map {:description "A definition's newest measured digest's median beside its previous digest's."}
-  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
-  [:seon.health/before-bucket :seon.health/before-bucket]
-  [:seon.health/after-bucket :seon.health/after-bucket]
-  [:seon.health/buckets-up :seon.health/buckets-up]
-  [:seon.health/before-us :seon.health/before-us]
-  [:seon.health/after-us :seon.health/after-us]
-  [:seon.health/added-ms :seon.health/added-ms]
-  [:seon.health/before-calls :seon.health/before-calls]
-  [:seon.health/before-digest :seon.health/before-digest]
-  [:seon.health/after-digest :seon.health/after-digest]
-  [:seon.profile.measurement/calls :seon.profile.measurement/calls]
-  [:seon.health/changed-at :seon.health/changed-at]]
  :boot-regression
  [:map {:seon.health/severity 5 :seon.health/in [:seon.health/regressions] :seon.health/subject :seon.health/phase
         :seon.health/impact :seon.health/increase-ms :seon.health/at :seon.health/changed-at
@@ -185,16 +154,6 @@
   [:seon.health/phase :seon.health/phase]
   [:seon.health/increase-ms [:int {:min 51}]]
   [:seon.health/increase-percent [:int {:min 21}]]]
- :definition-regression
- [:map {:seon.health/severity 4 :seon.health/in [:seon.health/regressions] :seon.health/subject :seon.profile.measurement/sym
-        :seon.health/impact :seon.health/added-ms :seon.health/at :seon.health/changed-at
-        :seon.health/clues [[:seon.health/before-us] [:seon.health/after-us]
-                            [:seon.health/before-digest] [:seon.health/after-digest]]
-        :description "A definition whose median measures at least one bucket (a doubling) slower under its newest digest than under its previous one, each measured over at least 200 calls: the after digest is the change. It ranks by the milliseconds it adds (added-ms), not by its calls. The tail is never compared (rare heavy calls dominate it; transact! p99 0.54 s -> 1.07 s was 68 vs 795 calls with a flat p50)."}
-  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
-  [:seon.health/before-calls [:int {:min 200}]]
-  [:seon.profile.measurement/calls [:int {:min 200}]]
-  [:seon.health/buckets-up [:int {:min 1}]]]
  :program-unknown
  [:map {:seon.health/severity 10 :seon.health/subject :seon.error/operation
         :seon.health/in [:seon.health/program] :seon.health/clues [[:seon.error/message]]

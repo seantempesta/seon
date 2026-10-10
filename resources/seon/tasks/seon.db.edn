@@ -77,11 +77,6 @@
              :intent "Binding `seon.db/*read-evidence-sink*` around seon.problems failed-tests made it 1,572 ms against 180 ms uncaptured: 1,775 captured (`seon.db/datoms` :avet) reads at about 0.8 ms each (default, armed, 2026-09-28). The runner patch reads those members in one query (25 ms); the capture's own per-read cost remains for any reader that seeks per item. Done when a captured index seek costs within 2x of an uncaptured one."
              :must-read #{seon.db/read-evidence seon.db/datoms}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md"}}
- #:seon.task{:name "a-transaction-of-many-profile-measurements-hits-the-validation-node-limit"
-             :kind :function
-             :intent "Settlement refused: component validation-node-limit 250000 hit by a transaction with many :seon.profile.measurement rows (profile flush volume scales whole-value validation), and a run-owned would-be transaction carried 150+ :seon.profile.measurement upserts (tmp/store-growth/report.md). Done when a profile flush no longer makes one owning value whose validation scales with the measurements, the settlement is not refused at that volume, and the bound has a regression."
-             :must-read #{seon.db/db seon.profile/cell}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/store-growth--report.md"}}
  #:seon.task{:name "render-rejection-ai-fails-its-own-input-contract"
              :kind :function
              :intent "`seon.db/render-rejection-ai` fails its own input contract (five problems) for a transaction refused for a missing `:seon.turn/agent`: the error renderer cannot render an error (seen once, landing-reds-2). Done when a refusal for a missing `:seon.turn/agent` renders through its AI face with a regression on that exact transaction, and the contract admits every refusal the writer produces."

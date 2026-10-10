@@ -872,13 +872,6 @@
                                                              ;; never replaces or drops a published entry
                                                              (settled-into (:seon.batch/settled commit))
                                                              (assoc :seon.batch/commit (dissoc commit :seon.batch/settled)))
-                                               ;; a measuring failure stays beside the values and reaches the fault stage
-                                               (:seon.batch/measurement-error commit)
-                                               (update :seon.batch/diagnostics conj
-                                                       {:seon.error/message (str "settle: measurements not recorded: "
-                                                                                 (:seon.error/message (:seon.batch/measurement-error commit)))
-                                                        :seon.batch/stage :settle
-                                                        :seon.error/data (:seon.batch/measurement-error commit)})
                                                ;; a refusal or storage failure stays beside the values and
                                                ;; reaches the fault stage
                                                (or (:seon.batch/writer-refusal commit) (:seon.batch/storage-error commit))

@@ -457,41 +457,6 @@
                          :seon.health/changed-at (:seon.db.process/start-instant after)})))
               (sort-by key now))))))
 
-(defn definition-comparisons
-  "For each symbol measured under more than one digest in `measurements`, its
-  newest digest's median bucket beside its previous digest's, and the time the
-  move adds over the newest digest's calls (the tail is not compared: rare
-  heavy calls dominate it). A digest's value is its newest measurement;
-  digests order by it."
-  {:malli/schema [:=> [:cat [:sequential :seon.health/measured]]
-                  [:vector :seon.health/definition-comparison]]}
-  [measurements]
-  (into []
-        (mapcat (fn [[sym rows]]
-                  (let [by-digest (->> rows
-                                       (group-by :seon.profile.measurement/digest)
-                                       vals
-                                       (map #(apply max-key (comp inst-ms :seon.profile.measurement/at) %))
-                                       (sort-by (comp inst-ms :seon.profile.measurement/at)))
-                        [before after] (take-last 2 by-digest)]
-                    (when after
-                      [(let [before-us (quot (bit-shift-left 1 (:seon.profile.measurement/p50 before)) 1000)
-                             after-us (quot (bit-shift-left 1 (:seon.profile.measurement/p50 after)) 1000)
-                             calls (:seon.profile.measurement/calls after)]
-                         {:seon.profile.measurement/sym sym
-                          :seon.health/before-bucket (:seon.profile.measurement/p50 before)
-                          :seon.health/after-bucket (:seon.profile.measurement/p50 after)
-                          :seon.health/buckets-up (- (:seon.profile.measurement/p50 after) (:seon.profile.measurement/p50 before))
-                          :seon.health/before-us before-us
-                          :seon.health/after-us after-us
-                          :seon.health/added-ms (quot (* (- after-us before-us) calls) 1000)
-                          :seon.health/before-calls (:seon.profile.measurement/calls before)
-                          :seon.health/before-digest (:seon.profile.measurement/digest before)
-                          :seon.health/after-digest (:seon.profile.measurement/digest after)
-                          :seon.profile.measurement/calls calls
-                          :seon.health/changed-at (:seon.profile.measurement/at after)})]))))
-        (sort-by key (group-by :seon.profile.measurement/sym measurements))))
-
 (defn- stored
   "Every entity of `database` carrying `identity`, pulled by `attributes`:
   empty while `identity` or the first attribute is not installed (a store
@@ -508,10 +473,8 @@
 (defn regressions
   "Every comparison of a stored measure's newest value with its value before
   the change that moved it: boot phases from the process records boot writes
-  at seeding (`boot-comparisons`), definition buckets from the stored
-  measurements (`definition-comparisons`). A regression is the finding schema
-  a comparison satisfies (`:seon.health/boot-regression`,
-  `:seon.health/definition-regression`); nothing is stored.
+  at seeding (`boot-comparisons`). A regression is the finding schema a
+  comparison satisfies (`:seon.health/boot-regression`); nothing is stored.
 
   ## Examples
 
@@ -519,21 +482,15 @@
 
   ## Costs
 
-  Proportional to the process records and the measurements stored: one
-  query with a pull expression each."
+  Proportional to the process records stored: one query with a pull
+  expression."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.health/regressions]}
   [database]
   (let [records (stored database :seon.db.process/id
-                        [:seon.db.process/layers :seon.db.process/start-instant :seon.source/commit-id])
-        measurements (stored database :seon.profile.measurement/id
-                             [:seon.profile.measurement/sym :seon.profile.measurement/digest
-                              :seon.profile.measurement/p50
-                              :seon.profile.measurement/errors :seon.profile.measurement/calls
-                              :seon.profile.measurement/at])]
-    (cond (db/read-refusal? records) records
-          (db/read-refusal? measurements) measurements
-          :else (into (boot-comparisons records @(requiring-resolve 'seon.cluster.boot/boot-layers))
-                      (definition-comparisons measurements)))))
+                        [:seon.db.process/layers :seon.db.process/start-instant :seon.source/commit-id])]
+    (if (db/read-refusal? records)
+      records
+      (boot-comparisons records @(requiring-resolve 'seon.cluster.boot/boot-layers)))))
 
 (defn- state
   "The report's one word: faulted at the ranking's faulted severity; unknown

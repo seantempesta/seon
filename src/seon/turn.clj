@@ -23,7 +23,6 @@
             [seon.flow :as seon.flow]
             [seon.id :as id]
             [seon.profile :as profile]
-            [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.render :as render]
@@ -2872,16 +2871,6 @@
                                   :seon.db.process/id process)
                          (get terminal-ordinals (:seon.turn/id %)))
                        requests)
-        ;; The definitions these forms executed whose measurement moved,
-        ;; once for every attempt: measuring advances their cells' marks.
-        measured (measurement/significant-tx
-                  (db/db connection)
-                  (into #{} (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/executed])) requests))
-        ;; a measuring failure is delivered beside the values, never fails the settlement
-        prepared (if (:seon.error/at measured)
-                   (mapv #(update % :seon.turn.loop/receipt with-diagnostic measured) prepared)
-                   prepared)
-        measured (if (:seon.error/at measured) [] measured)
         ;; Built inside the committed phase: a refused read of the fault
         ;; window is a refused settlement the arm below closes, never an escape.
         transaction
@@ -2893,7 +2882,6 @@
          (-> (cond-> [] (seq program) (conj [:db.fn/call #'turn.batch/program-facts-call program-request program]))
              (into (receipt-settle-batch-tx receipts))
              (into (mapcat :seon.db/tx-data) prepared)
-             (into measured)
              ;; A settlement that already closes the turn needs no fold.
              (cond-> (not (some closing-settlement? prepared))
                (into (map (fn [[agent-id run-id]]

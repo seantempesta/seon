@@ -313,9 +313,7 @@
   ;; `seon.fn/declared-callers` one declaring row at a time, and ~100 its
   ;; executed set; neither has a consumer for a form that binds a Var (the
   ;; pre-turn refresh re-runs only read-only evaluations). The per-attribute
-  ;; census on default (2026-09-28) leaves 62-89 datoms besides profile measurements,
-  ;; which ride the commit by design and scale with the definitions whose
-  ;; timing moved (5-27 on default, every executed one in a fresh store).
+  ;; census on default (2026-09-28) leaves 62-89 datoms.
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [namespace-name (symbol (str "settle.probe" (id/id)))
@@ -330,8 +328,7 @@
                                           [?evaluation :seon.cluster.eval/ordinal 1 ?tx]]
                                         database run))
            stored (db/pull database [:seon.cluster.eval/executed] evaluation)
-           settled (count (remove #(= "seon.profile.measurement" (namespace (:a %)))
-                                  (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt))))]
+           settled (count (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt)))]
        (is (false? (get result "isError")))
        (is (empty? (:seon.cluster.eval/executed stored)) "a form stores no executed set")
        (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))

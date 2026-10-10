@@ -31,7 +31,6 @@
             [seon.batch]
             [seon.blob :as blob]
             [seon.fn.analyzer :as analyzer]
-            [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -869,11 +868,6 @@
   (let [conn (world/settlement-connection world)
         writer (:seon.db/writer world)
         head (db/db conn)
-        ;; once for every attempt: measuring advances the cells' marks
-        measuring (measurement/significant-tx
-                   head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
-        ;; a measuring failure rides the answer as a diagnostic; the commit proceeds without it
-        measured (if (:seon.error/at measuring) [] measuring)
         ;; under the settlement connection's own custody, never the calling
         ;; thread's: an entrant called from inside another evaluation records
         ;; on its own world's branch
@@ -881,9 +875,7 @@
                                     (db/call-with-custody {:seon.db/connection conn} #(writer conn tx)))]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
-                  (let [tx (try (let [tx (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))]
-                                  ;; measurements ride a commit that happens anyway, never one of their own
-                                  (cond-> tx (and (vector? tx) (seq tx)) (into measured)))
+                  (let [tx (try (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))
                                 (catch Throwable t {:seon.error/message (ex-message t) :seon.error/data (ex-data t)}))]
                     (cond
                       (map? tx) {:seon.batch/writer-refusal tx}
@@ -894,7 +886,7 @@
                                 {:seon.batch/applied true :seon.batch/tx-count (count tx) :seon.batch/after r})))))
         settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working]))
         first-try (try (attempt batch) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
-    (cond-> (if-not (:seon.batch/writer-refusal first-try)
+    (if-not (:seon.batch/writer-refusal first-try)
       ;; every path answers the state it settled
       (assoc first-try :seon.batch/settled (settled batch))
       ;; the head moved: re-derive on it; the settled state is what commits
@@ -902,8 +894,7 @@
             second-try (try (attempt rebased) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
         (assoc second-try
                :seon.batch/settled (settled rebased)
-               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))
-      (:seon.error/at measuring) (assoc :seon.batch/measurement-error measuring))))
+               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
 
 (defn- printed
   "The show stage's answer from the one printer's shown value, kept whole:

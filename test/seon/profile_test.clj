@@ -301,7 +301,7 @@
   ;; The counters are read directly: the per-cell predicates' own cells are
   ;; the observation, and none of them may move while the profile is read.
   (let [predicates '#{seon.profile/adder? seon.profile/accumulator? seon.profile/histogram?
-                      seon.profile/thread-local? seon.profile/throw-counts? seon.profile/measured-mark?}
+                      seon.profile/thread-local? seon.profile/throw-counts?}
         entered (fn [] (reduce (fn [found cell]
                                  (if (contains? predicates (:seon.profile/sym cell))
                                    (update found (:seon.profile/sym cell) (fnil + 0)
