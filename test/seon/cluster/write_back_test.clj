@@ -83,6 +83,28 @@
                              (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))
 
+(deftest write-back-refuses-a-root-that-is-not-an-absolute-checkout-and-writes-nothing
+  ;; A Seon JVM runs from its committed archive (data/source/<sha>), so a relative root
+  ;; such as "." resolved into the archive; write-back refuses such a root before reading anything.
+  (let [conn (:seon.db/connection (support/execution-handle nil))
+        base (support/temp-root "wb-root-refusal")
+        archive (io/file base "data" "source" "abc123")
+        sentinel (io/file archive "src" "x.clj")
+        accepted {:seon.program/identities #{}
+                  :seon.source/base-commit-id (random-uuid) :seon.source/commit-id (random-uuid)}
+        refusal (fn [root] (source/write-back! {:seon.db/connection conn :seon.source/accepted accepted :seon.fn/root root}))]
+    (io/make-parents sentinel)
+    (spit sentinel "(ns x)")
+    (try
+      (doseq [root ["." "tmp/checkout" (str base "/missing") (.getPath archive) (.getPath (io/file archive "src"))]]
+        (let [refused (refusal root)]
+          (testing "a relative, missing or archive-internal root is refused naming the root"
+            (is (= [:root-refused root]
+                   ((juxt :seon.source/write-back-refused :seon.error/offending) refused))))))
+      (is (= "(ns x)" (slurp sentinel)) "nothing was written")
+      (is (= :commit-absent (:seon.source/write-back-refused (refusal base))) "an absolute existing directory outside the archive is not refused for its root and reaches the write")
+      (finally (support/delete-root! base)))))
+
 (deftest ^{:seon.test/long "Two agent turns (the test on H, the replacement on C), one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and three analyses of a one-file fixture."
            :seon.test/long-ms 90000}
   an-agent-replacement-merges-and-writes-back-its-exact-span
@@ -93,7 +115,7 @@
         suffix (id/id)
         fixture-ns (symbol (str "wbfix" suffix ".core"))
         path (str "src/wbfix" suffix "/core.clj")
-        root (str "tmp/write-back-test-" suffix)
+        root (support/temp-root (str "write-back-test-" suffix))
         file (io/file root path)
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
@@ -157,7 +179,7 @@
             (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "One agent turn on C, one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and two analyses of a one-file fixture."
            :seon.test/long-ms 90000}
@@ -171,7 +193,7 @@
         suffix (id/id)
         fixture-ns (symbol (str "wbadd" suffix ".core"))
         path (str "src/wbadd" suffix "/core.clj")
-        root (str "tmp/write-back-add-test-" suffix)
+        root (support/temp-root (str "write-back-add-test-" suffix))
         file (io/file root path)
         added-fn [:seon.fn/sym (symbol (str fixture-ns) "triple")]
         added-test [:seon.test/sym (symbol (str fixture-ns) "triple-check")]
@@ -225,7 +247,7 @@
             (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (defn- merge-world!
   "The fixture file indexed onto H and a lane C where the agent submits
@@ -238,7 +260,7 @@
         h-conn (:seon.db/connection target)
         suffix (id/id)
         fixture-ns (symbol (str label suffix ".core"))
-        root (str "tmp/" label "-test-" suffix)
+        root (support/temp-root (str label "-test-" suffix))
         file (io/file root (str "src/" label suffix "/core.clj"))
         c (keyword (str label "-c-" suffix))
         made (volatile! [c])]
@@ -258,7 +280,7 @@
           (finally (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "One agent turn on C and one prepare-merge! whose file proof (one analysis of a one-file fixture) refuses before the gate runs."
            :seon.test/long-ms 30000}
@@ -316,7 +338,7 @@
         suffix (id/id)
         fixture-ns (symbol (str "wbtwo" suffix ".core"))
         test-ns (symbol (str fixture-ns "-test"))
-        root (str "tmp/wbtwo-test-" suffix)
+        root (support/temp-root (str "wbtwo-test-" suffix))
         paths [(str "src/wbtwo" suffix "/core.clj") (str "src/wbtwo" suffix "/core_test.clj")]
         test-source (str "(ns " test-ns "\n  \"Write-back test fixture.\"\n  (:require [clojure.test] [" fixture-ns "]))\n")
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
@@ -354,7 +376,7 @@
           (finally (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "Two analyses of a two-file fixture onto H, one replacement on a branch C, and one write-back (one analysis of the candidate)."
            :seon.test/long-ms 20000}
@@ -370,7 +392,7 @@
         suffix (id/id)
         helper-ns (symbol (str "wbfp" suffix ".helper"))
         core-ns (symbol (str "wbfp" suffix ".core"))
-        root (str "tmp/write-back-first-party-test-" suffix)
+        root (support/temp-root (str "write-back-first-party-test-" suffix))
         core-file (io/file root (str "src/wbfp" suffix "/core.clj"))
         callee [:seon.fn/sym (symbol (str core-ns) "callee")]
         replacement "(defn callee\n  \"Add one through the helper.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (helper/helper x))"
@@ -402,7 +424,7 @@
           (finally (agent/release-context! candidate))))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (deftest ^{:seon.test/long "Analyses of a one-file fixture onto H, three branches each replacing one declaration, and three write-backs (each analyzing the changed file and its candidate)."
            :seon.test/long-ms 20000}
@@ -415,7 +437,7 @@
         h-conn (:seon.db/connection target)
         suffix (id/id)
         fixture-ns (symbol (str "wbsib" suffix ".core"))
-        root (str "tmp/write-back-sibling-test-" suffix)
+        root (support/temp-root (str "write-back-sibling-test-" suffix))
         path (str "src/wbsib" suffix "/core.clj")
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         caller [:seon.fn/sym (symbol (str fixture-ns) "caller")]
@@ -458,4 +480,4 @@
             "a conflict writes nothing"))
       (finally
         (doseq [b branches] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))

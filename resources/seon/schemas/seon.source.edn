@@ -134,7 +134,7 @@
                [:seon.fn/root :seon.fn/root]],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
+               :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
               :write-back-error
               [:and :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]

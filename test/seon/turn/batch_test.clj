@@ -134,7 +134,7 @@
            agent-id (str "ns-form-" suffix)
            fixture-ns (symbol (str "nsform" suffix ".core"))
            path (str "src/nsform" suffix "/core.clj")
-           root (str "tmp/ns-form-test-" suffix)
+           root ((requiring-resolve 'seon.test-support/temp-root) (str "ns-form-test-" suffix))
            file (io/file root path)]
        (io/make-parents file)
        (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.string :as str]))\n\n"
@@ -178,7 +178,7 @@
          (finally
            (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
              (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
-           ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))
+           ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
 
 (deftest an-unchanged-committed-nilable-contract-is-admitted-and-written-back
   ;; the nilable-return rule judges a new or changed contract; one equal to
@@ -189,7 +189,7 @@
      (let [suffix (id/id)
            fixture-ns (symbol (str "nilable" suffix ".core"))
            path (str "src/nilable" suffix "/core.clj")
-           root (str "tmp/nilable-test-" suffix)
+           root ((requiring-resolve 'seon.test-support/temp-root) (str "nilable-test-" suffix))
            file (io/file root path)
            contract "{:malli/schema [:=> [:cat [:sequential :int]] [:maybe :int]]}"
            row (fn [sym] (db/pull (db/db connection) [:seon.fn/doc :seon.fn/spec]
@@ -225,4 +225,4 @@
                    "write-back of another function reindexes the unchanged nilable one equal")
                (is (= [path] (:seon.source/changed-paths written)) "write-back writes the namespace's file"))))
          (finally
-           ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))
+           ((requiring-resolve 'seon.test-support/delete-root!) root)))))))

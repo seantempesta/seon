@@ -656,6 +656,21 @@
         {::path (str target-path)})))
     (fs/delete-recursively! (str root-path) (str target-path))))
 
+(defn temp-root
+  "A fresh absolute checkout-like directory named `label` under the system temp
+  directory, outside any `data/source` archive (what `seon.fs/checkout-root?`
+  admits as a write-back root); `delete-root!` removes it."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [label]
+  (.getCanonicalPath (.toFile (java.nio.file.Files/createTempDirectory
+                               label (make-array java.nio.file.attribute.FileAttribute 0)))))
+
+(defn delete-root!
+  "Delete a `temp-root` directory."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [root]
+  (fs/delete-recursively! (.getCanonicalPath (io/file (System/getProperty "java.io.tmpdir"))) (.getCanonicalPath (io/file root))))
+
 (defn declare-proof!
   "Declare on `connection`, unrun, the deftest `ns-sym`/`test-name` naming the task `task-sym`,
   as a task file's proof is declared at the cluster head before anyone is assigned the task."

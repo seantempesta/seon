@@ -226,6 +226,21 @@
     (-> resource .toURI io/file .getParentFile .getParentFile
         .getParentFile .getCanonicalPath)))
 
+(defn checkout-root?
+  "Whether a value is a string naming an absolute, existing directory that is not
+  inside a `data/source` archive (the committed copy a Seon JVM runs from).
+
+  Takes a value and returns a boolean. This predicate validates a root that
+  source files are written under."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (boolean
+   (and (string? value)
+        (let [file (io/file value)]
+          (and (.isAbsolute file) (.isDirectory file)
+               (not-any? #(= ["data" "source"] %)
+                         (partition 2 1 (map str (.toPath (io/file (.getCanonicalPath file)))))))))))
+
 (defn absolute-path
   "Resolve a filesystem path against its explicit directory."
   {:malli/schema [:=> [:cat :string :string] :string]}

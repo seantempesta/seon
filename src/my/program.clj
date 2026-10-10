@@ -1005,10 +1005,12 @@
   without a merge (`seon.cluster.source/write-back!`): the changed, added and
   removed declarations of `my.program/diff`, or the `:seon.program/identities`
   you pass. Proven equivalent before an atomic install; answers the written
-  paths and digests.
+  paths and digests. `:seon.fn/root` is the checkout's absolute path
+  (`seon.fs/checkout-root?`): a relative path or one inside `data/source`
+  is refused (`:root-refused`) and nothing is written.
 
   Example:
-  (my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"})
+  (my.program/write-branch! {:seon.fn/root \"/Users/me/src/project\"})
   Edge cases: holding the cluster's own branch answers the empty difference; nothing is written.
   Costs: one fork-point read (as `my.program/diff`) and one analysis per written file."
   {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.fn/root :seon.fn/root]

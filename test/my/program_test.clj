@@ -259,7 +259,7 @@
         suffix (id/id)
         fixture-ns (symbol (str "wbranch" suffix ".core"))
         path (str "src/wbranch" suffix "/core.clj")
-        root (str "tmp/write-branch-test-" suffix)
+        root (support/temp-root (str "write-branch-test-" suffix))
         file (io/file root path)
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
@@ -296,7 +296,7 @@
             (finally (agent/release-context! held)))))
       (finally
         (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
-        (support/delete-recursively! root)))))
+        (support/delete-root! root)))))
 
 (deftest source-shows-the-docstring-once-inside-the-source
   (let [found (program/source (db/db) 'my.program/source)]

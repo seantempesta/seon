@@ -821,7 +821,7 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files)
+(declare proven-files root-refusal)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -905,12 +905,14 @@
             tx (when (and (seq delta) (empty? unchanged) (empty? reach))
                  (replacement branch head delta))
             ;; The file the merge would write back, proven before any test runs.
-            proof (when (and root (vector? tx))
+            root-error (when root (root-refusal root))
+            proof (when (and root (nil? root-error) (vector? tx))
                     (let [merged (db/with head {:tx-data tx})]
                       (if (:seon.error/at merged) merged (proven-files head merged delta root))))
             refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
         (try
           (cond
+            root-error root-error
             (not (set? changed)) changed
             (not three) (some #(when (:seon.error/at %) %) maps)
             (seq (:seon.program/conflict three)) three
@@ -1060,6 +1062,17 @@
    (merge {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/write-back!
            :seon.error/message message :seon.source/write-back-refused reason}
           members)))
+
+(defn- root-refusal
+  "A `:root-refused` write-back error naming `root` unless it is an absolute
+  existing directory outside any `data/source` archive (`seon.fs/checkout-root?`):
+  a relative root resolves against the JVM's working directory, which on a Seon
+  JVM is its committed archive."
+  {:malli/schema [:=> [:cat :seon.fn/root] [:or :nil :seon.source/write-back-error]]}
+  [root]
+  (when-not (fs/checkout-root? root)
+    (write-back-refusal :root-refused "A write-back root is the checkout's absolute path to an existing directory outside data/source; nothing was written."
+                        {:seon.error/offending root})))
 
 (defn- sha-256
   "The file digest publication records (`:seon.fn.file/digest`)."
@@ -1343,16 +1356,22 @@
   candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
   publication owner.
 
+  `:seon.fn/root` is the checkout's absolute path (`seon.fs/checkout-root?`);
+  a relative path or one inside a `data/source` archive is refused as
+  `:root-refused` and nothing is written.
+
   Example:
-  (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/checkout\"})"
+  (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"})"
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
   [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root}]
   (let [[before after] (map #(d/commit-as-db connection (% accepted))
                             [:seon.source/base-commit-id :seon.source/commit-id])]
     (try
+      (if-let [refused (root-refusal root)]
+        refused
       (if (some nil? [before after])
         (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
                             {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
-        (write-back-commits connection accepted before after root))
+        (write-back-commits connection accepted before after root)))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
