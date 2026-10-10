@@ -118,6 +118,14 @@ calling it (`:waiting`, admission open) and root got no message: a stalled worki
 assign-proofs, queued). The commit gate's `.cljc` fallback ran no tests again (lane `lane-gate-cljc`). Round cost:
 prepare 6.2 s / 3.2 GB for two one-function merges (task filed).
 
+**Loop round 2 (2026-10-10, tasks from the loop's own findings, 9a5324489): 1 of 3 green, 0 merged.** `r2-cost-diff`
+fixed the cost diff's false entries (13 calls, 143k tokens) but the merge gate refused it (run 5649676309ec, three reaching
+`seon.request-cost-test` tests red): the gate worked, the agent ended `:done` too early (proofs green, reached tests
+red; lane assign-proofs fixes `seon.turn/task-end`). `r2-problems-prose` was unprovable: its census proof reads files,
+which a branch cannot change. `r2-ref-section` capped (the task's second failure). Both capped ends reached root as end
+messages. Task-design rules learned: a proof reads through the program, never files; a task carries the updates to
+existing tests that assert the old behavior. Lane round2-refine diagnoses and refines all three for round 3.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
