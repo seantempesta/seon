@@ -167,6 +167,8 @@
                      {:seon.db/db tested
                       :seon.test.run/cluster [:seon.cluster/name cluster-name]
                       :seon.test.run/policy :named
+                      ;; a throwaway JVM loaded the candidate and ran it compiled
+                      :seon.test.run/evaluator :compiled
                       :seon.test/rerun? true
                       :seon.test/include-long? true
                       :seon.test/identities (set (map :seon.test/sym results))

@@ -305,14 +305,19 @@
            database (db/db connection)
            cluster [:seon.cluster/name (:seon.cluster/name handle)]
            entities-commit (:seon.source/commit-id (db/pull database [:seon.source/commit-id] cluster))
+           ;; a selection reuses only its own evaluator's evidence: the recorded run's
+           evaluator (:seon.test.run/evaluator (db/pull database [:seon.test.run/evaluator]
+                                                        [:seon.test.run/id (:seon.test.run/id recorded)]))
            select (fn [loaded]
                     (sut/select {:seon.db/db database :seon.test.run/cluster cluster
                                  :seon.test.run/policy :named :seon.test/identities #{test-symbol}
+                                 :seon.test.run/evaluator evaluator
                                  :seon.test/loaded-source loaded}))
            matching (select entities-commit)
            drifted (select (random-uuid))]
        (is (true? (:seon.test/passed? recorded)))
        (is (uuid? entities-commit) "the cluster records the source commit its entities came from")
+       (is (#{:compiled :interpreted} evaluator) "the run records the evaluator its members ran under")
        (is (= [test-symbol] (map :seon.test/sym (:seon.test.selection/unchanged matching)))
            "the same loaded program reuses its recorded green")
        (is (empty? (:seon.test.selection/unchanged drifted)))
@@ -326,6 +331,7 @@
            (support/transacted! connection [[:db/retract run :seon.test.run/loaded-commit-id entities-commit]])
            (let [old (sut/select {:seon.db/db (db/db connection) :seon.test.run/cluster cluster
                                   :seon.test.run/policy :named :seon.test/identities #{test-symbol}
+                                  :seon.test.run/evaluator evaluator
                                   :seon.test/loaded-source entities-commit})]
              (is (empty? (:seon.test.selection/unchanged old)))
              (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members old)))))))))))

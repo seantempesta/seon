@@ -38,6 +38,7 @@
                 :identities [:set {:description "Test identities explicitly requested at admission."} :qualified-symbol],
                 :include-long? [:boolean {:description "Explicit long-test inclusion decision for this request."}],
                 :input-digest [:and {:seon.db/identity false :description "Digest of publication inputs outside the program graph observed for this run."} :seon.source/digest],
+                :evaluator [:enum {:description "The evaluator the run's request resolved its file tests with: :compiled, the host JVM's loaded Vars (root's request, and a platform run's throwaway JVM), or :interpreted, SCI from the branch's rows (every other agent's request, `seon.test/resolve-test`). A result proves only what its evaluator ran: selection reuses and continues only runs of the requesting evaluator, and a run lacking it is unknown evidence that no request reuses."} :compiled :interpreted],
                 :loaded-commit-id [:and {:seon.db/identity false :description "The adopted source commit whose loaded definitions, arming and record agreed at the writer when this run was admitted: its host members' base program provenance, never the tested world's identity. A green run lacking it is unknown evidence and is never reused."} :seon.source/commit-id],
                 :admission
                 [:map
@@ -47,6 +48,7 @@
                  [:seon.test.run/input-digest :seon.test.run/input-digest]
                  [:seon.test.run/policy :seon.test.run/policy]
                  [:seon.test.run/include-long? :seon.test.run/include-long?]
+                 [:seon.test.run/evaluator {:optional true} :seon.test.run/evaluator]
                  [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]
                  [:seon.test.run/unchanged-through-t {:optional true} :seon.test.run/unchanged-through-t]
@@ -126,6 +128,7 @@
                  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
                  [:seon.test.run/input-digest {:optional true} :seon.test.run/input-digest]
                  [:seon.test.run/loaded-commit-id {:optional true} :seon.test.run/loaded-commit-id]
+                 [:seon.test.run/evaluator {:optional true} :seon.test.run/evaluator]
                  [:seon.test.run/policy {:optional true} :seon.test.run/policy]
                  [:seon.test.run/include-long? {:optional true} :seon.test.run/include-long?]
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]

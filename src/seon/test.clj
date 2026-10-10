@@ -799,7 +799,8 @@
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [{database :seon.db/db cluster :seon.test.run/cluster
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
-    supplied-basis :seon.test.run/change-basis-t rerun? :seon.test/rerun? :as request}]
+    supplied-basis :seon.test.run/change-basis-t rerun? :seon.test/rerun?
+    evaluator :seon.test.run/evaluator :as request}]
   (try
     (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
@@ -849,7 +850,7 @@
                      :seon.test.run/cluster :seon.test.run/policy
                      :seon.test.run/branch :seon.test.run/tested-branch
                      :seon.test.run/include-long? :seon.test.run/input-digest
-                     :seon.test.run/loaded-commit-id
+                     :seon.test.run/loaded-commit-id :seon.test.run/evaluator
                      :seon.test.run/basis-t :seon.test.run/selection-tx
                      :seon.test.run/program-revisions
                      :seon.test.run/namespaces :seon.test.run/identities
@@ -879,6 +880,8 @@
                                     (or (= :platform policy) (not= :platform (one % :seon.test.run/policy)))
                                     (= include-long? (one % :seon.test.run/include-long?))
                                     (= input-digest (one % :seon.test.run/input-digest))
+                                    ;; A result proves what its evaluator ran.
+                                    (= evaluator (one % :seon.test.run/evaluator))
                                     (= namespaces (get-in facts [% :seon.test.run/namespaces] #{}))
                                     (= identities (get-in facts [% :seon.test.run/identities] #{}))
                                     (one % :seon.test.run/selection-tx)))
@@ -1106,6 +1109,7 @@
                                 (filter #(and (= branch (one % :seon.test.run/branch))
                                               (not (one % :seon.test.run/tested-branch))
                                               (= input-digest (one % :seon.test.run/input-digest))
+                                              (= evaluator (one % :seon.test.run/evaluator))
                                               (one % :seon.test.run/selection-tx)) run-ids)))
             reuse-candidates (cond
                                (or loaded-drift? rerun?) {}
@@ -1178,6 +1182,7 @@
                  :seon.test.run/members (mapv (fn [[symbol reasons]]
                                                {:seon.test/sym symbol :seon.test.member/reasons reasons}) reasons)}
           cluster-id (assoc :seon.test.run/cluster cluster-id)
+          evaluator (assoc :seon.test.run/evaluator evaluator)
           (seq reused) (assoc :seon.test.selection/unchanged (vec (vals reused))
                               :seon.test.run/covered-by
                               (set (map #(second (get latest %)) (keys reused))))
@@ -1301,7 +1306,8 @@
                        :seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
                        :seon.test.run/input-digest :seon.test.run/branch
                        :seon.test.run/tested-branch :seon.test.run/change-basis-t
-                       :seon.test.run/policy :seon.test.run/include-long?])
+                       :seon.test.run/policy :seon.test.run/include-long?
+                       :seon.test.run/evaluator])
       (assoc :seon.test.run/namespaces (set (:seon.test.run/namespaces entity))
              :seon.test.run/identities (set (:seon.test.run/identities entity))))
     (= :named (:seon.test.run/policy entity))
@@ -1354,7 +1360,7 @@
         entity (-> (merge (select-keys request
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
-                                    :seon.test.run/deadline
+                                    :seon.test.run/evaluator :seon.test.run/deadline
                                     :seon.test.run/exclusions
                                     :seon.test.run/change-basis-t :seon.test.run/namespaces
                                     :seon.test.run/identities])
@@ -2555,6 +2561,9 @@
         effective (config/effective database cluster)
         bound (or (:seon.test/check-time-limit-ms request)
                   (:seon.test/check-time-limit-ms effective))
+        ;; Root's request resolves file tests compiled, any other agent's
+        ;; interpreted (`resolve-test`): what its results prove.
+        evaluator (if (root-agent? execution) :compiled :interpreted)
         ;; The arms' own admission, asked before a world is built for them.
         pressure (kernel/memory-pressure)]
     (cond
@@ -2573,6 +2582,7 @@
                        (cond-> {:seon.db/db database
                                 :seon.test.run/cluster [:seon.cluster/name cluster]
                                 :seon.test.run/policy policy
+                                :seon.test.run/evaluator evaluator
                                 :seon.test/include-long? (true? (:seon.test/include-long? request))}
                          (:seon.test/rerun? request) (assoc :seon.test/rerun? true)
                          (:seon.test/since-previous-run? request) (assoc :seon.test/since-previous-run? true)
@@ -2713,7 +2723,7 @@
                 request-handle! #(or @held-handle
                                      (vreset! held-handle
                                               (cond-> (assoc (clean-request-handle execution recording cluster effective)
-                                                             :seon.test/interpreted-files? (not (root-agent? execution)))
+                                                             :seon.test/interpreted-files? (= :interpreted evaluator))
                                                 (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted))))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose closure names the effect owner, from one reverse
