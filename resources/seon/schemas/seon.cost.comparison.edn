@@ -1,0 +1,20 @@
+;; One subject's live cost beside main's stored value (FEEDBACK-LOOP card §3).
+;; Producer: seon.batch/cost-diff. Consumers: the reply (`:seon.cost/diff`) and
+;; the value printer.
+#:seon.cost.comparison
+{:subject
+ [:or {:description "What a comparison is about: a function or test symbol, or a schema key."} :qualified-symbol :qualified-keyword]
+ :measure
+ [:enum {:description "The compared measure: a function's per-call self or inclusive microseconds or its call count (:seon.fn.cost/*). Later stages add the test and schema measures."}
+  :self-us :total-us :calls]
+ :live
+ [:double {:min 0.0 :description "This request's own measurement, read from its sink before anything is stored."}]
+ :main
+ [:double {:min 0.0 :description "Main's stored value for the same subject and measure; absent when main stores none."}]
+ :ratio
+ [:double {:min 0.0 :description "live / main; absent without a main value."}]
+ :flag
+ [:enum {:description ":new main stores no value; :changed the definition digest differs from main's; :interpreted the live value is an interpreted body's, guidance only (the compiled merge check judges); :over-budget a schema's generator or validator exceeds its dial."}
+  :new :changed :interpreted :over-budget]
+ :flags
+ [:set {:description "Why the comparison is shown; empty never occurs for a shown entry."} :seon.cost.comparison/flag]}

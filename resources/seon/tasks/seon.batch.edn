@@ -18,4 +18,9 @@
              :intent "`seon.batch/arm-measures` sums the allocation of the evaluation arms only, so `:seon.cost/alloc-mb` of a request that defines one function and one test reads 22 MB while the JVM allocated 1.0 GB (default f54e73c83, 2026-10-09: 709 MB on virtual threads in the test step, 296 MB on pool threads, 37 MB on the writer thread; JFR in the evidence). The agent cannot see the cost its request caused. Done when `seon.batch/request-cost` carries the allocation of the stages that ran for the request (test step and settlement included) or names the stages it excludes as data, and the 1.0 GB request reports within 2x of it."
              :must-read #{seon.batch/arm-measures seon.batch/request-cost seon.test/run}
              :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}
-]
+
+ #:seon.task{:name "a-reply-compares-its-live-cost-with-main"
+             :kind :function
+             :intent "A reply shows no per-function cost. Done when a request's reply carries `:seon.cost/diff` in `:seon.repl/request`: for the definitions the request defined and its top `:seon.config.test.cost/top` executed definitions by self time, one `:seon.cost/comparison` each, the live per-call self microseconds read from the request's own sink (`:seon.batch/sink`, nothing stored read for the live side) beside main's stored `:seon.fn.cost/entity` value pulled by identity (no `:seon.cost.comparison/main` when main stores none, flag :new; a differing digest :changed; an interpreted definition, scope `:seon.profile/context`, :interpreted). Functions only: tests are stage 7, schemas stage 15. New functions, named here without backticks until they exist: seon.profile/live-costs (sink to entities) and seon.batch/cost-diff (live, main database value, subjects to comparisons). Chain stage 4 of card FEEDBACK-LOOP."
+             :must-read #{seon.batch/request-cost seon.batch/merge-sink! seon.batch/sink seon.profile/transaction-observation seon.turn/step}
+             :evidence #{"docs/seon/schedule/cards/FEEDBACK-LOOP.md#3. The data model"}}]

@@ -1,0 +1,37 @@
+;; A function's latest cost: one entity per symbol, its definition digest beside
+;; its values, so a read on the name answers "did the code change" and "did the
+;; cost change" at once (FEEDBACK-LOOP card §3). Values are per-call means of a
+;; world's own work, taken from its call sink (`seon.batch/sink`, the
+;; `seon.profile/timed` counters): self time excludes counted callees.
+;; Producer: `seon.profile/transaction-observation`, conj'd by
+;; `seon.db/stamp-transaction` onto a transaction the world already writes (zero
+;; extra transactions), only when the stored value moved by half a log2 bucket
+;; (`seon.profile/moved?`), the digest changed or none is stored. Consumers:
+;; `seon.batch/cost-diff` (main's side of the comparison), `seon.health`'s slow
+;; unit, and the query "which functions are slow".
+;; Every value is noHistory: the latest value is the fact, and a replacement
+;; leaves one datom in the temporal indexes. Only the identity is indexed. Main's
+;; entities come from main's own traffic; cost entities are data and never merge
+;; as program.
+#:seon.fn.cost
+{:sym [:qualified-symbol {:seon.db/identity true :seon.program/row-schema :seon.fn.cost/entity
+                          :description "The measured function: the same symbol as :seon.fn/sym, held as a value because the definition may be absent from the branch that stores its cost."}]
+ :digest [:and {:seon.db/no-history? true
+                :description "The definition digest the values were measured under, as the held callable carried it. A different digest on read means the code changed since."}
+          :seon.program/definition-digest]
+ :scope [:enum {:seon.db/no-history? true
+                :description "The scope :seon.profile/scope names: :seon.profile/host a loaded Var's compiled wrapper, :seon.profile/context an interpreted SCI definition (its cost is guidance: an interpreted body costs up to 280 times its compiled self)."}
+         :seon.profile/host :seon.profile/context]
+ :calls [:int {:min 1 :seon.db/no-history? true
+               :description "The calls the values average over (at least seon.profile.measurement/min-calls; fewer store nothing)."}]
+ :self-us [:double {:min 0.0 :seon.db/no-history? true
+                    :description "Mean microseconds per call spent in the function itself, counted callees excluded."}]
+ :total-us [:double {:min 0.0 :seon.db/no-history? true
+                     :description "Mean microseconds per call including counted callees."}]
+ :entity [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+          [:seon.fn.cost/sym :seon.fn.cost/sym]
+          [:seon.fn.cost/digest :seon.fn.cost/digest]
+          [:seon.fn.cost/scope :seon.fn.cost/scope]
+          [:seon.fn.cost/calls :seon.fn.cost/calls]
+          [:seon.fn.cost/self-us :seon.fn.cost/self-us]
+          [:seon.fn.cost/total-us :seon.fn.cost/total-us]]}

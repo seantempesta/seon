@@ -104,3 +104,48 @@
        (is (pos? (.get made)))
        (is (= (:seon.cost/reads ping) (:seon.cost/reads noisy))
            "another thread's reads are not this request's")))))
+
+(defn- window-share
+  "The least share of the outer JVM allocation window a redefinition reply attributes: 0.6 while the step alone is counted (card FEEDBACK-LOOP stage 2), 0.9 once writer, commit, tests and the shared residual are (stage 12)."
+  {:malli/schema [:=> [:cat] :double]}
+  []
+  0.6)
+
+(deftest ^{:seon/tasks #{'seon.flow/a-reply-carries-its-step-cost}} a-redefinitions-reply-accounts-for-the-window
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (answer running agent-id "sci" "(in-ns 'request.cost.window) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")
+     (let [before (batch/jvm-counters)
+           reply (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))")
+           after (batch/jvm-counters)
+           cost (support/mcp-request reply)
+           outer (batch/jvm-window before after)
+           attributed (transduce (map #(get-in cost [% :seon.cost/alloc-mb] 0.0)) + 0.0
+                                 [:seon.cost/step :seon.cost/writer :seon.cost/commit :seon.cost/tests])]
+       (is (<= (* (window-share) (:seon.cost/alloc-mb outer)) attributed)
+           "the step, writer, commit and tests together cover the share of the outer window")))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-entities-hold-the-latest-values}} a-repeated-form-writes-no-cost-entities-and-no-extra-transactions
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [form "(let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/sym]] (seon.db/db))] (if (set? rows) (count rows) 0))"
+           runs (vec (repeatedly 5 #(answer running agent-id "sci" form)))
+           seen (mapv #(:seon.repl/value (support/mcp-reply %)) runs)
+           [fourth fifth] (map support/mcp-request (take-last 2 runs))]
+       (is (<= 1 (seen 1) 12) "the first request wrote cost entities, at most definitions defined + tests run + top")
+       (is (= (seen 3) (seen 4)) "the same work again writes none")
+       (is (= (:seon.cost/transactions fourth) (:seon.cost/transactions fifth)) "accounting adds no transaction")
+       (is (<= (:seon.cost/calls fifth) (* 1.1 (:seon.cost/calls fourth))) "accounting adds no armed calls")))))
+
+(deftest ^{:seon/tasks #{'seon.batch/a-reply-compares-its-live-cost-with-main}} a-reply-shows-its-live-cost-against-main-at-once
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (answer running agent-id "sci" "(in-ns 'request.cost.live) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")
+     (let [cost (support/mcp-request
+                 (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (reduce + (range 20000)) (inc x))"))
+           entry (first (filter #(= 'request.cost.live/tiny (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
+       (is (some? entry) "the very same reply compares the redefined function")
+       (is (= :self-us (:seon.cost.comparison/measure entry)))
+       (is (pos? (:seon.cost.comparison/live entry 0.0)) "the live side is the request's own measurement")
+       (is (not (contains? entry :seon.cost.comparison/main)) "main stores nothing for a function it has never run")
+       (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry)))))))

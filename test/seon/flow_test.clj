@@ -762,3 +762,14 @@
           (test-support/await-event!
            (.sendClose ^WebSocket @connection WebSocket/NORMAL_CLOSURE "test complete")
            ::monitor-socket-closed))))))
+
+(deftest ^{:seon/tasks #{'seon.flow/a-proc-runs-on-a-platform-thread}} a-proc-thread-is-a-platform-thread
+  (let [{::sut/keys [graph executor]} (sut/start-graph! {::sut/graph-definition {:procs {} :conns []}})]
+    (try
+      (is (false? (.get (.submit ^java.util.concurrent.ExecutorService executor
+                                 ^java.util.concurrent.Callable (fn [] (.isVirtual (Thread/currentThread))))
+                        5 TimeUnit/SECONDS))
+          "a proc's step runs on a platform thread, whose allocation and CPU counters are its own")
+      (finally
+        (flow/stop graph)
+        (.shutdown ^java.util.concurrent.ExecutorService executor)))))

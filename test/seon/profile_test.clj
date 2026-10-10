@@ -12,6 +12,7 @@
             [malli.instrument :as mi]
             [seon.batch :as batch]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.instrument :as instrument]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -318,3 +319,35 @@
                 (range 1 (count installed)))
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-entities-hold-the-latest-values}}
+  a-stamped-transaction-replaces-the-values-that-moved
+  (test-support/with-database
+   (fn [connection]
+     (let [sink (batch/sink)
+           world {:seon.batch/sink sink
+                  :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
+           sym 'seon.profile-test/cost-probe
+           stored (fn [] (db/pull (db/db connection) '[:seon.fn.cost/self-us :seon.fn.cost/digest] [:seon.fn.cost/sym sym]))
+           ;; the world does `calls` calls of `self-us` microseconds each under `digest`, then writes one transaction
+           step! (fn [calls self-us digest]
+                   (let [^java.util.concurrent.atomic.AtomicLongArray counter
+                         (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest] profile/new-adder)
+                         nanos (long (* calls self-us 1000))]
+                     (.addAndGet counter 0 calls)
+                     (.addAndGet counter 1 nanos)
+                     (.addAndGet counter 2 nanos))
+                   (let [report (binding [batch/*world* world] (db/transact! connection []))
+                         written (count (filter #(= "seon.fn.cost" (namespace (:a %))) (:tx-data report)))
+                         {:seon.fn.cost/keys [self-us digest]} (stored)]
+                     {:self-us self-us :digest digest :written? (pos? written)}))]
+       (clojure.test/are [calls self-us digest expected] (= expected (step! calls self-us digest))
+         100 50.0  digest-a {:self-us 50.0  :digest digest-a :written? true}
+         100 50.0  digest-a {:self-us 50.0  :digest digest-a :written? false}
+         100 100.0 digest-a {:self-us 100.0 :digest digest-a :written? true}
+         100 100.0 digest-b {:self-us 100.0 :digest digest-b :written? true}
+         5   900.0 digest-b {:self-us 100.0 :digest digest-b :written? false})
+       (is (= #{[100.0 true]}
+              (db/q '[:find ?us ?added :in $ ?sym :where [?e :seon.fn.cost/sym ?sym] [?e :seon.fn.cost/self-us ?us _ ?added]]
+                    (db/history (db/db connection)) sym))
+           "the replaced values leave one datom in the history: the current value")))))

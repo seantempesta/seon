@@ -33,12 +33,35 @@
   [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
   [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
+ :seon.cost/step
+ [:map {:description "The agent's turn step as the proc thread counted it: bytes allocated and CPU time between the step's start and its end, on a platform thread (exact, unlike a virtual thread, which has no counter). Producer: seon.flow/var-process. Consumer: the reply."}
+  [:seon.cost/alloc-mb :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms :seon.cost/cpu-ms]]
+ :seon.cost/comparison
+ [:map {:description "One subject's live value beside main's stored value. Shown when live is at least 1.41 times or at most 1/1.41 of main's, when main has none, or when the digest differs."}
+  [:seon.cost.comparison/subject :seon.cost.comparison/subject]
+  [:seon.cost.comparison/measure :seon.cost.comparison/measure]
+  [:seon.cost.comparison/live :seon.cost.comparison/live]
+  [:seon.cost.comparison/main {:optional true} :seon.cost.comparison/main]
+  [:seon.cost.comparison/ratio {:optional true} :seon.cost.comparison/ratio]
+  [:seon.cost.comparison/flags :seon.cost.comparison/flags]]
+ :seon.cost/diff
+ [:vector {:description "The request's comparisons against main, at most :seon.config.test.cost/top. Producer: seon.batch/cost-diff. Consumer: the reply."}
+  :seon.cost/comparison]
+ :seon.cost/live
+ [:vector {:description "The request's own per-definition values from its sink: what the reply compares. Producer: seon.profile/live-costs."}
+  :seon.fn.cost/entity]
+ :seon.cost/subjects
+ [:set {:description "The definitions and tests a request defined or ran, and the schemas it measured: what cost-diff pulls from main by identity."}
+  :seon.cost.comparison/subject]
  :seon.cost/request
  [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms only. jvm-window covers every thread in the observation window, including unrelated work. Causal all-thread attribution is unavailable; unavailable counters are absent."}
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/arm-scope [:= :evaluation-arms-only]]
   [:seon.cost/causal-attribution [:= :unavailable]]
   [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
+  [:seon.cost/step {:optional true} :seon.cost/step]
+  [:seon.cost/diff {:optional true} :seon.cost/diff]
   [:seon.cost/stages {:optional true} :seon.cost/stages]
   [:seon.cost/calls {:optional true} :seon.cost/calls]
   [:seon.cost/reads {:optional true} :seon.cost/reads]
