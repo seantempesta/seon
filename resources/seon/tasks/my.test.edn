@@ -28,4 +28,9 @@
  #:seon.task{:name "a-check-failure-shows-no-message"
              :kind :function
              :intent "`my.test/check` rendered an errored test as only `{:seon.test/sym ...}` under `:seon.render.test/failures` (lane repl-only-a5, 2026-10-09); its message, \"The admitted identity has no executable test Var.\", was found three evaluations later under `:seon.test/results` `:seon.test.failure/reports`. Done when each listed failure shows its report message."
-             :must-read #{my.test/check}}]
+             :must-read #{my.test/check}}
+ #:seon.task{:name "a-green-check-answers-no-per-test-counts"
+             :kind :function
+             :intent "`my.test/check` of 17 named tests (agent eval-fixes-3, default a740b1e26, 2026-10-10, run f11a3891e603) answered `:seon.test/passed? true` and `:seon.test/executed-count 17` with `:seon.test/results` empty: the pass, fail and error count of each test was readable only by querying the run's `:seon.test.run/members` and each `:seon.test.member/pass-count`. Done when the answer carries each executed test's counts by symbol."
+             :must-read #{my.test/check seon.test/run}}
+]

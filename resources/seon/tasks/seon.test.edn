@@ -165,4 +165,8 @@
              :kind :function
              :intent "`seon.test/select` refuses a changed identity it cannot find with `:seon.test/identity-unresolved` and offending `[:seon.fn/sym value]` whatever the change's attribute: lane merge-path (check run 0e1ca59bb5ea, 2026-10-10) saw a proof passed as `[:seon.test/sym wbfix150a6f88c052.core/caller-check]` reported as `[:seon.fn/sym wbfix150a6f88c052.core/caller-check]`, which reads as a missing function rather than a missing test. Done when the refusal names the change as given, as a row in an existing selection test."
              :must-read #{seon.test/select}}
+ #:seon.task{:name "a-named-check-on-a-branch-carrying-platform-edits-allocates-gigabytes"
+             :kind :function
+             :intent "Agent eval-fixes on default 9a23b8ff2 (2026-10-10), its branch carrying the edit hook's interpreted copies of `seon.sci.eval` and `seon.test`: `(my.test/check {:seon.test/identities <17 tests>})` took 18,045 ms and allocated 17,731 MB, executing 76 tests (the 17 named plus the step's reaching tests), with GC 12.4 s in the window. The same 17 named tests on a fresh agent took 7,735 ms and 1,157 MB (run f11a3891e603). Every later evaluation on that branch, a contract refusal included, paid a 10 to 18 s test step. Done when an evaluation that changed no definition runs no reaching test, and a named check's cost is proportional to the named tests."
+             :must-read #{my.test/check seon.test/run seon.test/reaching}}
 ]
