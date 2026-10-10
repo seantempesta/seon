@@ -583,7 +583,7 @@
        "(deftest ^{:seon/tasks #{'tq.endl/area}} area-test (is (= 25 (area 5))))\n\n"
        "(deftest ^{:seon/tasks #{'tq.endl/side}} side-test (is (= 4 (side 2))))\n"))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge}
+(deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge 'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
            :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two proposal runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
            :seon.test/long-ms 240000}
   a-green-end-lands-its-merge-without-root
@@ -632,13 +632,30 @@
                  head (git! root "rev-parse" "HEAD")
                  execution (fixed-end! running agent-id 'tq.endl
                                        "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+                 merge-branches #(set (filter (fn [b] (str/starts-with? (name b) "merge-")) (d/branches connection)))
+                 branches-before (merge-branches)
                  _ (end! running execution agent-id)
                  [message] (end-messages (db/db connection) agent-id)
-                 refused (merge-row (:seon.task/merge message))]
+                 refused (merge-row (:seon.task/merge message))
+                 recorded (db/pull (db/db connection) [:seon.task/refused-run
+                                                       {:seon.task/verdicts [:seon.task.verdict/test :seon.task.verdict/verdict
+                                                                             :seon.task.verdict/run]}]
+                                   [:seon.task/id (:seon.task/merge message)])
+                 shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) (:seon.task/ended %))
+                             (get-in (seon.context/current-state (db/db connection) "root") [:seon.context/unread :seon.context/items]))]
          (is (= :done (:seon.task/end message)) "the task ended green on its branch")
              (is (= {:seon.task/refusal :seon.source/red-test-error :seon.task/refused-tests #{'tq.endl/side-identity-test}}
                     (update refused :seon.task/refused-tests set))
                  "the merge task carries the refusal and stays undecided")
+             (is (string? (:seon.task/refused-run recorded)) "it names the refusing gate run")
+             (is (= #{['tq.endl/side-identity-test :red (:seon.task/refused-run recorded)]}
+                    (set (map (juxt :seon.task.verdict/test :seon.task.verdict/verdict :seon.task.verdict/run)
+                              (:seon.task/verdicts recorded))))
+                 "and each test's verdict in that run")
+             (is (= #{['tq.endl/side-identity-test :red]}
+                    (set (map (juxt :seon.task.verdict/test :seon.task.verdict/verdict) (:seon.task/verdicts shown))))
+                 "root's block shows the verdicts")
+             (is (empty? (remove branches-before (merge-branches))) "the refused gate's tested branch is retired")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
 

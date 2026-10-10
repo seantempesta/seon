@@ -318,7 +318,8 @@
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
   ended, its proofs' counts and red proofs, the agent's errors grouped by signature, its model calls and tokens,
-  the merge task when it ended green with its landing (the commits it made, or the refusal it met), and the
+  the merge task when it ended green with its landing (the commits it made, or the refusal it met with the
+  refusing gate run and each test's verdict in it), and the
   operations root takes next. The outcome is the one recorded when
   the task ended, else derived from the agent's branch, else unknown (`:seon.task/outcome-unknown`), never zeros."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
@@ -331,10 +332,13 @@
         outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))
         landing (when merge
                   (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests
-                                           :seon.task/refusal-reason :seon.task/blocked-by]
+                                           :seon.task/refusal-reason :seon.task/blocked-by :seon.task/refused-run
+                                           {:seon.task/verdicts [:db/id :seon.task.verdict/test :seon.task.verdict/verdict
+                                                                 :seon.task.verdict/run]}]
                                      [:seon.task/id merge])]
                     (when (map? row) (cond-> (dissoc row :db/id)
-                                       (:seon.task/refused-tests row) (update :seon.task/refused-tests set)))))]
+                                       (:seon.task/refused-tests row) (update :seon.task/refused-tests set)
+                                       (:seon.task/verdicts row) (update :seon.task/verdicts set)))))]
     (or (when (:seon.error/at outcome) outcome)
         (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
                         :seon.render/operations

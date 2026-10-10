@@ -2233,7 +2233,8 @@
 (defn- landing-tx
   "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
   or the refusal's error type, its reason (`seon.cluster.source/landing-refusal-reason`), the landing it waits
-  behind and the tests whose red verdict refused it."
+  behind, the tests whose red verdict refused it and, replacing the previous refusal's, the refusing gate run
+  and each test's verdict there (`:seon.task/verdicts`, references only)."
   {:malli/schema [:=> [:cat :seon.task/merge :map] :seon.store/transaction-data]}
   [merge-task landed]
   ;; a write-back or commit refusal after acceptance carries the accepted merge: main holds it
@@ -2243,14 +2244,23 @@
         reason (when refused (@source-refusal-reason landed))
         blocker (:seon.task/blocked-by landed)
         red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))
+        run (:seon.source/refused-test-run landed)
+        verdicts (into #{} (keep (fn [{test-symbol :seon.test/sym verdict :seon.source/verdict run-id :seon.test.run/id}]
+                                   (when (and test-symbol verdict run-id)
+                                     {:seon.task.verdict/test test-symbol :seon.task.verdict/verdict verdict
+                                      :seon.task.verdict/run run-id})))
+                       (:seon.source/red-tests landed))
         retract #(vector :db.fn/retractAttribute [:seon.task/id merge-task] %)]
-    (cond-> [(cond-> {:seon.task/id merge-task}
+    (cond-> (if refused (mapv retract [:seon.task/refused-tests :seon.task/verdicts :seon.task/refused-run]) [])
+      true (conj (cond-> {:seon.task/id merge-task}
                main (assoc :seon.task/landed main)
                (string? git) (assoc :seon.task/landed-git git)
                refused (assoc :seon.task/refusal refused)
                reason (assoc :seon.task/refusal-reason reason)
                blocker (assoc :seon.task/blocked-by blocker)
-               (and refused (seq red)) (assoc :seon.task/refused-tests red))]
+               (and refused (seq red)) (assoc :seon.task/refused-tests red)
+               (and refused run) (assoc :seon.task/refused-run run)
+               (and refused (seq verdicts)) (assoc :seon.task/verdicts verdicts)))
       ;; a resumed landing that committed answers the refusal its stopped attempt recorded
       (and (string? git) (not refused))
       (into (map retract) [:seon.task/refusal :seon.task/refusal-reason :seon.task/blocked-by])

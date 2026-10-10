@@ -125,13 +125,15 @@
                [:seon.test/passed? :boolean] [:seon.source/tally :string]
                [:seon.task/proofs :seon.task/proofs]
                [:seon.source/red {:optional true} :seon.source/red]
+               [:seon.source/target-run {:optional true} :seon.source/target-run]
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:seon.source/target-basis-t :seon.source/target-basis-t]
                [:parents [:set :seon.source/commit-id]]
                [:seon.source/advanced-base :seon.source/advanced-base]],
               :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
               :red [:vector {:min 1 :description "The run's members that are not green, by symbol; any refuses acceptance."} :seon.test/sym],
-              :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure, a failure already recorded on the target for its current reach there, or no executed outcome."} :red :red-on-target :unknown],
+              :target-run [:or {:description "The run prepare-merge! made on the merge target of the tests red on the candidate that the target had no result for at their current reach (seon.cluster.source/run-on-target!), or the error it met."} :seon.test.run/id :seon.error/value],
+              :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure the target does not share, a failure the target shares at its current reach there, or no executed outcome (on the candidate, or on the target once run there)."} :red :red-on-target :unknown],
               :red-test [:map {:description "A test of a merge's run that is not green, the run that recorded its result and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],
               :red-tests [:vector {:min 1} :seon.source/red-test],
               :red-test-error [:and {:description "accept-merge! refused: a test of the named run is not green."} :seon.source/test-evidence-error [:map [:seon.source/red-tests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/red-tests]]],

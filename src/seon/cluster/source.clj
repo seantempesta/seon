@@ -887,13 +887,38 @@
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
          :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))))
 
+(defn- run-on-target!
+  "Run on `source`, the merge target whose program `head` is, each test of
+  `red` that failed on the candidate (its gate run's `results`) and that the
+  target holds with no result at its current reach, recording there with the
+  same runner, so a verdict compares red with red. Answers the proposal's
+  `:seon.source/target-run`, that run's id or the error it met, absent when
+  the target holds a current result for each (`seon.test.runner/statuses-at-current-reach`)."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/database-value :seon.test/results [:vector :seon.test/sym]]
+                  [:map [:seon.source/target-run {:optional true} :seon.source/target-run]]]}
+  [source head results red]
+  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
+        failed (into [] (comp (filter red?) (map :seon.test/sym) (filter (set red)) (distinct)) results)
+        statuses (when (seq failed)
+                   ((requiring-resolve 'seon.test.runner/statuses-at-current-reach) head failed #{:compiled :interpreted}))
+        due (when (map? statuses) (into #{} (keep (fn [[test-symbol status]] (when (= :pending status) test-symbol))) statuses))]
+    (cond (:seon.error/at statuses) {:seon.source/target-run statuses}
+          (seq due) (let [run ((requiring-resolve 'seon.test/run)
+                               {:seon.test/policy :named :seon.test/execution source
+                                :seon.test/recording-connection (:seon.db/connection source) :seon.test/identities due})]
+                      {:seon.source/target-run (if (:seon.error/at run) run (:seon.test.run/id run))})
+          :else {})))
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
   `proofs` (the test symbols that prove the change: a merge task's proofs),
   and answer the proposal `accept-merge!` takes: the whole run's verdict and
   tally, and its red members by name, which refuse acceptance (AGENTS.md,
-  merge). A change is a
+  merge). A member that failed and that the target has no result for at its
+  current reach is run on the target first (`run-on-target!`), so acceptance
+  tells main's reds from the change's. A gate that answers no proposal
+  retires its tested branch. A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
@@ -975,8 +1000,9 @@
                                           (:seon.test/sym %))
                                        (:seon.test/results run))))]
               (cond
-                (:seon.error/at run) run
-                (seq unselected) (refuse "The gate answered none of these proofs." unselected)
+                (or (:seon.error/at run) (seq unselected))
+                (do (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})
+                    (if (:seon.error/at run) run (refuse "The gate answered none of these proofs." unselected)))
                 :else (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
                                      :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                                      :seon.task/proofs proofs
@@ -986,28 +1012,40 @@
                                      ;; The merge advances the branch's base to the value it merged.
                                      :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
                                                                        :seon.branch/base-t (db/basis-t branch)))
-                        (seq red) (assoc :seon.source/red red)))))
+                        (seq red) (assoc :seon.source/red red)
+                        (seq red) (into (run-on-target! source head (:seon.test/results run) red))))))
           (finally (release! [base branch]))))))))
 
 (defn- red-test-verdicts
   "Each of `not-green` (test symbols of run `run-id` with no green member) with
   the run that recorded its result and its verdict: `:unknown` with no
-  executed failure, `:red-on-target` when it is red on `head` for its current
-  reach there, else `:red`."
+  executed failure, or red with no outcome on `head` at its current reach
+  (`run-on-target!` ran it there first); `:red-on-target` when it is red on
+  `head` there; else `:red`, green on `head` or a test `head` does not hold.
+  One batch read of `head` (`seon.test.runner/statuses-at-current-reach`),
+  whatever their count."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :seon.test/results [:sequential :seon.test/sym]]
-                  [:vector :seon.source/red-test]]}
+                  [:or [:vector :seon.source/red-test] :seon.error/value]]}
   [head run-id results not-green]
   (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
         red? (requiring-resolve 'seon.test.runner/red-result?)
-        red-on-target? (requiring-resolve 'seon.test.runner/red-at-current-reach?)]
-    (into [] (map (fn [test-symbol]
-                    (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
-                      {:seon.test/sym test-symbol
-                       :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
-                       :seon.source/verdict (cond (not (and result (red? result))) :unknown
-                                                  (red-on-target? head test-symbol) :red-on-target
-                                                  :else :red)})))
-          (sort (distinct not-green)))))
+        tests (vec (sort (distinct not-green)))
+        failed (filterv #(some-> (by-symbol %) red?) tests)
+        on-head (if (seq failed)
+                  ((requiring-resolve 'seon.test.runner/statuses-at-current-reach) head failed #{:compiled :interpreted})
+                  {})]
+    (if (:seon.error/at on-head)
+      on-head
+      (into [] (map (fn [test-symbol]
+                      (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
+                        {:seon.test/sym test-symbol
+                         :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
+                         :seon.source/verdict (cond (not (and result (red? result))) :unknown
+                                                    :else (case (get on-head test-symbol ::absent)
+                                                            :red :red-on-target
+                                                            :pending :unknown
+                                                            :red))})))
+            tests))))
 
 (defn- red-test-refusal
   "The refusal of a merge whose run `run-id` on `s` left `red-tests` not
@@ -1115,6 +1153,7 @@
               (refuse "Every proof must be a member of the named run." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
+              (:seon.error/at red-tests) red-tests
               (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "
@@ -2008,7 +2047,11 @@
                                        (when-let [c (:seon.task/landed recorded)] {:seon.source/commit-id c})
                                        (when-let [r (:seon.task/gate-run recorded)] {:seon.test.run/id r}))
                        (:seon.source/candidate prepared)
-                       (timed :accept #(accept-merge! execution store (assoc prepared :seon.task/merge merge-task))))
+                       (let [answer (timed :accept #(accept-merge! execution store (assoc prepared :seon.task/merge merge-task)))]
+                         ;; a refused gate's tested branch is retired: its verdicts are recorded on the merge task
+                         (when-not (:seon.source/accepted-t answer)
+                           (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
+                         answer))
         ;; accept-merge! decided the merge task in its merge commit; the main commit is known only after it
         decided (when (and (not resumed?) (:seon.source/commit-id accepted))
                   (timed :decide #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
@@ -2051,12 +2094,12 @@
 (defn land!
   "Land the green `proposal` (an open merge proposal, `my.program/proposals`) in one call:
   `prepare-merge!` on a fresh branch of `execution`'s head, `accept-merge!` through the
-  unchanged gate (deciding the merge task `:accepted` and retiring the tested branch),
+  unchanged gate (deciding the merge task `:accepted`; the tested branch is retired either way),
   then `write-and-commit!`: `write-back!` into the checkout `root` and the commit of
   exactly the written bytes, under one hold of the lane commit lock.
   Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
   data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
-  undecided and writes nothing; a write-back or commit refusal after acceptance carries
+  undecided and merges nothing (main may record the target run of a red test it had no result for); a write-back or commit refusal after acceptance carries
   `:seon.source/accepted` (main already holds the merge).
   Each effect is recorded on the merge task as it is made: the acceptance in the
   merge commit, each installed file, the git commit. Calling `land!` again with

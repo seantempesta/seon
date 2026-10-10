@@ -267,6 +267,40 @@
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
+           :seon.test/long "One prepare (one nested seon.test/run on the candidate) and the run of its red test on the target (60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 120000}
+  a-test-never-run-on-the-target-is-not-blamed-on-the-merge
+  ;; Before, a test red on the candidate with no result on the target at its
+  ;; current reach was the change's (:red), though the target fails it too.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        fn-entity #(entity (db/db %1) :fn %2 %3)
+        test-entity #(entity (db/db %1) :test %2 %3)
+        callee #(str "(defn unrun-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
+        c (keyword (str "merge-test-c-" (id/id)))
+        _ (write! h-conn [(fn-entity h-conn "unrun-callee" (callee 1))])
+        _ (write! h-conn [(test-entity h-conn "unrun-proof" "(clojure.test/deftest unrun-proof (clojure.test/is (pos? (seon.cluster.merge-test/unrun-callee))))")
+                          (test-entity h-conn "unrun-broken" "(clojure.test/deftest unrun-broken (clojure.test/is (= 0 (seon.cluster.merge-test/unrun-callee))))")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])]
+    (try
+      (write! c-conn [(fn-entity c-conn "unrun-callee" (callee "(* 1 1)"))])
+      (let [proposal (source/prepare-merge! target store c #{(sym "unrun-proof")})
+            _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+            refusal (source/accept-merge! target store proposal)]
+        (is (= [(sym "unrun-broken")] (:seon.source/red proposal)) "the gate ran it red")
+        (is (= :seon.source/red-on-target-error (:seon.error/type refusal)) "it stops for root, not blamed on the change")
+        (is (= #{[(sym "unrun-broken") :red-on-target]}
+               (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refusal))))))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
 (defn- git!
   "Run git with `args` in `root`; its trimmed standard output, throwing on a non-zero exit."
   [root & args]
@@ -373,13 +407,14 @@
                  head (git! root "rev-parse" "HEAD")
                  proposal (proposed! running connection "side"
                                      "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-                 main (db/commit-id (db/db connection))
+                 main (digest connection 'tq.land/side)
                  refused (source/land! execution proposal root)]
              (is (= :seon.source/red-test-error (:seon.error/type refused)))
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
              (is (nil? (outcome (:seon.task/merge proposal))) "the merge task stays undecided")
-             (is (= main (db/commit-id (db/db connection))) "main is unchanged")
+             ;; main records the target run of the red test it never ran (its own evidence), never the change
+             (is (= main (digest connection 'tq.land/side)) "main's program is unchanged")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
