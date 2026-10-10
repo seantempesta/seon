@@ -46,6 +46,20 @@ order:
 4. Model tool markup `</invoke>` in a reply is read as code (3 errors; `seon.sci.forgive` reply-mode prose rules).
 5. A guessed `seon.print/inspect`; `my.program/callers` passed a function (refused with a fix; agent errors).
 
+**Chain run 3 (decided 2026-10-10 after Astra's review, `astra-chain-friction.md`, 1fc49251c).** `forgive` was the wrong
+first task: a 178-line platform reader, three defects and an unsettled repair policy, so it tested everything at once.
+Chain run 3 is the small ordinary `comp.text/slug-removes-edge-hyphens` (policy fixed before launch; lane `slug-task`);
+then a small real owner; `scan` later as a separate platform acceptance. Landed for it and live on default 18919b663:
+sealed archives and pins (9cd874d94, 4027882d4), whole source (e25afdf6e), tool markup as prose (ececefad5), an agent
+runs its proofs with `clojure.test` at its REPL (9a78f8f9d), errors grouped by signature across agents in health
+(763693afc), retirement closes admission and a message hosts a stopped agent (d98ab13ed; the agent does not yet run:
+lane `message-wakes`), six red census proofs for violated laws (18919b663). In flight: `message-wakes`, `merge-gate`,
+`slug-task`, and the DYNAMIC-CONTEXT card's revision (owner: reflection reads the record first, then asks a snapshot
+of the agent forked at the decision's t; one happy path for task running, every end message goes to root).
+Open: two reds on clean HEAD (`seon.config-test/the-default-document-has-one-canonical-complete-location`,
+`seon.db-test/equal-declaration-content-shares-one-projection-across-values`) to classify; boot readiness 15.6 s on
+18919b663 against 5–9 s earlier.
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
