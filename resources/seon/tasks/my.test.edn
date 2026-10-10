@@ -19,7 +19,7 @@
              :must-read #{my.test/check}}
  #:seon.task{:name "an-agent-cannot-run-one-test-by-hand"
              :kind :function
-             :intent "At an agent's REPL (clojure.test/run-test-var #'t) throws ClassCastException (sci.lang.Namespace cannot be cast to clojure.lang.Symbol), (clojure.test/run-test t) and (clojure.test/test-vars [#'t]) answer nil, and calling the deftest prints FAIL lines located at (lookup.clj:43) (fanout run, default e1a71b7c8, 2026-10-08; agents fan-source and live-flash-4 tried these). Done when clojure.test's own run-test-var and run-test answer their summary map at the agent's REPL, as in Clojure."
+             :intent "At an agent's REPL (clojure.test/run-test-var #'t) throws ClassCastException (sci.lang.Namespace cannot be cast to clojure.lang.Symbol), (clojure.test/run-test t) and (clojure.test/test-vars [#'t]) answer nil, and calling the deftest prints FAIL lines located at (lookup.clj:43) (fanout run, default e1a71b7c8, 2026-10-08; agents fan-source and live-flash-4 tried these). Done when clojure.test's own run-test-var and run-test answer their summary map at the agent's REPL, as in Clojure. Reproduced again on default caba650fa (agent chain-frictions-probe, 2026-10-10): (ns cf.scratch (:require [clojure.test :as t])) (t/deftest cf-t (t/is true)) (t/run-test-var #'cf-t) throws \"class sci.lang.Namespace cannot be cast to class clojure.lang.Symbol\" (1 ms). Same class as `seon.sci.eval` task run-test-var-throws-on-an-sci-test-var, whose proof this task shares."
              :must-read #{my.test/run-owned}}
  #:seon.task{:name "a-two-test-check-allocates-a-gigabyte-and-a-half"
              :kind :function

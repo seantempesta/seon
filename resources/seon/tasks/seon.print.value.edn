@@ -1,6 +1,6 @@
 [#:seon.task{:name "a-contract-refusal-prints-a-generated-example-of-the-whole-schema"
              :kind :function
-             :intent "A contract refusal on a wrong-type argument prints a generated :example of the whole schema (about 40 lines of fake data, e.g. `seon.cluster.boot/readiness` given a string). Done when the refusal shows the expected schema name and one dig form, with no generated example for large maps, asserted on the refusal's data."
+             :intent "A contract refusal on a wrong-type argument prints a generated :example of the whole schema (about 40 lines of fake data, e.g. `seon.cluster.boot/readiness` given a string). Done when the refusal shows the expected schema name and one dig form, with no generated example for large maps, asserted on the refusal's data. Seen again by lane loop-prove (86b7cdbbe, 2026-10-10): the examples are junk values that no caller could pass, such as [:./R tV] and N/j, so they mislead as well as bulk; a refusal that cannot show a valid example shows none."
              :must-read #{seon.print.value/bounded-text}}
  #:seon.task{:name "printed-copies-stored-or-sent-instead-of-values"
              :kind :namespace
