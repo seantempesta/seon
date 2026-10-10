@@ -300,3 +300,30 @@ Unclassified assertion difference: the test runs but asserts something that diff
 ## Cost
 
 One non-root `my.test/check` of 4 tests took 2,015 ms and allocated 1,355 MB. Each member's test resolution took 180 to 470 ms. Interpreting the shared helpers once per request cut resolution to 130 to 260 ms but raised the total to 2,327 ms and 2,115 MB, so that change was not landed. Most of the per-member cost is somewhere other than `seon.test-support`; `seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte` holds the cost evidence.
+
+## Update, 2026-10-11: the 205 rerun
+
+Lane interp-honest re-ran the 205 interpreted-only reds above as a non-root agent (`interp-census-1`, on its own branch of default at 26b25941f, which includes the evaluator-aware evidence, namespace-object and fixture fixes of 7ab559153, ad86afd43 and b097db713), in batches of 25 per `seon.test/run` request with `:seon.test/rerun? true` and declared-long tests included: `bb -cp script:src -m seon.interpreted-census /path/to/checkout default interp-census-1 docs/research/agent-platform/2026-10-11/interpreted-census-before.edn docs/research/agent-platform/2026-10-11/interpreted-census-after-205.edn 25` (`script/seon/interpreted_census.clj`). Each batch took 1 to 35 s, about 106 s in all. Every member ran: none was pending, refused or excluded. The per-test results are in [interpreted-census-after-205.edn](../2026-10-11/interpreted-census-after-205.edn), with the class each test had above.
+
+| Class | Before | Still red | Now green |
+|---|---|---|---|
+| R: Redefines a Var | 50 | 49 | 1 |
+| D: Requires a dev/ namespace | 25 | 0 | 25 |
+| F: A test-namespace def failed to interpret | 20 | 9 | 11 |
+| O: SCI *out* unbound on the member thread | 17 | 1 | 16 |
+| E: await-event! refuses the event source | 14 | 1 | 13 |
+| M: Test macro reads the compiler &env | 10 | 10 | 0 |
+| P: proxy unsupported in SCI | 7 | 7 | 0 |
+| G: test.check or Malli rejects SCI values | 5 | 3 | 2 |
+| I: Instrumentation keyed by the host Var | 3 | 3 | 0 |
+| N: SCI namespaces carry no metadata | 2 | 2 | 0 |
+| T: Over its bound interpreted | 3 | 3 | 0 |
+| V: Test row did not interpret (other) | 3 | 3 | 0 |
+| U: Unclassified assertion difference | 46 | 19 | 27 |
+| Total | 205 | 110 | 95 |
+
+Limits:
+
+- A green here is green interpreted. It was compiled-green in the baseline above, so it no longer differs; this rerun did not repeat the compiled run.
+- The remaining F reds are uncaught exceptions in `seon.db-test`, `seon.blob-test`, `seon.cluster.store-transact-test` and `seon.datahike-fork-test`. The one O red (`seon.cluster.boot-test/status-answers-faulted-health-and-lists-the-open-fault`) and the one E red (`seon.cluster.host-test/retirement-closes-admission-at-the-writer-and-races-submission`) fail on an assertion, not on the class's cause. The EDN keeps the first three lines of each failure message only, so reclassifying the 19 U reds needs a rerun of those tests.
+- The full tier (2,677 tests) was not rerun, so interpreted reds outside these 205 are not counted. The same script takes a vector of every stored test symbol; at about 13 s per batch of 25 it needs about 25 minutes. A compiled baseline is needed to tell interpreted-only reds from the rest.
