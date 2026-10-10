@@ -25,7 +25,7 @@
  :seon.cost/cpu-ms
  [:double {:min 0.0 :description "CPU milliseconds (to 0.1) of the request's evaluation arms, scoped as :seon.cost/alloc-mb."}]
  :seon.cost/unmeasured
- [:map-of {:description "A measure the request could not take, by its key, and why: :unmeasured-arm (a form's arm ran where HotSpot keeps no count), :no-form (nothing evaluated)."}
+ [:map-of {:description "A measure the request could not take, by its key, and why: :unmeasured-arm (a form's arm ran where HotSpot keeps no count), :no-form (nothing evaluated), :counter-unavailable (a JVM counter answered -1), :overlapping-parts (the attributed parts exceed the window: a residual never clamped)."}
   :qualified-keyword :keyword]
  :seon.cost/counts
  [:map [:seon.cost/calls :seon.cost/calls] [:seon.cost/reads :seon.cost/reads]
@@ -34,6 +34,8 @@
   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
   [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
   [:seon.cost/step {:optional true} :seon.cost/step]
+  [:seon.cost/writer {:optional true} :seon.cost/writer]
+  [:seon.cost/commit {:optional true} :seon.cost/commit]
   [:seon.cost/live {:optional true} :seon.cost/live]
   [:seon.cost/tests {:optional true} :seon.cost/tests]
   [:seon.cost/live-tests {:optional true} :seon.cost/live-tests]]
@@ -41,8 +43,22 @@
  [:map {:description "The agent's turn step as the proc thread counted it: bytes allocated and CPU time between the step's start and its end, on a platform thread (exact, unlike a virtual thread, which has no counter). Producer: seon.flow/var-process. Consumer: the reply."}
   [:seon.cost/alloc-mb :seon.cost/alloc-mb]
   [:seon.cost/cpu-ms :seon.cost/cpu-ms]]
+ :seon.cost/writer-meter
+ [:and {:description "A world's writer meter (seon.db/writer-meter), six slots: transactions, processing bytes and CPU nanoseconds, commit-share bytes and CPU nanoseconds, the largest batch. seon.db/transact! adds each committed report's writer cost; seon.db/writer-cost reads it. Producer: seon.flow/var-process, one per step."}
+  :seon.profile/world-counter]
+ :seon.cost/writer
+ [:map {:description "The Datahike writer's processing of the request's transactions, as the writer thread counted it (`:datahike/processing` on each report, seon.cluster.store/processing-measured): megabytes allocated, CPU milliseconds, and how many transactions. Producer: seon.db/writer-cost. Consumer: the reply."}
+  [:seon.cost/alloc-mb :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms :seon.cost/cpu-ms]
+  [:seon.cost/transactions :seon.cost/transactions]]
+ :seon.cost/commit
+ [:map {:description "The commits that made the request's transactions durable, as their one platform thread counted them (`:datahike/commit` on each report): megabytes and CPU milliseconds. A commit shared by a batch of transactions (Datahike group commit) is charged in equal shares; batch-size is the largest batch, so above 1 the values are shares. Producer: seon.db/writer-cost. Consumer: the reply."}
+  [:seon.cost/alloc-mb :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms :seon.cost/cpu-ms]
+  [:seon.cost/batch-size :seon.cost/batch-size]]
+ :seon.cost/batch-size [:int {:min 1 :description "The most transactions one commit made durable together."}]
  :seon.cost/comparison
- [:map {:description "One subject's live value beside main's stored value. Shown when live is at least 1.41 times or at most 1/1.41 of main's, when main has none, or when the digest differs."}
+ [:map {:description "One subject's live value beside main's stored value. A definition the agent changed (interpreted, or its digest differs from main's) is always shown; an unchanged one only when live is at least :seon.config.fn.cost/hysteresis times main's (an improvement the agent did not cause is left out). A test is shown when main has none or its allocation moved by the hysteresis either way."}
   [:seon.cost.comparison/subject :seon.cost.comparison/subject]
   [:seon.cost.comparison/measure :seon.cost.comparison/measure]
   [:seon.cost.comparison/live :seon.cost.comparison/live]
@@ -67,11 +83,31 @@
  :seon.cost/subjects
  [:set {:description "The definitions and tests a request defined or ran, and the schemas it measured: what cost-diff pulls from main by identity."}
   :seon.cost.comparison/subject]
+ :seon.cost/entrance
+ [:map {:description "The entrance thread (the MCP caller) as its counters measured the request: custody acquisition, a JVM-mode form's host evaluation, the diff and the print; a platform thread, exact. Producer: seon.mcp/eval-clj. Consumer: the reply and :seon.cost/shared."}
+  [:seon.cost/alloc-mb :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms :seon.cost/cpu-ms]]
+ :seon.cost/gc-ms
+ [:double {:min 0.0 :description "Garbage-collection CPU milliseconds of the whole JVM in the request's window (java.lang.management.MemoryMXBean/getTotalGcCpuTime)."}]
+ :seon.cost/jit-ms
+ [:double {:min 0.0 :description "JIT compilation milliseconds of the whole JVM in the request's window (java.lang.management.CompilationMXBean/getTotalCompilationTime)."}]
+ :seon.cost/shared
+ [:map {:description "The request's JVM window less its attributed parts (entrance, step, tests, writer, commit), with the window's GC CPU and JIT time beside it: work shared with the JVM, labelled and never apportioned. Producer: seon.batch/shared-cost. Consumer: the reply."}
+  [:seon.cost/attribution [:= :shared-never-apportioned]]
+  [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
+  [:seon.cost/gc-ms {:optional true} :seon.cost/gc-ms]
+  [:seon.cost/jit-ms {:optional true} :seon.cost/jit-ms]
+  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
  :seon.cost/request
- [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms only, step covers the turn step's proc thread. jvm-window covers every thread in the observation window, including unrelated work; unavailable counters are absent."}
+ [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms (whose owning thread is the step's or the entrance's), step the turn step's proc thread, entrance the MCP caller's thread, shared the window's residual. jvm-window covers every thread in the observation window, including unrelated work; unavailable counters are absent."}
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
   [:seon.cost/step {:optional true} :seon.cost/step]
+  [:seon.cost/writer {:optional true} :seon.cost/writer]
+  [:seon.cost/commit {:optional true} :seon.cost/commit]
+  [:seon.cost/entrance {:optional true} :seon.cost/entrance]
+  [:seon.cost/shared {:optional true} :seon.cost/shared]
   [:seon.cost/tests {:optional true} :seon.cost/tests]
   [:seon.cost/diff {:optional true} :seon.cost/diff]
   [:seon.cost/stages {:optional true} :seon.cost/stages]

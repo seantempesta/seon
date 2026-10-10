@@ -14,6 +14,7 @@
             [datahike.writing :as datahike.writing]
             [malli.core :as m]
             [malli.instrument :as mi]
+            [seon.batch]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.store :as store]
@@ -369,6 +370,41 @@
        (is (string? (:seon.db.write.attempt/request-id refusal)))
        (is (= [] transaction-findings))
        (is (not (instance? Throwable refusal)))))))
+
+(deftest a-transaction-report-carries-its-processing-cost
+  (test-support/with-database
+   (fn [connection]
+     (let [meter (db/writer-meter)
+           report (binding [seon.batch/*world* {:seon.cost/writer-meter meter}]
+                    (db/transact! connection [{:db/ident :seon.db-test/writer-cost}]))
+           {writer :seon.cost/writer commit :seon.cost/commit} (db/writer-cost meter)]
+       (is (pos? (get-in report [:datahike/processing :alloc-bytes] 0)) "the writer thread counted the report's processing")
+       (is (pos? (get-in report [:datahike/commit :alloc-bytes] 0)) "the commit's one thread counted its storage writes")
+       (is (= 1 (:seon.cost/transactions writer)))
+       (is (pos? (:seon.cost/alloc-mb writer 0.0)) "the world's writer cost holds the processing")
+       (is (pos? (:seon.cost/alloc-mb commit 0.0)) "and its share of the commit")))))
+
+(deftest a-shared-commit-is-charged-in-equal-shares
+  (test-support/with-database
+   (fn [connection]
+     (let [^java.util.concurrent.atomic.AtomicLongArray meter (db/writer-meter)
+           world {:seon.cost/writer-meter meter}
+           ;; concurrent writers queue behind one another's commits: Datahike
+           ;; commits what queued as one batch
+           pool (java.util.concurrent.Executors/newFixedThreadPool 8)
+           reports (try
+                     (->> (range 8)
+                          (mapv (fn [i] ^java.util.concurrent.Callable
+                                  (fn [] (binding [seon.batch/*world* world]
+                                           (db/transact! connection [{:db/ident (keyword "seon.db-test" (str "shared-" i))}])))))
+                          (.invokeAll pool)
+                          (mapv #(.get ^java.util.concurrent.Future %)))
+                     (finally (.shutdown pool)))
+           commits (vals (group-by :commit-id (map :datahike/commit reports)))
+           durable (transduce (map (comp :alloc-bytes first)) + 0 commits)]
+       (is (= 8 (.get meter 0)) "every transaction is charged")
+       (is (every? #(= (count %) (:tx-count (first %))) commits) "a commit's batch is the reports that share it")
+       (is (<= (- durable 8) (.get meter 3) durable) "the shares add up to the commits, within integer division")))))
 
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database

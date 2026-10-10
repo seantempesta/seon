@@ -18,6 +18,7 @@
             [datahike.api :as d]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
+            [datahike.writing :as datahike.writing]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
@@ -161,6 +162,29 @@
   (-> (io/resource "seon/schemas/seon.config.db.edn") slurp clojure.edn/read-string
       :seon.config.db/store-cache-size second :seon.config/default))
 
+(defn processing-measured
+  "Datahike writer operation `op`, returning its report with
+  `:datahike/processing`: the bytes the writer thread allocated (absent where
+  the JVM keeps no count) and the CPU nanoseconds it spent in the operation.
+  The writer applies one operation at a time, synchronously, on a platform
+  thread of its own loop, so the counters are the operation's own."
+  {:malli/schema [:=> [:cat :seon.cluster.store/writer-operation] :seon.cluster.store/writer-operation]}
+  [op]
+  (fn [database & arguments]
+    (let [[allocated cpu] (flow/thread-counters)
+          report (apply op database arguments)
+          [allocated' cpu'] (flow/thread-counters)]
+      (cond-> report
+        (map? report)
+        (assoc :datahike/processing
+               (cond-> {:cpu-ns (- cpu' cpu)}
+                 (<= 0 allocated allocated') (assoc :alloc-bytes (- allocated' allocated))))))))
+
+(def ^:private write-operations
+  "The writer's measured operations, one value so configurations compare equal."
+  {'transact! (processing-measured datahike.writing/transact!)
+   'merge! (processing-measured datahike.writing/merge-writer!)})
+
 (defn datahike-configuration
   "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
@@ -206,7 +230,9 @@
               ; written before it stay readable: not a creation setting.
               :config {:defer-immutable-sync? true
                        :compressor {:type :lz4}}}
-      :writer {:backend :self}
+      ; Each report carries its processing cost (`processing-measured`);
+      ; the fork keeps these runtime operations out of storage.
+      :writer {:backend :self :write-fn-map write-operations}
       ; Every connection to this store shares one LRU of materialized index
       ; nodes, keyed by immutable address. It holds a new branch's first
       ; whole-program read (an agent's acquisition and first form); below

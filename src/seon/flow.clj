@@ -314,11 +314,13 @@
 
 (defn- with-step-start
   "Run one proc step with its thread's starting counters in its world
-  (`::step-start`), whose reader takes the step's cost from them."
+  (`::step-start`), whose reader takes the step's cost from them, and a fresh
+  writer meter (`:seon.cost/writer-meter`) its transactions charge."
   {:malli/schema [:=> [:cat [:=> [:cat] :any]] :any]}
   [f]
   (if-let [world seon.batch/*world*]
-    (binding [seon.batch/*world* (assoc world ::step-start (thread-counters))] (f))
+    (binding [seon.batch/*world* (assoc world ::step-start (thread-counters)
+                                        :seon.cost/writer-meter (db/writer-meter))] (f))
     (f)))
 
 (defn stop-off-thread!

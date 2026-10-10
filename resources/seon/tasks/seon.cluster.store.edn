@@ -46,4 +46,8 @@
              :intent "`:seon.config.db/store-cache-size` is 8,192 nodes (`seon.cluster.store/datahike-configuration` passes it to Datahike's node LRU, `datahike.index.interface/make-node-cache`) while the default store holds 772,000 index nodes and the cache was full; CLAUDE.md says the node cache is byte-bounded. A warm `my.program/write-branch!` that writes nothing allocates 170 MB, about 108 MB of it LZ4 and Fressian decoding of nodes read from disk (default f54e73c83, 2026-10-09, JFR in the evidence). Done when the dial is a byte budget (weighing a node by its decoded size, as `seon.cache` weighs entries) sized for a 16 GB machine, or the evidence shows the node count is the right unit, and the same call's node reads are counted per branch storage in status."
              :must-read #{seon.cluster.store/datahike-configuration}
              :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}
+ #:seon.task{:name "datahike-error-log-lines-exceed-their-bound"
+             :kind :function
+             :intent "`seon.cluster.store/datahike-log!` prints a Datahike `:error` log of a large value as a 1,331-character line; `seon.cluster.store-test/datahike-logs-through-seon-bounded-and-expected-refusals-below-error` bounds it at 600 and is red at 56cae0c85 (bin/seon check run f3ccb4a1b849, and at 5acc29e23 run e43068efadc3). Done when the log line shows the value through the one value printer's budget and that test is green."
+             :must-read #{seon.cluster.store/datahike-log!}}
 ]

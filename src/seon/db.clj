@@ -5922,6 +5922,50 @@
          :seon.error/data (or data {})
          :seon.db/transaction-outcome-unknown true})))))
 
+(defn writer-meter
+  "A new writer meter: what the Datahike writer spent on a world's
+  transactions (`java.util.concurrent.atomic.AtomicLongArray`): transactions,
+  processing bytes and CPU nanoseconds, the commits' bytes and CPU nanoseconds
+  charged to them, and the largest batch a commit shared."
+  {:malli/schema [:=> [:cat] :seon.cost/writer-meter]}
+  []
+  (java.util.concurrent.atomic.AtomicLongArray. 6))
+
+(defn- charge-writer!
+  "Add one committed report's writer cost to `meter`: its processing
+  (`:datahike/processing`) and an equal share of the commit that made it
+  durable (`:datahike/commit`, shared by `:tx-count` reports)."
+  {:malli/schema [:=> [:cat :seon.cost/writer-meter :seon.db/transaction-report] :nil]}
+  [^java.util.concurrent.atomic.AtomicLongArray meter report]
+  (let [{:keys [alloc-bytes cpu-ns]} (:datahike/processing report)
+        commit (:datahike/commit report)
+        shared (max 1 (:tx-count commit 1))]
+    (.incrementAndGet meter 0)
+    (when alloc-bytes (.addAndGet meter 1 alloc-bytes))
+    (when cpu-ns (.addAndGet meter 2 cpu-ns))
+    (when-let [b (:alloc-bytes commit)] (.addAndGet meter 3 (quot b shared)))
+    (when-let [c (:cpu-ns commit)] (.addAndGet meter 4 (quot c shared)))
+    (.accumulateAndGet meter 5 shared (reify java.util.function.LongBinaryOperator
+                                        (applyAsLong [_ a b] (max a b))))
+    nil))
+
+(defn writer-cost
+  "What `meter` holds as the reply's `:seon.cost/writer` and `:seon.cost/commit`;
+  empty when the world committed nothing."
+  {:malli/schema [:=> [:cat :seon.cost/writer-meter]
+                  [:map [:seon.cost/writer {:optional true} :seon.cost/writer]
+                   [:seon.cost/commit {:optional true} :seon.cost/commit]]]}
+  [^java.util.concurrent.atomic.AtomicLongArray meter]
+  (let [mb #(/ (Math/round (/ (double %) 1e2)) 1e4)
+        ms #(/ (Math/round (/ (double %) 1e4)) 1e2)
+        transactions (.get meter 0)]
+    (if (zero? transactions)
+      {}
+      {:seon.cost/writer {:seon.cost/alloc-mb (mb (.get meter 1)) :seon.cost/cpu-ms (ms (.get meter 2))
+                          :seon.cost/transactions transactions}
+       :seon.cost/commit {:seon.cost/alloc-mb (mb (.get meter 3)) :seon.cost/cpu-ms (ms (.get meter 4))
+                          :seon.cost/batch-size (.get meter 5)}})))
+
 (defn- transact-call
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction]
@@ -5983,8 +6027,10 @@
                                [:seon.db/connection-identity
                                 :seon.store/branch])
                   :seon.error/data (merge evidence {:seon.error/member :seon.config.db/write-time-limit-ms})}))
-              (cond-> report
-                (and (:db-after report) (not (:parents request))) hold-committed-projection!)))))
+              (do (when-let [meter (:seon.cost/writer-meter batch/*world*)]
+                    (when (:db-after report) (charge-writer! meter report)))
+                  (cond-> report
+                    (and (:db-after report) (not (:parents request))) hold-committed-projection!))))))
     (catch Throwable throwable
       (write-refusal database transaction throwable))))
 

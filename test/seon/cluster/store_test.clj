@@ -92,7 +92,9 @@
     (is (true? (:fuse-index-roots? configuration)))
     (is (= (:index-config configuration) (:index-config non-temporal))
         "index tuning is one creation decision, independent of history policy")
-    (is (= {:backend :self} (:writer configuration)))
+    (is (= :self (get-in configuration [:writer :backend])))
+    (is (= #{'transact! 'merge!} (set (keys (get-in configuration [:writer :write-fn-map]))))
+        "the writer's operations report their processing cost")
     (is (= :write (:schema-flexibility configuration)))
     (is (true? (:keep-history? configuration))
         "ordinary stores retain history by default")
@@ -791,7 +793,8 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
-(deftest datahike-logs-through-seon-bounded-and-expected-refusals-below-error
+(deftest ^{:seon/tasks #{'seon.cluster.store/datahike-error-log-lines-exceed-their-bound}}
+  datahike-logs-through-seon-bounded-and-expected-refusals-below-error
   ;; A raise and the writer's write-error reach their caller as the failure;
   ;; they were printed whole at :error on stdout by trove's console backend.
   (let [large {:entity (vec (range 5000))}

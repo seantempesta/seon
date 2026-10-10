@@ -25,4 +25,11 @@
 
  :seon.cluster.store/error-root
  [:string {:min 1}]
+
+ :seon.cluster.store/writer-operation
+ [:fn
+  {:description "A Datahike writer operation (`datahike.writing/transact!`, `merge-writer!`): the writer's current database value and the dispatched arguments to the operation's report. Consumer: the store configuration's :write-fn-map."
+   :error/message "must be a writer operation function"
+   :gen/schema [:=> [:cat :seon.db/database-value :map] :map]}
+  clojure.core/ifn?]
 }
