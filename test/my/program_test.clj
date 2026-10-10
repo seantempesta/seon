@@ -358,7 +358,7 @@
        (is (not (contains? shown :seon.repl/error)) "slurp, spit and file-seq resolve in an agent's context")
        (is (= ["written" 2] (:seon.repl/value shown)) "they read, write and list files as clojure.core does")))))
 
-(deftest ^{:seon/tasks #{'my.program/source-shows-a-function-whole}} source-shows-a-function-whole
+(deftest source-shows-a-function-whole
   (support/with-running-agent
    (fn [running agent-id _]
      (let [target 'seon.sci.forgive/scan

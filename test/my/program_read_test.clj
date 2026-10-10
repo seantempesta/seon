@@ -1,5 +1,6 @@
 (ns my.program-read-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string]
+            [clojure.test :refer [are deftest is]]
             [my.program :as program]
             [seon.db :as db]
             [seon.test-support :as support]))
@@ -50,3 +51,26 @@
         elsewhere (my.program/source database 'nope.ns/foo)]
     (is (= 'seon.ref/section (first (:seon.error/expected typo))))
     (is (= (:seon.error/message typo) (:seon.error/message elsewhere)) "the message is fixed text; the names are data")))
+
+(deftest ^{:seon/tasks #{'my.program/a-search-snippet-keeps-the-whole-line}}
+  a-search-snippet-keeps-the-whole-line
+  ;; match-row cut a trimmed line over 100 characters to 97 and "..."; the value printer alone bounds what is shown.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           longest-line (fn [sym]
+                          (->> (db/q database '[:find ?src . :in $ ?sym :where [?e :seon.fn/sym ?sym] [?e :seon.fn/source ?src]] sym)
+                               clojure.string/split-lines
+                               (map clojure.string/trim)
+                               (sort-by count)
+                               last))
+           snippet-of (fn [sym line]
+                        (->> (:matches (program/search database {:text line :limit 50}))
+                             (filter #(= sym (:sym %)))
+                             first
+                             :snippet))]
+       (is (< 100 (count (longest-line 'my.program/caller-data))) "the fixture line is long enough to be cut")
+       (are [sym] (= (longest-line sym) (snippet-of sym (longest-line sym)))
+         'my.program/caller-data
+         'my.program/reads-key
+         'my.program/breaks)))))

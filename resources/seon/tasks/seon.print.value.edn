@@ -9,6 +9,6 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--print-sites.tsv" "docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--notes.md"}}
  #:seon.task{:name "ad-hoc-text-clips-outside-the-printer"
              :kind :namespace
-             :intent "Two sites cut text with subs outside the value printer: `my.program/match-row` (100-character snippet with ...) and `seon.mcp/call` (first 200 characters of a request as its source). Owner 2026-10-07: no random clipping. Inventory class ad-hoc-clip, 2 sites: src/my/program.clj 1, mcp.clj 1. Done when both keep the whole line or request as data and the printer bounds what is shown, asserted by a my.program-test search over a 10,000-character line whose result holds the full line."
+             :intent "`seon.mcp/call` cuts a request to its first 200 characters as its source with subs, outside the value printer (the other site, `my.program/match-row`, is task `my.program/a-search-snippet-keeps-the-whole-line`). Owner 2026-10-07: no random clipping. Done when it keeps the whole request as data and the printer bounds what is shown, asserted by a seon.mcp-entrance-test call with a 10,000-character request whose recorded source holds all of it."
              :must-read #{seon.mcp/call seon.print.value/bounded-text}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--print-sites.tsv" "docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--notes.md"}}]

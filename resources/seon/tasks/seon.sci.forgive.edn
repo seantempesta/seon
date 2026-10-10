@@ -18,9 +18,4 @@
             :kind :function
             :intent "`seon.sci.forgive/forgive` is idempotent: forgiving its `:seon.batch/text` again yields no `:seon.batch/repairs` and the same `:seon.batch/spans`. Today a dropped stray closer joins tokens (\"a]a\" -> \"aa\"), a quote before an inserted closer falls outside every span (\"('\"), and a closer inserted after a lone backslash becomes a character literal (\"(\\\\\"). Every change stays recorded as a `:seon.batch/repair` (a replaced closer carries both `:seon.batch/dropped` and `:seon.batch/inserted`). The fix lands in `seon.sci.forgive/scan`, which `seon.sci.forgive/forgive` calls; the consumers `seon.sci.forgive/step` and `seon.sci.forgive/segments` read the `:seon.batch/forgiven` it answers."
             :must-read #{seon.sci.forgive/forgive seon.sci.forgive/scan seon.sci.forgive/step seon.sci.forgive/segments}
-            :evidence #{"docs/research/agent-platform/2026-10-10/designed-task-examples.md"}}
- #:seon.task{:name "tool-markup-in-a-reply-is-prose"
-            :kind :function
-            :intent "A model reply line of tool-call markup (`</invoke>`, `</parameter>`) is prose: `seon.sci.forgive/literal-line?` reads `</invoke>` as one namespace-qualified symbol, so `seon.sci.forgive/forgive` in `:reply` mode keeps it as code and the evaluation answers 'Unable to resolve symbol: </invoke>' (chain run 2, agent chain2-forgive-1: 3 of 15 calls). A line whose first non-blank characters are `<` then a letter or `/` cannot start a form; `seon.sci.forgive/segments` keeps it as the `:seon.batch/comment` of the next form."
-            :must-read #{seon.sci.forgive/literal-line? seon.sci.forgive/forgive seon.sci.forgive/segments}
-            :evidence #{"docs/seon/plan.md"}}]
+            :evidence #{"docs/research/agent-platform/2026-10-10/designed-task-examples.md"}}]
