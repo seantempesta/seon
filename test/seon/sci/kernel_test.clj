@@ -58,6 +58,17 @@
     (kernel/cache-program! ctx {} {})
     (is (= [] (kernel/public-functions-in ctx 'viewer)))))
 
+(deftest ^{:seon/tasks #{'seon.sci.eval/sci-binding-of-a-host-dynamic-var-never-reaches-host-code}}
+  binding-a-host-dynamic-var-binds-it-for-compiled-code
+  ;; compiled code reads the host Var, so an agent's binding must reach it;
+  ;; seon.db is a program namespace, held by an acquired (forked) context
+  (let [ctx (test-support/fork-cluster-ctx
+             (:seon.db/connection (test-support/execution-handle nil)))]
+    (is (= [2 :probe]
+           (value ctx (str "[(binding [*print-length* 2] (.deref (clojure.lang.Var/find 'clojure.core/*print-length*)))"
+                           " (binding [seon.db/*read-evidence-sink* :probe]"
+                           "   (.deref (clojure.lang.Var/find 'seon.db/*read-evidence-sink*)))]"))))))
+
 (deftest the-interpreter-resolves-the-classpath-and-loaded-namespaces
   (let [ctx (eval/build-base-ctx (schema/handed-projection))]
     (testing "java.lang short names, as Clojure's default imports"
