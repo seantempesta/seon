@@ -17,6 +17,7 @@
             [seon.mcp :as mcp]
             [seon.operator.runtime :as runtime]
             [seon.task :as task]
+            [seon.test]
             [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
             [seon.db :as db]
@@ -361,7 +362,13 @@
                                       (str "(ns tq.endr (:require [clojure.test :refer [deftest is]]))\n"
                                            "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                            "(deftest ^{:seon/tasks #{'tq.endr/area}} area-test (is (= 25 (area 5))))\n"
-                                           "(deftest identity-test (is (= 3 (area 3))))\n"))
+                                           "(deftest identity-test (is (= 3 (area 3))))\n")
+                                      "test")
+           ;; identity-test is green on main before the change: its red on the branch is the change's break
+           main-run (seon.test/run {:seon.test/policy :named :seon.test/execution (support/execution-handle nil)
+                                    :seon.test/recording-connection connection :seon.test/identities #{'tq.endr/identity-test}})
+           _ (is (= [[1 0]] (mapv (juxt :seon.test/pass-count :seon.test/fail-count) (:seon.test/results main-run)))
+                 "identity-test is green on main before the change")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
                                             :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/kind :function
@@ -628,7 +635,7 @@
                  _ (end! running execution agent-id)
                  [message] (end-messages (db/db connection) agent-id)
                  refused (merge-row (:seon.task/merge message))]
-             (is (= :done (:seon.task/end message)) "the task ended green on its branch")
+         (is (= :done (:seon.task/end message)) "the task ended green on its branch")
              (is (= {:seon.task/refusal :seon.source/red-test-error :seon.task/refused-tests #{'tq.endl/side-identity-test}}
                     (update refused :seon.task/refused-tests set))
                  "the merge task carries the refusal and stays undecided")
@@ -753,3 +760,62 @@
          (finally
            (.setWritable (io/file root "test/tq") true false)
            (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done}
+           :seon.test/long "An own-branch agent's setup and settings with their test steps, one run on main and one fixture-model pass with its test step."
+           :seon.test/long-ms 60000}
+  a-green-proof-with-reached-tests-only-unverified-or-red-on-main-ends-done
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           agent-id (str "reached-unverified-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           ;; besides the proof, `area` is reached by a test red on main (and still red after the change), a test
+           ;; main never ran that the change turns red, and a declared-long test the step never runs
+           _ (support/declare-source! connection 'tq.endu
+                                      (str "(ns tq.endu (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.endu/area}} area-test (is (= 25 (area 5))))\n"
+                                           "(deftest legacy-test (is (= 0 (area 1))))\n"
+                                           "(deftest unproven-test (is (= 2 (area 2))))\n"
+                                           "(deftest ^{:seon.test/long \"never run by a step\" :seon.test/long-ms 6000}"
+                                           " slow-test (is (pos? (area 2))))\n")
+                                      "test")
+           main-run (seon.test/run {:seon.test/policy :named :seon.test/execution (support/execution-handle nil)
+                                    :seon.test/recording-connection connection :seon.test/identities #{'tq.endu/legacy-test}})
+           _ (is (= [[0 1]] (mapv (juxt :seon.test/pass-count :seon.test/fail-count) (:seon.test/results main-run)))
+                 "legacy-test is red on main before the change")
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endu)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.endu :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))]
+       (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                          :seon.db/connection connection :seon.task/assigned id
+                                                          :seon.task/agent [:seon.agent/id agent-id]
+                                                          :seon.task/branch branch})))
+           "root assigns the task to the agent's branch")
+       (support/with-provider
+        (atom []) (support/reply-queue ["(in-ns 'tq.endu)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"])
+        (fn [server]
+          (agent-eval running agent-id (str "(my.agent/settings! "
+                                            (seon.id/printed (assoc (support/provider-config server)
+                                                                    :seon.config.ai/no-provider false
+                                                                    :seon.config.run/max-episode-runs 1))
+                                            ")"))
+          (support/outside-wake-on-branch! running agent-id target "Work your task.")
+          (until #(:seon.agent/admission-closed-tx
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                 1000)))
+       (let [home (db/db connection)
+             message (db/q '[:find (pull ?m [:seon.task/end]) . :in $ ?agent-id
+                             :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end _]]
+                           home agent-id)
+             shown (some #(when (and (:seon.task/end %) (= agent-id (:my.message/from %))) %)
+                         (get-in (seon.context/current-state home "root") [:seon.context/unread :seon.context/items]))]
+         (is (= :done (:seon.task/end message))
+             "the proof is green and the change broke no test: unverified and red-on-main reached tests do not block")
+         (is (= {:seon.task/unverified '[tq.endu/slow-test tq.endu/unproven-test]
+                 :seon.task/red-on-target '[tq.endu/legacy-test]}
+                (select-keys (:seon.task/ended shown) [:seon.task/unverified :seon.task/red-on-target]))
+             "root's end summary lists them: the never-run and no-baseline tests unverified, the one red on main red-on-target"))))))

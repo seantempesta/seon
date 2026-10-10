@@ -673,18 +673,32 @@
   [root]
   (fs/delete-recursively! (.getCanonicalPath (io/file (System/getProperty "java.io.tmpdir"))) (.getCanonicalPath (io/file root))))
 
-(defn declare-source!
-  "Declare on `connection`, unrun, the program the namespace `ns-sym` holds as the file text `source`,
-  as a published file is declared at the cluster head."
-  {:malli/schema [:=> [:cat :seon.db/connection :symbol :string] :seon.schema/value]}
-  [connection ns-sym source]
-  (let [root (io/file "tmp" "declare-proof" (str (random-uuid)))
-        file (io/file root (str (str/replace (str ns-sym) "." "/") ".clj"))]
+(defn- declare-root!
+  "Declare on `connection` the namespace `ns-sym` as the file text `source` under the one source root the
+  analysis `request` names, deleting the directory `scratch` holding it afterwards."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol :string :string
+                       [:map [:seon.fn/roots [:vector {:min 1 :max 1} :string]] [:seon.fn/root {:optional true} :string]]]
+                  :seon.schema/value]}
+  [connection ns-sym source scratch request]
+  (let [file (io/file (first (:seon.fn/roots request)) (str (str/replace (str ns-sym) "." "/") ".clj"))]
     (try (io/make-parents file)
          (spit file source)
-         (transacted! connection (seon.fn/reconcile-tx (db/db connection)
-                                                       (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
-         (finally (delete-recursively! root)))))
+         (transacted! connection (seon.fn/reconcile-tx (db/db connection) (seon.fn/program-entities request) []))
+         (finally (delete-recursively! (io/file scratch))))))
+
+(defn declare-source!
+  "Declare on `connection`, unrun, the program the namespace `ns-sym` holds as the file text `source`,
+  as a published file is declared at the cluster head; under the source root `root-name` (\"test\" makes its
+  deftests ones a test step runs when a change reaches them), else under a root no gate runs."
+  {:malli/schema [:function [:=> [:cat :seon.db/connection :symbol :string] :seon.schema/value]
+                  [:=> [:cat :seon.db/connection :symbol :string :string] :seon.schema/value]]}
+  ([connection ns-sym source]
+   (let [scratch (.getPath (io/file "tmp" "declare-proof" (str (random-uuid))))]
+     (declare-root! connection ns-sym source scratch {:seon.fn/roots [scratch]})))
+  ([connection ns-sym source root-name]
+   (let [scratch (.getCanonicalPath (io/file "tmp" "declare-proof" (str (random-uuid))))]
+     (declare-root! connection ns-sym source scratch
+                    {:seon.fn/root scratch :seon.fn/roots [(.getPath (io/file scratch root-name))]}))))
 
 (defn declare-proof!
   "Declare on `connection`, unrun, the red deftest `ns-sym`/`test-name` naming the task `task-sym`,

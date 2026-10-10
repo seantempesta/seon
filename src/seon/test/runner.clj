@@ -2275,17 +2275,39 @@
   (boolean (and (:seon.test/pass-count result)
                 (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))))))
 
+(defn statuses-at-current-reach
+  "Each of `test-symbols`' status on `database` for its current reach there:
+  `:red` when its latest result of `evaluators` (`latest-results`) is red
+  (`red-result?`) for the reach it has now, `:green` when that result passed,
+  else `:pending` (never run, run on another reach, or unknown). One read of
+  their results and one of their reach digests, whatever their count; a test
+  `database` does not hold has no entry."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym] [:set :seon.test.run/evaluator]]
+                  [:or [:map-of :seon.test/sym :seon.context/proof-status] :seon.error/value]]}
+  [database test-symbols evaluators]
+  (let [held (when (seq test-symbols)
+               (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.test/sym ?s]] database (vec (distinct test-symbols))))
+        results (when (seq held) (latest-results database held evaluators))
+        current (when (seq held) (reach-digests database held))]
+    (or (some #(when (:seon.error/at %) %) [held results current])
+        (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) results)]
+          (into {} (map (fn [test-symbol]
+                          (let [result (by-symbol test-symbol)
+                                reach (get current test-symbol)]
+                            [test-symbol
+                             (cond (not (and result reach (= reach (:seon.test.member/reach-digest result)))) :pending
+                                   (red-result? result) :red
+                                   (and (pos? (:seon.test/pass-count result 0)) (not (:seon.error/at result))) :green
+                                   :else :pending)])))
+                held)))))
+
 (defn red-at-current-reach?
   "Whether `test-symbol`'s latest admitted result on `database` is red for its
   current reach there: red on that branch as it stands, not only once. Reads
-  the results of `evaluators` (`latest-results`)."
+  the results of `evaluators` (`statuses-at-current-reach`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]
                   [:=> [:cat :seon.db/database-value :seon.test/sym [:set :seon.test.run/evaluator]] :boolean]]}
   ([database test-symbol] (red-at-current-reach? database test-symbol #{:compiled :interpreted}))
   ([database test-symbol evaluators]
-   (let [results (latest-results database [test-symbol] evaluators)
-         result (when (vector? results) (first results))
-         current (reach-digests database [test-symbol])]
-     (boolean (and result (red-result? result) (map? current)
-                   (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))
+   (= :red (get (statuses-at-current-reach database [test-symbol] evaluators) test-symbol))))

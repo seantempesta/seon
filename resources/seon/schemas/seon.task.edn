@@ -85,6 +85,8 @@
  :completion-tokens [:int {:min 0 :description "The completion tokens an ended task's model calls received."}]
  :proof-counts [:map-of {:description "An ended task's proofs by status on its agent's branch."} :seon.context/proof-status [:int {:min 1}]]
  :red-proofs [:vector {:description "An ended task's red proofs."} :seon.test/sym]
+ :unverified [:vector {:min 1 :description "The tests an ended task's change reaches whose verdict was unknown on its branch (:seon.agent/reached-unverified): never run there at their current reach, or red there with no result on the head. The merge gate runs them."} :seon.test/sym]
+ :red-on-target [:vector {:min 1 :description "The tests an ended task's change reaches that were red on its branch and already red on the head (:seon.agent/reached-red-on-target)."} :seon.test/sym]
  :outcome-unknown [:= {:description "Present (true) when neither the ending agent's branch nor the outcome recorded when its task ended remains: calls, tokens and proofs are unknown, never zero."} true]
  :errors [:vector {:description "The errors an ended task's agent evaluated on its branch, grouped by signature (seon.problems/agent-errors-by-signature)."} :seon.problems/agent-error]
  :ended [:map {:description "What a task's end message stands for, derived when root reads it from the outcome recorded on the ending agent when its task ended (seon.context/outcome-tx), else from its branch, else unknown; the message holds references only. Producer: seon.context/ended."}
@@ -95,6 +97,7 @@
          [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
          [:seon.task/refusal-reason {:optional true} :seon.task/refusal-reason] [:seon.task/blocked-by {:optional true} :seon.task/blocked-by]
          [:seon.task/proof-counts {:optional true} :seon.task/proof-counts] [:seon.task/red-proofs {:optional true} :seon.task/red-proofs]
+         [:seon.task/unverified {:optional true} :seon.task/unverified] [:seon.task/red-on-target {:optional true} :seon.task/red-on-target]
          [:seon.task/errors {:optional true} :seon.task/errors]
          [:seon.task/calls {:optional true} :seon.task/calls] [:seon.task/prompt-tokens {:optional true} :seon.task/prompt-tokens]
          [:seon.task/completion-tokens {:optional true} :seon.task/completion-tokens]

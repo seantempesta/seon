@@ -78,6 +78,10 @@
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
   (delay (requiring-resolve 'seon.test.runner/latest-results)))
+(defonce ^:private registry-fork-of
+  (delay (requiring-resolve 'seon.cluster.registry/fork-of)))
+(defonce ^:private test-statuses
+  (delay (requiring-resolve 'seon.test.runner/statuses-at-current-reach)))
 (defonce ^:private test-accepted-evaluators
   (delay (requiring-resolve 'seon.test.runner/accepted-evaluators)))
 (defonce ^:private test-changes
@@ -2148,7 +2152,7 @@
 
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
-  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
+  green and its change broke no reached test (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
@@ -5402,43 +5406,70 @@
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
-(defn- reached-red
-  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, whose
-  latest result there by the evaluators proving its work (`seon.test.runner/accepted-evaluators`) is not green
-  (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:or :seon.test/changed :seon.error/value]]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [database agent-id changed]
+(def ^:private reached-attributes
+  "The agent attribute recording each verdict on the tests its change reaches."
+  {:red :seon.agent/reached-red :unverified :seon.agent/reached-unverified :red-on-target :seon.agent/reached-red-on-target})
+
+(defn- reached-verdicts
+  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, by
+  verdict against `head`, the branch's merge target (`merge-target`), each sorted and absent when empty: `:red`,
+  red on the branch at its current reach and green on the head there, a test the head does not hold, or any red
+  with no target (a break its change made); `:red-on-target`, red on both (`seon.test.runner/red-at-current-reach?`, the merge gate's
+  verdict); `:unverified`, with no current result on the branch, or red there with none on the head, left to
+  the merge gate. The branch's results are those of the evaluators proving its work
+  (`seon.test.runner/accepted-evaluators`), the head's either, as the merge gate reads them."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] :seon.agent/id
+                       [:or :seon.test/changed :seon.error/value]]
+                  [:or [:map-of [:enum :red :unverified :red-on-target] [:vector {:min 1} :seon.test/sym]] :seon.error/value]]}
+  [database head agent-id changed]
   (if (:seon.error/at changed)
-    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) [] changed)
+    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) {} changed)
     (let [proofs (task-proofs database agent-id)
           reached (when-not (:seon.error/at proofs)
                     (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
           tests (when (sequential? reached) (vec (remove (set proofs) reached)))
-          results (when (seq tests) (@test-latest-results database tests (@test-accepted-evaluators agent-id)))]
-      (or (some #(when (:seon.error/at %) %) [proofs reached results])
-          (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0))
-                                                  (zero? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
-                                         (:seon.test/sym %)))
-                            results)]
-            (vec (sort (remove green tests))))))))
+          branch (when (seq tests) (@test-statuses database tests (@test-accepted-evaluators agent-id)))
+          red (when (map? branch) (filterv #(= :red (get branch %)) tests))
+          target (when (and head (seq red)) (@test-statuses head red #{:compiled :interpreted}))]
+      (or (some #(when (:seon.error/at %) %) [proofs reached branch target])
+          (let [verdict (fn [test-symbol]
+                          (if (not= :red (get branch test-symbol))
+                            (when (not= :green (get branch test-symbol)) :unverified)
+                            (case (get target test-symbol ::absent)
+                              :red :red-on-target
+                              (:green ::absent) :red
+                              :unverified)))]
+            (into {} (map (fn [[k syms]] [k (vec (sort syms))]))
+                  (dissoc (group-by verdict tests) nil)))))))
 
-(defn- record-reached-red!
-  "Record on the agent's row on its branch `connection` the tests its whole change `changed` reaches that are not
-  green there (`reached-red`), replacing the previous step's: what `seon.context/task-done?` reads. Answers them."
+(defn- merge-target
+  "The database of the branch `database`'s branch merges into (its fork's `:seon.branch/target`, as the merge gate
+  compares it); nil when it is no fork, as the cluster's own branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/database-value]]}
+  [database]
+  (when-let [target (:seon.branch/target (@registry-fork-of database (get-in database [:config :branch])))]
+    (db/branch-database database target)))
+
+(defn- record-reached!
+  "Record on the agent's row on its branch `connection` the verdicts on the tests its whole change `changed`
+  reaches (`reached-verdicts` against its `merge-target`), replacing the previous step's: `seon.context/task-done?`
+  reads `:seon.agent/reached-red`. Answers them."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+                  [:or [:map-of [:enum :red :unverified :red-on-target] [:vector {:min 1} :seon.test/sym]] :seon.error/value]]}
   [connection agent-id changed]
   (let [database (db/db connection)
-        red (reached-red database agent-id changed)
-        held (set (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))
-        tx (when (vector? red)
-             (into (mapv #(vector :db/retract [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove (set red) held))
-                   (map #(vector :db/add [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove held red))))]
-    (if (or (:seon.error/at red) (empty? tx))
-      red
+        verdicts (reached-verdicts database (merge-target database) agent-id changed)
+        row (db/pull database (vec (vals reached-attributes)) [:seon.agent/id agent-id])
+        tx (when-not (:seon.error/at verdicts)
+             (into [] (mapcat (fn [[verdict attribute]]
+                                (let [now (set (get verdicts verdict)) held (set (get row attribute))]
+                                  (concat (map #(vector :db/retract [:seon.agent/id agent-id] attribute %) (remove now held))
+                                          (map #(vector :db/add [:seon.agent/id agent-id] attribute %) (remove held now))))))
+                   reached-attributes))]
+    (if (or (:seon.error/at verdicts) (empty? tx))
+      verdicts
       (let [report (db/transact! connection tx)]
-        (if (:seon.error/at report) report red)))))
+        (if (:seon.error/at report) report verdicts)))))
 
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
@@ -5459,11 +5490,12 @@
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
       (let [reaching (run-reaching execution (max 1 left) changed platform)
             ;; a derivation that fails is shown beside the step's values, never in place of them
-            red (try (record-reached-red! connection agent-id changed)
+            red (try (let [verdicts (record-reached! connection agent-id changed)]
+                       (if (:seon.error/at verdicts) verdicts (:red verdicts)))
                      (catch Throwable failure
                        (or (error/refusal failure)
                            (seon.error.refusal/diagnostic
-                            (Date.) :seon.turn/test-step `record-reached-red!
+                            (Date.) :seon.turn/test-step `record-reached!
                             {:seon.error/message "The reached tests' status could not be recorded."
                              :seon.error/exception-class (.getName (class failure))}))))]
         (some-> (summary (ran-something proofs) (ran-something reaching) platform)
