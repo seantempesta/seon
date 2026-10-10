@@ -110,6 +110,14 @@ reaching tests run interpreted, so these are false reds in agents' replies: lane
 interpreter classes largest first. Lane `assign-proofs` builds `assign!` running the proofs in the agent's own
 environment.
 
+**Loop round 1 (2026-10-10, three DeepSeek-flash agents in parallel, tasks aeaf6f1fc): 2 of 3 green and merged
+(a4b7e6261).** `r1-path-form` (5 calls, 9.2 s, 0 errors) and `r1-search-limit` (2 calls, 6.8 s) ended green; each end
+message was root's merge request; root reviewed, prepared (gate runs f895519d7509, 04fe54058fd5), accepted and wrote
+back; proofs green on HEAD (run d9089653c740). `r1-ref-section` diagnosed its bug correctly, then the turn loop stopped
+calling it (`:waiting`, admission open) and root got no message: a stalled working agent and a silent end (lane
+assign-proofs, queued). The commit gate's `.cljc` fallback ran no tests again (lane `lane-gate-cljc`). Round cost:
+prepare 6.2 s / 3.2 GB for two one-function merges (task filed).
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
