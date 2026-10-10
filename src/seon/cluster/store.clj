@@ -154,13 +154,13 @@
   [store-dir]
   (str (canonical-path store-dir) ".lock"))
 
-(defn- declared-store-cache-size
-  "The declared default of `:seon.config.db/store-cache-size`, for stores
+(defn- declared-store-cache-bytes
+  "The declared default of `:seon.config.db/store-cache-bytes`, for stores
   opened without a configuration (boot passes the configured value)."
-  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
+  {:malli/schema [:=> [:cat] :seon.config.db/store-cache-bytes]}
   []
   (-> (io/resource "seon/schemas/seon.config.db.edn") slurp clojure.edn/read-string
-      :seon.config.db/store-cache-size second :seon.config/default))
+      :seon.config.db/store-cache-bytes second :seon.config/default))
 
 (defn processing-measured
   "Datahike writer operation `op`, returning its report with
@@ -190,8 +190,7 @@
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
   must be the ONE store) with LZ4-compressed values, fused persistent-set roots with a 32-entry
-  diff buffer and a measured 128-way branching factor, a node cache that
-  holds a branch's whole-program read, retained history by
+  diff buffer and a measured 128-way branching factor, a byte-bounded node cache shared by branches, retained history by
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
@@ -201,12 +200,12 @@
    [:function
     [:=> [:cat :seon.store/dir] [:map]]
     [:=> [:cat :seon.store/dir :boolean] [:map]]
-    [:=> [:cat :seon.store/dir :boolean [:int {:min 1}]] [:map]]]}
+    [:=> [:cat :seon.store/dir :boolean :seon.config.db/store-cache-bytes] [:map]]]}
   ([store-dir]
    (datahike-configuration store-dir true))
   ([store-dir keep-history?]
-   (datahike-configuration store-dir keep-history? (declared-store-cache-size)))
-  ([store-dir keep-history? store-cache-size]
+   (datahike-configuration store-dir keep-history? (declared-store-cache-bytes)))
+  ([store-dir keep-history? store-cache-bytes]
    (let [path (canonical-path store-dir)]
      {:store {:backend :file
               :path path
@@ -233,13 +232,9 @@
       ; Each report carries its processing cost (`processing-measured`);
       ; the fork keeps these runtime operations out of storage.
       :writer {:backend :self :write-fn-map write-operations}
-      ; Every connection to this store shares one LRU of materialized index
-      ; nodes, keyed by immutable address. It holds a new branch's first
-      ; whole-program read (an agent's acquisition and first form); below
-      ; that working set each branch re-reads those nodes from disk into a
-      ; private copy its tree keeps. Not a creation setting: the first
-      ; connection a process opens sets it (`:seon.config.db/store-cache-size`).
-      :store-cache-size store-cache-size
+      ; The shared weighted cache owns decoded-node retention; PSS child
+      ; references are weak when the byte budget is configured.
+      :store-cache-bytes store-cache-bytes
       :keep-history? keep-history?
       :fuse-index-roots? true
       :index-config {; A commit rewrites every leaf it touches whole, in each of
@@ -559,7 +554,7 @@
                              [:seon.config.db/keep-history?
                               {:optional true}
                               :boolean]
-                             [:seon.config.db/store-cache-size {:optional true} [:int {:min 1}]]]]
+                             [:seon.config.db/store-cache-bytes {:optional true}]]]
                   :seon.store/store]}
   [{store-dir :seon.store/dir :as request}]
   ;; Before Datahike's first call: its logging goes through Seon's logger.
@@ -607,8 +602,8 @@
             requested (:seon.config.db/keep-history? request)
             creation-configuration
             (datahike-configuration dir (if requested? requested true)
-                                    (get request :seon.config.db/store-cache-size
-                                         (declared-store-cache-size)))
+                                    (get request :seon.config.db/store-cache-bytes
+                                         (declared-store-cache-bytes)))
             created? (cond
                        (not exists?)
                        (do (create-store! dir creation-configuration) true)

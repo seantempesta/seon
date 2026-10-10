@@ -173,7 +173,7 @@
         store (cluster/acquire-root-store! (:seon.boot/store-dir config) keep-history?
                                            (true? (:seon.store/destroy? config))
                                            (get-in compiled-config
-                                                   [:seon.config/effective :seon.config.db/store-cache-size]))
+                                                   [:seon.config/effective :seon.config.db/store-cache-bytes]))
         instance (publish! (assoc instance :seon.store/store store))
         _ (cluster/write-advertisement!
            (cluster/cluster-paths (:seon.boot/root config) cluster-name)

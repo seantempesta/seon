@@ -442,7 +442,7 @@
    (acquire-root-store! store-dir keep-history? false))
   ([store-dir keep-history? destroy?]
    (acquire-root-store! store-dir keep-history? destroy? nil))
-  ([store-dir keep-history? destroy? store-cache-size]
+  ([store-dir keep-history? destroy? store-cache-bytes]
    (let [store-key (root-store-key store-dir)
          requested? (not= ::unspecified-history-policy keep-history?)]
      (locking root-store-holder
@@ -466,8 +466,8 @@
          (let [request (cond-> {:seon.store/dir store-key :seon.store/destroy? destroy?}
                          requested?
                          (assoc :seon.config.db/keep-history? keep-history?)
-                         store-cache-size
-                         (assoc :seon.config.db/store-cache-size store-cache-size))
+                         store-cache-bytes
+                         (assoc :seon.config.db/store-cache-bytes store-cache-bytes))
                store (store/open-store! request)]
            (swap! root-store-holder assoc store-key
                   {:seon.store/store store ::holders 1})

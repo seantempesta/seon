@@ -70,10 +70,9 @@
  ; hours, with no eviction (docs/research/agent-platform/2026-10-08/dials/dials.md).
  :seon.config.cache/max-bytes 512000000
 
- ; Unit: materialized index nodes in Datahike's node LRU, shared by every
- ; connection to the store. 8,192 nodes measured about 4.7 KB each, about
- ; 39 MB (dials.md); it holds a new branch's whole-program read.
- :seon.config.db/store-cache-size 8192
+ ; Unit: estimated decoded bytes in Datahike's shared node cache.
+ ; Weak tree references leave strong retention under this byte budget.
+ :seon.config.db/store-cache-bytes 512000000
 
  ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
  ; display caps were deleted from `seon.sci.admit`; elision happens only at
