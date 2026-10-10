@@ -4855,13 +4855,13 @@
     (ex-info (:seon.error/message diagnostic) diagnostic)))
 
 (defn- agent-dial
-  "One agent dial: the agent's overlay, else the handle's carried value, else
-  the cluster's effective config; nil only when none of them declares it. A
+  "One agent dial: the agent's overlay, else the value the cluster handle `cluster` carries, else
+  the effective config of the cluster it names; nil only when none of them declares it. A
   declared false is a value.
 
   A refused overlay or config read is RETURNED, the declared error it is; it
   never falls through to the next source as if it were absent."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/cluster
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source
                        :seon.agent/id :qualified-keyword]
                   [:or [:maybe :seon.schema/value] :seon.error/value]]}
   [database cluster agent-id dial]
@@ -5233,9 +5233,10 @@
                                 :seon.test/destructive-excluded :seon.test/deferred :seon.test/long-excluded]))
     run))
 
-(defn- step-limit-ms
-  "The agent's dial `:seon.config.test/step-time-limit-ms`; throws the declared error when no source gives it."
-  {:malli/schema [:=> [:cat :map :seon.agent/id] pos-int?]}
+(defn step-limit-ms
+  "The agent's dial `:seon.config.test/step-time-limit-ms` read through the cluster handle `cluster`: the bound
+  its automatic test step and its assignment's proof run take; throws the declared error when no source gives it."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/id] pos-int?]}
   [cluster agent-id]
   (let [dial :seon.config.test/step-time-limit-ms
         limit (agent-dial (db/db (:seon.db/connection cluster)) cluster agent-id dial)]

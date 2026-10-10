@@ -43,8 +43,8 @@
                           (db/db connection) agent-id)
                     0)
         id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]] (db/db connection) task-sym)]
-    (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+    (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
     (support/with-provider
      (atom []) (support/reply-queue replies)
      (fn [server]

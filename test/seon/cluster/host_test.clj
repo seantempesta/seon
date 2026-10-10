@@ -440,7 +440,7 @@
         (support/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
         (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
         (is (= '(my.program/propose-merge! {})
-               (last (:seon.render/operations (as-root task/assign! {:seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]
+               (last (:seon.render/operations (as-root task/assign! {:seon.agent/context-source handle :seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]
                                                                      :seon.task/branch branch}))))
             "the assignment offers the agent its proposal")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))")

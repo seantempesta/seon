@@ -19,12 +19,12 @@
 
 (defn- assigned
   "What `seon.task/assign!` answers for `task-sym` given to `agent-id`: the assignment, or its refusal."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym] :map]}
-  [connection agent-id task-sym]
-  (task/assign! {:seon.db/connection connection
+  {:malli/schema [:=> [:cat :string :seon.db/connection :seon.agent/id :seon.task/sym] :map]}
+  [running connection agent-id task-sym]
+  (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                  :seon.task/assigned (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
                                            (db/db connection) task-sym)
-                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
 
 (defn- proofs-passed?
   "Whether the proofs the automatic test step ran after `code`, evaluated as `agent-id`, all passed."
@@ -42,7 +42,7 @@
   (support/with-running-agent
    (fn [running agent-id connection]
      (is (= (repeat (inc (count others)) nil)
-            (map #(:seon.task/refused (assigned connection agent-id %)) (cons prose others)))
+            (map #(:seon.task/refused (assigned running connection agent-id %)) (cons prose others)))
          "root assigns every wording while the proof is red")
      (let [red (proofs-passed? running agent-id (get competency/setups prose "(ns user)"))
            green (proofs-passed? running agent-id (get competency/oracles prose))]

@@ -480,41 +480,93 @@
         report
         {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))}))))
 
+(defn assignment-read
+  "What assigning task `handle` to `agent` reads at the task home `database`: the task's revision, the agent's
+  id and the task's proofs; refused when the task or agent is unknown or the task has no proof."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assigned :seon.task/agent]
+                  [:or [:map [:seon.task/revision :seon.task/revision] [:seon.agent/id :seon.agent/id]
+                        [:seon.task/proofs :seon.task/proofs]]
+                   :seon.task/refused-error :seon.error/value]]}
+  [database handle agent]
+  (let [revision (task-revision database handle)
+        agent-id (:seon.agent/id (db/pull database [:seon.agent/id] agent))
+        edges (when (and (string? revision) (string? agent-id))
+                (task-edges database (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle]))))]
+    (cond (:seon.error/at revision) revision
+          (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
+          (not (string? agent-id)) (refused 'seon.task/assign! :unassigned 'seon.task agent)
+          (:seon.error/at edges) edges
+          (empty? (:seon.task/proofs edges)) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
+          :else {:seon.task/revision revision :seon.agent/id agent-id :seon.task/proofs (:seon.task/proofs edges)})))
+
+(defonce ^:private acquire-context!
+  ;; seon.cluster.agent requires this namespace through seon.turn: resolved once, at first use
+  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
+
+(defonce ^:private step-limit-ms
+  (delay (requiring-resolve 'seon.turn/step-limit-ms)))
+
+(defn- proof-run
+  "Run `proofs` as `agent-id` in its own world on `branch`, acquired through the cluster handle `cluster` as
+  its eval requests acquire it, by the runner and bound its automatic test step uses, recorded on that branch."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/id :seon.task/branch :seon.task/proofs]
+                  [:or :seon.test/run-result :seon.error/value]]}
+  [cluster agent-id branch proofs]
+  (let [execution (@acquire-context! cluster agent-id {:seon.agent/branch branch})
+        connection (:seon.db/connection execution)]
+    (db/call-with-custody {:seon.db/connection connection}
+      #(test/run {:seon.test/execution execution :seon.test/recording-connection connection
+                  :seon.test/policy :named :seon.test/identities proofs
+                  :seon.test/check-time-limit-ms (@step-limit-ms cluster agent-id)}))))
+
+(defn- all-green?
+  "Whether the run `ran` holds a green result for every one of `proofs`."
+  {:malli/schema [:=> [:cat :seon.test/run-result :seon.task/proofs] :boolean]}
+  [ran proofs]
+  (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0)) (zero? (:seon.test/fail-count % 0))
+                                          (zero? (:seon.test/error-count % 0)))
+                                 (:seon.test/sym %)))
+                    (:seon.test/results ran))]
+    (every? green proofs)))
+
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
-  working on `:seon.task/branch`, binding the revision it reviews now. Answers
-  the assignment; it offers no operation, since nothing is yet worked.
+  working on `:seon.task/branch`, binding the revision it reviews now. The
+  task's proofs first run in the agent's own world (its branch and SCI context,
+  acquired through the cluster handle `:seon.agent/context-source`, supplied
+  from my world) and are recorded there as its test evidence; a task they all
+  pass refuses `:proofs-green`, decided by that run alone. Answers the
+  assignment with that run's id, or, when the proofs could not run in that
+  world, with the run's error beside it (the agent meets the same error); it
+  offers no operation, since nothing is yet worked.
 
   Example:
   (seon.task/assign! {:seon.task/assigned \"a1b2c3d4e5f6\" :seon.task/agent [:seon.agent/id \"mcp/fix\"]
                       :seon.task/branch :fix})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.task/assigned :seon.task/assigned]
-                             [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]]]
+                             [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
+                             [:seon.agent/context-source {:optional true} :seon.agent/context-source]]]
                   [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
-  [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch}]
-  (let [database (db/db (home-connection connection))
-        revision (task-revision database handle)
-        agent-id (:seon.agent/id (db/pull database [:seon.agent/id] agent))]
-    (cond (:seon.error/at revision) revision
-          (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
-          (not (string? agent-id)) (refused 'seon.task/assign! :unassigned 'seon.task agent)
-          :else (let [edges (task-edges database (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
-                      proofs (:seon.task/proofs edges)
-                      verified (when (seq proofs) (mapv #(test/verified? database %) proofs))]
-                  (cond (:seon.error/at edges) edges
-                        (empty? proofs) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
-                        (some :seon.error/at verified) (some #(when (:seon.error/at %) %) verified)
-                        (every? true? verified) (refused 'seon.task/assign! :proofs-green 'seon.task
-                                                         {:seon.task/assigned handle :seon.task/proofs proofs})
-                        :else (let [assignment (id/id [handle agent-id branch])
-                                    report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
-                                                                 :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
-                                                                 :seon.task/branch branch}])]
-                                (if (:seon.error/at report)
-                                  report
-                                  {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
-                                   :seon.task/branch branch
-                                   :seon.render/operations []})))))))
+  [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch
+    cluster :seon.agent/context-source}]
+  (let [read (assignment-read (db/db (home-connection connection)) handle agent)
+        {revision :seon.task/revision agent-id :seon.agent/id proofs :seon.task/proofs} read
+        ran (when (and (not (:seon.error/at read)) cluster) (proof-run cluster agent-id branch proofs))]
+    (cond (:seon.error/at read) read
+          (nil? cluster) (refused 'seon.task/assign! :no-world 'seon.task {:seon.task/assigned handle :seon.agent/id agent-id})
+          (and (not (:seon.error/at ran)) (all-green? ran proofs)) (refused 'seon.task/assign! :proofs-green 'seon.task
+                                           {:seon.task/assigned handle :seon.task/proofs proofs
+                                            :seon.test.run/id (:seon.test.run/id ran)})
+          :else (let [assignment (id/id [handle agent-id branch])
+                      report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
+                                                   :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
+                                                   :seon.task/branch branch}])]
+                  (if (:seon.error/at report)
+                    report
+                    (cond-> {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
+                             :seon.task/branch branch :seon.render/operations []}
+                      (:seon.error/at ran) (assoc :seon.task/proof-run-error ran)
+                      (:seon.test.run/id ran) (assoc :seon.test.run/id (:seon.test.run/id ran))))))))
 
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its

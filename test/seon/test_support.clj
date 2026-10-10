@@ -673,19 +673,38 @@
   [root]
   (fs/delete-recursively! (.getCanonicalPath (io/file (System/getProperty "java.io.tmpdir"))) (.getCanonicalPath (io/file root))))
 
-(defn declare-proof!
-  "Declare on `connection`, unrun, the deftest `ns-sym`/`test-name` naming the task `task-sym`,
-  as a task file's proof is declared at the cluster head before anyone is assigned the task."
-  {:malli/schema [:=> [:cat :seon.db/connection :symbol :symbol :symbol] :seon.schema/value]}
-  [connection ns-sym test-name task-sym]
+(defn declare-source!
+  "Declare on `connection`, unrun, the program the namespace `ns-sym` holds as the file text `source`,
+  as a published file is declared at the cluster head."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol :string] :seon.schema/value]}
+  [connection ns-sym source]
   (let [root (io/file "tmp" "declare-proof" (str (random-uuid)))
         file (io/file root (str (str/replace (str ns-sym) "." "/") ".clj"))]
     (try (io/make-parents file)
-         (spit file (str "(ns " ns-sym " (:require [clojure.test :refer [deftest is]]))\n"
-                         "(deftest ^{:seon/tasks #{'" task-sym "}} " test-name " (is (= 1 1)))\n"))
+         (spit file source)
          (transacted! connection (seon.fn/reconcile-tx (db/db connection)
                                                        (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
          (finally (delete-recursively! root)))))
+
+(defn declare-proof!
+  "Declare on `connection`, unrun, the red deftest `ns-sym`/`test-name` naming the task `task-sym`,
+  as a task file's proof is declared at the cluster head before anyone is assigned the task: red, since
+  `seon.task/assign!` runs it and refuses a task whose proofs all pass."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol :symbol :symbol] :seon.schema/value]}
+  [connection ns-sym test-name task-sym]
+  (declare-source! connection ns-sym
+                   (str "(ns " ns-sym " (:require [clojure.test :refer [deftest is]]))\n"
+                        "(deftest ^{:seon/tasks #{'" task-sym "}} " test-name " (is (= 1 2)))\n")))
+
+(defn context-source
+  "The cluster handle a running instance holds over `connection`, else the executing test's handle for it:
+  where an agent of the cluster on `connection` acquires its world."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.agent/context-source]}
+  [connection]
+  (or (some #(let [handle (:seon.turn.loop/cluster %)]
+               (when (identical? connection (:seon.db/connection handle)) handle))
+            (vals @operator.runtime/running-instances))
+      (execution-handle connection)))
 
 (defn assign-task!
   "Assign `agent-id` a task of its own whose proof has not run: a model turn needs an assignment."
@@ -696,9 +715,20 @@
     (declare-proof! connection 'tq.assigned (symbol (str "proves-" slug)) (symbol "tq.assigned" task-name))
     (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
                                  :seon.task/name task-name :seon.task/kind :work :seon.task/intent "Work."})]
-      (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
-                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+      (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
+                                    :seon.task/agent [:seon.agent/id agent-id]
+                                    :seon.task/branch (get-in (db/db connection) [:config :branch])
+                                    :seon.agent/context-source (context-source connection)})]
+        ;; a refused fixture write is surfaced, never left for the turn to miss
+        (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned))))
       nil)))
+
+(defn running-cluster
+  "The cluster handle of the instance `running` names: the context source `seon.task/assign!` runs an agent's
+  proofs through, as its eval requests acquire its world."
+  {:malli/schema [:=> [:cat :string] :seon.agent/context-source]}
+  [running]
+  (:seon.turn.loop/cluster (get @operator.runtime/running-instances running)))
 
 (defn file-store-probe-schema
   "Return the one synthetic string marker attribute for a file-store test."

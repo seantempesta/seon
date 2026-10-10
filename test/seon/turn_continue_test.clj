@@ -249,8 +249,8 @@
                                          :seon.task/ns 'tq.end :seon.task/name "area" :seon.task/kind :function
                                          :seon.task/intent "Square."}))
         ledger (atom [])]
-    (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+    (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
     (support/with-provider
      ledger (support/reply-queue replies)
      (fn [server]
@@ -303,7 +303,7 @@
                                             :seon.task/intent "Square."}))
            ledger (atom [])]
        (is (keyword? branch) "the agent has a branch of its own")
-       (is (nil? (:seon.error/at (task/assign! {:seon.db/connection connection :seon.task/assigned id
+       (is (nil? (:seon.error/at (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                                                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})))
            "root assigns the task to the agent's branch")
        (support/with-provider

@@ -204,7 +204,7 @@
       (merge run (failed agent-id :setup first-request))
       (let [task-id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
                           (db/db (task/home-connection connection)) task-sym)
-            assigned (task/assign! {:seon.db/connection connection :seon.task/assigned task-id
+            assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned task-id
                                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
         (if (:seon.error/at assigned)
           (merge run (failed agent-id :assignment {}) {:seon.competency/refusal assigned})

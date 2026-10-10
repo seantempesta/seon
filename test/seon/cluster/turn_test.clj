@@ -2821,8 +2821,8 @@
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
                                                  :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/kind :function
                                                  :seon.task/intent "Square."}))]
-       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
      (let [results (seon.test.runner/latest-results (db/db connection) ['tq.f4/area-test])]
        (is (= 1 (count results)))
@@ -2839,8 +2839,8 @@
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
                                                  :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/kind :function
                                                  :seon.task/intent "Square."}))]
-       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (let [reply (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
            reaching (get-in reply [:seon.turn.loop/tests :seon.turn.loop/reaching])
            results (seon.test.runner/latest-results (db/db connection) ['tq.f4-test/perimeter-uses-area])]
@@ -2903,8 +2903,8 @@
   (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
                                               :seon.task/ns 'tq.f4c :seon.task/name "area" :seon.task/kind :function
                                               :seon.task/intent "Square."}))]
-    (let [assigned (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
-                                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})]
+    (let [assigned (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})]
       (is (nil? (:seon.error/message assigned)) "the fixture's task is assigned")))
   nil)
 
@@ -3019,8 +3019,8 @@
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
                                                  :seon.task/ns 'tq.cx1 :seon.task/name "area" :seon.task/kind :function
                                                  :seon.task/intent "Square."}))]
-       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :transcript})")))
          "this test reads the transcript wire format, set on the agent")
      (let [help-reply (str/join (map #(get % "text") (get (eval-result running agent-id "(help)") "content")))
@@ -3080,8 +3080,8 @@
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
                                                  :seon.task/ns 'tq.cx12 :seon.task/name "area" :seon.task/kind :function
                                                  :seon.task/intent "Square."}))]
-       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :chat})")))
          "the wire format is the agent's own setting")
      (let [sent (model-requests! running agent-id connection ["(+ 40 2)" "(+ 7 7)" "(in-ns 'tq.cx12)\n(defn area [r] (* r r))"] 3)

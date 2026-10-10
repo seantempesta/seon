@@ -56,8 +56,8 @@
            task-section #(:seon.context/task (block running agent-id))]
        (is (nil? (:seon.context/task (block running agent-id))) "an agent holding no task has no task section")
        (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
-       (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (is (= {:seon.task/sym 'tq.cs/shape :seon.task/intent "First."} (task-section)))
        (is (= :working (:seon.task/status (:seon.context/turns (block running agent-id)))))
        (is (int? (:my.agent/turns-left (:seon.context/turns (block running agent-id)))))
@@ -80,13 +80,13 @@
 
 (defn- proof-task
   "Creates and assigns the task `tq.cs/shape` for `agent-id`."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
-  [connection agent-id]
+  {:malli/schema [:=> [:cat :string :seon.db/connection :seon.agent/id] :nil]}
+  [running connection agent-id]
   (let [_ (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                          :seon.task/name "shape" :seon.task/kind :function :seon.task/intent "First."}))]
-    (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+    (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
     nil))
 
 (def ^:private proof-test
@@ -98,7 +98,7 @@
 (deftest a-red-proof-shows-every-failing-assertion-with-its-claim-as-text
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (proof-task connection agent-id)
+     (proof-task running connection agent-id)
      (evaluate running agent-id "(ns tq.cs) (defn f [x] (inc x))")
      (evaluate running agent-id two-failure-proof-test)
      (evaluate running agent-id "(my.test/check {})")
@@ -117,8 +117,8 @@
                                             :seon.task/name "names" :seon.task/kind :function
                                             :seon.task/intent "Use `seon.task/home` and `:seon.task/intent`."
                                             :seon.task/must-read #{'seon.task/agent-task}}))]
-       (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[names operations] (shown running agent-id
                                        "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
          (is (= ['seon.task/agent-task 'seon.task/home :seon.task/intent] names))
@@ -131,8 +131,8 @@
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "missing" :seon.task/kind :function
                                             :seon.task/intent "Fix `tq.cs/missing`."}))]
-       (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (is (= [{:seon.ref/name 'tq.cs/missing :seon.ref/problem-kind :unresolved :seon.ref/line 1}]
               (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")))))))
 
@@ -143,8 +143,8 @@
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "library" :seon.task/kind :function
                                             :seon.task/intent "Validate with `malli.core/validator`."}))]
-       (task/assign! {:seon.db/connection connection :seon.task/assigned id
-                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[entry] (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")
              pin (:seon.ref/pin entry)
              path (mapv str (iterator-seq (.iterator (java.nio.file.Paths/get (.toURI (io/resource "malli/core.cljc"))))))]
@@ -217,7 +217,7 @@
   the-block-names-the-agents-current-namespace
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (proof-task connection agent-id)
+     (proof-task running connection agent-id)
      (is (= 'tq.cs (get-in (context/current-state (db/db connection) agent-id) [:seon.context/turns :seon.context/namespace]))
          "an agent that evaluated nothing is in its task's namespace")
      (evaluate running agent-id "(ns tq.cs.elsewhere)")
