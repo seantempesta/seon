@@ -122,6 +122,10 @@
           (or (neg? last-slash)
               (= "/" s)
               (and (pos? sep)
+                   ;; the reader's namespace group ([\\D&&[^/]].*/)? cannot
+                   ;; start with a slash: a leading slash is allowed only for
+                   ;; the whole text "/", handled above
+                   (not= \/ (.charAt s 0))
                    (= \/ (.charAt s sep))
                    (let [c (.charAt s (inc sep))] (not (and (<= (int \0) (int c)) (<= (int c) (int \9)))))
                    (not= \: (.charAt s (dec sep)))
