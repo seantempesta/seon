@@ -1562,7 +1562,8 @@
               (select-keys data [:error :expected :new])))
        (is (instance? datahike.datom.Datom (:old data)))))))
 
-(deftest a-merge-shares-the-write-fence-and-records-immutable-lineage
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-def-that-fails-to-interpret-is-used-as-its-refusal}}
+  a-merge-shares-the-write-fence-and-records-immutable-lineage
   (with-codec-database
    {:seon.test-support/extra-schema (schema.datahike/malli->datahike-schema-in fixture-projection [::row-id])}
    (fn [connection]

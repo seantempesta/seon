@@ -2571,3 +2571,14 @@
       ;; character and one separator per member), never the whole seq
       (is (pos? (:seon.eval/elisions infinite)))
       (is (<= @realized (inc (quot (tokens/estimate-chars (:seon.render.profile/token-budget (:seon.render/profile request))) 2)))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-def-that-fails-to-interpret-is-used-as-its-refusal}}
+  a-test-namespace-def-reads-the-def-above-it-in-the-file
+  ;; `fixture-projection` reads `schema-delta`, defined above it; installed by
+  ;; name it came first and bound the refusing root.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)]
+       (eval/enter-namespace! ctx (quote seon.db-test))
+       (is (eval/source-namespace? ctx (quote seon.db-test)))
+       (is (map? @(sci/resolve ctx 'seon.db-test/fixture-projection)))))))

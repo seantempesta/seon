@@ -2471,19 +2471,23 @@
                   (::agent-authored?
                    (get namespace-row-by-name namespace-name))
                   (update :seon.sci.eval/installed inc))
-                (map (fn [[sym source _ admission private?]]
-                       {:seon.fn/sym sym
-                        :seon.schema.admission/source admission
-                        :seon.fn/source source
-                        :seon.fn/ns [:seon.ns/name namespace-name]
-                        :seon.fn/private? private?
-                        :seon.fn/arglists
-                        (:seon.fn/arglists (db/pull db [:seon.fn/arglists]
-                                                  [:seon.fn/sym sym]))
-                        ::skip-contract-install?
-                        (not= :agent admission)})
-                     (sort-by first
-                              (get function-rows-by-ns namespace-name)))))
+                ;; In file order, as loading the file evaluates them: a def
+                ;; reading another def finds it bound. Rows with no span
+                ;; (defined at a REPL) follow, by name.
+                (->> (get function-rows-by-ns namespace-name)
+                     (map (fn [[sym source _ admission private?]]
+                            (let [{:seon.fn/keys [arglists form-span]}
+                                  (db/pull db [:seon.fn/arglists :seon.fn/form-span] [:seon.fn/sym sym])]
+                              [[(or (first form-span) Long/MAX_VALUE) (str sym)]
+                               {:seon.fn/sym sym
+                                :seon.schema.admission/source admission
+                                :seon.fn/source source
+                                :seon.fn/ns [:seon.ns/name namespace-name]
+                                :seon.fn/private? private?
+                                :seon.fn/arglists arglists
+                                ::skip-contract-install? (not= :agent admission)}])))
+                     (sort-by first)
+                     (map second))))
              state
              order)]
         ;; Tests resolve only after every namespace's functions and exact
