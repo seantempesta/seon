@@ -93,6 +93,10 @@
                  ;; would select it for every pulled function entity.
                  [:seon.fn/sym :seon.fn/sym]
                  [:seon.fn/malformed-spec :seon.fn/malformed-spec]],
+                :file-without-namespace
+                [:map {:seon.health/severity 2 :seon.health/subject :seon.fn.file/relative-path
+                       :seon.health/in [:seon.health/problems :seon.problems/files-without-namespace]}
+                 [:seon.fn.file/relative-path :seon.fn.file/relative-path]],
                 :deferred-agent
                 [:map {:seon.health/severity 2 :seon.health/impact :seon.problems/deferred-count :seon.health/subject :seon.agent/id
                        :seon.health/in [:seon.health/problems :seon.problems/deferred-agents]
@@ -133,7 +137,10 @@
                   [:vector :seon.problems/missing-model]]
                  [:seon.problems/malformed-contracts
                   {:optional true}
-                  [:vector :seon.problems/malformed-contract]]],
+                  [:vector :seon.problems/malformed-contract]]
+                 [:seon.problems/files-without-namespace
+                  {:optional true}
+                  [:vector :seon.problems/file-without-namespace]]],
                 :error-signature
                 [:map
                  [:seon.error/signature :seon.error/signature]

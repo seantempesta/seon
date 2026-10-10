@@ -3266,3 +3266,29 @@
                      (mapv :seon.fn/sym (:seon.problems/malformed-contracts
                                          (seon.problems/problems database {})))))))))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-dev-namespace-test-cannot-run-interpreted-on-a-cluster}}
+  a-file-with-no-namespace-is-a-problem-on-the-file-and-the-rest-publishes
+  (let [root (fixture-root)]
+    (try
+      (write-source! root "sample/with_ns.clj" "(ns sample.with-ns)\n(defn kept [] 1)\n")
+      (write-source! root "sample/script.clj" "(require '[clojure.string :as str])\n(defn loose [] 2)\n")
+      (let [manifest (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+            paths (into #{} (map :seon.fn.file/relative-path)
+                        (:seon.fn.manifest/artifacts manifest))
+            script-path (first (filter #(str/ends-with? % "sample/script.clj") paths))]
+        (test-support/with-database
+          (fn [connection]
+            (seon.fn/index! {:seon.db/connection connection
+                             :seon.db/process boot-process
+                             :seon.source/previous-database @connection
+                             :seon.fn/changed-paths paths
+                             :seon.fn/manifest manifest})
+            (let [database @connection]
+              (is (integer? (:db/id (db/pull database [:db/id] [:seon.fn/sym 'sample.with-ns/kept]))))
+              (is (nil? (db/pull database [:db/id] [:seon.fn/sym 'user/loose])))
+              (is (= [script-path]
+                     (mapv :seon.fn.file/relative-path
+                           (:seon.problems/files-without-namespace
+                            (seon.problems/problems database {})))))))))
+      (finally (test-support/delete-recursively! root)))))

@@ -19,22 +19,19 @@
 ;;   :placeholder no taught form carries a value an agent cannot fill
 ;;              ("/path/to", "...", <slot>)
 ;;   :size      reply tokens within the form's ceiling (what its content needs)
-(require '[seon.operator :as operator] '[cheshire.core :as json]
-         '[clojure.string :as str] '[edamame.core :as e])
-
-(def root (or (first *command-line-args*) "."))
-(def agent-id (or (second *command-line-args*) "context-corpus"))
-(def advertisement (operator/advertisement root "default"))
+(ns seon.dev.context-corpus
+  (:require [seon.operator :as operator] [cheshire.core :as json]
+            [clojure.string :as str] [edamame.core :as e]))
 
 (defn host
-  "One form's EDN value from the running JVM."
-  [code]
-  (operator/prepl-value! advertisement code 300000))
+  "One form's EDN value from the running JVM `world` advertises."
+  [world code]
+  (operator/prepl-value! (:advertisement world) code 300000))
 
 (defn call
   "The MCP call `tool` with `arguments`: its texts and their token estimates."
-  [tool arguments]
-  (host (str "(let [r (clojure.data.json/read-str (seon.mcp/call "
+  [world tool arguments]
+  (host world (str "(let [r (clojure.data.json/read-str (seon.mcp/call "
              (json/generate-string (json/generate-string {:name tool :arguments arguments}))
              ")) texts (mapv #(get % \"text\") (get r \"content\"))]"
              " {:texts texts :error? (get r \"isError\")"
@@ -42,8 +39,8 @@
 
 (defn evaluate
   "Evaluate `code` as the corpus agent."
-  [code]
-  (call "eval_clj" {:agent agent-id :cluster "default" :mode "sci" :code code}))
+  [world code]
+  (call world "eval_clj" {:agent (:agent-id world) :cluster "default" :mode "sci" :code code}))
 
 (def setup
   "Unscored forms that give the corpus its subjects: a contracted function, a
@@ -150,21 +147,29 @@
 
 (defn run-item
   "Evaluate and score one corpus item."
-  [item]
+  [world item]
   (score item (if (= "runtime_status" (:tool item))
-                (call "runtime_status" {:cluster "default"})
-                (evaluate (:code item)))))
+                (call world "runtime_status" {:cluster "default"})
+                (evaluate world (:code item)))))
 
-(doseq [code setup] (evaluate code))
-(def rows (mapv run-item corpus))
-(doseq [row rows] (prn row))  ; the rows carry the reply texts for inspection
-(println)
-(println "| # | Form | Tokens / ceiling | Failing rules | Noise | Duplicates |")
-(println "|---|------|------------------|---------------|-------|------------|")
-(doseq [[i {:keys [label tokens ceiling failures] found :noise dups :duplicates}] (map-indexed vector rows)]
-  (println (format "| %d | %s | %d / %d | %s | %s | %s |" (inc i) label tokens ceiling
-                   (if (seq failures) (str/join " " (map name failures)) "-")
-                   (if (seq found) (str/join " " found) "-")
-                   (if (seq dups) (str/join "; " (map #(str (:head %) " x" (:times %)) dups)) "-"))))
-(println (format "\nTotal: %d tokens, %d rule failures over %d forms."
-                 (reduce + (map :tokens rows)) (reduce + (map (comp count :failures) rows)) (count rows)))
+(defn -main
+  "Run the corpus against the checkout at `root` as `agent-id` and print its rows and table."
+  [& [root agent-id]]
+  (let [world {:advertisement (operator/advertisement (or root ".") "default")
+               :agent-id (or agent-id "context-corpus")}
+        _ (doseq [code setup] (evaluate world code))
+        rows (mapv #(run-item world %) corpus)]
+    (doseq [row rows] (prn row))  ; the rows carry the reply texts for inspection
+    (println)
+    (println "| # | Form | Tokens / ceiling | Failing rules | Noise | Duplicates |")
+    (println "|---|------|------------------|---------------|-------|------------|")
+    (doseq [[i {:keys [label tokens ceiling failures] found :noise dups :duplicates}] (map-indexed vector rows)]
+      (println (format "| %d | %s | %d / %d | %s | %s | %s |" (inc i) label tokens ceiling
+                       (if (seq failures) (str/join " " (map name failures)) "-")
+                       (if (seq found) (str/join " " found) "-")
+                       (if (seq dups) (str/join "; " (map #(str (:head %) " x" (:times %)) dups)) "-"))))
+    (println (format "\nTotal: %d tokens, %d rule failures over %d forms."
+                     (reduce + (map :tokens rows)) (reduce + (map (comp count :failures) rows)) (count rows)))))
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (apply -main *command-line-args*))

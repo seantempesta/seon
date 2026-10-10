@@ -1500,8 +1500,12 @@
               (::analyzer/namespace-definitions analysis))]
     (reduce
      (fn [entities entry]
+       ;; A var whose namespace no file declares (a script with no `ns`
+       ;; form defines into `user`) has no namespace to belong to: its file
+       ;; stays an input without declarations, and seon.problems reports it.
        (if-let [entity (if (::analyzer/ns entry)
-                      (var-entity projection contexts namespace-contexts edges entry)
+                      (when (contains? namespace-contexts (::analyzer/ns entry))
+                        (var-entity projection contexts namespace-contexts edges entry))
                       (cond-> (namespace-entity projection contexts
                                               (get namespace-contexts (::analyzer/name entry))
                                               entry)
