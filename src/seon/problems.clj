@@ -177,13 +177,43 @@
                         [agent-id eval-id (one entity :seon.cluster.eval/at) error]))))
             (db/undecoded-datoms head :aevt [:seon.cluster.eval/error])))))
 
+(defn- error-groups
+  "`errors` (`[agent-id eval-id at error]` each) grouped by pattern ([[agent-error-parts]]), most agents first:
+  the pattern's agent count, occurrences, distinct values and latest example by agent and evaluation id."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]] [:vector :seon.problems/agent-error]]}
+  [errors]
+  (->> (group-by (comp first agent-error-parts peek) errors)
+       (map (fn [[pattern grouped]]
+              (let [latest (apply max-key #(.getTime ^java.util.Date (nth % 2)) grouped)]
+                {:seon.problems/agent-error-signature (id/id [::agent-error pattern] 12)
+                 :seon.problems/agent-error-pattern pattern
+                 :seon.problems/agents (count (distinct (map first grouped)))
+                 :seon.problems/occurrences (count grouped)
+                 :seon.problems/agent-error-values (vec (sort (distinct (keep (comp second agent-error-parts peek) grouped))))
+                 :seon.cluster.eval/at (nth latest 2)
+                 :seon.agent/id (first latest)
+                 :seon.cluster.eval/id (second latest)})))
+       (sort-by (juxt (comp - :seon.problems/agents) (comp - :seon.problems/occurrences) :seon.problems/agent-error-pattern))
+       vec))
+
+(defn- head-evaluation-ids
+  "The evaluation ids the cluster head `database` holds: a branch inherits them."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :string]]}
+  [database]
+  (into #{} (map #(nth % 2)) (db/undecoded-datoms database :aevt [:seon.cluster.eval/id])))
+
+(defn agent-errors-by-signature
+  "The errors `agent-id` evaluated on its branch `branch` that the cluster head `database` does not hold, grouped
+  by pattern as `agent-error-signatures` groups every agent's: one agent's errors, each pattern once with its count."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.store/branch] [:vector :seon.problems/agent-error]]}
+  [database agent-id branch]
+  (error-groups (branch-agent-errors database agent-id branch (head-evaluation-ids database))))
+
 (defn- agent-error-signatures
   "Agent-delivered errors that `:seon.config.error/agent-error-agents` distinct
-  agents hit, grouped by pattern ([[agent-error-parts]]), most agents first:
-  the pattern's agent count, occurrences, distinct values and latest example by
-  agent and evaluation id. An agent's own mistake stays delivered to it
-  (`seon.error`); a pattern many agents hit is a defect in Seon's reader,
-  context or tools, and health must see it. Derived from the evaluations on
+  agents hit, grouped by pattern (`error-groups`). An agent's own mistake stays
+  delivered to it (`seon.error`); a pattern many agents hit is a defect in Seon's
+  reader, context or tools, and health must see it. Derived from the evaluations on
   each roster agent's branch head, never copied; the cluster head's own
   errors are excluded as inherited.
 
@@ -194,25 +224,13 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.problems/agent-error]]}
   [database]
   (let [dial (db/q '[:find ?n . :where [_ :seon.config.error/agent-error-agents ?n]] database)
-        head-ids (into #{} (map #(nth % 2)) (db/undecoded-datoms database :aevt [:seon.cluster.eval/id]))]
+        head-ids (head-evaluation-ids database)]
     (if-not dial
       []
       (->> (db/q '[:find ?agent-id ?branch :where [?agent :seon.agent/id ?agent-id] [?agent :seon.agent/branch ?branch]] database)
            (mapcat (fn [[agent-id branch]] (branch-agent-errors database agent-id branch head-ids)))
-           (group-by (comp first agent-error-parts peek))
-           (keep (fn [[pattern errors]]
-                   (let [latest (apply max-key #(.getTime ^java.util.Date (nth % 2)) errors)]
-                     (when (<= dial (count (distinct (map first errors))))
-                       {:seon.problems/agent-error-signature (id/id [::agent-error pattern] 12)
-                        :seon.problems/agent-error-pattern pattern
-                        :seon.problems/agents (count (distinct (map first errors)))
-                        :seon.problems/occurrences (count errors)
-                        :seon.problems/agent-error-values (vec (sort (distinct (keep (comp second agent-error-parts peek) errors))))
-                        :seon.cluster.eval/at (nth latest 2)
-                        :seon.agent/id (first latest)
-                        :seon.cluster.eval/id (second latest)}))))
-           (sort-by (juxt (comp - :seon.problems/agents) (comp - :seon.problems/occurrences) :seon.problems/agent-error-pattern))
-           vec))))
+           error-groups
+           (filterv #(<= dial (:seon.problems/agents %)))))))
 
 (defn open-faults
   "Every fault `seon.error/resolution` leaves open at `database`: the error

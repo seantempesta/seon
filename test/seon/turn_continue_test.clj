@@ -7,6 +7,8 @@
             [clojure.data.json :as json]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.host :as host]
+            [seon.context]
             [seon.eval.drive :as drive]
             [seon.id]
             [seon.mcp :as mcp]
@@ -279,3 +281,59 @@
        (Thread/sleep 500)
        (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})) "a wake opens no work turn")
        (is (= 1 (model-turns (db/db connection) agent-id)) "the model was not called again")))))
+
+
+(deftest ^{:seon/tasks #{'seon.turn/a-task-end-never-reaches-root}
+           :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass, its proposal's proof run and root's merge gate."
+           :seon.test/long-ms 60000}
+  a-task-that-ends-green-sends-root-one-merge-request
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           agent-id (str "ended-" (seon.id/id))
+           ;; root's home is this member's branch, so the end message and the merge stay inside the fixture
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           ;; the task's proof, defined at the home by root before the agent's branch exists
+           _ (agent-eval running "root" (str "(ns tq.endm) (defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                             "(clojure.test/deftest ^{:seon/tasks #{'tq.endm/area}} area-test (clojure.test/is (= 25 (area 5))))"))
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endm)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.endm :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))
+           ledger (atom [])]
+       (is (keyword? branch) "the agent has a branch of its own")
+       (is (nil? (:seon.error/at (task/assign! {:seon.db/connection connection :seon.task/assigned id
+                                                :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})))
+           "root assigns the task to the agent's branch")
+       (support/with-provider
+        ledger (support/reply-queue ["(in-ns 'tq.endm)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"])
+        (fn [server]
+          (agent-eval running agent-id (str "(my.agent/settings! "
+                                            (seon.id/printed (assoc (support/provider-config server)
+                                                                    :seon.config.ai/no-provider false))
+                                            ")"))
+          (support/outside-wake-on-branch! running agent-id target "Work your task.")
+          (until #(:seon.agent/admission-closed-tx
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                 1000)))
+       (let [home (db/db connection)
+             ended (db/q '[:find [(pull ?m [:seon.message/about :seon.task/end :seon.task/merge]) ...] :in $ ?agent-id
+                           :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent]
+                           [?root :seon.agent/id "root"] [?m :seon.message/to ?root]]
+                         home agent-id)
+             [message] ended
+             proposed (db/q '[:find ?merge . :in $ ?branch :where [?p :seon.task/branch ?branch] [?p :seon.task/merge ?merge]]
+                            home branch)
+             prepared (agent-eval running "root" (str "(my.program/prepare-merge! {:seon.task/merge \"" (:seon.task/merge message) "\"})"))]
+         (is (= 1 (count @ledger)) "one model call turned the proof green")
+         (is (= 1 (count ended)) "root received exactly one message from the agent")
+         (is (= {:seon.message/about id :seon.task/end :done} (select-keys message [:seon.message/about :seon.task/end]))
+             "it names the task and how it ended")
+         (is (and (some? proposed) (= proposed (:seon.task/merge message))) "it names the proposal's merge task")
+         (is (some? (:seon.source/candidate (:seon.repl/value prepared))) "root's prepare-merge! on it answers a proposal")
+         (let [shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) %)
+                           (get-in (seon.context/current-state home "root") [:seon.context/unread :seon.context/items]))]
+           (is (= {:seon.task/end :done :seon.task/proof-counts {:green 1} :seon.task/calls 1}
+                  (select-keys (:seon.task/ended shown) [:seon.task/end :seon.task/proof-counts :seon.task/calls]))
+               "root's block shows the ended value derived from the agent's branch")))))))

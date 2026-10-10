@@ -414,25 +414,17 @@
                                          :my.program/base? (boolean base)
                                          :my.program/connection? (boolean connection)}}))))
 
-(defn propose-merge!
-  "Propose my branch's change for the task I am assigned, once its proofs pass here.
+(defn proposal!
+  "Record on the cluster my branch's proposal for the task I am assigned, once its proofs pass here, and tell
+  no one: the act `propose-merge!` and a task's end (`seon.turn/end-task-call`) share.
 
-  The assignment is root's, read on the cluster (`seon.task/assignment`); I
-  name no task. Every test naming the task (on the cluster and on my branch)
-  runs on my branch, and each must then hold green evidence current for my
-  program (`seon.test/verified?`); otherwise the refusal names them and root
-  hears nothing. A green proof records on the cluster the merge task and my
-  proposal (`seon.task/propose!`), then tells root with a message naming the
-  merge task, and answers the proposal with root's `prepare-merge!` offered. A
-  failed message leaves the proposal on record (root's `proposals` reads it)
-  and is named as `:seon.task/undelivered`.
-
-  Example:
-  (my.program/propose-merge! {})"
-  {:seon/tasks #{'my.program/an-agent-cannot-see-or-choose-its-change}
+  Every test naming the task (on the cluster and on my branch) runs on my branch and must then hold green
+  evidence current for my program (`seon.test/verified?`); otherwise the refusal names them. Answers the
+  proposal (`seon.task/propose!`)."
+  {:seon.fn/internal? true
    :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
                              [:seon.agent/id :seon.agent/id]]]
-                  [:or :seon.task/proposal-answer :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+                  [:or :seon.task/proposal-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id}]
   (let [branch (get-in (db/db connection) [:config :branch])
         work (task/assignment (db/db (task/home-connection connection)) agent-id branch)
@@ -461,15 +453,40 @@
               (seq unproven) (refuse :unproven unproven)
               (:seon.error/at proposal) proposal
               (nil? proposal) (refuse :unproven (vec (sort (remove (set (map first digests)) proofs))))
-              :else
-              (let [sent (message/send! {:my.message/to "root" :my.message/about (:seon.task/merge proposal)
-                                         :my.message/content (str "Please merge branch " (name branch) ": merge task "
-                                                                  (:seon.task/merge proposal) " (" (:seon.task/key work) ").")}
-                                        connection agent-id)]
-                ;; A failed message leaves the proposal on record: `proposals` reads it.
-                (cond-> (assoc proposal :seon.render/operations
-                               [(list 'my.program/prepare-merge! {:seon.task/merge (:seon.task/merge proposal)})])
-                  (:seon.error/at sent) (assoc :seon.task/undelivered sent))))))))
+              :else proposal)))))
+
+(defn propose-merge!
+  "Propose my branch's change for the task I am assigned, once its proofs pass here.
+
+  The assignment is root's, read on the cluster (`seon.task/assignment`); I
+  name no task. Every test naming the task (on the cluster and on my branch)
+  runs on my branch, and each must then hold green evidence current for my
+  program (`seon.test/verified?`); otherwise the refusal names them and root
+  hears nothing. A green proof records on the cluster the merge task and my
+  proposal (`seon.task/propose!`), then tells root with a message naming the
+  merge task, and answers the proposal with root's `prepare-merge!` offered. A
+  failed message leaves the proposal on record (root's `proposals` reads it)
+  and is named as `:seon.task/undelivered`.
+
+  Example:
+  (my.program/propose-merge! {})"
+  {:seon/tasks #{'my.program/an-agent-cannot-see-or-choose-its-change}
+   :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
+                             [:seon.agent/id :seon.agent/id]]]
+                  [:or :seon.task/proposal-answer :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (let [proposal (proposal! request)]
+    (if (:seon.error/at proposal)
+      proposal
+      (let [branch (:seon.task/branch proposal)
+            sent (message/send! {:my.message/to "root" :my.message/about (:seon.task/merge proposal)
+                                 :my.message/content (str "Please merge branch " (name branch) ": merge task "
+                                                          (:seon.task/merge proposal) ".")}
+                                connection agent-id)]
+        ;; A failed message leaves the proposal on record: `proposals` reads it.
+        (cond-> (assoc proposal :seon.render/operations
+                       [(list 'my.program/prepare-merge! {:seon.task/merge (:seon.task/merge proposal)})])
+          (:seon.error/at sent) (assoc :seon.task/undelivered sent))))))
 
 (defn proposals
   "Read the open merge proposals on my cluster: every proposal whose merge task

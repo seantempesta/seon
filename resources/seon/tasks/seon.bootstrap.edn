@@ -1,6 +1,6 @@
 [#:seon.task{:name "help-evidence-test-red-on-head"
              :kind :function
-             :intent "`seon.help-test/help-evidence-tracks-its-code-version` is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."
+             :intent "`seon.help-test/help-evidence-tracks-its-code-version` is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption. Still red on af605e344 (check run a856f1516768); commit 34bbd83cb's message refers to this task by a name that does not exist, `seon.bootstrap/help-evidence-is-stale-after-an-unrelated-write`: this entry, `seon.bootstrap/help-evidence-test-red-on-head`, is the one it means."
              :must-read #{seon.bootstrap/help-value}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
  #:seon.task{:name "session-end-is-taught-three-ways"

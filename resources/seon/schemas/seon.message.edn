@@ -81,7 +81,9 @@
                 [:seon.message/received-tx {:optional true} :seon.message/received-tx]
                 [:my.message/reason
                  {:optional true}
-                 :my.message/reason]],
+                 :my.message/reason]
+                [:seon.task/end {:optional true} :seon.task/end]
+                [:seon.task/merge {:optional true} :seon.task/merge]],
                :pulled
                [:map
                 {:description

@@ -233,7 +233,9 @@
                          (:my.message/assignment candidate)
                          (assoc :seon.message/assignment (:my.message/assignment candidate))
                          (:my.message/reason candidate)
-                         (assoc :my.message/reason (:my.message/reason candidate)))]
+                         (assoc :my.message/reason (:my.message/reason candidate))
+                         ;; a task's end message: how it ended and, ended green, the merge task it proposed
+                         true (merge (select-keys candidate [:seon.task/end :seon.task/merge])))]
                (update delivered :seon.message/rows conj entity)))))
        {:seon.message/rows [] :seon.error/values []}
        candidates))))
@@ -597,7 +599,9 @@
     :seon.message/about
     :seon.message/assignment
     :seon.message/received-tx
-    :my.message/reason])
+    :my.message/reason
+    :seon.task/end
+    :seon.task/merge])
 
 (defn- endpoint-id
   [message endpoint]
@@ -632,7 +636,10 @@
            :seon.render/operations [(list 'my.message/received! (:seon.message/id message))]}
     (endpoint-id message :seon.message/from)
     (assoc :my.message/from
-           (endpoint-id message :seon.message/from))))
+           (endpoint-id message :seon.message/from))
+    ;; a task's end message: its references, from which the reader derives the ended value
+    (:seon.task/end message)
+    (merge (select-keys message [:seon.message/about :seon.task/end :seon.task/merge]))))
 
 (defn- recipient-eid
   [database agent-id]
@@ -868,7 +875,8 @@
        :seon.error/message (str (pr-str (:my.message/to candidate)) " lives on branch " (pr-str home)
                                 ", which this process holds no connection to; the message was not sent.")}
       :else
-      (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason]))
+      (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason
+                                                              :seon.task/end :seon.task/merge]))
             write! #(db/transact! target
                                   {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
                                    :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})

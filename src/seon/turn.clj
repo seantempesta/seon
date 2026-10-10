@@ -63,6 +63,8 @@
   (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private context-task-done?
   (delay (requiring-resolve 'seon.context/task-done?)))
+(defonce ^:private program-proposal!
+  (delay (requiring-resolve 'my.program/proposal!)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
@@ -2139,20 +2141,46 @@
     []
     [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]))
 
+(defn- end-message
+  "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
+  subject and, ended green, the merge task its proposal recorded (`merge`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
+                  :my.message/message]}
+  [database agent-id end merge]
+  (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
+    (cond-> {:my.message/to "root" :my.message/about held :seon.task/end end
+             :my.message/content (str "My task ended: " (name end) "."
+                                      (when merge " Its merge request is the merge task this message names."))}
+      merge (assoc :seon.task/merge merge))))
+
 (defn- end-task!
-  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`); nil otherwise.
-  A refused write is a fault recorded beside the pass."
+  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
+  it ended green (`my.program/proposal!`, the agent's own act), send root the one end message (`end-message`),
+  then close the agent (`end-task-call`), last, so whoever sees the agent closed finds its message; nil otherwise.
+  A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
-  (let [connection (:seon.db/connection cluster)]
+  (let [connection (:seon.db/connection cluster)
+        fault! (fn [operation outcome]
+                 (fault/fault! (env/of cluster) (ex-info (:seon.error/message outcome "The task's end was refused.") outcome)
+                               {:seon.error/layer :seon.turn/task-end
+                                :seon.error/operation operation
+                                :seon.db.process/id (:seon.db.process/id cluster)
+                                :seon.agent/id agent-id}))]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [outcome (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]])]
-        (when-not (:db-after outcome)
-          (fault/fault! (env/of cluster) (ex-info (:seon.error/message outcome "The task's end was refused.") outcome)
-                        {:seon.error/layer :seon.turn/task-end
-                         :seon.error/operation `end-task!
-                         :seon.db.process/id (:seon.db.process/id cluster)
-                         :seon.agent/id agent-id}))))
+      (let [execution (when (= :done end) (@cluster-agent-acquire-context! cluster agent-id))
+            proposal (when execution
+                       (@program-proposal! {:my.program/context (assoc execution :my.program/base-ctx
+                                                                       (:seon.sci.eval/base-ctx execution))
+                                            :seon.db/connection (:seon.db/connection execution)
+                                            :seon.agent/id agent-id}))
+            _ (when (:seon.error/at proposal) (fault! 'my.program/proposal! proposal))
+            sent (message/send! (end-message (db/db connection) agent-id end (:seon.task/merge proposal))
+                                connection agent-id)
+            ;; a refused write answers the writer's refusal, which carries no message id
+            _ (when-not (:seon.message/id sent) (fault! `message/send! sent))
+            outcome (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]])]
+        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
     nil))
 
 (defn next-agent-work

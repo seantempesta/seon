@@ -13,6 +13,7 @@
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.operator.runtime :as runtime]
+            [seon.test-support :as support]
             [seon.task :as task]
             [seon.turn :as turn]))
 
@@ -195,42 +196,39 @@
   the run with its branch and connection, or the step that was refused."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [running {agent-id :seon.competency/agent task-sym :seon.competency/task settings :seon.competency/settings :as run}]
-  (let [first-request (agent-eval! running agent-id (str (get setups task-sym "(ns user)")
+  (let [{branch :seon.store/branch target :seon.db/connection first-request :seon.test/reply}
+        (support/own-branch-agent! running agent-id (str (get setups task-sym "(ns user)")
                                                          "\n(my.agent/settings! " (id/printed settings) ")"))
-        handle (:seon.turn.loop/cluster (get @runtime/running-instances running))
-        connection (:seon.db/connection handle)
-        branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]]
-                     (db/db connection) agent-id)]
-    (if (or (get first-request "isError") (not (keyword? branch)))
+        connection (:seon.db/connection (:seon.turn.loop/cluster (get @runtime/running-instances running)))]
+    (if-not branch
       (merge run (failed agent-id :setup first-request))
       (let [task-id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
                           (db/db (task/home-connection connection)) task-sym)
             assigned (task/assign! {:seon.db/connection connection :seon.task/assigned task-id
-                                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
-            target (db/branch-connection (db/db connection) branch)]
+                                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
         (if (:seon.error/at assigned)
           (merge run (failed agent-id :assignment {}) {:seon.competency/refusal assigned})
-          (do (db/call-with-custody {:seon.db/connection target}
-                #(drive/inbound! target (:seon.cluster/name handle) cluster/boot-process-identity agent-id
-                                 "Work your task."))
+          (do (support/outside-wake-on-branch! running agent-id target "Work your task.")
               (assoc run :seon.store/branch branch :seon.db/connection target)))))))
 
 (defn- run-state
   "Where the run of `agent-id` stands on its branch `database`: `:running` while a model call or a test member
-  is open; then `:done` once `seon.context/task-done?` holds (the loop stops calling the model once every proof
-  is green, so no later reply is ever left to read), `:waiting` once its last reply leaves the turn loop nothing to continue (`seon.turn`'s own
-  rule: no evaluated form, a disposition or a failed attempt), `:capped` once `cap` calls closed; else
-  `:running`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id pos-int?] [:enum :running :done :waiting :capped]]}
-  [database agent-id cap]
+  is open; once the task's end closed the agent, how it ended (`:done`, `:capped`, `:given-back`), as its end
+  message to root at the task home says; `:waiting` once its last reply leaves the turn loop nothing to continue
+  (`seon.turn`'s own rule: no evaluated form, a disposition or a failed attempt); else `:running`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:enum :running :done :waiting :capped :given-back]]}
+  [database agent-id]
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
-                       database)]
+                       database)
+        closed? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+        ended (when closed?
+                (db/q '[:find ?end . :in $ ?agent-id
+                        :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
+                      (db/db (task/home database)) agent-id))]
     (cond (or (empty? calls) (some #(nil? (:seon.turn/closed-tx %)) calls) testing?) :running
-          ;; the loop's own rules, read rather than restated
-          (context/task-done? database agent-id) :done
+          ended ended
           (not (@#'turn/continuing-reply? database agent-id)) :waiting
-          (<= cap (count calls)) :capped
           :else :running)))
 
 (defn- await-runs
@@ -241,7 +239,7 @@
   [runs poll-ms deadline-ms]
   (let [deadline (+ (System/currentTimeMillis) deadline-ms)
         states #(mapv (fn [{agent-id :seon.competency/agent connection :seon.db/connection settings :seon.competency/settings}]
-                        (run-state (db/db connection) agent-id (:seon.config.run/max-episode-runs settings)))
+                        (run-state (db/db connection) agent-id))
                       runs)]
     (loop [previous nil]
       (let [now (states)]

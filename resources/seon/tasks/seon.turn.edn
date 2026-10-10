@@ -179,4 +179,9 @@
              :intent "`seon.turn/next-agent-work` opens a turn for any unanswered wake, so an agent whose task is done, capped or given back is reopened by the next message: root's questions to chain2-forgive-2 became 11 more calls of task work (DYNAMIC-CONTEXT stage 2). Done when the end of a model agent's task (`seon.turn/task-end`) asserts `:seon.agent/admission-closed-tx` once (`seon.turn/end-task-call`) and no later wake opens a turn for it."
              :must-read #{seon.turn/next-agent-work seon.turn/task-end seon.turn/end-task-call seon.context/task-done?}
              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
+ #:seon.task{:name "a-task-end-never-reaches-root"
+             :kind :function
+             :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so `my.program/propose-merge!` never runs and root's `my.program/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (`my.program/proposal!`) named by `:seon.task/merge`, which `my.program/prepare-merge!` takes."
+             :must-read #{seon.turn/task-end seon.turn/end-task-call my.program/proposal! my.program/propose-merge! my.program/prepare-merge! seon.cluster.message/send!}
+             :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md" "docs/seon/plan.md"}}
 ]

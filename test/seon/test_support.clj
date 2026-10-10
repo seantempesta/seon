@@ -17,6 +17,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.eval.drive :as drive]
+            [seon.mcp :as mcp]
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.id :as id]
@@ -1410,3 +1412,38 @@
   {:seon.config.ai/endpoint (str "http://127.0.0.1:" (.getPort (.getAddress server)) "/chat")
    :seon.config.ai/no-auth true
    :seon.config.ai/model "fixture-provider"})
+
+
+(defn own-branch-agent!
+  "Create `agent-id` homed on a work branch of its own, forked from the running cluster `running`'s live branch
+  toward it (the branch root holds and merges into), and host it there through its first eval request, `setup`;
+  answers that request's MCP result under `:seon.test/reply`, with the agent's branch and that branch's connection
+  when it is hosted."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
+  [running agent-id setup]
+  (let [instance (get @operator.runtime/running-instances running)
+        handle (:seon.turn.loop/cluster instance)
+        connection (:seon.db/connection handle)
+        live (get-in (db/db connection) [:config :branch])
+        lane (keyword (str "agent-" (id/id)))
+        _ (transacted! connection (agent/creation-tx {:seon.agent/id agent-id :seon.ns/name 'user
+                                                      :seon.cluster/name (:seon.cluster/name handle)
+                                                      :seon.agent/branch lane}))
+        forked (registry/fork! {:seon.store/store (:seon.store/store instance) :seon.store/branch lane
+                                :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                :seon.db/db (db/db connection) :seon.branch/target live})
+        first-request (when-not (:seon.error/at forked)
+                        (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                   "arguments" {"code" setup "agent" agent-id "cluster" running}}))))]
+    (cond-> {:seon.test/reply (or first-request forked)}
+      (and first-request (not (get first-request "isError")))
+      (assoc :seon.store/branch lane :seon.db/connection (db/branch-connection (db/db connection) lane)))))
+
+(defn outside-wake-on-branch!
+  "Write one outside message `text` to `agent-id` on its branch `connection`, as the branch's own work: the
+  wake an operator sends to an agent hosted on its own branch."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :string] :seon.schema/value]}
+  [running agent-id connection text]
+  (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))]
+    (db/call-with-custody {:seon.db/connection connection}
+      #(drive/inbound! connection (:seon.cluster/name handle) cluster/boot-process-identity agent-id text))))

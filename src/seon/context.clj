@@ -13,6 +13,7 @@
             [seon.render]
             [seon.repl :as repl]
             [seon.sci.eval :as sci.eval]
+            [seon.problems :as problems]
             [seon.ref :as ref]
             [seon.task :as task]
             [seon.test.runner :as runner]
@@ -220,6 +221,41 @@
         (turn/previous-ending-namespace database eid))
       (some-> (:seon.task/sym held) namespace symbol)))
 
+(defn ended
+  "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for, derived now from
+  the ending agent's branch: the task, how it ended, its proofs' counts and red proofs, the agent's errors grouped
+  by signature, its model calls and tokens, the merge task when it ended green, and the operations root takes next."
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
+  [database {agent-id :my.message/from task-id :seon.message/about end :seon.task/end merge :seon.task/merge}]
+  (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
+        home (if-let [connection (task/home database)] (db/db connection) database)
+        sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home task-id)
+        branch-db (when (keyword? branch) (db/branch-database database branch))
+        proven (when (and branch-db sym) (proofs branch-db sym))
+        attempts (when branch-db
+                   (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
+                           :in $ ?agent-id
+                           :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
+                         branch-db agent-id))
+        total #(transduce (keep (comp % second)) + 0 attempts)]
+    (or (some #(when (:seon.error/at %) %) [proven attempts])
+        (cond-> {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
+                 :seon.task/calls (count (into #{} (map first) attempts))
+                 :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
+                 :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)
+                 :seon.render/operations
+                 (cond-> [(list 'seon.context/model-context (list 'seon.db/branch-database (list 'seon.db/db) branch) {} agent-id)]
+                   merge (conj (list 'my.program/prepare-merge! {:seon.task/merge merge}))
+                   sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
+                                                       :seon.task/basis task-id})))}
+          sym (assoc :seon.task/sym sym)
+          (keyword? branch) (assoc :seon.agent/branch branch)
+          merge (assoc :seon.task/merge merge)
+          proven (assoc :seon.task/proof-counts (:seon.context/counts proven)
+                        :seon.task/red-proofs (into [] (comp (filter #(= :red (:seon.context/proof-status %))) (map :seon.test/sym))
+                                                    (:seon.context/proof-list proven)))
+          (keyword? branch) (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status (`:done` once every
@@ -243,7 +279,13 @@
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
         unread (let [items (message/inbox database agent-id)]
-                 (if (:seon.error/at items) items (unshown database agent-id items)))
+                 (if (:seon.error/at items)
+                   items
+                   (let [items (unshown database agent-id items)]
+                     (if (:seon.error/at items)
+                       items
+                       ;; a task's end message is shown with the value its references stand for, derived now
+                       (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
         namespace (agent-namespace database agent-id held)
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
