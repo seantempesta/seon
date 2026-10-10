@@ -553,3 +553,30 @@
       (finally
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
+
+(deftest ^{:seon/tasks #{'seon.task/one-open-proposal-per-assignment}
+           :seon.test/long "One own-branch agent's first request, assignment and two proposal runs."
+           :seon.test/long-ms 120000}
+  a-second-open-proposal-for-one-assignment-is-refused-at-the-writer
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/land.clj"
+           root (checkout! "propose-once-test" {path land-source})
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           first-proposal (proposed! running connection "area"
+                                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+           agent-id (get-in (db/pull (db/db connection) [{:seon.task/created-by [:seon.agent/id]}]
+                                     [:seon.task/id (:seon.task/merge first-proposal)])
+                            [:seon.task/created-by :seon.agent/id])
+           _ (agent-eval running agent-id "(in-ns 'tq.land)\n(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r (+ r 0)))")
+           second-proposal (agent-eval running agent-id "(:seon.task/refused (my.program/propose-merge! {}))")
+           open (db/q '[:find [?id ...] :in $ ?m :where [?p :seon.task/merge ?m] [?p :seon.task/proposal ?id]]
+                      (db/db connection) (:seon.task/merge first-proposal))]
+       (try
+         (is (some #{:proposal-open} (tree-seq coll? seq second-proposal)) "the writer refuses a second open proposal")
+         (is (= [(:seon.task/proposal first-proposal)] open) "the first proposal stays the only one")
+         (finally (support/delete-root! root)))))))

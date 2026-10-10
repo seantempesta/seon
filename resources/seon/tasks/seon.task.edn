@@ -1,4 +1,8 @@
-[#:seon.task{:name "no-repl-entrance-creates-a-task"
+[#:seon.task{:name "one-open-proposal-per-assignment"
+             :kind :function
+             :intent "`seon.task/propose!` had no writer check against a second proposal for one assignment: concurrent `seon.turn/end-task!` calls were safe only because an agent's loop runs one step at a time. Done when the proposal write refuses `:proposal-open` inside the writer while another proposal of the same `:seon.task/proposes` assignment has an open merge task (no `:seon.task/outcome`); the same proposal again stays a no-op."
+             :must-read #{seon.task/propose! seon.turn/end-task! my.program/propose-merge!}}
+ #:seon.task{:name "no-repl-entrance-creates-a-task"
              :kind :namespace
              :intent "No REPL entrance creates a task. Detectors, errors, users and agents can add a task only by hand-editing resources/seon/tasks EDN, the bootstrap exception of spec 7.14. `seon.task/create!` (spec 7.8) must submit a declaration, with the basis it read, to the one task writer: the handle is seon.id over [ns name kind], a duplicate or a supplied handle that differs from its aspect refuses, and a competing revision returns base, current and proposed (7.16). Today every task in this directory was written by hand."
              :must-read #{seon.task/index-tasks! seon.task/task-basis seon.task/task-handle seon.task/tasks-tx}

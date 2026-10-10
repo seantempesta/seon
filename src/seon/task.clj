@@ -751,13 +751,31 @@
                           (when (and (pos? (+ fail failure)) (not (green [proof reach]))) [proof reach])))
               members)))))
 
+(defn- one-open-proposal-tx
+  "Transaction data that refuses `:proposal-open`, inside the writer, while a
+  proposal of the assignment `proposes` other than `proposal` has an open merge
+  task (no `:seon.task/outcome`): one assignment, one open proposal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/proposes :string :seon.task/ns] [:= []]]}
+  [database proposes proposal holder]
+  (let [assignment (:db/id (db/pull database [:db/id] proposes))
+        open (when assignment
+               (db/q '[:find [?id ...] :in $ ?a ?this
+                       :where [?p :seon.task/proposes ?a] [?p :seon.task/proposal ?id] [(not= ?id ?this)]
+                       [?p :seon.task/merge ?m] [?t :seon.task/id ?m] (not [?t :seon.task/outcome _])]
+                     database assignment proposal))]
+    (when (seq open)
+      (throw (ex-info "An open proposal already answers this assignment."
+                      (refused 'seon.task/propose! :proposal-open holder (vec (sort open))))))
+    []))
+
 (defn propose!
   "Record on the cluster the merge task for the assigned `work` and one proposal
   of the commit `view` names on its branch: its proofs at their definition digests, the run and its tested
   program, and each proof observed red on the branch before the change
   (`:seon.task/refuted`, read from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a repeat
   proposal finds it; the recurrence key `[key commit]` records one proposal per
-  commit. Answers the proposal view."
+  commit. A second proposal while another of the same assignment is open
+  refuses `:proposal-open` at the writer. Answers the proposal view."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/assigned-work
                        [:map [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit]
                         [:seon.task/proved :seon.task/proved] [:seon.task/run-id :seon.task/run-id]
@@ -770,7 +788,9 @@
         red (refuted (db/db connection) (into #{} (map first) (:seon.task/proved view)))
         view (cond-> (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
                (seq red) (assoc :seon.task/refuted red))
-        report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/proposes proposes))))]
+        report (refusal-data #(written connection (conj (task-call connection entity {})
+                                                        [:db.fn/call #'one-open-proposal-tx proposes (:seon.task/proposal view) ns]
+                                                        (assoc view :seon.task/proposes proposes))))]
     (cond (map? red) red
           (:seon.error/at report) report
           :else view)))
