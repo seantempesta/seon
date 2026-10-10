@@ -525,3 +525,29 @@
         (is (= head (git! root "rev-parse" (str sha "^"))) "the proven bytes commit on the previous head")
         (is (= "(ns a)\n(def x 1)" (git! root "show" (str sha ":src/a.clj")))))
       (finally (support/delete-root! root)))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/one-owner-holds-the-checkout-from-write-back-through-git}}
+  a-landing-write-back-waits-for-the-lane-commit-lock
+  ;; write-and-commit! holds .git/lane-commit.lock from the file proof through git, so a
+  ;; lane commit or a second landing never interleaves with a landing's files
+  (let [root (checkout! "land-write-lock-test" {"src/a.clj" "(ns a)\n"})
+        accepted {:seon.program/identities #{[:seon.fn/sym 'a/f]} :seon.test.run/id "abcdef012345"
+                  :seon.source/base-commit-id (random-uuid) :seon.source/commit-id (random-uuid)}
+        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
+                    :seon.source/commit-id (:seon.source/commit-id accepted)}
+        connection (:seon.db/connection (support/execution-handle nil))
+        holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
+                                "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
+                                (str root "/.git/lane-commit.lock"))]
+    (try
+      (is (= "locked" (.readLine (io/reader (:out holder)))) "a lane commit holds the lock")
+      (let [landing (future (source/write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted
+                                                       :seon.fn/root root}
+                                                      acceptance))]
+        (is (= ::waiting (deref landing 1000 ::waiting)) "the write-back waits while the lane commit holds the lock")
+        (.close ^java.io.OutputStream (:in holder))
+        (is (= :commit-absent (:seon.source/write-back-refused (deref landing 10000 nil)))
+            "then it runs: these accepted commits are absent from the store"))
+      (finally
+        (.close ^java.io.OutputStream (:in holder))
+        (support/delete-root! root)))))

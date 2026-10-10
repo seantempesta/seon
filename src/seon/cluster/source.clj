@@ -1702,6 +1702,33 @@
                           {:seon.error/offending differing :seon.git/commit (:out after)})
           :else {:seon.git/commit (:out after)})))))
 
+(defn write-and-commit!
+  "`write-back!` of `request` and the commit of exactly what it wrote
+  (`commit!`'s checks and verification, its message from `acceptance`), both
+  while this process holds the checkout's `.git/lane-commit.lock`, so no other
+  landing or lane commit reads, replaces or commits those files in between.
+  Answers `{:seon.source/written … :seon.git/commit …}`, the write-back's
+  refusal, or the commit's refusal carrying `:seon.source/written`.
+
+  Example:
+  (write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"} acceptance)"
+  {:malli/schema [:=> [:cat :seon.source/write-back-request :seon.source/acceptance]
+                  [:or [:map [:seon.source/written :seon.source/written] [:seon.git/commit :seon.git/commit]]
+                   :seon.source/write-back-error :seon.git/commit-error]]}
+  [{root :seon.fn/root :as request} acceptance]
+  (or (root-refusal root)
+      (call-with-commit-lock
+       root []
+       (fn []
+         (let [written (write-back! request)
+               paths (vec (:seon.source/changed-paths written))
+               candidates (into {} (map (juxt :seon.source/path :seon.source/candidate-digest)) (:seon.source/files written))
+               committed (when-not (:seon.error/at written) (commit-locked root paths candidates acceptance))]
+           (cond
+             (:seon.error/at written) written
+             (:seon.error/at committed) (assoc committed :seon.source/written written)
+             :else {:seon.source/written written :seon.git/commit (:seon.git/commit committed)}))))))
+
 (defn commit!
   "Commit exactly the paths `written` installed under the checkout `root` as one git commit
   (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
@@ -1750,27 +1777,27 @@
         decided (when (:seon.source/commit-id accepted)
                   (timed :decide #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
                                       ((requiring-resolve 'seon.task/decide!) connection merge-task :accepted))))
-        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at decided)))
-                  (timed :write-back #(write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})))
-        acceptance (when (:seon.source/changed-paths written)
+        acceptance (when (:seon.source/commit-id accepted)
                      (merge (acceptance-names (db/db connection) merge-task)
                             (select-keys accepted [:seon.test.run/id :seon.source/commit-id])))
-        committed (when acceptance (timed :commit #(commit! root written acceptance)))]
+        landed (when (and acceptance (not (:seon.error/at decided)))
+                 (timed :write-and-commit
+                        #(write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root}
+                                            acceptance)))]
     (cond
       (not (:seon.source/candidate prepared)) prepared
       (not (:seon.source/commit-id accepted)) accepted
       (:seon.error/at decided) (assoc decided :seon.source/accepted accepted)
-      (:seon.error/at written) (assoc written :seon.source/accepted accepted)
-      (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
-      :else {:seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
-             :seon.source/written written :seon.git/commit (:seon.git/commit committed)
-             :seon.source/step-ms @clock})))
+      (:seon.error/at landed) (assoc landed :seon.source/accepted accepted)
+      :else (assoc landed :seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
+                   :seon.source/step-ms @clock))))
 
 (defn land!
   "Land the green `proposal` (an open merge proposal, `my.program/proposals`) in one call:
   `prepare-merge!` on a fresh branch of `execution`'s head, `accept-merge!` through the
   unchanged gate (deciding the merge task `:accepted` and retiring the tested branch),
-  `write-back!` into the checkout `root` and `commit!` of exactly the written paths.
+  then `write-and-commit!`: `write-back!` into the checkout `root` and the commit of
+  exactly the written bytes, under one hold of the lane commit lock.
   Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
   data, never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
   undecided and writes nothing; a write-back or commit refusal after acceptance carries

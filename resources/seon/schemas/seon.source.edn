@@ -109,7 +109,7 @@
               [:map {:description "What a landing's git commit names: the merge task, the run that gated it, the merge commit, and the task and agent when the cluster records them."}
                [:seon.task/merge :seon.task/merge] [:seon.test.run/id :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
                [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]],
-              :step-ms [:map-of {:description "Milliseconds each step of a landing took."} [:enum :prepare :accept :decide :write-back :commit] :int],
+              :step-ms [:map-of {:description "Milliseconds each step of a landing took."} [:enum :prepare :accept :decide :write-and-commit] :int],
               :landed
               [:map {:description "A landed merge (seon.cluster.source/land!): the acceptance, its merge commit on main, the files written back, the git commit and each step's milliseconds."}
                [:seon.source/accepted :seon.source/accepted] [:seon.source/commit-id :seon.source/commit-id]
