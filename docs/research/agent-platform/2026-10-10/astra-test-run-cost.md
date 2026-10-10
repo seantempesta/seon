@@ -1,4 +1,5 @@
 ---
+type: research
 title: Interpreted test cost — astra-test-run-cost
 date: 2026-10-10
 status: ownership-boundary handoff
