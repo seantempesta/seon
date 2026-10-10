@@ -56,6 +56,11 @@ runs its proofs with `clojure.test` at its REPL (9a78f8f9d), errors grouped by s
 lane `message-wakes`), six red census proofs for violated laws (18919b663). In flight: `message-wakes`, `merge-gate`,
 `slug-task`, and the DYNAMIC-CONTEXT card's revision (owner: reflection reads the record first, then asks a snapshot
 of the agent forked at the decision's t; one happy path for task running, every end message goes to root).
+Boot (Astra, 246a571ed, `docs/research/agent-platform/2026-10-10-boot-source.md`): readiness 5.3 s unchanged, 7.5 s one
+file, 6.9 s across a dependency change on a quiet machine; default's 15–18 s boots were contention with lanes' check
+JVMs. Every changed boot still re-derives the whole program (`stored-derivation-schema-keys` 1.55–1.78 GB). Owner
+2026-10-10: deferred; the slots go to the self-improvement loop. Per-file derivation inputs (3–5 h) is the chosen fix
+when it is picked up.
 Open: two reds on clean HEAD (`seon.config-test/the-default-document-has-one-canonical-complete-location`,
 `seon.db-test/equal-declaration-content-shares-one-projection-across-values`) to classify; boot readiness 15.6 s on
 18919b663 against 5–9 s earlier.
