@@ -12,7 +12,7 @@
             [seon.fn]
             [seon.fn-test]
             [seon.test.accretion :as accretion]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [are deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -50,6 +50,18 @@
                                  :seed 20261007)]
       (is (:pass? result) "every generated symbol agrees with the EDN reader")))
   (is (false? (program/edn-round-trip-symbol? "a")) "a string is not a symbol"))
+
+(deftest ^{:seon/tasks #{'seon.program/edn-symbol-text-accepts-a-leading-slash}}
+  edn-symbol-text-agrees-with-the-reader-on-slash-led-text
+  (are [text reads?] (= reads? (#'program/edn-symbol-text? text))
+    "/"     true
+    "a//"   true
+    "a/b"   true
+    "/x"    false
+    "//."   false
+    "//|"   false
+    "/?/?"  false
+    "/'//"  false))
 
 (deftest three-way-classifies-complete-generated-digest-maps
   (let [result
