@@ -223,7 +223,7 @@
         changed 'my.program/sizes
         added 'my.program/diff-fixture-added
         removed 'my.program-test/program-refusals-carry-complete-distinguishable-declared-schemas]
-    (registry/branch! {:seon.store/store store :seon.store/branch branch
+    (registry/fork! {:seon.store/store store :seon.store/branch branch
                        :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
     (let [held (agent/acquire-context! target nil {:seon.agent/branch branch})
           connection (:seon.db/connection held)
@@ -274,7 +274,7 @@
         ;; A cluster of its own, whose head holds the indexed file: the branch compares against it.
         (registry/branch! {:seon.store/store store :seon.store/branch home
                            :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
-        (registry/branch! {:seon.store/store store :seon.store/branch branch
+        (registry/fork! {:seon.store/store store :seon.store/branch branch
                            :seon.cluster.registry/from (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})})
         (let [held (agent/acquire-context! target nil {:seon.agent/branch branch})
               connection (:seon.db/connection held)]

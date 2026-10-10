@@ -724,29 +724,37 @@
   [missing message members]
   (assoc (program/digest-map-refusal missing message members) :seon.error/operation 'seon.cluster.source/prepare-merge!))
 
+(defn- branch-base-t
+  "The base-t attribute of `candidate`'s fork entity: the one `head` (the
+  target) holds when a merge advanced it, else the one `branch` wrote at its
+  fork. A base-t past `branch`'s own t names another branch that once had this
+  name; it, and a branch with no fork entity, refuse by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch]
+                  [:or :seon.db/basis-t :seon.program/digest-map-refusal]]}
+  [branch head candidate]
+  (let [t (or (registry/base-t head candidate) (registry/base-t branch candidate))]
+    (cond
+      (nil? t)
+      (refused :seon.program/history "The branch has no fork entity, so it has no merge base."
+               {:seon.store/branch candidate})
+      (< (db/basis-t branch) t)
+      (refused :seon.program/history
+               "The branch's base-t is past its own t: its fork entity belongs to an earlier branch of this name."
+               {:seon.store/branch candidate :seon.error/offending t})
+      :else t)))
+
 (defn- merge-base
-  "The nearest commit both `branch` and `head` reach: alternate parent walks
-  over stored commits, O(commits since the fork). More than `bound` visited
-  commits or an unavailable one refuses by name."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.db/database-value :seon.db/database-value
-                       :seon.program/max-datoms]
+  "`branch` (the database of `candidate`) as of its base-t (`branch-base-t`):
+  its fork, advanced to the merged value by each merge into `head`. It is the
+  branch's own value, not the target's, so the base never mixes another
+  lineage's transaction numbers and holds whatever the target is. Its
+  `seon.program/digest-map` reads are slower than a commit's
+  (`seon.cluster.source/as-of-merge-base-digest-reads-are-slower`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch]
                   [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
-  [store branch head bound]
-  (loop [queues (mapv #(conj clojure.lang.PersistentQueue/EMPTY (db/commit-id %)) [branch head])
-         seen [#{} #{}] side 0 visited 0]
-    (let [other (- 1 side) commit (peek (queues side))
-          stored (when (and commit (not ((seen other) commit)) (<= visited bound))
-                   (commit-database store commit))]
-      (cond
-        (and commit ((seen other) commit)) (commit-database store commit)
-        (every? empty? queues) (refused :seon.program/history "The branches share no commit." {})
-        (nil? commit) (recur queues seen other visited)
-        (nil? stored) (refused :seon.program/read-bound "The merge base is unavailable within its commit bound."
-                               {:seon.program/max-datoms bound :seon.error/offending commit})
-        :else (recur (update (update queues side pop) side into
-                             (try (get-in stored [:meta :datahike/parents])
-                                  (finally (d/release-materialized-db stored))))
-                     (update seen side conj commit) other (inc visited))))))
+  [branch head candidate]
+  (let [t (branch-base-t branch head candidate)]
+    (if (:seon.error/at t) t (d/as-of branch t))))
 
 (defn- replacement
   "Exact replacement transaction data onto `onto` for `delta`'s entities in `from`."
@@ -835,10 +843,11 @@
       {:c-id c-id}
       (let [bound {:seon.program/max-datoms 10000}
             branch (commit-database held-store c-id)
-            base (merge-base held-store branch head 10000)
-            ;; Only what the candidate changed can merge or conflict; H's
-            ;; transaction numbers are another lineage's.
-            changed (if (:seon.error/at base) base (program/changed-identities base branch bound))
+            base (merge-base branch head candidate)
+            ;; Only what the candidate changed since its base can merge or
+            ;; conflict, read on the candidate's own lineage.
+            changed (if (:seon.error/at base) base
+                        (program/changed-identities (branch-base-t branch head candidate) branch bound))
             maps (when (set? changed)
                    (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
@@ -934,7 +943,9 @@
                 :else (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
                                      :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                                      :seon.task/proofs proofs
-                                     :seon.source/expected-digests (held-digests head delta) :parents #{c-id})
+                                     :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
+                                     ;; The merge advances the branch's base to the value it merged.
+                                     :seon.source/advanced-base (registry/branch-fork-entity candidate (db/basis-t branch)))
                         (seq red) (assoc :seon.source/red red)))))
           (finally (release! [base branch]))))))))
 
@@ -947,7 +958,8 @@
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the proposal's `:seon.source/expected-digests`; writes to
   other rows never stale it. The merge commit's parents add the candidate and
-  S's head. A task handle the merged program names with no task admitted on the
+  S's head, and it writes the merged branch's fork entity with its advanced
+  base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
   head refuses, by handle and holder. Answers the accepted merge `write-back!`
   takes: its identities, the commit before it, its merge commit and the run.
 
@@ -957,10 +969,11 @@
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:seon.task/proofs :seon.task/proofs]
                         [:seon.source/expected-digests :seon.source/expected-digests]
-                        [:parents [:set :seon.source/commit-id]]]]
+                        [:parents [:set :seon.source/commit-id]]
+                        [:seon.source/advanced-base :seon.source/advanced-base]]]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
   [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs merged :parents}]
+                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
@@ -1018,7 +1031,7 @@
               (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected]] tx)
+                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected] advanced] tx)
                                           :parents (conj merged e-id)})]
                 (if (:db-after report)
                   {:seon.program/identities delta :seon.test.run/id run-id

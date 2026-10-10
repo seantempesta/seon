@@ -112,7 +112,9 @@
                [:seon.task/proofs :seon.task/proofs]
                [:seon.source/red {:optional true} :seon.source/red]
                [:seon.source/expected-digests :seon.source/expected-digests]
-               [:parents [:set :seon.source/commit-id]]],
+               [:parents [:set :seon.source/commit-id]]
+               [:seon.source/advanced-base :seon.source/advanced-base]],
+              :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
               :red [:vector {:min 1 :description "The run's members that are not green, by symbol: shown to root, not gated; only the proofs gate acceptance."} :seon.test/sym],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}

@@ -1127,11 +1127,14 @@
                          (schema/projection-from-database
                           @connection (db/carried-projection database)))
                        (:seon.cluster/name handle))))
-                 _ (when (and create? agent-id)
+                 ;; The new branch's first transaction writes its fork entity
+                 ;; (its merge base) and, for an agent, its assignment.
+                 _ (when create?
                      (let [result (db/call-with-custody {}
                                     #(db/transact! connection
-                                      [{:db/id [:seon.agent/id agent-id]
-                                        :seon.agent/branch branch}]))]
+                                      (cond-> [(registry/branch-fork-entity branch (db/basis-t @connection))]
+                                        agent-id (conj {:db/id [:seon.agent/id agent-id]
+                                                        :seon.agent/branch branch}))))]
                        (when-not (:db-after result)
                          (throw (ex-info "Branch assignment refused." result)))))
                  selected (db/db connection)

@@ -294,6 +294,47 @@
       (finally (store/release-branch! connection))))
   nil)
 
+(defn branch-fork-entity
+  "The branch's fork entity: `branch` and its base-t attribute `t`, the
+  branch's own transaction its merge base is as of."
+  {:malli/schema [:=> [:cat :seon.store/branch :seon.db/basis-t] :seon.branch/fork]}
+  [branch t]
+  {:seon.branch/name branch :seon.branch/base-t t})
+
+(defn fork!
+  "Create a work branch as `branch!` does and, when this call created it,
+  write in it the branch's fork entity, its base-t attribute the transaction
+  `t` it forked at: its merge base until a merge advances it (`base-t`). A
+  refused write answers the writer's error value."
+  {:malli/schema [:=> [:cat :seon.cluster.registry/branch-request]
+                  [:or :seon.cluster.registry/branch-result :seon.error/value]]}
+  [{store :seon.store/store branch :seon.store/branch :as request}]
+  (let [result (branch! request)]
+    (if-not (:seon.cluster/created? result)
+      result
+      (let [connection (store/open-branch! store branch)]
+        (try
+          (let [database (db/db connection)
+                projection (or (db/carried-projection database) (schema/handed-projection)
+                               (schema/projection-from-database database))
+                ;; The new branch's own write, never the caller's custody.
+                written (db/call-with-custody
+                         {:seon.db/connection connection}
+                         #(schema/call-with-projection
+                           projection
+                           (fn [] (db/transact! connection
+                                                {:tx-data [(branch-fork-entity branch (db/basis-t database))]}))))]
+            (if (:db-after written) result written))
+          (finally (store/release-branch! connection)))))))
+
+(defn base-t
+  "The base-t attribute of `branch`'s fork entity in `database`, or nil when
+  `database` holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.db/basis-t]]}
+  [database branch]
+  (db/q '[:find ?t . :in $ ?branch :where [?e :seon.branch/name ?branch] [?e :seon.branch/base-t ?t]]
+        database branch))
+
 (defn ensure-cluster!
   "Ensure `:cluster-<name>` exists at the requested source commit.
   Idempotent by the roster: a second call returns

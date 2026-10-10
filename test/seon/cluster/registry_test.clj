@@ -665,19 +665,21 @@
   an-idle-branch-keeps-the-commit-it-forked-from-through-collection
   ;; The lane forks from `src`'s head F and commits once; `src` then moves on.
   ;; A collection whose cutoff is past every commit (the window an idle branch
-  ;; outlives) keeps each branch head but follows no parent, so F reaches
-  ;; nothing and goes. The merge base, which `seon.cluster.source/compare-branch`
-  ;; and `my.program/write-branch!` need, is then unavailable.
+  ;; outlives) keeps each branch head but follows no parent, so F's commit
+  ;; goes. The merge base, which `seon.cluster.source/compare-branch` (and so
+  ;; `my.program/diff` and `my.program/write-branch!`) needs, is the lane's
+  ;; own value as of its recorded fork t, which history keeps.
   (with-source-store
     (fn [opened]
       (let [src-connection (store/open-branch! opened source-branch)
             lane :lane
-            head-of #(registry/branch-commit-id {:seon.store/store opened :seon.store/branch %})]
+            head-of #(registry/branch-commit-id {:seon.store/store opened :seon.store/branch %})
+            marker-set #(set (d/q '[:find [?m ...] :where [_ :seon.registry.test/marker ?m]] %))]
         (try
           (write-marker! src-connection "before-fork")
-          (let [fork (head-of source-branch)]
-            (registry/branch! {:seon.store/store opened :seon.cluster.registry/from source-branch
-                               :seon.store/branch lane})
+          (let [fork (marker-set @src-connection)]
+            (registry/fork! {:seon.store/store opened :seon.cluster.registry/from source-branch
+                             :seon.store/branch lane})
             (let [lane-connection (store/open-branch! opened lane)]
               (try (write-marker! lane-connection "on-lane")
                    (finally (store/release-branch! lane-connection))))
@@ -686,9 +688,30 @@
             (registry/collect! opened (java.util.Date. (+ (System/currentTimeMillis) 60000)) {})
             (let [head (source/commit-database opened (head-of source-branch))
                   branch (source/commit-database opened (head-of lane))
-                  base (#'source/merge-base opened branch head 10000)]
+                  base (#'source/merge-base branch head lane)
+                  compared (source/compare-branch opened lane head)]
               (try
-                (is (= fork (when-not (:seon.error/at base) (d/commit-id base)))
-                    "the merge base is the commit the lane forked from")
-                (finally (run! #(some-> % d/release-materialized-db) [head branch (when-not (:seon.error/at base) base)])))))
+                (is (= fork (when-not (:seon.error/at base) (marker-set base)))
+                    "the merge base holds exactly what the lane forked from")
+                (is (= #{} (:changed compared))
+                    "the comparison `my.program/diff` and `my.program/write-branch!` share reads the lane's changes since its fork")
+                (finally (source/release! [head branch (:branch compared)])))))
           (finally (store/release-branch! src-connection)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
+  a-branch-without-its-own-fork-entity-refuses-its-merge-base-by-name
+  (with-source-store
+    (fn [opened]
+      (registry/branch! {:seon.store/store opened :seon.cluster.registry/from source-branch
+                         :seon.store/branch :bare})
+      (let [branch (source/commit-database opened (registry/branch-commit-id {:seon.store/store opened :seon.store/branch :bare}))
+            reused (d/db-with branch [(registry/branch-fork-entity :bare (inc (db/basis-t branch)))])]
+        (try
+          (is (= {:seon.program/missing-evidence :seon.program/history :seon.store/branch :bare}
+                 (select-keys (#'source/merge-base branch branch :bare)
+                              [:seon.program/missing-evidence :seon.store/branch]))
+              "a branch with no fork entity has no merge base")
+          (is (= (inc (db/basis-t branch))
+                 (:seon.error/offending (#'source/merge-base branch reused :bare)))
+              "a base-t past the branch's own t names an earlier branch of that name")
+          (finally (source/release! [branch])))))))

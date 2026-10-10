@@ -1,0 +1,10 @@
+#:seon.branch
+{:name [:and {:seon.db/identity true :seon.program/row-schema :seon.branch/fork
+              :description "The branch a fork entity describes: written in that branch's own database when seon.cluster.registry/fork! creates it, and in the target's when seon.cluster.source/accept-merge! merges it."}
+        :seon.store/branch]
+ :base-t [:and {:description "The branch's own transaction t its merge base is as of: the t it forked at, advanced by each merge to the t of the merged branch value. History keeps it through collection."}
+          :seon.db/basis-t]
+ :fork [:map {:seon.db/attributes true :seon.program/partition :seon.data
+              :description "A branch's fork entity: the branch and its base-t attribute (seon.cluster.source/compare-branch)."}
+        [:seon.branch/name :seon.branch/name]
+        [:seon.branch/base-t :seon.branch/base-t]]}

@@ -30,7 +30,7 @@
         _ (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
                           (fn-entity h-conn "merge-caller" "(defn merge-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/merge-callee))")])
         _ (write! h-conn [(entity (db/db h-conn) :test "merge-check" "(clojure.test/deftest merge-check (clojure.test/is (= 1 (seon.cluster.merge-test/merge-caller))))")])
-        _ (registry/branch! {:seon.store/store store :seon.store/branch c
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
@@ -95,7 +95,7 @@
         c (keyword (str "merge-test-c-" (id/id)))
         _ (write! h-conn [(entity (db/db h-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")
                           (entity (db/db h-conn) :test "merge-other" "(clojure.test/deftest merge-other (clojure.test/is true))")])
-        _ (registry/branch! {:seon.store/store store :seon.store/branch c
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)]

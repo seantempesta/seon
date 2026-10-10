@@ -538,7 +538,8 @@
       (not (:seon.source/candidate prepared)) prepared
       :else
       (let [request (cond-> (assoc (select-keys prepared [:seon.source/candidate :seon.test.run/id :seon.task/proofs
-                                                          :seon.source/expected-digests :parents])
+                                                          :seon.source/expected-digests :parents
+                                                          :seon.source/advanced-base])
                                    :seon.task/merge merge-task :seon.task/branch (:seon.task/branch proposal))
                       root (assoc :seon.fn/root root))]
         (merge prepared request
@@ -992,7 +993,7 @@
   Example:
   (my.program/diff)
   Edge cases: holding the cluster's own branch answers empty.
-  Costs: one merge-base walk and digests of the changed declarations only."
+  Costs: one fork-point read and digests of the changed declarations only."
   {:malli/schema [:=> [:cat :my.program/context] [:or :map :seon.error/value]]}
   [context]
   (let [comparison (head-comparison context)]
@@ -1009,7 +1010,7 @@
   Example:
   (my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"})
   Edge cases: holding the cluster's own branch answers the empty difference; nothing is written.
-  Costs: one merge-base walk (as `my.program/diff`) and one analysis per written file."
+  Costs: one fork-point read (as `my.program/diff`) and one analysis per written file."
   {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.fn/root :seon.fn/root]
                              [:seon.program/identities {:optional true} :seon.program/identity-set]]]
                   [:or :seon.source/written :seon.source/write-back-error :seon.error/value]]}
