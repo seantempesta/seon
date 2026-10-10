@@ -1,0 +1,63 @@
+{:boot-source/surface :mcp-jvm
+ :boot-source/cluster "default"
+ :boot-source/agent "astra-boot-source"
+ :boot-source/loaded-revision "a6cbe4fcf6d0c81cb98674bd73eb1f2c3d9d1cee"
+ :boot-source/dependency-cache-hit
+ {:boot-source/form
+  (seon.profile/measure
+   (fn [] (seon.fn.analyzer/ensure-dependency-analysis! seon.fn/source-roots)))
+  :seon.profile/ms 3.14
+  :seon.profile/alloc-bytes 494696
+  :seon.profile/alloc-scope :thread
+  :seon.profile/calls 6}
+ :boot-source/source-comparison
+ {:boot-source/form
+  (seon.profile/measure
+   (fn [] ((var seon.cluster.boot/changed-source-paths)
+           (:seon.store/store (get @seon.operator.runtime/running-instances "default")))))
+  :seon.profile/ms 173.08
+  :seon.profile/alloc-bytes 176464008
+  :seon.profile/alloc-scope :thread
+  :seon.profile/calls 15208
+  :seon.profile/gc-ms 13
+  :boot-source/called
+  {seon.cluster.source/capture-paths {:calls 1 :self-ms 121}
+   seon.test.cache/input-path? {:calls 11152 :self-ms 34}
+   seon.id/sha-256 {:calls 869 :self-ms 5}}}
+ :boot-source/private-empty-dependency-cache
+ {:boot-source/form
+  (let [entries ((var seon.fn.analyzer/dependency-entries))]
+    (seon.profile/measure
+     (fn []
+       (clj-kondo.core/run!
+        {:lint entries :dependencies true :parallel true :copy-configs false
+         :config-dir seon.fn.analyzer/config-directory
+         :cache-dir scratch-cache-directory
+         :config {:output {:canonical-paths true}}}))))
+  :boot-source/reproduction "Bind scratch-cache-directory to a new, owned empty directory. Do not use a shared cache."
+  :seon.profile/ms 3151.51
+  :seon.profile/alloc-bytes 661412624
+  :seon.profile/alloc-scope :thread
+  :seon.profile/gc-ms 219
+  :boot-source/classpath-entries 267
+  :boot-source/analyzed-files 1804
+  :boot-source/kondo-summary {:error 0 :warning 0 :info 0 :duration 3152 :files 1804}
+  :seon.cost/jvm-window
+  {:seon.cost/alloc-mb 16918.487232 :seon.cost/cpu-ms 25271.832
+   :seon.cost/attribution :includes-unrelated-work}}
+ :boot-source/warm-stored-schema-inputs
+ {:boot-source/form
+  (let [store (:seon.store/store (get @seon.operator.runtime/running-instances "default"))
+        database (seon.cluster.source/database store
+                   (:seon.source/commit-id (seon.cluster.source/current store)))
+        paths (into #{} (seon.db/q (quote [:find [?path ...]
+                                         :where [_ :seon.fn.file/relative-path ?path]]) database))]
+    (try (seon.profile/measure
+          (fn [] ((var seon.cluster/stored-derivation-schema-keys) database paths)))
+         (finally (datahike.api/release-materialized-db database))))
+  :boot-source/note "This warm probe includes resource paths as well as source paths; it is not a cold boot measurement."
+  :seon.profile/ms 13.35
+  :seon.profile/alloc-bytes 21277880
+  :seon.profile/alloc-scope :thread
+  :boot-source/returned-files 903
+  :boot-source/derivation-schema-keys-calls 396}}
