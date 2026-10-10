@@ -295,4 +295,44 @@
  #:seon.task{:name "a-non-root-agent-never-loads-into-the-shared-jvm"
              :kind :function
              :intent "Owner, 2026-10-10: a non-root agent never loads, reloads or interns anything in the JVM every cluster shares; only root's adoption after a merge changes the host. Paths found in a clj-kondo analysis of src (requires, loads, interns, requiring-resolve and eval whose target an agent controls): `seon.sci.eval/enter-namespace!` through `seon.sci.eval/host-namespace!` (an agent's require or in-ns of a test namespace, or of one the JVM never loaded); `seon.test/resolve-test` through `seon.test/resolve-loaded`, plus `seon.test/arm-first-loads!` (every test run); `seon.turn.batch/jvm-evaluate` (MCP jvm mode, any agent); and `seon.schedule/invoke-handler` (requiring-resolve of a stored handler symbol). SCI's own `require :reload` and `load-string` stay inside SCI: agent sci-tests' `(require 'seon.sci.forgive :reload)` left the host Var root of `seon.sci.forgive/segments` unchanged on default a6cbe4fcf. Done when a non-root agent's SCI `require :reload` and require of a test namespace leave the host's namespaces and Vars unchanged, and its jvm-mode request is refused by name."
-             :must-read #{seon.sci.eval/enter-namespace! seon.sci.eval/source-namespace? seon.test/resolve-test seon.turn.batch/jvm-request seon.schedule/invoke-handler}}]
+             :must-read #{seon.sci.eval/enter-namespace! seon.sci.eval/source-namespace? seon.test/resolve-test seon.turn.batch/jvm-request seon.schedule/invoke-handler}}
+ #:seon.task{:name "sci-out-is-unbound-on-a-test-member-thread"
+             :kind :function
+             :intent "A non-root agent's interpreted file test that prints fails with \"class sci.impl.vars.SciUnbound cannot be cast to class java.io.Writer\": the test member thread binds no SCI `*out*`, so `println` or `with-out-str` in the interpreted body has nothing to write to (17 interpreted-only reds of the 2026-10-10 interpreted tier, class O, e.g. `my.program-query-test/predicate-arguments-are-bindings-not-nested-clojure-evaluations`). Done when an interpreted test body prints and reads `*out*` as its compiled form does."
+             :must-read #{seon.test/run seon.sci.eval/run-tests sci.core/binding}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "a-proxy-in-interpreted-code-is-unsupported"
+             :kind :function
+             :intent "`proxy` in interpreted code throws \"no proxy-fn\": the agent base context passes SCI no `:proxy-fn`, as it lacked a `:reify-fn` until `seon.sci.eval/interface-reify` (7 interpreted-only reds, class P, e.g. `seon.ai-test/a-stream-that-ends-mid-body-keeps-every-character-that-arrived`). Done when a `proxy` of a class or interface interprets and dispatches."
+             :must-read #{seon.sci.eval/build-base-ctx seon.sci.eval/interface-reify}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "an-interpreted-namespace-carries-no-metadata"
+             :kind :function
+             :intent "An SCI namespace for a program namespace carries no metadata, so `(:doc (meta (the-ns 'my.message)))` is nil at an agent's REPL and in interpreted tests (class N, e.g. `my.message-test/the-surface-is-exactly-five-functions`). Done when an agent's `(meta (the-ns n))` answers the namespace's declared metadata, its docstring included."
+             :must-read #{seon.sci.eval/install-first-party-namespaces! seon.sci.eval/enter-namespace!}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "a-test-namespace-def-that-fails-to-interpret-is-used-as-its-refusal"
+             :kind :function
+             :intent "A top-level `def` of a test namespace that fails to interpret installs a refusing root (`seon.sci.eval/install-refusing-root!`), and a test then uses that root as the value: \"seon.schema.datahike/malli->datahike-schema-in refused argument 0 `projection`: expected a map, got an instance of seon.sci.eval$refusing$refused\", or a fixture write \"requires a carried schema projection\" (20 interpreted-only reds, class F, e.g. `seon.db-test/a-merge-shares-the-write-fence-and-records-immutable-lineage`). Done when the failing defs are named with their causes and each interprets, or the test refuses by the def's name instead of using its refusal as data."
+             :must-read #{seon.sci.eval/install-row! seon.sci.eval/install-refusing-root!}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "a-test-macro-reading-the-compiler-env-cannot-interpret"
+             :kind :function
+             :intent "A test-file macro that reads the compiler `&env` as `clojure.lang.Compiler$LocalBinding` cannot interpret, because SCI passes symbols: \"Cannot interpret seon.cluster.turn-test/with-render-context-proc: class clojure.lang.Symbol cannot be cast to class clojure.lang.Compiler$LocalBinding\"; `seon.cluster.agent-test/with-connection` fails the same way (10 interpreted-only reds after removing the Var-redefining tests, class M). Done when those macros read nothing from the compiler environment, or are functions."
+             :must-read #{seon.sci.eval/install-row!}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "a-dev-namespace-test-cannot-run-interpreted-on-a-cluster"
+             :kind :function
+             :intent "A test of a `dev/` Babashka namespace (`seon.dev.mcp-bridge-test`, `seon.dev.docstring-test`, `seon.dev.hook-test` and others) cannot interpret on a cluster, which never loads `seon.dev.*`, so `seon.test/resolve-test` answers \"The admitted identity has no executable test Var.\" (25 interpreted-only reds, class D). Done when these tests are selected only where their namespace loads, and refused by that name otherwise."
+             :must-read #{seon.test/resolve-test seon.sci.eval/source-namespace?}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "await-event-refuses-an-interpreted-tests-event-source"
+             :kind :function
+             :intent "`seon.test-support/await-event!`, called from an interpreted test, refuses its source (\"The test event source is not a channel, latch, future, or watched reference.\"), or the wake it waits for is never observed (14 interpreted-only reds, class E, e.g. `seon.cluster.host-test/an-ordinary-message-wakes-the-idle-hosted-agent`). Done when an interpreted wake test observes its event as its compiled form does."
+             :must-read #{seon.test-support/await-event!}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
+ #:seon.task{:name "remaining-interpreted-only-test-differences"
+             :kind :function
+             :intent "The 2026-10-10 interpreted tier left 57 tests red only when interpreted, with no single cause yet: test.check or Malli rejecting values built in SCI (5, e.g. `seon.error-test/normalization-is-total`); instrumentation keyed by host Var (3, e.g. `seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary`); test rows that did not interpret for other reasons, such as the library private Var `datahike.query/create-plan-via-ir` (3); and 46 unclassified assertion differences, listed on the evidence page. Done when each is classified to its owner or green interpreted."
+             :must-read #{seon.test/resolve-test seon.sci.eval/install-row!}
+             :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}]
