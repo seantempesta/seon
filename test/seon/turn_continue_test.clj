@@ -380,3 +380,43 @@
                         (db/db connection) agent-id)]
          (is (= [:capped] ends)
              "the proof went green but a reaching test went red: the task never ended done, and the cap ended it"))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-stalled-agent-ends-its-task-to-root}
+           :seon.test/long "An own-branch agent's setup and settings with their test steps and two fixture-model passes."
+           :seon.test/long-ms 60000}
+  an-agent-whose-loop-stops-before-its-proofs-pass-ends-stalled-to-root
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           agent-id (str "stalled-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           _ (support/declare-source! connection 'tq.ends
+                                      (str "(ns tq.ends (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.ends/area}} area-test (is (= 25 (area 5))))\n"))
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.ends)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.ends :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))]
+       (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                          :seon.db/connection connection :seon.task/assigned id
+                                                          :seon.task/agent [:seon.agent/id agent-id]
+                                                          :seon.task/branch branch})))
+           "root assigns the task to the agent's branch")
+       ;; two prose replies in a row: the loop gives the first one more call and then stops calling the agent
+       (support/with-provider
+        (atom []) (support/reply-queue ["I think area should square its input." "Squaring is the fix."])
+        (fn [server]
+          (agent-eval running agent-id (str "(my.agent/settings! "
+                                            (seon.id/printed (assoc (support/provider-config server)
+                                                                    :seon.config.ai/no-provider false))
+                                            ")"))
+          (support/outside-wake-on-branch! running agent-id target "Work your task.")
+          (until #(:seon.agent/admission-closed-tx
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                 400)))
+       (is (= [:stalled] (db/q '[:find [?end ...] :in $ ?agent-id
+                                 :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
+                               (db/db connection) agent-id))
+           "the stopped loop ended the task, and root heard it once")))))

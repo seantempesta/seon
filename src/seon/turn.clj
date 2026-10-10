@@ -2117,10 +2117,29 @@
   [database agent-id]
   (some? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))))
 
+(defn- stalled?
+  "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
+  model turn chose no disposition, that reply does not continue (`continuing-reply?`) and no wake is unanswered."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
+                         :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                         [?turn :seon.turn/id _ ?t] [?turn :seon.turn/closed-tx _] [?turn :seon.turn/reply-size _]]
+                       database agent-id)
+        disposed? (when latest-t
+                    (db/q '[:find ?turn . :in $ ?agent-id ?t
+                            :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                            [?turn :seon.turn/id _ ?t] [?turn :seon.turn/disposition _]]
+                          database agent-id latest-t))]
+    (boolean (and latest-t (not disposed?)
+                  (not (continuing-reply? database agent-id))
+                  (empty? (unanswered-wakes database agent-id {}))))))
+
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
   green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
-  turns left; nil while it runs, when it holds no task or its admission is already closed."
+  turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
+  its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
   [database agent-id]
   (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
@@ -2130,7 +2149,8 @@
                     :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
                     [?turn :seon.turn/disposition :completed]]
                   database agent-id) :given-back
-            (= 0 (turns-left database agent-id)) :capped))))
+            (= 0 (turns-left database agent-id)) :capped
+            (stalled? database agent-id) :stalled))))
 
 (defn end-task-call
   "Close the admission of `agent-id`, whose task ended, at the writer; nothing when it is already closed,
@@ -5247,6 +5267,43 @@
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
+(defn- reached-red
+  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, whose
+  latest result there is not green (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [database agent-id changed]
+  (if (:seon.error/at changed)
+    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) [] changed)
+    (let [proofs (task-proofs database agent-id)
+          reached (when-not (:seon.error/at proofs)
+                    (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
+          tests (when (sequential? reached) (vec (remove (set proofs) reached)))
+          results (when (seq tests) (@test-latest-results database tests))]
+      (or (some #(when (:seon.error/at %) %) [proofs reached results])
+          (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0))
+                                                  (zero? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
+                                         (:seon.test/sym %)))
+                            results)]
+            (vec (sort (remove green tests))))))))
+
+(defn- record-reached-red!
+  "Record on the agent's row on its branch `connection` the tests its whole change `changed` reaches that are not
+  green there (`reached-red`), replacing the previous step's: what `seon.context/task-done?` reads. Answers them."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [connection agent-id changed]
+  (let [database (db/db connection)
+        red (reached-red database agent-id changed)
+        held (set (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))
+        tx (when (vector? red)
+             (into (mapv #(vector :db/retract [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove (set red) held))
+                   (map #(vector :db/add [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove held red))))]
+    (if (or (:seon.error/at red) (empty? tx))
+      red
+      (let [report (db/transact! connection tx)]
+        (if (:seon.error/at report) report red)))))
+
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
   acquisition of the agent's world; tests reaching a host-bound change are named as its platform proof, not run and within the dial `:seon.config.test/step-time-limit-ms`. The proofs
@@ -5264,9 +5321,18 @@
           platform (when (vector? changed) (platform-proof (db/db connection) changed))
           proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
-      (let [reaching (run-reaching execution (max 1 left) changed platform)]
+      (let [reaching (run-reaching execution (max 1 left) changed platform)
+            ;; a derivation that fails is shown beside the step's values, never in place of them
+            red (try (record-reached-red! connection agent-id changed)
+                     (catch Throwable failure
+                       (or (error/refusal failure)
+                           (seon.error.refusal/diagnostic
+                            (Date.) :seon.turn/test-step `record-reached-red!
+                            {:seon.error/message "The reached tests' status could not be recorded."
+                             :seon.error/exception-class (.getName (class failure))}))))]
         (some-> (summary (ran-something proofs) (ran-something reaching) platform)
-                (merge (test-costs (db/db connection) [proofs reaching])))))
+                (merge (test-costs (db/db connection) [proofs reaching]))
+                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/reached-red red)))))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error

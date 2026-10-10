@@ -216,7 +216,7 @@
   is open; once the task's end closed the agent, how it ended (`:done`, `:capped`, `:given-back`), as its end
   message to root at the task home says; `:waiting` once its last reply leaves the turn loop nothing to continue
   (`seon.turn`'s own rule: no evaluated form, a disposition or a failed attempt); else `:running`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:enum :running :done :waiting :capped :given-back]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:enum :running :done :waiting :capped :given-back :stalled]]}
   [database agent-id]
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]

@@ -162,13 +162,15 @@
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
 (defn task-done?
-  "True when the task `agent-id` holds has proofs and all are green on `database`, the agent's branch:
-  the task is done for the agent, pending root's merge, and the turn loop opens no continuation for it."
+  "True when the task `agent-id` holds has proofs, all green on `database`, the agent's branch, and its turn's
+  test step found no test its change reaches red there (`:seon.agent/reached-red` absent): the task is done for
+  the agent, pending root's merge, and the turn loop opens no continuation for it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [held (held-task database agent-id)]
     (boolean (and held (not (:seon.error/at held))
-                  (all-green? (proofs database (:seon.task/sym held)))))))
+                  (all-green? (proofs database (:seon.task/sym held)))
+                  (empty? (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))))))
 
 (defn- unshown
   "The inbox `items` no turn of `agent-id` has handled: a closed model turn's

@@ -33,4 +33,7 @@
              :kind :function
              :intent "`my.test/check` of 17 named tests (agent eval-fixes-3, default a740b1e26, 2026-10-10, run f11a3891e603) answered `:seon.test/passed? true` and `:seon.test/executed-count 17` with `:seon.test/results` empty: the pass, fail and error count of each test was readable only by querying the run's `:seon.test.run/members` and each `:seon.test.member/pass-count`. Done when the answer carries each executed test's counts by symbol."
              :must-read #{my.test/check seon.test/run}}
-]
+ #:seon.task{:name "an-agent-call-reaches-resolve-test-without-its-class-loader"
+             :kind :function
+             :intent "An agent's evaluation reached `seon.test/resolve-test` without `:seon.test/class-loader`, and the contract refused it (`:seon.test/resolution-request`): agent ap-probe-2 on default 340462543, branch :agent-9996d823c28d, 2026-10-10 11:54:55, recorded as an agent error with signature 4e3dc9667cd3. Its request was `(require 'seon.competency-test)`, a `my.test/check` naming `seon.competency-test/t5-slug-removes-edge-hyphens` as changed, then `seon.test/reaching` and a `seon.db/pull`. The caller building the resolution request from an agent's world omits the class loader the request requires. Done when that caller supplies it, or the request's schema says why an interpreted resolution needs none, with a regression running the same forms as an own-branch agent that records no error."
+             :must-read #{seon.test/resolve-test seon.test/run my.test/check}}]
