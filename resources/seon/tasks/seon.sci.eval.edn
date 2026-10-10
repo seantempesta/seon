@@ -1,4 +1,8 @@
-[
+[#:seon.task{:name "a-world-acquired-from-rows-runs-its-namespace-fixtures"
+             :kind :function
+             :intent "Since b097db713 a context's `use-fixtures` reaches the namespace object `clojure.test/test-vars` reads, so a test run in the context that evaluated it runs inside its fixture. A namespace's unnamed top-level forms (`use-fixtures`, `seon.schema/register!`) are not program rows, so a world acquired from a branch's rows (`seon.sci.eval/install-selected!`, the worlds `seon.test/run` forks for `my.test/check` and the turn's test step) never evaluates them. Root's ruling (2026-10-10): the namespace entity holds its unnamed top-level forms, those no clj-kondo var or namespace definition starts at, as an ordered list with their byte offsets, interpreted in file order with the definitions; they get no identity, and write-back keeps them through the namespace. Done when a test an agent checks runs inside the fixtures its namespace's rows declare."
+             :must-read #{seon.sci.eval/install-selected! seon.sci.eval/enter-namespace! seon.sci.lookup/agent-use-fixtures seon.fn/index! seon.test/run}}
+ 
  #:seon.task{:name "doc-and-dir-erase-request-keys"
              :kind :function
              :intent "The agent doc/dir contract view replaces every schema keyword with its form by postwalk-replace (agent-documentation-contract, eval.clj:2370), including map entry keys, so request keys disappear and supplied members are not removed; my.issue/add! cannot be called from its doc. (dir my.program) and (dir seon.schema) are about 25 KB each and list plumbing (native-call-refusal, supplied-context, *-generator functions, begin-registration-delta); `my.test/run` shows 'The program entity lacks a declaration ... `:seon.fn/spec`' as :in and :out. Walk Malli's own structure (m/walk, m/entries) and leave internal functions out of dir."
