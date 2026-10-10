@@ -82,4 +82,8 @@
              :kind :function
              :intent "`bin/lane commit LANE --test ... PATHS` (the throwaway-check path) has no way to accept a test that is already red on HEAD, so lanes name vars around the red test (loop-prove, 86b7cdbbe, 2026-10-10; the branch-evidence path has `--accept-red-before TEST`). Done when the check path takes the same flag, records that the named test was red on the parent commit (the parent's stored run) and lets only that test stay red, with the commit trailer naming it; any other red still refuses."
              :must-read #{seon.operator/check! seon.cluster.branch-evidence/branch-evidence}
-             :evidence #{"bin/lane"}}]
+             :evidence #{"bin/lane"}}
+ #:seon.task{:name "an-extracted-archive-is-read-only"
+             :kind :function
+             :intent "A committed archive `data/source/<sha>` (`seon.operator/committed-source!`) is the running JVM's program and working directory, yet an agent's relative `(spit \"src/seon/sci/forgive.clj\" ...)` rewrote the running archive's platform source (observed 2026-10-10, chain run 2), to be loaded by the next reload or by a restart reusing the sha. Done when `seon.operator/seal-archive!` clears the write bits of every committed regular file of the archive before it is moved into place, deleters (`prune-archives!`, nuke) still delete it whole, and a committed source file refuses a write."
+             :must-read #{seon.operator/committed-source! seon.operator/seal-archive! seon.operator/prune-archives!}}]

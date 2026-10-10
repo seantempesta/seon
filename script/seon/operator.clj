@@ -899,6 +899,24 @@
       (command! ["tar" "-xf" (str tar) "-C" (str destination)] repository 120000)
       (finally (.delete tar)))))
 
+(defn- seal-archive!
+  "Clear the write bits of each regular file named by `paths-text` (an archive's
+  NUL-separated committed paths) under `directory`, links and directories
+  untouched: a JVM running the archive cannot overwrite its own program (an
+  agent's relative `spit` once rewrote `src/` of the running archive, to be
+  loaded as platform code by the next reload). A deleter needs no file write
+  bit on POSIX (`fs/delete-tree`); directories stay writable for the caches a
+  launch places beside the program (`.cpcache`, `target`)."
+  {:malli/schema [:=> [:cat :string :string] :nil]}
+  [directory paths-text]
+  (doseq [relative (str/split paths-text #"\u0000")
+          :let [file (io/file directory relative)]
+          :when (and (seq relative)
+                     (java.nio.file.Files/isRegularFile (.toPath file)
+                                                        (into-array java.nio.file.LinkOption
+                                                                    [java.nio.file.LinkOption/NOFOLLOW_LINKS])))]
+    (.setWritable file false false)))
+
 (defn- committed-repository
   "The operator's Git checkout (`repository-root`: `SEON_CHECKOUT`, else this
   script's location, never the cwd), required to be a Git top level: a nuke
@@ -1018,8 +1036,9 @@
             ;; file deleted there but still staged leaked into the commit's
             ;; inputs. The archive carries its commit's exact paths, the
             ;; inventory `seon.test.cache/input-paths` reads when present.
-            _ (spit (io/file staging "test-input-paths.txt")
-                    (command! ["git" "ls-tree" "-r" "-z" "--name-only" sha] repository 30000))]
+            committed-paths (command! ["git" "ls-tree" "-r" "-z" "--name-only" sha] repository 30000)
+            _ (spit (io/file staging "test-input-paths.txt") committed-paths)
+            _ (seal-archive! (str staging) committed-paths)]
         (fs/move staging target {:atomic-move true})
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
          :seon.operator/source-built? true :seon.operator/submodules submodules})))))

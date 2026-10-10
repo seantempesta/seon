@@ -90,6 +90,7 @@
         (is (= (str (fs/canonicalize (fs/path root "data" "source" sha))) source-root)
             "the program directory is HEAD's archive under the managed root")
         (is (not= (operator/repository-root) source-root))
+        (is (not (fs/writable? (fs/path source-root "deps.edn"))) "the archive's committed files are sealed read-only")
         (is (fs/sym-link? (fs/path source-root "target")) "the class cache is shared, not rebuilt")
         (is (fs/exists? (fs/path source-root ".cpcache")) "tools.deps computed its classpath before any stop"))
       (finally (fs/delete-tree root)))))

@@ -328,3 +328,24 @@
       (finally
         (reset! running false)
         (doseq [file (reverse (file-seq (java.io.File. root)))] (.delete ^java.io.File file))))))
+
+(deftest ^{:seon/tasks #{'seon.operator/an-extracted-archive-is-read-only}}
+  an-extracted-archive-is-read-only
+  (let [base (java.nio.file.Files/createTempDirectory "seon-sealed" (make-array java.nio.file.attribute.FileAttribute 0))
+        archive (str base "/archive")
+        source (java.io.File. archive "src/seon/sci/forgive.clj")
+        repository (operator/repository-root)
+        tracked (slurp (.getInputStream (.start (doto (ProcessBuilder. ^java.util.List ["git" "ls-tree" "-r" "-z" "--name-only" "HEAD"])
+                                                  (.directory (java.io.File. repository))))))]
+    (try
+      (#'operator/extract-archive! repository "HEAD" archive)
+      (is (.canWrite source) "a freshly extracted archive is writable until sealed")
+      (#'operator/seal-archive! archive tracked)
+      (is (not (.canWrite source)) "a committed source file refuses a write once sealed")
+      (is (thrown? java.io.IOException (spit source "edited"))
+          "an agent's relative spit into the running archive fails")
+      (is (.createNewFile (java.io.File. archive "placed-beside-the-program"))
+          "a directory stays writable for the caches a launch places")
+      (finally
+        (doseq [file (reverse (file-seq (.toFile base)))] (.delete ^java.io.File file))))
+    (is (not (.exists (.toFile base))) "a sealed archive is deleted whole")))
