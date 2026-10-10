@@ -5419,6 +5419,8 @@
                           queue (if (step-due? report)
                                   (summary-queue tests)
                                   (:seon.turn.loop/queue state))
+                          ;; THE STEP'S OWN COST: its proc thread's counters since the step began
+                          step-cost (some-> (:seon.flow/step-start seon.batch/*world*) seon.flow/step-cost)
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)
@@ -5426,7 +5428,9 @@
                                                     ;; the pass's own calls (its proc world's sink,
                                                     ;; `seon.cluster.agent/turn-step`) beside its batch's
                                                     (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
-                                                    (update :seon.cost/counts #(merge-with + % (profile/sink-counts (:seon.batch/sink seon.batch/*world*)))))))]
+                                                    (update :seon.cost/counts #(merge-with + % (profile/sink-counts (:seon.batch/sink seon.batch/*world*))))
+                                                    (and step-cost (:seon.cost/counts report))
+                                                    (assoc-in [:seon.cost/counts :seon.cost/step] step-cost))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete

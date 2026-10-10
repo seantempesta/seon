@@ -144,4 +144,9 @@
  :seon.flow/exception-error
  [:and :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
 
+ :seon.flow/thread-counters
+ [:tuple {:description "One thread's allocated bytes and CPU nanoseconds (seon.flow/thread-counters); an unavailable reading is -1."} :int :int]
+ :seon.flow/step-start
+ [:and {:description "The proc thread's counters when its running step began: seon.flow/var-process puts them in the step's world (seon.batch/*world*); seon.turn/step reads the step's cost from them (seon.flow/step-cost)."} :seon.flow/thread-counters]
+
 }

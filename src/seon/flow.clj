@@ -292,6 +292,35 @@
     (binding [seon.batch/*world* world] (f))
     (f)))
 
+(defn thread-counters
+  "This thread's allocated bytes and CPU nanoseconds; an unavailable reading is -1."
+  {:malli/schema [:=> [:cat] ::thread-counters]}
+  []
+  (let [threads (java.lang.management.ManagementFactory/getThreadMXBean)]
+    [(if (instance? com.sun.management.ThreadMXBean threads)
+       (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean threads)
+       -1)
+     (.getCurrentThreadCpuTime threads)]))
+
+(defn step-cost
+  "What the proc step running on this thread has allocated and spent since its
+  `::step-start` counters; nil when a counter is unavailable."
+  {:malli/schema [:=> [:cat ::thread-counters] [:maybe :seon.cost/step]]}
+  [[allocated0 cpu0]]
+  (let [[allocated1 cpu1] (thread-counters)]
+    (when (and (<= 0 allocated0 allocated1) (<= 0 cpu0 cpu1))
+      {:seon.cost/alloc-mb (/ (Math/round (/ (double (- allocated1 allocated0)) 1e5)) 10.0)
+       :seon.cost/cpu-ms (/ (Math/round (/ (double (- cpu1 cpu0)) 1e5)) 10.0)})))
+
+(defn- with-step-start
+  "Run one proc step with its thread's starting counters in its world
+  (`::step-start`), whose reader takes the step's cost from them."
+  {:malli/schema [:=> [:cat [:=> [:cat] :any]] :any]}
+  [f]
+  (if-let [world seon.batch/*world*]
+    (binding [seon.batch/*world* (assoc world ::step-start (thread-counters))] (f))
+    (f)))
+
 (defn stop-off-thread!
   "Request `graph`'s stop from a new virtual thread, never the caller's: a
   proc stopping through its own control tap, or the panicked proc's own
@@ -405,9 +434,11 @@
                                          state)))))
                     ([state input message]
                      (in-world environment nil
-                               #(try (step-var state input message)
-                                     (catch Throwable failure
-                                       [(cond-> state (failed! failure) closed) nil])))))))
+                               #(with-step-start
+                                  (fn []
+                                    (try (step-var state input message)
+                                         (catch Throwable failure
+                                           [(cond-> state (failed! failure) closed) nil])))))))))
          launcher (flow/process (step (fn [])) options)]
      (reify
        core.protocols/Datafiable
