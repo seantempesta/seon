@@ -3,7 +3,8 @@
   number outside a dial."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.census :as census]))
+            [seon.census :as census]
+            [seon.db :as db]))
 
 (def ^:private source-files (delay (census/files ["src"] [".clj" ".cljc"])))
 
@@ -63,5 +64,11 @@
 
 (deftest ^{:seon/tasks #{'seon.problems/problems-prose-carries-no-date-or-file-line}}
   problems-prose-carries-no-date-or-file-line
-  (is (= [] (sites-of (census/prose ["src/seon/problems.clj"]) (re-pattern (str iso-date "|" file-line))))
-      "each site is a comment or docstring of seon.problems carrying an ISO date or a file and line"))
+  ;; the docstrings are read from the branch the test runs on (custody supplies the database),
+  ;; so a redefinition on the branch is what the census sees; a fixture database would show main's
+  (let [docs (db/q '[:find ?sym ?doc
+                     :where [?namespace :seon.ns/name seon.problems] [?e :seon.fn/ns ?namespace]
+                     [?e :seon.fn/sym ?sym] [?e :seon.fn/doc ?doc]])]
+    (is (> (count docs) 20) "the census read the docstrings of seon.problems")
+    (is (= [] (vec (sort (for [[sym doc] docs :when (re-find (re-pattern (str iso-date "|" file-line)) doc)] sym))))
+        "each function's docstring carries an ISO date or a file and line")))

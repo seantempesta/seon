@@ -156,3 +156,13 @@
     "no-such-file.md#the-goal"
     "#the-goal"
     "#"))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
+  a-reference-with-no-path-answers-an-error-that-holds-no-path
+  ;; an empty path names no file: the error carries no :seon.ref/path (absence is no key) and lists the checkout root's Markdown
+  (are [reference expected] (= expected
+                               (let [error (ref/section reference)]
+                                 [(:seon.ref/section-missing error) (:seon.ref/anchor error) (contains? error :seon.ref/path)
+                                  (some? (some #{"README.md"} (:seon.ref/nearest error)))]))
+    "#the-goal" [:file "the-goal" false true]
+    "#" [:file nil false true]))

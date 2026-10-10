@@ -221,6 +221,21 @@
       :cold [digest-a 1 520.0] [digest-a 1 500.0]
       :warm [digest-a 30 5.0] [digest-a 100 5.0])))
 
+(deftest ^{:seon/tasks #{'seon.batch/an-unchanged-interpreted-definition-shows-no-cost-entry}}
+  a-sample-is-judged-against-the-digest-of-main-s-program-row
+  ;; main stored no sample of the symbol, but its program row holds the definition digest
+  ;; (`cost-diff`'s fourth argument, symbol -> digest, read once by the callers); `apply` because the
+  ;; arity does not exist yet and indexing refuses a call-site its declaration lacks
+  (let [sym 'request.cost.row/f
+        diff (fn [digest main-digests]
+               (mapv :seon.cost.comparison/flags
+                     (apply batch/cost-diff [(cost sym :seon.profile/context :warm [digest 30 5.0])] {} 20 [main-digests])))]
+    (are [digest main-digests expected] (= expected (diff digest main-digests))
+      digest-a {sym digest-a} []
+      digest-b {sym digest-a} [#{:changed :interpreted}]
+      ;; main has no definition of the symbol at all
+      digest-a {} [#{:new :interpreted}])))
+
 (deftest ^{:seon/tasks #{'seon.batch/an-entrances-self-time-is-its-forms-work}}
   an-entrances-self-time-is-never-given-a-ratio
   ;; the self time of seon.turn.batch/jvm-evaluate is the evaluated form's own work: the
@@ -230,11 +245,13 @@
                   (shown (cost sym :seon.profile/host :cold [digest-b 1 106063.0])
                          [(cost sym :seon.profile/host :cold [digest-a 1 25739.0])])))))
 
-(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like
+                        'seon.batch/an-unchanged-interpreted-definition-shows-no-cost-entry}}
   an-interpreted-live-value-is-never-given-a-ratio-against-a-compiled-main-value
   (let [sym 'request.cost.scope/f]
+    ;; main defines the symbol (its compiled sample holds digest-a) and the agent's digest differs: changed, not new
     (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 300.0
-             :seon.cost.comparison/flags #{:new :interpreted}}]
+             :seon.cost.comparison/flags #{:changed :interpreted}}]
            (shown (cost sym :seon.profile/context :warm [digest-b 30 300.0])
                   [(cost sym :seon.profile/host :warm [digest-a 100 1.0] :cold [digest-a 1 40.0])]))
         "main's compiled samples are another scope: no main value, no ratio")
@@ -254,15 +271,16 @@
            (shown (cost sym :seon.profile/host :warm [digest-b 30 200.0])
                   [(cost sym :seon.profile/host :warm [digest-a 100 50.0] :cold [digest-a 1 5000.0])])))))
 
-(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like
+                        'seon.batch/an-unchanged-interpreted-definition-shows-no-cost-entry}}
   after-a-restart-the-first-call-compares-against-the-stored-cold-value
-  ;; root's interpreted definition on main, called once after a restart: its
-  ;; one call is cold, compared with main's cold sample, never its warm one
+  ;; a definition the agent changed (digest-b against main's digest-a), called once after a
+  ;; restart: its one call is cold, compared with main's cold sample, never its warm one
   (let [sym 'request.cost.restart/f]
     (is (= [{:seon.cost.comparison/measure :cold-self-us :seon.cost.comparison/live 520.0
              :seon.cost.comparison/main 500.0 :seon.cost.comparison/ratio 1.04
-             :seon.cost.comparison/flags #{:interpreted}}]
-           (shown (cost sym :seon.profile/context :cold [digest-a 1 520.0])
+             :seon.cost.comparison/flags #{:changed :interpreted}}]
+           (shown (cost sym :seon.profile/context :cold [digest-b 1 520.0])
                   [(cost sym :seon.profile/context :warm [digest-a 100 5.0] :cold [digest-a 1 500.0])])))))
 
 (deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
