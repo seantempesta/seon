@@ -172,6 +172,10 @@
  ; The automatic test step after an eval request that evaluated a form.
  :seon.config.test/step? true
 
+ ; Whether a task that ends green lands its merge with no root. Off until the landing fences the
+ ; target it tested and the bytes it commits (Astra day audit 2026-10-10, findings 1 and 2).
+ :seon.config.root/land? false
+
  ; Each step's time limit; proofs run first, tests the limit leaves continue on the next pass.
  :seon.config.test/step-time-limit-ms 10000
 

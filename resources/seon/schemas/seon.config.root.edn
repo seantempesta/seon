@@ -1,0 +1,7 @@
+#:seon.config.root{:land?
+                   [:boolean
+                    {:seon.config/display-label "Land green ends" :seon.config/optional true,
+                     :description
+                     "True: a task that ends green lands its merge with no root (seon.cluster.source/land!: prepare, accept, write-back into :seon.config.fs/working-root and one git commit) and its merge task records the landing or the refusal. False: the green end only proposes, and root lands it."
+                     :seon.config/default false,
+                     :seon.config/dial true}]}

@@ -267,19 +267,31 @@
            "no counts are manufactured for evidence that is gone")
        (is (= [] (context/outcome-tx (db/db connection) "ended-unknown")) "and nothing is recorded for it")))))
 
-(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}}
+(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}
+           :seon.test/long "The assignment's proof run, the fix with its test step and the end's proposal run."
+           :seon.test/long-ms 30000}
   the-outcome-recorded-at-the-end-equals-the-one-the-branch-shows
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (proof-task running connection agent-id)
+     (evaluate running agent-id (str "(ns tq.cso (:require [clojure.test :refer [deftest is]]))\n"
+                                     "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                     "(deftest ^{:seon/tasks #{'tq.cso/area}} area-test (is (= 25 (area 5))))"))
+     (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                    :seon.task/assigned (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                                      :seon.task/ns 'tq.cso :seon.task/name "area"
+                                                                      :seon.task/kind :function :seon.task/intent "Square."}))
+                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+     (evaluate running agent-id "(in-ns 'tq.cso)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
      (let [handle (task/agent-task (db/db connection) agent-id)
            entry (end-entry agent-id handle)
            from-branch (context/ended (db/db connection) entry)
-           tx (context/outcome-tx (db/db connection) agent-id)
-           _ (test-support/transacted! connection tx)
-           recorded (context/ended (db/db connection) entry)
            outcome [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens :seon.task/proof-counts :seon.task/red-proofs]]
-       (is (seq tx) "the branch's outcome is recorded")
-       (is (= (select-keys from-branch outcome) (select-keys recorded outcome))
+       (is (= :done (turn/task-end (db/db connection) agent-id)) "the fix turned the proof green")
+       ;; the end observed as the agent's loop observes it
+       (db/call-with-custody {:seon.db/connection connection}
+                             #(#'turn/end-task! (test-support/running-cluster running) agent-id))
+       (is (some? (:seon.agent/outcome-calls (db/pull (db/db connection) [:seon.agent/outcome-calls] [:seon.agent/id agent-id])))
+           "the end recorded the agent's outcome")
+       (is (= (select-keys from-branch outcome) (select-keys (context/ended (db/db connection) entry) outcome))
            "the recorded outcome is what the branch showed")
-       (is (= {:red 1} (:seon.task/proof-counts recorded)) "the task's one proof is red")))))
+       (is (= {:green 1} (:seon.task/proof-counts from-branch)) "the task's one proof is green")))))

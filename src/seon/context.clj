@@ -298,7 +298,8 @@
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
   ended, its proofs' counts and red proofs, the agent's errors grouped by signature, its model calls and tokens,
-  the merge task when it ended green, and the operations root takes next. The outcome is the one recorded when
+  the merge task when it ended green with its landing (the commits it made, or the refusal it met), and the
+  operations root takes next. The outcome is the one recorded when
   the task ended, else derived from the agent's branch, else unknown (`:seon.task/outcome-unknown`), never zeros."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
   [database {agent-id :my.message/from task-id :seon.message/about end :seon.task/end merge :seon.task/merge}]
@@ -307,7 +308,12 @@
         sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home task-id)
         recorded (recorded-outcome database agent-id)
         branch-db (when (keyword? branch) (db/branch-database database branch))
-        outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))]
+        outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))
+        landing (when merge
+                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
+                                     [:seon.task/id merge])]
+                    (when (map? row) (cond-> (dissoc row :db/id)
+                                       (:seon.task/refused-tests row) (update :seon.task/refused-tests set)))))]
     (or (when (:seon.error/at outcome) outcome)
         (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
                         :seon.render/operations
@@ -320,6 +326,7 @@
           sym (assoc :seon.task/sym sym)
           (keyword? branch) (assoc :seon.agent/branch branch)
           merge (assoc :seon.task/merge merge)
+          (seq landing) (into landing)
           branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
 (defn current-state
