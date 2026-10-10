@@ -571,8 +571,10 @@
   [error throwable]
   (let [refusal (contract-refusal error throwable)
         refuser (:seon.instrument/fn refusal)
-        interpreted (delay (some (fn [[where]] (when (and (qualified-symbol? where) (not= where refuser)) where))
-                                 (interpreted-frames error throwable)))
+        ;; the first frame past the refuser: an agent's own closure or form (`user`) is
+        ;; the blamed caller, never the compiled or interpreted function that called it
+        interpreted (delay (let [where (ffirst (remove (fn [[frame]] (= frame refuser)) (interpreted-frames error throwable)))]
+                             (when (qualified-symbol? where) where)))
         named (fn [function digest]
                 (if (and function (authored-function? function))
                   (cond-> {:seon.error/producer function} digest (assoc :seon.error/producer-digest digest))
