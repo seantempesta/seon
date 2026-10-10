@@ -29,6 +29,7 @@
             [seon.config :as config]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
+            [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.schema]
             [seon.schema.datahike :as schema-datahike]
@@ -659,3 +660,35 @@
           (finally
             (d/release held)
             (d/release connection)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
+  an-idle-branch-keeps-the-commit-it-forked-from-through-collection
+  ;; The lane forks from `src`'s head F and commits once; `src` then moves on.
+  ;; A collection whose cutoff is past every commit (the window an idle branch
+  ;; outlives) keeps each branch head but follows no parent, so F reaches
+  ;; nothing and goes. The merge base, which `seon.cluster.source/compare-branch`
+  ;; and `my.program/write-branch!` need, is then unavailable.
+  (with-source-store
+    (fn [opened]
+      (let [src-connection (store/open-branch! opened source-branch)
+            lane :lane
+            head-of #(registry/branch-commit-id {:seon.store/store opened :seon.store/branch %})]
+        (try
+          (write-marker! src-connection "before-fork")
+          (let [fork (head-of source-branch)]
+            (registry/branch! {:seon.store/store opened :seon.cluster.registry/from source-branch
+                               :seon.store/branch lane})
+            (let [lane-connection (store/open-branch! opened lane)]
+              (try (write-marker! lane-connection "on-lane")
+                   (finally (store/release-branch! lane-connection))))
+            (write-marker! src-connection "after-1")
+            (write-marker! src-connection "after-2")
+            (registry/collect! opened (java.util.Date. (+ (System/currentTimeMillis) 60000)) {})
+            (let [head (source/commit-database opened (head-of source-branch))
+                  branch (source/commit-database opened (head-of lane))
+                  base (#'source/merge-base opened branch head 10000)]
+              (try
+                (is (= fork (when-not (:seon.error/at base) (d/commit-id base)))
+                    "the merge base is the commit the lane forked from")
+                (finally (run! #(some-> % d/release-materialized-db) [head branch (when-not (:seon.error/at base) base)])))))
+          (finally (store/release-branch! src-connection)))))))
