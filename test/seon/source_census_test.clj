@@ -60,3 +60,8 @@
   (let [sites (vec (mapcat hardcoded @source-files))]
     (is (> (count @source-files) 100) "the census read the source tree")
     (is (= [] sites) "each site is a top-level constant or an or-default naming a policy number")))
+
+(deftest ^{:seon/tasks #{'seon.problems/problems-prose-carries-no-date-or-file-line}}
+  problems-prose-carries-no-date-or-file-line
+  (is (= [] (sites-of (census/prose ["src/seon/problems.clj"]) (re-pattern (str iso-date "|" file-line))))
+      "each site is a comment or docstring of seon.problems carrying an ISO date or a file and line"))
