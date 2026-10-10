@@ -897,7 +897,7 @@
                            (str/split-lines text))]
     (if-let [[i line] (first hits)]
       {:sym sym :line (inc i) :hits (count hits) :test? (= :test kind)
-       :snippet (let [t (str/trim line)] (if (< 100 (count t)) (str (subs t 0 97) "...") t))
+       :snippet (str/trim line)
        :named? (str/includes? (str sym) needle)}
       {})))
 
