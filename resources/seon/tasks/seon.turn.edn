@@ -174,4 +174,9 @@
              :kind :function
              :intent "After an agent branch redefines `seon.task/candidate-dangling` and its tagged deftest in `seon.task-ingestion-test` (both green), later eval requests that define nothing re-execute the reaching tests: lane merge-path on default a6cbe4fcf, 2026-10-10, `(let [d (seon.db/db)] ...)` and `(my.test/check {...})` replies each carried `:seon.cost/tests` count 2, 755-1,403 ms and 1.7 GB allocated, a test step of 1.4-2.7 s per reply. Another branch's read-only `(my.program/propose-merge! {})` ran no test (test step 29 ms), so reuse holds sometimes; which reuse condition fails is not measured. AGENTS.md: unchanged results are answered from their record. `seon.turn/test-step` selects the branch's whole difference from its base through `seon.test/changes` each request (the root form of this class is `seon.turn/a-root-request-runs-the-clusters-whole-drift-as-reaching-tests`). Done when a request that changes no declaration executes no test and answers its reaching tests from their record (`:seon.test/unchanged`), with a `seon.profile/measure` regression on the step's cost."
              :must-read #{seon.turn/test-step seon.turn/run-reaching seon.test/changes seon.test/select}}
+ #:seon.task{:name "a-wake-reopens-a-finished-task"
+             :kind :function
+             :intent "`seon.turn/next-agent-work` opens a turn for any unanswered wake, so an agent whose task is done, capped or given back is reopened by the next message: root's questions to chain2-forgive-2 became 11 more calls of task work (DYNAMIC-CONTEXT stage 2). Done when the end of a model agent's task (`seon.turn/task-end`) asserts `:seon.agent/admission-closed-tx` once (`seon.turn/end-task-call`) and no later wake opens a turn for it."
+             :must-read #{seon.turn/next-agent-work seon.turn/task-end seon.turn/end-task-call seon.context/task-done?}
+             :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
 ]

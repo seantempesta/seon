@@ -4,8 +4,14 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [clojure.data.json :as json]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.eval.drive :as drive]
+            [seon.id]
+            [seon.mcp :as mcp]
+            [seon.operator.runtime :as runtime]
+            [seon.task :as task]
             [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
             [seon.db :as db]
@@ -180,3 +186,96 @@
 (deftest provider-progress-has-its-own-bound
   (prove-session :slow-provider [done-source] 3 1 :wait))
 
+
+
+;;; A model agent driven through the real path: its own MCP entrance, an outside wake, the turn loop and a
+;;; local provider answering fixed replies (`test-support/with-provider`).
+
+(defn- agent-eval
+  "The last reply item of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
+  [running agent-id code]
+  (->> (get (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                       "arguments" {"code" code "agent" agent-id "cluster" running}})))
+            "content")
+       (map #(support/reply (get % "text")))
+       (remove #(and (map? %) (contains? % :seon.repl/request)))
+       last))
+
+(defn- model-turns
+  "How many call rows of `agent-id` carry a model attempt on `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :int]}
+  [database agent-id]
+  (or (db/q '[:find (count ?turn) . :in $ ?agent-id
+              :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts _]]
+            database agent-id)
+      0))
+
+(defn- outside-wake!
+  "Write one outside message to `agent-id`, as an operator would, and wake its proc."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :string] :nil]}
+  [running agent-id connection text]
+  (let [cluster-name (:seon.cluster/name (support/execution-handle nil))
+        wake (java.util.concurrent.FutureTask.
+              ^java.util.concurrent.Callable
+              #(drive/inbound! connection cluster-name cluster/boot-process-identity agent-id text))]
+    ;; an outside wake comes from no evaluation: written on a thread with no conveyed custody
+    (.start (Thread. wake))
+    (.get wake)
+    (async/offer! (:seon.cluster.wake/channel
+                   (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @runtime/running-instances running)))
+                           [:seon.agent/armed agent-id]))
+                  :seon.agent/wake)
+    nil))
+
+(defn- until
+  "Poll `ready?` every 50 ms for at most `tries` polls; its last answer."
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value] :int] :seon.schema/value]}
+  [ready? tries]
+  (loop [n tries]
+    (let [answer (ready?)]
+      (if (or answer (zero? n)) answer (do (Thread/sleep 50) (recur (dec n)))))))
+
+(defn- green-task!
+  "Assign `agent-id` the task `tq.end/area` whose proof is red, then let the model define the fix through
+  `replies` until the agent's admission closes; answers the provider's request documents."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]}
+  [running agent-id connection replies]
+  (agent-eval running agent-id "(ns tq.end) (defn area [r] r)")
+  (agent-eval running agent-id "(in-ns 'tq.end) (clojure.test/deftest ^{:seon/tasks #{'tq.end/area}} area-test (clojure.test/is (= 25 (tq.end/area 5))))")
+  (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                         :seon.task/ns 'tq.end :seon.task/name "area" :seon.task/kind :function
+                                         :seon.task/intent "Square."}))
+        ledger (atom [])]
+    (task/assign! {:seon.db/connection connection :seon.task/assigned id
+                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+    (support/with-provider
+     ledger (support/reply-queue replies)
+     (fn [server]
+       (is (nil? (:seon.repl/error
+                  (agent-eval running agent-id (str "(my.agent/settings! "
+                                                    (seon.id/printed (assoc (support/provider-config server)
+                                                                            :seon.config.ai/no-provider false))
+                                                    ")")))))
+       (outside-wake! running agent-id connection "Work your task.")
+       (until #(:seon.agent/admission-closed-tx
+                (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+              600)
+       @ledger))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-wake-reopens-a-finished-task}
+           :seon.test/long "Two setup evaluations with their test steps, then one fixture-model pass and its test step."
+           :seon.test/long-ms 30000}
+  a-done-agent-opens-no-work-turn
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [sent (green-task! running agent-id connection ["(in-ns 'tq.end)\n(defn area [r] (* r r))"])
+           database (db/db connection)]
+       (is (= 1 (count sent)) "one model call turned the proof green")
+       (is (some? (:seon.agent/admission-closed-tx
+                   (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))
+           "the task's end closed the agent's admission")
+       (outside-wake! running agent-id connection "Why did you square it?")
+       (Thread/sleep 500)
+       (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})) "a wake opens no work turn")
+       (is (= 1 (model-turns (db/db connection) agent-id)) "the model was not called again")))))

@@ -2109,6 +2109,52 @@
                                [?evaluation :seon.eval/duration-ms _]]
                              database previous-t)))))
 
+(defn- admission-closed?
+  "True when the agent `agent-id`'s admission is closed on `database`: its task ended or it retired."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (some? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))))
+
+(defn task-end
+  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
+  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
+  turns left; nil while it runs, when it holds no task or its admission is already closed."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
+  [database agent-id]
+  (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
+    (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
+      (cond (@context-task-done? database agent-id) :done
+            (db/q '[:find ?turn . :in $ ?agent-id
+                    :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                    [?turn :seon.turn/disposition :completed]]
+                  database agent-id) :given-back
+            (= 0 (turns-left database agent-id)) :capped))))
+
+(defn end-task-call
+  "Close the admission of `agent-id`, whose task ended, at the writer; nothing when it is already closed,
+  so a task's end is recorded once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end] :seon.store/transaction-data]}
+  [database agent-id _end]
+  (if (admission-closed? database agent-id)
+    []
+    [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]))
+
+(defn- end-task!
+  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`); nil otherwise.
+  A refused write is a fault recorded beside the pass."
+  {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
+  [cluster agent-id]
+  (let [connection (:seon.db/connection cluster)]
+    (when-let [end (task-end (db/db connection) agent-id)]
+      (let [outcome (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]])]
+        (when-not (:db-after outcome)
+          (fault/fault! (env/of cluster) (ex-info (:seon.error/message outcome "The task's end was refused.") outcome)
+                        {:seon.error/layer :seon.turn/task-end
+                         :seon.error/operation `end-task!
+                         :seon.db.process/id (:seon.db.process/id cluster)
+                         :seon.agent/id agent-id}))))
+    nil))
+
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
   Pure — the per-agent derivation every turn proc runs (F1 §5.2). The
@@ -2124,7 +2170,9 @@
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition and evaluated a form, or is the first
   in a row that evaluated none (`continuing-reply?`), and never once the held
-  task's proofs are all green (`seon.context/task-done?`).
+  task's proofs are all green (`seon.context/task-done?`). An agent whose task
+  ended (`task-end`, recorded by `end-task-call`) has its admission closed and
+  is given no work, whatever wakes it.
   Virtual and system replies never authorize continuation.
   A successful provider attempt answers its earlier wakes. A provider
   refusal leaves them unanswered and defers reopening until a new outside
@@ -2162,6 +2210,8 @@
       (let [held (task/agent-task (or (some-> (task/home db) db/db) db) agent-id)
             deferred (when (string? held) (opening-deferred? db agent-id))]
         (cond
+          ;; AN ENDED TASK CLOSED THE AGENT: no wake reopens it
+          (admission-closed? db agent-id) nil
           (map? held) held
           (and (map? deferred)
                (contains? deferred :seon.error/at)
@@ -2171,7 +2221,7 @@
           (string? held)
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
-              ;; a task whose proofs are all green is done for the agent: only a wake opens a turn
+              ;; a task whose proofs are all green continues nothing, before or after its end closes the agent
               (when (or (seq wakes) (and (continuing-reply? db agent-id)
                                          (not (@context-task-done? db agent-id))))
                 (cond->
@@ -5429,6 +5479,10 @@
                           report (cond-> report
                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
                                                       (/ (- (System/nanoTime) test-start) 1e6)))
+                          ;; A MODEL PASS THAT CLOSED ITS TURN OBSERVES THE TASK'S END, after the
+                          ;; step recorded the proofs: the end closes the agent once.
+                          _ (when (and (nil? submission) (= :closed (:seon.turn.loop/outcome report)))
+                              (end-task! cluster agent-id))
                           ;; THE QUEUE IS THIS PROC'S STATE: a pass that ran its own step replaces it
                           ;; with what that step left (the new requests cover the older queue on the
                           ;; newer program); any other pass carries it to the idle pass.
