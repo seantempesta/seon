@@ -96,7 +96,9 @@
           handle (merge cluster-handle
                         (select-keys execution [:seon.db/connection :seon.sci.eval/ctx :seon.sci.eval/base-ctx
                                                 :seon.env/environment :seon.agent/routing :seon.agent/branch])
-                        {:seon.sci.eval/projection-state
+                        {;; the cluster's own handle, which the agents this armer arms carry
+                         :seon.agent/context-source (or (:seon.agent/context-source cluster-handle) cluster-handle)
+                         :seon.sci.eval/projection-state
                          (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
                          :seon.cluster.wake/channel armer-channel
                          :seon.turn.loop/stream-channel (async/chan (async/sliding-buffer 1))

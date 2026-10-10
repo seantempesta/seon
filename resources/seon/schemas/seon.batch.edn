@@ -23,6 +23,7 @@
          [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
          [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its roster."} :seon.store/store]
          [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]
+         [:seon.agent/context-source {:optional true :description "The running cluster's own handle with its store, never a hosted agent's branch handle: my.message/send hosts a stopped recipient through it."} :seon.agent/context-source]
          [:seon.batch/defined {:optional true} :seon.batch/defined]]
  :defined [:set {:description "The definitions earlier forms of this request applied, by symbol: recorded only by the request's one transaction, so a call in a later form that needs their facts answers that it runs after recording."} :qualified-symbol]
  :text [:string {:description "Exact text of a batch: what is read, evaluated, stored and rendered."}]

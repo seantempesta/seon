@@ -4234,7 +4234,9 @@
                 run-id (assoc :seon.turn/id run-id)
                 (env/of cluster) (-> (assoc :seon.env/environment (env/of cluster))
                                      (merge (seon.batch/environment-members (env/of cluster))))
-                (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster)))
+                (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster))
+                ;; the cluster's own handle the agent's arming recorded (`seon.cluster.agent/arm!`)
+                (:seon.agent/context-source cluster) (assoc :seon.agent/context-source (:seon.agent/context-source cluster)))
         request (-> (turn.batch/program-request
                      {:seon.batch/world world
                       ;; the batch starts from the value this turn read

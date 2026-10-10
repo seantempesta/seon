@@ -61,6 +61,7 @@
    :seon.sci.eval/ctx :seon.sci.eval/ctx
    :seon.store/store :seon.store/store
    :seon.agent/routing :seon.agent/routing
+   :seon.agent/context-source :seon.agent/context-source
    :seon.batch/defined :seon.batch/defined})
 
 (defn environment-members

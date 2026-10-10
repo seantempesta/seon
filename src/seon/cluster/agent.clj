@@ -1328,6 +1328,12 @@
                               :seon.schedule/channel schedule-channel
                               :seon.turn.loop/completion completion
                               :seon.agent/turn-backstop-state turn-backstop-state
+                              ;; The cluster's own handle, never this agent's branch
+                              ;; one: a hosted armer's handle carries its cluster's
+                              ;; (`seon.cluster.host`), the cluster armer's is it.
+                              :seon.agent/context-source
+                              (or (:seon.agent/context-source handle)
+                                  (merge (select-keys execution [:seon.store/store]) handle))
                               ;; The execution owner's stop request, read from
                               ;; the roster when a fault fires: interrupt the
                               ;; transform and request the graph's stop off

@@ -78,6 +78,13 @@
   [hosted f]
   (db/call-with-custody {:seon.db/connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])} f))
 
+(defn- assign-hosted!
+  "Assign the hosted agent a task on its branch, where a test world without a
+  root row keeps its tasks: a model turn needs an assignment."
+  [hosted]
+  (as-host hosted #(support/assign-task! (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])
+                                         (:seon.agent/id hosted))))
+
 (defn- hosted-run-receipts
   "One ordinary run of the hosted agent: its settled receipts in order under
   its run id, or the refusal the submission answered."
@@ -250,6 +257,7 @@
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/listener")
+            _ (assign-hosted! hosted)
             connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])
             closed-runs #(db/q '[:find (count ?run) . :where [?agent :seon.agent/id "mcp/listener"]
                                  [?run :seon.turn/agent ?agent] [?run :seon.turn/closed-tx _]]
@@ -699,10 +707,15 @@
             database agent-id)
       0))
 
+(defn- sender!
+  "Create the agent `sender` on the cluster before any branch is made from it: a
+  message is written on its recipient's home branch, which must hold the sender."
+  [connection sender]
+  (support/transacted! connection (support/agent-tx @connection sender)))
+
 (defn- send-from-cluster!
-  "`my.message/send` from `sender`, created on the cluster, as the cluster's own work."
+  "`my.message/send` from `sender` (`sender!`) as the cluster's own work."
   [handle connection sender request]
-  (support/transacted! connection (support/agent-tx @connection sender))
   (db/call-with-custody {:seon.db/connection connection}
     #(my.message/send (merge {:seon.db/connection connection :seon.agent/id sender
                               :seon.agent/context-source handle}
@@ -712,8 +725,10 @@
   a-message-to-a-stopped-admitted-agent-hosts-it-and-its-armer-takes-it
   (with-host-world {}
     (fn [{:keys [handle branch! connection]}]
-      (let [branch (branch!)
+      (let [_ (sender! connection "resume-sender")
+            branch (branch!)
             hosted (host-on! handle branch "mcp/sleeper")]
+        (assign-hosted! hosted)
         (is (= ["1"] (hosted-run! hosted "1")))
         (is (nil? (host/stop! hosted)))
         (is (nil? (db/branch-connection (db/db connection) branch)) "the restart dropped the connection")
@@ -727,6 +742,38 @@
             (support/await-event! branch-connection ::resumed
                                   (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/sleeper"))))
             (is (< 1 (closed-runs-of @branch-connection "mcp/sleeper")) "its armer took the message")))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-message-resumes-a-stopped-agent}}
+  an-sci-send-from-the-cluster-supplies-its-handle-and-resumes-a-stopped-agent
+  ;; The sender runs on the cluster as an ordinary SCI evaluation, so
+  ;; `my.message/send` takes the cluster's handle from its world by schema name.
+  (with-host-world {}
+    (fn [{:keys [handle branch! connection]}]
+      (let [_ (sender! connection "cluster-sender")
+            branch (branch!)
+            hosted (host-on! handle branch "mcp/waker")
+            routing (:seon.agent/routing handle)]
+        (assign-hosted! hosted)
+        (is (= ["1"] (hosted-run! hosted "1")))
+        (is (nil? (host/stop! hosted)))
+        (try
+          (let [sent (db/call-with-custody {:seon.db/connection connection}
+                       #(agent/evaluate-source!
+                         {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id "cluster-sender"
+                          :seon.agent/segmenter 'seon.turn/code-sources
+                          :seon.cluster.reply/text "(:seon.message/id (my.message/send {:my.message/to \"mcp/waker\" :my.message/content \"Why?\"}))"}))
+                resumed (host/hosted handle branch)
+                branch-connection (get-in resumed [:seon.turn.loop/cluster :seon.db/connection])]
+            (is (string? (some-> (drive/run-receipts (:seon.db/db sent) [(:seon.turn/id sent)]) first :seon.eval/shown read-string))
+                "the evaluation's send wrote the message")
+            (is (some? resumed) "the send hosted the agent through the cluster handle its world supplied")
+            (when branch-connection
+              (support/await-event! branch-connection ::woken
+                                    (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/waker"))))
+              (is (< 1 (closed-runs-of @branch-connection "mcp/waker")) "the resumed agent ran")))
+          (finally
+            (doseq [id (keys (:seon.agent/armed @routing))]
+              (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/retiring-a-branch-closes-its-agents-admission}}
   retiring-a-stopped-agents-branch-closes-its-admission
@@ -746,7 +793,8 @@
   a-message-to-an-admitted-agent-whose-branch-was-deleted-refuses-branch-absent
   (with-host-world {}
     (fn [{:keys [handle branch! connection]}]
-      (let [branch (branch!)]
+      (let [_ (sender! connection "orphan-sender")
+            branch (branch!)]
         (is (nil? (host/stop! (host-on! handle branch "mcp/orphan"))))
         ;; the roster deletion alone, as root's retirements before the fix left it
         (registry/retire-branch! {:seon.store/store (:seon.store/store handle) :seon.store/branch branch})

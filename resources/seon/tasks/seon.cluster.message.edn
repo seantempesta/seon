@@ -1,4 +1,8 @@
 [#:seon.task{:name "unresolved-sender-logs-unbounded"
              :kind :function
              :intent "Rendering a message whose sender lookup ref does not resolve ([`:seon.agent/id` \"nobody\"]) makes Datahike log an unbounded :error line on every render. AGENTS: a log line printing a value outside the floor is a defect. Resolve the sender as data (a typed unknown) without the logging lookup, or bound the line (fix-html-views 52fb24e1c)."
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "a-sender-created-after-the-recipients-branch-cannot-message-it"
+             :kind :function
+             :intent "`seon.cluster.message/send!` writes the message on the recipient's home branch with `:seon.message/from [:seon.agent/id sender]`; a sender created on the cluster after that branch forked does not exist there, so the writer refuses `:seon.db.write/validation-refusal` \"Nothing found for entity id [:seon.agent/id ...]\" and `my.message/send` answers it. Root and agents older than the branch are unaffected. Decide at `seon.cluster.message/send-call` how a sender absent on the target branch is named (the ref is required there)."
+             :must-read #{seon.cluster.message/send! seon.cluster.message/delivery my.message/send}}]
