@@ -5438,6 +5438,7 @@
                           ;; how many definitions the reply compares with main; a refused read compares none
                           top (agent-dial (db/db connection) cluster agent-id :seon.config.test.cost/top)
                           floor (agent-dial (db/db connection) cluster agent-id :seon.config.fn.cost/min-total-us)
+                          ;; The step's cost is read last, just before this offer: only two wake offers and the next state follow it.
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)

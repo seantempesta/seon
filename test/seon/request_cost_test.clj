@@ -197,3 +197,10 @@
       :seon.profile/context 5.0 {} [#{:new :interpreted}]
       ;; a compiled definition main has no value for is left out
       :seon.profile/host 5.0 {} [])))
+
+(deftest the-reply-is-offered-after-accounting
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [step (:seon.cost/step (support/mcp-request (answer running agent-id "sci" "(+ 1 2)")))]
+       (is (pos? (:seon.cost/alloc-mb step 0.0)) "the reply carries the step's cost, read before it was offered")
+       (is (contains? step :seon.cost/cpu-ms))))))
