@@ -5,10 +5,9 @@
   throw without changing either; an SCI installation owns its own cell; a
   same-definition re-arm keeps its cell and a new definition gets a new one;
   a re-entry through the same wrapper is inside one outermost call;
-  the reads rank and list over-second maxima; an operation's explanation names
-  the definitions whose counters grew. No nanosecond assertion: timings are
+  the reads rank and list over-second maxima. No nanosecond assertion: timings are
   measured at the REPL (landing note), never asserted here."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [malli.instrument :as mi]
             [seon.batch :as batch]
             [seon.config :as config]
@@ -16,8 +15,7 @@
             [seon.instrument :as instrument]
             [seon.profile :as profile]
             [seon.schema :as schema]
-            [seon.test-support :as test-support])
-  (:import [java.util.concurrent.atomic LongAdder]))
+            [seon.test-support :as test-support]))
 
 (defn- preserving-roots
   [body]
@@ -156,167 +154,6 @@
     (is (= 2 (armed 2 0)))
     (is (= {:seon.profile/calls 3 :seon.profile/throws 1} (calls))
         "a throw leaves the thread outside the cell, so the next entry counts")))
-
-(deftest an-explanation-names-the-definitions-whose-counters-grew
-  (let [var-name (symbol (str "explained-" (random-uuid)))]
-    (try
-      (let [candidate (arm-probe! var-name
-                                  (fn [n] (loop [i 0 t (System/nanoTime)]
-                                            (if (< (- (System/nanoTime) t) 2000000)
-                                              (recur (inc i) t)
-                                              n)))
-                                  digest-a)
-            _ (candidate 0)
-            mark (profile/begin)
-            _ (dotimes [_ 3] (candidate 0))
-            explanation (profile/explain mark 50)
-            grown (some #(when (= (symbol "seon.profile-test" (name var-name))
-                                  (:seon.profile/sym %)) %)
-                        (:seon.profile/growths explanation))]
-        (testing "only the growth inside the window is counted"
-          (is (= 3 (:seon.profile/calls grown))))
-        (is (<= 6 (:seon.profile/total-ms grown)))
-        (is (some #(re-find #"ms total in seon\.profile-test/explained-" %) (:seon.profile/lines explanation)))
-        (is (re-find #"^OVER ONE SECOND"
-                     (first (:seon.profile/lines
-                             (profile/explain-slow (assoc mark :seon.profile/started-ns
-                                                          (- (System/nanoTime) 2000000000))))))
-            "over one second, the first line tells the agent the operation is its defect to fix")
-        (is (nil? (profile/explain-slow (profile/begin)))
-            "an operation within one second has nothing to explain"))
-      (finally (ns-unmap 'seon.profile-test var-name)))))
-
-(deftest an-explanation-ranks-the-callee-that-did-the-work-above-the-wrapper-around-it
-  (let [work (symbol (str "explained-work-" (random-uuid)))
-        wrap (symbol (str "explained-wrap-" (random-uuid)))]
-    (try
-      (let [worker (arm-probe! work (fn [n] (let [t (System/nanoTime)]
-                                              (while (< (- (System/nanoTime) t) 5000000))
-                                              n))
-                               digest-a)
-            wrapper (arm-probe! wrap (fn [n] (@worker n)) digest-b)
-            mark (profile/begin)
-            _ (@wrapper 0)
-            order (mapv :seon.profile/sym (:seon.profile/growths (profile/explain mark 50)))
-            row (fn [v] (some #(when (= (symbol "seon.profile-test" (name v)) (:seon.profile/sym %)) %)
-                              (:seon.profile/growths (profile/explain mark 50))))]
-        (is (< (.indexOf order (symbol "seon.profile-test" (name work)))
-               (.indexOf order (symbol "seon.profile-test" (name wrap))))
-            "the callee that did the work ranks first though both have the same inclusive time")
-        (is (<= 4 (:seon.profile/self-ms (row work))))
-        (is (< (:seon.profile/self-ms (row wrap)) (:seon.profile/total-ms (row wrap)))
-            "a wrapper's self time is below its inclusive total, which stays a member"))
-      (finally (ns-unmap 'seon.profile-test work) (ns-unmap 'seon.profile-test wrap)))))
-
-(defn- digest-of
-  [label]
-  (apply str (take 64 (cycle (str label "0123456789abcdef")))))
-
-(defn- probe-cell
-  [label]
-  (profile/cell {:seon.profile/sym (symbol "seon.profile-test" (str label "-" (random-uuid)))
-                 :seon.profile/digest (digest-of label)
-                 :seon.profile/scope :seon.profile/host}))
-
-(deftest profile-summary-returns-call-data-once
-  (let [inner-cell (probe-cell "inner")
-        outer-cell (probe-cell "outer")
-        idle (profile/cell {:seon.profile/sym 'probe/idle :seon.profile/scope :seon.profile/host})
-        inner (profile/with-cell inner-cell (fn [] (profile/timed (Thread/sleep 30))))
-        outer (profile/with-cell outer-cell (fn [] (profile/timed (inner))))
-        _ (outer)
-        summary (profile/summary [outer-cell inner-cell idle] 5)
-        [first-row second-row :as rows] (:seon.profile/by-self summary)]
-    (is (= 2 (:seon.profile/observed summary)) "a cell with no calls is not observed")
-    (is (= [(:seon.profile/sym inner-cell) (:seon.profile/sym outer-cell)] (mapv :seon.profile/sym rows))
-        "the callee that did the work ranks above the wrapper that only called it")
-    (is (<= 25 (:seon.profile/self-ms first-row)))
-    (is (<= (:seon.profile/self-ms second-row) 5) "a wrapper's self time excludes its callee's")
-    (is (<= 25 (:seon.profile/total-ms second-row)) "its inclusive total still contains the callee's")
-    (is (= #{:seon.profile/observed :seon.profile/over-second-count :seon.profile/by-self}
-           (set (keys summary))) "one list of call data, no string rows or repeated rankings")
-    (is (every? map? rows))
-    (is (= 1 (count (:seon.profile/by-self (profile/summary [outer-cell inner-cell] 1)))))))
-
-(deftest a-cell-counts-each-call-into-its-histogram-gauge-and-throws-by-class
-  (let [held (probe-cell "histogram")
-        inside (volatile! nil)
-        call (profile/with-cell held (fn [f] (profile/timed (f))))]
-    (call (fn [] (vreset! inside (:seon.profile/in-flight (profile/observation held)))))
-    (dotimes [_ 2] (try (call #(throw (ex-info "probe" {}))) (catch clojure.lang.ExceptionInfo _)))
-    (try (call #(throw (IllegalStateException. "probe"))) (catch IllegalStateException _))
-    (let [observed (profile/observation held)]
-      (is (= 1 @inside) "a call not yet returned is in flight")
-      (is (= {:seon.profile/calls 4 :seon.profile/throws 3 :seon.profile/in-flight 0
-              :seon.profile/throws-by-class {"clojure.lang.ExceptionInfo" 2 "java.lang.IllegalStateException" 1}}
-             (select-keys observed [:seon.profile/calls :seon.profile/throws :seon.profile/in-flight
-                                    :seon.profile/throws-by-class])))
-      (is (= 4 (reduce + (map #(.sum ^LongAdder %) (:seon.profile/histogram held))))
-          "calls are the histogram's sum")
-      (is (<= (:seon.profile/p50-us observed) (:seon.profile/p99-us observed))))))
-
-(deftest a-world-sink-holds-self-time-and-an-observation-is-its-delta
-  (let [inner-cell (probe-cell "inner")
-        outer-cell (probe-cell "outer")
-        inner (profile/with-cell inner-cell (fn [] (profile/timed (Thread/onSpinWait))))
-        outer (profile/with-cell outer-cell (fn [n] (profile/timed (dotimes [_ n] (inner)))))
-        sink (batch/sink)
-        world {:seon.batch/sink sink}
-        key-of (fn [held] [(:seon.profile/sym held) (:seon.profile/digest held)])
-        slots (fn [held] (let [^java.util.concurrent.atomic.AtomicLongArray a (get sink (key-of held))]
-                           (mapv #(.get a %) (range 3))))
-        observed (fn [min-calls] (into {} (map (juxt :seon.fn.cost/sym :seon.fn.cost/calls))
-                                       (profile/transaction-observation world {} min-calls 0 10)))
-        heavy 50]
-    (binding [batch/*world* world] (outer 3))
-    (is (= {} (observed 20)) "work under the call floor observes nothing")
-    (binding [batch/*world* world] (outer heavy))
-    (let [[outer-calls outer-nanos outer-self] (slots outer-cell)
-          [inner-calls inner-nanos inner-self] (slots inner-cell)]
-      (is (= [2 (+ 3 heavy)] [outer-calls inner-calls]))
-      (is (= inner-nanos inner-self) "a leaf's self time is its whole time")
-      (is (= outer-nanos (+ outer-self inner-nanos)) "a caller's self time excludes its counted callees")
-      (is (= {(:seon.profile/sym inner-cell) heavy (:seon.profile/sym outer-cell) 1} (observed 1))
-          "the delta since the previous observation")
-      (is (= {} (observed 1)) "the next observation holds only work done since"))))
-
-(deftest cost-entities-rank-by-self-time-spent-above-the-floor
-  (let [sink (batch/sink)
-        counted (fn [sym digest calls self-us]
-                  (let [a (java.util.concurrent.atomic.AtomicLongArray. 6)]
-                    (.set a 0 calls) (.set a 1 (long (* 1000 calls self-us))) (.set a 2 (long (* 1000 calls self-us)))
-                    (.put ^java.util.concurrent.ConcurrentHashMap sink [sym digest] a)))
-        digest (digest-of "probe")]
-    (counted 'probe/cheap? digest 1000 0.5)
-    (counted 'probe/slow digest 30 400.0)
-    (counted 'probe/often digest 5000 2.0)
-    (counted 'probe/written nil 40 100.0)
-    (is (= '[probe/slow probe/often probe/written]
-           (mapv :seon.fn.cost/sym (profile/transaction-observation {:seon.batch/sink sink} {'probe/written digest} 20 1000 10)))
-        "a predicate called 1,000 times under a microsecond never qualifies; the rest rank by self time spent")
-    (is (= digest (:seon.fn.cost/digest (last (profile/live-costs sink {'probe/written digest} 1000 10))))
-        "a definition counted before its digest was derived takes its symbol's")))
-
-(deftest reading-the-profile-checks-no-cell-again
-  ;; The counters are read directly: the per-cell predicates' own cells are
-  ;; the observation, and none of them may move while the profile is read.
-  (let [predicates '#{seon.profile/adder? seon.profile/accumulator? seon.profile/histogram?
-                      seon.profile/thread-local? seon.profile/throw-counts?}
-        entered (fn [] (reduce (fn [found cell]
-                                 (if (contains? predicates (:seon.profile/sym cell))
-                                   (update found (:seon.profile/sym cell) (fnil + 0)
-                                           (.sum ^LongAdder (:seon.profile/entry-counter cell)))
-                                   found))
-                               {} (profile/cells)))
-        before (entered)
-        mark (profile/begin)
-        explanation (profile/explain mark 10000)
-        after (entered)
-        own (filter #(= "seon.profile" (namespace (:seon.profile/sym %))) (:seon.profile/by-calls explanation))]
-    (is (= predicates (set (keys before))) "every per-cell predicate is armed, so a zero is a reading")
-    (is (= before after) "reading, marking and explaining call no per-cell predicate")
-    (is (<= (reduce + 0 (map :seon.profile/calls own)) 3)
-        "an empty mark grows only explain's entry and the two checks of the mark")))
 
 (deftest calls-of-counts-a-function-past-the-hot-limit
   (let [projection (schema/handed-projection)

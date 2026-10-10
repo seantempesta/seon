@@ -587,9 +587,9 @@
                   (= "" (:out result))))))
 
 (defparity "D10" :passing
-  ;; `seon.profile/explain` destructures `::cells` in its arglists: the doc reader
+  ;; `seon.cache/kind-counters` destructures `::keys` in its arglists: the doc reader
   ;; resolves auto-resolved keywords in the namespace's aliases and never throws.
-  (let [result (first (repl-session ["(doc seon.profile/explain)"]))
+  (let [result (first (repl-session ["(doc seon.cache/kind-counters)"]))
         value (:value result)]
     (checked "arglists read as data"
              result

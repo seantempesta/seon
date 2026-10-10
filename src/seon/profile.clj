@@ -42,7 +42,7 @@
   and eight threads, and a cell's bytes."
   (:require [seon.batch]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Collections IdentityHashMap WeakHashMap]
+  (:import [java.util Collections WeakHashMap]
            [java.util.concurrent ConcurrentHashMap]
            [java.util.concurrent.atomic AtomicLongArray LongAccumulator LongAdder]
            [java.util.function LongBinaryOperator Supplier]))
@@ -547,119 +547,6 @@
      (or (nil? a)
          (not= (:seon.fn.cost/digest stored) (:seon.fn.cost/digest live))
          (and (not= a b) (>= (max a b) (* hysteresis (min a b))))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Explaining one slow operation
-;;; ---------------------------------------------------------------------------
-
-(defn snapshot?
-  "True for the counter snapshot `begin` takes.
-
-  It holds the live cells it read and their entries and nanos,
-  `[entries0 nanos0 self0 entries1 nanos1 self1 ...]`, in one long array."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (boolean (and (map? value)
-                (vector? (::cells value))
-                (some-> (::sums value) class .isArray))))
-
-(defn begin
-  "Mark the start of an operation: its clock and every cell's entries and total.
-
-  One read of the live cells, then one pass over them reading their counters
-  directly into one primitive array: no armed call per cell, three longs each."
-  {:malli/schema [:=> [:cat] :seon.profile/mark]}
-  []
-  (let [held (cells)
-        sums (long-array (* 3 (count held)))]
-    (dotimes [i (count held)]
-      (let [member (nth held i)]
-        (aset sums (* 3 i) (.sum ^LongAdder (:seon.profile/entry-counter member)))
-        (aset sums (+ 1 (* 3 i)) (.sum ^LongAdder (:seon.profile/total-counter member)))
-        (aset sums (+ 2 (* 3 i)) (.sum ^LongAdder (:seon.profile/self-counter member)))))
-    {:seon.profile/started-ns (System/nanoTime)
-     :seon.profile/snapshot {::cells held ::sums sums}}))
-
-(defn- growth-line
-  {:malli/schema [:=> [:cat :seon.profile/growth] :string]}
-  [{sym :seon.profile/sym calls :seon.profile/calls total :seon.profile/total-ms self :seon.profile/self-ms
-    scope :seon.profile/scope context :seon.profile/context}]
-  (str self " ms self, " total " ms total in " sym " x" calls
-       (when (= :seon.profile/context scope)
-         (str " [SCI" (when context (str " " context)) "]"))))
-
-(defn explain
-  "What the armed definitions did during the operation `mark` began.
-
-  The growth is every cell's counter increase in this JVM during the window:
-  the ranked growths (at least a millisecond inclusive, most self time first,
-  then inclusive total), every
-  entered definition by calls, and the calls in all. Nested calls appear in
-  both caller and callee, and concurrent work on other threads is included.
-  Calls are the outermost entries in the window, an entered call not yet
-  returned included (this call's own entry and its contract's check of `mark`
-  among them). No growth means the time was spent in unarmed code or waiting."
-  {:malli/schema [:=> [:cat :seon.profile/mark [:int {:min 1}]] :seon.profile/explanation]}
-  [{started :seon.profile/started-ns {held ::cells ^longs sums ::sums} :seon.profile/snapshot} limit]
-  (let [elapsed-ms (quot (- (System/nanoTime) started) 1000000)
-        ;; a local function, not an armed one: a read of the counters calls
-        ;; no armed definition per cell
-        growth (fn [member calls0 total0 self0]
-                 (let [calls (- (.sum ^LongAdder (:seon.profile/entry-counter member)) (long calls0))]
-                   (when (pos? calls)
-                     (merge (select-keys member [:seon.profile/sym :seon.profile/digest
-                                                 :seon.profile/scope :seon.profile/context])
-                            {:seon.profile/calls calls
-                             :seon.profile/self-ms (quot (- (.sum ^LongAdder (:seon.profile/self-counter member))
-                                                            (long self0))
-                                                         1000000)
-                             :seon.profile/total-ms (quot (- (.sum ^LongAdder (:seon.profile/total-counter member))
-                                                             (long total0))
-                                                          1000000)}))))
-        ;; the held cells are read before anything else is called, so the
-        ;; read of the live cells below is outside the window
-        old (into [] (keep (fn [i] (let [j (* 3 (long i))] (growth (nth held i) (aget sums j) (aget sums (inc j)) (aget sums (+ 2 j))))))
-                  (range (count held)))
-        ;; Cells are matched by identity (a LongAdder is a Number, which a
-        ;; Clojure map would compare by value); a cell installed after
-        ;; `begin` starts from zero.
-        known (let [index (Collections/newSetFromMap (IdentityHashMap.))]
-                (run! #(.add index (:seon.profile/entry-counter %)) held)
-                index)
-        grown (into old (keep #(when-not (.contains known (:seon.profile/entry-counter %)) (growth % 0 0 0)))
-                    (cells))
-        ranked (into [] (comp (filter (comp pos? :seon.profile/total-ms)) (take limit))
-                     (sort-by (juxt :seon.profile/self-ms :seon.profile/total-ms) #(compare %2 %1) grown))]
-    {:seon.profile/elapsed-ms elapsed-ms
-     :seon.profile/growths ranked
-     :seon.profile/by-calls (into [] (take limit) (sort-by :seon.profile/calls > grown))
-     :seon.profile/calls (transduce (map :seon.profile/calls) + 0 grown)
-     :seon.profile/lines
-     (into [(str elapsed-ms " ms elapsed.")]
-           (if (seq ranked)
-             (into [(str "Armed definitions by self time, inclusive total beside it (a caller's"
-                         " total contains its callees'; concurrent work included):")]
-                   (map growth-line) ranked)
-             [(str "No armed definition accumulated a millisecond: the time is in"
-                   " unarmed code or waiting.")]))}))
-
-(defn explain-slow
-  "The explanation when the operation `mark` began took over one second.
-
-  Nil is the declared answer for an operation that finished within the bound;
-  the fast path pays one clock read."
-  {:seon/tasks #{'seon.profile/slow-explanation-blames-the-agent-for-platform-time}
-   :malli/schema [:=> [:cat :seon.profile/mark] [:or :nil :seon.profile/explanation]]}
-  [mark]
-  (when (< slow-ms (quot (- (System/nanoTime) (:seon.profile/started-ns mark)) 1000000))
-    (let [explanation (explain mark 10)]
-      (update explanation :seon.profile/lines
-              #(into [(str "OVER ONE SECOND (" (:seon.profile/elapsed-ms explanation)
-                           " ms). The armed definitions below grew in this JVM during the"
-                           " operation, concurrent work included, so they name where time"
-                           " went, not whose defect it is. Find what the top call's work is"
-                           " proportional to (the whole program? the store? the call count?).")]
-                     (rest %))))))
 
 (defn summary
   "The definitions that did the work, once, as data: `limit` rows ranked by

@@ -26,7 +26,6 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
-            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
@@ -2299,8 +2298,6 @@
                                                            (clojure.lang.RT/baseLoader))})
                              (finally (vreset! resolved (elapsed started)))))
             started (System/nanoTime)
-            ;; A member over one second reports what the armed definitions did.
-            profile-mark (profile/begin)
             registry-before (runner/live-cluster-schema-states)
             result (do
                      (vreset! handed? true)
@@ -2320,7 +2317,6 @@
                           (when watched? (exited! @cleanup-failure))
                           nil))))
             executed (- (elapsed started) @resolved)
-            explanation (profile/explain-slow profile-mark)
             drifted (runner/schema-restore-drift
                      (runner/restore-live-cluster-schema! registry-before))
             result (if (empty? drifted)
@@ -2336,9 +2332,7 @@
         (when-not @handed? (vreset! handed? true) (release! false))
         {:seon.test/result (cond-> (with-cleanup-failure result)
                              (not (:seon.test.run/terminated? result))
-                             (assoc :seon.agent/branch (:seon.agent/branch child))
-                             explanation
-                             (assoc :seon.profile/explanation explanation))
+                             (assoc :seon.agent/branch (:seon.agent/branch child)))
          :seon.test/timings (timing @resolved executed)})
       (catch Throwable failure
         (when-not @handed? (release! false))

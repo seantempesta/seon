@@ -50,7 +50,7 @@
  :cache :seon.cache/status
  :tested? [:boolean {:description "Whether any test reaches a function (seon.fn/functions-without-tests)."}]
  :refused [:or [:vector {:description "A refusal for each stored finding schema that constrains only identity attributes; its matches are never derived."} :seon.error/value] :seon.error/value]
- :profile [:or [:vector {:description "The observations of every armed definition with at least one second of inclusive time (the over-bound candidates), each saying whether a test reaches it; a definition that throws often in under a second of total time is not among them."} :seon.profile/observation] :seon.error/value]
+ :profile [:or [:vector {:description "The observations of the definitions worth a finding, each saying whether a test reaches it: those whose stored cost entity (`:seon.fn.cost/entity`) has a mean self time per call over one second, and those the live cells show called ten thousand times or thrown a thousand times."} :seon.profile/observation] :seon.error/value]
  :replaced-roots [:vector {:description "Loaded first-party Vars whose root is not their namespace's own compile: a redefinition outside a reload, each as seon.instrument/replaced-roots reports it."} :seon.instrument/replaced-root]
  :program :seon.error/value
 

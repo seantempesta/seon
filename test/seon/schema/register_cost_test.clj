@@ -12,11 +12,9 @@
                     {"name" "eval_clj"
                      "arguments" {"code" "(seon.schema/register! :scratch.register-cost/probe [:map [:scratch.register-cost/n :int]])"
                                   "agent" agent-id "cluster" running}})
-           mark (profile/begin)
-           reply (json/read-str (mcp/call request))
-           measured (profile/explain mark 100000)
-           calls (fn [sym] (reduce + 0 (keep #(when (= sym (:seon.profile/sym %)) (:seon.profile/calls %))
-                                             (:seon.profile/by-calls measured))))
+           measured (profile/measure #(json/read-str (mcp/call request)))
+           reply (:seon.profile/value measured)
+           calls (partial profile/calls-of measured)
            value (:seon.repl/value (support/reply (get-in reply ["content" 0 "text"])))]
        (is (false? (get reply "isError")))
        (is (= :scratch.register-cost/probe (:seon.schema/key value)))

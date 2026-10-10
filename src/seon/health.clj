@@ -370,26 +370,61 @@
   [database]
   (set (derived database ::untested fn/functions-without-tests)))
 
+(def ^:private stored-slow-query
+  "The stored cost entities (`:seon.fn.cost/entity`) whose mean self time per
+  call is at least the bound `?bound` in microseconds."
+  '[:find ?sym ?scope ?digest ?calls ?self ?total
+    :in $ ?bound
+    :where [?e :seon.fn.cost/self-us ?self]
+           [(<= ?bound ?self)]
+           [?e :seon.fn.cost/sym ?sym]
+           [?e :seon.fn.cost/scope ?scope]
+           [?e :seon.fn.cost/digest ?digest]
+           [?e :seon.fn.cost/calls ?calls]
+           [?e :seon.fn.cost/total-us ?total]])
+
+(defn- stored-observation
+  "A stored cost entity's tuple as the observation of its definition: the
+  counters a cost entity does not keep (maximum, throws, calls in flight) are
+  absent."
+  {:malli/schema [:=> [:cat [:tuple :qualified-symbol :keyword :seon.program/definition-digest :int :double :double]]
+                  :seon.profile/observation]}
+  [[sym scope digest calls self-us total-us]]
+  {:seon.profile/sym sym :seon.profile/digest digest :seon.profile/scope scope
+   :seon.profile/calls calls
+   :seon.profile/total-ms (long (/ (* calls total-us) 1000.0))
+   :seon.profile/self-ms (long (/ (* calls self-us) 1000.0))
+   :seon.profile/mean-us (long total-us)
+   :seon.profile/self-mean-us (long self-us)})
+
 (defn- profile-unit
-  "Observations of the armed definitions with at least one second of
-  inclusive time (every over-bound match needs that much), each saying whether
+  "Observations of the armed definitions worth a finding, each saying whether
   a test reaches it once that set is derived: the set is read within the
   deadline, and while it is still deriving an observation says nothing about
-  tests (unknown, never untested) and the completion runs `wake`. Read live (the counters are the measurement; any key over
-  them moves with this very read), a cell's one total counter first, so only
-  candidates pay for an observation."
+  tests (unknown, never untested) and the completion runs `wake`.
+  The definitions whose stored mean self time per call is over the bound are the
+  stored cost entities (they survive a restart; one indexed scan); the live
+  cells add the definitions that threw a thousand times or were called ten
+  thousand times, which a cost entity does not keep, a cell's one counter read
+  first so only candidates pay for an observation."
   {:malli/schema [:=> [:cat :seon.db/database-value [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
-                  [:vector :seon.profile/observation]]}
+                  [:or [:vector :seon.profile/observation] :seon.error/value]]}
   [database deadline-ms wake]
-  (let [committed (db/committed-value-identity database)
-        unreached (if committed
-                    (cache/lookup-within ::untested committed weight #(untested database) deadline-ms wake)
-                    (untested database))
-        known? (set? unreached)]
-    (into [] (comp (filter #(<= 1000000000 (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/total-counter %))))
-                   (map profile/observation)
-                   (map #(cond-> % known? (assoc :seon.health/tested? (not (contains? unreached (:seon.profile/sym %)))))))
-          (profile/cells))))
+  (let [stored (db/q stored-slow-query database 1000000.0)]
+    (if-not (set? stored)
+      stored
+      (let [committed (db/committed-value-identity database)
+            unreached (if committed
+                        (cache/lookup-within ::untested committed weight #(untested database) deadline-ms wake)
+                        (untested database))
+            known? (set? unreached)
+            live (into {} (comp (filter #(<= 1000 (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/entry-counter %))))
+                                (map profile/observation)
+                                (filter #(or (<= 10000 (:seon.profile/calls %)) (<= 1000 (:seon.profile/throws %))))
+                                (map (juxt :seon.profile/sym identity)))
+                       (profile/cells))]
+        (into [] (map #(cond-> % known? (assoc :seon.health/tested? (not (contains? unreached (:seon.profile/sym %))))))
+              (vals (into live (map (juxt :seon.profile/sym identity)) (map stored-observation stored))))))))
 
 (defn- problems-unit
   "The problems value at `database`, each family retained by what it read;

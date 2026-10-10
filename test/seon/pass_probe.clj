@@ -6,7 +6,7 @@
   provider in the agent's settings, MCP SCI `my.test/check` for a test) with
   the owners' own readings: wall time, the JVM's allocated bytes split by
   platform thread (a virtual thread's bytes land on its carrier), the armed
-  calls `seon.profile/explain` counts, attempts through
+  calls `seon.profile/measure` counts, attempts through
   `seon.db/transact-call`, durable commits as distinct commit ids per branch
   and the touched files' final sizes from the store's konserve write hooks,
   and the tokens shown. Results are returned as data; nothing is stored."
@@ -117,14 +117,10 @@
      ::blob-bytes (:bytes blobs)}))
 
 (defn- grown
-  "Calls and inclusive milliseconds of `syms` in `explanation`'s growth."
-  {:malli/schema [:=> [:cat :seon.profile/explanation [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
-  [explanation syms]
-  (reduce (fn [m {sym :seon.profile/sym :as g}]
-            (if (syms sym)
-              (update m sym #(merge-with + % (select-keys g [:seon.profile/calls :seon.profile/total-ms])))
-              m))
-          {} (:seon.profile/by-calls explanation)))
+  "Calls of `syms` in `measured`'s window."
+  {:malli/schema [:=> [:cat :seon.profile/measured-call [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
+  [measured syms]
+  (into {} (keep (fn [sym] (when-let [n (get-in measured [:seon.profile/called sym])] [sym {:seon.profile/calls n}]))) syms))
 
 (defn window
   "Run `pass` (a thunk answering `{::complete? … ::shown …}`) and measure it.
@@ -135,16 +131,15 @@
                        [:=> [:cat] :map]]
                   :map]}
   [{::keys [store base branches stages]} pass]
-  (let [mark (profile/begin)
-        threads0 (thread-bytes)
+  (let [threads0 (thread-bytes)
         total0 (total-bytes)
         [hook-id events] (hook! store)
         t0 (System/nanoTime)
-        result (pass)
+        measured (profile/measure pass)
+        result (:seon.profile/value measured)
         t1 (System/nanoTime)
         total1 (total-bytes)
         threads1 (thread-bytes)
-        explanation (profile/explain mark 100000)
         groups (by-thread threads0 threads1)
         allocated (- total1 total0)]
     (when (and hook-id (::complete? result)) (konserve/remove-write-hook! store hook-id))
@@ -153,13 +148,13 @@
             ::allocated-bytes allocated
             ::allocated-by-thread groups
             ::unattributed-bytes (- allocated (reduce + 0 (vals groups)))
-            ::checked-calls (:seon.profile/calls explanation)
-            ::top-calls (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/total-ms])
-                              (take 10 (:seon.profile/by-calls explanation)))
-            ::top-ms (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/total-ms])
-                           (take 15 (:seon.profile/growths explanation)))
-            ::attempts (get-in (grown explanation '#{seon.db/transact-call}) ['seon.db/transact-call :seon.profile/calls] 0)
-            ::stages (grown explanation (or stages #{}))
+            ::checked-calls (:seon.profile/calls measured)
+            ::top-calls (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/self-ms])
+                              (take 10 (:seon.profile/ranked-by-calls measured)))
+            ::top-ms (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/self-ms])
+                           (take 15 (:seon.profile/ranked-by-self measured)))
+            ::attempts (get-in (grown measured '#{seon.db/transact-call}) ['seon.db/transact-call :seon.profile/calls] 0)
+            ::stages (grown measured (or stages #{}))
             ::tokens (tokens/estimate (str/join "\n" (::shown result)))
             ::calibration tokens/shipped-chars-per-token}
            (if hook-id

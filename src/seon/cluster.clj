@@ -49,7 +49,6 @@
             [seon.fs :as fs]
             [babashka.fs]
             [seon.instrument :as instrument]
-            [seon.profile :as profile]
             [seon.cache :as cache]
             [seon.id :as id]
             [seon.test.cache :as test.cache]
@@ -2728,10 +2727,7 @@
   ([root changed-paths development-cluster directory]
    (report-source-progress! "request accepted")
      (report-source-progress! "bootstrap configuration")
-     (let [;; A publication over one second reports what the armed
-           ;; definitions did during it, in its progress and its result.
-           profile-mark (profile/begin)
-           instance (when development-cluster
+     (let [instance (when development-cluster
                       (get @running-instances development-cluster))
            _ (when (and development-cluster (not instance))
                (refused! "Development updates require the named cluster to be running."
@@ -2761,11 +2757,7 @@
                            (:seon.error/at published) published
                            (:seon.error/at adoption) adoption
                            :else (merge published adoption))]
-              (if-let [explanation (profile/explain-slow profile-mark)]
-                (do (report-source-progress!
-                     (str "profile: " (str/join "\n  " (:seon.profile/lines explanation))))
-                    (assoc result :seon.profile/explanation explanation))
-                result))))
+              result)))
          (finally
            (release-root-store! store-dir))))))
 
