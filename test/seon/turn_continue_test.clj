@@ -634,3 +634,53 @@
                  "the merge task carries the refusal and stays undecided")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/an-accepted-landing-that-stopped-is-resumed}
+           :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two proposal runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit), then one resumed write-back."
+           :seon.test/long-ms 240000}
+  a-landing-stopped-after-acceptance-is-resumed-by-the-next-end
+  (support/with-running-agent
+   (fn [running _ connection]
+     (root-home! connection)
+     (let [path "test/tq/endu.clj"
+           root (support/temp-root "end-resume")
+           merge-row #(dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed :seon.task/landed-git
+                                                          :seon.task/refusal]
+                                       [:seon.task/id %]) :db/id)
+           area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           side "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           ;; the commits in the checkout's history naming merge task `m` (seon.cluster.source/commit-message's trailer)
+           commits-for #(remove str/blank? (str/split-lines (git! root "log" "--format=%H" "-F" (str "--grep=Merge-task: " %))))]
+       (try
+         (git! root "init" "-q")
+         (git! root "config" "user.email" "end@test.invalid")
+         (git! root "config" "user.name" "end-test")
+         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endu"))
+         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
+                                {:seon.config.root/land? true :seon.config.fs/working-root root})
+         (let [head (git! root "rev-parse" "HEAD")
+               {first-agent :seon.agent/id} (branch-agent! running connection 'tq.endu "area")
+               first-execution (fixed-end! running first-agent 'tq.endu area)
+               ;; the file's directory refuses the install, so the landing stops after acceptance
+               _ (.setWritable (io/file root "test/tq") false false)
+               _ (end! running first-execution first-agent)
+               _ (.setWritable (io/file root "test/tq") true false)
+               [{stopped :seon.task/merge}] (end-messages (db/db connection) first-agent)]
+           (testing "the first end's landing stops after acceptance, uncommitted"
+             (is (= :accepted (:seon.task/outcome (merge-row stopped))) "main holds the merge")
+             (is (nil? (:seon.task/landed-git (merge-row stopped))) "no git commit is recorded")
+             (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
+           (testing "the next end resumes the stopped landing to one git commit, with no root call"
+             (let [{second-agent :seon.agent/id} (branch-agent! running connection 'tq.endu "side")
+                   second-execution (fixed-end! running second-agent 'tq.endu side)
+                   _ (end! running second-execution second-agent)
+                   [{landed :seon.task/merge}] (end-messages (db/db connection) second-agent)
+                   resumed (merge-row stopped)]
+               (is (= [(:seon.task/landed-git resumed)] (commits-for stopped)) "exactly one git commit names the stopped merge task")
+               (is (= head (git! root "rev-parse" (str (:seon.task/landed-git resumed) "^"))) "on the previous head")
+               (is (nil? (:seon.task/refusal resumed)) "the landed merge task carries no refusal")
+               (is (= (git! root "rev-parse" "HEAD") (:seon.task/landed-git (merge-row landed))) "the second end lands after it")
+               (is (every? #(str/includes? (slurp (io/file root path)) %) [area side]) "the file holds both definitions"))))
+         (finally
+           (.setWritable (io/file root "test/tq") true false)
+           (support/delete-root! root)))))))

@@ -2197,8 +2197,28 @@
         proposal (when (and (seq found) (not (db/read-refusal? found)))
                    (update (second (last (sort-by first found))) :seon.task/proved set))]
     (when proposal
-      (merge proposal (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge proposal)])
+      (merge proposal (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal :seon.task/landed-git]
+                                       [:seon.task/id (:seon.task/merge proposal)])
                               :db/id)))))
+
+(defn- unfinished-landings
+  "The landings at the task home `home` that stopped after acceptance: each merge task accepted
+  (`:seon.task/accepted-tx`) with no git commit recorded (`:seon.task/landed-git`), as its latest proposal with its
+  outcome, in the order main accepted them."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
+  [home]
+  (let [found (db/q '[:find ?accepted ?tx (pull ?p [:seon.task/proposal :seon.task/merge :seon.task/branch :seon.task/commit
+                                                    :seon.task/proved :seon.task/run-id :seon.task/program])
+                      :where [?m :seon.task/accepted-tx ?accepted] (not [?m :seon.task/landed-git])
+                      [?m :seon.task/id ?handle] [?p :seon.task/merge ?handle] [?p :seon.task/proposal _ ?tx]]
+                    home)]
+    (if (db/read-refusal? found)
+      []
+      (->> (group-by #(:seon.task/merge (nth % 2)) found)
+           vals
+           (map #(last (sort-by second %)))
+           (sort-by first)
+           (mapv #(-> (nth % 2) (update :seon.task/proved set) (assoc :seon.task/outcome :accepted)))))))
 
 (defn- landing-tx
   "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
@@ -2209,23 +2229,28 @@
   (let [main (or (:seon.source/commit-id landed) (get-in landed [:seon.source/accepted :seon.source/commit-id]))
         git (:seon.git/commit landed)
         red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))]
-    [(cond-> {:seon.task/id merge-task}
-       main (assoc :seon.task/landed main)
-       (string? git) (assoc :seon.task/landed-git git)
-       (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
-       (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]))
+    (cond-> [(cond-> {:seon.task/id merge-task}
+               main (assoc :seon.task/landed main)
+               (string? git) (assoc :seon.task/landed-git git)
+               (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
+               (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]
+      ;; a resumed landing that committed answers the refusal its stopped attempt recorded
+      (and (string? git) (not (:seon.error/type landed)))
+      (conj [:db.fn/retractAttribute [:seon.task/id merge-task] :seon.task/refusal]))))
 
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
-  is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
-  root's world, then record its result on the merge task at the task home (`landing-tx`). Answers the landing, or
-  nil when nothing was landed."
+  is open and unrefused, or accepted with no git commit (a landing that stopped after acceptance, which
+  `seon.cluster.source/land!` resumes from its record): `seon.cluster.source/land!` into the checkout
+  `:seon.config.fs/working-root` through root's world, then record its result on the merge task at the task home
+  (`landing-tx`). Answers the landing, or nil when nothing was landed."
   {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
   [cluster agent-id proposal]
   (let [database (db/db (:seon.db/connection cluster))
-        land? (agent-dial database cluster agent-id :seon.config.root/land?)]
+        land? (agent-dial database cluster agent-id :seon.config.root/land?)
+        {outcome :seon.task/outcome refusal :seon.task/refusal git :seon.task/landed-git} proposal]
     (when (and (true? land?) (:seon.task/merge proposal)
-               (not (:seon.task/outcome proposal)) (not (:seon.task/refusal proposal)))
+               (or (and (nil? outcome) (nil? refusal)) (and (= :accepted outcome) (nil? git))))
       (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
             ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
             execution (@cluster-agent-acquire-context!
@@ -2246,7 +2271,8 @@
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
   it ended green (`my.program/proposal!`, the agent's own act; a proposal this end already recorded is reused,
-  `end-proposal`), land it with no root when the dial says so (`land-end!`), record the agent's outcome at the
+  `end-proposal`), land it with no root when the dial says so (`land-end!`), after resuming every landing that
+  stopped after acceptance (`unfinished-landings`), record the agent's outcome at the
   task home (`seon.context/outcome-tx`), send root the one end message (`end-message`), then close the agent
   (`end-task-call`), last, so whoever sees the agent closed finds its message; nil otherwise. An end whose message
   is not delivered leaves the agent open, so the next observation delivers it; one already delivered is not sent
@@ -2271,8 +2297,12 @@
                                                 :seon.db/connection (:seon.db/connection execution)
                                                 :seon.agent/id agent-id})))
             _ (when (:seon.error/at proposal) (fault! 'my.program/proposal! proposal))
-            landed (when (:seon.task/merge proposal) (land-end! cluster agent-id proposal))
-            _ (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))
+            ;; landings that stopped after acceptance resume first, in main's order, before this end's own
+            landed (into [] (keep #(land-end! cluster agent-id %))
+                         (concat (remove #(= (:seon.task/merge proposal) (:seon.task/merge %)) (unfinished-landings (db/db home)))
+                                 (when (:seon.task/merge proposal) [proposal])))
+            _ (doseq [refused landed :when (and (:seon.error/at refused) (not (:seon.error/message refused)))]
+                (fault! `land-end! refused))
             ;; the outcome is written at the task home before the message, so whoever reads the message finds it
             outcome-tx (@context-outcome-tx (db/db connection) agent-id)
             kept (when (seq outcome-tx)
