@@ -3,6 +3,7 @@
   (`seon.cluster.source/prepare-merge!`, `accept-merge!`)."
   (:require [babashka.process :as process]
             [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -16,6 +17,7 @@
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.program :as program]
+            [seon.schema :as schema]
             [seon.task :as task]
             [seon.test]
             [seon.test-support :as support]))
@@ -263,21 +265,22 @@
        "(deftest side-identity-test (is (= 3 (side 3))))\n"))
 
 (defn- proposed!
-  "An own-branch agent assigned the task `tq.land/<task-name>` that redefines it as `fix` and proposes its
-  merge; the open proposal on the cluster `connection` holds."
-  [running connection task-name fix]
+  "An own-branch agent assigned the task `<ns>/<task-name>` (`tq.land` by default) that evaluates `fix` in
+  that namespace and proposes its merge; the open proposal on the cluster `connection` holds."
+  ([running connection task-name fix] (proposed! running connection 'tq.land task-name fix))
+  ([running connection ns-sym task-name fix]
   (let [agent-id (str "land-" task-name "-" (id/id))
-        {branch :seon.store/branch} (support/own-branch-agent! running agent-id "(ns tq.land)")
-        id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'tq.land
+        {branch :seon.store/branch} (support/own-branch-agent! running agent-id (str "(ns " ns-sym ")"))
+        id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns ns-sym
                                          :seon.task/name task-name :seon.task/kind :function :seon.task/intent "Fix."}))
         assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                 :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
     (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
-    (let [defined (agent-eval running agent-id (str "(in-ns 'tq.land)\n" fix))
+    (let [defined (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
           proposed (agent-eval running agent-id "(my.program/propose-merge! {})")]
       ;; a refused fixture step is surfaced, never left for the landing to miss
       (or (some #(when (= branch (:seon.task/branch %)) %) ((requiring-resolve 'my.program/proposals) {:seon.db/db (db/db connection)}))
-          (throw (ex-info "The agent proposed no merge." {:defined defined :proposed proposed}))))))
+          (throw (ex-info "The agent proposed no merge." {:defined defined :proposed proposed})))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/land-is-one-call 'seon.test/an-unloaded-agent-namespace-runs-interpreted-at-the-gate}
            :seon.test/long "Two own-branch agents' first requests, assignments and proposal runs, and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
@@ -332,6 +335,72 @@
              (is (= main (db/commit-id (db/db connection))) "main is unchanged")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+         (finally (support/delete-root! root)))))))
+
+(def ^:private shape-source
+  ;; a producer, its consumer and the test reading both, over the schema resource's :tq.shape/radius
+  (str "(ns tq.shape\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+       "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :int]}\n  [r]\n  r)\n\n"
+       "(defn label\n  \"The area's label.\"\n  {:malli/schema [:=> [:cat :int] :string]}\n  [a]\n  (str a))\n\n"
+       "(deftest ^{:seon/tasks #{'tq.shape/area}} area-test (is (= \"25\" (label (area 5)))))\n"))
+
+(def ^:private shape-schemas
+  "#:tq.shape{:radius :int\n           :side   :int}\n")
+
+(defn- schema-entities
+  "The schema entities publication declares for `forms` over `database`'s projection."
+  [database forms]
+  (let [projection (reduce-kv (fn [p k v] (schema/projection-with-schema p k v {:seon.schema.admission/source :core}))
+                              (db/carried-projection database) forms)]
+    (schema/canonical-schema-entities projection forms)))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-function-and-its-schema-land-as-one-unit}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 180000}
+  a-function-and-its-schema-land-as-one-unit
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/shape.clj"
+           schema-path "resources/seon/schemas/tq.shape.edn"
+           root (checkout! "land-schema-test" {path shape-source schema-path shape-schemas})
+           ;; the checkout's schemas, then its file, declared at the cluster head unrun, as publication declares them
+           schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
+                    "(seon.schema/register! :tq.shape/area [:int {:min 0}])\n"
+                    "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :tq.shape/area]}\n  [r]\n  (* r r))\n"
+                    "(defn label\n  \"The area's label.\"\n  {:malli/schema [:=> [:cat :tq.shape/area] :string]}\n  [a]\n  (str a))")]
+       (try
+         (let [proposal (proposed! running connection 'tq.shape "area" fix)
+               before (git! root "rev-parse" "HEAD")
+               landed (source/land! execution proposal root)
+               main (db/db connection)
+               file-schemas (edn/read-string (slurp (io/file root schema-path)))
+               published (into {} (map (juxt :seon.schema/key :seon.program/definition-digest))
+                               (schema/canonical-schema-entities (db/carried-projection main) file-schemas))
+               held #(:seon.program/definition-digest (db/pull main [:seon.program/definition-digest] [:seon.schema/key %]))]
+           (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
+           (is (= #{path schema-path} (set (get-in landed [:seon.source/written :seon.source/changed-paths])))
+               "the function's file and its schema resource are written")
+           (is (= {:tq.shape/radius [:int {:min 0}] :tq.shape/side :int :tq.shape/area [:int {:min 0}]} file-schemas)
+               "the resource declares the replaced and the added schema beside the unchanged one")
+           (is (str/includes? (slurp (io/file root schema-path)) ":side   :int") "an unchanged entry keeps its text")
+           (is (= {:tq.shape/radius (held :tq.shape/radius) :tq.shape/area (held :tq.shape/area)}
+                  (select-keys published [:tq.shape/radius :tq.shape/area]))
+               "the resource publishes the digests main holds")
+           (is (= [:=> [:cat :tq.shape/area] :string]
+                  (edn/read-string (:seon.fn/spec (db/pull main [:seon.fn/spec] [:seon.fn/sym 'tq.shape/label]))))
+               "the consumer's contract names the new schema on main")
+           (is (= #{path schema-path}
+                  (set (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" (:seon.git/commit landed)))))
+               "one git commit carries both files")
+           (is (= before (git! root "rev-parse" "HEAD^"))))
          (finally (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}

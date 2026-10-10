@@ -9,6 +9,7 @@
   `:current-src` is opened or retained."
   (:require [seon.error.refusal]
             [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -24,6 +25,9 @@
             [seon.program :as program]
             [seon.test.cache :as test.cache]
             [hasch.core :as hasch]
+            [rewrite-clj.node :as node]
+            [rewrite-clj.parser :as parser]
+            [rewrite-clj.zip :as z]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -1305,21 +1309,151 @@
           :else {:seon.source/path path :seon.source/base-digest base-digest
                  :seon.source/candidate-bytes candidate :seon.source/proof-rows (vec changes)})))))
 
+(defn- schema-path
+  "The schema resource `k` is declared in: its namespace's file under the
+  checkout's `resources/` (`seon.schema.edn/default-resource`, whose loader
+  refuses a key placed in another namespace's file)."
+  {:malli/schema [:=> [:cat :qualified-keyword] :seon.source/path]}
+  [k]
+  (str "resources/" schema.edn/default-resource "/" (namespace k) ".edn"))
+
+(defn- schema-entry-edit
+  "`children` (a schema resource map node's children) with `k`'s entry set to
+  `form`: its value replaced, its entry and the whitespace before it removed
+  when `form` is nil, or, for a new `k`, an entry inserted before the first
+  greater key when the keys are sorted, else appended, separated as the
+  file's first two entries are. `prefix` is the map's namespace qualifier."
+  {:malli/schema [:=> [:cat [:vector :any] [:maybe :string] :qualified-keyword [:maybe :string]] [:vector :any]]}
+  [children prefix k form]
+  (let [significant (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
+        keys-at (vec (take-nth 2 significant))
+        key-of #(node/sexpr (nth children %))
+        at (some #(when (= k (key-of %)) %) keys-at)
+        after-key #(some (fn [i] (when (> i %) i)) significant)
+        value-node #(parser/parse-string form)
+        entry #(vector (node/keyword-node (if (= prefix (namespace k)) (keyword (name k)) k)) (node/spaces 1) (value-node))
+        separator (if (< 1 (count keys-at))
+                    (vec (remove node/comment? (subvec children (inc (after-key (first keys-at))) (second keys-at))))
+                    [(node/spaces 1)])
+        splice (fn [from to nodes] (into (into (subvec children 0 from) nodes) (subvec children to)))]
+    (cond
+      (and at form) (assoc children (after-key at) (value-node))
+      at (let [before (last (filter #(< % at) significant))
+               value (after-key at)]
+           (if before
+             (splice (inc before) (inc value) [])
+             (splice at (or (after-key value) (count children)) [])))
+      (nil? form) children
+      (empty? keys-at) (splice 0 0 (entry))
+      :else (let [ks (map key-of keys-at)
+                  greater (when (= ks (sort ks)) (some #(when (pos? (compare (key-of %) k)) %) keys-at))]
+              (if greater
+                (splice greater greater (into (entry) separator))
+                (let [end (inc (last significant))] (splice end end (into separator (entry)))))))))
+
+(defn- schema-file-text
+  "`text`, one schema resource's EDN map (plain or namespaced), with each
+  `[k form]` of `edits` applied by rewrite-clj (`schema-entry-edit`); every
+  other node keeps its text."
+  {:malli/schema [:=> [:cat :string [:sequential [:tuple :qualified-keyword [:maybe :string]]]] :string]}
+  [text edits]
+  (let [outer (z/find (z/of-string text) z/right #(#{:map :namespaced-map} (z/tag %)))
+        [m prefix] (if (= :namespaced-map (z/tag outer))
+                     [(z/find (z/down outer) z/right #(= :map (z/tag %))) (:prefix (z/node (z/down outer)))]
+                     [outer nil])
+        children (reduce (fn [children [k form]] (schema-entry-edit children prefix k form))
+                         (vec (node/children (z/node m))) edits)]
+    (z/root-string (z/replace m (node/replace-children (z/node m) children)))))
+
+(defn- schema-entry-digest
+  "The definition digest publication gives `form` declared as `k` under
+  `projection` (`seon.schema/canonical-schema-entities`)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :any] :seon.program/definition-digest]}
+  [projection k form]
+  (:seon.program/definition-digest (first (schema/canonical-schema-entities projection {k form}))))
+
+(defn- proven-schema-file
+  "The candidate bytes of the schema resource `identities` (schema keys of one
+  namespace) are declared in, under `root`, with each entry as `after` holds
+  it: replaced, removed or added by `schema-file-text`. A file entry that
+  holds neither `before`'s nor `after`'s form is a `:conflict`. Proven by
+  reading the candidate back: each written entry's publication digest
+  (`schema-entry-digest` under `after`'s projection) equals `after`'s, a
+  removed one is absent, and every other entry reads as it did."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
+                  [:or :seon.source/proof :seon.source/write-back-error]]}
+  [before after identities root]
+  (let [path (schema-path (second (first identities)))
+        file (io/file root path)
+        base-bytes (when (.isFile file) (Files/readAllBytes (.toPath file)))
+        base-text (some-> ^bytes base-bytes (String. "UTF-8"))
+        pull (fn [database [_ k]]
+               (let [entity (db/pull database [:db/id :seon.schema/key :seon.schema/form :seon.program/definition-digest]
+                                     [:seon.schema/key k])]
+                 (when (:db/id entity) (dissoc entity :db/id))))
+        rows (vec (for [identity (sort-by str identities)] [identity (pull before identity) (pull after identity)]))
+        form-of #(if % (edn/read-string (:seon.schema/form %)) ::absent)
+        digest-of #(or (:seon.program/definition-digest %) :seon.program/absent)
+        read-map #(try (let [value (edn/read-string %)] (when (map? value) value)) (catch Exception _ nil))
+        ours (some-> base-text read-map)
+        projection (db/carried-projection after)
+        refuse (fn [reason message evidence] (write-back-refusal reason message (assoc evidence :seon.source/path path)))]
+    (cond
+      (nil? base-bytes) (refuse :file-absent "The changed schemas' resource is absent under the root." {})
+      (nil? ours) (refuse :not-analyzable "The schema resource as it is now does not read as one EDN map." {})
+      :else
+      (let [conflicting (into {} (keep (fn [[[_ k :as identity] was now]]
+                                         (let [held (get ours k ::absent)]
+                                           (when-not (#{(form-of was) (form-of now)} held)
+                                             [identity {:seon.program/base-digest (digest-of was)
+                                                        :seon.program/branch-digest (digest-of now)
+                                                        :seon.program/head-digest
+                                                        (if (= ::absent held) :seon.program/absent
+                                                            (schema-entry-digest (db/carried-projection before) k held))}]))))
+                              rows)
+            written (map (comp second first) rows)
+            candidate (when (empty? conflicting)
+                        (schema-file-text base-text (mapv (fn [[[_ k] _ now]] [k (:seon.schema/form now)]) rows)))
+            read (some-> candidate read-map)
+            differing (when read
+                        (into (vec (keep (fn [[[_ k :as identity] _ now]]
+                                           (when-not (if now
+                                                       (and (contains? read k)
+                                                            (= (digest-of now) (schema-entry-digest projection k (get read k))))
+                                                       (not (contains? read k)))
+                                             identity))
+                                         rows))
+                              (when (not= (apply dissoc ours written) (apply dissoc read written)) [:seon.source/other-entries])))]
+        (cond
+          (seq conflicting)
+          (refuse :conflict "The resource changed these schemas since your branch's base, and your branch changed them too."
+                  {:seon.program/conflict-digests conflicting})
+          (nil? read) (refuse :not-analyzable "The candidate schema resource does not read as one EDN map." {})
+          (seq differing)
+          (refuse :not-equivalent "The candidate schema resource does not declare exactly the accepted schemas."
+                  {:seon.error/offending differing})
+          :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
+                 :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
+
 (defn- change-path
-  "The relative path of the one file `identity`'s change is written into: the
-  declaration's own file as `before` recorded it, else (an addition) its
-  namespace's file; nil when neither is recorded."
+  "The relative path of the one file `identity`'s change is written into: a
+  schema's resource (`schema-path`), the declaration's own file as `before`
+  recorded it, else (an addition) its namespace's file; nil when neither is
+  recorded."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :seon.source/path]]}
-  [before [_ declared :as identity]]
-  (or (get-in (db/pull before [{:seon.fn/file [:seon.fn.file/relative-path]}] identity)
-              [:seon.fn/file :seon.fn.file/relative-path])
-      (when (qualified-symbol? declared)
-        (:seon.fn.file/relative-path (namespace-path before (symbol (namespace declared)))))))
+  [before [attribute declared :as identity]]
+  (if (= :seon.schema/key attribute)
+    (schema-path declared)
+    (or (get-in (db/pull before [{:seon.fn/file [:seon.fn.file/relative-path]}] identity)
+                [:seon.fn/file :seon.fn.file/relative-path])
+        (when (qualified-symbol? declared)
+          (:seon.fn.file/relative-path (namespace-path before (symbol (namespace declared))))))))
 
 (defn- proven-files
-  "`proven-file` for each file the changes of `identities` are written into,
-  by path: a function and the test proving it are two files of one merge.
-  The first refusal answers; a change naming no file refuses `:one-file`."
+  "`proven-file` (`proven-schema-file` for schemas) for each file the changes
+  of `identities` are written into, by path: a function, its schema and the
+  test proving it are three files of one merge. The first refusal answers; a
+  change naming no file refuses `:one-file`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
                   [:or [:vector :seon.source/proof] :seon.source/write-back-error]]}
   [before after identities root]
@@ -1330,7 +1464,8 @@
       (write-back-refusal :one-file "Each change needs its source and one file."
                           {:seon.error/offending (vec (sort-by str (get groups nil)))})
       :else (reduce (fn [proofs [_ group]]
-                      (let [proof (proven-file before after (set group) root)]
+                      (let [prove (if (= :seon.schema/key (ffirst group)) proven-schema-file proven-file)
+                            proof (prove before after (set group) root)]
                         (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
                     [] (sort-by key groups)))))
 
