@@ -182,6 +182,19 @@ Each is small, names its proof and what it makes measurably better.
   is published after accounting; writer cost per transaction via `:write-fn-map`; node cache bounded by bytes.
 - 2026-10-10 Tasks are entities upserted as the chain refines them, with history; author little, derive the rest.
 - 2026-10-10 Task names are fully namespaced symbols; docs live at the symbol level, linked in the database.
+- 2026-10-10 The feedback loop (honest step cost, cost entities, live diff to main, schema cost) is designed in
+  [FEEDBACK-LOOP](schedule/cards/FEEDBACK-LOOP.md) as 17 stages of about 15 minutes each; it replaces §4 and §5
+  steps 1–2 as the work order. The loop works crudely after stages 1, 2, 4 and 5.
+- 2026-10-10 Stored data is described in Datahike's terms: entities, attributes, values, datoms (AGENTS.md vocabulary).
+  Cost is a cost entity per function, identified by its symbol, with values replaced in place and no history.
+- 2026-10-10 Numbers are live: each reply shows the request's own measured values against main's stored values (which
+  change only when merges land). A threshold of 1.41× only gates when a branch rewrites its stored value.
+- 2026-10-10 Schema cost is measured once per schema digest at contract-writing time (generate samples, validate,
+  record), flagged in that reply when over budget, and re-measured only when the schema changes.
+- 2026-10-10 Land the Datahike fork's commit-cost change now (FEEDBACK-LOOP stage 11).
+- 2026-10-10 Merge bases are found by the fork point's `t` and `as-of`, never by walking commits the collection may
+  have removed (task `seon.cluster.source/merge-base-survives-collection`). There is no live data to migrate:
+  default is nuked and rebuilt after the fix.
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog. Stay on deepseek-flash. Commits 1–3 lines; docs
@@ -236,7 +249,7 @@ agents cannot record their output. Options: (a) write-back for task files throug
 (b) the database is the task's home and the EDN file is generated at commit; (c) keep hand-edited files.
 Recommendation: (a); it is the same mechanism functions use.
 
-**Q3. Is full history really kept?** *Under investigation (lane commit-id-gc): stored commit ids may stop loading after the 1 h window.*
+**Q3. Is full history really kept?** *Decided 2026-10-10: yes; keep the 1 h window. The merge base, the one consumer that loaded old commits, moves to `t` (see §7).*
 Verified at the REPL (JVM mode, default): `d/history` sees 819 transactions spanning 265 hours (2026-09-28 to today);
 `d/as-of` at 2026-10-03 answers 5,610 functions against 5,874 now; the last collection (2026-10-09, 4.3 GB reclaimed,
 792,620 objects swept) removed none of it. Why: with `:keep-history? true` retracted datoms live in the temporal
