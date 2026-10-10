@@ -704,8 +704,28 @@
                                    history namespaces)) [])]
     [(set direct) (set namespace-symbols)]))
 
+(defn- schema-consumers
+  "The functions whose contract names schema `k`, or a schema referencing it
+  transitively (`:seon.schema/references`), by an arity's input or output
+  refs: what a schema change reaches."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:set :qualified-symbol]]}
+  [database k]
+  (let [closure (loop [found #{k} frontier [k]]
+                  (let [referring (selection-read!
+                                   (db/q '[:find [?key ...] :in $ [?r ...]
+                                           :where [?s :seon.schema/references ?r] [?s :seon.schema/key ?key]]
+                                         database frontier))
+                        new (vec (remove found referring))]
+                    (if (seq new) (recur (into found new) new) found)))]
+    (set (selection-read!
+          (db/q '[:find [?symbol ...] :in $ [?k ...]
+                  :where (or [?a :seon.fn.arity/input-refs ?k] [?a :seon.fn.arity/output-refs ?k])
+                  [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?symbol]]
+                database (vec closure))))))
+
 (defn- selection-seeds
-  "Resolve supplied definition and namespace identities in this database."
+  "Resolve supplied definition, namespace and schema identities in this database;
+  a schema seeds the functions whose contracts name it (`schema-consumers`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed]
                   [:or [:set :qualified-symbol] :seon.test/selection-error :seon.test/unknown-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
@@ -725,7 +745,9 @@
                       (contains? members :seon.error/operation)) (reduced members)
                  (empty? members) (reduced (unknown change "Namespace has no analyzed definitions."))
                  :else (into seeds members)))
-         (if (qualified-symbol? value)
+         (cond
+           (= attribute :seon.schema/key) (into seeds (schema-consumers database value))
+           (qualified-symbol? value)
            (let [known (db/q '[:find ?e . :in $ ?symbol
                                :where (or [?e :seon.fn/sym ?symbol]
                                           [?e :seon.test/sym ?symbol]
@@ -741,6 +763,7 @@
                    :else (reduced (selection-refusal database :seon.test/identity-unresolved
                                    "Changed identity has no definition, history or incoming edge."
                                    [:seon.fn/sym value]))))
+           :else
            (reduced (selection-refusal database :seon.test/coverage-unknown
                                        "This changed declaration has no bounded graph selection." change))))))
    #{} changed))
