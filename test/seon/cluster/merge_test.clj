@@ -544,6 +544,54 @@
            (writable! root "test/tq" true)
            (support/delete-root! root)))))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-resumed-landing-reads-its-record-under-the-commit-lock}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and three landings."
+           :seon.test/long-ms 120000}
+  two-concurrent-resumes-of-a-stopped-landing-make-one-commit-and-no-refusal
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/shape.clj"
+           schema-path "resources/seon/schemas/tq.shape.edn"
+           root (checkout! "land-race-test" {path shape-source schema-path shape-schemas})
+           schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
+                    "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :int]}\n  [r]\n  (* r r))")
+           holder (volatile! nil)]
+       (try
+         (let [proposal (proposed! running connection 'tq.shape "area" fix)
+               merge-task (:seon.task/merge proposal)
+               head (git! root "rev-parse" "HEAD")]
+           (writable! root "test/tq" false)
+           (is (= :install-failed (:seon.source/write-back-refused (source/land! execution proposal root)))
+               "the landing stops after acceptance")
+           (writable! root "test/tq" true)
+           ;; a lane commit holds the lock while both resumes start, so both read the record before either commits
+           (vreset! holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
+                                            "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
+                                            (str root "/.git/lane-commit.lock")))
+           (is (= "locked" (.readLine (io/reader (:out @holder)))) "a lane commit holds the lock")
+           (let [resumes [(future (source/land! execution proposal root)) (future (source/land! execution proposal root))]]
+             (is (= [::waiting ::waiting] (mapv #(deref % 2000 ::waiting) resumes)) "both resumes wait for the lock")
+             (.close ^java.io.OutputStream (:in @holder))
+             (let [landed (mapv #(deref % 60000 nil) resumes)
+                   sha (git! root "rev-parse" "HEAD")]
+               (is (= [nil nil] (mapv :seon.error/type landed)) "neither resume answers a refusal")
+               (is (= [sha sha] (mapv :seon.git/commit landed)) "both answer the one commit")
+               (is (= head (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
+               (is (= sha (:seon.task/landed-git (db/pull (db/db connection) [:seon.task/landed-git] [:seon.task/id merge-task])))
+                   "the merge task records it"))))
+         (finally
+           (some-> @holder :in (#(.close ^java.io.OutputStream %)))
+           (writable! root "test/tq" true)
+           (support/delete-root! root)))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
   a-landed-merge-is-one-git-commit-of-exactly-its-paths
   (let [root (checkout! "land-commit-test" {"src/a.clj" "(ns a)\n" "src/b.clj" "(ns b)\n" "notes.txt" "x\n"})

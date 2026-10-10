@@ -1786,16 +1786,32 @@
   (let [{:keys [exit out]} (git root ["log" "-n" "1" "--format=%H" "-F" (str "--grep=Merge-task: " merge-task)])]
     (when (and (zero? exit) (not (str/blank? out))) out)))
 
+(defn- recorded-landing
+  "What merge task `merge-task` records of its landing on `database`: the
+  accepting transaction, the gate run, the main and git commits and the files
+  installed (path to candidate digest)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :map]}
+  [database merge-task]
+  (let [{accepted :seon.task/accepted-tx :as row}
+        (db/pull database [{:seon.task/accepted-tx [:db/id]} :seon.task/gate-run :seon.task/landed
+                           :seon.task/landed-git :seon.task/installed]
+                 [:seon.task/id merge-task])]
+    (cond-> (select-keys row [:seon.task/gate-run :seon.task/landed :seon.task/landed-git])
+      (:db/id accepted) (assoc :seon.source/accepted-t (:db/id accepted))
+      true (assoc :seon.source/installed (into {} (:seon.task/installed row))))))
+
 (defn write-and-commit!
   "`write-back!` of `request` and the commit of exactly what it wrote
   (`commit!`'s checks and verification, its message from `acceptance`), both
   while this process holds the checkout's `.git/lane-commit.lock`, so no other
   landing or lane commit reads, replaces or commits those files in between.
-  The files of the request's `:seon.source/installed` (written by an earlier
-  call that stopped) are not written again and are committed with the rest.
-  With `:seon.task/merge`, each installed file and the git commit are recorded
-  on that merge task as they are made; a resumed call whose files were all
+  With `:seon.task/merge`, the merge task's record is read inside that hold:
+  the files it records installed (by an earlier call that stopped) are not
+  written again and are committed with the rest, each installed file and the
+  git commit are recorded on it as they are made, a recorded git commit is
+  answered with nothing written, and a resumed call whose files were all
   written answers the commit its history already holds for the merge task.
+  Without one, the request's `:seon.source/installed` names the files written.
   Answers `{:seon.source/written … :seon.git/commit …}`, the write-back's
   refusal, or the commit's refusal carrying `:seon.source/written`.
 
@@ -1804,23 +1820,30 @@
   {:malli/schema [:=> [:cat :seon.source/write-back-request :seon.source/acceptance]
                   [:or [:map [:seon.source/written :seon.source/written] [:seon.git/commit :seon.git/commit]]
                    :seon.source/write-back-error :seon.git/commit-error :seon.error/value]]}
-  [{root :seon.fn/root connection :seon.db/connection merge-task :seon.task/merge installed :seon.source/installed :as request}
+  [{root :seon.fn/root connection :seon.db/connection merge-task :seon.task/merge :as request}
    acceptance]
   (or (root-refusal root)
       (call-with-commit-lock
        root []
        (fn []
-         (let [written (write-back! request)
-               candidates (into (or installed {}) (map (juxt :seon.source/path :seon.source/candidate-digest))
+         ;; the merge task's record is read inside the lock hold: a concurrent resume that committed first is answered
+         (let [recorded (when merge-task (recorded-landing (db/db connection) merge-task))
+               landed-git (:seon.task/landed-git recorded)
+               installed (if merge-task (:seon.source/installed recorded) (or (:seon.source/installed request) {}))
+               written (if landed-git
+                         {:seon.source/changed-paths [] :seon.source/files []}
+                         (write-back! (assoc request :seon.source/installed installed)))
+               candidates (into installed (map (juxt :seon.source/path :seon.source/candidate-digest))
                                 (:seon.source/files written))
                paths (vec (sort (keys candidates)))
-               found (when (and merge-task (seq installed) (empty? (:seon.source/files written)))
+               found (when (and merge-task (not landed-git) (seq installed) (empty? (:seon.source/files written)))
                        (let [sha (landed-commit root merge-task)]
                          (when (and sha (every? #(= (candidates %) (blob-digest root % sha)) paths)) sha)))
                committed (cond (:seon.error/at written) nil
+                               landed-git {:seon.git/commit landed-git}
                                found {:seon.git/commit found}
                                :else (commit-locked root paths candidates acceptance))
-               recorded (when (and merge-task (:seon.git/commit committed))
+               recorded (when (and merge-task (not landed-git) (:seon.git/commit committed))
                           (db/transact! connection [[:db/add [:seon.task/id merge-task] :seon.task/landed-git
                                                      (:seon.git/commit committed)]]))]
            (cond
@@ -1860,20 +1883,6 @@
     (cond-> {:seon.task/merge merge-task}
       (symbol? task-sym) (assoc :seon.task/sym task-sym)
       (string? agent-id) (assoc :seon.agent/id agent-id))))
-
-(defn- recorded-landing
-  "What merge task `merge-task` records of its landing on `database`: the
-  accepting transaction, the gate run, the main and git commits and the files
-  installed (path to candidate digest)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :map]}
-  [database merge-task]
-  (let [{accepted :seon.task/accepted-tx :as row}
-        (db/pull database [{:seon.task/accepted-tx [:db/id]} :seon.task/gate-run :seon.task/landed
-                           :seon.task/landed-git :seon.task/installed]
-                 [:seon.task/id merge-task])]
-    (cond-> (select-keys row [:seon.task/gate-run :seon.task/landed :seon.task/landed-git])
-      (:db/id accepted) (assoc :seon.source/accepted-t (:db/id accepted))
-      true (assoc :seon.source/installed (into {} (:seon.task/installed row))))))
 
 (defn- recorded-accepted
   "The accepted merge the transaction `t` made on `database`'s branch, read
@@ -1986,8 +1995,7 @@
                      :else
                      (timed :write-and-commit
                             #(write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root
-                                                 :seon.task/merge merge-task
-                                                 :seon.source/installed (:seon.source/installed recorded)}
+                                                 :seon.task/merge merge-task}
                                                 acceptance)))]
     (cond
       (seq (:seon.program/conflict prepared))
