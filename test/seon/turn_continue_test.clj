@@ -337,3 +337,46 @@
            (is (= {:seon.task/end :done :seon.task/proof-counts {:green 1} :seon.task/calls 1}
                   (select-keys (:seon.task/ended shown) [:seon.task/end :seon.task/proof-counts :seon.task/calls]))
                "root's block shows the ended value derived from the agent's branch")))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-reached-red-test-keeps-a-task-from-ending-done}
+           :seon.test/long "An own-branch agent's setup and settings with their test steps and one fixture-model pass with its test step."
+           :seon.test/long-ms 60000}
+  a-change-greening-its-proof-and-reddening-a-reaching-test-does-not-end-done
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           agent-id (str "reached-red-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           ;; the proof wants a square; another test reaching `area` holds its identity
+           _ (support/declare-source! connection 'tq.endr
+                                      (str "(ns tq.endr (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.endr/area}} area-test (is (= 25 (area 5))))\n"
+                                           "(deftest identity-test (is (= 3 (area 3))))\n"))
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))]
+       (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                          :seon.db/connection connection :seon.task/assigned id
+                                                          :seon.task/agent [:seon.agent/id agent-id]
+                                                          :seon.task/branch branch})))
+           "root assigns the task to the agent's branch")
+       (support/with-provider
+        (atom []) (support/reply-queue ["(in-ns 'tq.endr)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"])
+        (fn [server]
+          (agent-eval running agent-id (str "(my.agent/settings! "
+                                            (seon.id/printed (assoc (support/provider-config server)
+                                                                    :seon.config.ai/no-provider false
+                                                                    :seon.config.run/max-episode-runs 1))
+                                            ")"))
+          (support/outside-wake-on-branch! running agent-id target "Work your task.")
+          (until #(:seon.agent/admission-closed-tx
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                 1000)))
+       (let [ends (db/q '[:find [?end ...] :in $ ?agent-id
+                          :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
+                        (db/db connection) agent-id)]
+         (is (= [:capped] ends)
+             "the proof went green but a reaching test went red: the task never ended done, and the cap ended it"))))))
