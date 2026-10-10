@@ -99,7 +99,8 @@
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
-(deftest ^{:seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-refusal-carries-its-variant}
+           :seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
            :seon.test/long-ms 60000}
   a-replaced-function-no-test-reaches-and-a-later-program-write-refuse
   (let [target (support/execution-handle nil)
@@ -120,6 +121,7 @@
             refusal (source/accept-merge! target store proposal)]
         (is (true? (:seon.test/passed? proposal)) "the test owner selects no test and refuses nothing")
         (is (= [(sym "merge-alone")] (:seon.error/offending refusal)))
+        (is (= :seon.source/test-evidence-error (:seon.error/type refusal)) "the refusal carries its variant")
         (is (= before (db/commit-id (db/db h-conn))))
         (testing "a program write on S after the run refuses the named run"
           (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate proposal)})]

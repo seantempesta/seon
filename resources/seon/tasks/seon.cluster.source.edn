@@ -21,6 +21,10 @@
              :intent "`seon.cluster.source/write-back!` proved and installed a landing's files outside `.git/lane-commit.lock`, which `seon.cluster.source/commit!` took only afterwards, so two landings (or a landing and `bin/lane commit`) could read the same old bytes and replace each other's declarations (astra day audit, finding 2b). Done when `seon.cluster.source/write-and-commit!` holds that lock from the file proof through the verified git commit, and `seon.cluster.source/land!` writes and commits only through it."
              :must-read #{seon.cluster.source/write-back! seon.cluster.source/commit! seon.cluster.source/land!}
              :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md#files-and-git"}}
+ #:seon.task{:name "a-landing-refusal-carries-its-variant"
+             :kind :function
+             :intent "`seon.cluster.source/land!` answered some refusals without `:seon.error/type` (comparison refusals from `seon.program/digest-map-refusal`, `seon.cluster.source/accept-merge!`'s evidence refusals) and a conflict as a bare `seon.program/three-way` value, so `seon.turn/landing-tx` invented `:seon.source/landing-refused`. Done when each is built by `seon.error.refusal/error` under its variant (`:seon.program/digest-map-refusal`, `:seon.source/test-evidence-error`, `:seon.source/conflict-error`)."
+             :must-read #{seon.cluster.source/land! seon.cluster.source/accept-merge! seon.program/digest-map-refusal seon.turn/landing-tx seon.error.refusal/error}}
  #:seon.task{:name "a-landing-is-one-git-commit"
              :kind :function
              :intent "A landing's files reached git only through `bin/lane commit`, a Claude-lane tool. Done when `seon.cluster.source/commit!` makes one `git commit --only` of exactly the landing's written paths through `babashka.process/shell`, its message naming the task, merge task, agent, gate run and merge commit, and refuses `:seon.git/commit-error` when anything else is staged in the index (the rule `bin/lane commit` enforces)."

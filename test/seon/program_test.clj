@@ -281,7 +281,8 @@
         (is (m/validate :seon.program/digest-map-refusal result
                     {:registry (:seon.schema.projection/registry projection)}))))))
 
-(deftest changed-identities-scope-the-digest-maps-to-one-change
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-refusal-carries-its-variant}}
+  changed-identities-scope-the-digest-maps-to-one-change
   (let [projection (schema/handed-projection)
         f #(symbol "scoped" (name %))
         entity (fn [s digest] {:seon.fn/sym (f s) :seon.program/definition-digest digest})
@@ -323,7 +324,10 @@
                                           :seon.program/definition-digest digest-a]])
                              head)))))
     (let [result (refusal (example-database projection [(entity :same digest-a)]))]
-      (is (= :seon.program/history result)))))
+      (is (= :seon.program/history result)))
+    (is (= :seon.program/digest-map-refusal
+           (:seon.error/type (program/changed-identities base branch {:seon.program/max-datoms 1})))
+        "a comparison refusal carries its variant")))
 
 (deftest a-removed-namespace-whose-stub-returns-is-retracted-not-undigested
   (let [projection (schema/handed-projection)

@@ -1060,9 +1060,10 @@
             head (db/db (:seon.db/connection source))
             delta (set (keys expected))
             refuse (fn [message offending]
-                     (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
-                      {:seon.error/message message
-                      :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s}))]
+                     (seon.error.refusal/error :seon.source/test-evidence-error
+                      {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
+                       :seon.error/message message
+                       :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s}))]
         (try
           (let [run (db/pull tested [:seon.test.run/branch :seon.test.run/tested-branch :seon.test.run/basis-t]
                              [:seon.test.run/id run-id])
@@ -1764,7 +1765,7 @@
 (defn- land-held!
   "`land!` through `execution`, which carries its `:seon.store/store`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
-                  [:or :seon.source/landed :seon.program/three-way :seon.error/value]]}
+                  [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
   [execution {merge-task :seon.task/merge branch :seon.task/branch proved :seon.task/proved} root]
   (let [store (:seon.store/store execution)
         connection (:seon.db/connection execution)
@@ -1785,6 +1786,11 @@
                         #(write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root}
                                             acceptance)))]
     (cond
+      (seq (:seon.program/conflict prepared))
+      (seon.error.refusal/error :seon.source/conflict-error
+       {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/land!
+        :seon.error/message "The candidate and main changed the same declarations since the merge base; resolve on the branch and propose again."
+        :seon.task/merge merge-task :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
       (not (:seon.source/candidate prepared)) prepared
       (not (:seon.source/commit-id accepted)) accepted
       (:seon.error/at decided) (assoc decided :seon.source/accepted accepted)
@@ -1799,14 +1805,14 @@
   then `write-and-commit!`: `write-back!` into the checkout `root` and the commit of
   exactly the written bytes, under one hold of the lane commit lock.
   Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
-  data, never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
+  data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
   undecided and writes nothing; a write-back or commit refusal after acceptance carries
   `:seon.source/accepted` (main already holds the merge) for a retry.
 
   Example:
   (land! execution proposal \"/Users/me/src/project\")"
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
-                  [:or :seon.source/landed :seon.program/three-way :seon.error/value]]}
+                  [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
   [execution proposal root]
   ;; A cluster handle holds its store in its SCI context's environment, where
   ;; `seon.cluster.agent/acquire-context!` reads it; an acquired context holds it directly.

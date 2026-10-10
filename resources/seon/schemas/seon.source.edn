@@ -139,6 +139,8 @@
               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
+              :conflict-error [:and {:description "land! refused: the candidate and the target changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
+                               [:map [:seon.task/merge :seon.task/merge] [:seon.program/conflict-digests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]]],
               :target-basis-t [:and {:description "The target's basis-t a merge was prepared and tested on: accept refuses when any program declaration changed there since."} :seon.db/basis-t],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
               :expected-digests

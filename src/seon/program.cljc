@@ -549,7 +549,8 @@
      {:malli/schema [:=> [:cat :seon.program/missing-evidence :string :map]
                      :seon.program/digest-map-refusal]}
      [missing message members]
-     (error/diagnostic
+     (error/error
+      :seon.program/digest-map-refusal
       (merge {:seon.error/at (java.util.Date.)
               :seon.error/layer :seon.program/comparison
               :seon.error/operation 'seon.program/digest-map
