@@ -2454,18 +2454,21 @@
        (zero? (:seon.test/error-count result 0))))
 
 (defn- loaded-program
-  "The program this JVM loaded: the commit `seon.sci.eval/loaded-identity` names
-  now, read from `ctx`'s store, else (an identity naming no commit) the booted
-  program `ctx`'s snapshot acquired; an unknown identity answers its
-  diagnostic. The snapshot is its acquisition's value and stays behind a later
-  adoption, so it decides only when no commit is named."
+  "The program this JVM loaded, as `ctx`'s world holds it: the commit
+  `seon.sci.eval/loaded-identity` names now, read from `ctx`'s store, else (an
+  identity naming no commit, or a commit another store adopted, which this
+  world's store never held) the booted program `ctx`'s snapshot acquired; an
+  unknown identity answers its diagnostic. The snapshot is its acquisition's
+  value and stays behind a later adoption, so it decides only when its store
+  holds no named commit."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] [:or :seon.db/database-value :seon.sci.eval/interpretation-error]]}
   [ctx]
-  (let [loaded-id @sci.eval/loaded-identity]
+  (let [loaded-id @sci.eval/loaded-identity
+        store (:seon.store/store (env/of ctx))
+        commit-id (:seon.source/commit-id loaded-id)]
     (cond
       (:seon.error/at loaded-id) loaded-id
-      (:seon.source/commit-id loaded-id)
-      (source/database (:seon.store/store (env/of ctx)) (:seon.source/commit-id loaded-id))
+      (and commit-id (source/commit-database store commit-id)) (source/database store commit-id)
       :else (:seon.sci.eval/loaded-database @(:seon.sci.kernel/program-snapshot ctx)))))
 
 (defn- namespace-declarations
