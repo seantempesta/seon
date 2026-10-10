@@ -42,7 +42,7 @@
 # exactly the committed files' definitions, and is every test reaching what it
 # changed from the cluster head green on its head? Proven, the commit skips
 # `bin/seon check` and carries the branch commit, the verified tests and their
-# run ids as trailers. Only src/ and test/ .clj files qualify; any other path,
+# run ids as trailers. Only src/ and test/ .clj and .cljc files qualify; any other path,
 # a changed host-bound declaration, an unanalyzable file, no live root or a
 # root that has not loaded the gate takes the throwaway check, saying why. A
 # file differing from the branch, an unproven or unreached change, or a test
@@ -375,13 +375,13 @@ staged_only() {
   done < <(git diff --cached --name-only)
 }
 
-# Only source and test Clojure files are judged by branch evidence.
+# Only source and test Clojure files (.clj, .cljc) are judged by branch evidence.
 evidence_paths() {
   local path
   for path in "$@"; do
     case "$path" in
-      src/*.clj|test/*.clj) ;;
-      *) echo "== $path is not a src/ or test/ .clj file: throwaway check required"; return 1 ;;
+      src/*.clj|src/*.cljc|test/*.clj|test/*.cljc) ;;
+      *) echo "== $path is not a src/ or test/ .clj or .cljc file: throwaway check required"; return 1 ;;
     esac
   done
 }
@@ -519,6 +519,7 @@ commit() {
   elif documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
     echo "== documentation only: no program input; bin/seon check not run"
   else
+    [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); nothing committed"
     echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
     bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
   fi
@@ -652,6 +653,7 @@ case "$command" in
     branch_evidence "$evidence_agent" "$evidence_trailer" "$@" ;;
   _lint-cache-sync) lint_cache_sync ;;
   _lint-candidate) lint_candidate "$@" ;;
+  _evidence-paths) evidence_paths "$@" ;;
   _commit-locked) commit_locked "$@" ;;
   release) release "$@" ;;
   status) status "$@" ;;

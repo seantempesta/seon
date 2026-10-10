@@ -100,3 +100,23 @@
     (is (str/includes? body "errors: 0"))
     (is (str/includes? arity "src/b/core.clj:2"))
     (is (str/includes? arity "is called with 1 arg but expects 2"))))
+
+(deftest a-cljc-file-is-branch-evidence-eligible
+  (let [dir (scratch)
+        eligible #(:exit (lane dir "_evidence-paths" %))]
+    (is (zero? (eligible "src/seon/print.cljc")))
+    (is (zero? (eligible "test/seon/print_test.cljc")))
+    (is (zero? (eligible "src/my/program.clj")))
+    (is (= 1 (eligible "resources/seon/x.edn")) "a non-program path still takes the throwaway check")))
+
+(deftest a-fallback-check-names-its-tests
+  (let [dir (scratch)
+        put (fn [path text] (io/make-parents (io/file dir path)) (spit (io/file dir path) text))]
+    (put ".clj-kondo/config.edn" "{}")
+    (put "src/x/core.cljc" "(ns x.core)\n")
+    (sh dir "git" "add" ".clj-kondo")
+    (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "k")
+    (sh dir "env" "LANE_ADOPT=1" "bin/lane" "claim" "one" "src/x/core.cljc")
+    (let [refused (lane dir "commit" "one" "-m" "x" "--branch-evidence" "nobody" "src/x/core.cljc")]
+      (is (= 2 (:exit refused)))
+      (is (str/includes? (:err refused) "names no test: pass each reaching test as --test NS/VAR")))))
