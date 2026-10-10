@@ -56,6 +56,14 @@ Standing rules:
 - Root chores (branch cleanup, measurements) run beside lanes, never ahead of goal work; after a landing root
   launches the next step in the same turn.
 - Every lane names the essential it serves; at most two or three implementation lanes, on disjoint files.
+- A finding is filed the same day with a red tagged proof, or as a row in an existing proof. A task without one is
+  invisible to the schedule: E1's F9 (proof tests unresolvable in an agent's world) and H1 (prose read as code) were
+  seen on 2026-10-08, left unfiled or filed proofless, and met again in chain run 2.
+- Every chain run keeps its branch and ends with reflection: root wakes the agent with questions about why it acted
+  as it did and records the answers. The first reflection found two bugs (an agent created before a restart could not
+  be woken; a root question was treated as more task work).
+- Errors are judged by their producer, not their submitter: the same signature across distinct agents is a Seon
+  defect (lane `agent-error-signatures`); every checkable AGENTS.md law needs a test (audit `laws-without-proofs`).
 - The REPL-only acceptance's host-bound half (31b442840 fell back to `--test`; `proven-file` unreached) still gates
   new platform machinery.
 - Lanes delete with plain `rm`, never `git rm`, and leave nothing staged; a whole-namespace `--test` on a namespace
