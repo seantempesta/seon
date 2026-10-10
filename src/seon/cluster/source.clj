@@ -859,8 +859,8 @@
   `source`'s head H on a fresh branch S of H through the save gate, with the
   `proofs` (the test symbols that prove the change: a merge task's proofs),
   and answer the proposal `accept-merge!` takes: the whole run's verdict and
-  tally, and its red members by name, shown and not gated; only the proofs
-  gate acceptance (AGENTS.md, merge). A change is a
+  tally, and its red members by name, which refuse acceptance (AGENTS.md,
+  merge). A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
@@ -954,12 +954,47 @@
                         (seq red) (assoc :seon.source/red red)))))
           (finally (release! [base branch]))))))))
 
+(defn- red-test-verdicts
+  "Each of `not-green` (test symbols of run `run-id` with no green member) with
+  the run that recorded its result and its verdict: `:unknown` with no
+  executed failure, `:red-on-target` when it is red on `head` for its current
+  reach there, else `:red`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :seon.test/results [:sequential :seon.test/sym]]
+                  [:vector :seon.source/red-test]]}
+  [head run-id results not-green]
+  (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
+        red? (requiring-resolve 'seon.test.runner/red-result?)
+        red-on-target? (requiring-resolve 'seon.test.runner/red-at-current-reach?)]
+    (into [] (map (fn [test-symbol]
+                    (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
+                      {:seon.test/sym test-symbol
+                       :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
+                       :seon.source/verdict (cond (not (and result (red? result))) :unknown
+                                                  (red-on-target? head test-symbol) :red-on-target
+                                                  :else :red)})))
+          (sort (distinct not-green)))))
+
+(defn- red-test-refusal
+  "The refusal of a merge whose run `run-id` on `s` left `red-tests` not
+  green: `:seon.source/red-on-target-error` when each is already red on the
+  target, for root to decide, else `:seon.source/red-test-error`."
+  {:malli/schema [:=> [:cat :seon.test.run/id :seon.store/branch :seon.source/red-tests]
+                  [:or :seon.source/red-test-error :seon.source/red-on-target-error]]}
+  [run-id s red-tests]
+  (let [on-target? (every? #(= :red-on-target (:seon.source/verdict %)) red-tests)]
+    (seon.error.refusal/error
+     (if on-target? :seon.source/red-on-target-error :seon.source/red-test-error)
+     {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
+      :seon.error/message (if on-target?
+                            "Every test the merge leaves red is already red on the target; root decides."
+                            "A test of the named run is not green; a merge commits only when every test is.")
+      :seon.source/red-tests red-tests :seon.source/refused-test-run run-id :seon.test.run/branch s})))
+
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into
-  `source`: the named run on S complete, every one of its `:seon.task/proofs`
-  green (the other reaching members' verdicts are shown by prepare, not
-  gated), every added or replaced function reached by a green member, and S's
-  program unwritten since. The
+  `source`: the named run on S complete, each of its `:seon.task/proofs` a
+  member, every member green (`red-test-refusal`), every added or replaced
+  function reached by a green member, and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the proposal's `:seon.source/expected-digests`; writes to
   other rows never stale it. The merge commit's parents add the candidate and
@@ -998,7 +1033,8 @@
                                          [?m :seon.test.member/symbol ?sym]] tested run-id))
                 green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
                 green (set (vals (select-keys members green-ids)))
-                unproven (vec (sort (remove green proofs)))
+                unproven (vec (sort (remove (set (vals members)) proofs)))
+                red-tests (when (vector? results) (red-test-verdicts head run-id results (remove green (vals members))))
                 ;; A retracted function has nothing to cover: its surviving
                 ;; callers are the writer's refs and the run's reaching tests.
                 ;; What an agent merges back is specified (owner 2026-09-27): the
@@ -1021,9 +1057,10 @@
               (refuse "The named run was not recorded on the tested branch." run)
               (:seon.error/at results) results
               (or (empty? proofs) (seq unproven))
-              (refuse "Every proof of the named run must be green." unproven)
+              (refuse "Every proof must be a member of the named run." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
+              (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "
                            (vec uncontracted) ". Declare their data shapes as registered schemas, "

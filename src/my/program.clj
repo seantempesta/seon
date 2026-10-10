@@ -550,8 +550,9 @@
   "Merge exactly the program `prepare-merge!` tested into my cluster
   (`seon.cluster.source/accept-merge!`), record the merge task `:accepted`,
   and answer the accepted merge `write-back!` takes: the merged identities,
-  the commit before it, its merge commit and the run. Refuses when a proof is
-  not green, or when a merged declaration itself changed since the prepare,
+  the commit before it, its merge commit and the run. Refuses when any test of
+  the run is not green (a test already red on the target separately, for me
+  to decide), or when a merged declaration itself changed since the prepare,
   naming it with both digests. The merge closes the proposing branch: the
   tested branch and the proposal's own branch (its hosted agent first,
   `my.agent/retire-branch!`) retire afterwards as detached io work, off this

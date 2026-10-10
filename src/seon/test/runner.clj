@@ -2242,3 +2242,21 @@
            (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
            vec))
     (catch Exception failure (result-read-error "latest-results" failure))))
+
+(defn red-result?
+  "Whether `result` is an executed, failing recorded test result."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [result]
+  (boolean (and (:seon.test/pass-count result)
+                (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))))))
+
+(defn red-at-current-reach?
+  "Whether `test-symbol`'s latest admitted result on `database` is red for its
+  current reach there: red on that branch as it stands, not only once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
+  [database test-symbol]
+  (let [results (latest-results database [test-symbol])
+        result (when (vector? results) (first results))
+        current (reach-digests database [test-symbol])]
+    (boolean (and result (red-result? result) (map? current)
+                  (= (get current test-symbol) (:seon.test.member/reach-digest result))))))

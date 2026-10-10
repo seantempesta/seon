@@ -115,7 +115,12 @@
                [:parents [:set :seon.source/commit-id]]
                [:seon.source/advanced-base :seon.source/advanced-base]],
               :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
-              :red [:vector {:min 1 :description "The run's members that are not green, by symbol: shown to root, not gated; only the proofs gate acceptance."} :seon.test/sym],
+              :red [:vector {:min 1 :description "The run's members that are not green, by symbol; any refuses acceptance."} :seon.test/sym],
+              :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure, a failure already recorded on the target for its current reach there, or no executed outcome."} :red :red-on-target :unknown],
+              :red-test [:map {:description "A test of a merge's run that is not green, the run that recorded its result and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],
+              :red-tests [:vector {:min 1} :seon.source/red-test],
+              :red-test-error [:and {:description "accept-merge! refused: a test of the named run is not green."} :seon.source/test-evidence-error [:map [:seon.source/red-tests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/red-tests]]],
+              :red-on-target-error [:and {:description "accept-merge! stopped for root: every test the merge leaves red is already red on the target."} :seon.source/test-evidence-error [:map [:seon.source/red-tests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/red-tests]]],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}
                            [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],

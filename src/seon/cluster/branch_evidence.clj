@@ -85,22 +85,6 @@
          ::removed (filterv #(= :seon.program/absent (on-branch %)) changed)
          ::host-bound (filterv host-bound (map second changed))}))))
 
-(defn- red?
-  "Whether `result` is an executed, failing recorded test result."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [result]
-  (boolean (and (:seon.test/pass-count result)
-                (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))))))
-
-(defn- red-on-head?
-  "Whether `test-symbol` is recorded red on `head` for its current reach there."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
-  [head test-symbol]
-  (let [result (test/recorded-result head test-symbol)
-        current (runner/reach-digests head [test-symbol])]
-    (boolean (and (red? result) (map? current)
-                  (= (get current test-symbol) (:seon.test.member/reach-digest result))))))
-
 (defn- run-id
   "The id of the run that recorded `result`, a lookup ref or a pulled run."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.test.run/id]]}
@@ -150,7 +134,7 @@
           (or refusal
               (let [{verified true unverified false} (group-by #(true? (verdicts %)) tests)
                     {before true unproven false}
-                    (group-by #(and (red? (test/recorded-result branch %)) (red-on-head? head %)) unverified)]
+                    (group-by #(and (runner/red-result? (test/recorded-result branch %)) (runner/red-at-current-reach? head %)) unverified)]
                 {::verified (vec verified)
                  ::red-before (vec before)
                  ::unproven (vec unproven)

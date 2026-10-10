@@ -1,4 +1,8 @@
-[#:seon.task{:name "changed-identities-walks-history-for-an-adopted-commit"
+[#:seon.task{:name "a-red-reaching-test-refuses-acceptance"
+             :kind :function
+             :intent "`seon.cluster.source/accept-merge!` gated only the proofs (and each replaced function reaching a green member), so a merge whose proofs were green committed while another test of its run was red, shown only as `:seon.source/red` (AGENTS.md, merge: `merge!` commits only when every test on the merge branch is green; a test already red on main stops it for root). Done when acceptance reads the run's recorded members and refuses `:seon.source/red-test-error` naming each member of the run that is not green (`:seon.source/red-tests`, each with its `:seon.test/sym`, the `:seon.test.run/id` that recorded it and its verdict, red or unknown), and refuses `:seon.source/red-on-target-error` instead when every such test is recorded red on the target for its current reach there; main's head is unchanged."
+             :must-read #{seon.cluster.source/accept-merge! seon.cluster.source/prepare-merge! seon.test/recorded-result seon.test.runner/reach-digests seon.test/green-members}}
+ #:seon.task{:name "changed-identities-walks-history-for-an-adopted-commit"
              :kind :function
              :intent "changed-identities answered 0 identities in 1.2 s on default (2026-09-28) when the cluster's adopted commit was the published commit: with no publication report it reads (d/since (d/history after) basis) over the whole history index, so its cost follows the store, not the change. Done when an equal prior and published commit answers #{} without reading history and a real diff costs what changed, with a timing regression."
              :must-read #{seon.cluster.source/changed-identities}

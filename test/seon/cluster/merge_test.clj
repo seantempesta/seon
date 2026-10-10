@@ -7,6 +7,7 @@
             [seon.cluster.source :as source]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.test]
             [seon.test-support :as support]))
 
 (defn- sym [n] (symbol "seon.cluster.merge-test" n))
@@ -160,3 +161,55 @@
       (finally
         (cluster.agent/release-context! a-context)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch a})))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-red-reaching-test-refuses-acceptance}
+           :seon.test/long "Two prepares and one nested seon.test/run on the target, each one nested seon.test/run (60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 180000}
+  a-red-reaching-test-refuses-acceptance
+  ;; Before, accept-merge! gated only the proofs: a green proof merged a change
+  ;; that turned another reaching test red, shown only as :seon.source/red.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        fn-entity #(entity (db/db %1) :fn %2 %3)
+        test-entity #(entity (db/db %1) :test %2 %3)
+        callee #(str "(defn gate-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
+        c (keyword (str "merge-test-c-" (id/id)))
+        _ (write! h-conn [(fn-entity h-conn "gate-callee" (callee 1))])
+        _ (write! h-conn [(test-entity h-conn "gate-proof" "(clojure.test/deftest gate-proof (clojure.test/is (pos? (seon.cluster.merge-test/gate-callee))))")
+                          (test-entity h-conn "gate-exact" "(clojure.test/deftest gate-exact (clojure.test/is (= 1 (seon.cluster.merge-test/gate-callee))))")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])
+        prepare #(let [p (source/prepare-merge! target store c #{(sym "gate-proof")})]
+                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)
+        refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))]
+    (try
+      (testing "a green proof with another reaching test red on the merge refuses, naming that test"
+        (write! c-conn [(fn-entity c-conn "gate-callee" (callee 2))])
+        (let [proposal (prepare)
+              before (db/commit-id (db/db h-conn))
+              refusal (source/accept-merge! target store proposal)]
+          (is (= [(sym "gate-exact")] (:seon.source/red proposal)) "the gate ran it red")
+          (is (= :seon.source/red-test-error (:seon.error/type refusal)))
+          (is (= #{[(sym "gate-exact") :red]} (refused-tests refusal)))
+          (is (= #{(:seon.test.run/id proposal)} (set (map :seon.test.run/id (:seon.source/red-tests refusal))))
+              "each red test names the run that recorded it")
+          (is (= before (db/commit-id (db/db h-conn))) "main's head is unchanged")))
+      (testing "a test already red on the target refuses separately, named for root"
+        (write! h-conn [(test-entity h-conn "gate-broken" "(clojure.test/deftest gate-broken (clojure.test/is (= 0 (seon.cluster.merge-test/gate-callee))))")])
+        (seon.test/run {:seon.test/policy :named :seon.test/execution target :seon.test/recording-connection h-conn
+                        :seon.test/changed [(sym "gate-broken")]})
+        (write! c-conn [(fn-entity c-conn "gate-callee" (callee "(* 1 1)"))])
+        (let [proposal (prepare)
+              before (db/commit-id (db/db h-conn))
+              refusal (source/accept-merge! target store proposal)]
+          (is (= [(sym "gate-broken")] (:seon.source/red proposal)))
+          (is (= :seon.source/red-on-target-error (:seon.error/type refusal)))
+          (is (= #{[(sym "gate-broken") :red-on-target]} (refused-tests refusal)))
+          (is (= before (db/commit-id (db/db h-conn))) "main's head is unchanged")))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
