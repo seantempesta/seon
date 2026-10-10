@@ -211,6 +211,25 @@
       ;; a compiled definition main has no value for is left out
       (host digest-a 5.0) [] [])))
 
+(deftest ^{:seon/tasks #{'seon.batch/an-unchanged-interpreted-definition-shows-no-cost-entry}}
+  an-interpreted-sample-of-the-digest-main-holds-shows-no-entry
+  ;; chain run 5 (2026-10-10): my.program/search and five seon.test-support
+  ;; helpers, none of them changed, came back as :interpreted entries
+  (let [sym 'request.cost.unchanged/f]
+    (are [half live stored] (= [] (mapv :seon.cost.comparison/flags (shown (cost sym :seon.profile/context half live)
+                                                                          [(cost sym :seon.profile/context half stored)])))
+      :cold [digest-a 1 520.0] [digest-a 1 500.0]
+      :warm [digest-a 30 5.0] [digest-a 100 5.0])))
+
+(deftest ^{:seon/tasks #{'seon.batch/an-entrances-self-time-is-its-forms-work}}
+  an-entrances-self-time-is-never-given-a-ratio
+  ;; the self time of seon.turn.batch/jvm-evaluate is the evaluated form's own work: the
+  ;; digest differs from main's, the two forms differ, and the ratio is no regression
+  (let [sym 'seon.turn.batch/jvm-evaluate]
+    (is (not-any? :seon.cost.comparison/ratio
+                  (shown (cost sym :seon.profile/host :cold [digest-b 1 106063.0])
+                         [(cost sym :seon.profile/host :cold [digest-a 1 25739.0])])))))
+
 (deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
   an-interpreted-live-value-is-never-given-a-ratio-against-a-compiled-main-value
   (let [sym 'request.cost.scope/f]
