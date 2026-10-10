@@ -248,6 +248,9 @@ Each is small, names its proof and what it makes measurably better.
   codebase later. Next, in order: the node-cache cut (efficiency, measured by the loop), the REPL-only acceptance
   rerun, a second chain run with a DeepSeek-flash implementer, then backlog triage. FEEDBACK-LOOP stages 14, 15
   and 17 wait. At most two or three implementation lanes at once.
+- 2026-10-10 Only reliable data is surfaced (owner: "false regressions are the bug"). A number shown or stored as a
+  baseline is like-for-like: the same scope (interpreted or compiled), warm, and with enough calls. Otherwise it is
+  an explicit unknown, never a misleading ratio. Lane cost-reliable is auditing and fixing every surfaced number.
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog. Stay on deepseek-flash. Commits 1–3 lines; docs
