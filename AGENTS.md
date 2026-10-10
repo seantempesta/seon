@@ -145,6 +145,7 @@ and prose use the library's words.
 | agent execution | `clojure.core.async.flow` procs and step-fns ([core.async](https://github.com/clojure/core.async)) | own schedulers, state tags |
 | durable bytes | [konserve](https://github.com/replikativ/konserve) (our fork) | own stores |
 | merging vocabulary | git: branch, main, merge request, source/target branch, merge base, ours/theirs, unmerged | invented names |
+| stored data | Datahike: entity, attribute, value, datom, transaction (`t`), commit (a stored snapshot, named by its commit id) | "row", "table", "column", "record" for facts |
 
 Words genuinely Seon's, recorded in [vocabulary](docs/seon/architecture/vocabulary.md): task, proof, reaching test,
 turn, render function, current-state block, write-back, wake, answered t. Seams per area:
