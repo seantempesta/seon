@@ -514,7 +514,8 @@
   [{database :seon.db/db}]
   (let [found (db/q '[:find [(pull ?p [:seon.task/proposal :seon.task/merge :seon.task/branch :seon.task/commit
                                        :seon.task/proved :seon.task/run-id :seon.task/program]) ...]
-                      :where [?p :seon.task/merge ?handle] [?t :seon.task/id ?handle] (not [?t :seon.task/outcome])]
+                      :where [?p :seon.task/proposal] [?p :seon.task/merge ?handle] [?t :seon.task/id ?handle]
+                      (not [?t :seon.task/outcome])]
                     database)]
     ;; a pulled cardinality-many value is a vector; :seon.task/proved is a set
     (if (db/read-refusal? found)

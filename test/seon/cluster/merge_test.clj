@@ -11,6 +11,7 @@
             [hasch.core :as hasch]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.host :as host]
+            [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.db :as db]
@@ -668,4 +669,35 @@
        (try
          (is (some #{:proposal-open} (tree-seq coll? seq second-proposal)) "the writer refuses a second open proposal")
          (is (= [(:seon.task/proposal first-proposal)] open) "the first proposal stays the only one")
+         (finally (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'my.program/proposals-refuses-its-own-result-on-main}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run."
+           :seon.test/long-ms 120000}
+  an-end-message-naming-a-merge-task-is-not-a-proposal
+  ;; an agent's end message names its merge task (:seon.task/merge) beside the proposal that recorded it
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           root (checkout! "proposals-message-test" {"test/tq/land.clj" land-source})
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           proposal (proposed! running connection "area"
+                               "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+           agent-id (get-in (db/pull (db/db connection) [{:seon.task/created-by [:seon.agent/id]}]
+                                     [:seon.task/id (:seon.task/merge proposal)])
+                            [:seon.task/created-by :seon.agent/id])
+           sent (message/send! {:my.message/to "root" :my.message/content "My task ended: done."
+                                :seon.task/end :done :seon.task/merge (:seon.task/merge proposal)}
+                               connection agent-id)]
+       (try
+         (is (:seon.message/id sent) "the end message is recorded")
+         (let [open ((requiring-resolve 'my.program/proposals) {:seon.db/db (db/db connection)})]
+           (is (vector? open) "proposals answers its proposals")
+           (is (every? :seon.task/proposal open) "every entry is a proposal")
+           (is (= [(:seon.task/proposal proposal)]
+                  (keep #(when (= (:seon.task/merge proposal) (:seon.task/merge %)) (:seon.task/proposal %)) open))
+               "the merge task's one proposal, not its end message"))
          (finally (support/delete-root! root)))))))
