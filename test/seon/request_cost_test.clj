@@ -109,10 +109,10 @@
            "another thread's reads are not this request's")))))
 
 (defn- window-share
-  "The least share of the outer JVM allocation window a redefinition reply attributes: 0.75 with the entrance, step and tests counted (card FEEDBACK-LOOP stage 12; 0.79-0.82 measured), 0.9 once the writer and commit are (stages 10-11)."
+  "The least share of the outer JVM allocation window a redefinition reply attributes: the entrance, step, tests, writer and commit (card FEEDBACK-LOOP stages 10-12)."
   {:malli/schema [:=> [:cat] :double]}
   []
-  0.75)
+  0.9)
 
 (deftest a-redefinitions-reply-accounts-for-the-window
   (support/with-running-agent

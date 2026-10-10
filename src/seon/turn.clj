@@ -5455,7 +5455,10 @@
                                                     (and (:seon.cost/tests tests) (:seon.cost/counts report))
                                                     (update :seon.cost/counts merge (select-keys tests [:seon.cost/tests :seon.cost/live-tests]))
                                                     (and step-cost (:seon.cost/counts report))
-                                                    (assoc-in [:seon.cost/counts :seon.cost/step] step-cost))))]
+                                                    (assoc-in [:seon.cost/counts :seon.cost/step] step-cost)
+                                                    ;; the writer's processing and commits of the step's transactions
+                                                    (and (:seon.cost/writer-meter seon.batch/*world*) (:seon.cost/counts report))
+                                                    (update :seon.cost/counts merge (db/writer-cost (:seon.cost/writer-meter seon.batch/*world*))))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
