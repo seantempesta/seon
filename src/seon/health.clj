@@ -372,16 +372,17 @@
 
 (def ^:private stored-slow-query
   "The stored cost entities (`:seon.fn.cost/entity`) whose mean self time per
-  call is at least the bound `?bound` in microseconds."
+  warm call is at least the bound `?bound` in microseconds: steady-state cost,
+  never a cold sample's startup cost."
   '[:find ?sym ?scope ?digest ?calls ?self ?total
     :in $ ?bound
-    :where [?e :seon.fn.cost/self-us ?self]
+    :where [?e :seon.fn.cost/warm-self-us ?self]
            [(<= ?bound ?self)]
-           [?e :seon.fn.cost/sym ?sym]
-           [?e :seon.fn.cost/scope ?scope]
-           [?e :seon.fn.cost/digest ?digest]
-           [?e :seon.fn.cost/calls ?calls]
-           [?e :seon.fn.cost/total-us ?total]])
+           [?e :seon.fn.cost/key ?k]
+           [(untuple ?k) [?sym ?scope]]
+           [?e :seon.fn.cost/warm-digest ?digest]
+           [?e :seon.fn.cost/warm-calls ?calls]
+           [?e :seon.fn.cost/warm-total-us ?total]])
 
 (defn- stored-observation
   "A stored cost entity's tuple as the observation of its definition: the

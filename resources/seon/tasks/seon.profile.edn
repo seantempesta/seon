@@ -17,4 +17,12 @@
              :kind :function
              :intent "There is no per-symbol profile function for an agent, and zero calls cannot be told from never measured. Done when a my.* call answers one symbol's calls, mean and max, and a symbol with no measurement answers a typed unknown while a measured zero answers zero."
              :must-read #{seon.profile/cell}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--read.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--read.md"}}
+ #:seon.task{:name "cost-values-are-reliable-and-like-for-like"
+             :kind :function
+             :intent "Every cost number shown or stored is like-for-like (owner ruling 2026-10-10: false regressions are the bug). `seon.profile/timed` splits a definition's first `:seon.config.fn.cost/cold-calls` calls in a process (its cell's `:seon.profile/ordinal`) into the sink's cold half; `seon.profile/transaction-observation` and `seon.db/cost-upserts` keep one `:seon.fn.cost/entity` per `:seon.fn.cost/key` (symbol and scope) with a cold and a warm sample, each replaced only from its own kind (`seon.profile/moved?`); `seon.batch/cost-diff` compares warm with warm and cold with cold in the same scope, and gives a ratio only with `:seon.config.fn.cost/min-calls` warm calls on both sides (else `:seon.cost.comparison/unknown`); `seon.batch/test-cost-diff` shows only tests whose reach differs from main's, never with a ratio."
+             :must-read #{seon.profile/timed seon.profile/transaction-observation seon.db/cost-upserts seon.batch/cost-diff seon.batch/test-cost-diff}}
+ #:seon.task{:name "cold-calls-dial-reaches-the-cell-from-the-cluster-configuration"
+             :kind :function
+             :intent "`seon.instrument/arm-var!` and `seon.instrument/wrap-interpreted` give each new `seon.profile/cell` its `:seon.profile/cold-calls` from the shipped default (`seon.config/defaults`), so a cluster's own `:seon.config.fn.cost/cold-calls` never reaches the cells. Done when the arming request carries the effective dial (beside `:seon.config.error/max-evidence-bytes`) and a cell made under a cluster setting of 3 counts its first three calls cold."
+             :must-read #{seon.instrument/arm-var! seon.instrument/wrap-interpreted seon.profile/cell seon.config/defaults}}]

@@ -266,25 +266,26 @@
 (defn- with-diff
   "The request's cost with its live values (`:seon.cost/live`) replaced by
   their comparison with main's stored cost entities (`:seon.cost/diff`,
-  `seon.batch/cost-diff`): one query on `main`, as the request found it, by
-  the live symbols. Main storing none, or not yet declaring them, compares
-  every value as new."
+  `seon.batch/cost-diff`, like with like only): one query on `main`, as the
+  request found it, by the live keys. Main storing none, or not yet declaring
+  them, compares every value as new."
   {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string]] :map]}
   [cost main cluster-name]
   (let [live (:seon.cost/live cost)
         live-tests (:seon.cost/live-tests cost)
         cost (dissoc cost :seon.cost/live :seon.cost/live-tests)
-        hysteresis (when (and main cluster-name) (dial main cluster-name :seon.config.fn.cost/hysteresis))
-        tests (when (and (seq live-tests) hysteresis)
+        tests (when (and (seq live-tests) main)
                 (let [latest (runner/latest-results main (mapv :seon.test/sym live-tests))
                       stored (if (:seon.error/at latest)
                                {}
-                               (into {} (keep (fn [r] (when-some [b (:seon.test.member/alloc-bytes r)] [(:seon.test/sym r) b]))) latest))]
-                  (seon.batch/test-cost-diff live-tests stored hysteresis)))
+                               (into {} (keep (fn [r] (when (:seon.test.member/alloc-bytes r)
+                                                        [(:seon.test/sym r) (select-keys r [:seon.test.member/alloc-bytes :seon.test.member/reach-digest])])))
+                                     latest))]
+                  (seon.batch/test-cost-diff live-tests stored)))
         cost (cond-> cost (seq tests) (assoc :seon.cost/diff tests))]
     (if (and (seq live) main cluster-name)
-      (let [stored (db/stored-costs main (mapv :seon.fn.cost/sym live))
-            diff (seon.batch/cost-diff live stored (dial main cluster-name :seon.config.fn.cost/hysteresis))]
+      (let [stored (db/stored-costs main (mapv :seon.fn.cost/key live))
+            diff (seon.batch/cost-diff live stored (dial main cluster-name :seon.config.fn.cost/min-calls))]
         (cond-> cost (seq diff) (update :seon.cost/diff #(into (vec diff) %))))
       cost)))
 

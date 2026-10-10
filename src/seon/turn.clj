@@ -5127,7 +5127,7 @@
 
 (defn- test-costs
   "The members `runs` executed in this step, read from the connection's latest results for them: their
-  allocation, in bytes, per test (`:seon.cost/live-tests`) and summed with their wall milliseconds
+  allocation, in bytes, and tested reach per test (`:seon.cost/live-tests`) and summed with their wall milliseconds
   (`:seon.cost/tests`); nil when none carries a cost."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:maybe :map]]]
                   [:maybe [:map [:seon.cost/tests :seon.cost/tests] [:seon.cost/live-tests :seon.cost/live-tests]]]]}
@@ -5138,7 +5138,7 @@
                     (when-not (:seon.error/at latest)
                       (filterv :seon.test.member/alloc-bytes latest))))]
     (when (seq members)
-      {:seon.cost/live-tests (mapv #(select-keys % [:seon.test/sym :seon.test.member/alloc-bytes]) members)
+      {:seon.cost/live-tests (mapv #(select-keys % [:seon.test/sym :seon.test.member/alloc-bytes :seon.test.member/reach-digest]) members)
        :seon.cost/tests {:seon.cost/alloc-mb (/ (Math/round (* 1e4 (/ (transduce (map :seon.test.member/alloc-bytes) + 0 members) 1e6))) 1e4)
                          :seon.cost/ms (/ (Math/round (* 10.0 (transduce (map #(:seon.test.member/run-ms % 0.0)) + 0.0 members))) 10.0)
                          :seon.cost/count (count members)}})))

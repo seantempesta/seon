@@ -184,28 +184,30 @@
       (into [] (remove (comp (set handled) :my.message/id)) items))))
 
 (defn- branch-cost
-  "The branch's `:seon.fn.cost/entity` values whose digest differs from main's (or main
-  stores none), as `seon.batch/cost-diff` comparisons: the most self time spent first,
-  at most `:seon.config.test.cost/top`, both dials of the branch's effective configuration.
-  Main is the task home (`seon.task/home`). Nil on main itself, the branch stores none,
-  its program declares no cost entities or its configuration is refused."
+  "The branch's stored cost entities (`:seon.fn.cost/entity`) that differ from
+  main's (a sample digest main does not hold, or main stores none for that
+  symbol and scope), as `seon.batch/cost-diff` comparisons, like with like
+  only: the most self time spent first, at most `:seon.config.test.cost/top`,
+  the dials of the branch's effective configuration. Main is the task home
+  (`seon.task/home`). Nil on main itself, the branch stores none, its program
+  declares no cost entities or its configuration is refused."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cost/diff]]}
   [database]
   (let [main (some-> (task/home database) db/db)
         cluster (when main (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database))
         effective (when cluster (config/effective database cluster))
-        rows (when (and effective (not (:seon.error/at effective)))
-               (db/q database '[:find ?s ?d ?sc ?c ?us ?t
-                                :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/scope ?sc]
-                                [?e :seon.fn.cost/calls ?c] [?e :seon.fn.cost/self-us ?us] [?e :seon.fn.cost/total-us ?t]]))]
-    (when (and (seq rows) (not (db/read-refusal? rows)))
-      (let [stored (db/stored-costs main (mapv first rows))
-            live (->> rows
-                      (map (fn [[sym digest scope calls self-us total-us]]
-                             #:seon.fn.cost{:sym sym :digest digest :scope scope :calls calls :self-us self-us :total-us total-us}))
-                      (remove #(= (:seon.fn.cost/digest %) (first (get stored (:seon.fn.cost/sym %)))))
-                      (sort-by #(- (* (:seon.fn.cost/calls %) (:seon.fn.cost/self-us %)))))
-            diff (batch/cost-diff (vec live) stored (:seon.config.fn.cost/hysteresis effective))]
+        cost-keys (when (and effective (not (:seon.error/at effective)))
+                    (db/q database '[:find [?k ...] :where [_ :seon.fn.cost/key ?k]]))]
+    (when (and (seq cost-keys) (not (db/read-refusal? cost-keys)))
+      (let [stored (db/stored-costs main cost-keys)
+            unchanged? (fn [entity]
+                         (let [main-entity (get stored (:seon.fn.cost/key entity))]
+                           (every? #(= (first (batch/sample entity %)) (first (batch/sample main-entity %)))
+                                   (filter #(batch/sample entity %) [:warm :cold]))))
+            live (->> (vals (db/stored-costs database cost-keys))
+                      (remove unchanged?)
+                      (sort-by #(- (batch/spent %))))
+            diff (batch/cost-diff (vec live) stored (:seon.config.fn.cost/min-calls effective))]
         (not-empty (into [] (take (:seon.config.test.cost/top effective)) diff))))))
 
 (defn current-state

@@ -136,7 +136,7 @@
   (support/with-running-agent
    (fn [running agent-id _]
      ;; the repeated work (200 queries) spends more self time than :seon.config.fn.cost/min-total-us
-     (let [form "(do (dotimes [_ 200] (seon.db/q '[:find ?e . :where [?e :db/ident :db/ident]] (seon.db/db))) (let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/sym]] (seon.db/db))] (if (set? rows) (count rows) 0)))"
+     (let [form "(do (dotimes [_ 200] (seon.db/q '[:find ?e . :where [?e :db/ident :db/ident]] (seon.db/db))) (let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/key]] (seon.db/db))] (if (set? rows) (count rows) 0)))"
            runs (vec (repeatedly 5 #(answer running agent-id "sci" form)))
            seen (mapv #(:seon.repl/value (support/mcp-reply %)) runs)
            [fourth fifth] (map support/mcp-request (take-last 2 runs))]
@@ -153,17 +153,15 @@
                  (answer running agent-id "sci" "(defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (reduce + (range 20000)) (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))) (clojure.test/is (= 2000000 (count (vec (range 2000000))))))"))
            entry (first (filter #(= 'request.cost.live/tiny (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
        (is (some? entry) "the very same reply compares the redefined function")
-       (is (= :self-us (:seon.cost.comparison/measure entry)))
+       (is (#{:self-us :cold-self-us} (:seon.cost.comparison/measure entry)) "a warm or a cold sample, never the two averaged")
        (is (pos? (:seon.cost.comparison/live entry 0.0)) "the live side is the request's own measurement")
        (is (not (contains? entry :seon.cost.comparison/main)) "main stores nothing for a function it has never run")
        (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry)))
        (let [test-entry (first (filter #(= 'request.cost.live/tiny-test (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))]
-         (is (some? test-entry) "the very same reply compares the test its step ran")
+         (is (some? test-entry) "the very same reply shows the test its step ran on a changed reach")
          (is (= :alloc-bytes (:seon.cost.comparison/measure test-entry)))
          (is (pos? (:seon.cost.comparison/live test-entry 0.0)) "the live side is the member the step just ran")
-         (is (pos? (:seon.cost.comparison/main test-entry 0.0)) "main's latest member of the same test is the other side")
-         (is (<= 1.41 (:seon.cost.comparison/ratio test-entry 0.0)) "a test that got heavier by the hysteresis factor is shown")
-         (is (empty? (:seon.cost.comparison/flags test-entry))))
+         (is (not (contains? test-entry :seon.cost.comparison/ratio)) "one run of another reach is no ratio"))
        (is (pos? (get-in cost [:seon.cost/tests :seon.cost/alloc-mb] 0.0)) "the step's members sum")
        (is (= 1 (get-in cost [:seon.cost/tests :seon.cost/count])))))))
 
@@ -176,32 +174,93 @@
            entry (first (filter #(= 'request.cost.own/summed (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))
            stored (:seon.repl/value (support/mcp-reply
                                      (answer running agent-id "sci"
-                                             "(seon.db/pull '[:seon.fn.cost/scope :seon.fn.cost/calls] [:seon.fn.cost/sym 'request.cost.own/summed])")))]
+                                             "(seon.db/pull '[:seon.fn.cost/warm-calls] [:seon.fn.cost/key ['request.cost.own/summed :seon.profile/context]])")))]
        (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry))
            "the very same reply compares the function it defined and called")
-       (is (= :seon.profile/context (:seon.fn.cost/scope stored)) "its cost entity is stored on the branch")
-       (is (<= 30 (:seon.fn.cost/calls stored 0)))))))
+       (is (<= 29 (:seon.fn.cost/warm-calls stored 0))
+           "its interpreted cost entity is stored on the branch, the first call apart as cold")))))
+
+(def ^:private digest-a (apply str (repeat 64 "a")))
+(def ^:private digest-b (apply str (repeat 64 "b")))
+
+(defn- cost
+  "A cost entity of `sym` in `scope` holding the given samples
+  (`[digest calls self-us]` each)."
+  [sym scope & {:keys [warm cold]}]
+  (cond-> {:seon.fn.cost/key [sym scope]}
+    warm (batch/with-sample :warm (conj warm (peek warm)))
+    cold (batch/with-sample :cold (conj cold (peek cold)))))
+
+(defn- shown
+  "The comparisons `cost-diff` gives `live` against `stored` entities, without their subject."
+  [live stored]
+  (mapv #(dissoc % :seon.cost.comparison/subject)
+        (batch/cost-diff [live] (into {} (map (juxt :seon.fn.cost/key identity)) stored) 20)))
 
 (deftest an-unchanged-platform-function-shows-no-entry
-  (let [digest (apply str (repeat 64 "a"))
-        other (apply str (repeat 64 "b"))
-        live (fn [scope self-us] [{:seon.fn.cost/sym 'seon.schema/projection-cache-value :seon.fn.cost/digest digest
-                                   :seon.fn.cost/scope scope :seon.fn.cost/calls 30
-                                   :seon.fn.cost/self-us self-us :seon.fn.cost/total-us self-us}])
-        flags (fn [entries] (mapv :seon.cost.comparison/flags entries))]
-    (are [scope self-us stored shown] (= shown (flags (batch/cost-diff (live scope self-us) stored 1.41)))
-      ;; main's cold first value, the definition unchanged: an improvement the agent did not cause
-      :seon.profile/host 5.0 {'seon.schema/projection-cache-value [digest 46.0]} []
-      :seon.profile/host 30.0 {'seon.schema/projection-cache-value [digest 46.0]} []
-      ;; an unchanged definition that got slower is no entry either: only changed and new subjects are compared
-      :seon.profile/host 70.0 {'seon.schema/projection-cache-value [digest 46.0]} []
-      :seon.profile/host 2576.0 {'seon.schema/projection-cache-value [digest 46.0]} []
-      ;; an improvement shows for a definition the agent changed
-      :seon.profile/host 5.0 {'seon.schema/projection-cache-value [other 46.0]} [#{:changed}]
-      :seon.profile/context 5.0 {'seon.schema/projection-cache-value [digest 46.0]} [#{:interpreted}]
-      :seon.profile/context 5.0 {} [#{:new :interpreted}]
+  (let [sym 'seon.schema/projection-cache-value
+        host #(cost sym :seon.profile/host :warm [%1 30 %2])
+        flags (fn [live stored] (mapv :seon.cost.comparison/flags (shown live stored)))]
+    (are [live stored expected] (= expected (flags live stored))
+      ;; main's value, the definition unchanged: an improvement or regression the agent did not cause
+      (host digest-a 5.0) [(host digest-a 46.0)] []
+      (host digest-a 2576.0) [(host digest-a 46.0)] []
+      ;; a definition the agent changed
+      (host digest-a 5.0) [(host digest-b 46.0)] [#{:changed}]
+      (cost sym :seon.profile/context :warm [digest-a 30 5.0]) [] [#{:new :interpreted}]
       ;; a compiled definition main has no value for is left out
-      :seon.profile/host 5.0 {} [])))
+      (host digest-a 5.0) [] [])))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  an-interpreted-live-value-is-never-given-a-ratio-against-a-compiled-main-value
+  (let [sym 'request.cost.scope/f]
+    (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 300.0
+             :seon.cost.comparison/flags #{:new :interpreted}}]
+           (shown (cost sym :seon.profile/context :warm [digest-b 30 300.0])
+                  [(cost sym :seon.profile/host :warm [digest-a 100 1.0] :cold [digest-a 1 40.0])]))
+        "main's compiled samples are another scope: no main value, no ratio")
+    (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 300.0
+             :seon.cost.comparison/main 100.0 :seon.cost.comparison/unknown :few-calls
+             :seon.cost.comparison/flags #{:changed :interpreted}}]
+           (shown (cost sym :seon.profile/context :warm [digest-b 3 300.0])
+                  [(cost sym :seon.profile/context :warm [digest-a 100 100.0])]))
+        "a warm sample of three calls is too few for a ratio: the unknown says why")))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  a-warm-like-for-like-regression-of-a-changed-definition-still-shows
+  (let [sym 'seon.schema/projection-cache-value]
+    (is (= [{:seon.cost.comparison/measure :self-us :seon.cost.comparison/live 200.0
+             :seon.cost.comparison/main 50.0 :seon.cost.comparison/ratio 4.0
+             :seon.cost.comparison/flags #{:changed}}]
+           (shown (cost sym :seon.profile/host :warm [digest-b 30 200.0])
+                  [(cost sym :seon.profile/host :warm [digest-a 100 50.0] :cold [digest-a 1 5000.0])])))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  after-a-restart-the-first-call-compares-against-the-stored-cold-value
+  ;; root's interpreted definition on main, called once after a restart: its
+  ;; one call is cold, compared with main's cold sample, never its warm one
+  (let [sym 'request.cost.restart/f]
+    (is (= [{:seon.cost.comparison/measure :cold-self-us :seon.cost.comparison/live 520.0
+             :seon.cost.comparison/main 500.0 :seon.cost.comparison/ratio 1.04
+             :seon.cost.comparison/flags #{:interpreted}}]
+           (shown (cost sym :seon.profile/context :cold [digest-a 1 520.0])
+                  [(cost sym :seon.profile/context :warm [digest-a 100 5.0] :cold [digest-a 1 500.0])])))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  a-test-reaching-no-change-is-no-entry-and-a-member-gets-no-ratio
+  (let [live (fn [reach] [(cond-> {:seon.test/sym 'request.cost.t/a-test :seon.test.member/alloc-bytes 4000}
+                            reach (assoc :seon.test.member/reach-digest reach))])
+        main {'request.cost.t/a-test {:seon.test.member/alloc-bytes 1000 :seon.test.member/reach-digest digest-a}}
+        bare (fn [entries] (mapv #(dissoc % :seon.cost.comparison/subject :seon.cost.comparison/measure) entries))]
+    (are [entries expected] (= expected (bare entries))
+      ;; the reach main tested: unchanged, whatever its allocation
+      (batch/test-cost-diff (live digest-a) main) []
+      ;; a reach main never tested: shown, but one run is no ratio
+      (batch/test-cost-diff (live digest-b) main)
+      [{:seon.cost.comparison/live 4000.0 :seon.cost.comparison/main 1000.0
+        :seon.cost.comparison/unknown :single-run :seon.cost.comparison/flags #{:changed}}]
+      (batch/test-cost-diff (live digest-b) {})
+      [{:seon.cost.comparison/live 4000.0 :seon.cost.comparison/flags #{:new}}])))
 
 (deftest the-reply-is-offered-after-accounting
   (support/with-running-agent

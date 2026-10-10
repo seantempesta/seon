@@ -3765,18 +3765,41 @@
                     database undigested))
       {})))
 
+(def ^:private cost-attributes
+  "The attributes of a cost entity (`:seon.fn.cost/entity`)."
+  [:seon.fn.cost/key
+   :seon.fn.cost/warm-digest :seon.fn.cost/warm-calls :seon.fn.cost/warm-self-us :seon.fn.cost/warm-total-us
+   :seon.fn.cost/cold-digest :seon.fn.cost/cold-calls :seon.fn.cost/cold-self-us :seon.fn.cost/cold-total-us])
+
+(def ^:private cost-query
+  "The stored cost entities of the bound keys, each key with its entity."
+  [:find '?k (list 'pull '?e cost-attributes) :in '$ '[?k ...] :where '[?e :seon.fn.cost/key ?k]])
+
+(defn stored-costs
+  "The stored cost entities of `cost-keys` (`[sym scope]`) on `database`, by
+  key; a key with none stored is absent. One query; a refused read, or a
+  database that declares no cost entities, answers none."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn.cost/key]]
+                  [:map-of :seon.fn.cost/key :seon.fn.cost/entity]]}
+  [database cost-keys]
+  (if (and (seq cost-keys) (get (dbi/-schema database) :seon.fn.cost/key))
+    (let [rows (q cost-query database (vec cost-keys))]
+      (if (read-refusal? rows) {} (into {} (map (fn [[k pulled]] [k (dissoc pulled :db/id)])) rows)))
+    {}))
+
 (defn cost-upserts
   "The cost entities of the work a world's call `sink` counted since its
-  previous transaction whose stored values moved (`seon.profile/moved?`),
-  among the definitions called at least `min-calls` times for at least
-  `min-total-us` of self time: one with a stored entity is re-checked wherever
-  it ranks, so a value stored cold is replaced once warm work re-observes it;
-  a new entity must rank in the `top` by self time. Invoked by the writer as
-  `[:db.fn/call #'cost-upserts sink]` after the transaction's other data
-  (`stamp-transaction`), so it decides on that mid-transaction value: an
-  interpreted definition the same transaction writes resolves its definition
-  digest, and accounting adds no transaction. None when the branch declares
-  no cost dials."
+  previous transaction, holding only the samples that moved
+  (`seon.profile/moved?`) against the stored sample of the same kind (cold
+  against cold, warm against warm) and key (symbol and scope): a cold sample
+  never replaces a warm one nor the reverse. A warm sample needs `min-calls`
+  warm calls; either needs `min-total-us` of self time. An entity already
+  stored is re-checked wherever it ranks; a new one must rank in the `top` by
+  self time. Invoked by the writer as `[:db.fn/call #'cost-upserts sink]`
+  after the transaction's other data (`stamp-transaction`), so it decides on
+  that mid-transaction value: an interpreted definition the same transaction
+  writes resolves its definition digest, and accounting adds no transaction.
+  None when the branch declares no cost dials."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/sink] [:vector :seon.fn.cost/entity]]}
   [database sink]
   (let [projection (carried-projection database)
@@ -3786,30 +3809,23 @@
     (if (and min-calls min-total-us hysteresis top)
       (let [observed (profile/transaction-observation {:seon.batch/sink sink} (sink-digests database sink)
                                                       min-calls min-total-us Integer/MAX_VALUE)
-            stored (if (get (dbi/-schema database) :seon.fn.cost/sym)
-                     (into {} (map (fn [[s d us]] [s {:seon.fn.cost/digest d :seon.fn.cost/self-us us}]))
-                           (d/q '[:find ?s ?d ?us :in $ [?s ...]
-                                  :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
-                                database (mapv :seon.fn.cost/sym observed)))
+            ;; the writer's own value, read directly: no armed read inside the writer
+            stored (if (and (seq observed) (get (dbi/-schema database) :seon.fn.cost/key))
+                     (into {} (map (fn [[k pulled]] [k (dissoc pulled :db/id)]))
+                           (d/q cost-query database (mapv :seon.fn.cost/key observed)))
                      {})
             ;; `observed` ranks by self time spent
-            top-set (into #{} (comp (take top) (map :seon.fn.cost/sym)) observed)]
-        (filterv (fn [{sym :seon.fn.cost/sym :as live}]
-                   (and (or (stored sym) (top-set sym))
-                        (profile/moved? hysteresis (stored sym) live)))
-                 observed))
+            top-set (into #{} (comp (take top) (map :seon.fn.cost/key)) observed)]
+        (into []
+              (keep (fn [{k :seon.fn.cost/key :as live}]
+                      (when (or (stored k) (top-set k))
+                        (let [moved (filter #(when-let [s (batch/sample live %)]
+                                               (profile/moved? hysteresis (batch/sample (stored k) %) s))
+                                            [:warm :cold])]
+                          (when (seq moved)
+                            (reduce #(batch/with-sample %1 %2 (batch/sample live %2)) {:seon.fn.cost/key k} moved))))))
+              observed))
       [])))
-
-(defn stored-costs
-  "The stored cost entities of `symbols` on `database`, as `seon.batch/cost-diff`'s
-  `stored`: symbol -> [digest self-us]. One query; a refused read answers no costs."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
-                  [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]]}
-  [database symbols]
-  (let [rows (q '[:find ?s ?d ?us :in $ [?s ...]
-                  :where [?e :seon.fn.cost/sym ?s] [?e :seon.fn.cost/digest ?d] [?e :seon.fn.cost/self-us ?us]]
-                database (vec symbols))]
-    (if (read-refusal? rows) {} (into {} (map (fn [[s d us]] [s [d us]])) rows))))
 
 (defn- stamp-transaction
   "Attach writer observations once, including the first schema-installing write.
@@ -3826,8 +3842,7 @@
         sink (:seon.batch/sink world)
         costs? (instance? java.util.concurrent.ConcurrentHashMap sink)
         attributes (cond-> [:seon.db.transaction/operation :seon.db.transaction/agent]
-                     costs? (into [:seon.fn.cost/sym :seon.fn.cost/digest :seon.fn.cost/scope
-                                        :seon.fn.cost/calls :seon.fn.cost/self-us :seon.fn.cost/total-us]))
+                     costs? (into cost-attributes))
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
         ;; The whole packaged population, so the stamp's referenced schemas

@@ -632,7 +632,8 @@
   ([function-symbol spec-edn projection caps f arm-request]
   (let [original (original-interpreted f)
         callable-identity (merge {:seon.profile/sym function-symbol
-                                  :seon.profile/scope :seon.profile/context}
+                                  :seon.profile/scope :seon.profile/context
+                                  :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)}
                                  (when-let [digest (:seon.program/definition-digest arm-request)]
                                    {:seon.profile/digest digest})
                                  (select-keys arm-request [:seon.profile/context]))
@@ -1000,7 +1001,8 @@
        (let [original (mi/-f->original current)
              function-symbol (var-symbol candidate)
              callable-identity (cond-> {:seon.profile/sym function-symbol
-                                        :seon.profile/scope :seon.profile/host}
+                                        :seon.profile/scope :seon.profile/host
+                                        :seon.profile/cold-calls (:seon.config.fn.cost/cold-calls config/defaults)}
                                  digest (assoc :seon.profile/digest digest))
              prior (::cell (meta current))
              cell (if (profile/reusable? prior callable-identity

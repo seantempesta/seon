@@ -47,11 +47,18 @@ transaction; main's values change only when a merge lands, so the comparison is 
 1. **Step** (Flow proc thread, platform after stage 1): `seon.flow/var-process` brackets the step with
    `getCurrentThreadAllocatedBytes`/`getCurrentThreadCpuTime` → `:seon.cost/step` → in the reply
    (`:seon.repl/request`). Cost: two counter pairs, ~1 µs.
-2. **Functions** (every armed call, `seon.profile/timed`): calls, inclusive ns, self ns into the world's sink. The
-   reply reads the sink directly for the request's live per-function values. At the world's next transaction
-   `seon.db/stamp-transaction` runs `seon.profile/transaction-observation`, which now returns the cost-entity upserts
-   (`:seon.fn.cost/*`) for the definitions whose stored value moved → the branch's stored values, replaced in place →
-   read by the diff (main's side), health's slow unit and any query.
+2. **Functions** (every armed call, `seon.profile/timed`): calls, inclusive ns, self ns into the world's sink, and
+   again into the counter's cold half when the call is one of the definition's first `:seon.config.fn.cost/cold-calls`
+   (1) calls in this process, by its profile cell's call order (`:seon.profile/ordinal`; no clock, no restart stamp;
+   once past them the ordinal is only read). The reply reads the sink directly for the request's live per-function
+   values. At the world's next transaction `seon.db/stamp-transaction` runs `seon.profile/transaction-observation`,
+   which returns the cost-entity upserts (`:seon.fn.cost/*`, one per symbol and scope, a cold and a warm sample) for
+   the samples that moved against the stored sample of their own kind → the branch's stored values, replaced in place
+   → read by the diff (main's side), health's slow unit (warm) and any query. **Owner ruling 2026-10-10: false
+   regressions are the bug.** A number shown or stored is like-for-like or not surfaced: warm beside warm, cold beside
+   cold, the same scope (interpreted or compiled), and a ratio only when a warm sample holds `min-calls` calls on both
+   sides; otherwise the comparison has no ratio and `:seon.cost.comparison/unknown` says why. After a restart the
+   first calls are cold and compare with the stored cold sample, so they read as startup cost, never a regression.
 3. **Tests** (`seon.test/measured-body` on the body thread): the member, as today → the reply reads the members the
    step just ran (live); main's `latest-results` for the same tests is the comparison.
 4. **Writer and commit**: `:write-fn-map` wrappers put `:datahike/processing` on each tx report; the fork puts
@@ -88,17 +95,20 @@ transaction; main's values change only when a merge lands, so the comparison is 
 | `:seon.cost/shared` `{alloc-mb cpu-ms gc-ms jit-ms}` | `seon.flow/var-process` | reply |
 | `:seon.cost/diff` `[:seon.cost/comparison]` | `seon.batch/cost-diff` | reply, current-state block |
 | `:seon.cost/comparison` `[subject measure live main ×ratio & flags]` | `seon.batch/cost-diff` | the value printer (AI face) |
-| **Function cost entity**: `:seon.fn.cost/sym` (identity), `:seon.fn.cost/digest`, `:seon.fn.cost/scope`, `:seon.fn.cost/calls`, `:seon.fn.cost/self-us`, `:seon.fn.cost/total-us`; map `:seon.fn.cost/entity` (`:seon.data` partition) | `seon.profile/transaction-observation` via `seon.db/stamp-transaction` | `seon.batch/cost-diff` (main's side), `seon.health/profile-unit`, queries |
+| **Function cost entity**: `:seon.fn.cost/key` (identity, `[sym scope]`), a warm sample `:seon.fn.cost/warm-{digest,calls,self-us,total-us}` and a cold sample `:seon.fn.cost/cold-{digest,calls,self-us,total-us}`; map `:seon.fn.cost/entity` (`:seon.data` partition); the per-symbol `sym`/`digest`/`scope`/`calls`/`self-us`/`total-us` are retired (no producer) | `seon.profile/transaction-observation` via `seon.db/stamp-transaction` | `seon.batch/cost-diff` (main's side), `seon.health/profile-unit` (warm), queries |
 | **Schema cost, on the schema entity**: `:seon.schema.cost/gen-us`, `:seon.schema.cost/check-us`, `:seon.schema.cost/samples`, `:seon.schema.cost/digest` | `seon.schema.cost/measure!` in the turn step | reply finding, `seon.batch/cost-diff`, queries |
 | `:seon.config.schema.cost/samples` (20), `:seon.config.schema.cost/max-us` (10,000) | dials | `seon.schema.cost/measure!` |
 
-**The cost entities.** One entity per *symbol*, the definition digest beside its values, so a read on the name answers
-"did the code change" and "did the cost change" at once. Every value attribute is `:seon.db/no-history? true`
+**The cost entities.** One entity per *symbol and scope* (`:seon.fn.cost/key`, a Datahike tuple identity), each of
+its two samples (cold, warm) carrying the definition digest beside its values, so a read on the key answers "did the
+code change" and "did the cost change" at once, and an interpreted value never meets a compiled one. Each sample is
+replaced only from its own kind: a cold value never overwrites the warm one nor the reverse. Every value attribute is `:seon.db/no-history? true`
 (verified: two upserts via `d/with` on default leave one history datom, the current value; the fork skips the temporal
 indexes in `datahike.db.transaction/with-datom-upsert` when `dbu/no-history?`). Values are per-call means of the
 request's own work (`self-us` = self ns / calls); a stored value is replaced only when the live value differs from it
-by at least half a log2 bucket (1.41×, `hysteresis`), the digest changed, or none is stored; fewer than `min-calls`
-(20) calls, or less than `min-total-us` (1,000 µs) of self time in that work (calls × self-us), store nothing, and the
+by at least half a log2 bucket (1.41×, `hysteresis`), the digest changed, or none is stored; a warm sample of fewer
+than `min-calls` (20) warm calls, or a sample with less than `min-total-us` (1,000 µs) of self time in that work
+(calls × self-us), stores nothing, and the
 stored set is the `top` by that total self time, ties by symbol (`seon.profile/selected`): ranking by calls filled it
 with sub-microsecond predicates. This rule decides only when the branch writes; it never delays or alters what the
 agent sees. The upserts ride the transaction the world already writes: `stamp-transaction` appends
@@ -108,14 +118,19 @@ write by `seon.sci.arm/arm!`) resolves its digest from the row that transaction 
 the same attributes on main, from main's own traffic (cost entities are data and never merge as program).
 
 **The comparison.** Subjects: definitions the request defined, its top 10 executed definitions by self time, tests the
-step ran, schemas it measured (≤ ~30 pulls on main: under 1 ms). If it is unchanged it is unchanged: only (a) definitions whose digest differs from main's or that main lacks (`:changed`, `:new`) and (b) tests whose reach includes such a definition (shown when live is ≥ 1.41× or ≤ 1/1.41 of
-main's, or main has none) are entries, plus a schema over budget
-(`:over-budget`); a `:seon.profile/context`-scope function is flagged `:interpreted` (an interpreted body costs up to
-280× its compiled self, G4), so it is guidance, and the compiled merge check is where a regression is judged. Each
+step ran, schemas it measured (≤ ~30 pulls on main: under 1 ms). If it is unchanged it is unchanged: only (a) definitions whose digest differs from main's or that main lacks (`:changed`, `:new`) and (b) tests whose reach differs from main's latest member's (or main has none) are entries, plus a schema over budget
+(`:over-budget`); a `:seon.profile/context`-scope function is flagged `:interpreted` and compared only with main's
+interpreted sample of it (an interpreted body costs up to 280× its compiled self, G4: never a ratio across scopes);
+the compiled merge check is where a compiled regression is judged. Each function entry compares one sample kind
+(`:self-us` warm, `:cold-self-us` cold) with main's of the same kind; a ratio needs `min-calls` warm calls on both
+sides, else `:unknown :few-calls`. A test entry is shown only when its member's reach digest differs from main's
+latest member's (or main has none), and never with a ratio: a member is one run of unknown warmth, and on a branch
+its changed reach runs interpreted where main's ran compiled (`:unknown :single-run`). Each
 entry is a tuple of about 15 tokens; a typical reply carries 0–3 (≤ 50 tokens), a redefinition's at most `top`.
 
 **Slow paths are one query**:
-`(seon.db/q '[:find ?s ?us :where [?e :seon.fn.cost/self-us ?us] [(< 1000 ?us)] [?e :seon.fn.cost/sym ?s]] db)`;
+`(seon.db/q '[:find ?k ?us :where [?e :seon.fn.cost/warm-self-us ?us] [(< 1000 ?us)] [?e :seon.fn.cost/key ?k]] db)`;
+slow to start: the same over `:seon.fn.cost/cold-self-us`;
 expensive schemas: `[?e :seon.schema.cost/check-us ?us] [(< 10000 ?us)] [?e :seon.schema/key ?k]`.
 
 ## 4. The interface (stubs; contracts by schema name)
@@ -221,17 +236,17 @@ A redefinition of `tiny` on its branch, after the work (numbers from one-system 
              :jvm-window {:alloc-mb 842.0 :cpu-ms 1015.0}
              :calls 1805 :reads 9 :transactions 3
              :stages {:custody 0.3 :fork 12.1 :read 0.2 :evaluate 27.7 :settle 38.8 :test-step 466.0 :print 2.0 :unattributed 65.3}
-             :diff [[request.cost.measure/tiny :self-us 41 0.3 ×137 :changed :interpreted]
-                    [request.cost.measure/tiny-test :alloc-bytes 14300000 900000 ×15.9]
-                    [seon.fn/gate-set :self-us 2100 1400 ×1.5]]}}
+             :diff [[request.cost.measure/tiny :cold-self-us 41 :new :interpreted]
+                    [request.cost.measure/tiny-test :alloc-bytes 14300000 900000 :single-run :changed]]}}
 ```
 
 About 190 tokens. A request that registers a schema with a slow validator adds one entry,
 `[:my.ns/thing :check-us 48000 nil :new :over-budget]`, about 20 tokens. Attributed here:
 (614 + 0.3 + 70 + 14) / 842 = 83% because this run's `shared` still holds listener and cache-derivation work on
 `async-mixed`; stage 11's synchronous commit moves the konserve writes into `:commit` (one-system closed 98.7% that
-way). The agent reads: its own function is the cost (interpreted, so guidance), its test allocates 16× main's, and
-`gate-set` moved 1.5× for reasons outside its change.
+way). The agent reads: its own function's first call (cold, interpreted; main has no interpreted sample, so no ratio) and the
+allocation of the test reaching it, beside main's, without a ratio (one run of another reach). `gate-set`, unchanged,
+is no entry.
 
 ## 8. Questions for the owner
 

@@ -151,12 +151,13 @@
        (into #{} (comp (take limit) (map (fn [[sym [n self]]] [sym n (quot self 1000000)]))))))
 
 (def ^:private ^java.util.function.Function new-adder
-  "A sink's counter for a key it has not seen, the same five slots as
+  "A sink's counter for a key it has not seen, the same twelve slots as
   `seon.profile/new-adder` makes: calls, nanos, self nanos and the three marks
-  `seon.profile/transaction-observation` keeps (seon.profile requires this
-  namespace, so the constructor is repeated here)."
+  `seon.profile/transaction-observation` keeps, then the same for the cold
+  calls (seon.profile requires this namespace, so the constructor is repeated
+  here)."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 6))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 12))))
 
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
@@ -164,13 +165,14 @@
   (/ (- (System/nanoTime) t0) 1e6))
 
 (defn merge-sink!
-  "Add a completed child's calls and times to its parent, leaving the child intact."
+  "Add a completed child's calls and times, all and cold, to its parent,
+  leaving the child intact."
   {:malli/schema [:=> [:cat :seon.batch/sink :seon.batch/sink] :nil]}
   [^java.util.concurrent.ConcurrentHashMap parent child]
   (when-not (identical? parent child)
     (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray from] child
             :let [^java.util.concurrent.atomic.AtomicLongArray to (.computeIfAbsent parent k new-adder)]]
-      (dotimes [i 3] (.addAndGet to i (.get from i)))))
+      (doseq [i [0 1 2 6 7 8]] (.addAndGet to i (.get from i)))))
   nil)
 
 (defn jvm-counters
@@ -256,57 +258,95 @@
   [x]
   (/ (Math/round (* 100.0 (double x))) 100.0))
 
+(def ^:private sample-keys
+  "The attributes of a cost entity's warm and cold sample, in
+  `:seon.fn.cost/sample` order."
+  {:warm [:seon.fn.cost/warm-digest :seon.fn.cost/warm-calls :seon.fn.cost/warm-self-us :seon.fn.cost/warm-total-us]
+   :cold [:seon.fn.cost/cold-digest :seon.fn.cost/cold-calls :seon.fn.cost/cold-self-us :seon.fn.cost/cold-total-us]})
+
+(defn sample
+  "The `half` (`:warm` or `:cold`) sample of a cost `entity`, as
+  `:seon.fn.cost/sample`; nil when the entity holds none."
+  {:malli/schema [:=> [:cat [:maybe :map] [:enum :warm :cold]] [:maybe :seon.fn.cost/sample]]}
+  [entity half]
+  (let [ks (sample-keys half)]
+    (when (some? (get entity (first ks)))
+      (mapv #(get entity %) ks))))
+
+(defn with-sample
+  "`entity` holding `s` as its `half` sample."
+  {:malli/schema [:=> [:cat :map [:enum :warm :cold] :seon.fn.cost/sample] :map]}
+  [entity half s]
+  (into entity (map vector (sample-keys half) s)))
+
+(defn spent
+  "The microseconds of self time a cost entity's samples hold: calls times
+  per-call self time, summed over both."
+  {:malli/schema [:=> [:cat :map] :double]}
+  [entity]
+  (transduce (keep #(when-let [[_ n self-us] (sample entity %)] (* n self-us))) + 0.0 [:warm :cold]))
+
 (defn cost-diff
-  "The request's live values beside main's stored ones (`stored`: symbol ->
-  [digest self-us]): one comparison per definition the agent changed (its
-  interpreted ones: :interpreted, and :new when main stores nothing for it;
-  a compiled one whose digest differs from main's: :changed). An unchanged
-  definition is never an entry, whatever its ratio: its first-call noise is
-  not the agent's change. A compiled definition main has no value for is left
-  out too: on a branch that is most platform code, on every reply. Reads
+  "The request's live values beside main's stored ones (`stored`: cost key
+  -> entity), like with like only: each live sample (warm, then cold) beside
+  main's sample of the same kind for the same symbol and scope, never across
+  scopes nor between cold and warm. One comparison per sample of a
+  definition the agent changed (its interpreted ones: :interpreted, and :new
+  when main stores nothing of that kind; a compiled one whose digest differs
+  from main's: :changed). An unchanged definition is never an entry, whatever
+  its ratio: its first-call noise is not the agent's change. A compiled
+  definition main has no value for is left out too: on a branch that is most
+  platform code, on every reply. A ratio needs a warm sample to hold
+  `min-calls` calls on both sides; without one, :unknown says why. Reads
   nothing stored itself."
-  {:malli/schema [:=> [:cat :seon.cost/live
-                       [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]
-                       :seon.config.fn.cost/hysteresis]
+  {:malli/schema [:=> [:cat :seon.cost/live [:map-of :seon.fn.cost/key :seon.fn.cost/entity]
+                       :seon.config.fn.cost/min-calls]
                   :seon.cost/diff]}
-  [live stored _hysteresis]
+  [live stored min-calls]
   (into []
-        (keep (fn [{:seon.fn.cost/keys [sym digest scope self-us]}]
-                (let [[main-digest main-us] (get stored sym)
-                      ratio (when (and main-us (pos? main-us)) (/ self-us main-us))
-                      flags (cond-> #{}
-                              (nil? main-us) (conj :new)
-                              (and main-us (not= digest main-digest)) (conj :changed)
-                              (= :seon.profile/context scope) (conj :interpreted))]
-                  (when (or (contains? flags :changed) (contains? flags :interpreted))
-                    (cond-> {:seon.cost.comparison/subject sym
-                             :seon.cost.comparison/measure :self-us
-                             :seon.cost.comparison/live (hundredths self-us)
-                             :seon.cost.comparison/flags flags}
-                      main-us (assoc :seon.cost.comparison/main (hundredths main-us))
-                      ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))
+        (mapcat (fn [{[sym scope :as k] :seon.fn.cost/key :as entity}]
+                  (keep (fn [half]
+                          (when-let [[digest n self-us] (sample entity half)]
+                            (let [[main-digest main-calls main-us] (sample (get stored k) half)
+                                  enough (if (= :warm half) min-calls 1)
+                                  like? (and main-us (pos? main-us) (<= enough n) (<= enough main-calls))
+                                  flags (cond-> #{}
+                                          (nil? main-us) (conj :new)
+                                          (and main-us (not= digest main-digest)) (conj :changed)
+                                          (= :seon.profile/context scope) (conj :interpreted))]
+                              (when (or (contains? flags :changed) (contains? flags :interpreted))
+                                (cond-> {:seon.cost.comparison/subject sym
+                                         :seon.cost.comparison/measure (if (= :warm half) :self-us :cold-self-us)
+                                         :seon.cost.comparison/live (hundredths self-us)
+                                         :seon.cost.comparison/flags flags}
+                                  main-us (assoc :seon.cost.comparison/main (hundredths main-us))
+                                  like? (assoc :seon.cost.comparison/ratio (hundredths (/ self-us main-us)))
+                                  (and main-us (not like?)) (assoc :seon.cost.comparison/unknown :few-calls))))))
+                        [:warm :cold])))
         live))
 
 (defn test-cost-diff
-  "The tests the request ran (`live`: their members' `:seon.test.member/alloc-bytes`)
-  beside main's latest members' (`stored`: test symbol -> bytes): one comparison
-  per test main stores nothing for (:new) or whose allocation moved by the
-  factor `hysteresis` either way. Reads nothing stored itself."
-  {:malli/schema [:=> [:cat :seon.cost/live-tests [:map-of :qualified-symbol :seon.test.member/alloc-bytes]
-                       :seon.config.fn.cost/hysteresis]
+  "The tests the request ran (`live`: their members' allocation and reach
+  digest) beside main's latest members' (`stored`: test symbol -> member):
+  one comparison per test main stores nothing for (:new) or whose reach
+  differs from main's member's (:changed; an unknown reach is not the same).
+  A test whose reach is main's is unchanged and never an entry. No ratio: a
+  member is one run, of unknown warmth, and on a branch its changed reach
+  runs interpreted where main's ran compiled (:unknown :single-run). Reads
+  nothing stored itself."
+  {:malli/schema [:=> [:cat :seon.cost/live-tests [:map-of :qualified-symbol :seon.cost/live-test]]
                   :seon.cost/diff]}
-  [live stored hysteresis]
+  [live stored]
   (into []
-        (keep (fn [{sym :seon.test/sym allocated :seon.test.member/alloc-bytes}]
-                (let [main-bytes (get stored sym)
-                      ratio (when (and main-bytes (pos? main-bytes)) (/ (double allocated) main-bytes))]
-                  (when (or (nil? main-bytes) (and ratio (or (>= ratio hysteresis) (<= ratio (/ 1.0 hysteresis)))))
+        (keep (fn [{sym :seon.test/sym allocated :seon.test.member/alloc-bytes reach :seon.test.member/reach-digest}]
+                (let [{main-bytes :seon.test.member/alloc-bytes main-reach :seon.test.member/reach-digest} (get stored sym)]
+                  (when (or (nil? main-bytes) (nil? reach) (not= reach main-reach))
                     (cond-> {:seon.cost.comparison/subject sym
                              :seon.cost.comparison/measure :alloc-bytes
                              :seon.cost.comparison/live (double allocated)
-                             :seon.cost.comparison/flags (if main-bytes #{} #{:new})}
-                      main-bytes (assoc :seon.cost.comparison/main (double main-bytes))
-                      ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))
+                             :seon.cost.comparison/flags (if main-bytes #{:changed} #{:new})}
+                      main-bytes (assoc :seon.cost.comparison/main (double main-bytes)
+                                        :seon.cost.comparison/unknown :single-run))))))
         live))
 
 (defn arm-measures

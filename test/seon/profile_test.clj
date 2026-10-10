@@ -171,35 +171,78 @@
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
 
+(defn- stamping-world
+  "A world over `connection` whose work is set by hand: `(step! warm-calls
+  warm-us cold-calls cold-us digest)` adds that many warm and cold calls of
+  that many self microseconds each to its sink under `digest`, writes one
+  transaction and answers the stored entity's samples and whether that
+  transaction wrote any of them."
+  [connection sym]
+  (let [sink (batch/sink)
+        world {:seon.batch/sink sink
+               :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
+        k [sym :seon.profile/host]]
+    (fn [warm-calls warm-us cold-calls cold-us digest]
+      (let [^java.util.concurrent.atomic.AtomicLongArray counter
+            (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest] profile/new-adder)
+            warm (long (* warm-calls warm-us 1000))
+            cold (long (* cold-calls cold-us 1000))]
+        (doseq [[slot n] [[0 (+ warm-calls cold-calls)] [1 (+ warm cold)] [2 (+ warm cold)]
+                          [profile/cold-slot cold-calls] [(+ 1 profile/cold-slot) cold] [(+ 2 profile/cold-slot) cold]]]
+          (.addAndGet counter slot n))
+        (let [report (binding [batch/*world* world] (db/transact! connection []))
+              probe (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn.cost/key k]))
+              ;; the probe's own entity: the writer's armed calls count into the world too
+              written (count (filter #(and (= probe (:e %)) (= "seon.fn.cost" (namespace (:a %)))) (:tx-data report)))
+              stored (get (db/stored-costs (db/db connection) [k]) k)]
+          {:warm (some-> (batch/sample stored :warm) (nth 2))
+           :cold (some-> (batch/sample stored :cold) (nth 2))
+           :digest (first (batch/sample stored :warm))
+           :written? (pos? written)})))))
+
 (deftest a-stamped-transaction-replaces-the-values-that-moved
   (test-support/with-database
    (fn [connection]
-     (let [sink (batch/sink)
-           world {:seon.batch/sink sink
-                  :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
-           sym 'seon.profile-test/cost-probe
-           stored (fn [] (db/pull (db/db connection) '[:seon.fn.cost/self-us :seon.fn.cost/digest] [:seon.fn.cost/sym sym]))
-           ;; the world does `calls` calls of `self-us` microseconds each under `digest`, then writes one transaction
-           step! (fn [calls self-us digest]
-                   (let [^java.util.concurrent.atomic.AtomicLongArray counter
-                         (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest] profile/new-adder)
-                         nanos (long (* calls self-us 1000))]
-                     (.addAndGet counter 0 calls)
-                     (.addAndGet counter 1 nanos)
-                     (.addAndGet counter 2 nanos))
-                   (let [report (binding [batch/*world* world] (db/transact! connection []))
-                         probe (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn.cost/sym sym]))
-                         ;; the probe's own entity: the writer's armed calls count into the world too
-                         written (count (filter #(and (= probe (:e %)) (= "seon.fn.cost" (namespace (:a %)))) (:tx-data report)))
-                         {:seon.fn.cost/keys [self-us digest]} (stored)]
-                     {:self-us self-us :digest digest :written? (pos? written)}))]
-       (clojure.test/are [calls self-us digest expected] (= expected (step! calls self-us digest))
-         100 50.0  digest-a {:self-us 50.0  :digest digest-a :written? true}
-         100 50.0  digest-a {:self-us 50.0  :digest digest-a :written? false}
-         100 100.0 digest-a {:self-us 100.0 :digest digest-a :written? true}
-         100 100.0 digest-b {:self-us 100.0 :digest digest-b :written? true}
-         5   900.0 digest-b {:self-us 100.0 :digest digest-b :written? false})
+     (let [sym 'seon.profile-test/cost-probe
+           step! (stamping-world connection sym)]
+       (clojure.test/are [calls self-us digest expected] (= expected (step! calls self-us 0 0.0 digest))
+         100 50.0  digest-a {:warm 50.0  :cold nil :digest digest-a :written? true}
+         100 50.0  digest-a {:warm 50.0  :cold nil :digest digest-a :written? false}
+         100 100.0 digest-a {:warm 100.0 :cold nil :digest digest-a :written? true}
+         100 100.0 digest-b {:warm 100.0 :cold nil :digest digest-b :written? true}
+         5   900.0 digest-b {:warm 100.0 :cold nil :digest digest-b :written? false})
        (is (= #{[100.0 true]}
-              (db/q '[:find ?us ?added :in $ ?sym :where [?e :seon.fn.cost/sym ?sym] [?e :seon.fn.cost/self-us ?us _ ?added]]
-                    (db/history (db/db connection)) sym))
+              (db/q '[:find ?us ?added :in $ ?k :where [?e :seon.fn.cost/key ?k] [?e :seon.fn.cost/warm-self-us ?us _ ?added]]
+                    (db/history (db/db connection)) [sym :seon.profile/host]))
            "the replaced values leave one datom in the history: the current value")))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  a-cold-single-call-never-becomes-the-warm-baseline
+  (test-support/with-database
+   (fn [connection]
+     (let [step! (stamping-world connection 'seon.profile-test/cold-probe)]
+       ;; warm calls, warm us, cold calls, cold us: each sample changes only from its own kind
+       (clojure.test/are [warm-calls warm-us cold-calls cold-us expected]
+                         (= expected (dissoc (step! warm-calls warm-us cold-calls cold-us digest-a) :digest))
+         ;; a process's first call alone: startup cost, never the warm baseline
+         0   0.0  1 5000.0  {:warm nil  :cold 5000.0 :written? true}
+         100 50.0 0 0.0     {:warm 50.0 :cold 5000.0 :written? true}
+         ;; a warm window never touches the cold sample, however different
+         100 52.0 0 0.0     {:warm 50.0 :cold 5000.0 :written? false}
+         ;; after a restart the first call replaces only the cold sample, and only when it moved
+         0   0.0  1 5200.0  {:warm 50.0 :cold 5000.0 :written? false}
+         0   0.0  1 10000.0 {:warm 50.0 :cold 10000.0 :written? true})))))
+
+(deftest ^{:seon/tasks #{'seon.profile/cost-values-are-reliable-and-like-for-like}}
+  a-fresh-cells-first-call-is-cold
+  ;; a restart starts every cell from zero: the first call after it is cold
+  (let [var-name (symbol (str "cold-" (random-uuid)))]
+    (try
+      (let [candidate (arm-probe! var-name inc digest-a)
+            sink (batch/sink)
+            _ (binding [batch/*world* {:seon.batch/sink sink}] (candidate 1) (candidate 2) (candidate 3))
+            ^java.util.concurrent.atomic.AtomicLongArray counter
+            (get sink [(symbol "seon.profile-test" (name var-name)) digest-a])]
+        (is (= [3 1] [(.get counter 0) (.get counter profile/cold-slot)])
+            "three calls, the cell's first of them cold"))
+      (finally (ns-unmap 'seon.profile-test var-name)))))

@@ -414,7 +414,7 @@
            world {:seon.batch/sink sink}
            digest (apply str (repeat 64 "c"))
            probe 'seon.db-test/cost-cold
-           stored #(:seon.fn.cost/self-us (db/pull (db/db connection) '[:seon.fn.cost/self-us] [:seon.fn.cost/sym %]))
+           stored #(:seon.fn.cost/warm-self-us (db/pull (db/db connection) '[:seon.fn.cost/warm-self-us] [:seon.fn.cost/key [% :seon.profile/host]]))
            work! (fn [sym calls self-us]
                    (let [^java.util.concurrent.atomic.AtomicLongArray counter
                          (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest] profile/new-adder)

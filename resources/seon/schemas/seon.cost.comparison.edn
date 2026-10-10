@@ -5,16 +5,19 @@
 {:subject
  [:or {:description "What a comparison is about: a function or test symbol, or a schema key."} :qualified-symbol :qualified-keyword]
  :measure
- [:enum {:description "The compared measure: a function's per-call self or inclusive microseconds or its call count (:seon.fn.cost/*). A test's member allocation in bytes (:seon.test.member/alloc-bytes). Later stages add the schema measures."}
-  :self-us :total-us :calls :alloc-bytes]
+ [:enum {:description "The compared measure: a function's per-call self microseconds over its warm calls (:self-us, :seon.fn.cost/warm-self-us) or over its cold calls (:cold-self-us, :seon.fn.cost/cold-self-us). A test's member allocation in bytes (:seon.test.member/alloc-bytes). Later stages add the schema measures."}
+  :self-us :cold-self-us :alloc-bytes]
  :live
  [:double {:min 0.0 :description "This request's own measurement, read from its sink before anything is stored."}]
  :main
- [:double {:min 0.0 :description "Main's stored value for the same subject and measure; absent when main stores none."}]
+ [:double {:min 0.0 :description "Main's stored value for the same subject, measure and scope; absent when main stores none."}]
  :ratio
- [:double {:min 0.0 :description "live / main; absent without a main value."}]
+ [:double {:min 0.0 :description "live / main, given only between samples of the same kind and scope that each hold enough calls (a warm sample :seon.config.fn.cost/min-calls); absent otherwise, and then :seon.cost.comparison/unknown says why when main has a value."}]
+ :unknown
+ [:enum {:description "Why a comparison with a main value has no ratio: :few-calls a warm sample with fewer than :seon.config.fn.cost/min-calls calls; :single-run a test member is one run, of unknown scope and warmth."}
+  :few-calls :single-run]
  :flag
- [:enum {:description ":new main stores no value; :changed the definition digest differs from main's; :interpreted the live value is an interpreted body's, guidance only (the compiled merge check judges); :over-budget a schema's generator or validator exceeds its dial."}
+ [:enum {:description ":new main stores no value of this kind and scope; :changed the definition digest differs from main's; :interpreted the live value is an interpreted body's, guidance only (the compiled merge check judges); :over-budget a schema's generator or validator exceeds its dial."}
   :new :changed :interpreted :over-budget]
  :flags
- [:set {:description "Why the comparison is shown besides its ratio; empty when the ratio alone moved past :seon.config.fn.cost/hysteresis."} :seon.cost.comparison/flag]}
+ [:set {:description "Why the comparison is shown."} :seon.cost.comparison/flag]}

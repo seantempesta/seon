@@ -128,7 +128,7 @@
 (deftest item-21-a-function-called-more-than-the-threshold-is-named-once-repeated
   (let [call! (fn [n] (fn [request form _]
                         (.put ^java.util.concurrent.ConcurrentHashMap (:seon.batch/form-sink (:seon.batch/world request))
-                              ['x/f nil] (java.util.concurrent.atomic.AtomicLongArray. (long-array [n 0 0 0 0])))
+                              ['x/f nil] (java.util.concurrent.atomic.AtomicLongArray. (long-array [n 0 0 0 0 0 0 0 0 0 0 0])))
                         {:seon.batch/value form}))
         at-threshold (:seon.batch/call-profile (first (:seon.batch/entries (run {:seon.batch/evaluate (call! batch/repeated-calls)}))))
         over (:seon.batch/call-profile (first (:seon.batch/entries (run {:seon.batch/evaluate (call! (inc batch/repeated-calls))}))))]
@@ -140,7 +140,7 @@
         _ (run {:seon.batch/world {:seon.boot/cluster-name "default" :seon.batch/sink sink}
                 :seon.batch/evaluate (fn [request form _]
                                        (.put ^java.util.concurrent.ConcurrentHashMap (:seon.batch/form-sink (:seon.batch/world request))
-                                             ['x/f nil] (java.util.concurrent.atomic.AtomicLongArray. (long-array [3 0 0 0 0])))
+                                             ['x/f nil] (java.util.concurrent.atomic.AtomicLongArray. (long-array [3 0 0 0 0 0 0 0 0 0 0 0])))
                                        {:seon.batch/value form})})]
     (is (= 6 (get (batch/calls sink) 'x/f)) "two forms of three calls")))
 

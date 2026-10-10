@@ -58,12 +58,13 @@
   [:seon.cost/batch-size :seon.cost/batch-size]]
  :seon.cost/batch-size [:int {:min 1 :description "The most transactions one commit made durable together."}]
  :seon.cost/comparison
- [:map {:description "One subject's live value beside main's stored value. Only a definition the agent changed (interpreted, or its digest differs from main's) is shown; an unchanged definition is never an entry, whatever its ratio. A test reaching a changed definition is shown when main has none or its allocation moved by the hysteresis either way."}
+ [:map {:description "One subject's live value beside main's stored value of the same kind: a warm sample beside main's warm, a cold beside main's cold, always the same scope (`:seon.fn.cost/key`). Only a definition the agent changed (interpreted, or its digest differs from main's) is shown; an unchanged definition is never an entry, whatever its ratio. A test is shown when its reach differs from main's latest member's, or main has none. A ratio is given only between like samples with enough calls; otherwise :seon.cost.comparison/unknown says why there is none."}
   [:seon.cost.comparison/subject :seon.cost.comparison/subject]
   [:seon.cost.comparison/measure :seon.cost.comparison/measure]
   [:seon.cost.comparison/live :seon.cost.comparison/live]
   [:seon.cost.comparison/main {:optional true} :seon.cost.comparison/main]
   [:seon.cost.comparison/ratio {:optional true} :seon.cost.comparison/ratio]
+  [:seon.cost.comparison/unknown {:optional true} :seon.cost.comparison/unknown]
   [:seon.cost.comparison/flags :seon.cost.comparison/flags]]
  :seon.cost/diff
  [:vector {:description "The request's comparisons against main, at most :seon.config.test.cost/top. Producer: seon.batch/cost-diff. Consumer: the reply."}
@@ -77,9 +78,14 @@
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/count :seon.cost/count]]
  :seon.cost/count [:int {:min 0 :description "How many members the test step ran in this request."}]
+ :seon.cost/live-test
+ [:map {:description "One test member's cost and the reach it tested."}
+  [:seon.test/sym {:optional true} :seon.test/sym]
+  [:seon.test.member/alloc-bytes :seon.test.member/alloc-bytes]
+  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]]
  :seon.cost/live-tests
- [:vector {:description "The members the test step ran in this request, with their cost attributes: what the reply compares with main's latest results for the same tests. Producer: seon.turn/test-step."}
-  [:map [:seon.test/sym :seon.test/sym] [:seon.test.member/alloc-bytes :seon.test.member/alloc-bytes]]]
+ [:vector {:description "The members the test step ran in this request, with their allocation and reach: what the reply compares with main's latest results for the same tests. Producer: seon.turn/test-step."}
+  :seon.cost/live-test]
  :seon.cost/subjects
  [:set {:description "The definitions and tests a request defined or ran, and the schemas it measured: what cost-diff pulls from main by identity."}
   :seon.cost.comparison/subject]

@@ -12,10 +12,14 @@
 
   A call made inside an evaluation's world also counts into that world's call
   sink: its calls, nanoseconds and self nanoseconds (its elapsed less its
-  counted callees', from the same two clock reads). `transaction-observation`
-  turns a sink's delta into the cost entities the world's next transaction
-  carries (`:seon.fn.cost/entity`); `live-costs` reads a request's own sink for
-  its reply
+  counted callees', from the same two clock reads), and again in the sink's
+  cold half when it is one of the cell's first `:seon.profile/cold-calls` calls
+  in this process (the cell's ordinal decides: call order, no clock). A
+  definition's cold and warm calls are never averaged together.
+  `transaction-observation` turns a sink's delta into the cost entities the
+  world's next transaction carries (`:seon.fn.cost/entity`, one per symbol and
+  scope, a cold and a warm sample); `live-costs` reads a request's own sink for
+  its reply.
 
   A host cell belongs to a loaded Var's JVM wrapper and is attributed to no
   cluster. A context cell belongs to one SCI installation's wrapper. Cells are
@@ -127,13 +131,15 @@
   "A new cumulative cell for one installed callable.
 
   `callable-identity` names the callable's symbol, its definition digest when the
-  installer holds one, and its scope. A missing digest is unknown, never a
-  substitute."
+  installer holds one, its scope and how many of its first calls in this
+  process are cold. A missing digest is unknown, never a substitute."
   {:malli/schema [:=> [:cat :seon.profile/identity] :seon.profile/cell]}
   [callable-identity]
   (let [created (merge (select-keys callable-identity [:seon.profile/sym :seon.profile/digest
-                                                       :seon.profile/scope :seon.profile/context])
-                       {:seon.profile/histogram (into-array LongAdder (repeatedly buckets #(LongAdder.)))
+                                                       :seon.profile/scope :seon.profile/context
+                                                       :seon.profile/cold-calls])
+                       {:seon.profile/ordinal (java.util.concurrent.atomic.AtomicLong.)
+                        :seon.profile/histogram (into-array LongAdder (repeatedly buckets #(LongAdder.)))
                         :seon.profile/total-counter (LongAdder.)
                         :seon.profile/self-counter (LongAdder.)
                         :seon.profile/max-counter (LongAccumulator. longest 0)
@@ -185,6 +191,9 @@
          (:seon.profile/throw-counts cell#)
          ~(with-meta '__profile-entered {:tag 'java.lang.ThreadLocal})
          (:seon.profile/entered cell#)
+         ~(with-meta '__profile-ordinal {:tag 'java.util.concurrent.atomic.AtomicLong})
+         (:seon.profile/ordinal cell#)
+         ~'__profile-cold (long (:seon.profile/cold-calls cell# 0))
          ;; the executed definition's identity, once: its symbol and held
          ;; definition digest (nil is unknown), the key of a world's call sink
          ~'__profile-key [(:seon.profile/sym cell#) (:seon.profile/digest cell#)]]
@@ -192,16 +201,22 @@
 
 (def ^java.util.function.Function new-adder
   "The one function a call sink makes an executed definition's first counter
-  with: `[calls nanos self-nanos calls-stamped self-stamped nanos-stamped]`,
-  the last three where `transaction-observation` last read the first three."
+  with: `[calls nanos self-nanos calls-stamped self-stamped nanos-stamped]` for
+  every call, then the same six for its cold calls alone (`cold-slot` on):
+  the stamped slots are where `transaction-observation` last read the others."
   (reify java.util.function.Function
-    (apply [_ _] (AtomicLongArray. 6))))
+    (apply [_ _] (AtomicLongArray. 12))))
+
+(def cold-slot
+  "The first slot of a sink counter's cold half (`new-adder`)."
+  6)
 
 (defn world-counter?
-  "True for a call sink's counter as `new-adder` makes it (six slots)."
+  "True for a world's counter array: a call sink's counter as `new-adder`
+  makes it, or a writer meter (`seon.db/writer-meter`)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (and (instance? AtomicLongArray value) (= 6 (.length ^AtomicLongArray value))))
+  (instance? AtomicLongArray value))
 
 (def ^ThreadLocal callee-frame
   "Per thread, the nanoseconds the counted armed calls inside the current
@@ -240,8 +255,10 @@
   thread's `callee-frame` (reset at entry, the caller's total `saved`); the
   caller's frame then holds `saved` plus this elapsed. Into the world counter
   `counted` (nil outside a world): a call, its nanoseconds and its self
-  nanoseconds; for an `outer`most entry, into the cell `with-cell` bound."
-  [outer counted started frame saved]
+  nanoseconds, and into its cold half too when `cold` (one of the cell's
+  first calls in this process); for an `outer`most entry, into the cell
+  `with-cell` bound."
+  [outer counted cold started frame saved]
   (let [elapsed (gensym "elapsed")
         c (hinted "counted" 'java.util.concurrent.atomic.AtomicLongArray)
         b (hinted "bucket" 'java.util.concurrent.atomic.LongAdder)]
@@ -251,7 +268,11 @@
        (when-some [~c ~counted]
          (. ~c ~'incrementAndGet 0)
          (. ~c ~'addAndGet 1 ~elapsed)
-         (. ~c ~'addAndGet 2 self#))
+         (. ~c ~'addAndGet 2 self#)
+         (when ~cold
+           (. ~c ~'incrementAndGet 6)
+           (. ~c ~'addAndGet 7 ~elapsed)
+           (. ~c ~'addAndGet 8 self#)))
        (when ~outer
          (let [~b (aget ~'__profile-histogram (seon.profile/bucket-of ~elapsed))]
            (. ~b ~'increment))
@@ -274,7 +295,9 @@
   and self nanoseconds are added at exit from the same clock read as the
   cell's. Each entry restores the prior one on exit. A throw is counted as a
   completed call and as a throw of its class, then rethrown unchanged. Two
-  clock reads per counted entry, never more."
+  clock reads per counted entry, never more. A counted entry among the cell's
+  first `:seon.profile/cold-calls` in this process is cold: once past them
+  the ordinal is only read, never written."
   [& body]
   (let [prior (gensym "prior")
         sink (hinted "sink" 'java.util.concurrent.ConcurrentHashMap)
@@ -282,6 +305,7 @@
         outer (gensym "outer")
         started (gensym "started")
         counted (gensym "counted")
+        cold (gensym "cold")
         frames (hinted "frames" 'java.lang.ThreadLocal)
         frame (hinted "frame" 'longs)
         saved (gensym "saved")
@@ -297,6 +321,8 @@
                ~started (System/nanoTime)
                ~counted (when (some? ~sink)
                           (. ~sink ~'computeIfAbsent ~'__profile-key seon.profile/new-adder))
+               ~cold (and (< (. ~'__profile-ordinal ~'get) ~'__profile-cold)
+                          (<= (. ~'__profile-ordinal ~'incrementAndGet) ~'__profile-cold))
                ~frames seon.profile/callee-frame
                ~frame (. ~frames ~'get)
                ~saved (aget ~frame 0)]
@@ -305,10 +331,10 @@
            (. ~'__profile-entered ~'set ~here)
            (try
              (let [~value (do ~@body)]
-               (seon.profile/exited ~outer ~counted ~started ~frame ~saved)
+               (seon.profile/exited ~outer ~counted ~cold ~started ~frame ~saved)
                ~value)
              (catch Throwable ~failure
-               (seon.profile/exited ~outer ~counted ~started ~frame ~saved)
+               (seon.profile/exited ~outer ~counted ~cold ~started ~frame ~saved)
                (when ~outer
                  (let [~thrown (. ~'__profile-throws ~'computeIfAbsent (class ~failure) seon.profile/new-counter)]
                    (. ~thrown ~'increment)))
@@ -422,23 +448,31 @@
 (defn- cost-scope
   "The scope of the executed definition `executed-key`: an interpreted SCI
   definition's when any of its live cells is a context cell, else the host's."
-  {:malli/schema [:=> [:cat :seon.batch/executed-key] :seon.fn.cost/scope]}
+  {:malli/schema [:=> [:cat :seon.batch/executed-key] :seon.profile/scope]}
   [executed-key]
   (if (some #(= :seon.profile/context (:seon.profile/scope %)) (cells-of executed-key))
     :seon.profile/context
     :seon.profile/host))
 
 (defn- cost-entity
-  "One executed definition's cost entity from its calls, nanoseconds, self
-  nanoseconds and scope: per-call means in microseconds."
-  {:malli/schema [:=> [:cat [:tuple :seon.batch/executed-key :int :int :int :seon.fn.cost/scope]] :seon.fn.cost/entity]}
-  [[[sym digest] calls nanos self scope]]
-  {:seon.fn.cost/sym sym
-   :seon.fn.cost/digest digest
-   :seon.fn.cost/scope scope
-   :seon.fn.cost/calls calls
-   :seon.fn.cost/self-us (/ (double self) calls 1000.0)
-   :seon.fn.cost/total-us (/ (double nanos) calls 1000.0)})
+  "One executed definition's cost entity from its row (calls, nanoseconds and
+  self nanoseconds of all its calls, then of its cold calls alone) and scope:
+  its warm sample (the calls that were not cold) and its cold sample, each
+  per-call means in microseconds, each present when `qualifies?` it (its
+  half, calls and self nanoseconds); nil when neither does."
+  {:malli/schema [:=> [:cat [:tuple :seon.batch/executed-key :int :int :int :int :int :int]
+                       :seon.profile/scope [:=> [:cat [:enum :warm :cold] :int :int] :boolean]]
+                  [:maybe :seon.fn.cost/entity]]}
+  [[[sym digest] calls nanos self cold-calls cold-nanos cold-self] scope qualifies?]
+  (let [mean (fn [n total self] [digest n (/ (double self) n 1000.0) (/ (double total) n 1000.0)])
+        warm-calls (- calls cold-calls)
+        warm (when (qualifies? :warm warm-calls (- self cold-self))
+               (mean warm-calls (- nanos cold-nanos) (- self cold-self)))
+        cold (when (qualifies? :cold cold-calls cold-self) (mean cold-calls cold-nanos cold-self))]
+    (when (or warm cold)
+      (cond-> {:seon.fn.cost/key [sym scope]}
+        warm (seon.batch/with-sample :warm warm)
+        cold (seon.batch/with-sample :cold cold)))))
 
 (defn undigested
   "The symbols `sink` counted under no definition digest: interpreted
@@ -449,35 +483,38 @@
   (into [] (keep (fn [[sym digest]] (when (nil? digest) sym))) (.keySet ^ConcurrentHashMap sink)))
 
 (defn- selected
-  "`worked` (`[[sym digest] calls nanos self-nanos]` rows) as cost entities:
-  a row without a digest takes its symbol's from `digests` (else is dropped),
-  rows of one executed definition are summed, one digest per symbol (its most
-  called), each called at least `min-calls` times and spending at least
-  `min-total-us` microseconds of self time, the `limit` most self time spent
-  first (ties by symbol): the same work selects the same definitions, and
-  cheap predicates called often never qualify."
-  {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int]]
+  "`worked` (`[[sym digest] calls nanos self-nanos cold-calls cold-nanos
+  cold-self-nanos]` rows) as cost entities, one per symbol and scope: a row
+  without a digest takes its symbol's from `digests` (else is dropped), rows
+  of one executed definition are summed, one digest per symbol and scope (its
+  most called). A warm sample needs at least `min-calls` warm calls, a cold
+  sample one cold call, and each at least `min-total-us` microseconds of self
+  time; the `limit` most self time spent first (ties by symbol): the same work
+  selects the same definitions, and cheap predicates called often never
+  qualify."
+  {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int :int :int :int]]
                        [:map-of :qualified-symbol :seon.program/definition-digest]
-                       :seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
+                       :int :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
                   [:vector :seon.fn.cost/entity]]}
   [worked digests min-calls min-total-us limit]
-  (->> worked
-       (keep (fn [[[sym digest :as k] calls nanos self]]
-               (when-let [digest (or digest (get digests sym))]
-                 [[sym digest] calls nanos self (cost-scope k)])))
-       (reduce (fn [m [k calls nanos self scope]]
-                 (update m k (fn [[_ c n s sc]]
-                               [k (+ (or c 0) calls) (+ (or n 0) nanos) (+ (or s 0) self)
-                                (if (= :seon.profile/context sc) sc scope)])))
-               {})
-       vals
-       (group-by ffirst)
-       (keep (fn [[_ rows]]
-               (let [[_ calls _ self :as row] (apply max-key second rows)]
-                 (when (and (<= (max 1 min-calls) calls) (<= (* 1000 min-total-us) self))
-                   row))))
-       (sort-by (fn [[[sym] _ _ self]] [(- self) sym]))
-       (into [] (comp (take limit) (map cost-entity)))))
+  (let [qualifies? (fn [half calls self]
+                     (and (pos? calls) (<= (if (= :warm half) min-calls 1) calls) (<= (* 1000 min-total-us) self)))]
+    (->> worked
+         (keep (fn [[[sym digest :as k] & row]]
+                 (when-let [digest (or digest (get digests sym))]
+                   [[sym digest] (vec row) (cost-scope k)])))
+         (reduce (fn [m [k row scope]]
+                   (update m k (fn [[_ summed sc]]
+                                 [k (if summed (mapv + summed row) row)
+                                  (if (= :seon.profile/context sc) sc scope)])))
+                 {})
+         vals
+         (group-by (fn [[[sym] _ scope]] [sym scope]))
+         (keep (fn [[_ rows]]
+                 (let [[k row scope] (apply max-key #(first (second %)) rows)]
+                   (cost-entity (into [k] row) scope qualifies?))))
+         (sort-by (fn [e] [(- (seon.batch/spent e)) (first (:seon.fn.cost/key e))]))
+         (into [] (take limit)))))
 
 (defn live-costs
   "The request's own per-definition values from its sink, as cost entities:
@@ -490,26 +527,27 @@
                        :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
                   :seon.cost/live]}
   [sink digests min-total-us limit]
-  (let [entities (selected (into [] (map (fn [[k ^AtomicLongArray c]] [k (.get c 0) (.get c 1) (.get c 2)]))
+  (let [entities (selected (into [] (map (fn [[k ^AtomicLongArray c]]
+                                           [k (.get c 0) (.get c 1) (.get c 2) (.get c 6) (.get c 7) (.get c 8)]))
                                  ^ConcurrentHashMap sink)
                            digests 1 0 Integer/MAX_VALUE)
-        [own host] ((juxt filter remove) #(= :seon.profile/context (:seon.fn.cost/scope %)) entities)]
+        [own host] ((juxt filter remove) #(= :seon.profile/context (second (:seon.fn.cost/key %))) entities)]
     (into [] (take limit)
-          (concat own (filter (fn [{:seon.fn.cost/keys [calls self-us]}] (<= min-total-us (* calls self-us))) host)))))
+          (concat own (filter #(<= min-total-us (seon.batch/spent %)) host)))))
 
 (defn transaction-observation
   "The cost entities of the work `world` did since its previous transaction:
-  `selected` from its call sink, per-call means of that work alone. The
-  writer's own armed calls count too: they are that world's work. Empty for
-  no world or no sink. A definition counted under no digest takes its
-  symbol's from `digests`.
+  `selected` from its call sink, per-call means of that work alone, its cold
+  calls apart from its warm ones. The writer's own armed calls count too:
+  they are that world's work. Empty for no world or no sink. A definition
+  counted under no digest takes its symbol's from `digests`.
 
   Read from the world's call sink (`:seon.batch/sink`): each counter's calls,
-  nanoseconds and self nanoseconds less those at the world's previous
-  transaction, which this call then marks (the sink's counters own the mark,
-  so nothing beside them holds state). Two threads observing one world at
-  once split its work between their transactions. The caller decides which
-  entities moved (`moved?`) against the stored values.
+  nanoseconds and self nanoseconds, all and cold, less those at the world's
+  previous transaction, which this call then marks (the sink's counters own
+  the marks, so nothing beside them holds state). Two threads observing one
+  world at once split its work between their transactions. The caller decides
+  which samples moved (`moved?`) against the stored values.
 
   # Costs
   Proportional to the definitions the world executed: one pass over its
@@ -518,34 +556,37 @@
                        :seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
                   [:vector :seon.fn.cost/entity]]}
   [world digests min-calls min-total-us limit]
-  (let [sink (:seon.batch/sink world)]
+  (let [sink (:seon.batch/sink world)
+        ;; the slots of one half since its mark, marking them: [calls nanos self]
+        since! (fn [^AtomicLongArray c base]
+                 (let [calls (.get c base) nanos (.get c (+ base 1)) self (.get c (+ base 2))]
+                   [(- calls (.getAndSet c (+ base 3) calls))
+                    (- nanos (.getAndSet c (+ base 5) nanos))
+                    (- self (.getAndSet c (+ base 4) self))]))]
     (if-not (instance? ConcurrentHashMap sink)
       []
       (selected
        (into []
              (keep (fn [[k counter]]
                      (when (instance? AtomicLongArray counter)
-                       (let [^AtomicLongArray c counter
-                             calls (.get c 0)
-                             nanos (.get c 1)
-                             self (.get c 2)
-                             made (- calls (.getAndSet c 3 calls))]
+                       (let [[made :as all] (since! counter 0)
+                             cold (since! counter cold-slot)]
                          (when (pos? made)
-                           [k made (- nanos (.getAndSet c 5 nanos)) (- self (.getAndSet c 4 self))])))))
+                           (into (into [k] all) cold))))))
              ^ConcurrentHashMap sink)
        digests min-calls min-total-us limit))))
 
 (defn moved?
-  "True when `live` should replace the `stored` cost entity: none is stored,
-  the definition digest changed, or the per-call self time differs by at
-  least the factor `hysteresis` either way."
-  {:malli/schema [:=> [:cat :seon.config.fn.cost/hysteresis [:maybe :map] :seon.fn.cost/entity] :boolean]}
+  "True when the `live` sample should replace the `stored` one of the same
+  half: none is stored, the definition digest changed, or the per-call self
+  time differs by at least the factor `hysteresis` either way."
+  {:malli/schema [:=> [:cat :seon.config.fn.cost/hysteresis [:maybe :seon.fn.cost/sample] :seon.fn.cost/sample] :boolean]}
   [hysteresis stored live]
-  (let [a (:seon.fn.cost/self-us stored)
-        b (:seon.fn.cost/self-us live)]
+  (let [[stored-digest _ a] stored
+        [live-digest _ b] live]
     (boolean
      (or (nil? a)
-         (not= (:seon.fn.cost/digest stored) (:seon.fn.cost/digest live))
+         (not= stored-digest live-digest)
          (and (not= a b) (>= (max a b) (* hysteresis (min a b))))))))
 
 (defn summary

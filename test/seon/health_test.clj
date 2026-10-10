@@ -190,10 +190,14 @@
    (fn [connection]
      (let [digest (apply str (repeat 64 "a"))
            cost (fn [sym self-us total-us]
-                  {:seon.fn.cost/sym sym :seon.fn.cost/digest digest :seon.fn.cost/scope :seon.profile/host
-                   :seon.fn.cost/calls 4 :seon.fn.cost/self-us self-us :seon.fn.cost/total-us total-us})
+                  {:seon.fn.cost/key [sym :seon.profile/host] :seon.fn.cost/warm-digest digest
+                   :seon.fn.cost/warm-calls 4 :seon.fn.cost/warm-self-us self-us :seon.fn.cost/warm-total-us total-us})
            _ (db/transact! connection [(cost 'probe.health/stored-slow 2.0e6 3.0e6)
-                                       (cost 'probe.health/stored-quick 10.0 20.0)])
+                                       (cost 'probe.health/stored-quick 10.0 20.0)
+                                       ;; a slow first call alone is startup cost, not a slow definition
+                                       {:seon.fn.cost/key ['probe.health/stored-cold-slow :seon.profile/host]
+                                        :seon.fn.cost/cold-digest digest :seon.fn.cost/cold-calls 1
+                                        :seon.fn.cost/cold-self-us 5.0e6 :seon.fn.cost/cold-total-us 5.0e6}])
            database (db/db connection)
            unit (#'health/profile-unit database 900 nil)
            slow (some #(when (= 'probe.health/stored-slow (:seon.profile/sym %)) %) unit)
@@ -201,7 +205,7 @@
                           (health/findings database {:seon.health/profile unit}))]
        (is (= [2000000 3000000 4] ((juxt :seon.profile/self-mean-us :seon.profile/mean-us :seon.profile/calls) slow))
            "a stored entity over the bound is an observation of the unit")
-       (is (not-any? #(= 'probe.health/stored-quick (:seon.profile/sym %)) unit))
+       (is (not-any? #(#{'probe.health/stored-quick 'probe.health/stored-cold-slow} (:seon.profile/sym %)) unit))
        (is (= ['probe.health/stored-slow] (filterv #{'probe.health/stored-slow 'probe.health/stored-quick}
                                                    (mapv :seon.health/subject found)))
            "it is an over-bound finding")))))
