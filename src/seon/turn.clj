@@ -2212,8 +2212,8 @@
     [(cond-> {:seon.task/id merge-task}
        main (assoc :seon.task/landed main)
        (string? git) (assoc :seon.task/landed-git git)
-       (:seon.error/message landed) (assoc :seon.task/refusal (or (:seon.error/type landed) :seon.source/landing-refused))
-       (and (:seon.error/message landed) (seq red)) (assoc :seon.task/refused-tests red))]))
+       (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
+       (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]))
 
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
