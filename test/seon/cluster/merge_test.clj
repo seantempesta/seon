@@ -1,7 +1,10 @@
 (ns seon.cluster.merge-test
   "Prepare, gate and named accept of a candidate branch's replacements
   (`seon.cluster.source/prepare-merge!`, `accept-merge!`)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -213,3 +216,54 @@
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(defn- git!
+  "Run git with `args` in `root`; its trimmed standard output, throwing on a non-zero exit."
+  [root & args]
+  (let [{:keys [exit out err]} (apply shell/sh "git" "-C" root args)]
+    (when-not (zero? exit) (throw (ex-info err {:git args})))
+    (str/trim out)))
+
+(defn- checkout!
+  "A disposable git checkout under the temp directory holding `files` (relative path to text), committed."
+  [label files]
+  (let [root (support/temp-root label)]
+    (doseq [[path text] files] (io/make-parents (io/file root path)) (spit (io/file root path) text))
+    (git! root "init" "-q")
+    (git! root "config" "user.email" "land@test.invalid")
+    (git! root "config" "user.name" "land-test")
+    (git! root "add" ".")
+    (git! root "commit" "-q" "-m" "fixture")
+    root))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
+  a-landed-merge-is-one-git-commit-of-exactly-its-paths
+  (let [root (checkout! "land-commit-test" {"src/a.clj" "(ns a)\n" "src/b.clj" "(ns b)\n" "notes.txt" "x\n"})
+        acceptance {:seon.task/sym 'tq.land/area :seon.task/merge "0123456789ab" :seon.agent/id "land-agent"
+                    :seon.test.run/id "abcdef012345" :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
+        written {:seon.source/changed-paths ["src/a.clj"]
+                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
+                                      :seon.source/replaced []}]}]
+    (try
+      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
+      (spit (io/file root "src/b.clj") "(ns b)\n(def y 2)\n")
+      (testing "anything else staged in the index refuses and commits nothing"
+        (git! root "add" "src/b.clj")
+        (let [head (git! root "rev-parse" "HEAD")
+              refused (source/commit! root written acceptance)]
+          (is (= :seon.git/commit-error (:seon.error/type refused)))
+          (is (= ["src/b.clj"] (:seon.error/offending refused)))
+          (is (= head (git! root "rev-parse" "HEAD"))))
+        (git! root "reset" "-q" "--" "src/b.clj"))
+      (testing "the commit carries exactly the written paths and a message naming the task, merge, agent, run and commit"
+        (let [head (git! root "rev-parse" "HEAD")
+              sha (:seon.git/commit (source/commit! root written acceptance))
+              message (git! root "log" "-1" "--format=%B" sha)]
+          (is (= sha (git! root "rev-parse" "HEAD")))
+          (is (= head (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
+          (is (= ["src/a.clj"] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" sha))))
+          (is (every? #(str/includes? message %) ["tq.land/area" "0123456789ab" "land-agent" "abcdef012345"
+                                                  "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"]))
+          (is (= "(ns b)\n(def y 2)\n" (slurp (io/file root "src/b.clj"))) "another file's working-tree change stays uncommitted")
+          (is (= ["src/b.clj"] (str/split-lines (git! root "diff" "--name-only"))))))
+      (finally (support/delete-root! root)))))

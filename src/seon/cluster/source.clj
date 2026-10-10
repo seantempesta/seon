@@ -8,6 +8,7 @@
   Scratch branches are retired after publication and no connection to
   `:current-src` is opened or retained."
   (:require [seon.error.refusal]
+            [babashka.process :as process]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -1419,3 +1420,69 @@
                             {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
         (write-back-commits connection accepted before after root)))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
+
+;;; ---------------------------------------------------------------------------
+;;; Landing: one git commit of exactly a write-back's paths
+;;; ---------------------------------------------------------------------------
+
+(defn- git
+  "One git command `args` in the checkout `root`: its exit and trimmed output."
+  {:malli/schema [:=> [:cat :seon.fn/root [:sequential :string]] [:map [:exit :int] [:out :string] [:err :string]]]}
+  [root args]
+  (let [{:keys [exit out err]} (apply process/shell {:dir root :out :string :err :string :continue true} "git" args)]
+    {:exit exit :out (str/trim out) :err (str/trim err)}))
+
+(defn- commit-refusal
+  "`commit!`'s refusal: its message and evidence."
+  {:malli/schema [:=> [:cat [:vector :seon.source/path] :string :map] :seon.git/commit-error]}
+  [paths message members]
+  (seon.error.refusal/error :seon.git/commit-error
+   (merge {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/commit!
+           :seon.error/message message :seon.git/paths paths}
+          members)))
+
+(defn- commit-message
+  "The landing's commit message: what merged and the evidence it merged on, in `bin/lane`'s trailer form."
+  {:malli/schema [:=> [:cat :seon.source/acceptance [:vector :seon.source/path]] :string]}
+  [{task-sym :seon.task/sym merge-task :seon.task/merge agent-id :seon.agent/id run-id :seon.test.run/id
+    commit-id :seon.source/commit-id}
+   paths]
+  (str "Land " (or task-sym (str "merge task " merge-task)) (when agent-id (str " from agent " agent-id))
+       ": merged on main as " commit-id " by gate run " run-id "\n\n"
+       "Written: " (str/join " " paths) "\n\n"
+       "Merge-task: " merge-task "\n"
+       "Merge-commit: " commit-id "\n"
+       "Branch-evidence-runs: " run-id "\n"
+       "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
+
+(defn commit!
+  "Commit exactly the paths `written` installed under the checkout `root` as one git commit
+  (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
+  `:seon.git/commit`. Refuses, committing nothing, when anything else is staged in the
+  index: the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
+  landings. A commit git made that is not exactly the written paths on the previous head
+  is answered as a refusal naming what it carries; history is never rewritten.
+
+  Example:
+  (commit! \"/Users/me/src/project\" written acceptance)"
+  {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
+                  [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
+  [root written acceptance]
+  (let [paths (vec (:seon.source/changed-paths written))
+        staged (git root ["diff" "--cached" "--name-only"])
+        other (when (zero? (:exit staged)) (vec (remove (set paths) (remove str/blank? (str/split-lines (:out staged))))))
+        before (git root ["rev-parse" "HEAD"])]
+    (cond
+      (not (zero? (:exit staged))) (commit-refusal paths "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
+      (seq other) (commit-refusal paths "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
+      (empty? paths) (commit-refusal paths "The landing wrote no path to commit." {:seon.error/offending paths})
+      :else
+      (let [made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
+            after (git root ["rev-parse" "HEAD"])
+            carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])]
+        (cond
+          (not (zero? (:exit made))) (commit-refusal paths "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
+          (not= (set paths) (set (str/split-lines (:out carried))))
+          (commit-refusal paths "The commit git made is not exactly the written paths; history is not rewritten."
+                          {:seon.error/offending (str/split-lines (:out carried)) :seon.error/expected paths})
+          :else {:seon.git/commit (:out after)})))))

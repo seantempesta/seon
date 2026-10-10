@@ -1,4 +1,8 @@
-[#:seon.task{:name "a-red-reaching-test-refuses-acceptance"
+[#:seon.task{:name "a-landing-is-one-git-commit"
+             :kind :function
+             :intent "A landing's files reached git only through `bin/lane commit`, a Claude-lane tool (card ROOT-AGENT stage 3). Done when `seon.cluster.source/commit!` makes one `git commit --only` of exactly the landing's written paths through `babashka.process/shell`, its message naming the task, merge task, agent, gate run and merge commit, and refuses `:seon.git/commit-error` when anything else is staged in the index (the rule `bin/lane commit` enforces)."
+             :must-read #{seon.cluster.source/commit! babashka.process/shell}}
+ #:seon.task{:name "a-red-reaching-test-refuses-acceptance"
              :kind :function
              :intent "`seon.cluster.source/accept-merge!` gated only the proofs (and each replaced function reaching a green member), so a merge whose proofs were green committed while another test of its run was red, shown only as `:seon.source/red` (AGENTS.md, merge: `merge!` commits only when every test on the merge branch is green; a test already red on main stops it for root). Done when acceptance reads the run's recorded members and refuses `:seon.source/red-test-error` naming each member of the run that is not green (`:seon.source/red-tests`, each with its `:seon.test/sym`, the `:seon.test.run/id` that recorded it and its verdict, red or unknown), and refuses `:seon.source/red-on-target-error` instead when every such test is recorded red on the target for its current reach there; main's head is unchanged."
              :must-read #{seon.cluster.source/accept-merge! seon.cluster.source/prepare-merge! seon.test/recorded-result seon.test.runner/reach-digests seon.test/green-members}}
