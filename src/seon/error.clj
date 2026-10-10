@@ -1853,6 +1853,13 @@
   "Declared names shown beside a name not found: the nearest by spelling."
   8)
 
+(defn- name-distance
+  "The sort key of declared name `sym` beside the wanted name: its spelling
+  distance from `wanted`, then its name."
+  {:malli/schema [:=> [:cat :string :symbol] [:tuple :int :string]]}
+  [wanted sym]
+  [(me/levenshtein wanted (name sym)) (name sym)])
+
 (defn- names-in
   "The names `namespace-name` declares nearest to `missing` by spelling, at
   most eight: its public names when `missing` is qualified (another
@@ -1868,11 +1875,11 @@
         wanted (name missing)]
     (if (db/read-refusal? found)
       found
-      (into []
-            (comp (remove (fn [[_ private?]] (and private? (qualified-symbol? missing))))
-                  (map (comp symbol name first))
-                  (take names-shown))
-            (sort-by (fn [[sym]] [(me/levenshtein wanted (name sym)) (name sym)]) found)))))
+      (->> found
+           (into [] (comp (remove (fn [[_ private?]] (and private? (qualified-symbol? missing))))
+                          (map (fn [[sym]] (name-distance wanted sym)))))
+           sort
+           (into [] (comp (map (comp symbol second)) (take names-shown)))))))
 
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored

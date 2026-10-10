@@ -1774,3 +1774,23 @@
                                             :seon.error/path [:my.message/to] :seon.error/argument "request" :seon.error/parent parent})))]
     (is (clojure.string/includes? (fix {:seon.message/to "x"}) ":seon.message/to") "the held key of the same name is named")
     (is (= "Supply :my.message/to with a string." (fix {:other 1})))))
+
+(deftest nearest-names-measure-each-name-once
+  ;; Each declared name's spelling distance is computed once, never per
+  ;; comparison of the sort; the ranking stays nearest first, then by name.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           names-in #'error/names-in
+           declared (count (db/q '[:find ?f :in $ ?ns :where [?n :seon.ns/name ?ns] [?f :seon.fn/ns ?n]]
+                                 database 'seon.error))
+           [_ calls] (test-support/armed-calls #{'seon.error/name-distance}
+                                               #(names-in database 'seon.error 'seon.error/recordnig))]
+       (is (< 8 declared))
+       (is (<= (get calls 'seon.error/name-distance) declared)
+           "each declared name's distance is computed at most once")
+       (doseq [[missing nearest] '[[seon.error/recordnig recording]
+                                   [resolutoin resolution]
+                                   [seon.error/render-aj render-ai]]]
+         (is (= nearest (first (names-in database 'seon.error missing)))
+             "the nearest name by spelling ranks first"))))))
