@@ -45,9 +45,4 @@
              :kind :function
              :intent "AGENTS.md: task evidence never points into gitignored `tmp/`. The census `seon.task-ingestion-test/a-task-evidence-path-names-no-gitignored-file` reads every `:seon.task/evidence` path in resources/seon/tasks and lists those under a directory `.gitignore` names. Red at 4027882d4 with two tasks in seon.turn.edn (their paths now point at the committed copies under docs/research/agent-platform/2026-10-08/task-census/evidence) and one that remains, `seon.fn.analyzer/local-root-dependency-analysis-goes-stale`, naming a data/ log. Done when the census answers [] and task ingestion reports an evidence path under an ignored directory as a problem on the task."
              :must-read #{seon.task/index-tasks! seon.task/task-files}
-             :evidence #{"docs/research/agent-platform/2026-10-10/laws-without-proofs.md"}}
- #:seon.task{:name "a-destinations-own-unadmitted-task-tag-refuses-every-merge"
-             :kind :function
-             :intent "`seon.task/candidate-dangling` counts the destination's untouched holders' task edges (`theirs`) as well as the merged ones, so one test on the target tagged with a task the target has not admitted makes `seon.cluster.source/accept-merge!` refuse every merge into it with \"The merged program names tasks the destination has not admitted.\", naming that unrelated holder (lane merge-gate, default aa2e97b32, 2026-10-10: a deftest tagged `seon.cluster.source/a-red-reaching-test-refuses-acceptance` defined on the agent's branch, whose task is not ingested there, made `seon.cluster.merge-test/a-candidate-merges-only-its-tested-green-program` refuse its green accept, run 75871bed1b2a). Done when only the merged holders' task edges can refuse a merge, as a row in an existing merge test."
-             :must-read #{seon.task/candidate-dangling seon.cluster.source/accept-merge!}}
-]
+             :evidence #{"docs/research/agent-platform/2026-10-10/laws-without-proofs.md"}}]

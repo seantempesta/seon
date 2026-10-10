@@ -214,8 +214,7 @@
             (adopt!)
             (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
-(deftest ^{:seon/tasks #{'seon.task/a-destinations-own-unadmitted-task-tag-refuses-every-merge}}
-  a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
+(deftest a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
   ;; P1-3: the candidate's entities for the merged identities, against the
   ;; destination's tasks; a holder the merge leaves untouched never refuses it.
   (test-support/with-database
