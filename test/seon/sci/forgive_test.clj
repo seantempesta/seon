@@ -93,6 +93,16 @@
     :code  "(+ 1 2))"                                               ["(+ 1 2)"]
     :code  "(defn f [x]\n  (+ x 1)\n(f 1)"                          ["(defn f [x]\n  (+ x 1))" "(f 1)"]))
 
+(deftest ^{:seon/tasks #{'seon.sci.forgive/tool-markup-in-a-reply-is-prose}}
+  tool-markup-in-a-reply-is-prose
+  ;; A tag line cannot start a Clojure form: it is a comment held by the next form, never a source.
+  (are [text segments] (= segments (:seon.batch/segments (forgive/segments text :reply)))
+    "(+ 1 2)\n</invoke>\n(+ 3 4)"
+    [{:seon.batch/source "(+ 1 2)"} {:seon.batch/source "(+ 3 4)" :seon.batch/comment "; </invoke>"}]
+    "<invoke name=\"eval\">\n<parameter name=\"code\">\n(+ 1 2)\n</parameter>\n</invoke>\n(+ 3 4)"
+    [{:seon.batch/source "(+ 1 2)" :seon.batch/comment "; <invoke name=\"eval\">\n; <parameter name=\"code\">"}
+     {:seon.batch/source "(+ 3 4)" :seon.batch/comment "; </parameter>\n; </invoke>"}]))
+
 (deftest an-unbalanced-text-names-each-repair
   (are [mode text repairs] (= repairs (:seon.batch/repairs (forgive/segments text mode)))
     :code  "(+ 1 2))"                                      [{:seon.batch/line 1 :seon.batch/at 7 :seon.batch/dropped ")"}]

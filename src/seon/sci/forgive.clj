@@ -97,7 +97,7 @@
 (defn- literal-line?
   "Whether the trimmed line `[s le)` is exactly one literal (number, string,
   keyword, character, `##` value, `true`, `false`, `nil`) or one
-  namespace-qualified symbol."
+  namespace-qualified symbol; a markup tag such as `</invoke>` is none."
   {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
   [^String text ^long s ^long le]
   (let [e (loop [e le] (if (and (> e s) (Character/isWhitespace (.charAt text (int (dec e))))) (recur (dec e)) e))
@@ -109,6 +109,8 @@
        (= \\ c) (and (>= (- e s) 2) (one-token? (+ s 2)))
        (= \# c) (and (> (- e s) 2) (= \# (.charAt text (int (inc s)))) (one-token? (+ s 2)))
        (not (one-token? s)) false
+       ;; a tag (`</invoke>`) is markup: `<` then a letter or slash starts no form
+       (and (= \< c) (< (inc s) e) (let [d (.charAt text (int (inc s)))] (or (= \/ d) (Character/isLetter d)))) false
        (#{"true" "false" "nil"} (subs text s e)) true
        (Character/isDigit c) true
        (#{\+ \-} c) (and (> (- e s) 1) (Character/isDigit (.charAt text (int (inc s)))))
