@@ -251,7 +251,10 @@
   (let [copied (sci/copy-var* host-var sci-namespace)]
     (when (.getThreadBinding host-var)
       (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
-    (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %))
+    ;; The new Var's own metadata, which every context's binding of it starts
+    ;; from; under an active context `alter-meta!` writes only that one's.
+    (sci.ctx-store/with-ctx nil
+      (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %)))
     copied))
 
 

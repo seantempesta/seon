@@ -338,8 +338,7 @@
     (is (true? (:seon.test/passed? result)))
     (is (< (:seon.profile/alloc-bytes measured) 100000000))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-problems-derivation-calls-db-with-no-connection}
-           :seon.test/long "One isolated member acquisition and one canonical problems fixture (measured 1,572 ms run on default)."
+(deftest ^{:seon.test/long "One isolated member acquisition and one canonical problems fixture (measured 1,572 ms run on default)."
            :seon.test/long-ms 15000}
   a-member-body-reads-its-member
   ;; seon.problems-test's `world-namespaces` reads the member's connection from

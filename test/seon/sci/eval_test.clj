@@ -2630,7 +2630,13 @@
        (is (some? (:malli/schema (meta #'db/db))))
        (is (= (:malli/schema (meta #'db/db)) (:malli/schema copied))
            "the context's Var answers the compiled Var's contract")
-       (is (not (contains? copied :test)))))))
+       (is (not (contains? copied :test)))
+       (is (= (:malli/schema (meta #'db/db))
+              (let [evaluating (test-support/fork-cluster-ctx connection)
+                    made (sci.ctx-store/with-ctx evaluating
+                           (#'eval/copy-host-var #'db/db (sci/create-ns 'seon.db)))]
+                (sci.ctx-store/with-ctx ctx (:malli/schema (meta made)))))
+           "a copy made while another context evaluates carries it into every context")))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-test-namespace-runs-without-its-fixtures}}
   an-interpreted-namespace-runs-its-fixture-around-a-deftest
