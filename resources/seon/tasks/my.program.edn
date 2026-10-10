@@ -132,4 +132,9 @@
  #:seon.task{:name "a-search-snippet-keeps-the-whole-line"
              :kind :function
              :intent "`my.program/search` shows each match as `:snippet`, the matching source line, but its helper `my.program/match-row` cuts any trimmed line over 100 characters to 97 and appends \"...\" (default a3eff174a, agent real-task-pick-2: searching \"read! (db/pull-many database [:seon.fn.arity/min\" answers the `my.program/caller-data` line, over 100 characters, as 100 characters ending \"arit...\"). Owner 2026-10-07: no random clipping; the value printer alone bounds what is shown. Done when `:snippet` is the whole trimmed matching line whatever its length, asserted for the longest line of `my.program/caller-data`, `my.program/reads-key` and `my.program/breaks` in `my.program-read-test/a-search-snippet-keeps-the-whole-line`."
-             :must-read #{my.program/search my.program/match-row}}]
+             :must-read #{my.program/search my.program/match-row}}
+ #:seon.task{:name "a-search-limit-is-a-positive-integer"
+             :kind :function
+             :intent "`my.program/search` declares its `:limit` as any `:int`, so `(my.program/search database {:text \"inbox\" :limit 0})` (default 9a23b8ff2, agent loop-round-probe) answers `:matches []` with 45 matches counted and a `:more` form that asks again with `:limit 0` (three times zero), a dig that never advances; `:limit -1` answers no matches the same way. Correct: a limit below 1 cannot select anything, so the contract says `[:int {:min 1}]` and the call is refused as `:seon.instrument/contract-error`; a limit of 1 answers one match and a `:more` form with a larger limit. Rows in `my.program-read-test/a-search-limit-is-a-positive-integer`."
+             :must-read #{my.program/search}}
+]

@@ -41,4 +41,9 @@
 #:seon.task{:name "stored-or-compared-text-printed-under-ambient-bindings"
              :kind :function
              :intent "`seon.fn` stored a contract's text with plain `pr-str`, so publication (namespace maps on) and an agent evaluation (off) stored different text and digests for the same contract, and `*print-length*` made `seon.schema/canonical-definition` refuse every contract (fixed for those owners in e5cfb80dc with `seon.id/printed`). Census every `pr-str`/`prn-str`/`print-str` whose output is stored, hashed, compared or sorted in src/ and convert each to data comparison or `seon.id/printed` (AGENTS.md: one printer; identity is a structural digest, never printed text; ledger PR-24, PR-17)."
-             :must-read #{seon.id/printed}}]
+             :must-read #{seon.id/printed}}
+ #:seon.task{:name "a-path-form-reads-any-plain-key"
+             :kind :function
+             :intent "`seon.print/path-form` takes only keywords and non-negative integers as plain `get-in` steps and destructures every other step as a typed step `[tag index part]`, although `seon.print/path-step` reads any step that is not a typed vector as a map key (`seon.print/value-at` of `{\"a\" [10 20]}` at `[\"a\" 1]` answers 20). On default (9a23b8ff2, agent loop-round-probe): `(seon.print/path-form 'result/e1 [\"a\" 0])` answers `(get-in (nth (seq result/e1) nil) [0])`, a form that reads another value (the string's characters become the tag and index), and `[1.5]` throws \"nth not supported on this type: Double\". Correct: a step that is not a typed vector (a vector headed `:seon.render.data/entry` or `:seon.render.data/nth`) joins the run of one `get-in`, so `[\"a\" 0]` answers `(get-in result/e1 [\"a\" 0])`; typed steps and keyword or index runs answer as they do now. Rows in `seon.printer-elision-test/a-path-form-reads-any-plain-key`."
+             :must-read #{seon.print/path-form seon.print/path-step seon.print/value-at}}
+]

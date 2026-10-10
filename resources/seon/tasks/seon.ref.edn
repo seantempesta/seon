@@ -9,4 +9,9 @@
  #:seon.task{:name "a-task-target-reads-as-an-unresolved-reference"
              :kind :function
              :intent "A typed task names the function the agent must create in backticks (`comp.geo/area` in `seon.competency/area-is-contracted-typed`, `:comp.order/qty` in `seon.competency/quantity-schema-then-function-typed`), and `seon.ref/references` answers it as `:problem-kind :unresolved`, the same problem a broken reference gets: the block tells the agent its task is defective exactly where the task is correct. Done when a reference the task's intent names as its target (a name in the task's own subject namespace, or one the intent marks as to be defined) reads as a target to create, distinct from an unresolved reference."
-             :must-read #{seon.ref/references seon.context/current-state}}]
+             :must-read #{seon.ref/references seon.context/current-state}}
+ #:seon.task{:name "a-reference-with-no-path-is-a-missing-file"
+             :kind :function
+             :intent "`my.fs/section` declares its output `[:or :seon.ref/section :seon.ref/section-error]`, but a reference that is only an anchor throws: `(my.fs/section \"#the-goal\")` on default (9a23b8ff2, agent loop-round-probe) refuses inside `seon.ref/locate` (\"refused argument 0 `path`: expected :seon.ref/path (a string of length at least 1)\", called from `seon.ref/section`), while `(my.fs/section \"no-such-file.md#the-goal\")` answers a `:seon.ref/section-error`. Correct: an empty path names no file, so `seon.ref/section` of \"#the-goal\" and of \"#\" answers the `:seon.ref/section-error` with `:seon.ref/section-missing` `:file` (nearest: the Markdown files of the checkout root), the same as any missing file. Rows in `seon.ref-test/a-reference-with-no-path-is-a-missing-file`."
+             :must-read #{seon.ref/section seon.ref/locate my.fs/section}}
+]

@@ -1,7 +1,7 @@
 (ns seon.ref-test
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [are deftest is]]
             [my.program :as program]
             [seon.db :as db]
             [seon.error]
@@ -148,3 +148,11 @@
         "the tests reaching it, as symbols")
     (is (operations '(my.program/callers {:seon.program/subject 'seon.ref/section})))
     (is (operations '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})))))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
+  a-reference-with-no-path-is-a-missing-file
+  ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
+  (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))
+    "no-such-file.md#the-goal"
+    "#the-goal"
+    "#"))

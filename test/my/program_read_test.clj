@@ -74,3 +74,20 @@
          'my.program/caller-data
          'my.program/reads-key
          'my.program/breaks)))))
+
+(deftest ^{:seon/tasks #{'my.program/a-search-limit-is-a-positive-integer}}
+  a-search-limit-is-a-positive-integer
+  ;; :limit 0 answered no matches and a :more form that asks again with limit 0.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           refusal-type (fn [limit]
+                          (let [answer (try (program/search database {:text "inbox" :limit limit})
+                                            (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+                            (:seon.error/type answer)))
+           one (program/search database {:text "inbox" :limit 1})]
+       (is (= 1 (count (:matches one))) "a limit of 1 answers one match")
+       (is (< 1 (:limit (second (:more one)))) "its :more form asks for a larger limit")
+       (are [limit] (= :seon.instrument/contract-error (refusal-type limit))
+         0
+         -1)))))

@@ -3,11 +3,12 @@
   reply shows, and that its elision form, evaluated through the same entrance,
   reads exactly the rest with `clojure.core`."
   (:require [clojure.data.json :as json]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [are deftest is]]
             [clojure.walk :as walk]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.mcp :as mcp]
+            [seon.print :as printer]
             [seon.test-support :as support]))
 
 (defn- reply-text
@@ -139,3 +140,14 @@
        (is (= (:seon.config.ai/prompt-token-budget config/defaults)
               (:seon.eval/budget-override (override-finding capped)))
            "the model's prompt window caps the override")))))
+
+(deftest ^{:seon/tasks #{'seon.print/a-path-form-reads-any-plain-key}}
+  a-path-form-reads-any-plain-key
+  ;; path-step reads a step that is not a typed vector as a map key; path-form destructured every one but a keyword or index.
+  (are [path form] (= form (try (printer/path-form 'result/e1 path) (catch Exception e (ex-message e))))
+    [:rows 0] '(get-in result/e1 [:rows 0])
+    [:rows 0 [:seon.render.data/nth 2]] '(nth (seq (get-in result/e1 [:rows 0])) 2)
+    ["a" 0] '(get-in result/e1 ["a" 0])
+    ["a" "b"] '(get-in result/e1 ["a" "b"])
+    [:x "a" [:seon.render.data/nth 1]] '(nth (seq (get-in result/e1 [:x "a"])) 1)
+    [1.5] '(get-in result/e1 [1.5])))
