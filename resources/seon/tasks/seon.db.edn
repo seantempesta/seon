@@ -214,4 +214,9 @@
  #:seon.task{:name "the-first-read-of-a-branch-head-derives-its-schema"
              :kind :function
              :intent "The first `seon.db/q` or `seon.db/datoms` on each fresh branch head costs 8-85 ms (mean about 40 ms, 12 MB allocated) because `with-declarations` / `read-declarations` derives the head's declarations, while the same read through `datahike.api/datoms` is 0.04 ms (2026-10-10, default, 30 agent branch heads: 1.2 s and 2.6 GB through `seon.db/q`, 45 ms raw; `seon.db/branch-database` itself is 1 ms). Any reader of many branch heads (health's agent error patterns, `seon.problems/agent-error-signatures`) pays it per head; it reads undecoded through `seon.db/undecoded-datoms` meanwhile. Done when a first `seon.db/q` on a branch head of an unchanged declaration population reuses the main head's declarations and costs under 2 ms."
-             :must-read #{seon.db/branch-database seon.db/q seon.db/datoms seon.db/undecoded-datoms seon.problems/agent-error-signatures}}]
+             :must-read #{seon.db/branch-database seon.db/q seon.db/datoms seon.db/undecoded-datoms seon.problems/agent-error-signatures}}
+ #:seon.task{:name "a-missing-branch-connection-answers-an-error-never-a-null"
+  :kind :function
+  :intent "On default (2026-10-10, lane interp-honest-2) `seon.db/branch-connection` returned nil for a branch with no open connection and its caller dereferenced it, throwing a NullPointerException instead of an error map. Correct: a read of a branch with no connection answers a named refusal (the branch, why), or the caller derives the connection on demand as hosting does (d98ab13ed); never a null that crashes a later call."
+  :must-read #{seon.db/branch-connection}
+  :evidence #{"docs/seon/plan.md"}}]

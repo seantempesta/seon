@@ -1,13 +1,14 @@
 (ns seon.interpreted-census
-  "Run test symbols interpreted, as a non-root agent on its own branch of the live root, in batches.
+  "Run test symbols interpreted, as a non-root agent on its own branch of the live root, in batches;
+  AGENT \"root\" runs them compiled on the cluster's own execution, the baseline.
 
   bb -cp script:src -m seon.interpreted-census ROOT CLUSTER AGENT SYMBOLS-EDN OUT-EDN [BATCH]
 
   SYMBOLS-EDN holds a vector of test symbols, or of [class symbol] pairs. Each batch is one
   `seon.test/run` request of AGENT's acquired world (the request `my.test/check` makes, with
   `:seon.test/rerun? true` and declared-long tests included), sent over the root's prepl; one EDN
-  line per member is appended to OUT-EDN: its class, symbol, counts and the first line of its
-  failure message, or the batch's refusal."
+  line per member is appended to OUT-EDN: its class, symbol, counts and its whole failure
+  message, or the batch's refusal."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.operator :as operator]))
@@ -16,7 +17,8 @@
   "The form the live root evaluates for one batch of `symbols`."
   [cluster agent-id symbols]
   `(let [handle# (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances ~cluster))
-         execution# (seon.cluster.agent/acquire-context! handle# ~agent-id)
+         ;; root runs compiled on the cluster's own execution: the baseline
+         execution# (if (= "root" ~agent-id) handle# (seon.cluster.agent/acquire-context! handle# ~agent-id))
          connection# (:seon.db/connection execution#)
          began# (System/nanoTime)
          run# (seon.db/call-with-custody
@@ -31,8 +33,7 @@
       :excluded (mapv :seon.test/sym (concat (:seon.test/destructive-excluded run#) (:seon.test/deferred run#)))
       :results (mapv (fn [result#]
                        (assoc (select-keys result# [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count])
-                              :message (some-> (:seon.test/failure-message result#) str/split-lines
-                                               (->> (remove str/blank?) (take 3) (str/join " | ")))))
+                              :message (:seon.test/failure-message result#)))
                      (:seon.test/results run#))}))
 
 (defn -main
