@@ -811,33 +811,36 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/message
                        :seon.agent/id] :seon.db/tx-data]}
   [database candidate agent-id]
-  (let [limits (db/q '[:find [?limit ...]
-                       :where [?cluster :seon.cluster/config ?config]
-                              [?config :seon.config.message/max-chain ?limit]] database)
-        limit (when (= 1 (count limits)) (first limits))
-        _ (when-not (pos-int? limit)
-            (throw (ex-info "Messaging requires one configured chain bound."
-                            {:seon.message/no-limit true
-                             :seon.error/at (java.util.Date.)
-                             :seon.error/layer :seon.message/delivery
-                             :seon.error/operation 'seon.cluster.message/send-call
-                             :seon.error/message "Messaging requires one configured chain bound."
-                             :seon.error/data {:seon.config.message/max-chain limits}})))
-        run-id (db/q '[:find ?id . :in $ ?agent-id
-                       :where [?agent :seon.agent/id ?agent-id]
-                              [?turn :seon.turn/agent ?agent]
-                              [?turn :seon.turn/id ?id]
-                              (not [?turn :seon.turn/closed-tx _])]
-                     database agent-id)
-        cause (when run-id (trigger database run-id))
-        result (delivery database
-                         (cond-> {:my.message/value candidate
-                                  :seon.agent/id agent-id
-                                  :seon.config.message/max-chain limit}
-                           cause (assoc :seon.message/trigger cause)))]
-    (if-let [failure (first (:seon.error/values result))]
-      (throw (ex-info (:seon.error/message failure) failure))
-      (:seon.message/rows result))))
+  ;; A message whose id is already written was delivered: sending the same occurrence again writes nothing.
+  (if (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]] database (:seon.message/id candidate))
+    []
+    (let [limits (db/q '[:find [?limit ...]
+                         :where [?cluster :seon.cluster/config ?config]
+                                [?config :seon.config.message/max-chain ?limit]] database)
+          limit (when (= 1 (count limits)) (first limits))
+          _ (when-not (pos-int? limit)
+              (throw (ex-info "Messaging requires one configured chain bound."
+                              {:seon.message/no-limit true
+                               :seon.error/at (java.util.Date.)
+                               :seon.error/layer :seon.message/delivery
+                               :seon.error/operation 'seon.cluster.message/send-call
+                               :seon.error/message "Messaging requires one configured chain bound."
+                               :seon.error/data {:seon.config.message/max-chain limits}})))
+          run-id (db/q '[:find ?id . :in $ ?agent-id
+                         :where [?agent :seon.agent/id ?agent-id]
+                                [?turn :seon.turn/agent ?agent]
+                                [?turn :seon.turn/id ?id]
+                                (not [?turn :seon.turn/closed-tx _])]
+                       database agent-id)
+          cause (when run-id (trigger database run-id))
+          result (delivery database
+                           (cond-> {:my.message/value candidate
+                                    :seon.agent/id agent-id
+                                    :seon.config.message/max-chain limit}
+                             cause (assoc :seon.message/trigger cause)))]
+      (if-let [failure (first (:seon.error/values result))]
+        (throw (ex-info (:seon.error/message failure) failure))
+        (:seon.message/rows result)))))
 
 (defn send!
   "Write a message and its permanent recipient atomically; return the stored message.
@@ -875,7 +878,7 @@
        :seon.error/message (str (pr-str (:my.message/to candidate)) " lives on branch " (pr-str home)
                                 ", which this process holds no connection to; the message was not sent.")}
       :else
-      (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason
+      (let [candidate (merge candidate (select-keys request [:seon.message/id :my.message/assignment :my.message/reason
                                                               :seon.task/end :seon.task/merge]))
             write! #(db/transact! target
                                   {:tx-data [[:db.fn/call #'send-call candidate agent-id]]

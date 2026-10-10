@@ -8,6 +8,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
+            [seon.cluster.message :as message]
             [seon.context]
             [seon.eval.drive :as drive]
             [seon.id]
@@ -420,3 +421,34 @@
                                  :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
                                (db/db connection) agent-id))
            "the stopped loop ended the task, and root heard it once")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-task-end-is-delivered-once}
+           :seon.test/long "Three setup evaluations with their test steps, then the end's proposal run."
+           :seon.test/long-ms 30000}
+  an-end-delivered-before-a-crash-is-not-sent-again
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     ;; root's home is this member's branch, so the end message stays inside the fixture
+     (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                (:seon.cluster/name (support/execution-handle nil))]])
+     (agent-eval running agent-id (str "(ns tq.endo (:require [clojure.test :refer [deftest is]]))\n"
+                                       "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                       "(deftest ^{:seon/tasks #{'tq.endo/area}} area-test (is (= 25 (area 5))))"))
+     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                            :seon.task/ns 'tq.endo :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))
+           _ (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                            :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                            :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           _ (agent-eval running agent-id "(in-ns 'tq.endo)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
+           ends #(db/q '[:find [?m ...] :in $ ?agent-id
+                         :where [?a :seon.agent/id ?agent-id] [?m :seon.message/from ?a] [?m :seon.task/end _]]
+                       (db/db connection) agent-id)]
+       (is (= :done (turn/task-end (db/db connection) agent-id)) "the fix turned the proof green")
+       ;; an end that crashed after delivering its message and before closing the agent
+       (message/send! (#'turn/end-message (db/db connection) agent-id :done nil) connection agent-id)
+       (#'turn/end-task! (support/running-cluster running) agent-id)
+       (is (= 1 (count (ends))) "root holds the end's message once")
+       (is (some? (:seon.agent/admission-closed-tx
+                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))
+           "the end closed the agent")))))

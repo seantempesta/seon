@@ -2163,12 +2163,14 @@
 
 (defn- end-message
   "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
-  subject and, ended green, the merge task its proposal recorded (`merge`)."
+  subject and, ended green, the merge task its proposal recorded (`merge`). Its id is the end's occurrence (the
+  agent and the task it holds), so delivering the same end again writes nothing (`seon.cluster.message/send!`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
                   :my.message/message]}
   [database agent-id end merge]
   (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
-    (cond-> {:my.message/to "root" :my.message/about held :seon.task/end end
+    (cond-> {:seon.message/id (seon.id/digest 12 [:seon.task/end agent-id held])
+             :my.message/to "root" :my.message/about held :seon.task/end end
              :my.message/content (str "My task ended: " (name end) "."
                                       (when merge " Its merge request is the merge task this message names."))}
       merge (assoc :seon.task/merge merge))))
@@ -2177,7 +2179,8 @@
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
   it ended green (`my.program/proposal!`, the agent's own act), send root the one end message (`end-message`),
   then close the agent (`end-task-call`), last, so whoever sees the agent closed finds its message; nil otherwise.
-  A refused step is a fault recorded beside the pass."
+  An end whose message is not delivered leaves the agent open, so the next observation delivers it; one already
+  delivered is not sent twice (the message's id is the end's). A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
   (let [connection (:seon.db/connection cluster)
@@ -2198,9 +2201,11 @@
             sent (message/send! (end-message (db/db connection) agent-id end (:seon.task/merge proposal))
                                 connection agent-id)
             ;; a refused write answers the writer's refusal, which carries no message id
-            _ (when-not (:seon.message/id sent) (fault! `message/send! sent))
-            outcome (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]])]
-        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
+            delivered? (some? (:seon.message/id sent))
+            _ (when-not delivered? (fault! `message/send! sent))
+            ;; the end closes the agent only once root holds its message: undelivered, it stays due
+            outcome (when delivered? (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]]))]
+        (when (and delivered? (not (:db-after outcome))) (fault! `end-task-call outcome))))
     nil))
 
 (defn next-agent-work
