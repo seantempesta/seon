@@ -51,6 +51,8 @@ Test body run directly under `seon.profile/measure` on the calling thread, one w
 
 ## Change
 
+Slice 1 (item 1) landed and stays. Slices 2-3 (items 2-6: baseline, assignment capture, regression red, acceptance, health fold) are superseded by FEEDBACK-LOOP, which compares a reply's live cost with main's stored cost entities instead; their dials are deleted.
+
 Data flow: member body thread → its cost (three numbers + bounded top functions) on the stored member → the
 branch member's cost compared with the target's member for the same test → a red result carrying both.
 
@@ -106,8 +108,7 @@ branch member's cost compared with the target's member for the same test → a r
    measurements depends on `:seon.profile/over-bound-warning`'s reader (task
    `seon.profile.measurement/a-test-run-upserts-three-hundred-measurement-rows`).
 
-Dials (16 GB machine, config facts under `:seon.config.test.cost/*`): `alloc-factor` 2, `alloc-floor-bytes`
-67108864, `calls-factor` 2, `calls-floor` 1000, `ms-factor` 3, `ms-floor` 1000, `assign-runs` 32, `top` 10.
+Dial (config fact `:seon.config.test.cost/top`): 10. The factor, floor and assign-runs dials of slices 2-3 were deleted unread.
 
 ## Would it have caught nearest
 

@@ -1,32 +1,4 @@
 #:seon.config.test.cost{:top
                         [:int
                          {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 10,
-                          :description "Rows `[sym calls self-ms]` a test member keeps of the definitions its body called most (`:seon.test.member/top`)."}]
-                        :alloc-factor
-                        [:int
-                         {:min 1, :seon.config/optional true, :seon.config/dial true, :seon.config/default 2,
-                          :description "A branch member allocating more than this times its baseline member (and more than the floor above it) is a cost regression."}]
-                        :alloc-floor-bytes
-                        [:int
-                         {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 67108864,
-                          :description "Bytes a member's allocation must grow over its baseline before the factor can make it a cost regression; absorbs cold caches."}]
-                        :calls-factor
-                        [:int
-                         {:min 1, :seon.config/optional true, :seon.config/dial true, :seon.config/default 2,
-                          :description "A branch member making more than this times its baseline's armed calls (and more than the floor above it) is a cost regression."}]
-                        :calls-floor
-                        [:int
-                         {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1000,
-                          :description "Armed calls a member must grow by over its baseline before the factor can make it a cost regression."}]
-                        :ms-factor
-                        [:int
-                         {:min 1, :seon.config/optional true, :seon.config/dial true, :seon.config/default 3,
-                          :description "A branch member running more than this times its baseline's wall time (and more than the floor above it) is a cost regression."}]
-                        :ms-floor
-                        [:int
-                         {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1000,
-                          :description "Milliseconds a member's run must grow by over its baseline before the factor can make it a cost regression; wall time is noisy at small numbers."}]
-                        :assign-runs
-                        [:int
-                         {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 32,
-                          :description "Baseline member runs `seon.task/assign!` may make on the target for tests without a current green target member carrying cost; proofs first."}]}
+                          :description "Rows `[sym calls self-ms]` a test member keeps of the definitions its body called most (`:seon.test.member/top`)."}]}
