@@ -589,7 +589,8 @@
         (.close ^java.util.concurrent.ExecutorService (::sut/executor launcher))))))
 
 (deftest ^{:seon.test/long
-           "Forcibly terminates a child JVM to cover committed-fact survival across process death."}
+           "Forcibly terminates a child JVM to cover committed-fact survival across process death."
+           :seon/tasks #{'seon.flow/forced-child-jvm-death-fixture-write-is-refused-for-its-projection}}
   forced-child-jvm-death-preserves-committed-facts
   (testing "SIGKILL loses process-local compute but not committed state"
     (let [store-id (random-uuid)
@@ -763,7 +764,7 @@
            (.sendClose ^WebSocket @connection WebSocket/NORMAL_CLOSURE "test complete")
            ::monitor-socket-closed))))))
 
-(deftest ^{:seon/tasks #{'seon.flow/a-proc-runs-on-a-platform-thread}} a-proc-thread-is-a-platform-thread
+(deftest a-proc-thread-is-a-platform-thread
   (let [{::sut/keys [graph executor]} (sut/start-graph! {::sut/graph-definition {:procs {} :conns []}})]
     (try
       (is (false? (.get (.submit ^java.util.concurrent.ExecutorService executor

@@ -72,12 +72,27 @@
 (schema/register-core-predicate! 'seon.flow/step-var? step-var?)
 (schema/register-core-predicate! 'seon.flow/write-port? write-port?)
 
+(def ^:private ^:dynamic *proc-thread-name*
+  "The name `graph-executor` gives the thread it makes: bound by a proc's
+  `start`, on whose thread Flow's `futurize` asks the factory for it."
+  "seon-flow")
+
+(defn- proc-thread-name
+  "seon-flow/<cluster>[/<agent>]/<pid>: a proc thread named by its graph and proc."
+  {:malli/schema [:=> [:cat :map :keyword] :string]}
+  [args pid]
+  (let [environment (env/of args)]
+    (str "seon-flow/" (or (:seon.boot/cluster-name environment) "-")
+         (some->> (:seon.agent/id environment) (str "/"))
+         "/" (subs (str pid) 1))))
+
 (defn- graph-executor
-  "One graph's own proc-loop executor: a virtual thread per task, running in
-  the projection world the graph was handed. It is the join: after
-  `.shutdown`, `awaitTermination` is true only when every proc loop,
-  stop transition included, has returned
-  (`core.async/.../flow/impl.clj:29-36,262,323`)."
+  "One graph's own proc-loop executor: a daemon platform thread per task,
+  named by graph and proc, so the thread's allocation and CPU counters are
+  the proc's own, running in the projection world the graph was handed. It
+  is the join: after `.shutdown`, `awaitTermination` is true only when every
+  proc loop, stop transition included, has returned
+  (`clojure.core.async.flow.impl/futurize`)."
   {:malli/schema [:=> [:cat [:map [::projection-state {:optional true} :seon.sci.eval/projection-state]
                              [::projection {:optional true} :seon.schema/projection]]]
                   ::executor]}
@@ -85,16 +100,20 @@
   (Executors/newThreadPerTaskExecutor
    (reify ThreadFactory
      (newThread [_ runnable]
-       (.unstarted (Thread/ofVirtual)
-                   (cond
-                     ;; the thread's whole life runs in the world, not as one armed call
-                     projection-state
-                     (let [bindings (schema/projection-state-bindings projection-state)]
-                       #(with-bindings bindings (.run runnable)))
-                     projection
-                     (let [bindings (schema/projection-bindings projection)]
-                       #(with-bindings bindings (.run runnable)))
-                     :else runnable))))))
+       (-> (Thread/ofPlatform)
+           (.daemon true)
+           (.name ^String *proc-thread-name*)
+           (.unstarted
+            ^Runnable
+            (cond
+              ;; the thread's whole life runs in the world, not as one armed call
+              projection-state
+              (let [bindings (schema/projection-state-bindings projection-state)]
+                #(with-bindings bindings (.run runnable)))
+              projection
+              (let [bindings (schema/projection-bindings projection)]
+                #(with-bindings bindings (.run runnable)))
+              :else runnable)))))))
 
 (defn start-graph!
   "Create one Flow graph on its own executor, join declared fan-outs, resume."
@@ -420,11 +439,12 @@
                                                         ::flow/pid (::flow/pid report)
                                                         :seon.error/throwable-class (.getName (class failure))}
                                                        []))))]
-           (flow.spi/start
-            (flow/process (step stop!) options)
-            (-> start-options
-                (update :args #(merge args %))
-                (assoc-in [:outs ::flow/error] (fault-port dispose!))))))))))
+           (binding [*proc-thread-name* (proc-thread-name args (:pid start-options))]
+             (flow.spi/start
+              (flow/process (step stop!) options)
+              (-> start-options
+                  (update :args #(merge args %))
+                  (assoc-in [:outs ::flow/error] (fault-port dispose!)))))))))))
 
 (defn- carried-arm
   [work]
