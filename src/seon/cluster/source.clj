@@ -1376,22 +1376,22 @@
   (try (= (node/sexpr a) (node/sexpr b)) (catch Exception _ false)))
 
 (defn- relaid
-  "`new` (a parsed value node) in the layout of `old`, the value it replaces:
+  "`value` (a parsed value node) in the layout of `old`, the value it replaces:
   a part reading as before keeps its node, and a collection of the same kind
   keeps its whitespace and comments between items, recursively, an added item
-  taking the last separator; any other part is `new`'s. Reads as `new`."
+  taking the last separator; any other part is `value`'s. Reads as `value`."
   {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] [:fn rewrite-clj.node/node?]] [:fn rewrite-clj.node/node?]]}
-  [old new]
+  [old value]
   (cond
-    (same-value? old new) old
-    (and (= (node/tag old) (node/tag new)) (#{:vector :list :map :set} (node/tag new)))
+    (same-value? old value) old
+    (and (= (node/tag old) (node/tag value)) (#{:vector :list :map :set} (node/tag value)))
     (let [children (vec (node/children old))
           at (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
-          items (vec (remove node/whitespace-or-comment? (node/children new)))
+          items (vec (remove node/whitespace-or-comment? (node/children value)))
           gaps (mapv (fn [[a b]] (subvec children (inc a) b)) (partition 2 1 at))
           gap #(get gaps % (or (peek gaps) [(node/spaces 1)]))]
       (if (empty? at)
-        new
+        value
         (node/replace-children
          old
          (-> (subvec children 0 (first at))
@@ -1400,7 +1400,7 @@
                                    (when (< i (dec (count items))) (gap i))))
                            (range) items))
              (into (subvec children (inc (peek at))))))))
-    :else new))
+    :else value))
 
 (defn- schema-entry-edit
   "`children` (a schema resource map node's children) with `k`'s entry set to
