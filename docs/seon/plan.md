@@ -13,6 +13,43 @@ generative-testing, astra-malli-behavior, fable-simplify) and the cards BEHAVIOR
 Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in JVM mode, read-only. It supersedes
 `docs/research/agent-platform/2026-10-09/plan.md`.
 
+## 0. Where we are (revised in place; last 2026-10-10)
+
+**Landed and confirmed live on default:**
+- FEEDBACK-LOOP stages 1–13 and 16 (card `schedule/cards/FEEDBACK-LOOP.md`). Every reply attributes its cost to
+  entrance, step, writer and commit, plus a labelled shared residual. A warm redefinition reads about 358 MB with
+  97.5% attributed; this morning it read 28 MB.
+- Each reply carries a compact diff to main; the agent's block shows its branch cost; slow paths are one query over
+  `:seon.fn.cost/*` entities.
+- The merge base is recorded by `t`, advanced at each merge, inherited by nested forks and keyed by fork id
+  (d9eb15c05, aa7ffb17f; Astra-reviewed).
+- Write-back refuses a relative or archive root (93d9e4ef6).
+- The Datahike fork's per-batch commit cost (fork cf815730; bump 5acc29e23).
+
+**Running:**
+- `astra-node-cache`: node cache bounded by bytes. Targets: about 300 MB per warm redefinition, about 2.4 GB and
+  830 ms custody on a new agent's first request.
+- `repl-only-3`: the REPL-only acceptance rerun, one ordinary fix (`seon.error/names-in` sort trap) and one
+  host-bound fix.
+
+**Next, in order:**
+1. A second chain run with a DeepSeek-flash implementer (`forgive` idempotence, designed-task-examples A).
+2. Backlog triage: prove the top ~30 tasks; the rest go to an unproven backlog.
+3. FEEDBACK-LOOP stages 14, 15 and 17.
+4. Check `seon.db/pull-logical`, which reads about 3× main on agent branches.
+
+**Course corrections (root's reflection, 2026-10-10):**
+- Every lane names the essential it serves (§2).
+- The REPL-only acceptance is the gate for new platform machinery. The feedback loop was the owner-sanctioned
+  exception, and that exception is now closed.
+- Most of the day built the instrument. From now on the instrument is used: a model agent working a designed task
+  is the next real test of the goal.
+- At most two or three implementation lanes at a time, on disjoint files, because collisions cost hours today.
+- Lanes delete with plain `rm`, never `git rm`, and leave nothing staged.
+- A whole-namespace `--test` is refused when the namespace has declared-long tests; name the vars instead.
+- A dependency bump blocks every `bin/lane commit` until default restarts; root lands it last in a batch.
+- Codebase growth is acceptable for now (owner); Seon agents trim it later from the stored cost data.
+
 ## 1. The goal
 
 Software that grows by accretion: open data under named schemas, stable names, every call checked and measured, built
