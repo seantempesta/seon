@@ -102,6 +102,6 @@
   :must-read #{seon.operator/launch-child! seon.operator/launched-throwaway! seon.operator/check!}}
  #:seon.task{:name "the-move-test-calls-launch-form-by-its-current-arity"
              :kind :function
-             :intent "Central round 2026-10-12: `seon.operator-move-test/a-move-states-branch-heads-before-its-boot-writes` (script/seon/operator_move_test.clj) is red at HEAD with `Wrong number of args (3) passed to: seon.operator/launch-form`: the test calls `launch-form` with three arguments after a change of its arity (suspect 05139fa1f, the launcher pid for a throwaway JVM). Update the call to the current arity or, if the test's third argument is still wanted, restore it at the owner. Done when the test is green."
+             :intent "Central round 2, e0bd37443: unchanged. `seon.operator-move-test/a-move-states-branch-heads-before-its-boot-writes` (script/seon/operator_move_test.clj:179) still calls `seon.operator/launch-form` with three arguments; the function takes `[request port program launcher]`. Update the call (suspect 05139fa1f). Done when the test is green."
              :must-read #{seon.operator/launch-form seon.operator-move-test/a-move-states-branch-heads-before-its-boot-writes}
              :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

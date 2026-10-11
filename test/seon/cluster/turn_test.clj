@@ -2847,7 +2847,8 @@
        (is (some #{'tq.f4-test/perimeter-uses-area} (:seon.turn.loop/red reaching)))
        (is (= 1 (:seon.test/fail-count (first results))) "the reaching step recorded the red result")))))
 
-(deftest ^{:seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request)."
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-changed-programs-overlay-reads-the-agents-database}
+           :seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request)."
            :seon.test/long-ms 30000}
   the-tests-block-shows-what-the-request-executed-and-nothing-after
   (test-support/with-running-agent

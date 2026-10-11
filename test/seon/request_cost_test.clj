@@ -14,8 +14,7 @@
                                             "arguments" {"cluster" running "agent" agent-id "mode" mode
                                                          "code" code}}))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-changed-programs-overlay-reads-the-agents-database}}
-  a-reply-carries-its-request-cost
+(deftest a-reply-carries-its-request-cost
   (support/with-running-agent
    (fn [running agent-id _]
      (let [ping (answer running agent-id "sci" ":ping")

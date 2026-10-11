@@ -184,8 +184,7 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
-(deftest ^{:seon/tasks #{'seon.db/a-write-to-a-store-without-declaration-rows-takes-the-projection-its-caller-hands}}
-  open-write-release-reopen-preserves-data
+(deftest open-write-release-reopen-preserves-data
   (let [dir (fresh-dir)]
     (try
       (let [opened (store/open-store! {:seon.store/dir dir})]

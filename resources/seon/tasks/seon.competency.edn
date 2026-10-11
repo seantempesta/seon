@@ -45,6 +45,6 @@
              :evidence #{"docs/research/agent-platform/2026-10-10/astra-chain-friction.md"}}
  #:seon.task{:name "a-launch-grades-each-run-green"
              :kind :function
-             :intent "Central round 2026-10-12: `seon.competency-grade-test/a-launch-grades-each-run` and `a-fixture-model-run-grades-green` (green at c53c9306e) are red alone at HEAD: the fixture-model runs grade `{:red 1}` instead of `{:green 1}`; four of five graded fields match and one run differs (the printed comparison is cut). Likely a consequence of the proof run in the agent's branch (`seon.sci.eval/a-changed-programs-overlay-reads-the-agents-database`) or the attempt chain (R1 2b49056a8, 57388f28b); confirm by re-running after those. Done when both are green alone."
+             :intent "Central round 2, e0bd37443: `a-fixture-model-run-grades-green` is green now; `seon.competency-grade-test/a-launch-grades-each-run` is still red alone (one of the four graded runs differs from `{:green? true :calls-to-green 1 :model-calls 1 :terminal :done :retired? true}`; the printed comparison is cut). Compare the four grades with the first form before assuming the attempt chain (R1 2b49056a8, 57388f28b). Done when it is green alone."
              :must-read #{seon.competency/grade seon.competency-grade-test/a-launch-grades-each-run}
              :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

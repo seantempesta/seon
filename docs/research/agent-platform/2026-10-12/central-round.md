@@ -318,3 +318,52 @@ Test names drop the `seon.` prefix. "alone" is the status on a fresh JVM, one te
   - was red: `turn-backstop-test/a-thrown-step-cancels-its-completion-backstop`
   - was red: `turn-continue-test/a-green-proof-with-reached-tests-only-unverified-or-red-on-main-ends-done`
   - was red: `turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering`
+
+## Round 2: HEAD e0bd37443, after the three fixes (e1c424db5 overlay nil database, c7dc2c3b6 fork source, e0bd37443 projection on the writer thread)
+
+Same request and procedure, on a fresh isolated root (`tmp/test-runs/central-round2`, nuked from the archive of e0bd37443),
+now with the committed driver `script/seon/central_round.clj` (it replaces the session-local scripts: it lists every stored
+test less the two fixture namespaces, runs batches of 25 as root, waits for the cluster handle and retries a refused batch once).
+2,830 tests ran (the 6 fixture symbols are not run). Bulk pass 114 batches, 63.3 min on one JVM, 5 batches at the 240 s limit,
+no memory refusal; 71 unrun tests rerun in batches of 5 (14 min), 22 still unknown rerun one per request, then the 27 tests
+below that stayed non-green rerun alone to confirm.
+
+| | c53c9306e | cd59c9fa3 | e0bd37443 |
+|---|---|---|---|
+| tests run | 2,770 | 2,830 | 2,830 |
+| green | 2,365 | 2,346 | 2,456 |
+| red | 232 | 246 | 254 |
+| error | 106 | 238 | 120 |
+| unknown | 67 | 0 | 0 |
+
+Against cd59c9fa3: green to green 2,342; error to green 94; red to green 20; error to red 27; error to error 117; red to red 223;
+red to error 3; green to red 4 (all four are new, below).
+
+### The 125 regressions per cause: 102 gone, 23 remain
+
+| Cause | Before | Remaining (red alone) | Task |
+|---|---|---|---|
+| C1 projection on a raw store | 48 | 0 | retired (fixed by e0bd37443) |
+| C2 overlay nil database | 37 | 2 (`cluster.turn-test/the-tests-block-shows-what-the-request-executed-and-nothing-after`, `tests-past-the-step-bound-continue-on-the-next-pass`; both about the tests block's `:seon.test/selection` error) | `seon.sci.eval/a-changed-programs-overlay-reads-the-agents-database`, refined, proof moved to the first |
+| C3 reconcile does not converge | 7 | 7 (unchanged: 3-6 operations, a second transaction) | `seon.config/a-reapplied-manifest-converges-with-zero-operations`, refined |
+| C4 test runner semantics | 11 | 6 (seeds now fail with `This write names branch ..., not the writing cluster's branch`; `(db/db)` in a host body; a NullPointerException; reaching selection; `absent-program-function` names `loaded-database`) | `seon.test/a-member-body-reads-the-world-its-seeds-prepared`, refined |
+| C5 read evidence and cost | 6 | 3 (`render.root-pull-test` x2, `eval-alloc-test`: 10,043 calls against 8,434 Vars) | `seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current`, refined |
+| C6 launch-form arity | 1 | 1 (unchanged) | `seon.operator/the-move-test-calls-launch-form-by-its-current-arity`, refined |
+| C7 nil or foreign branch in a fork | 3 | 0 | retired (fixed by c7dc2c3b6) |
+| C8 competency grade | 2 | 1 (`a-launch-grades-each-run`) | `seon.competency/a-launch-grades-each-run-green`, refined |
+| C9 singletons | 10 | 3 (`flow-world-test`, `schema-test`, `schema.datahike-test`) | `seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again`, refined |
+
+C1 and C7 are retired: their tasks are deleted and their proof tags removed (`seon.cluster.store-test/open-write-release-reopen-preserves-data`,
+`seon.registry-isolation-test/two-clusters-own-their-contracts-and-share-stable-host-wrappers`). The C2 proof tag moved to a test that is still red.
+
+### New regressions (green at cd59c9fa3, red alone at e0bd37443): 4
+
+- `cluster.squash-test/one-attempts-copy-stays-within-its-cost-bound`: 13.4 ms and 36.6 MB against 10 ms and 5 MB.
+- `start-flow-benchmark-test/commit-to-paused-flow-costs`: cold branch 8.2 MB against 4 MB, cold sci 1,399 ms against 1,300 ms.
+  Both are filed as `seon.db/a-write-keeps-its-cost-after-the-projection-hand-off` (suspects: the three fixes; the probes should be timed on cd59c9fa3 and each).
+- `config-test/config-loads-the-packaged-population-in-a-fresh-jvm`: 9.9 s against a 5 s bound (the same test was red at c53c9306e; timing, possibly cold JVM).
+- `turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering`: the reply is an error (it was also red at c53c9306e).
+  Both are added to the C9 task.
+
+Against revert-after.edn (c53c9306e), nothing else green then is red now outside the 125 and these four. The 2 bulk-noise tests are green. Not
+re-checked: tests that were red or error at c53c9306e and still are (about 340); they are not classified here.

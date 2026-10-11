@@ -156,7 +156,8 @@
        (is (empty? (:tx-data concurrent)))
        (is (= 1 (count (:conflicts concurrent))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
+(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity
+                         'seon.db/a-write-keeps-its-cost-after-the-projection-hand-off}} one-attempts-copy-stays-within-its-cost-bound
   (support/with-database
    (fn [connection]
      (let [handle (task/task-handle 'fixture.tasks "squash-cost" :function)
