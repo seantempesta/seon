@@ -979,8 +979,8 @@
            "the required entry refuses by name")))))
 
 (deftest an-omitted-database-is-the-custody-in-force
-  ;; A test body's fixture branch (`seon.db/call-with-custody`) runs inside its
-  ;; member's evaluation world: an omitted database read the world's branch,
+  ;; A test body's fixture branch (`seon.db/call-with-custody`) runs inside an
+  ;; evaluation's world (one with an environment): an omitted database read the world's branch,
   ;; never the fixture's writes (seon.error-test's render without a database).
   (test-support/with-database
    (fn [world-connection]
@@ -992,11 +992,13 @@
               prepare #(cp/prepare current (environment-for world-connection) plan [])
               branch #(get-in (first %) [:config :branch])]
           (is (= (get-in @custody [:config :branch])
-                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection}]
+                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection
+                                                      :seon.env/environment (environment-for world-connection)}]
                            (db/call-with-custody {:seon.db/connection custody} prepare))))
               "the custody in force supplies the database")
           (is (= (get-in @world-connection [:config :branch])
-                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection}]
+                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection
+                                                      :seon.env/environment (environment-for world-connection)}]
                            (db/call-with-custody {:seon.db/connection world-connection} prepare))))
               "the world's own custody supplies its connection's database")))))))
 

@@ -2,6 +2,7 @@
   "Run admission uses the canonical writer and preserves selected obligations."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is]]
+            [seon.batch]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
@@ -410,3 +411,20 @@
     ;; both; the problems fixture's body reads about 200 more.
     (is (< (:reads reading) (* 1.5 (:reads quiet)))
         "a body that reads its fixture adds nothing to the caller's evidence")))
+
+(deftest ^{:seon/tasks #{'seon.test/a-test-green-on-a-fresh-jvm-is-green-on-the-live-root}}
+  a-member-runs-in-its-own-world-never-its-requesters
+  ;; Root's `my.test/check` ran members inside root's evaluation: the body
+  ;; thread conveyed root's world, so `seon.error/normalize`'s optional
+  ;; agent id was supplied as root and six seon.error-test members failed on
+  ;; the live root only (post-restart-verify, 2026-10-11).
+  (let [execution (assoc (test-support/execution-handle nil) :seon.agent/id "member-world-requester")
+        result (binding [seon.batch/*world* {:seon.boot/cluster-name "default"
+                                             :seon.env/environment (:seon.env/environment execution)
+                                             :seon.agent/id "member-world-requester"}]
+                 (sut/run {:seon.test/execution execution
+                           :seon.test/recording-connection (:seon.db/connection execution)
+                           :seon.test/policy :named :seon.test/rerun? true
+                           :seon.test/identities #{'seon.error-test/attribution-is-a-lookup-ref-or-nothing}}))]
+    (is (true? (:seon.test/passed? result))
+        "the member's omitted agent id is its own world's, never the requester's")))

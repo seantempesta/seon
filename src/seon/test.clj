@@ -284,8 +284,15 @@
                   ;; Its reads are its member's, never the calling form's
                   ;; evidence: the form's sink would hold every member's
                   ;; database values and results until the request ends.
+                  ;; Nor is its world the creator's: it keeps only the calling
+                  ;; world's call sink, so its calls still count there, and no
+                  ;; requester member (agent, connection, task) is supplied to
+                  ;; it; its calls are prepared from its own context
+                  ;; (`kernel/*host-world*`), as in a JVM no agent called.
                   (bound-fn []
-                    (binding [db/*read-evidence-sink* nil]
+                    (binding [db/*read-evidence-sink* nil
+                              seon.batch/*world* (some->> (:seon.batch/sink seon.batch/*world*)
+                                                          (hash-map :seon.batch/sink))]
                     (db/call-with-custody
                      (select-keys custody [:seon.db/connection])
                      (fn [] (sci.eval/call-detecting-program-change
@@ -2331,12 +2338,6 @@
                   :seon.test.timing/run-ms executed
                   :seon.test.timing/release-ms @release-ms})]
     (try
-      ;; The member's world is the executing agent's: a call omitting its
-      ;; declared agent id receives this one, on the member's own branch.
-      (when-let [agent-id (:seon.agent/id request-handle)]
-        (let [ctx (:seon.sci.eval/ctx child)]
-          (env/replace-environment! (get ctx env/state-carrier)
-                                    (env/scope (env/of ctx) {:seon.agent/id agent-id}))))
       (let [ctx (:seon.sci.eval/ctx child)
             resolved (volatile! 0.0)
             ;; What ran the body: the host JVM's compiled Var or SCI's, as resolved.

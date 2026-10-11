@@ -879,8 +879,9 @@
       (:seon.call-preparation/optional? slot) (supply-from-world slot sym)
       (not= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
       (supply-from-row current environment slot sym)
-      ;; an evaluation of the one path: its world is the only source
-      seon.batch/*world* (supply-from-world slot sym)
+      ;; an evaluation of the one path: its world is the only source; a
+      ;; world without an environment (a test member's call sink) is none
+      (:seon.env/environment seon.batch/*world*) (supply-from-world slot sym)
       ;; an entrant not yet converted to the one path binds no world: its
       ;; member's row supplier answers, as before (deleted with the last
       ;; converted entrant, S4-S12)

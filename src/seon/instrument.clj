@@ -800,9 +800,13 @@
   {:malli/schema [:=> [:cat] [:or :nil :seon.env/environment]]}
   []
   ;; Called on every prepared call, so it reads the arm and scopes unarmed.
+  ;; A world without an environment (a test member's: only its caller's call
+  ;; sink) is no evaluation's world: its calls are answered from the context
+  ;; governing the thread, below.
   (if-let [{environment :seon.env/environment connection :seon.db/connection
-            agent-id :seon.agent/id ctx :seon.sci.eval/ctx} seon.batch/*world*]
-    (when environment
+            agent-id :seon.agent/id ctx :seon.sci.eval/ctx} (when (:seon.env/environment seon.batch/*world*)
+                                                            seon.batch/*world*)]
+    (do
       ;; a world holds no database: the custody in force, else the world's
       ;; connection, read now
       (let [database (cond (or db/*read-database* db/*conn*) ((mi/-f->original db/db))
