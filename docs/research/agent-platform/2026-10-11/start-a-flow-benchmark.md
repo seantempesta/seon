@@ -367,6 +367,81 @@ full-leg gain. The samples retain different preceding test/library-cache
 histories. The isolated base is the direct comparison for this removal.
 Full-tree lint: 0 errors, 1,513 warnings, 7,319 ms.
 
+### Remove the loaded base's self-comparison
+
+`df70fe7c1` landed the selected-test query; its final benchmark measured cold SCI
+**544.47 ms / 814.605 MB**, warm **28.09 ms / 29.375 MB**. The next removal follows
+the only caller of `acquire-program!`, `derive-base-ctx`: both hold the loaded
+program itself. Comparing its function digests against itself, opening it again,
+finding overridden rows and their closure, and merging its rows with itself do
+no work needed by the base. Those operations and the now unused
+`host-function-rows` and `loaded-function-rows` helpers/cache kind are deleted.
+`derive-overlay-plan` remains the owner of branch differences.
+
+Candidate `3a2c2ac6aed828ea5e5b0cf833c49d09a510ce84`, run `f78a9d947ac8`,
+measured **203.71 ms / 495.057 MB** for the isolated cold base (previously
+236.65 ms / 566.663 MB). Zero digest scans, loaded-database entrances, behavior
+comparisons, contract installations and contract-reference walks pass. The
+allocation bound remains red for this individual removal; the other 46
+assertions, including the full benchmark, pass. Full-tree lint: 0 errors,
+1,511 warnings, 7,906 ms.
+
+H2 landed `c566e0401` during this work. Default still runs `c6113d2f3`, PID 8540;
+the live adoption half of `bin/seon check` now refuses the changed Datahike
+dependency with `JVM RESTART NEEDED`. The throwaway JVM runs HEAD plus the owned
+paths and returns the measurements above. **RESET NEEDED** is reported to root;
+this lane never restarts default or empties its cache. A failed live adoption
+is not a successful landing even when the throwaway tests pass.
+
+### Namespace binding joins: measured candidate
+
+An explicit namespace selector reduced the remaining base allocation only from
+495.057 MB to 468.001 MB; it still traversed entity-ordered index leaves and was
+not retained. The cold function ranges independently cost **87.88 ms / 184.618 MB**
+after eviction. Namespace acquisition therefore replaces the remaining entity
+pull with four Datalog attribute joins for requires, aliases, imports and refers,
+reusing the namespace names and source/admission declarations already read.
+This is a declaration-sized join, with no general pull implementation or cache.
+`base-namespace-acquisition-preserves-declarations-and-bindings` compares every
+namespace's source, admission and bindings against the former pull on the loaded
+program and requires zero pull-many entrances.
+
+Candidate `df1e08308cb3d8705b4d13769843189e6f1da909`, run `35ddb335be07`, passes
+all **49 assertions** in the cold-base proof, namespace equivalence and full
+benchmark. The isolated base is **132.69 ms / 292.517 MB** (the original base was
+763.86 ms / 2,446.279 MB), with 7,712 Var copies, four function attribute ranges,
+nine queries, zero entity pulls, and zero digest scans, behavior comparisons,
+wrapper installations and reference walks. The repeated namespace join costs
+5.55 ms / 16.087 MB. Full-tree lint: 0 errors, 1,514 warnings, 6,656 ms.
+
+The full SCI leg of this sample is **817.62 ms / 1,645.164 MB / 66,830 calls**,
+warm **11.71 ms / 5.001 MB / 490 calls**. H2 changed the warm identity path during
+these checks; that warm reduction is not attributed to H9. The cold full leg
+still includes the config projection and the overlay, separately from the now
+green base. Live adoption remains refused by the dependency mismatch, so the
+self-comparison deletion and namespace-join change are checked and landed separately.
+
+Root subsequently refreshed default to `696a8cf46`, PID 42206, resolving the
+dependency mismatch. The next self-comparison-deletion check
+(`e1087123437076f1951048a5bad5001cb5d16209`, run `93920c0023e5`) passed 80
+assertions and found one existing red:
+`seon.sci.acquisition-cost-test/a-data-only-commit-reuses-the-program-overlay`
+observes two `authored-rows` calls instead of zero. Unchanged HEAD reproduces it
+in run `06c5bdcc8883` (2 pass, 1 fail, 2,958 ms); it is excluded from the passing
+slice gate along with the earlier dependency-visibility red. H3 owns the
+remaining program-identity/overlay reuse work.
+
+The benchmark's cold branch allocation also became red after the root refresh:
+4.095 MB in run `2d2e80932df2`, 4.421 MB in `d153b993abf4`, against its unchanged
+4 MB bound. Unchanged HEAD reproduces **4.426 MB** (the other 38 assertions pass).
+This is before SCI acquisition and outside the evaluator change. The full
+benchmark is still rerun for each removal, with its SCI observations retained;
+its pre-existing branch assertion is reported red, never relaxed or counted
+green. The passing slice gate therefore names the individual acquisition and
+binding Vars, excluding this benchmark Var as well as the two pre-existing
+Vars named above. On unchanged HEAD its cold SCI leg is **838.18 ms /
+1,834.565 MB**, establishing the refreshed-store comparison.
+
 ### Configuration owner task
 
 `seon.config/a-config-read-rebuilds-the-packaged-projection` names

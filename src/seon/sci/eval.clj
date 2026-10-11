@@ -2372,27 +2372,6 @@
                        admission (get privates entity false)])))
             symbols))))
 
-(defn- loaded-function-rows
-  "`function-rows` of a loaded program, once per store and commit, as
-  `loaded-digests` reads its digests: a fresh materialization of the commit
-  answers the whole-program join cold."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :string :symbol :keyword :boolean]]]}
-  [loaded]
-  (seon.cache/lookup ::loaded-function-rows [(store-identity loaded) (db/commit-id loaded)]
-                     #(reduce (fn [bytes [_ source]] (+ bytes 128 (* 2 (count source)))) 0 %)
-                     #(function-rows loaded)))
-
-(defn- host-function-rows
-  "The rows whose compiled Vars bind: the branch's own, plus the loaded program's
-  rows the branch lacks. A branch forked before a reload holds no row for a
-  function the reload added, yet the compiled Var is running on every branch
-  (AGENTS: a branch never changes the platform)."
-  [branch-rows loaded db]
-  (if (or (nil? loaded) (identical? loaded db))
-    branch-rows
-    (let [known (into #{} (map first) branch-rows)]
-      (into branch-rows (remove (comp known first)) (loaded-function-rows loaded)))))
-
 (defn- commit-id-of
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :uuid]]}
   [database]
@@ -2618,11 +2597,9 @@
          ::agent-authored? (boolean (and source (= :agent admission)))))
 
 (defn- acquire-program!
-  "Acquire the whole program `db` holds, against the JVM's loaded program value.
-
-  Overridden rows and their affected callers interpret stored source; matching
-  definitions bind compiled Vars regardless of authorship. Private evaluation objects are never
-  read from the database. Failed source loads remain typed acquisition results."
+  "Acquire the loaded program into its base context. Compiled definitions bind
+  their JVM roots; namespaces the JVM has not loaded interpret their source.
+  Branch differences belong to `derive-overlay-plan`."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
@@ -2656,26 +2633,6 @@
                     [_ :seon.ns/name ?namespace-name]]
                   db)
             all-function-rows (function-rows db)
-            loaded (loaded-database ctx db)
-            branch-digests (function-digests db)
-            ;; A loaded value identical to the acquired one may be uncommitted
-            ;; (`d/with`); only a distinct, committed loaded value is retained.
-            loaded-digests (if (identical? loaded db) branch-digests (loaded-digests loaded))
-            ;; Only what an agent authored overrides (`overridden-row?`): a
-            ;; file-derived row the loaded program moved past is not the branch's.
-            authored (into #{} (keep (fn [[sym _ _ admission]] (when (= :agent admission) (symbol sym))))
-                           all-function-rows)
-            overridden
-            (into #{} (keep (fn [[sym digest]]
-                              (when (and (authored sym) (not= digest (get loaded-digests sym))
-                                         (behavior-changed? db loaded sym))
-                                sym)))
-                  branch-digests)
-            closure (if (seq overridden)
-                      (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})
-                      {:seon.fn/affected #{} :seon.fn/tests []})
-            _ (when (:seon.db/invalid-read closure)
-                (throw (ex-info "Cannot acquire the affected function closure." closure)))
             test-namespaces (test-namespaces db)
             ;; a program namespace this JVM never loaded runs from its rows
             ;; (an agent never loads into the shared JVM); a test namespace
@@ -2685,8 +2642,8 @@
                                                   (nil? (find-ns namespace-name)))
                                          (symbol sym))))
                            all-function-rows)
-            interpreted (into overridden (:seon.fn/affected closure))
-            function-rows (filterv (fn [[sym]] (or (interpreted sym) (unloaded sym))) all-function-rows)
+            interpreted #{}
+            function-rows (filterv (comp unloaded first) all-function-rows)
             _ (lookup/install-program-doc! ctx db projection)
             selected-namespace-names
             (into (into #{} (map #(nth % 2)) function-rows)
@@ -2714,7 +2671,7 @@
          (into {} (map (fn [row] [(symbol (first row)) (function-entry row)])) all-function-rows)
          all-namespace-row-by-name)
         (swap! (::kernel/program-snapshot ctx) assoc
-               ::loaded-commit-id (db/commit-id loaded) ::interpreted interpreted
+               ::loaded-commit-id (db/commit-id db) ::interpreted interpreted
                ::test-namespaces test-namespaces)
         (when-let [recorder recording-operation]
           (swap! (::kernel/program-snapshot ctx) assoc
@@ -2735,7 +2692,7 @@
         ;; that declaration install. Selected definitions overwrite only their Vars.
         (install-first-party-namespaces!
          ctx namespace-assertions all-namespace-rows
-         (host-function-rows all-function-rows loaded db))
+         all-function-rows)
         ;; Libraries the namespaces require resolve through their aliases and
         ;; full names, as the compiled namespaces that require them do.
         (install-required-libraries! ctx all-namespace-rows)

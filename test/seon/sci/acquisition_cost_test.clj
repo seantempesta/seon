@@ -33,12 +33,14 @@
             :append true))
     measurement))
 
-(deftest function-acquisition-preserves-the-loaded-declarations
+(deftest ^{:seon.test/platform "Empties the central cache in the disposable check JVM."}
+  function-acquisition-preserves-the-loaded-declarations
   (support/with-database
    (fn [connection]
      (let [loaded (#'evaluation/loaded-program (db/db connection))
-           expected (db/q (::benchmark/function-rows benchmark/base-queries) loaded)
-           acquired (measured ::function-rows #(#'evaluation/function-rows loaded))]
+           _ (benchmark/empty-cache!)
+           acquired (measured ::function-rows #(#'evaluation/function-rows loaded))
+           expected (db/q (::benchmark/function-rows benchmark/base-queries) loaded)]
        (is (= (set expected)
               (into #{} (map (fn [[sym source _ admission private?]]
                               [sym source admission private?]))
@@ -58,6 +60,9 @@
          (is (evaluation/ctx? (:seon.profile/value cold)))
          (is (< (:seon.profile/ms cold) 300))
          (is (< (:seon.profile/alloc-bytes cold) 300000000))
+         (is (zero? (profile/calls-of cold 'seon.sci.eval/function-digests)))
+         (is (zero? (profile/calls-of cold 'seon.sci.eval/behavior-changed?)))
+         (is (zero? (profile/calls-of cold 'seon.sci.eval/loaded-database)))
          (is (zero? (profile/calls-of cold 'seon.sci.eval/install-function-contract!)))
          (is (zero? (profile/calls-of cold 'seon.schema/contract-references))))))))
 
