@@ -16,6 +16,7 @@
             [clojure.stacktrace :as stacktrace]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [edamame.core :as edamame]
             [malli.core :as m]
             [malli.error :as me]
             [malli.generator :as mg]
@@ -1881,6 +1882,76 @@
            sort
            (into [] (comp (map (comp symbol second)) (take names-shown)))))))
 
+(defn- name-tokens
+  "The words of a symbol's namespace or name: the parts between `.` and `-`."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:set :string]]}
+  [text]
+  (if text
+    (into #{} (remove empty?) (.split ^String (str/replace text \. \-) "-"))
+    #{}))
+
+(defn nearest-names
+  "At most `limit` of the qualified symbols `candidates` that `wanted` may
+  have meant, nearest first: by the words they share with it, rare words
+  counting most and a word shared by both names more than one shared across
+  namespace and name, then by the spelling distance of the names. The
+  candidates are the caller's: the public declarations, tests included or not."
+  {:malli/schema [:=> [:cat :symbol [:sequential :qualified-symbol] pos-int?] [:vector :qualified-symbol]]}
+  [wanted candidates limit]
+  (let [wanted-name (name wanted)
+        wanted-name-words (name-tokens wanted-name)
+        wanted-words (into wanted-name-words (name-tokens (namespace wanted)))
+        entries (mapv (fn [sym] [sym (name-tokens (name sym)) (name-tokens (namespace sym))]) candidates)
+        frequency (frequencies (mapcat (fn [[_ name-words ns-words]] (into name-words ns-words)) entries))
+        total (count entries)
+        score (fn [[_ name-words ns-words]]
+                (reduce (fn [sum word]
+                          (+ sum (* (Math/log (/ (inc total) (inc (get frequency word 0))))
+                                    (if (and (wanted-name-words word) (name-words word)) 1.0 0.5))))
+                        0.0
+                        (filter wanted-words (into name-words ns-words))))
+        keyed (into []
+                    (keep (fn [[sym :as entry]]
+                            (let [distance (me/levenshtein wanted-name (name sym))
+                                  shared (score entry)]
+                              (when (or (pos? shared) (<= distance 2))
+                                [[(- shared) distance (str sym)] sym]))))
+                    entries)]
+    (into [] (comp (map second) (take limit)) (sort-by first keyed))))
+
+(defn- declared-by-test?
+  "Whether `sym` is declared in a test or test-support namespace: a helper
+  no program caller guesses."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [sym]
+  (let [home (namespace sym)]
+    (or (str/ends-with? home "-test") (str/ends-with? home "-support"))))
+
+(defn- calling-form
+  "The call a function's shortest stored arglist makes: `(sym arg ...)`, or
+  `(sym)` when none is stored."
+  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :string]] :seon.schema/value]}
+  [sym arglists]
+  (let [home (symbol (namespace sym))
+        read-arglists #(edamame/parse-string % {:auto-resolve (fn [requested] (if (= :current requested) home requested))})
+        shortest (some->> arglists read-arglists (sort-by count) first)]
+    (apply list sym shortest)))
+
+(defn- nearest-calls
+  "The calling forms of the public program declarations nearest to `missing`
+  (`nearest-names`), at most eight. Nothing when the read is refused:
+  `names-in` shows that refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:vector :seon.schema/value]]}
+  [database missing]
+  (let [found (db/q '[:find ?sym ?arglists :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
+                      [(get-else $ ?f :seon.fn/private? false) ?private] [(not ?private)]]
+                    database)]
+    (if (db/read-refusal? found)
+      []
+      (let [arglists (into {} found)]
+        (into [] (map #(calling-form % (get arglists %)))
+              (nearest-names missing (remove declared-by-test? (keys arglists)) names-shown))))))
+
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored
   source that name `subject`, each headed by its line number within the
@@ -1959,6 +2030,9 @@
   - `:seon.error/in-namespace`: when a name was not found, the names its
     namespace declares nearest to it by spelling, at most eight; absent
     when it declares none.
+  - `:seon.error/nearest`: when a name was not found, the calling forms
+    of the public declarations nearest to it across every namespace, by the
+    words of their names (`nearest-names`), at most eight.
   - `:seon.error/sources`: where each function the refusal names (a
     removal's callers, at most three) mentions the blocked subject.
   - `:seon.error/chain`: for a thrown failure that is no structural refusal
@@ -2037,7 +2111,8 @@
                      links)))
          arity? (contains? error :seon.instrument/declared-arities)
          ;; an empty name list is no key; a refused read is shown as it is
-         in-namespace (when (and database namespace-name) (names-in database namespace-name missing))]
+         in-namespace (when (and database namespace-name) (names-in database namespace-name missing))
+         nearest (when (and database missing) (nearest-calls database missing))]
      (cond-> (if options (variant-members options error) {})
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
@@ -2059,6 +2134,7 @@
        (assoc :seon.instrument/caller (:seon.instrument/caller error))
        (seq in-namespace)
        (assoc :seon.error/in-namespace {namespace-name in-namespace})
+       (seq nearest) (assoc :seon.error/nearest nearest)
        (and database (seq referenced) (qualified-symbol? (:seon.program/blocked-subject error)))
        (assoc :seon.error/sources (call-lines database referenced (:seon.program/blocked-subject error)))
        chain (assoc :seon.error/chain chain)

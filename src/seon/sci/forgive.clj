@@ -84,6 +84,23 @@
                \` (#{\( \[ \{} d)
                false))))
 
+;;; Tool markup
+
+(defn- markup-end
+  "The end of the tool markup starting at `i` in the line `[i le)`, else nil:
+  a closing tag (`</invoke>`) or the token `[i j)` ending an ellipsis standing
+  for omitted code outside any collection (`top?`), or an `antml` or DSML tag
+  through its `>`."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int? :boolean] [:maybe nat-int?]]}
+  [^String text ^long i ^long le top?]
+  (let [j (token-end text i le)
+        token (subs text i j)]
+    (cond
+      (str/starts-with? token "</") j
+      (and (str/starts-with? token "<") (or (str/includes? token "DSML") (str/starts-with? token "<antml")))
+      (let [close (.indexOf text ">" (int i))] (if (and (>= close 0) (< close le)) (inc close) le))
+      (and top? (#{"..." "\u2026"} token)) j)))
+
 (defn- string-closes-at?
   "Whether the string opened at `s` closes exactly at `end`."
   {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
@@ -198,6 +215,12 @@
                         top? (and (nil? @form) (zero? (.length open)))]
                     (cond
                       (or (Character/isWhitespace c) (= \, c)) (recur (inc i) copied after)
+                      ;; tool markup is no code: dropped, as a stray closer is
+                      (and (#{\< \. \u2026} c) (markup-end text i le top?))
+                      (let [j (long (markup-end text i le top?))]
+                        (.append out text (int copied) (int i))
+                        (repair! line (.length out) :seon.batch/dropped (subs text i j))
+                        (recur j j after))
                       (or (= \; c) (and (= \# c) (= \! d))) (.append out text (int copied) (int le))
                       ;; words after a form on its line become its comment
                       (and top? after trailing? (not (form-start? text i le)))

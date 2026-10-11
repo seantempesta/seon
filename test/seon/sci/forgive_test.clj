@@ -241,3 +241,16 @@
   (test-support/assert-check!
    (tc/quick-check 300 (prop/for-all [text text-gen] (= text (unrepair (forgive/forgive text :code))))
                    :seed 20261010 :max-size 40)))
+
+(deftest tool-markup-among-code-is-dropped-at-read
+  ;; A model's tool-call closers and DSML tags are no names: they are dropped
+  ;; as repairs, never read as symbols (health: `Unable to resolve symbol: </invoke>`).
+  (are [mode text sources] (= sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments text mode))))
+    :code "(+ 1 2)</invoke>"                  ["(+ 1 2)"]
+    :code "(+ 1 2)\n</invoke>\n(+ 3 4)"        ["(+ 1 2)" "(+ 3 4)"]
+    :code "(+ 1 2)\n<｜｜DSML｜｜ /invoke>"      ["(+ 1 2)"]
+    :code "(+ 1 2)\n..."                       ["(+ 1 2)"]
+    :reply "(+ 1 2)</invoke>"                  ["(+ 1 2)"]
+    ;; an ellipsis inside a collection is a symbol (datalog), and markup in a string is text
+    :code "(q '[:find [?s ...] :where [?e :a ?s]])" ["(q '[:find [?s ...] :where [?e :a ?s]])"]
+    :code "(str \"</invoke>\")"                ["(str \"</invoke>\")"]))

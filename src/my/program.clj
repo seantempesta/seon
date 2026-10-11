@@ -23,8 +23,7 @@
             [seon.fault :as fault]
             [seon.sci.lookup]
             [seon.flow :as work]
-            [seon.test]
-            [malli.error]))
+            [seon.test]))
 
 (defn- read-result
   {:malli/schema
@@ -851,16 +850,13 @@
       {})))
 
 (defn- nearest
-  "Up to five declared symbols closest to sym by edit distance of their names, the same namespace before others."
+  "Up to five declared symbols closest to sym by the words of their names (`seon.error/nearest-names`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
   [database sym]
-  (let [ns-part (namespace sym) name-part (name sym)]
-    (->> (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
-                 (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]]))
-         ;; each distance once, never per comparison
-         (map (fn [s] [[(malli.error/levenshtein (name s) name-part) (not= ns-part (namespace s)) (str s)] s]))
-         (sort-by first)
-         (take 5) (mapv second))))
+  (error/nearest-names sym
+                       (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
+                               (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]]))
+                       5))
 
 (defn- not-found
   "The refusal for a subject nothing names: the nearest declared symbols for a qualified symbol, and the forms that work."

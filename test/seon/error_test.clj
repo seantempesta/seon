@@ -1794,3 +1794,27 @@
                                    [seon.error/render-aj render-ai]]]
          (is (= nearest (first (names-in database 'seon.error missing)))
              "the nearest name by spelling ranks first"))))))
+
+(deftest a-guessed-name-is-answered-with-the-nearest-real-calls
+  ;; Agents guess names (health's top agent-error signature): the refusal
+  ;; carries the calling forms of the public declarations nearest by the
+  ;; words of the names, across every namespace, including a guess in a
+  ;; namespace that does not exist.
+  (let [database (seon.db/db)
+        nearest (fn [guess] (:seon.error/nearest
+                             (seon.error/reply-value database {:seon.error/message (str "Unable to resolve symbol: " guess)
+                                                               :seon.program/not-found guess})))]
+    (clojure.test/are [guess expected] (some #{expected} (map first (nearest guess)))
+      'my.cluster.source/write 'my.program/write-branch!
+      'my.agent/messages 'seon.ai/messages
+      'seon.repl/help 'seon.bootstrap/help
+      'seon.test/result 'seon.test/recorded-result
+      'my.program/overrides 'seon.program/overrides
+      'seon.task/current 'seon.context/current-state)
+    (testing "each candidate is a calling form of at most eight, named and with its arguments"
+      (let [forms (nearest 'my.program/overrides)]
+        (is (<= (count forms) 8))
+        (is (= '(seon.program/overrides database) (first (filter #(= 'seon.program/overrides (first %)) forms))))))
+    (testing "a name nothing resembles has no key"
+      (is (not (contains? (seon.error/reply-value database {:seon.error/message "x" :seon.program/not-found 'qqqq.zzzz/xxyyzz})
+                          :seon.error/nearest))))))
