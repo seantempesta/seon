@@ -3243,11 +3243,12 @@
    (fn [connection]
      (let [projection (schema/handed-projection)
            options {:registry (:seon.schema.projection/registry projection)}
-           max-eid (:max-eid (db/db connection))
+           {:keys [max-eid max-tx]} (db/db connection)
            ident (fn [row] (keyword "seon.db-test" (str "explicit-eid-" (name row))))
            explicit (fn [row eid] (db/transact! connection [[:db/add eid :db/ident (ident row)]]))
-           ;; an eid in the transaction range and one above emax can never be entities
-           refused [[:transaction-range (+ constants/tx0 7)]
+           ;; a transaction id not yet issued and one above emax name nothing
+           ;; (an issued transaction id names its transaction's metadata)
+           refused [[:unissued-transaction (+ max-tx 7)]
                     [:above-emax (bit-or (bit-shift-left 7 32) 1)]]
            unissued (+ max-eid 100000)]
        (doseq [[row eid] refused]
@@ -3274,7 +3275,9 @@
                   (let [k (keyword "seon.db-test" (str "born-on-" (name branch)))
                         fork (store/open-branch! store branch)]
                     (try
-                      (db/transact! fork [{:db/ident k}])
+                      ;; a write lands on the branch whose custody it runs under
+                      (db/call-with-custody {:seon.db/connection fork}
+                                            #(db/transact! fork [{:db/ident k}]))
                       (d/q '[:find ?e . :in $ ?k :where [?e :db/ident ?k]] (db/db fork) k)
                       (finally (store/release-branch! fork)))))]
        (try

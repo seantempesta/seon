@@ -655,7 +655,9 @@ mechanism that a §3.22 decision deletes is dropped, not swept.
 Approved by the owner: one validated state map per process and one per cluster (`set-validator!` with a compiled Malli
 validator, so an invalid `swap!` throws and the state is unchanged); agent state lives in its Flow proc and its SCI
 context; kept mutable counters: per-function profile counters, the SCI interrupt flag, the running Thread and
-clojure.test's report counter. Seon's own cache counters are deleted in favour of Caffeine's. Any further holder that
+clojure.test's report counter, and in the Datahike fork the store's eid allocator (`datahike.writing/eid-allocators`:
+one increment-only `AtomicLong` per open store, rederived from the committed heads on first use, valid because one process
+holds a store's writers; P1a). Seon's own cache counters are deleted in favour of Caffeine's. Any further holder that
 should stay is reported to the owner in plain words with its justification; a lint refuses new atoms.
 
 | Id (census slice) | Title | Change | Files | Proof | Budget | Deps | Group | Status |
