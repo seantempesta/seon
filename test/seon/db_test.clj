@@ -324,6 +324,20 @@
        (is (= [] (db/q collection database [])))
        (is (= [] (db/q scalar database "not-a-recorded-agent")))))))
 
+(deftest ^{:seon/tasks #{'seon.db/q-lets-a-stack-overflow-error-escape}}
+  a-stack-overflow-in-a-query-is-answered-as-a-refusal
+  (test-support/with-database
+   (fn [connection]
+     (let [result (db/q '[:find [?t ...] :in $ %
+                          :where (done ?t)]
+                        (db/db connection)
+                        '[[(done ?t) [?t :seon.agent/id _]
+                           [?t :seon.agent/id ?c] (not (done ?c))]])]
+       (is (true? (:seon.db/invalid-read result)))
+       (is (= 'seon.db/q (:seon.db/refused-read-operation result)))
+       (is (= "java.lang.StackOverflowError"
+              (get-in result [:seon.error/data :seon.db/exception-class])))))))
+
 (deftest relation-only-queries-need-no-database-schema
   (is (= [:sample/fail]
          (db/q '[:find [?key ...] :in [[?key ?passed]]

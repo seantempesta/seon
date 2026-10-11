@@ -259,7 +259,8 @@
   Datahike's `log/raise` (`replikativ/logging.cljc:82`, data carrying its
   `:error` member, e.g. `:query/where`, `:lookup-ref/unique`), the Datalog
   parser's `raise` (`datalog/parser/impl/util.cljc:10`) and Seon's codec.
-  Reads catch only that carrier; every other throwable — the stop's
+  Reads catch only that carrier and `seon.db/q`'s `StackOverflowError` from a
+  rule recursing through negation; every other throwable — the stop's
   interrupt, a host failure — propagates unchanged with its whole cause."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.db/error-result]}
   [operation error]
@@ -2955,6 +2956,13 @@
                               (append-query-evidence! request response result)
                               result))))))))))
         (catch clojure.lang.ExceptionInfo cause
+          (when explicit-database?
+            (append-database-evidence! query-or-database :all))
+          (dependency-error 'seon.db/q cause))
+        ;; Datahike lowers a rule recursing through negation without bound and
+        ;; overflows the stack; this is the one Error the query engine's own
+        ;; input produces, so it is answered as the read's refusal, cause kept.
+        (catch StackOverflowError cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
           (dependency-error 'seon.db/q cause))))))
