@@ -149,11 +149,11 @@
   (= #{:green} (set (keys (:seon.context/counts proven)))))
 
 (defn held-task
-  "The declaration of the task `agent-id` holds, read at the task home seen from `database`; nil when it holds none."
+  "The declaration of the task `agent-id` holds, read at main seen from `database`; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :nil :seon.context/task :seon.error/value]]}
   [database agent-id]
-  (let [home (if-let [connection (task/home database)] (db/db connection) database)
+  (let [home (if-let [connection (task/main database)] (db/db connection) database)
         handle (task/agent-task home agent-id)]
     (cond (:seon.error/at handle) handle
           (string? handle)
@@ -192,12 +192,12 @@
   main's (a sample digest main does not hold, or main stores none for that
   symbol and scope), as `seon.batch/cost-diff` comparisons, like with like
   only: the most self time spent first, at most `:seon.config.test.cost/top`,
-  the dials of the branch's effective configuration. Main is the task home
-  (`seon.task/home`). Nil on main itself, the branch stores none, its program
+  the dials of the branch's effective configuration. Main is read through
+  `seon.task/main`. Nil on main itself, the branch stores none, its program
   declares no cost entities or its configuration is refused."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cost/diff]]}
   [database]
-  (let [main (some-> (task/home database) db/db)
+  (let [main (some-> (task/main database) db/db)
         cluster (when main (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database))
         effective (when cluster (config/effective database cluster))
         cost-keys (when (and effective (not (:seon.error/at effective)))
@@ -224,7 +224,7 @@
         (turn/previous-ending-namespace database eid))
       (some-> (:seon.task/sym held) namespace symbol)))
 
-(defn- branch-outcome
+(defn- branch-end-summary
   "What the agent `agent-id` did on `branch-db` toward task `sym`: its model calls and tokens and its proofs'
   counts and red proofs; an error when a read refuses."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe :seon.task/sym]]
@@ -250,36 +250,36 @@
 
 (def ^:private proof-count-attributes
   "The agent attribute recording each proof status's count."
-  {:green :seon.agent/outcome-green :red :seon.agent/outcome-red :pending :seon.agent/outcome-pending})
+  {:green :seon.agent/end-green :red :seon.agent/end-red :pending :seon.agent/end-pending})
 
-(defn- outcome-facts
-  "The agent attributes recording `outcome` (a `branch-outcome`)."
+(defn- end-summary-facts
+  "The agent attributes recording `outcome` (a `branch-end-summary`)."
   {:malli/schema [:=> [:cat :map] :map]}
   [outcome]
-  (cond-> {:seon.agent/outcome-calls (:seon.task/calls outcome)
-           :seon.agent/outcome-prompt-tokens (:seon.task/prompt-tokens outcome)
-           :seon.agent/outcome-completion-tokens (:seon.task/completion-tokens outcome)}
-    (seq (:seon.task/red-proofs outcome)) (assoc :seon.agent/outcome-red-proofs (set (:seon.task/red-proofs outcome)))
+  (cond-> {:seon.agent/end-calls (:seon.task/calls outcome)
+           :seon.agent/end-prompt-tokens (:seon.task/prompt-tokens outcome)
+           :seon.agent/end-completion-tokens (:seon.task/completion-tokens outcome)}
+    (seq (:seon.task/red-proofs outcome)) (assoc :seon.agent/end-red-proofs (set (:seon.task/red-proofs outcome)))
     true (into (keep (fn [[status attribute]] (when-let [n (get-in outcome [:seon.task/proof-counts status])] [attribute n])))
                proof-count-attributes)))
 
-(defn- recorded-outcome
-  "The outcome recorded on agent `agent-id` when its task ended, as a `branch-outcome`; nil when none was."
+(defn- recorded-end-summary
+  "The outcome recorded on agent `agent-id` when its task ended, as a `branch-end-summary`; nil when none was."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
   [database agent-id]
-  (let [row (db/pull database (into [:seon.agent/outcome-calls :seon.agent/outcome-prompt-tokens :seon.agent/outcome-completion-tokens
-                                     :seon.agent/outcome-red-proofs]
+  (let [row (db/pull database (into [:seon.agent/end-calls :seon.agent/end-prompt-tokens :seon.agent/end-completion-tokens
+                                     :seon.agent/end-red-proofs]
                                     (vals proof-count-attributes))
                      [:seon.agent/id agent-id])
         counts (into {} (keep (fn [[status attribute]] (when-let [n (get row attribute)] [status n]))) proof-count-attributes)]
-    (when (and (map? row) (contains? row :seon.agent/outcome-calls))
-      (cond-> {:seon.task/calls (:seon.agent/outcome-calls row)
-               :seon.task/prompt-tokens (:seon.agent/outcome-prompt-tokens row)
-               :seon.task/completion-tokens (:seon.agent/outcome-completion-tokens row)}
+    (when (and (map? row) (contains? row :seon.agent/end-calls))
+      (cond-> {:seon.task/calls (:seon.agent/end-calls row)
+               :seon.task/prompt-tokens (:seon.agent/end-prompt-tokens row)
+               :seon.task/completion-tokens (:seon.agent/end-completion-tokens row)}
         (seq counts) (assoc :seon.task/proof-counts counts)
-        (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/outcome-red-proofs row))))))))
+        (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/end-red-proofs row))))))))
 
-(defn outcome-tx
+(defn end-summary-tx
   "Transaction data recording the outcome of the task `agent-id` holds, derived from its branch in `database`
   (calls, tokens, proof counts and red proofs): what the end summary needs after the branch is retired. Empty
   when the agent has no branch, no task or its evidence is unreadable, so a summary never reads zeros for evidence
@@ -287,29 +287,29 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.store/transaction-data]}
   [database agent-id]
   (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
-        home (if-let [connection (task/home database)] (db/db connection) database)
+        home (if-let [connection (task/main database)] (db/db connection) database)
         handle (task/agent-task home agent-id)
         sym (when (string? handle) (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home handle))
         branch-db (when (keyword? branch) (db/branch-database database branch))
-        outcome (when branch-db (branch-outcome branch-db agent-id sym))]
+        outcome (when branch-db (branch-end-summary branch-db agent-id sym))]
     (if (or (nil? outcome) (:seon.error/at outcome))
       []
-      [(assoc (outcome-facts outcome) :seon.agent/id agent-id)])))
+      [(assoc (end-summary-facts outcome) :seon.agent/id agent-id)])))
 
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
   ended, its proofs' counts and red proofs, the agent's errors grouped by signature, its model calls and tokens,
   the merge task when it ended green with its landing (the commits it made, or the refusal it met), and the
   operations root takes next. The outcome is the one recorded when
-  the task ended, else derived from the agent's branch, else unknown (`:seon.task/outcome-unknown`), never zeros."
+  the task ended, else derived from the agent's branch, else unknown (`:seon.task/end-unknown`), never zeros."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
   [database {agent-id :my.message/from task-id :seon.message/about end :seon.task/end merge :seon.task/merge}]
   (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
-        home (if-let [connection (task/home database)] (db/db connection) database)
+        home (if-let [connection (task/main database)] (db/db connection) database)
         sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home task-id)
-        recorded (recorded-outcome database agent-id)
+        recorded (recorded-end-summary database agent-id)
         branch-db (when (keyword? branch) (db/branch-database database branch))
-        outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))
+        outcome (or recorded (when branch-db (branch-end-summary branch-db agent-id sym)))
         landing (when merge
                   (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
                                      [:seon.task/id merge])]
@@ -323,7 +323,7 @@
                           sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
                                                               :seon.task/basis task-id})))}
                        outcome)
-          (nil? outcome) (assoc :seon.task/outcome-unknown true)
+          (nil? outcome) (assoc :seon.task/end-unknown true)
           sym (assoc :seon.task/sym sym)
           (keyword? branch) (assoc :seon.agent/branch branch)
           merge (assoc :seon.task/merge merge)
@@ -332,7 +332,7 @@
 
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
-  task home reads it now, and its turns left with the task's status (`:done` once every
+  main reads it now, and its turns left with the task's status (`:done` once every
   proof is green, then `:capped` with no turns left, else `:working`) and the namespace
   it is in (`agent-namespace`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages

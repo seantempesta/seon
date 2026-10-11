@@ -38,7 +38,7 @@
              [:seon.task/intent {:optional true} :seon.task/intent]
              [:seon.render/operations :seon.render/operations]]
  :of-agent [:and {:seon.render/derived true
-                  :description "The task an agent holds, derived from its latest assignment at the task home (seon.task/agent-task); no datom stores it. The agent's attachment, so its task stays in its opening across compaction."
+                  :description "The task an agent holds, derived from its latest assignment at main (seon.task/agent-task); no datom stores it. The agent's attachment, so its task stays in its opening across compaction."
                   :seon.render/ai seon.render.ns/held-task-ai :seon.render/html seon.render.ns/held-task-html
                   :seon.render/form seon.render.ns/held-task-form}
             :seon.db/ref]
@@ -55,9 +55,9 @@
  :completion-tokens [:int {:min 0 :description "The completion tokens an ended task's model calls received."}]
  :proof-counts [:map-of {:description "An ended task's proofs by status on its agent's branch."} :seon.context/proof-status [:int {:min 1}]]
  :red-proofs [:vector {:description "An ended task's red proofs."} :seon.test/sym]
- :outcome-unknown [:= {:description "Present (true) when neither the ending agent's branch nor the outcome recorded when its task ended remains: calls, tokens and proofs are unknown, never zero."} true]
+ :end-unknown [:= {:description "Present (true) when neither the ending agent's branch nor the outcome recorded when its task ended remains: calls, tokens and proofs are unknown, never zero."} true]
  :errors [:vector {:description "The errors an ended task's agent evaluated on its branch, grouped by signature (seon.problems/agent-errors-by-signature)."} :seon.problems/agent-error]
- :ended [:map {:description "What a task's end message stands for, derived when root reads it from the outcome recorded on the ending agent when its task ended (seon.context/outcome-tx), else from its branch, else unknown; the message holds references only. Producer: seon.context/ended."}
+ :ended [:map {:description "What a task's end message stands for, derived when root reads it from the outcome recorded on the ending agent when its task ended (seon.context/end-summary-tx), else from its branch, else unknown; the message holds references only. Producer: seon.context/ended."}
          [:seon.task/id :seon.task/id] [:seon.task/end :seon.task/end] [:seon.agent/id :seon.agent/id]
          [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/branch {:optional true} :seon.agent/branch]
          [:seon.task/merge {:optional true} :seon.task/merge]
@@ -67,7 +67,7 @@
          [:seon.task/errors {:optional true} :seon.task/errors]
          [:seon.task/calls {:optional true} :seon.task/calls] [:seon.task/prompt-tokens {:optional true} :seon.task/prompt-tokens]
          [:seon.task/completion-tokens {:optional true} :seon.task/completion-tokens]
-         [:seon.task/outcome-unknown {:optional true} :seon.task/outcome-unknown]
+         [:seon.task/end-unknown {:optional true} :seon.task/end-unknown]
          [:seon.render/operations [:vector :seon.render/read-form]]]
  :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored."} :working :requested :done :bailed :capped]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
@@ -86,7 +86,7 @@
  :commit [:uuid {:description "C: the source branch's commit its proofs ran on."}]
  :proved [:set {:min 1 :description "Each proof as [test symbol, definition digest] at C: references that outlive C."}
           [:tuple :symbol [:string {:min 64 :max 64}]]]
- :refuted [:set {:description "Each proof observed red on the source branch before its change, as [test symbol, reach digest]: a proof must have failed at the old program (health plan §5)."}
+ :red-first [:set {:description "Each proof observed red on the source branch before its change, as [test symbol, reach digest]: a proof must have failed at the old program (health plan §5)."}
            [:tuple :symbol [:string {:min 64 :max 64}]]]
  :run-id [:and {:description "The test run on C that proved them."} :seon.test.run/id]
  :program [:and {:description "The run's tested program identity."} :seon.test.run/program-digest]
@@ -113,7 +113,7 @@
  :merge-request-row [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                 [:seon.task/merge-request :seon.task/merge-request] [:seon.task/merge :seon.task/merge] [:seon.task/of-assignment :seon.task/of-assignment]
                 [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
-                [:seon.task/refuted {:optional true} :seon.task/refuted]
+                [:seon.task/red-first {:optional true} :seon.task/red-first]
                 [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]
  :assigned-work [:map {:description "What an agent's branch is assigned: the key naming its merge task, the owning namespace, the proofs and the assignment its merge request answers."}
                  [:seon.task/key :seon.task/key] [:seon.task/ns :seon.task/ns] [:seon.task/proofs :seon.task/proofs]

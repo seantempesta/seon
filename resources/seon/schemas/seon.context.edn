@@ -1,5 +1,5 @@
 #:seon.context{:task
-               [:map {:description "The task an agent holds as its current declaration reads at the task home."}
+               [:map {:description "The task an agent holds as its current declaration reads at main."}
                 [:seon.task/id :seon.task/id]
                 [:seon.task/sym :seon.task/sym]
                 [:seon.task/intent :seon.task/intent]

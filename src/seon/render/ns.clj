@@ -133,14 +133,14 @@
        [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
 
 ;;; The agent's held task (`:seon.task/of-agent`, a derived attachment of the agent): read from the
-;;; task home, where its assignment is written while the agent works on its own branch.
+;;; main, where its assignment is written while the agent works on its own branch.
 
 (defn- held-task
-  "The task `unit`'s agent holds, read at the task home seen from the unit's database: its name and
+  "The task `unit`'s agent holds, read at main seen from the unit's database: its name and
   intent with the read of its proofs offered; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [{database :seon.db/db value :seon.render/value}]
-  (let [home (if-let [connection (task/home database)] (db/db connection) database)
+  (let [home (if-let [connection (task/main database)] (db/db connection) database)
         handle (task/agent-task home (:seon.agent/id value))]
     (if (string? handle)
       (let [task (db/pull home [:seon.task/name :seon.task/intent] [:seon.task/id handle])]

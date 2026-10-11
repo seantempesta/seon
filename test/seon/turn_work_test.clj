@@ -778,7 +778,7 @@
           "once a task is assigned, the waiting wake opens the turn"))))
 
 (deftest a-branch-agent-assigned-after-its-fork-opens-its-model-turn
-  ;; Assignments live at the task home (root's branch); the agent works on its own
+  ;; Assignments live at main (root's branch); the agent works on its own
   ;; branch, forked before root assigned it, so the branch never holds the assignment.
   (with-unassigned-database
     (fn [home]

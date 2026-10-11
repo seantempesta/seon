@@ -1,7 +1,7 @@
 (ns seon.task
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge request. Tasks live on the cluster, so every write goes to
-  the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
+  main through the one task writer (`seon.task/adopt-tasks-tx`)."
   {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
   (:require [seon.cache :as cache]
             [clojure.edn :as edn]
@@ -379,7 +379,7 @@
         (update-vals (group-by first (remove (comp (set admitted) first) (filter touched? mine)))
                      #(set (map (fn [[_ _ holder]] holder) %))))))
 
-(defn home
+(defn main
   "The connection tasks live on, seen from `database`: root's home branch (root's
   row names it, as a message to root is delivered there) through this process's
   connection to it; nil when `database` is that branch or no root row names another."
@@ -389,11 +389,11 @@
     (when (and (keyword? branch) (not= branch (get-in database [:config :branch])))
       (db/branch-connection database branch))))
 
-(defn home-connection
-  "The connection a task write from `connection` goes through: the task home's, else `connection`."
+(defn main-connection
+  "The connection a task write from `connection` goes through: main's, else `connection`."
   {:malli/schema [:=> [:cat :seon.db/connection] :seon.db/connection]}
   [connection]
-  (or (home (db/db connection)) connection))
+  (or (main (db/db connection)) connection))
 
 (defn- refused
   "The task refusal value naming `rule`, the `holder` namespace and the offending value."
@@ -405,11 +405,11 @@
                        :seon.task/refused rule :seon.task/holder holder :seon.error/offending offending}))
 
 (defn- written
-  "Write `tx` on the task home of `connection` under that home's custody."
+  "Write `tx` on main of `connection` under that home's custody."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/tx-data]
                   [:or :seon.db/transaction-report :seon.error/value]]}
   [connection tx]
-  (let [target (home-connection connection)]
+  (let [target (main-connection connection)]
     (db/call-with-custody {:seon.db/connection target} #(db/transact! target tx))))
 
 (defn- task-entity
@@ -432,14 +432,14 @@
     (into [] (keep (fn [[a current]] (when (not= current revision) [:db/add a :seon.task/revision revision]))) assigned)))
 
 (defn- task-call
-  "The task writer's call for `row` against `basis` on the task home of
+  "The task writer's call for `row` against `basis` on main of
   `connection`, or [] when that home already holds its declaration; a revision
   also advances the task's assignments. A revised declaration throws the writer's
   conflict with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/task :seon.task/basis] :seon.db/tx-data]}
   [connection entity basis]
   (let [handles #{(:seon.task/id entity)}]
-    (if (empty? (adopt-tasks-tx (db/db (home-connection connection)) [entity] handles basis))
+    (if (empty? (adopt-tasks-tx (db/db (main-connection connection)) [entity] handles basis))
       []
       [[:db.fn/call #'adopt-tasks-tx [entity] handles basis]
        [:db.fn/call #'advance-assignments-tx entity]])))
@@ -480,7 +480,7 @@
         {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))}))))
 
 (defn assignment-read
-  "What assigning task `handle` to `agent` reads at the task home `database`: the task's revision, the agent's
+  "What assigning task `handle` to `agent` reads at main `database`: the task's revision, the agent's
   id and the task's proofs; refused when the task or agent is unknown or the task has no proof."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assigned :seon.task/agent]
                   [:or [:map [:seon.task/revision :seon.task/revision] [:seon.agent/id :seon.agent/id]
@@ -576,7 +576,7 @@
                   [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
   [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch
     cluster :seon.agent/context-source}]
-  (let [read (assignment-read (db/db (home-connection connection)) handle agent)
+  (let [read (assignment-read (db/db (main-connection connection)) handle agent)
         {revision :seon.task/revision agent-id :seon.agent/id proofs :seon.task/proofs} read
         ran (when (and (not (:seon.error/at read)) cluster) (proof-run cluster agent-id branch proofs))]
     (cond (:seon.error/at read) read
@@ -617,7 +617,7 @@
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
 (defn agent-task
-  "The handle of the task `agent-id` holds in `database` (the task home's): its latest assignment's
+  "The handle of the task `agent-id` holds in `database` (main's): its latest assignment's
   task; nil when it holds none. One indexed query.
 
   ## Costs
@@ -630,7 +630,7 @@
                    database agent-id)]
     (or (read-error held) (first (apply max-key second [nil 0] (seq held))))))
 
-(defn- refuted
+(defn- red-first
   "The `proofs` observed red on `database` (the proposing branch) at a reach
   no green member of the same test shares, as `[test reach-digest]`: each
   failed at the program before the change (health plan §5, owner ruling: a
@@ -654,7 +654,7 @@
 (defn request-merge!
   "Record on the cluster the merge request for the assigned `work`: its merge task and one merge request
   of the commit `view` names on its branch, with its proofs at their definition digests, the run and its
-  tested program, and each proof observed red on the branch before the change (`:seon.task/refuted`, read
+  tested program, and each proof observed red on the branch before the change (`:seon.task/red-first`, read
   from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a
   repeat request finds it; the recurrence key `[key commit]` records one merge request per commit. Answers
   the merge request view."
@@ -667,9 +667,9 @@
   (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge-" key) :seon.task/kind :merge
                        :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
                       agent-id)
-        red (refuted (db/db connection) (into #{} (map first) (:seon.task/proved view)))
+        red (red-first (db/db connection) (into #{} (map first) (:seon.task/proved view)))
         view (cond-> (assoc view :seon.task/merge-request (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
-               (seq red) (assoc :seon.task/refuted red))
+               (seq red) (assoc :seon.task/red-first red))
         report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/of-assignment of-assignment))))]
     (cond (map? red) red
           (:seon.error/at report) report
@@ -697,7 +697,7 @@
   deleted. nil, or the inline refusal."
   {:malli/schema [:=> [:cat :seon.task/close-context :seon.store/branch] [:or :nil :seon.error/value]]}
   [{environment :seon.env/environment connection :seon.db/connection :as context} branch]
-  (let [main? (= branch (get-in (db/db (home-connection connection)) [:config :branch]))
+  (let [main? (= branch (get-in (db/db (main-connection connection)) [:config :branch]))
         retire! #(@retire-branch! {:seon.store/branch branch} context)
         launcher (:seon.flow/work-launcher environment)
         submitted (when (and launcher (not main?))

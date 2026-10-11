@@ -66,8 +66,8 @@
   (delay (requiring-resolve 'seon.context/task-done?)))
 (defonce ^:private program-request-merge!
   (delay (requiring-resolve 'my.program/request-merge!)))
-(defonce ^:private context-outcome-tx
-  (delay (requiring-resolve 'seon.context/outcome-tx)))
+(defonce ^:private context-end-summary-tx
+  (delay (requiring-resolve 'seon.context/end-summary-tx)))
 (defonce ^:private source-land!
   (delay (requiring-resolve 'seon.cluster.source/land!)))
 (defonce ^:private test-run
@@ -2125,12 +2125,12 @@
   (some? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))))
 
 (defn- admission-closed?
-  "True when the agent `agent-id`'s admission is closed on `database`, where it retires, or at the task home seen
-  from it (`seon.task/home`), where its task's end is written (`end-task-call`)."
+  "True when the agent `agent-id`'s admission is closed on `database`, where it retires, or at main seen
+  from it (`seon.task/main`), where its task's end is written (`end-task-call`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (or (closed-on? database agent-id)
-      (boolean (some-> (task/home database) db/db (closed-on? agent-id)))))
+      (boolean (some-> (task/main database) db/db (closed-on? agent-id)))))
 
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
@@ -2157,7 +2157,7 @@
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
   [database agent-id]
-  (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
+  (let [held (task/agent-task (or (some-> (task/main database) db/db) database) agent-id)]
     (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
       (cond (@context-task-done? database agent-id) :done
             (db/q '[:find ?turn . :in $ ?agent-id
@@ -2168,7 +2168,7 @@
             (stalled? database agent-id) :stalled))))
 
 (defn end-task-call
-  "Record the end of the task `agent-id` holds at the writer on the task home `database`: the end message `candidate`
+  "Record the end of the task `agent-id` holds at the writer on main `database`: the end message `candidate`
   to root (`seon.cluster.message/send-call`) and the agent's admission closed, as one transaction; nothing when the
   admission is already closed, so a task's end is recorded once."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message]
@@ -2185,14 +2185,14 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
                   :my.message/message]}
   [database agent-id end merge]
-  (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
+  (let [held (task/agent-task (or (some-> (task/main database) db/db) database) agent-id)]
     (cond-> {:my.message/to "root" :my.message/about held :seon.task/end end
              :my.message/content (str "My task ended: " (name end) "."
                                       (when merge " Its merge request is the merge task this message names."))}
       merge (assoc :seon.task/merge merge))))
 
 (defn- end-merge-request
-  "The merge request the end of the task `agent-id` holds already recorded at the task home `home`, with its merge
+  "The merge request the end of the task `agent-id` holds already recorded at main `home`, with its merge
   task's outcome and landing refusal: the latest merge request answering the agent's assignment of that task; nil
   when none was recorded, so one end requests the merge at most once whatever interrupted it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
@@ -2239,7 +2239,7 @@
 (defn- land-end!
   "Merge the green end's `request` with no root when the dial `:seon.config.root/land?` is on and its merge task
   is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
-  root's world, then record its result on the merge task at the task home (`landing-tx`). Answers the landing, or
+  root's world, then record its result on the merge task at main (`landing-tx`). Answers the landing, or
   nil when nothing was landed."
   {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
   [cluster agent-id request]
@@ -2264,8 +2264,8 @@
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): request the merge of its
   change when it ended green (`my.program/request-merge!`, the agent's own act; a merge request this end already
-  recorded is reused, `end-merge-request`), record the agent's outcome at the task home (`seon.context/outcome-tx`),
-  then send root the one end message and close the agent in one transaction at the task home (`end-task-call`), so
+  recorded is reused, `end-merge-request`), record the agent's outcome at main (`seon.context/end-summary-tx`),
+  then send root the one end message and close the agent in one transaction at main (`end-task-call`), so
   whoever sees the agent closed finds its message; then merge it with no root when the dial says so (`land-end!`,
   whose close deletes the agent's branch).
   A task sent back deletes the agent's branch (`seon.task/delete-branch!`): nothing of it will merge; a capped or
@@ -2281,7 +2281,7 @@
                                 :seon.db.process/id (:seon.db.process/id cluster)
                                 :seon.agent/id agent-id}))]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [home (task/home-connection connection)
+      (let [home (task/main-connection connection)
             recorded (when (= :done end) (end-merge-request (db/db home) agent-id))
             execution (when (and (= :done end) (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
             request (or recorded
@@ -2291,13 +2291,13 @@
                                                     :seon.db/connection (:seon.db/connection execution)
                                                     :seon.agent/id agent-id})))
             _ (when (:seon.error/at request) (fault! 'my.program/request-merge! request))
-            ;; the outcome is written at the task home before the message, so whoever reads the message finds it
-            outcome-tx (@context-outcome-tx (db/db connection) agent-id)
-            kept (when (seq outcome-tx)
+            ;; the outcome is written at main before the message, so whoever reads the message finds it
+            end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
+            kept (when (seq end-summary-tx)
                    (if (identical? home connection)
-                     (db/transact! home outcome-tx)
-                     (db/call-with-custody {:seon.db/connection home} #(db/transact! home outcome-tx))))
-            _ (when (and kept (not (:db-after kept))) (fault! `seon.context/outcome-tx kept))
+                     (db/transact! home end-summary-tx)
+                     (db/call-with-custody {:seon.db/connection home} #(db/transact! home end-summary-tx))))
+            _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
             candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge request)))
             write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate]]
                                         :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
@@ -2331,7 +2331,7 @@
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
   turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
-  read at the task home (`seon.task/home`) where assignments are written;
+  read at main (`seon.task/main`) where assignments are written;
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition and evaluated a form, or is the first
@@ -2373,7 +2373,7 @@
       ;; is about to answer. Handling claims are recorded at settlement.
       ;; A MODEL TURN NEEDS AN ASSIGNMENT: with none held, wakes stay
       ;; unanswered until a task is assigned.
-      (let [held (task/agent-task (or (some-> (task/home db) db/db) db) agent-id)
+      (let [held (task/agent-task (or (some-> (task/main db) db/db) db) agent-id)
             deferred (when (string? held) (opening-deferred? db agent-id))]
         (cond
           ;; AN ENDED TASK CLOSED THE AGENT: no wake reopens it
@@ -5211,10 +5211,10 @@
   (pos? (:seon.turn.loop/forms-run report)))
 
 (defn- task-proofs
-  "The proofs of the task `agent-id` holds, read at the task home and on the agent's branch; empty when it holds none."
+  "The proofs of the task `agent-id` holds, read at main and on the agent's branch; empty when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
   [database agent-id]
-  (let [home (or (some-> (task/home database) db/db) database)
+  (let [home (or (some-> (task/main database) db/db) database)
         handle (task/agent-task home agent-id)
         sym (when (string? handle)
               (:seon.task/sym (db/pull home [:seon.task/sym] [:seon.task/id handle])))

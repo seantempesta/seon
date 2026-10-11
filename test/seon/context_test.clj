@@ -116,14 +116,14 @@
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'names 'tq.cs/names)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "names" :seon.task/kind :function
-                                            :seon.task/intent "Use `seon.task/home` and `:seon.task/intent`."
+                                            :seon.task/intent "Use `seon.task/main` and `:seon.task/intent`."
                                             :seon.task/must-read #{'seon.task/agent-task}}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[names operations] (shown running agent-id
                                        "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
-         (is (= ['seon.task/agent-task 'seon.task/home :seon.task/intent] names))
-         (is (some #{'(doc seon.task/home)} operations)))))))
+         (is (= ['seon.task/agent-task 'seon.task/main :seon.task/intent] names))
+         (is (some #{'(doc seon.task/main)} operations)))))))
 
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
@@ -246,15 +246,15 @@
   (test-support/with-database
    (fn [connection]
      (gone-agent! connection "ended-gone")
-     (test-support/transacted! connection [{:seon.agent/id "ended-gone" :seon.agent/outcome-calls 7 :seon.agent/outcome-prompt-tokens 900
-                                            :seon.agent/outcome-completion-tokens 80 :seon.agent/outcome-green 1 :seon.agent/outcome-red 2
-                                            :seon.agent/outcome-red-proofs #{'tq.a/one 'tq.a/two}}])
+     (test-support/transacted! connection [{:seon.agent/id "ended-gone" :seon.agent/end-calls 7 :seon.agent/end-prompt-tokens 900
+                                            :seon.agent/end-completion-tokens 80 :seon.agent/end-green 1 :seon.agent/end-red 2
+                                            :seon.agent/end-red-proofs #{'tq.a/one 'tq.a/two}}])
      (let [ended (context/ended (db/db connection) (end-entry "ended-gone" "0123456789ab"))]
        (is (= {:seon.task/calls 7 :seon.task/prompt-tokens 900 :seon.task/completion-tokens 80
                :seon.task/proof-counts {:green 1 :red 2} :seon.task/red-proofs ['tq.a/one 'tq.a/two]}
               (select-keys ended [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens
                                   :seon.task/proof-counts :seon.task/red-proofs])))
-       (is (not (contains? ended :seon.task/outcome-unknown)))))))
+       (is (not (contains? ended :seon.task/end-unknown)))))))
 
 (deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}}
   an-ended-summary-with-no-evidence-is-unknown-never-zero
@@ -262,10 +262,10 @@
    (fn [connection]
      (gone-agent! connection "ended-unknown")
      (let [ended (context/ended (db/db connection) (end-entry "ended-unknown" "ba9876543210"))]
-       (is (true? (:seon.task/outcome-unknown ended)))
+       (is (true? (:seon.task/end-unknown ended)))
        (is (empty? (select-keys ended [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens :seon.task/proof-counts]))
            "no counts are manufactured for evidence that is gone")
-       (is (= [] (context/outcome-tx (db/db connection) "ended-unknown")) "and nothing is recorded for it")))))
+       (is (= [] (context/end-summary-tx (db/db connection) "ended-unknown")) "and nothing is recorded for it")))))
 
 (deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch
                          'seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row}
@@ -291,7 +291,7 @@
        ;; the end observed as the agent's loop observes it
        (db/call-with-custody {:seon.db/connection connection}
                              #(#'turn/end-task! (test-support/running-cluster running) agent-id))
-       (is (some? (:seon.agent/outcome-calls (db/pull (db/db connection) [:seon.agent/outcome-calls] [:seon.agent/id agent-id])))
+       (is (some? (:seon.agent/end-calls (db/pull (db/db connection) [:seon.agent/end-calls] [:seon.agent/id agent-id])))
            "the end recorded the agent's outcome")
        (is (= (select-keys from-branch outcome) (select-keys (context/ended (db/db connection) entry) outcome))
            "the recorded outcome is what the branch showed")

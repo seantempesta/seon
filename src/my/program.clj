@@ -436,7 +436,7 @@
                   [:or :seon.task/merge-request-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id}]
   (let [branch (get-in (db/db connection) [:config :branch])
-        work (task/assignment (db/db (task/home-connection connection)) agent-id branch)
+        work (task/assignment (db/db (task/main-connection connection)) agent-id branch)
         edges (when (:seon.task/sym work) (task/task-edges (db/db connection) (:seon.task/sym work)))
         proofs (into (set (:seon.task/proofs work)) (:seon.task/proofs edges))
         refuse #(seon.error.refusal/diagnostic (java.util.Date.) :seon.task/ingestion 'my.program/request-merge!

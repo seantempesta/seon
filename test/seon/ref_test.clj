@@ -20,11 +20,11 @@
   (test-support/with-running-agent
    (fn [running agent-id _]
      (let [kinds (str "(mapv (juxt :seon.ref/name :seon.ref/path :seon.ref/problem-kind) (seon.ref/references "
-                      "{:seon.ref/text \"Use `seon.task/home`, see [ledger](agent-loop-ledger.md#5-critical-path)"
+                      "{:seon.ref/text \"Use `seon.task/main`, see [ledger](agent-loop-ledger.md#5-critical-path)"
                       " and `src/seon/task.clj:381`.\" %s}))")
            as-intent (shown running agent-id (format kinds ""))
            as-doc (shown running agent-id (format kinds ":seon.ref/document-path \"docs/seon/schedule/README.md\""))]
-       (is (= [['seon.task/home nil nil]
+       (is (= [['seon.task/main nil nil]
                [nil "agent-loop-ledger.md" :unresolved]
                [nil "src/seon/task.clj" :line-reference]]
               as-intent))
@@ -35,7 +35,7 @@
   (test-support/with-running-agent
    (fn [running agent-id _]
      (is (= [] (shown running agent-id
-                      "(seon.ref/references {:seon.ref/text \"```clojure\\n`seon.task/home`\\n```\\n\\nAdd `(+ 1 2)`.\\n\"})"))))))
+                      "(seon.ref/references {:seon.ref/text \"```clojure\\n`seon.task/main`\\n```\\n\\nAdd `(+ 1 2)`.\\n\"})"))))))
 
 (deftest front-matter-is-not-a-heading
   (test-support/with-running-agent

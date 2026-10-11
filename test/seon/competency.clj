@@ -192,7 +192,7 @@
 
 (defn- start-run!
   "Create the run's agent on its own branch through its first eval request (its task's setup, then its
-  settings), assign it its task at the task home and write its one outside message on its branch. Answers
+  settings), assign it its task at main and write its one outside message on its branch. Answers
   the run with its branch and connection, or the step that was refused."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [running {agent-id :seon.competency/agent task-sym :seon.competency/task settings :seon.competency/settings :as run}]
@@ -203,7 +203,7 @@
     (if-not branch
       (merge run (failed agent-id :setup first-request))
       (let [task-id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
-                          (db/db (task/home-connection connection)) task-sym)
+                          (db/db (task/main-connection connection)) task-sym)
             assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned task-id
                                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
         (if (:seon.error/at assigned)
@@ -214,15 +214,15 @@
 (defn- run-state
   "Where the run of `agent-id` stands on its branch `database`: `:running` while a model call or a test member
   is open; once the task's end closed the agent, how it ended (`:done`, `:capped`, `:given-back`), as its end
-  message to root at the task home says; `:waiting` once its last reply leaves the turn loop nothing to continue
+  message to root at main says; `:waiting` once its last reply leaves the turn loop nothing to continue
   (`seon.turn`'s own rule: no evaluated form, a disposition or a failed attempt); else `:running`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:enum :running :done :waiting :capped :given-back :stalled]]}
   [database agent-id]
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
                        database)
-        home (or (some-> (task/home database) db/db) database)
-        ;; a task's end closes the agent at the task home, with its end message
+        home (or (some-> (task/main database) db/db) database)
+        ;; a task's end closes the agent at main, with its end message
         closed? (:seon.agent/admission-closed-tx (db/pull home [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
         ended (when closed?
                 (db/q '[:find ?end . :in $ ?agent-id
@@ -258,7 +258,7 @@
   Each run is a fresh agent `bench-<strategy>-<task name>-<launch>-<i>` on its own branch: its first eval
   request (through MCP in the running cluster `:seon.competency/cluster`) evaluates the task's setup and sets
   its own overrides, the cell's settings (the strategy's dials, the provider and the call cap
-  `:seon.config.run/max-episode-runs`); root assigns the task at the task home; one outside message wakes it.
+  `:seon.config.run/max-episode-runs`); root assigns the task at main; one outside message wakes it.
   Once every run is waiting, capped or past `:seon.competency/deadline-ms`, each is graded on its branch and
   its branch retired by root (`:seon.competency/retired?`). A run whose start was refused answers that refusal in place of its grade."
   {:malli/schema [:=> [:cat [:map [:seon.competency/cluster :string]
