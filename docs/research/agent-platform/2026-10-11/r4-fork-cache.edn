@@ -99,4 +99,73 @@
                        "The edit hook's SCI lane reported unresolved context-weight while installing the host platform slice. The candidate archive published, adopted and booted successfully; live branch evidence is not claimed."
                        "Known earlier unrelated red seon.db-test/equal-declaration-content-shares-one-projection-across-values was not selected; the seven selected eval tests were all green."]
  :seon.measure/foreign-boundary {:files ["src/seon/task.clj" "src/seon/turn/world.clj" "src/seon/turn.clj" "src/seon/flow.clj" "src/seon/mcp.clj" "src/seon/test.clj" "resources/seon/schemas/seon.batch.edn"]
-                                  :method "Each check used HEAD plus exactly this slice's two paths; in-flight changes to other owners' files were excluded."}}
+                                  :method "Each check used HEAD plus exactly this slice's two paths; in-flight changes to other owners' files were excluded."}
+ :seon.measure/landing {:commit "bdf7411b5e84cfb15359185eacd5e3fa3c0ffa63"
+                        :run "a8a471660dc0" :tests 11 :pass 66 :fail 0 :error 0
+                        :cacheless-lint {:errors 0 :warnings 1504 :ms 6818}
+                        :source-lines {:added 36 :removed 15}
+                        :test-lines {:added 49 :removed 1}
+                        :samples [{:seon.profile/ms 0.13,
+ :seon.profile/alloc-bytes 50272,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/commit,
+ :seon.profile/called {}}
+{:seon.profile/ms 0.15,
+ :seon.profile/alloc-bytes 53112,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/branch,
+ :seon.profile/called {}}
+{:seon.profile/ms 0.72,
+ :seon.profile/alloc-bytes 286424,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/install,
+ :seon.profile/called #:seon.sci.eval{copy-host-var 1, install-row! 1}}
+{:seon.profile/ms 1.02,
+ :seon.profile/alloc-bytes 852512,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/fork,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 669.0,
+ :seon.profile/alloc-bytes 786186760,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-first,
+ :seon.profile/called
+   #:seon.sci.eval{copy-host-var 3714,
+    authored-rows 2,
+    loaded-database 120,
+    overlay-plan 1,
+    install-row! 229,
+    base-ctx 1,
+    interpret-overlay! 1}}
+{:seon.profile/ms 1.28,
+ :seon.profile/alloc-bytes 830568,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-warm,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 1.1,
+ :seon.profile/alloc-bytes 803344,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-successor,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 1.5,
+ :seon.profile/alloc-bytes 880728,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-data-write,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+]}
+ :seon.measure/additional-boundaries
+ {:run "9df35772189d" :commit "a74fd3031a51d13787c061147df3e33d2bfb35a2"
+  :green [seon.sci.eval-test/acquisition-records-its-refusals-on-the-acquired-branch-under-foreign-custody
+          seon.sci.eval-test/agent-contracts-apply-on-acquire-and-cold-recovery
+          seon.sci.eval-test/an-acquired-function-uses-the-current-evaluation-limit]
+  :red seon.repl-differential-test/promoting-a-closure-costs-its-walk-and-the-callers-called
+  :parent {:commit "60fec55d24e29d5ad019cd9ebc0d428a40944921" :run "3a3f3bc3658b"
+           :wide-alloc-bytes 558136808 :wide-alloc-bound 203948032 :hub-ms 2423.63}
+  :r4 {:commit "bdf7411b5e84cfb15359185eacd5e3fa3c0ffa63" :run "72c9663dd6d4"
+       :wide-alloc-bytes 562038232 :wide-alloc-bound 204472320 :hub-ms 2407.76}
+  :classification "Both revisions fail the allocation and sub-second assertions. The allocation rises 0.7% on R4; the assertion's proportional bound also grows as the closure includes more definitions. No cause or improvement is claimed for this separate cost defect."
+  :existing-related-task seon.fn/tests-reaching-saturates
+  :owner-followup "Profile seon.sci.eval/interpret-affected! and seon.fn/reverse-closure using the existing red test; a cold fork of the whole interpreted program is not what this test measures."}
+ :seon.measure/cleanup {:scratch-branch :agent-74906bab2450 :retired? true
+                        :retirement-result result/e30097f04e846 :lane-claims :released}
+}
