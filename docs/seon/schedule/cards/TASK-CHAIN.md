@@ -179,3 +179,121 @@ Measured by guessed-name signatures and calls spent on failed guesses per round;
 ## 8. Reviews
 
 (Fable, then Astra, append their improvements below; root and the owner discuss.)
+
+### 8.1 Fable (2026-10-11)
+
+Verified against HEAD be10632f3 by symbol: `seon.turn/step` (the pass runs `test-step`, then, when a model pass closed
+its turn, `end-task!`), `seon.turn/task-end` (`:done` is `seon.context/task-done?`: every tagged proof green on the
+branch and no reached red), `seon.turn/end-task!` (proposal → `land-end!` under the dial `:seon.config.root/land?` →
+`seon.context/outcome-tx` at the task home → `end-message` to root → `end-task-call` closes admission),
+`seon.task/assign!` (runs the proofs in the agent's own world first; refuses `:proofs-green`, `:proofs-unobserved`,
+`:no-proofs`), `seon.task/task-edges` (proofs = deftests tagged with the task symbol), `seon.task/refuted` (proofs red at a
+reach no green member shares), `seon.task/resolution` (closedness derived: faults, signal, outcome; nothing stored),
+`seon.cluster.message/send!` (writes on the recipient's home branch), `seon.cluster.agent/graph-definition` (one graph
+per agent: mailbox → turn, plus schedule), `clojure.core.async.flow/impl` (`report-chan` and `error-chan` are
+`sliding-buffer 100`: lossy by design, so nothing durable may depend on them).
+
+#### 8.1.1 Is this correct software engineering?
+
+The chain is the discipline in the right order: reproduce (Mine) → localize and read the data flow (Survey) → model the
+data (Model) → specify by failing tests (Prove) → implement to green (Implement) → integrate under a gate (Land) →
+retrospect (Review). It is red-green TDD with the red written by a different agent than the green, design-by-contract
+in Model, and the reproduce → localize → patch → validate shape the assignment names (I did not verify outside
+sources; the comparison is to the shape as given). Four corrections:
+
+| Finding | Change |
+|---|---|
+| **The interface is nobody's stage.** Prove needs the function names, arities and contracts to exist as red stubs; Model only covers schemas. Design-by-contract puts the contract before the tests. | Model becomes **Design**: schemas *and* the contracted stub declarations (`defn` with its `:malli/schema`, body `(fail! ...)`), so Prove's deftests compile against real symbols. Its `:unchanged` decision covers "no new schema, no new symbol". |
+| **Survey and Model separate costs a model call to say `:unchanged`** on most tasks (this weekend's tasks added no schema). | One **Design** stage in pipeline A (survey + design); the split is pipeline B. Stage types stay separate entities so the data can say which paid. |
+| **Check as its own agent duplicates Prove's stage proof.** Everything mechanical in Check (tagged, red on main for the stated reason, reads the program, cheap) is Prove's proof below; what remains ("encodes the intent") is judgment. | Fold Check into Implement's first turn with a send-back right (§8.1.4); measure Prove→Implement send-backs. A Check agent is pipeline B. |
+| **Review is a retrospective, not code review.** Established practice reviews code before merge; here Land auto-lands on green and no one reads the diff first. That is a deliberate choice (immutable store, root's `decide!` can decline later), but name it. | Rename Review to **Retrospective**; keep root's `seon.task/decide!` as the post-landing code review of record, with the agent's diff value in root's block. |
+
+Nothing is mis-ordered. Mine is correctly a query most of the time; its reproduction form on the task is Survey's input.
+
+#### 8.1.2 One mechanically checkable stage proof per stage
+
+A stage proof is an ordinary deftest that reads **the task the running agent holds** from its world
+(`seon.context/held-task`, exactly as `task-done?` does), so it is parameterized by custody, not by argument. Each is
+owned by a stage type entity and tagged by **stage type**, not task; `seon.turn/task-proofs` unions the task's own
+tagged proofs with the current stage's proofs (one `or` in one function; no new runner). Then `task-done?`,
+`task-end`, `assign!`'s refusals and the automatic test step are the stage machinery, unchanged.
+
+| Stage | Reads | Red when | Green by |
+|---|---|---|---|
+| **Mine** | the task row; `:seon.task/evidence` ∋ a reproduction form; `seon.test/run` of that form on main | the form answers the expected (good) value on main, or an open task has the same subject symbol and intent digest | record the form that shows the bad value; name the subject |
+| **Survey / Design** | `:seon.task/must-read` resolved on the branch (`[?e :seon.fn/sym s]`, `:seon.ns/name`, `:seon.test/sym`); the intent's backticked symbols resolved the same way; the decision component; for `:added` keys, `malli.core/schema` compiles and `m/validate` holds on each `:seon.task.stage/sample` | any reference unresolved; intent names no existing symbol; no decision; an added key that does not compile or whose samples fail; a declared stub symbol without a complete contract | prune and add references; rewrite the intent in typed symbols; register schemas and contracted stubs; write the decision with `:unchanged` + reason when nothing is new |
+| **Prove** | the deftests tagged with the task (`task-edges`); `seon.task/refuted` on the branch at the head program; each proof's run result (`:seon.test/elapsed-ms`); the proof's var usages (`clojure.core/slurp`, `clojure.java.io/*`) ; the decision | no tagged proof; a proof green at the head program (`assign!` would refuse `:proofs-green`); a proof whose failure data is not the stated class (an `:error` where a `:fail` is stated); elapsed over the dial `:seon.config.test/step-time-limit-ms`; a proof reading files; no decision on "tests asserting the old behavior" | tag proofs; make each fail with the stated data; keep them program-reading and cheap; record `:changed #{old tests}` or `:unchanged` + reason |
+| **Implement** | today's `task-done?`; the stage decision | any proof red, a reached test red on branch and not on main, or no decision | the body; the decision `:changed #{syms}` (or `:send-back` with target and reason: the proof or intent is wrong, with the data) |
+| **Land** | the merge task (`:seon.task/landed-git`, `:seon.task/refusal`, `:seon.task/refused-tests`) | neither landed nor refused with a routed target | automatic (`seon.turn/land-end!`); a refusal writes the decision `:send-back` to Implement (red reached test) or Prove (refused proof) |
+| **Retrospective** | `seon.task/resolution` on the home; the task's open follow-ups; the stage type's template revision | the task's proofs are green on main but it is still open (no retirement); friction recorded with no template change and no `:none` decision | retire (derived, §8.1.3); file follow-ups as tasks with red proofs; edit the template or decide `:none` |
+
+Judgment stays in two places only, both recorded as data and judged downstream: Survey's choice of references (scored
+by Implement's calls and send-backs) and Check-in-Implement's "the proofs encode the intent" (scored by whether the
+landed change was declined by `decide!`). No stage proof calls a model.
+
+#### 8.1.3 Advancement with no machinery: the end already does it
+
+Today's facts: an agent's proofs run inside its own pass; a green end runs `end-task!`, which proposes, lands under a
+dial, writes the outcome at the task home, sends root one message and closes the agent. That *is* a stage transition
+for the last stage. Make it the transition for every stage:
+
+1. **The task carries its stage** (`:seon.task/stage`, a ref to the stage type entity) and its decisions
+   (`:seon.task/decisions`, cardinality-many component of the §3b map plus `:seon.task.stage/target` for send-backs).
+   The stage type entity holds `:seon.task.stage/proofs` (test symbols), `:seon.task.stage/next`,
+   `:seon.task.stage/template`. Pipelines are a vector of stage ids on a pipeline entity; the task refs its pipeline.
+2. **`seon.turn/task-proofs`** returns the task's tagged proofs ∪ the current stage's proofs. Nothing else changes:
+   `task-done?` is "stage done", `task-end` answers `:done`, the block shows the red stage proof with its data.
+3. **`seon.turn/end-task!` gains one branch, `advance-end!`, beside `land-end!`**: for a `:done` end whose task has a
+   next stage (or a `:send-back` decision with a target), in the same transaction as `outcome-tx` it sets
+   `:seon.task/stage` and calls the one launch path the chain runs already (`seon.competency/start-run!`: a fresh agent,
+   its branch, `seon.task/assign!`, which runs the new stage's proofs red first). Proposal and landing run only when the
+   stage is Implement. Under a dial `:seon.config.chain/advance?`, as landing is under `:seon.config.root/land?`.
+4. **The next agent's first wake is its assignment**, as today. Its context is `seon.context/current-state` rendering
+   the stage template from the stage entity (derived at render, never stored: the card's `:seon.task/instructions`
+   field goes), then the task as the previous stage left it.
+5. **Root observes, it does not drive.** The end message it already receives carries the task; its block derives the
+   stage column. Root acts only on a typed refusal that routes nowhere or a send-back count over
+   `:seon.config.chain/max-send-backs`.
+
+In Flow terms the edge between stages is **not a channel**: each stage is a fresh agent graph
+(`seon.cluster.agent/graph-definition`), the handoff is the task entity at the task home, and the event is the
+recording transaction of the previous agent's last pass. No pipeline proc, no stage proc, no supervisor, no poller, no
+`::flow/report` consumer (lossy), no `ping` loop, no `pause`/`resume`, no done-check registry, no second state machine.
+**What disappears from the card**: §2's done-check functions and `:seon.task/instructions`; §6 item 3's "transition"
+as a mechanism (it is three lines in `end-task!`); the Check stage of §3 for pipeline A.
+
+**Task edits land at the task home.** `my.task/refine!` is `seon.task/create!`'s upsert with `:seon.task/basis`,
+written through `seon.task/home-connection` with the agent as transaction provenance, exactly as
+`seon.cluster.message/send!` writes on the recipient's home branch: the handoff must be visible to a fresh agent on a
+fresh branch, so it cannot live on the editor's branch. A conflicting basis refuses with current and proposed, as today.
+
+**Auto-retire is derived, not written.** `seon.task/resolution` gains a fourth clause: `:seon.task/closed-by
+:seon.task/proofs` when every tagged proof's latest member on the home is green and the task was ever assigned
+(`assign!` refuses an already-green task, so "ever assigned" rules out the never-red). The `:seon/tasks` tag removal
+from definitions is part of the landing's write-back, not a separate sweep.
+
+#### 8.1.4 Answers to §7
+
+| Question | Recommendation |
+|---|---|
+| Check a separate agent? | No, in pipeline A: Prove's stage proof carries the mechanical half; Implement's first turn may `send-back` to Prove with data. Pipeline B adds the agent; the send-back rate decides. |
+| Survey and Model separate? | One Design stage (references, flow, schemas, contracted stubs) in A; split in B. |
+| May Implement send back itself? | Yes: `my.task/send-back!` writes the decision with target and reason; the stage proof then holds and `advance-end!` routes to the target. Root is involved only over the send-back cap. |
+| Which done-checks need judgment? | None: every stage proof above is a data predicate. Judgment is in agents' decisions and is scored by downstream data (send-backs, declines, calls). |
+| How much law excerpt in the stable prefix? | Only the laws the stage's template cites (Prove cites "Proof and performance" and the catalogue; Design cites "Data and contracts"), never the whole file; measure cache hits per stage in the competency table. |
+| How are variations assigned? | Deterministically by task id parity (A on even digests, B on odd), per round; no randomness, fair across families once the set is larger than a few tasks. |
+
+#### 8.1.5 Making the first experiment smaller
+
+Pipeline A for one mined task, three DeepSeek agents: **Design → Prove → Implement**, Mine done by root's query, Land
+automatic, Retrospective by root. Build only: (1) `my.task/refine!` at the home; (2) `:seon.task/stage`,
+`:seon.task/decisions` and the stage type entity with three stage proofs (three deftests); (3) the `or` in
+`seon.turn/task-proofs`; (4) `advance-end!` in `end-task!` under its dial; (5) the template rendered in
+`current-state`. Not yet: the pipeline entity (A is the only one; a vector in the stage entities' `next` suffices),
+measurement columns, the catalogue page (seed it with the three proofs the stages produce), §6b steps 3–4. Expected
+cost of the whole experiment: one task's three stage proofs plus one `end-task!` branch; the transition itself adds no
+model call.
+
+**Not verified:** that `seon.competency/start-run!` is callable from inside `end-task!`'s proc thread without the
+acquisition fences root's REPL path avoids (it runs today from root's JVM REPL); and the var-usage attribute by which a
+proof's file reads are detected, which Prove's proof needs and I did not confirm by symbol.
