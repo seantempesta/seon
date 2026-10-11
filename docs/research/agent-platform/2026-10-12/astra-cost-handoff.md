@@ -1,17 +1,17 @@
 ---
-title: "Cost hand-off: committed projection reuse"
+title: "Cost hand-off: committed projection reuse and changed-attribute squash"
 type: research
 status: evidence
 created: 2026-10-12
 ---
 
-# Cost hand-off: committed projection reuse
+# Cost hand-off: committed projection reuse and changed-attribute squash
 
 `seon.db/transact-call` prepares one projection, validates the speculative report, then hands the committed report to `seon.db/hold-committed-projection!`. The hand-off now associates the already held declaration-revision cell with the new commit, including ordinary writes. Reopening that commit reuses the cell instead of copying every declaration and finding a replacement base.
 
-## Outstanding boundary
+## Current result and boundary
 
-The assigned task is **not complete**: the squash bound remains red. It is also red on every suspected parent tested independently, including `cd59c9fa3`. No squash bound was relaxed. Its producer is the historical scan in `seon.program/changed-identities`, plus cold `seon.program/derived-cluster-attributes`, outside this lane's assigned `seon.db` and test ownership. An ownership extension was requested; no other lane was contacted or edited.
+Root extended ownership to `seon.program`. Both assigned cost bounds now pass, including squash in a standalone cold check. The follow-on C3 configuration-convergence item is separate: its cost entities need explicit provenance and the reconciler currently consumes only transaction provenance. A narrow consumer ownership extension was requested; no other lane was contacted or edited.
 
 The live JVM remained PID 51669, started 2026-10-11T17:57:28.024Z, running `e0bd37443`. It was never stopped, reset, restarted or loaded with this uncommitted host source. Its initial status was degraded by an overlay cache discipline warning and an unowned `user` namespace. Check JVMs were launched and retired by `bin/seon check`.
 
@@ -55,7 +55,11 @@ A finite default-JVM probe over the same immutable ten-evaluation helper measure
 
 A direct Datahike query filtering numeric transactions was also tried, without redefining any Var: equal empty result, 10.03 MB / 8.37 ms versus 14.21 MB / 6.99 ms for the existing historical scan. It is not a sufficient fix and was not installed. A malformed trailing delimiter in that probe was my input error, delivered as an additional reply item; the measurement form itself completed.
 
-The next producer slice should make the scan proportional to changed attributes or changed index content using Datahike's existing revision/index mechanisms, and separately avoid discovering cluster entity declarations by examining every schema on a cold call. It must retain additions, retractions, speculative values, branch ancestry and the existing squash proofs. `astra-cost-handoff/squash-costs` preserves the read probes without warming the full squash first.
+The producer slice now selects attributes with `seon.db/changed-attributes`, comparing Datahike's committed or speculative attribute revisions. An absent revision means that attribute still needs its historical read; numeric bases and temporal views retain the full selection. `:db/txInstant` is always read because Datahike excludes it from revision tracking. No derived state or cache is added. `seon.db/entities-changed-after` reads the selected native historical index and compares its datoms' transaction numbers directly to the held basis, avoiding `datahike.db.utils/filter-txInstant`'s transaction-entity lookups. Retractions remain in the history and returned coordinates.
+
+`seon.program/derived-cluster-attributes` uses the projection's already derived database-entity catalog (290 entries), rather than rediscovering entities from all 3,628 schemas. Plain maps use `malli.core/properties`; aliases and conjunctions retain `seon.schema.internal/entity-properties` and inherited rules. The existing central cache still owns the derived result. Cold work is proportional to entity declarations plus the historical index of changed attributes, not every schema and every cluster attribute's history.
+
+Incremental cold measurements: revision selection alone 9.16 MB / 11.01 ms; entity catalog 5.43 MB / 11.01 ms; numeric historical basis 4.95 MB / 7.68 ms; direct plain-map properties **4.85 MB / 7.53 ms** (standalone run `80320c5d828c`, 6 assertions, no failures/errors). The bound remains 5 MB / 10 ms. The earlier full squash suite, cluster-attribute proof and flow cost check passed 13 tests / 133 assertions (`91b9b0ad1164`); the final lane gate repeats them against the complete slice. The existing retraction proof now includes native, numeric-basis and temporal-view cases. The cost proof writes its measured data through the value printer for durable evidence. See `astra-cost-handoff-evidence/squash-cold-after.edn` and `astra-cost-handoff-evidence/squash-check-after.txt`.
 
 ## Verification and evidence
 
@@ -65,7 +69,7 @@ The raw-store/accounting check passed all 18 named tests and 149 assertions, no 
 
 Full-tree `clj-kondo --lint src script test --cache false` finished in 6.87 s with **0 errors**, 1,541 pre-existing warnings. `git diff --check` was clean. Production source is +15/-15 lines; the strengthened existing test is +8/-2; the reusable measurement script is 39 lines. The original `e0bd37443` commit message names 14 tests only by category; [tests.edn](astra-cost-handoff-evidence/tests.edn) names the concrete 14 raw-store/accounting regressions run here, alongside the three projection proofs and flow bound. This does not claim recovery of an unavailable exact manifest from another agent's session.
 
-Foreign working-tree edits were excluded from the candidate: `test/seon/reconcile_test.clj`, its landing note, the pre-existing scratch/proof files, and the dirty http-kit submodule. The edit hook's SCI path also reported a pending-test selection error and an acquisition refusal on its lane branch; host-bound proof is the committed-archive check, not that unavailable SCI proof. Those hook diagnostics were not treated as green. The existing task remains open because its squash proof is red.
+Foreign working-tree edits were excluded from the candidate: `test/seon/reconcile_test.clj`, its landing note, the pre-existing scratch/proof files, and the dirty http-kit submodule. In the squash continuation, foreign runner/SCI test edits were likewise excluded; a concurrently landed runner fix entered HEAD normally. The original edit hook's SCI path reported pending-test selection and acquisition errors; the continuation reports the lane's previously retired admission as closed. No uncommitted source was loaded into default. Host-bound proof is the archived publication/adoption and disposable-JVM check, not the unavailable lane SCI proof. Those diagnostics are not counted as green.
 
 The first lane commit gate stopped before tests in `clojure -Spath -M:dev:test`: Maven's `DefaultModelValidator` threw the known `HashMap$Node`/`HashMap$TreeNode` race. The full diagnostic is retained in `astra-cost-handoff-evidence/classpath-race.edn`; the existing issue is [dependency-resolution-can-race-maven-model-validation](../../../seon/issues/dependency-resolution-can-race-maven-model-validation.md). No source workaround or dependency change was made; the same commit gate was invoked again.
 

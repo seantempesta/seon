@@ -1,0 +1,80 @@
+{:seon.profile/alloc-bytes 4854480,
+ :seon.profile/alloc-scope :thread,
+ :seon.profile/calls 1438,
+ :seon.profile/gc-count 0,
+ :seon.profile/gc-ms 0,
+ :seon.profile/ms 7.53,
+ :seon.profile/reads 0,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 8.546776,
+    :cpu-ms 34.374},
+ :seon.profile/called
+   {seon.id/id 3,
+    seon.cache/claim 1,
+    seon.db/entities-changed-after 1,
+    seon.program/digest-map 3,
+    seon.schema.internal/reference-id 912,
+    seon.schema.internal/entity-entries 3,
+    seon.program/three-way 1,
+    seon.cache/lookup 1,
+    seon.cluster.squash/selected-coordinates 1,
+    seon.program/cluster-attributes 1,
+    seon.program/changed-identities 1,
+    seon.cache/cache? 2,
+    seon.db/identity-attributes 1,
+    seon.cache/counters 1,
+    seon.db/basis-t 1,
+    seon.schema.internal/entity-properties 222,
+    seon.id/hex 3,
+    seon.cluster.squash/collision-remap 1,
+    seon.program/derived-cluster-attributes 1,
+    seon.db/database-value? 31,
+    seon.cache/kind-counters 1,
+    seon.db/changed-attributes 1,
+    seon.db/schema-database 1,
+    seon.schema.internal/entity-maps 225,
+    seon.id/structural-digest 3,
+    seon.schema/projection-cache-value 1,
+    seon.cluster.squash/attribute-tx 1,
+    seon.db/undecoded-datoms 6,
+    seon.cluster.squash/squash-merge 1,
+    seon.program/projected-values 6,
+    seon.cache/settle! 1},
+ :seon.profile/ranked-by-calls
+   [#:seon.profile{:sym seon.schema.internal/reference-id,
+     :calls 912,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-maps,
+     :calls 225,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-properties,
+     :calls 222,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/database-value?, :calls 31, :self-ms 0}
+    #:seon.profile{:sym seon.db/undecoded-datoms, :calls 6, :self-ms 0}
+    #:seon.profile{:sym seon.program/projected-values,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.id/id, :calls 3, :self-ms 0}
+    …13],
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.db/entities-changed-after,
+     :calls 1,
+     :self-ms 3}
+    #:seon.profile{:sym seon.schema.internal/reference-id,
+     :calls 912,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-maps,
+     :calls 225,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-properties,
+     :calls 222,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/database-value?, :calls 31, :self-ms 0}
+    #:seon.profile{:sym seon.db/undecoded-datoms, :calls 6, :self-ms 0}
+    #:seon.profile{:sym seon.program/projected-values, :calls 6, …1}
+    …13]}

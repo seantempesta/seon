@@ -3532,6 +3532,32 @@
     (into {} (map (fn [attribute] [attribute (get attribute-revisions attribute conservative-revision)]))
           attributes)))
 
+(defn changed-attributes
+  "Attributes whose datoms may differ, using Datahike's native revisions.
+  A transaction basis or a value without revisions leaves every attribute to be read."
+  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t]
+                       :seon.db/database-value [:set :qualified-keyword]]
+                  [:set :qualified-keyword]]}
+  [before after attributes]
+  (let [before-context (when (instance? DB before) (:cache-context before))
+        after-context (when (instance? DB after) (:cache-context after))
+        revision (fn [context attribute]
+                   (get (:datahike.cache/attribute-revisions context) attribute
+                        (:datahike.cache/conservative-revision context)))]
+    (into #{} (remove (fn [attribute]
+                       (let [prior (revision before-context attribute)]
+                         (and (not= :db/txInstant attribute)
+                              prior (= prior (revision after-context attribute))))))
+          attributes)))
+
+(defn entities-changed-after
+  "Entities asserting or retracting `attribute` after transaction `basis`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t :qualified-keyword]
+                  [:set :seon.db/entity-id]]}
+  [database basis attribute]
+  (into #{} (comp (filter #(> (:tx %) basis)) (map :e))
+        (d/datoms (d/history database) :aevt attribute)))
+
 (defn history
   "Historical view of an explicit or current database value."
   {:malli/schema

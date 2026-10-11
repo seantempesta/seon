@@ -13,7 +13,9 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.profile :as profile]
+            [seon.program :as program]
             [seon.schema :as schema]
+            [seon.render.value :as value]
             [seon.task :as task]
             [seon.turn :as turn]
             [seon.test-support :as support]))
@@ -151,6 +153,12 @@
                                        [:db/retract entity :seon.task/evidence "docs/a"]])
            unchanged (squash/squash-merge source base base projection nil)
            concurrent (squash/squash-merge source base target projection nil)]
+       (doseq [[from to] [[base source]
+                         [(db/basis-t base) source]
+                         [(db/as-of base (db/basis-t base)) source]
+                         [base (db/as-of source (db/basis-t source))]]]
+         (is (= #{[:seon.task/evidence (:db/id (db/pull base [:db/id] entity))]}
+                (program/changed-identities from to {} #{:seon.task/evidence :seon.task/intent}))))
        (is (nil? (:seon.task/evidence (db/pull (checked-value base {:tx-data (:tx-data unchanged)})
                                              [:seon.task/evidence] entity))))
        (is (empty? (:tx-data concurrent)))
@@ -169,6 +177,8 @@
                                  [{:db/id entity :seon.task/intent "Refined"}])
            projection (schema/handed-projection)
            measured (profile/measure #(squash/squash-merge source base base projection nil))]
+       (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff-squash.edn")
+             (value/core-text (dissoc measured :seon.profile/value)))
        (is (<= (:seon.profile/ms measured) 10))
        (is (number? (:seon.profile/alloc-bytes measured)))
        (is (<= (:seon.profile/alloc-bytes measured) 5000000))))))

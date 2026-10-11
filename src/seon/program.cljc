@@ -90,15 +90,17 @@
   [projection]
   (let [registry (:seon.schema.projection/registry projection)]
     (into {}
-          (mapcat (fn [schema-key]
+          (mapcat (fn [{schema-key :seon.schema/key}]
                     (let [compiled (mr/schema registry schema-key)
-                          properties (internal/entity-properties compiled)]
+                          properties (if (= :map (m/type compiled))
+                                       (m/properties compiled)
+                                       (internal/entity-properties compiled))]
                       (when (= :seon.cluster (:seon.program/partition properties))
                         (map (fn [[attribute entry-properties _]]
                                [attribute (get entry-properties :seon.cluster/conflict
                                                (get properties :seon.cluster/conflict :root))])
                              (internal/entity-entries compiled))))))
-          (keys (:seon.schema.projection/forms projection)))))
+          (:seon.schema.projection/catalog projection))))
 
 (defn cluster-attributes
   "Attributes copied at an attempt's successful end, with the rule for each."
@@ -860,14 +862,14 @@
              [:set :qualified-keyword]] [:set :seon.program/identity]]]}
      ([base database bounds] (declaration-changed-identities base database bounds))
      ([base database _bounds attributes]
-      (let [[history since basis datoms]
-            (map requiring-resolve '[seon.db/history seon.db/since seon.db/basis-t seon.db/undecoded-datoms])
-            changed (since (history database)
-                           (if (int? base) base (basis base)))]
+      (let [[basis changed-attributes entities-changed-after]
+            (map requiring-resolve '[seon.db/basis-t seon.db/changed-attributes
+                                     seon.db/entities-changed-after])
+            since (if (int? base) base (basis base))]
         (into #{} (mapcat (fn [attribute]
-                           (map (fn [[entity _ _]] [attribute entity])
-                                (datoms changed :aevt [attribute]))))
-              attributes)))))
+                           (map (fn [entity] [attribute entity])
+                                (entities-changed-after database since attribute))))
+              (changed-attributes base database attributes))))))
 
 (defn three-way
   "Classify branch and head declaration identities relative to base.
