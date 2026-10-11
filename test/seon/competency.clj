@@ -253,7 +253,8 @@
 
 (defn launch!
   "Run every cell of `:seon.competency/cells` (a task, a strategy name and its settings) `:seon.competency/runs`
-  times, all in parallel, and answer one grade per run with its strategy and terminal state.
+  times, completing each task attempt before assigning the next, and answer one grade per run
+  with its strategy and terminal state.
 
   Each run is a fresh agent `bench-<strategy>-<task name>-<launch>-<i>` on its own branch: its first eval
   request (through MCP in the running cluster `:seon.competency/cluster`) evaluates the task's setup and sets
@@ -275,19 +276,29 @@
                            i (range n)]
                        (assoc cell :seon.competency/agent
                               (str "bench-" (name strategy) "-" (name task-sym) "-" launch "-" i))))
-        started (mapv #(start-run! running %) planned)
-        settled (await-runs (filterv :seon.db/connection started)
-                            (:seon.competency/poll-ms request) (:seon.competency/deadline-ms request))
-        graded (mapv (fn [{agent-id :seon.competency/agent connection :seon.db/connection branch :seon.store/branch
-                           :as run}]
-                       (let [graded-run (grade (db/db connection) agent-id (:seon.competency/task run))
-                             retired (agent-eval! running "root"
-                                                  (str "(my.agent/retire-branch! {:seon.store/branch " branch "})"))]
-                         (merge graded-run (select-keys run [:seon.competency/strategy :seon.competency/terminal
-                                                             :seon.store/branch])
-                                {:seon.competency/retired? (false? (get retired "isError"))})))
-                     settled)]
-    (into graded (comp (remove :seon.db/connection) (map #(dissoc % :seon.competency/settings))) started)))
+        grades
+        (into []
+              (mapcat
+               (fn [run]
+                 (let [started [(start-run! running run)]
+                       settled (await-runs (filterv :seon.db/connection started)
+                                           (:seon.competency/poll-ms request)
+                                           (:seon.competency/deadline-ms request))
+                       graded (mapv
+                               (fn [{agent-id :seon.competency/agent connection :seon.db/connection
+                                     branch :seon.store/branch :as run}]
+                                 (let [graded-run (grade (db/db connection) agent-id (:seon.competency/task run))
+                                       retired (agent-eval! running "root"
+                                                            (str "(my.agent/retire-branch! {:seon.store/branch " branch "})"))]
+                                   (merge graded-run
+                                          (select-keys run [:seon.competency/strategy :seon.competency/terminal
+                                                            :seon.store/branch])
+                                          {:seon.competency/retired? (false? (get retired "isError"))})))
+                               settled)]
+                   (into graded (comp (remove :seon.db/connection)
+                                      (map #(dissoc % :seon.competency/settings))) started))))
+              planned)]
+    grades))
 
 (defn- median
   "The middle value of `xs` (the lower of the two middles), or nil when empty."

@@ -46,5 +46,5 @@
  #:seon.task{:name "a-launch-grades-each-run-green"
              :kind :function
              :intent "Central round 2, e0bd37443: `a-fixture-model-run-grades-green` is green now; `seon.competency-grade-test/a-launch-grades-each-run` is still red alone (one of the four graded runs differs from `{:green? true :calls-to-green 1 :model-calls 1 :terminal :done :retired? true}`; the printed comparison is cut). Compare the four grades with the first form before assuming the attempt chain (R1 2b49056a8, 57388f28b). Done when it is green alone."
-             :must-read #{seon.competency/grade seon.competency-grade-test/a-launch-grades-each-run}
+             :must-read #{seon.competency/launch! seon.competency/grade seon.task/attempt-tx seon.competency-grade-test/a-launch-grades-each-run}
              :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]
