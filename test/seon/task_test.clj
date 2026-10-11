@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is are]]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.task :as task]
             [seon.test-support :as test-support]))
 
@@ -87,3 +88,103 @@
                     (update :seon.task/attempt-of sym-of) (update :seon.task.attempt/target sym-of))))
          (is (= {:seon.task.fire/at #inst "2026-10-11T00:00:00Z" :seon.task.fire/of 'tq.tree/a}
                 (update (db/pull database [:seon.task.fire/at :seon.task.fire/of] [:seon.task.fire/id firing]) :seon.task.fire/of sym-of))))))))
+
+;;; THE FRONTIER: P1's tree of fifty leaves (design-probes.md): subject → design; prove needs design;
+;;; N fan-out leaves need prove; b needs prove and holds schema, then M bodies needing schema;
+;;; integrate needs every fan-out leaf and b; merge needs integrate and is held.
+
+(def ^:private fan-out (mapv #(str "f" %) (range 1 24)))
+
+(def ^:private bodies (mapv #(str "body" %) (range 1 23)))
+
+(defn- children
+  "The `:seon.task/children` member naming the tq.tree tasks `names`."
+  {:malli/schema [:=> [:cat [:sequential :string]] :string]}
+  [names]
+  (str ":children #{" (str/join " " (map #(str "[:seon.task/sym tq.tree/" % "]") names)) "}"))
+
+(defn- tree-entries
+  "The fifty-leaf tree's task EDN entries."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (-> [(entry "subject" (children (concat ["design" "prove" "b" "integrate" "merge"] fan-out)))
+       (entry "design" "") (entry "prove" (needs "design"))
+       (entry "b" (str (children (cons "schema" bodies)) " " (needs "prove"))) (entry "schema" "")
+       (entry "integrate" (apply needs "b" fan-out)) (entry "merge" (needs "integrate"))]
+      (into (map #(entry % (needs "prove"))) fan-out)
+      (into (map #(entry % (needs "schema"))) bodies)))
+
+(defn- handle
+  {:malli/schema [:=> [:cat :string] :seon.task/handle]}
+  [task-name]
+  (task/task-handle 'tq.tree task-name :work))
+
+(defn- ended
+  "An attempt row of tq.tree/`task-name` by the fixture agent, ended `end` (open when nil), sent
+  back to `target` when given; `n` keeps a task's second attempt distinct."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string [:maybe :seon.task.attempt/end] [:maybe :string] :int] :map]}
+  [database task-name end target n]
+  (cond-> {:seon.task/assignment (id/id [(handle task-name) "tq-tree-agent" n]) :seon.task/assigned (handle task-name)
+           :seon.task/attempt-of [:seon.task/id (handle task-name)] :seon.task/revision (task/task-revision database (handle task-name))
+           :seon.task/agent [:seon.agent/id "tq-tree-agent"] :seon.task/branch (keyword (str "tq-" task-name "-" n))}
+    end (assoc :seon.task.attempt/end end)
+    target (assoc :seon.task.attempt/target [:seon.task/id (handle target)])))
+
+(defn- after
+  "`database` after each transaction of `txs` in turn, never committed; each step's `[name end]`
+  pairs become attempt rows, and `[name :execution intent]` sets an intent."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:sequential [:vector :seon.schema/value]]]] :seon.db/database-value]}
+  [database txs]
+  (reduce-kv (fn [value n steps]
+               (db/with value (mapv (fn [[task-name end target]]
+                                      (if (= :execution end)
+                                        [:db/add [:seon.task/id (handle task-name)] :seon.task/execution target]
+                                        (ended database task-name end target n)))
+                                    steps)))
+             database (vec txs)))
+
+(defn- with-tree
+  "Call `body` with the database holding the fifty-leaf tree, merge held, and the fixture agent."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] :seon.schema/value]}
+  [body]
+  (test-support/with-database
+   (fn [connection]
+     (apply ingest! connection (tree-entries))
+     (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-tree-agent"))
+     (test-support/transacted! connection [[:db/add [:seon.task/id (handle "merge")] :seon.task/execution :held]])
+     (body (db/db connection)))))
+
+(def ^:private done-through-prove [[["design" :done] ["prove" :done]]])
+
+(def ^:private all-but-integrate
+  (conj done-through-prove (mapv #(vector % :done) (concat fan-out ["schema"] bodies))))
+
+(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} the-frontier-is-the-leaves-whose-needs-are-done
+  (with-tree
+   (fn [database]
+     (are [txs expected] (= (set (map handle expected)) (task/frontier (after database txs)))
+       [] ["design"]
+       [[["design" :done]]] ["prove"]
+       done-through-prove (conj fan-out "schema")
+       (conj done-through-prove [["schema" :done] ["f1" :done]]) (concat (rest fan-out) bodies)
+       all-but-integrate ["integrate"]
+       (conj all-but-integrate [["integrate" :done]]) []
+       (conj all-but-integrate [["integrate" :done] ["merge" :execution :running]]) ["merge"]
+       (conj done-through-prove [["f1" :sent-back "prove"]]) ["prove"]
+       [[["design" :done] ["prove" nil]]] ["prove"]
+       [[["design" :done] ["prove" :given-back]]] []
+       (conj done-through-prove [["f1" :execution :stopped]]) (conj (vec (rest fan-out)) "schema")
+       (conj all-but-integrate [["integrate" :done] ["merge" :execution :running]] [["merge" :done]]) [])
+     (is (task/done? (after database all-but-integrate) (handle "b")) "a parent is done when its leaves are")
+     (is (= {:seon.task/closed-by :seon.task/children} (task/resolution (after database all-but-integrate) (handle "b")))))))
+
+(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} the-frontier-answers-in-under-10-ms-for-fifty-leaves
+  (with-tree
+   (fn [database]
+     (let [value (after database (conj done-through-prove [["schema" :done] ["f1" :done]]))
+           acquired (profile/measure #(task/frontier value))
+           measured (profile/measure #(task/frontier value))]
+       (is (= (:seon.profile/value acquired) (:seon.profile/value measured)))
+       (is (= 44 (count (:seon.profile/value measured))))
+       ;; The first call in a fresh JVM also plans the two queries; the budget is the warm read.
+       (is (< (:seon.profile/ms measured) 10.0) "the two reads over fifty leaves: P1 measured 4 ms at worst")))))

@@ -59,11 +59,6 @@
              :intent "`seon.context/ended` derived an ended task's calls, tokens and proofs from the agent's branch, so once the branch was retired it reported zero calls and tokens and omitted the proofs (astra day audit finding 8). Done when the small historical outcome (`:seon.task/calls`, `:seon.task/prompt-tokens`, `:seon.task/completion-tokens`, `:seon.task/proof-counts`, `:seon.task/red-proofs`) is recorded as `:seon.agent/outcome` on the ending agent at the writer when the task ends, `seon.context/ended` reads it when the branch is gone, and when neither the branch nor the record remains the summary carries `:seon.task/end-unknown` and no zero counts."
              :must-read #{seon.context/ended seon.turn/end-task-call seon.turn/end-task!}
              :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md"}}
- #:seon.task{:name "the-frontier-query-answers-in-under-50-ms-for-fifty-leaves"
-             :kind :function
-             :intent "Card P1 (probe). Recursive Datalog rules `done` and `needs*` run through `seon.db/q` on the live store, and the frontier query of runtime-follows-db §2 (leaves, not done, needs done, intent permitting, no open attempt) answers under 50 ms for a synthetic fifty-leaf tree written under d/with; the cost assertion goes through `seon.profile/measure`. Refutes or confirms that the frontier can be one query with no scheduler state."
-             :must-read #{seon.db/q seon.profile/measure seon.task/resolution}
-             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "a-needs-cycle-is-refused-at-the-writer"
              :kind :schema
              :intent "Card S1. Schema: `:seon.task/children` (component ref set of child tasks), `:seon.task/needs` (indexed ref set), `:seon.task/instructions`, `:seon.task/execution` (`:seon.wake/arms true`), `:seon.task/cron`, `:seon.task/zone`, `:seon.task/function`, the attempt facts on the assignment row (`:seon.task/attempt-of`, `:seon.task.attempt/end`, `:seon.task.attempt/target`, `:seon.task.attempt/reason`, `:seon.task.attempt/commit`) and the firing (`:seon.task.fire/id`, `:seon.task.fire/at`, `:seon.task.fire/of`, `:seon.task.fire/to`); task EDN authors children and needs as lookup refs; the writer refuses a needs cycle (`seon.task/refuse-needs-cycle`, called by `seon.task/create!` and `seon.task/index-tasks!`); adoption proven on a branch of the live store."
@@ -71,9 +66,9 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "the-frontier-is-the-leaves-whose-needs-are-done"
              :kind :function
-             :intent "Card S2. `seon.task/done` (an attempt ended :done with no later :sent-back targeting it; a parent when its children are) and `seon.task/frontier` (runtime-follows-db §2) as functions over a database value; `seon.task/resolution` gains the derived done clause. Proof: an are table over a chain, a fan-out, a nested fan-out, a join and a send-back."
-             :must-read #{seon.task/resolution seon.task/task-edges seon.db/q}
-             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+             :intent "Card S2. `seon.task/frontier` answers the handles that should run now over a database value as two `seon.db/q` reads with `seon.task/frontier-rules` (the eligible leaves minus `blocked`, evaluated unbound); `seon.task/done?` (a leaf by an attempt's :done end with no later :sent-back targeting it, a parent when no leaf under it is open); `seon.task/resolution` answers `:seon.task/children` for a done parent. Proof: P1's twelve scenarios on the fifty-leaf tree, and the frontier under 10 ms through `seon.profile/measure`."
+             :must-read #{seon.task/frontier seon.task/done? seon.task/resolution seon.db/q seon.profile/measure}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md" "docs/research/agent-platform/2026-10-11/design-probes.md"}}
  #:seon.task{:name "a-sent-back-end-reopens-its-target"
              :kind :function
              :intent "Card S4. `seon.turn/end-task-call` records :sent-back with `:seon.task/target` and the decision in the attempt's one end transaction; `seon.task/done` honors it (the target is no longer done, its successors stop being ready). A row in the S2 table."

@@ -819,11 +819,62 @@
                     reason (assoc :seon.task/reason reason)
                     (seq refused) (assoc :seon.task/delete-refusals refused))))))
 
+;;; THE FRONTIER (runtime-follows-db §2): the leaves that should run now, derived from the tree,
+;;; the intents and the attempts' ends, with no scheduler state. Recursion is positive (`under`,
+;;; `needs*`) and negation applies only to finished relations, which Datahike evaluates.
+
+(def frontier-rules
+  "The stratified rules the frontier reads: `leaf-done` (an attempt ended :done with no later
+  :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and inherited needs) and
+  `blocked` (a need with an open leaf at or under it)."
+  '[[(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end :done ?tx]
+     (not-join [?t ?tx] [?b :seon.task.attempt/end :sent-back ?tx2] [?b :seon.task.attempt/target ?t] [(> ?tx2 ?tx)])]
+    [(under ?n ?l) [?n :seon.task/children ?l]]
+    [(under ?n ?l) [?n :seon.task/children ?c] (under ?c ?l)]
+    [(self-or-under ?n ?l) [(identity ?n) ?l]]
+    [(self-or-under ?n ?l) (under ?n ?l)]
+    [(needs* ?t ?n) [?t :seon.task/needs ?n]]
+    [(needs* ?t ?n) [?p :seon.task/children ?t] (needs* ?p ?n)]
+    [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]])
+
+(defn frontier
+  "The handles of every task that should be running now in `database` (main's): the leaves of a tree
+  (some parent's child) or with an attempt, not done, not held, stopped or cancelled, without a terminal
+  end other than :done, minus those a need blocks. An authored task in no tree and never attempted is
+  backlog, never launched by being read here, and the read is proportional to tree members and attempts.
+  Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
+  hundred times more. A leaf with an open attempt stays in it; the roster tells running from launch."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
+  [database]
+  (let [eligible (db/q '[:find ?t ?h :in $ % :where (or-join [?t] [_ :seon.task/children ?t] [_ :seon.task/attempt-of ?t])
+                         [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
+                         (not-join [?t] [?t :seon.task/execution ?i] [(contains? #{:held :stopped :cancelled} ?i)])
+                         (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
+                                   [(contains? #{:given-back :capped :stalled :cancelled} ?e)])]
+                       database frontier-rules)
+        blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database frontier-rules))]
+    (or (read-error eligible) (read-error blocked)
+        (let [blocked (set blocked)] (into #{} (keep (fn [[t h]] (when-not (blocked t) h))) eligible)))))
+
+(defn done?
+  "Whether task `handle` is done in `database`: a leaf when an attempt of it ended :done with no
+  later :sent-back targeting it, a parent when no leaf under it is open. An unknown task is not done."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
+  [database handle]
+  (let [task (db/q '[:find ?n . :in $ ?h :where [?n :seon.task/id ?h]] database handle)
+        below (when (int? task) (db/q '[:find [?l ...] :in $ % ?n :where (under ?n ?l)] database frontier-rules task))
+        open (when (and (int? task) (not (read-error below)))
+               (db/q '[:find [?l ...] :in $ % [?l ...] :where (not [?l :seon.task/children _]) (not (leaf-done ?l))]
+                     database frontier-rules (conj (vec below) task)))]
+    (when-let [failure (some read-error [task below open])] (throw (ex-info (:seon.error/message failure) failure)))
+    (and (int? task) (empty? open))))
+
 (defn resolution
   "Why task `handle` is closed, or nil while it is open: derived from what
   the task answers, never a stored flag. A merge request is closed by root's
-  outcome. An authored task is open while a definition names it
-  (`seon.task/open-tasks`); it has no resolution here.
+  outcome; a parent by its children, once all are done (`done?`). An authored
+  task is open while a definition names it (`seon.task/open-tasks`); it has no
+  resolution here.
 
   ## Examples
 
@@ -831,6 +882,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/resolution :seon.db/error-result]]}
   [database handle]
-  (let [task (db/pull database [:seon.task/outcome] [:seon.task/id handle])]
+  (let [task (db/pull database [:seon.task/outcome :seon.task/children] [:seon.task/id handle])]
     (cond (:seon.error/at task) task
-          (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome})))
+          (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
+          (and (seq (:seon.task/children task)) (done? database handle)) {:seon.task/closed-by :seon.task/children})))
