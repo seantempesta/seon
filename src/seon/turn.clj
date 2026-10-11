@@ -2347,7 +2347,7 @@
                 (fault! `task/delete-branch! refused)))))))
     nil))
 
-(declare proof-run-recorded? prove-turn step-limit-ms)
+(declare first-proof-run-t latest-answering-turn-t proof-run-recorded? prove-turn step-limit-ms)
 
 (defn- attempt-running?
   "True when the task `handle` an agent holds has intent :running at main, seen from `database`, its branch."
@@ -2355,6 +2355,18 @@
   [database handle]
   (let [home (or (some-> (task/main database) db/db) database)]
     (= :running (:seon.task/execution (db/pull home [:seon.task/execution] [:seon.task/id handle])))))
+
+(defn- proved-unanswered?
+  "True when the task `agent-id` holds is a :running attempt whose first proof run on `database`, its branch, came
+  after every answering turn (`latest-answering-turn-t`) and its proofs are not all green: that red run is the
+  attempt's work, answered by the model turn it opens."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/handle] :boolean]}
+  [database agent-id handle]
+  (let [proved-t (first-proof-run-t database agent-id)]
+    (boolean (and (int? proved-t)
+                  (attempt-running? database handle)
+                  (> proved-t (latest-answering-turn-t database agent-id))
+                  (not (@context-task-done? database agent-id))))))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2369,7 +2381,8 @@
   read at main (`seon.task/main`) where assignments are written;
   a held task whose intent is :running (db<->flow started the attempt) and
   whose proofs have no run recorded on the agent's branch is `:prove` first
-  (`prove-turn`: proofs only, no model call);
+  (`prove-turn`: proofs only, no model call), and a red first run is its work: the next pass
+  opens the model turn that answers it (`proved-unanswered?`);
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition and evaluated a form, or is the first
@@ -2431,8 +2444,10 @@
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
               ;; a task whose proofs are all green continues nothing, before or after its end closes the agent
-              (when (or (seq wakes) (and (continuing-reply? db agent-id)
-                                         (not (@context-task-done? db agent-id))))
+              (when (or (seq wakes)
+                        (proved-unanswered? db agent-id held)
+                        (and (continuing-reply? db agent-id)
+                             (not (@context-task-done? db agent-id))))
                 (cond->
                  {:seon.turn.work/situation :open
                   :seon.agent/id agent-id}
@@ -5284,17 +5299,25 @@
                             :seon.test/policy :named :seon.test/identities proofs
                             :seon.test/check-time-limit-ms limit-ms}))))
 
+(defn- first-proof-run-t
+  "The transaction of the first run of the proofs of the task `agent-id` holds recorded on `database`, the agent's
+  branch, destined for that branch; nil when none ran, the proofs' read refusal when they cannot be read."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.error/value]]}
+  [database agent-id]
+  (let [proofs (task-proofs database agent-id)]
+    (if (or (:seon.error/at proofs) (empty? proofs))
+      (when (:seon.error/at proofs) proofs)
+      (db/q '[:find (min ?t) . :in $ ?branch [?proof ...]
+              :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/identities ?proof]
+              [?run :seon.test.run/identities _ ?t]]
+            database (get-in database [:config :branch]) (vec proofs)))))
+
 (defn proof-run-recorded?
   "True when a run of the task `agent-id` holds has its proofs recorded on `database`, the agent's branch,
   destined for that branch (red or green), or when the task names no proof: the attempt has proved first."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (let [proofs (task-proofs database agent-id)]
-    (boolean
-     (or (:seon.error/at proofs) (empty? proofs)
-         (some? (db/q '[:find ?run . :in $ ?branch [?proof ...]
-                        :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/identities ?proof]]
-                      database (get-in database [:config :branch]) (vec proofs)))))))
+  (or (empty? (task-proofs database agent-id)) (some? (first-proof-run-t database agent-id))))
 
 (defn- prove-turn
   "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no

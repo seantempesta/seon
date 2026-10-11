@@ -282,9 +282,8 @@
            (is (= #{agent-a} (started routing)) "and starts nothing")
            (let [a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                                   :seon.store/branch branch-a})]
-             (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) (proof "a"))) ::a-proved)
-             (is (zero? (model-turns (db/db a-connection) agent-a))
-                 "its first pass ran its red proofs on its branch and called no model"))
+             (is (seq (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) (proof "a"))) ::a-proved))
+                 "its first pass ran its red proofs on its branch"))
            ;; A's work on its branch, through the connection its execution holds
            (let [a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                                   :seon.store/branch branch-a})]
@@ -329,3 +328,29 @@
             (is (seq (proof-runs-on (db/branch-database (db/db connection) branch-b) (proof "a")))
                 "B's branch forked from A's end commit: it holds A's proof run")
             (is (= :done (await-on! connection (ended "b") ::b-ended)) "and B ends the chain")))))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-fresh-attempt-is-work-without-a-message 'seon.turn/a-send-back-names-its-target-on-the-attempt}}
+  a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target
+  (binding [*space* "tq.chainred"]
+  (test-support/with-database
+   (fn [connection]
+     (let [ledger (atom [])]
+       (test-support/with-provider
+        ledger (test-support/reply-queue [(str "(my.task/send-back! {:my.task/reason \"The proof asserts 1 is 2.\""
+                                               " :my.task/target '" *space* "/t})")])
+        (fn [server]
+          (chain-world
+           connection {"r" [#{} "(clojure.test/is (= 1 2))"] "t" [#{"r"} "(clojure.test/is (= 1 2))"]}
+           (fn [handle]
+             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                             :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+             (pass! handle (:seon.agent/routing handle))
+             (let [[[key-r]] (seq (attempts connection "r"))
+                   end (await-on! connection #(some (fn [[_ _ _ e]] (when (not= :open e) e)) (attempts connection "r"))
+                                  ::r-ended)]
+               (is (= 1 (count @ledger)) "its red proofs were its work: one model call, with no wake")
+               (is (= :sent-back end) "that turn's send-back ended it")
+               (is (= {:seon.task/sym (symbol *space* "t")}
+                      (:seon.task.attempt/target (db/pull (db/db connection) [{:seon.task.attempt/target [:seon.task/sym]}]
+                                                          [:seon.task/assignment key-r])))
+                   "naming its target on the attempt")))))))))))

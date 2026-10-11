@@ -8,6 +8,7 @@
              [:seon.turn/agent :seon.turn/agent]
              [:seon.turn/attempts {:optional true} :seon.turn/attempts]
              [:seon.turn/disposition {:optional true} :seon.turn/disposition]
+             [:seon.turn/sent-back-to {:optional true} :seon.turn/sent-back-to]
              [:seon.turn/result {:optional true} :seon.turn/result]
              [:seon.turn/trigger {:optional true} :seon.turn/trigger]
              [:seon.turn/handled {:optional true} :seon.turn/handled]
