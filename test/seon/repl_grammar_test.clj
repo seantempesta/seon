@@ -38,12 +38,12 @@
 (deftest changed-read-marker-does-not-rewrite-agent-input
   (let [emission {:seon.ns/name 'my.agent
                   :seon.cluster.eval/comment ";; Read the current value."
-                  :seon.cluster.eval/source "(my.task/steps {})"
+                  :seon.cluster.eval/source "(my.task/current {})"
                   :seon.eval/shown "{}"}
         original (repl/text emission)
         changed (assoc emission :seon.repl/changed-since? true)]
-    (is (= ";; Read the current value.\n(my.task/steps {})\n#:seon.repl{:value {}}"
+    (is (= ";; Read the current value.\n(my.task/current {})\n#:seon.repl{:value {}}"
            original))
-    (is (= ";; changed since your last turn\n(my.task/steps {})\n#:seon.repl{:value {}}"
+    (is (= ";; changed since your last turn\n(my.task/current {})\n#:seon.repl{:value {}}"
            (repl/text changed)))
     (is (= original (repl/text emission)))))

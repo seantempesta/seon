@@ -5,8 +5,7 @@
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
-            [seon.error.refusal :as refusal]
-            [seon.run :as run]))
+            [seon.error.refusal :as refusal]))
 
 (defn identity
   "Read my identity, assigned namespace, and its steward.
@@ -19,20 +18,6 @@
   {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.agent/identity :seon.error/value]]}
   [request]
   (agent/identity (:seon.db/db request) (:seon.agent/id request)))
-
-(defn done
-  "End my session now; a later outside wake may start another session.
-
-  Finish only after verifying the requested result and sending any reply.
-  Call preparation supplies my database and agent identity.
-  Returns {:my.turn/disposition :wait :my.turn/note \"Session complete.\"}; the
-  turn interprets this value when it is the result of a form.
-
-  Example:
-  (my.agent/done {})"
-  {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.turn/wait :seon.error/value]]}
-  [_request]
-  (run/wait "Session complete."))
 
 (defn settings
   "Read my setting overrides of cluster defaults.

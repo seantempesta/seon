@@ -269,9 +269,9 @@
       (is (= "absent" (:my.message/not-found (evaluate "(my.message/received! \"absent\")"))))
       (finally (cluster.agent/release-context! handle)))))
 
-(deftest the-surface-is-exactly-five-functions
-  ;; The established names remain; send, decline and received! write immediately.
-  (is (= #{'decline 'inbox 'read 'received! 'send}
+(deftest the-surface-is-exactly-four-functions
+  ;; The established names remain; send and received! write immediately.
+  (is (= #{'inbox 'read 'received! 'send}
          (set (keys (ns-publics 'my.message)))))
   (is (.contains ^String (:doc (meta (the-ns 'my.message)))
                  "inter-agent message protocol"))

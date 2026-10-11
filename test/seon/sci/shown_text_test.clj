@@ -8,7 +8,7 @@
             [seon.test-support :as support]))
 
 
-(deftest a-task-steps-result-shows-data-instead-of-its-block-render-source
+(deftest a-current-task-result-shows-data-instead-of-its-block-render-source
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
@@ -24,7 +24,7 @@
                 (evaluation/fork-for-turn
                  {:seon.sci.eval/ctx base :seon.db/db @connection
                   :seon.db/connection connection :seon.agent/id "juniper"}))
-           request {:seon.cluster.eval/source "[(my.task/plan! {:seon.task/steps [\"Render this plan clearly\" \"Verify dependencies\"]}) (my.message/inbox) (my.agent/settings)]"
+           request {:seon.cluster.eval/source "[(my.task/current {}) (my.message/inbox) (my.agent/settings)]"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                     :seon.agent/id "juniper"
                     :seon.sci.eval/ctx ctx
@@ -35,10 +35,9 @@
            result (support/evaluate request)
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)))
-       (is (= "Render this plan clearly"
-              (get-in result [:seon.sci.admit/value 0 :seon.task/current-step])))
+       (is (= "Work." (get-in result [:seon.sci.admit/value 0 :seon.context/task :seon.task/intent])))
        (is (= [] (get-in result [:seon.sci.admit/value 1])))
        (is (not (str/includes? shown "ExceptionInfo")))
        (is (string? shown))
-       (is (str/includes? shown "Render this plan clearly"))
+       (is (str/includes? shown "Work."))
        (is (not (str/includes? shown "format-item-ai")))))))

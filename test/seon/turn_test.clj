@@ -1521,7 +1521,7 @@
          (let [preview (turn/preview-sources {:seon.turn.loop/cluster handle :seon.db/db database
                                               :seon.sci.eval/ctx ctx :seon.agent/id "printer"
                                               :seon.ns/name 'my.agents.printer
-                                              :seon.cluster.reply/text "(my.agent/done)\n(+ 1 1)"
+                                              :seon.cluster.reply/text "(my.turn/wait {:my.turn/note \"later\"})\n(+ 1 1)"
                                               :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
                refused (get-in preview [:seon.turn.loop/evaluated-sources 0 :seon.sci.eval/evaluation])
                value (:seon.sci.admit/value refused)]

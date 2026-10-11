@@ -57,14 +57,14 @@
 
 (deftest print-nodes-expose-symbols-and-entity-identities-without-shape-rules
   (let [node (admitted-node
-              {:frontier/symbol 'my.turn/complete
+              {:frontier/symbol 'my.turn/wait
                :frontier/namespace 'my.message
                :frontier/entity
                {:seon.message/id "task-1"
                 :frontier/nested
                 [[:seon.ns/name 'my.turn]
                  {:seon.agent/id "worker"}]}})]
-    (is (= #{'my.turn/complete
+    (is (= #{'my.turn/wait
              'my.message
              'my.turn
              [:seon.message/id "task-1"]

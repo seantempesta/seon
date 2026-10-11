@@ -80,21 +80,3 @@
                     {:seon.turn.loop/cluster cluster :seon.agent/branch home
                      :seon.agent/id (:my.message/to request) :seon.ns/name 'user})]
           (if (:seon.error/at host) host (message/send! message connection agent-id)))))))
-
-(defn decline
-  "Send a reason for declining an assignment to its sender.
-
-  Returns the written message, including :seon.message/id and endpoint refs.
-  :my.message/assignment identifies the evaluation assigned for repair.
-
-  Example:
-  (my.message/decline {:my.message/to \"root\"
-                       :my.message/assignment \"evaluation-id\"
-                       :my.message/reason \"The required input is unavailable.\"})"
-  {:malli/schema [:=> [:cat :my.message/decline-request]
-                  [:or :seon.message/message :seon.error/value]]}
-  [request]
-  (message/send! (-> request
-                     (dissoc :seon.db/connection :seon.agent/id)
-                     (assoc :my.message/content (:my.message/reason request)))
-                 (:seon.db/connection request) (:seon.agent/id request)))

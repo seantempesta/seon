@@ -51,7 +51,7 @@
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)]
        (doseq [wrong ["\"\"" "123" ":kw" "{:a 1}" "nil" "[\"\"]"]
-               call ["my.turn/complete" "my.turn/wait"]]
+               call ["my.turn/wait"]]
          (let [source (str "(" call " " wrong ")")
                value (support/agent-value ctx source)]
            (is (map? value))
@@ -62,11 +62,11 @@
            (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) value))
                "and the loop cannot mistake it for a disposition")))))))
 
-(deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
-  (is (= #{'wait 'complete 'usage-form}
+(deftest the-lifecycle-surface-has-one-action-and-its-own-presentation
+  (is (= #{'wait 'usage-form}
          (set (keys (ns-publics 'my.turn)))))
   (is (str/includes? (:doc (meta (the-ns 'my.turn)))
-                     "Return explicit completion or waiting data for my session."))
+                     "Return waiting data for my session"))
   (is (str/includes? (:doc (meta #'run/complete)) "Use `complete` when"))
   (is (str/includes? (:doc (meta #'run/wait)) "Use `wait` when")))
 
@@ -87,7 +87,7 @@
         forms (mapv :seon.repl/form entries)]
     (is (= 5 (count entries)))
     (is (every? :seon.repl/comment entries))
-    (is (= ['defn 'defn 'largest 'clojure.test/deftest 'my.turn/complete]
+    (is (= ['defn 'defn 'largest 'clojure.test/deftest 'my.turn/wait]
            (mapv first forms)))
     (is (= [nil true]
            [(-> forms (nth 3) second meta :seon.test/usage)
@@ -95,6 +95,6 @@
                 meta
                 :seon.test/usage)]))
     (is (= :not-a-row-sequence (second (nth forms 2))))
-    (is (= :completed
+    (is (= :wait
            (:my.turn/disposition
             (eval (last forms)))))))

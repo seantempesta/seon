@@ -2152,7 +2152,7 @@
 
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
-  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
+  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.task/send-back!`), `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
@@ -4146,21 +4146,11 @@
                 (report :error 0)))))))))
 
 (defn- early-disposition?
-  "Whether `form`'s value `value` is a disposition, or `form` calls
-  `(my.agent/done ...)`, anywhere but as the reply's last form: the one
-  disposition rule, over the form the fold read (never its source again)."
+  "Whether `form`'s value `value` is a disposition anywhere but as the reply's
+  last form: the one disposition rule, over the value the fold evaluated."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.batch/form :seon.batch/value :boolean] :boolean]}
-  [projection form value last?]
-  (let [calls (tree-seq
-               #(and (coll? %)
-                     (not (and (seq? %)
-                               (contains? #{'quote 'fn 'fn* 'defn 'defn-} (first %)))))
-               seq form)
-        done-calls (filter #(and (seq? %) (= 'my.agent/done (first %))) calls)]
-    (boolean
-     (or (and (seq done-calls)
-              (not (and last? (= form (first done-calls)) (= 1 (count done-calls)))))
-         (and (disposition projection value) (not last?))))))
+  [projection _form value last?]
+  (boolean (and (disposition projection value) (not last?))))
 
 (defn- turn-rows-state
   "The fold's read state over a run's pre-opened rows: each step reads one
@@ -4259,8 +4249,8 @@
 
 (defn- publish-row
   "The turn's last word on a published form, in its world: the disposition
-  rule over the held form (an early `(my.agent/done ...)` or a disposition
-  before the last row is replaced by its refusal, the refused value kept
+  rule over the held form (a disposition before the last row is replaced by
+  its refusal, the refused value kept
   beside it), the one bind of the final value under its handle, and whether
   reading stops (a disposition ends the reply)."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding :seon.batch/entry]
@@ -4293,7 +4283,7 @@
                 (let [refusal (seon.error.refusal/diagnostic
                                (Date.) :seon.turn/evaluation 'seon.turn/evaluate-sources
                                {:seon.turn/invalid-disposition-source (:seon.batch/source entry)
-                                :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
+                                :seon.error/message "A disposition must be the last form of your reply; it cannot precede another reply form."
                                 :seon.error/data {:seon.cluster.eval/source (:seon.batch/source entry)}})
                       unrun (sci.eval/unrun-evaluation {:seon.sci.admit/value refusal
                                                         :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]})

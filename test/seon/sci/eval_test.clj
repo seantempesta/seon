@@ -1145,7 +1145,7 @@
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
-            completed (run-in ctx "(my.turn/complete {:my.turn/result \"done\"})" 2000)
+            completed (run-in ctx "(my.task/send-back! {:my.task/reason \"done\"})" 2000)
             waiting (run-in ctx "(my.turn/wait {:my.turn/note \"later\"})" 2000)]
         (is (ok? completed))
         (is (= {:my.turn/disposition :completed :my.turn/result "done"}

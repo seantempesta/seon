@@ -56,7 +56,7 @@
   after recording, in the same reply.
 
   Example:
-  (my.test/check {:seon.test/changed ['my.turn/complete]})"
+  (my.test/check {:seon.test/changed ['my.turn/wait]})"
   {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
                    :seon.error/value]]}

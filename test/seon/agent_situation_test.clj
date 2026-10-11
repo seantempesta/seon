@@ -62,7 +62,7 @@
           (let [text (agent/render-situation-ai situation)]
             (is (string? text))
             (is (.contains text "You are agent situation"))
-            (is (.contains text "my.turn/complete"))))))))
+            (is (.contains text "my.task/send-back!"))))))))
 
 (deftest the-agent-id-supplier-reads-only-the-turn-environment
   (is (= "situation"

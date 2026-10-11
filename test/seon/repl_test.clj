@@ -198,12 +198,12 @@
                         :seon.repl/ns)))))
 
 (deftest history-preserves-shown-text-without-applying-a-later-profile
-  (let [shown "[my.turn/complete my.turn/wait]"
+  (let [shown "[my.turn/usage-form my.turn/wait]"
         emission {:seon.cluster.eval/source "(dir my.turn)"
                   :seon.ns/name 'my.agents.juniper
                   :seon.eval/shown shown}
         response (repl/response emission)]
-    (is (= '[my.turn/complete my.turn/wait] (:seon.repl/value (support/reply response)))
+    (is (= '[my.turn/usage-form my.turn/wait] (:seon.repl/value (support/reply response)))
         "the stored shown text is the value, as it was shown")
     (doseq [settings [{:seon.print/length 1}
                       {:seon.print/level 0}
@@ -276,7 +276,7 @@
                             :seon.ns/name 'my.agents.juniper
                             :seon.cluster.eval/ordinal 4
                             :seon.cluster.eval/output "complete\n"
-                            :seon.eval/shown "[my.turn/complete my.turn/wait]"
+                            :seon.eval/shown "[my.turn/usage-form my.turn/wait]"
                             :seon.eval/duration-ms 2})]
       (is (not (str/includes? emitted ";; result/"))
           "the result handle is a map key, never a comment")
@@ -377,14 +377,14 @@
           (is (= value (:seon.repl/value reply)))
           (is (= 1 (:seon.repl/ms reply))))))
     (testing "a declared renderer's text is the :value as shown, and the keys after it read as data"
-      (let [emission {:seon.cluster.eval/source "(my.task/steps {})"
-                      :seon.eval/renderer 'my.task/steps
+      (let [emission {:seon.cluster.eval/source "(my.task/current {})"
+                      :seon.eval/renderer 'my.task/current
                       :seon.repl/handle handle
                       :seon.eval/duration-ms 12
-                      :seon.eval/shown ";; The plan has two steps.\n(my.task/steps {})"}
+                      :seon.eval/shown ";; The plan has two steps.\n(my.task/current {})"}
             entries (into {} (#'repl/response-entries emission))
             reply (one-map (repl/response emission))]
-        (is (= ";; The plan has two steps.\n(my.task/steps {})" (:seon.repl/value entries)))
+        (is (= ";; The plan has two steps.\n(my.task/current {})" (:seon.repl/value entries)))
         (is (= handle (:seon.repl/result reply)))
         (is (= 12 (:seon.repl/ms reply))))
       (let [reply (one-map (repl/response {:seon.cluster.eval/source "(dir x)"
@@ -394,7 +394,7 @@
         (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
             "a render that is EDN is data")))
     (testing "prose with an open delimiter or quote cannot swallow a key the composer wrote"
-      (let [emission {:seon.cluster.eval/source "(steps)" :seon.eval/renderer 'my.task/steps
+      (let [emission {:seon.cluster.eval/source "(steps)" :seon.eval/renderer 'my.task/current
                       :seon.repl/handle handle :seon.eval/duration-ms 12
                       :seon.eval/shown "Steps: 1) open it\n2) say \"hi"}
             reply (repl/response emission)

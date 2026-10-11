@@ -1,9 +1,8 @@
 (ns seon.error.attribution-test
   "One regression per class of attribution at the producer (health plan §3,
   §5): who produced a failure, the event graph one recorded failure writes,
-  when its fault is resolved, and the one work queue."
+  when its fault is resolved."
   (:require [clojure.test :refer [deftest is testing]]
-            [my.task :as my.task]
             [seon.batch]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -112,22 +111,6 @@
          (is (= limit (stored-sum)) "the held count is not stored yet")
          (fault/fault! environment (ex-info "another failure" {}) context)
          (is (= (+ 2 limit) (stored-sum)) "the next fault's commit carried it"))))))
-
-(deftest the-queue-offers-open-tasks-and-a-held-task-refuses-another-claim
-  (test-support/with-database
-   (fn [connection]
-     (let [environment (world connection "attribution-queue")
-           receipt (fault/fault! environment (refused misuse) context)
-           [handle] (triaged-task! connection (:seon.error/signature receipt) `misuse)
-           database (db/db connection)
-           queued (some #(when (= handle (:seon.task/id %)) %) (my.task/open database))]
-       (is (= 1 (:seon.task/occurrences queued)))
-       (is (= [(list 'my.task/claim! {:seon.task/assigned handle})] (:seon.render/operations queued)))
-       (let [claimed (my.task/claim! {:seon.db/connection connection :seon.agent/id "root" :seon.task/assigned handle})]
-         (is (= handle (:seon.task/assigned claimed)))
-         (is (not-any? #(= handle (:seon.task/id %)) (my.task/open (db/db connection))) "a held task leaves the queue")
-         (is (= :claimed (:seon.task/refused (my.task/claim! {:seon.db/connection connection :seon.agent/id "mcp/other"
-                                                               :seon.task/assigned handle})))))))))
 
 (deftest a-fault-in-an-agents-world-is-copied-to-the-cluster
   ;; The fixture branch is the agent's; a sibling `:cluster-<name>` branch of the

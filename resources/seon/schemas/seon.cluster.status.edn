@@ -28,7 +28,6 @@
   [:seon.cluster.status/evaluations :seon.cluster.status/count]
   [:seon.cluster.status/evaluation-ms :seon.cluster.status/count]
   [:seon.cluster.status/last-turn-ms {:optional true} :int]
-  [:seon.task/current-step {:optional true} [:string {:min 1}]]
   [:seon.cluster.status/provider-tokens :seon.cluster.status/measurement]
   [:seon.cluster.status/provider-cost-usd [:or :int :double :seon.error/value]]
   [:seon.cluster.status/storage-bytes :seon.cluster.status/measurement]]

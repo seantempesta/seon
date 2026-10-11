@@ -136,11 +136,18 @@
   (test-support/with-database
    (fn [connection]
      (testing "a nested component reports its own attribute and complete path"
+       (test-support/seed-cluster! connection "feedback")
+       (test-support/transacted! connection
+                                 (agent/creation-tx {:seon.agent/id "feedback"
+                                                     :seon.cluster/name "feedback"
+                                                     :seon.ns/name 'feedback.agent}))
        (refused connection
-                [(assoc (test-support/task-row "feedbacknest" "Nested")
-                        :seon.task/steps [{:seon.step/position 0 :seon.step/text false :seon.step/status :open}])]
-                :seon.step/text false
-                [0 :seon.task/steps 0 :seon.step/text]))
+                [{:seon.turn/id "nested-turn" :seon.turn/agent [:seon.agent/id "feedback"] :seon.turn/opened-tx "datomic.tx"
+                  :seon.turn/attempts [{:seon.ai.attempt/id "nested-attempt" :seon.ai.attempt/ordinal 0
+                                        :seon.ai.attempt/at #inst "2026-01-01" :seon.ai/endpoint false
+                                        :seon.ai/model "nested-model" :seon.ai.attempt/settings-edn "{}"}]}]
+                :seon.ai/endpoint false
+                [0 :seon.turn/attempts 0 :seon.ai/endpoint]))
      (testing "a lookup ref validates the identity value, including its nesting"
        (refused connection
                 [[:db/add "feedback/ref" :seon.task/created-by [:seon.agent/id 42]]]

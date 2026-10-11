@@ -137,7 +137,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
  #:seon.task{:name "bare-source-and-apropos-do-not-resolve-in-an-agents-repl"
              :kind :function
-             :intent "In an agent's SCI context (source x) and (apropos s) are unresolved; only clojure.repl/source-fn and clojure.repl/apropos work, and (clojure.repl/source x) prints to :out with a nil value. Agents reach for the clojure.repl names first (live run 1, context-examples). Done when an agent evaluation of (source `my.task/steps`) and (apropos \"steps\") in a fresh agent world returns the source text and matching symbols as values, asserted by a regression through the agent entrance."
+             :intent "In an agent's SCI context (source x) and (apropos s) are unresolved; only clojure.repl/source-fn and clojure.repl/apropos work, and (clojure.repl/source x) prints to :out with a nil value. Agents reach for the clojure.repl names first (live run 1, context-examples). Done when an agent evaluation of (source `my.task/current`) and (apropos \"current\") in a fresh agent world returns the source text and matching symbols as values, asserted by a regression through the agent entrance."
              :must-read #{seon.sci.eval/build-base-ctx}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md" "docs/research/agent-platform/2026-10-07/live-run/report.md"}}
  #:seon.task{:name "find-doc-floods-out-with-thousands-of-tokens"
@@ -322,7 +322,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
  #:seon.task{:name "an-interpreted-namespace-carries-no-metadata"
              :kind :function
-             :intent "An SCI namespace for a program namespace carries no metadata, so `(:doc (meta (the-ns 'my.message)))` is nil at an agent's REPL and in interpreted tests (class N, e.g. `my.message-test/the-surface-is-exactly-five-functions`). Done when an agent's `(meta (the-ns n))` answers the namespace's declared metadata, its docstring included."
+             :intent "An SCI namespace for a program namespace carries no metadata, so `(:doc (meta (the-ns 'my.message)))` is nil at an agent's REPL and in interpreted tests (class N, e.g. `my.message-test/the-surface-is-exactly-four-functions`). Done when an agent's `(meta (the-ns n))` answers the namespace's declared metadata, its docstring included."
              :must-read #{seon.sci.eval/install-first-party-namespaces! seon.sci.eval/enter-namespace!}
              :evidence #{"docs/research/agent-platform/2026-10-10/interpreted-tier.md"}}
  #:seon.task{:name "a-test-namespace-def-that-fails-to-interpret-is-used-as-its-refusal"

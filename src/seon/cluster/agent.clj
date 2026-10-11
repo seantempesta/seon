@@ -401,7 +401,7 @@
            "\nInjected callables: help — " (doc-line #'bootstrap/help)
            " dir — " (doc-line #'bootstrap/dir)
            " doc — " (doc-line #'bootstrap/doc)
-           "\nEvery run ends with my.turn/complete or my.turn/wait; "
+           "\nEvery run ends with my.turn/wait (a reply is my.message/send first) or my.task/send-back!; "
            "an undisposed run is unfinished work."))))
 
 (defn render-creation-ai

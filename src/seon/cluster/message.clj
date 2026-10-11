@@ -902,7 +902,7 @@
   "Decline an assignment and explain why to its sender.
 
   Takes the sender id, assignment identity, and reader-facing reason. Returns
-  transaction input or a flat error; `my.message/decline` writes it directly."
+  transaction input or a flat error; an agent returns it as a form's value."
   {:malli/schema
    [:=> [:cat :my.message/to :my.message/assignment :my.message/reason]
     [:or :my.message/declination :seon.error/value]]}

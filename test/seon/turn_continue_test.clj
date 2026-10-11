@@ -31,7 +31,7 @@
 (def ^:private read-source
   "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
 
-(def ^:private done-source "(my.agent/done)")
+(def ^:private done-source "(my.turn/wait {:my.turn/note \"Session complete.\"})")
 
 (defn- provider-refusal []
   (with-open [body (java.io.ByteArrayInputStream.

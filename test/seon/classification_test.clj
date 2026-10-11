@@ -65,9 +65,9 @@
                                         :seon.db/db @connection})]
         (is (map? acquired))
         (is (not (contains? (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
-                            'my.turn/complete)))
-        (is (= {:my.turn/disposition :completed :my.turn/result "done"}
-               (sci/eval-string* ctx "(my.turn/complete {:my.turn/result \"done\"})")))
+                            'my.turn/wait)))
+        (is (= {:my.turn/disposition :wait :my.turn/note "done"}
+               (sci/eval-string* ctx "(my.turn/wait {:my.turn/note \"done\"})")))
         (is (some? (sci/resolve ctx 'seon.schema/register!)))))))
 
 (deftest namespace-context-follows-relevance-not-spelling

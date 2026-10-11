@@ -11,7 +11,6 @@
             [malli.error :as me]
             [malli.registry :as mr]
             [seon.db :as db]
-            [seon.error :as error]
             [seon.error.refusal :as refusal]
             [seon.fn :as functions]
             [seon.id :as id]
@@ -617,71 +616,6 @@
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
-;;; STEPS (spec task-steps): a task's ordered steps are components of its row, written at the task
-;;; home like every task write; they sit outside the declaration, so a step never revises the task.
-
-(def ^:private step-selector
-  [:db/id :seon.step/position :seon.step/text :seon.step/status {:seon.step/done-tx [:db/id]}])
-
-(defn- step-rows
-  "The stored steps of task `handle` with their entity ids, in position order."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or [:vector :map] :seon.db/invalid-read-error]]}
-  [database handle]
-  (let [pulled (db/pull database [{:seon.task/steps step-selector}] [:seon.task/id handle])]
-    (or (read-error pulled)
-        (vec (sort-by :seon.step/position (:seon.task/steps pulled))))))
-
-(defn task-steps
-  "The steps of task `handle` in `database`, in position order: position, text, status and, once
-  done, the completing transaction. Empty when the task has none or is absent.
-
-  ## Costs
-
-  One pull of the task's steps; proportional to their number."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or [:vector :seon.step/view] :seon.db/invalid-read-error]]}
-  [database handle]
-  (let [rows (step-rows database handle)]
-    (if (:seon.error/at rows)
-      rows
-      (mapv (fn [row] (cond-> (select-keys row [:seon.step/position :seon.step/text :seon.step/status])
-                        (:seon.step/done-tx row) (assoc :seon.step/done-tx (get-in row [:seon.step/done-tx :db/id]))))
-            rows))))
-
-(defn step-summary
-  "The current step's text and progress \"done/total\" of `steps`; empty for no steps."
-  {:malli/schema [:=> [:cat [:vector :seon.step/view]] [:map [:seon.task/current-step {:optional true} [:string {:min 1}]]
-                                                        [:seon.task/progress {:optional true} [:string {:min 3}]]]]}
-  [steps]
-  (if (empty? steps)
-    {}
-    (cond-> {:seon.task/progress (str (count (filter #(= :done (:seon.step/status %)) steps)) "/" (count steps))}
-      (some #(= :current (:seon.step/status %)) steps)
-      (assoc :seon.task/current-step (:seon.step/text (first (filter #(= :current (:seon.step/status %)) steps)))))))
-
-(defn steps-call
-  "The writer's transaction data for the step `op` on task `handle`, decided against the steps
-  stored now: `[:plan texts]` replaces them (the first current), `[:append text]` adds one (current
-  when none is), `[:done]` completes the current step and makes the next open one current. With
-  no current step `[:done]` is empty, so a repeat never completes two."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/step-op] :seon.db/tx-data]}
-  [database handle op]
-  (let [rows (step-rows database handle)
-        owner [:seon.task/id handle]
-        step (fn [position text status] {:seon.step/position position :seon.step/text text :seon.step/status status})
-        first-with (fn [status] (first (filter #(= status (:seon.step/status %)) rows)))]
-    (case (first op)
-      :plan (cond-> (mapv (fn [row] [:db/retractEntity (:db/id row)]) rows)
-              (seq (second op))
-              (conj {:db/id owner :seon.task/steps (vec (map-indexed #(step %1 %2 (if (zero? %1) :current :open)) (second op)))}))
-      :append [{:db/id owner
-                :seon.task/steps [(step (inc (reduce max -1 (map :seon.step/position rows))) (second op)
-                                        (if (first-with :current) :open :current))]}]
-      :done (if-let [current (first-with :current)]
-              (cond-> [[:db/add (:db/id current) :seon.step/status :done]
-                       [:db/add (:db/id current) :seon.step/done-tx "datomic.tx"]]
-                (first-with :open) (conj [:db/add (:db/id (first-with :open)) :seon.step/status :current]))
-              []))))
-
 (defn agent-task
   "The handle of the task `agent-id` holds in `database` (the task home's): its latest assignment's
   task; nil when it holds none. One indexed query.
@@ -695,40 +629,6 @@
                      :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned ?handle ?tx]]
                    database agent-id)]
     (or (read-error held) (first (apply max-key second [nil 0] (seq held))))))
-
-(defn steps-view
-  "The steps of `handle` as the agent reads them, with the calls its state offers."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :seon.task/steps-view :seon.db/invalid-read-error]]}
-  [database handle]
-  (let [steps (task-steps database handle)]
-    (or (read-error steps)
-        (merge {:seon.task/id handle :seon.task/steps steps
-                :seon.render/operations (if (some #(= :current (:seon.step/status %)) steps)
-                                          ['(my.task/done!)]
-                                          ['(my.task/step! {:seon.step/text "Next step"})])}
-               (step-summary steps)))))
-
-(defn steps!
-  "Apply the step `op` to task `handle` at the task home, answering the task's steps. An unknown
-  task refuses `:unknown-task`; `[:done]` with no current step refuses `:no-current-step`.
-
-  ## Costs
-
-  One transaction at the home, under the run bound (measured in the landing note)."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle :seon.task/step-op]
-                  [:or :seon.task/steps-view :seon.task/refused-error :seon.error/value]]}
-  [connection handle op]
-  (let [target (home-connection connection)
-        database (db/db target)
-        known (db/pull database [:seon.task/id] [:seon.task/id handle])
-        rows (when (:seon.task/id known) (step-rows database handle))]
-    (cond (:seon.error/at known) known
-          (nil? (:seon.task/id known)) (refused 'seon.task/steps! :unknown-task 'seon.task handle)
-          (:seon.error/at rows) rows
-          (and (= [:done] op) (not-any? #(= :current (:seon.step/status %)) rows))
-          (refused 'seon.task/steps! :no-current-step 'seon.task handle)
-          :else (let [report (written connection [[:db.fn/call #'steps-call handle op]])]
-                  (if (:seon.error/at report) report (steps-view (db/db target) handle))))))
 
 (defn- refuted
   "The `proofs` observed red on `database` (the proposing branch) at a reach
@@ -787,51 +687,11 @@
   (let [report (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]])]
     (if (:seon.error/at report) report {:seon.task/id merge-task :seon.task/outcome outcome})))
 
-(def resolution-selector
-  "The pull selector of what `resolution` reads of a task: a caller that
-  pulls tasks for its own view adds this and passes each pulled task to
-  `task-resolution`, instead of `resolution` pulling it again."
-  [:seon.task/id :seon.task/outcome :seon.task/signal {:seon.task/subject [:db/id]}
-   {:seon.task/faults [:seon.error/signature]}])
-
-(defn task-resolution
-  "`resolution` of a task already pulled with `resolution-selector` on
-  `database`: the same derivation without the pull.
-
-  ## Costs
-
-  Per fault signature three indexed queries and two pulls
-  (`seon.error/resolution`); none for a task with an outcome or no faults."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map]
-                  [:or :nil :seon.task/resolution :seon.db/error-result]]}
-  [database task]
-  (let [signatures (keep :seon.error/signature (:seon.task/faults task))]
-    (cond
-      (:seon.error/at task) task
-      (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
-      (seq signatures)
-      (let [resolved (mapv #(error/resolution database %) signatures)]
-        (cond (some :seon.error/at resolved) (some #(when (:seon.error/at %) %) resolved)
-              (every? some? resolved) {:seon.task/closed-by :seon.task/faults :seon.task/resolutions resolved}))
-      (and (:seon.task/signal task) (:db/id (:seon.task/subject task)))
-      (let [subject (db/stored-entity database (:db/id (:seon.task/subject task)))
-            satisfied? (schema/projection-validator (db/carried-projection database) (:seon.task/signal task))]
-        (when-not (satisfied? subject) {:seon.task/closed-by :seon.task/signal})))))
-
 (defn resolution
   "Why task `handle` is closed, or nil while it is open: derived from what
-  the task answers, never a stored flag (health plan §5).
-
-  - A task answering faults (`:seon.task/faults`) is closed when every one
-    is resolved (`seon.error/resolution`: its producer changed and, for a
-    fault the task answers, the task's proof holds).
-  - A task made from a warning signal is closed once its subject no longer
-    satisfies the named signal schema (`:seon.task/signal`), validated against
-    the subject's stored attributes.
-  - A merge task is closed by root's outcome.
-
-  An authored task answering none of these is open while a definition names
-  it (`seon.task/open-tasks`); it has no resolution here.
+  the task answers, never a stored flag. A merge request is closed by root's
+  outcome. An authored task is open while a definition names it
+  (`seon.task/open-tasks`); it has no resolution here.
 
   ## Examples
 
@@ -839,4 +699,6 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/resolution :seon.db/error-result]]}
   [database handle]
-  (task-resolution database (db/pull database resolution-selector [:seon.task/id handle])))
+  (let [task (db/pull database [:seon.task/outcome] [:seon.task/id handle])]
+    (cond (:seon.error/at task) task
+          (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome})))

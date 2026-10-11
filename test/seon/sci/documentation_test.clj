@@ -80,7 +80,7 @@
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
        (is (= :map (first (get-in directory-value [:schemas :seon.config/agent-overlay]))))
        (is (= :seon.config/agent-overlay (second (:in entity))))
-       (doseq [target ["my.message/send" "my.agent/done"]
+       (doseq [target ["my.message/send" "my.task/current"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys doc))))
          (is (not (str/blank? (:summary doc))))
@@ -374,8 +374,8 @@
          (lookup/docstring-parts
           "Read one.\n\n  Example:\n  (a 1)\n  (b 2)\n  Edge cases: none.\n  Costs: one query.\n\n  ## Known issues\n\n  x")))
   (is (= "(trim \"a \")" (:example (lookup/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
-  (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
-         (lookup/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
+  (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/current)"}
+         (lookup/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/current)")))
   (is (nil? (find (lookup/docstring-parts "No example here.") :example)) "an empty section is absent"))
 
 (deftest a-refused-schema-read-keeps-its-refusal

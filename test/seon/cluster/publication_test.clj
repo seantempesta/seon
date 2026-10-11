@@ -14,7 +14,7 @@
            artifacts (:seon.fn.manifest/artifacts manifest)
            declarations (filter :seon.fn/sym (:seon.fn.file/rows (first artifacts)))]
        (is (= ["src/my/turn.clj"] (mapv :seon.fn.file/relative-path artifacts)))
-       (is (= #{'my.turn/complete 'my.turn/wait 'my.turn/usage-form}
+       (is (= #{'my.turn/wait 'my.turn/usage-form}
               (set (map :seon.fn/sym declarations))))
        (is (every? #(not (contains? % :seon.fn/arities)) declarations)
            "authored declaration comparison does not acquire compiled arities")

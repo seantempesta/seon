@@ -326,7 +326,7 @@
     ;; its turn carries one (`src/seon/turn.clj:2845`; the `:open` arm admits
     ;; "continuation of the latest closed provider reply"), so a fixture that
     ;; closes without recording what the last form decided derives `:open`,
-    ;; not idle. The disposition is the fact `my.turn/complete` leaves
+    ;; not idle. The disposition is the fact `my.turn/wait` leaves
     ;; (`src/seon/turn.clj:3512`).
     ::build (fn [connection]
               (add-trigger! connection)

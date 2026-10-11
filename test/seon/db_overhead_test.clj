@@ -11,7 +11,7 @@
 
 (defn observe
   "Measure one read in its own call sink, retaining its actual value.
-  Root can use this same probe for q, pull and my.task/open after adoption."
+  Root can use this same probe for q, pull and my.task/current after adoption."
   {:malli/schema
    [:=> [:cat [:=> [:cat] :seon.schema/value]]
     [:map [:seon.db-overhead/value :seon.schema/value]

@@ -14,14 +14,14 @@
      (let [ctx (support/fork-cluster-ctx connection "transaction-result")
            created (support/agent-value
                     ctx
-                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/kind :function :seon.task/intent \"Verify\" :seon.task/steps [{:seon.step/position 0 :seon.step/text \"done\" :seon.step/status :done :seon.step/done-tx \"datomic.tx\"}]}])")
+                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/kind :function :seon.task/intent \"Verify\"} {:seon.agent/id \"reporter\" :seon.agent/branch :db :seon.agent/admission-closed-tx \"datomic.tx\"}])")
            changes (:seon.db/datoms created)
            transaction (:seon.db/tx created)]
        (is (= #{:seon.db/tx :seon.db/datoms} (set (keys created))))
        (is (integer? transaction))
        (is (some #{[[:seon.task/id "reportitem00"] :seon.task/intent "Verify" true]} changes))
        (is (some (fn [[_ attribute value added]]
-                   (and (= :seon.step/done-tx attribute) (= transaction value) added))
+                   (and (= :seon.agent/admission-closed-tx attribute) (= transaction value) added))
                  changes)
            "the current transaction is resolved")
        (is (= "Verify" (:seon.task/intent

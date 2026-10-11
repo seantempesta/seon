@@ -97,28 +97,18 @@
   [unit]
   (max 0 (long (get unit :seon.render/distance 1))))
 
-(defn- unit-steps
-  "The steps of the task a unit shows, read from the viewer's database; none when it has none."
-  {:malli/schema [:=> [:cat :seon.render/unit :map] [:vector :seon.step/view]]}
-  [unit task]
-  (let [steps (when (and (:seon.db/db unit) (:seon.task/id task)) (task/task-steps (:seon.db/db unit) (:seon.task/id task)))]
-    (if (vector? steps) steps [])))
-
 (defn task-ai
-  "One task as data: its id, symbol, name, kind and namespace, with its current step and progress; beyond
-  distance zero its intent, must-reads and steps. Its subjects and proofs are its related data."
+  "One task as data: its id, symbol, name, kind and namespace; beyond distance zero its intent and
+  must-reads. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
-        steps (unit-steps unit task)
-        named (merge (select-keys task [:seon.task/id :seon.task/sym :seon.task/name :seon.task/kind :seon.task/ns])
-                     (task/step-summary steps))]
+        named (select-keys task [:seon.task/id :seon.task/sym :seon.task/name :seon.task/kind :seon.task/ns])]
     (if (zero? (node-distance unit))
       named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
       ;; shape); must-read is declared a set, so it is shown as one.
       (cond-> (merge named (select-keys task [:seon.task/intent]))
-        (seq steps) (assoc :seon.task/steps steps)
         (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
 
 (defn task-form
@@ -139,61 +129,52 @@
     [:article {:class "seon-family-entry seon-task-entry"}
      [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
      [:p {:class "seon-task-intent"} intent]
-     (when-let [steps (seq (unit-steps unit (or (:seon.render/value unit) unit)))]
-       (into [:ol {:class "seon-task-steps"}]
-             (map (fn [{text :seon.step/text status :seon.step/status}] [:li {:data-status (name status)} text])) steps))
      (when (pos? (node-distance unit))
        [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
 
 ;;; The agent's held task (`:seon.task/of-agent`, a derived attachment of the agent): read from the
-;;; task home, since steps are written there while the agent works on its own branch.
+;;; task home, where its assignment is written while the agent works on its own branch.
 
 (defn- held-task
-  "The task `unit`'s agent holds, read at the task home seen from the unit's database: its name,
-  intent and steps view; nil when it holds none."
+  "The task `unit`'s agent holds, read at the task home seen from the unit's database: its name and
+  intent with the read of its proofs offered; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [{database :seon.db/db value :seon.render/value}]
   (let [home (if-let [connection (task/home database)] (db/db connection) database)
         handle (task/agent-task home (:seon.agent/id value))]
     (if (string? handle)
-      (let [task (db/pull home [:seon.task/name :seon.task/intent] [:seon.task/id handle])
-            steps (task/steps-view home handle)]
-        (cond (:seon.error/at task) task
-              (:seon.error/at steps) steps
-              :else (merge (select-keys task [:seon.task/name :seon.task/intent]) steps)))
+      (let [task (db/pull home [:seon.task/name :seon.task/intent] [:seon.task/id handle])]
+        (if (:seon.error/at task)
+          task
+          (assoc (select-keys task [:seon.task/name :seon.task/intent])
+                 :seon.task/id handle :seon.render/operations ['(my.task/current {})])))
       handle)))
 
 (defn held-task-ai
-  "The task I hold as data: name, intent, steps, current step, progress.
-
-  Offers the step calls my state allows; nothing when I hold none. Read at the task home, so it
-  shows the steps my own writes advanced there.
+  "The task I hold as data: name and intent, with the read of its proofs offered; nothing when I hold none.
 
   ## Costs
 
-  One query for the root row naming the home, one for my assignment, two pulls (task, steps)."
+  One query for the root row naming the home, one for my assignment, one pull of the task."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [unit]
   (held-task unit))
 
 (defn held-task-form
-  "The read that finds my task's steps again. Shown, never executed."
+  "The read that finds my task and its proofs again. Shown, never executed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [_unit]
-  (list 'my.task/steps {}))
+  (list 'my.task/current {}))
 
 (defn held-task-html
-  "Render the task an agent holds: its name, intent and steps with their status."
+  "Render the task an agent holds: its name and intent."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [held (held-task unit)]
     (if (:seon.task/id held)
       [:section {:class "seon-held-task"}
-       [:h3 (:seon.task/name held) " " [:code (:seon.task/id held)] " " (:seon.task/progress held "")]
-       (when (:seon.task/intent held) [:p (:seon.task/intent held)])
-       (into [:ol {:class "seon-task-steps"}]
-             (map (fn [{text :seon.step/text status :seon.step/status}] [:li {:data-status (name status)} text]))
-             (:seon.task/steps held))]
+       [:h3 (:seon.task/name held) " " [:code (:seon.task/id held)]]
+       (when (:seon.task/intent held) [:p (:seon.task/intent held)])]
       [:section {:class "seon-held-task"} [:p (or (:seon.error/message held) "No task held.")]])))
 
 (defn function-ai

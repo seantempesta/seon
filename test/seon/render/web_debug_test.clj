@@ -45,7 +45,7 @@
               :seon.cluster.eval/ordinal 0
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.thinking-probe]
               :seon.cluster.eval/comment ";; I should read the plan first."
-              :seon.cluster.eval/source "(my.task/steps {})"
+              :seon.cluster.eval/source "(my.task/current {})"
               :seon.eval/shown "The plan's shown text."}]]))
            _ (is (:db-after written))
            database @connection
@@ -70,14 +70,14 @@
        (is (= ";; I should read the plan first."
               (last (first (classed "seon-eval-thinking")))))
        (is (= 1 (count (classed "seon-eval-prompt"))))
-       (is (= "(my.task/steps {})"
+       (is (= "(my.task/current {})"
               (last (first (classed "seon-eval-prompt"))))
            "the prompt block no longer carries the comment")
        (is (str/includes? (element-text html) "The plan's shown text.")
            "the result renders through the evaluation schema's HTML pair")
        (is (str/starts-with?
             ai
-            ";; I should read the plan first.\n(my.task/steps {})")
+            ";; I should read the plan first.\n(my.task/current {})")
            "the AI pair keeps the REPL grammar unchanged")
        (doseq [namespace-ref [(get-in saved [:seon.cluster.eval/ns :db/id])
                              [:seon.ns/name 'my.agents.thinking-probe]]]
@@ -89,7 +89,7 @@
            (is (= 1 (count (filter #(= "seon-eval-thinking" (:class (second %)))
                                    blocks))))
            (is (str/includes? (element-text rendered)
-                              "(my.task/steps {})")
+                              "(my.task/current {})")
                "namespace references resolve through the carried database")))))))
 
 (deftest blocks-use-the-values-schema-documentation
@@ -292,19 +292,14 @@
            _ (is (:db-after installed))
            written (db/transact! connection
                                  (into (support/agent-tx @connection "reference-agent")
-                                   [{::probe-identity "aliased-reference"}
-                                    ;; An identity-less entity exists only as a
-                                    ;; component of its one owner (the writer
-                                    ;; refuses an unowned one).
-                                    (assoc (support/task-row "referenceuni" "Unidentified step owner")
-                                           :seon.task/steps [{:db/id "unidentified" :seon.step/position 0
-                                                              :seon.step/text "No identity" :seon.step/status :open}])]))
+                                   [{::probe-identity "aliased-reference"}]))
            _ (is (:db-after written))
            database @connection
            projection (schema/projection-from-database database)
            agent-ref (db/pull database '[:db/id] [:seon.agent/id "reference-agent"])
            probe-ref (db/pull database '[:db/id] [::probe-identity "aliased-reference"])
-           unidentified {:db/id (get-in written [:tempids "unidentified"])}
+           ;; the write's transaction entity: an entity with no identity attribute
+           unidentified {:db/id (get-in written [:tempids :db/current-tx])}
            plan-ref (db/pull database '[:db/id] [:seon.config/agent (:db/id agent-ref)])
            effective config/defaults
            request {:seon.db/db database

@@ -48,10 +48,10 @@
                      {:example/label "b" :example/amount 9}])))
        (clojure.test/is (= {} (largest []))))}
    {:seon.repl/comment
-    "; Defined, contracted, proven. Report back and close this run."
+    "; Defined, contracted, proven. Close this run until the next request."
     :seon.repl/form
-    '(my.turn/complete
-      {:my.turn/result (str "Built largest: a contracted function returning the entity with "
+    '(my.turn/wait
+      {:my.turn/note (str "Built largest: a contracted function returning the entity with "
            "the greatest :example/amount, or {} for empty input; its usage "
            "test is green.")})}])
 

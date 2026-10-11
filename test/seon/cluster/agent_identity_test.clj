@@ -137,8 +137,6 @@
           (is (= 1234 (:seon.config.eval/time-limit-ms dials)))
           (is (not (contains? dials :my.agent/turns-left))))
         (is (= [] (:seon.sci.admit/value (evaluate "(my.test/run)"))))
-        (is (= {:my.turn/disposition :wait :my.turn/note "Session complete."}
-               (:seon.sci.admit/value (evaluate "(my.agent/done)"))))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied\nNamespace my.agents.supplied\nCluster   identity-cluster"
                (:seon.sci.admit/value

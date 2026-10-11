@@ -84,12 +84,12 @@
 (deftest a-docstring-only-defn-reruns-no-test-and-a-body-change-reruns-its-reaching-tests
   (support/with-running-agent
    (fn [running agent-id connection]
-     (let [source (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'seon.task/steps-call]))
+     (let [source (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'seon.task/task-path?]))
            pass (fn [code]
                   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                             "arguments" {"code" (str "(in-ns 'seon.task) " code)
                                                                          "agent" agent-id "cluster" running}}))))
-           defined? #(= 'seon.task/steps-call (get-in (support/mcp-reply %) [:seon.repl/value :seon.render.var/symbol]))
+           defined? #(= 'seon.task/task-path? (get-in (support/mcp-reply %) [:seon.repl/value :seon.render.var/symbol]))
            doc-only (pass (edited-defn source "Only the docstring changed." false))
            body (pass (edited-defn source "Only the docstring changed." true))]
        (is (defined? doc-only))

@@ -604,11 +604,11 @@
              (and (nil? (:seon.error/message value)) (seq (:arglists value)) (contains? value :in)))))
 
 (defparity "D12" :passing
-  (let [{:keys [summary body]} (:value (first (repl-session ["(doc my.task/open)"])))]
+  (let [{:keys [summary body]} (:value (first (repl-session ["(doc seon.task/assign!)"])))]
     (checked "the first sentence, whole"
              summary
              (and (str/ends-with? summary ".")
-                  (str/includes? summary "no assignment names")
+                  (str/includes? summary "binding the revision it reviews now")
                   (not (str/includes? body summary))))))
 
 (defparity "D13" :passing

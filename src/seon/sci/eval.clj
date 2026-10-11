@@ -82,7 +82,7 @@
   THE CTX IS SUPPLIED, NOT BUILT HERE. `build-base-ctx` is the minimum
   N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus bare `help`, the two `my.turn` dispositions, and both `my.message`
+  plus bare `help`, the `my.turn` disposition, and both `my.message`
   values — and a caller may pass its own. `acquire!` compares program definition
   digests with the JVM's loaded source commit. Changed declarations and their
   affected callers interpret stored source; all other declarations bind the

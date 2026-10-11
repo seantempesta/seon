@@ -148,7 +148,7 @@
   [proven]
   (= #{:green} (set (keys (:seon.context/counts proven)))))
 
-(defn- held-task
+(defn held-task
   "The declaration of the task `agent-id` holds, read at the task home seen from `database`; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :nil :seon.context/task :seon.error/value]]}

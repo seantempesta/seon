@@ -77,9 +77,9 @@
  #:seon.task{:name "fault-task-closing-has-no-writer-left",
             :kind :function,
             :intent
-            "Recording no longer writes a producer task, so `:seon.task/faults` is fed by no writer: `seon.task/task-resolution`'s fault branch, `my.task/open`'s fault query and `seon.error/resolution`'s task-proof branch (proof) serve only the auto tasks written before 2026-10-07 (18 'faults of <fn>' tasks on default). Triage those into authored tasks with failing tests or retire them, then delete `:seon.task/faults`, the proof branch and their tests at the errors cut. Open decision for the errors spec owner: how an untriaged recorded error resolves (today: producer digest change alone, or `seon.problems/resolve!`). Proof: the attribute and the proof branch are gone and seon.error.resolution-test asserts the remaining rules.",
+            "Recording no longer writes a producer task, so `:seon.task/faults` is fed by no writer: `seon.error/resolution`'s task-proof branch (proof) serves only the auto tasks written before 2026-10-07 (18 'faults of <fn>' tasks on default). Triage those into authored tasks with failing tests or retire them, then delete `:seon.task/faults`, the proof branch and their tests at the errors cut. Open decision for the errors spec owner: how an untriaged recorded error resolves (today: producer digest change alone, or `seon.problems/resolve!`). Proof: the attribute and the proof branch are gone and seon.error.resolution-test asserts the remaining rules.",
             :must-read
-            #{seon.error/resolution seon.task/task-resolution}}
+            #{seon.error/resolution}}
  #:seon.task{:name "fault-window-derives-the-error-selector-when-no-error-occurred"
              :kind :function
              :intent "`seon.error/occurred-since` computes observation-selector whenever its query answers a vector, even an empty one; the selector is held per projection, so the first pass after any declaration write rederives it over the whole registry: 12-13 MB and 13.5 ms of the 94 MB pass after a defn (defn-why, 2026-10-08). Derive the selector only when the window holds an error, and hold it by the schema forms it reads (as `seon.program/program-attributes` now is), not by the projection value. Done when the pass after a defn allocates nothing in observation-selector with no errors in its window."

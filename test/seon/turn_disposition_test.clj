@@ -6,8 +6,8 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
-;; Root turn 62279 on `default` (2026-09-23 16:44Z) replied with a vector
-;; holding `(my.agent/done)`. The disposition rule refused it, but the
+;; Root turn 62279 on `default` (2026-09-23 16:44Z) replied with a disposition
+;; before another form. The disposition rule refused it, but the
 ;; replacement evaluation lacked its namespace, ending namespace, print
 ;; options and admission record, so `settle-batch!` refused the whole batch
 ;; and the agent never saw why.
@@ -21,7 +21,7 @@
                                   [:seon.agent/namespace :seon.ns/name])
            process "disposition-process"
            run-id "disposition-run"
-           source "['(+ 1 2) (my.agent/done)]"]
+           source "(my.turn/wait {:my.turn/note \"later\"})"]
        (support/seed-cluster! connection "disposition-resume")
        (support/transacted!
         connection
@@ -32,7 +32,7 @@
         connection
         (turn/plan-tx {:seon.turn/id run-id :seon.db.process/id process
                        :seon.turn/starting-ns [:seon.ns/name namespace-name]
-                       :seon.turn/sources [{:seon.cluster.eval/source source}]}))
+                       :seon.turn/sources [{:seon.cluster.eval/source source} {:seon.cluster.eval/source "(+ 1 2)"}]}))
        (let [ctx (support/fork-cluster-ctx connection)
              cluster (support/cluster-handle
                       {:seon.db/connection connection
@@ -62,7 +62,7 @@
          (is (= [:resume run-id 0]
                 (mapv work [:seon.turn.work/situation :seon.turn/id
                             :seon.cluster.eval/ordinal])))
-         (is (= 1 (:seon.turn.loop/forms-run report)))
+         (is (= 2 (:seon.turn.loop/forms-run report)) "the refused disposition ends nothing: the next form runs")
          (is (str/includes? (str (:seon.cluster.eval/error settled))
                             "must be the last form of your reply"))
          (is (string? (:seon.eval/shown settled)))

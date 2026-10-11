@@ -4,7 +4,7 @@
   an ordinary message wakes it, and retirement closes admission at the writer."
   (:require [clojure.core.async :as async]
             ;; loaded so a hosted run can check one of its tests by symbol
-            [seon.task-steps-test]
+            [my.task-test]
             [clojure.edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -495,9 +495,9 @@
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/member-custody")
-            shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['seon.task-steps-test/step-appends-and-is-current-when-none-is]})] "
+            shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['my.task-test/current-answers-the-held-task-with-its-proofs]})] "
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
-        (is (= "[true [[seon.task-steps-test/step-appends-and-is-current-when-none-is 0 nil]]]" shown))))))
+        (is (= "[true [[my.task-test/current-answers-the-held-task-with-its-proofs 0 nil]]]" shown))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/a-refused-deletion-reaches-the-deleting-forms-receipt}}
   a-refused-deletion-is-its-forms-refusal-and-the-run-closes

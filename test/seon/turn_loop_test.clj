@@ -693,7 +693,7 @@
           (is (str/includes? rendered "(+ (answer-count) 1)")
               "the following history carries the turn's own evaluations")
           (is (not (str/includes? rendered
-                                  "ended without my.turn/complete or my.turn/wait"))
+                                  "ended without my.turn/wait or my.task/send-back!"))
               "the dissolved notice is not re-introduced"))))))
 
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes

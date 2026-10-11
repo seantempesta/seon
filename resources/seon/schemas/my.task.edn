@@ -1,0 +1,13 @@
+#:my.task{:current [:map {:description "The task an agent holds with its proofs and their status on its branch (my.task/current); the task and proofs are absent when it holds none."}
+                    [:seon.agent/id :seon.agent/id]
+                    [:seon.context/task {:optional true} :seon.context/task]
+                    [:seon.context/proofs {:optional true} :seon.context/proofs]]
+          :reason [:string {:min 1 :description "Why an agent gives its task back without green proofs: the reply root reads."}]
+          :target [:and {:description "The task that owns the mistake a send-back names, by symbol."} :seon.task/sym]
+          :counterexample [:and {:description "The data showing why the task cannot be made green as written."} :seon.schema/value]
+          :send-back-request [:map [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
+                              [:my.task/counterexample {:optional true} :my.task/counterexample]]
+          :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it."}
+                      :my.turn/completed
+                      [:map [:my.task/target {:optional true} :my.task/target]
+                       [:my.task/counterexample {:optional true} :my.task/counterexample]]]}

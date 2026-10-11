@@ -1,18 +1,6 @@
 (ns ^{:seon.ns/context-relevant? true} my.turn
-  "Return explicit completion or waiting data for my session."
+  "Return waiting data for my session: a reply is `my.message/send` then `my.turn/wait`."
   (:require [seon.run :as run]))
-
-(defn complete
-  "Return my completion reply for its requester.
-
-  Returns {:my.turn/disposition :completed :my.turn/result string}.
-  Return this value as the form's result so the turn delivers the reply.
-
-  Example:
-  (my.turn/complete {:my.turn/result \"The requested verification passed.\"})"
-  {:malli/schema [:=> [:cat [:map [:my.turn/result :my.turn/result]]] [:or :my.turn/completed :my.turn/blank-result-error]]}
-  [request]
-  (run/complete (:my.turn/result request)))
 
 (defn wait
   "Return the event or reply I need before continuing.

@@ -121,7 +121,7 @@
      (let [database (db/db connection)
            path "src/my/turn.clj"
            declarations (functions/file-entities database [path] :seon.fn/file)]
-       (is (= #{'my.turn/complete 'my.turn/wait 'my.turn/usage-form}
+       (is (= #{'my.turn/wait 'my.turn/usage-form}
               (into #{} (keep :seon.fn/sym) declarations)))
        (is (every? #(= [:seon.fn.file/relative-path path] (:seon.fn/file %))
                    declarations))

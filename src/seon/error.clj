@@ -2233,8 +2233,7 @@
                  producer (into [(list 'my.program/callers {:seon.program/subject (list 'quote producer)})
                                  (list 'my.program/tests-reaching {:seon.program/subject (list 'quote producer)})])
                  evaluation (conj (list 'seon.db/pull ''[*] [:seon.cluster.eval/id evaluation]))
-                 blob (conj (list 'seon.blob/get blob))
-                 task (conj (list 'my.task/claim! {:seon.task/assigned task})))}
+                 blob (conj (list 'seon.blob/get blob)))}
         true (into (concat (select-keys fault [:seon.error/producer :seon.instrument/fn])
                            (select-keys latest [:seon.error/producer-digest :seon.error/caller
                                                 :seon.error/expected-key])))
