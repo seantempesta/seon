@@ -20,8 +20,8 @@
              :intent ":seon.config.ai/no-provider is [:= true] and per-agent: an agent overlay can set it but never lift it, so with the cluster's no-provider on (default's standing setting) a branch agent cannot be pointed at a local stub provider without retracting the cluster config row on its branch (what repl-dogfood 2026-09-27 had to do). Make the dial a boolean whose overlay value wins, or document the branch-row route as the entrance."
              :must-read #{seon.config/effective seon.ai/agent-overlay}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
- #:seon.task{:name "a-reapplied-manifest-converges-with-zero-operations"
+ #:seon.task{:name "the-packaged-population-loads-in-a-fresh-jvm-within-its-bound"
              :kind :function
-             :intent "Central round 2, e0bd37443: unchanged, all seven still red alone. `seon.config/apply!` of an already applied manifest answers `:seon.reconcile/converged? false` with operations (6, 5 or 3) and writes a second transaction (`:max-tx` moves): seon.reconcile-test (first-apply-writes-and-reapply-is-zero-writes; planning-pulls-only-the-provenance-managed-slice plans `[:db.fn/retractEntity ...]` for entities that are already exact), seon.config-test (4) and seon.index-reconcile-test. None of the three fixes of this round touches it. Suspects: da356e6c8, 7d7da5865, 6989f4407, 241b28434. Done when the seven are green alone on a fresh JVM."
-             :must-read #{seon.config/apply! seon.reconcile-test/first-apply-writes-and-reapply-is-zero-writes seon.config-test/apply-compiles-once-and-round-trips-through-database-facts}
+             :intent "Central round 3, HEAD 2319152dc: `seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` takes 9.2 s against its 5 s bound (also red in round 2 at 9.9 s; green in the c53c9306e tier and at cd59c9fa3). Time the same probe on cd59c9fa3 and on each landing since to find the commit, then bring the load back under its bound or justify the bound beside the measured number."
+             :must-read #{seon.config/effective seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm}
              :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

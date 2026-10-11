@@ -21,8 +21,7 @@
                     :seon.db/connection connection
                     :seon.sci.admit/caps (config/result-caps (config/effective (db/db connection) cluster-name))}))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}}
-  a-proc-step-runs-in-its-environments-world
+(deftest a-proc-step-runs-in-its-environments-world
   (test-support/with-database
    (fn [connection]
      (let [environment (world connection "flow-world")

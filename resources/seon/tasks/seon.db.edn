@@ -248,20 +248,15 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-agent-world.md"
                          "docs/research/agent-platform/2026-10-11/eid-ranges-opus.md"
                          "docs/research/agent-platform/2026-10-11/eid-ranges-sol.md"}}
- #:seon.task{:name "an-unrelated-entity-write-keeps-a-reads-evidence-current"
-             :kind :function
-             :intent "Central round 2, e0bd37443: three of six remain, all red alone: `seon.render.root-pull-test/unrelated-entity-change-keeps-root-read-current` (candidates #{root}, expected empty), `another-entity-schema-cannot-add-a-reverse-read-to-this-root` (`seon.db/read-evidence-current?` false) and `seon.eval-alloc-test/a-trivial-form-makes-fewer-armed-calls-than-its-context-holds-vars` (10,043 armed calls, bound 8,434 Vars). Green now: the declaration-key test and both request-cost tests. Done when the three are green alone on a fresh JVM."
-             :must-read #{seon.db/read-evidence-current? seon.db/declaration-content-key seon.db/content-revisions seon.render.root-pull-test/unrelated-entity-change-keeps-root-read-current seon.eval-alloc-test/a-trivial-form-makes-fewer-armed-calls-than-its-context-holds-vars}
-             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}
- #:seon.task{:name "a-write-keeps-its-cost-after-the-projection-hand-off"
-             :kind :function
-             :intent "Central round 2, e0bd37443: two cost bounds green at cd59c9fa3 are red alone: `seon.cluster.squash-test/one-attempts-copy-stays-within-its-cost-bound` (13.4 ms and 36.6 MB against 10 ms and 5 MB) and `seon.start-flow-benchmark-test/commit-to-paused-flow-costs` (cold branch 8.2 MB against 4 MB; cold sci 1,399 ms against 1,300 ms). Suspects: the three fixes of this round (e1c424db5 overlay from its acquired database, c7dc2c3b6 retained fork bases, e0bd37443 the write's basis projection handed to `seon.db/cost-upserts`); time the same probes on cd59c9fa3 and on each. Done when both bounds hold alone."
-             :must-read #{seon.db/cost-upserts seon.db/transact! seon.cluster.squash-test/one-attempts-copy-stays-within-its-cost-bound}
-             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}
  #:seon.task{:name "inbox-query-evidence-survives-another-recipients-message"
              :kind :function
              :intent "`seon.db/read-evidence-current?` must keep the inbox query in `seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current` current when a message is written to another recipient, both within a connection and after reopening. Both proofs return false on d02a78686 before the C5 no-history digest change, and remain false afterwards. Trace `seon.db/read-evidence` and `seon.db/query-index-patterns` through the evaluation's captured reads; fix the evidence producer without replaying the inbox or dropping actual dependencies."
              :must-read #{seon.db/read-evidence seon.db/read-evidence-current? seon.db/query-index-patterns
                           seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current
                           seon.read-evidence-test/a-fresh-connection-keeps-an-unrelated-read-current}
-             :evidence #{"docs/research/agent-platform/2026-10-12/astra-cost-handoff-evidence/c5-parent.txt"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-12/astra-cost-handoff-evidence/c5-parent.txt"}}
+ #:seon.task{:name "a-retained-branch-fixture-writes-the-digest-its-definition-produces"
+             :kind :function
+             :intent "Central round 3, HEAD 2319152dc: `seon.db-test/a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program` is new red (green at c53c9306e and in round 2, error alone): `Fixture write was refused at the write: The stored definition digest of [:seon.fn/sym seon.schema/shape-entity-in] is not the one its definition produces.` d02a78686 (the C3 fix) changed `seon.schema/shape-entity-in` while the test copies a program entity with the old stored digest. Make the fixture take the digest from the canonical writer instead of copying a stored one. Done when the test is green alone."
+             :must-read #{seon.db/transact! seon.db-test/a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program}
+             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

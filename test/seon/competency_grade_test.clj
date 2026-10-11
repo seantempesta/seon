@@ -115,8 +115,7 @@
                                  (:seon.cluster/name (support/execution-handle nil))]]))
     nil))
 
-(deftest ^{:seon/tasks #{'seon.competency/a-launch-grades-each-run-green}
-           :seon.test/long "Four fixture-model runs on their own branches, each one model call, its proof's step and a waiting reply."
+(deftest ^{:seon.test/long "Four fixture-model runs on their own branches, each one model call, its proof's step and a waiting reply."
            :seon.test/long-ms 120000}
   a-launch-grades-each-run
   (support/with-running-agent

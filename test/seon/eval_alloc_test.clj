@@ -62,8 +62,7 @@
            "compiled seon.db reads made from SCI are counted")
        (is (<= 3 (:seon.profile/reads reads)))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-trivial-form-makes-fifty-thousand-armed-calls
-                       'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-trivial-form-makes-fifty-thousand-armed-calls}}
   a-trivial-form-makes-fewer-armed-calls-than-its-context-holds-vars
   (support/with-running-agent
    (fn [running agent-id _]

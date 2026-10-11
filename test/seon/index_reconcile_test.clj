@@ -5,8 +5,7 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.config/a-reapplied-manifest-converges-with-zero-operations}}
-  indexing-an-existing-population-uses-one-writer
+(deftest indexing-an-existing-population-uses-one-writer
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)

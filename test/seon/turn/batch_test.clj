@@ -79,8 +79,7 @@
                                             [:seon.ns/name 'merge-m8.test-fixture]))))
          "the namespace keeps its refers"))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}}
-  a-removed-namespace-the-agent-stays-in-leaves-diff-answering
+(deftest a-removed-namespace-the-agent-stays-in-leaves-diff-answering
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id _connection]
      (eval! "(in-ns 'merge-m8.scratch) (defn merge-m8-scratch [x] x)" agent-id running)

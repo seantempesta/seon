@@ -1499,8 +1499,7 @@
                      (concat (keys (:seon.schema.projection/forms projection))
                              (keys (:seon.schema.projection/function-contracts projection))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}
-           :seon.test/long "Seven full and incremental packaged-population projections, then both committed projection loads."
+(deftest ^{:seon.test/long "Seven full and incremental packaged-population projections, then both committed projection loads."
            :seon.test/long-ms 10000}
   an-incremental-projection-equals-its-full-build
   (test-support/with-database

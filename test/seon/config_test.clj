@@ -105,7 +105,8 @@
                            [:seon.config/cluster "flag-test"])]
           (is (= {:seon.config/cluster "flag-test"} entity)))))))
 
-(deftest config-loads-the-packaged-population-in-a-fresh-jvm
+(deftest ^{:seon/tasks #{'seon.config/the-packaged-population-loads-in-a-fresh-jvm-within-its-bound}}
+  config-loads-the-packaged-population-in-a-fresh-jvm
   ;; The child is a fresh JVM on THIS member's classpath, started in its
   ;; working directory: the committed archive the JVM runs (`user.dir` is
   ;; data/source/<commit>), never the checkout. `clojure -M:dev` resolved the

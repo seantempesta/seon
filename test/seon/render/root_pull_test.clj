@@ -270,8 +270,7 @@
                     {::root call} fixed false))
            "an opening as-of database compares through seon.db revisions")))))
 
-(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
-  unrelated-entity-change-keeps-root-read-current
+(deftest unrelated-entity-change-keeps-root-read-current
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
@@ -315,8 +314,7 @@
                       {call-id (:entry refreshed)} database false))
              "the consumed revision advances even when the result is equal"))))))
 
-(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
-  another-entity-schema-cannot-add-a-reverse-read-to-this-root
+(deftest another-entity-schema-cannot-add-a-reverse-read-to-this-root
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]

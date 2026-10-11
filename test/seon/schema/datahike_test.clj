@@ -69,8 +69,7 @@
                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
          (is (= :seon.error/offending (:seon.schema/member refusal))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}}
-  canonical-population-native-parity
+(deftest canonical-population-native-parity
   ;; No hand list beside the schema: the live projection's native population
   ;; is checked by properties DERIVED from that projection, and against the one
   ;; recorded baseline, the historical admitted population (root ruling

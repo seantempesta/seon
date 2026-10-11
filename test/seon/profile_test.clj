@@ -171,8 +171,7 @@
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
 
-(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
-  ranking-costs-computes-each-definitions-spending-once
+(deftest ranking-costs-computes-each-definitions-spending-once
   (doseq [n [1 10 100]]
     (let [sink (batch/sink)
           symbols (mapv #(symbol "cost.rank" (str "f" %)) (range n))]

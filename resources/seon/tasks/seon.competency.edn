@@ -42,9 +42,4 @@
              :kind :function
              :intent "Redefine `comp.text/slug` in place, keeping its contract `[:=> [:cat :string] :string]`: trim whitespace, lowercase, turn each run of whitespace into one hyphen, remove leading and trailing hyphens, keep interior punctuation. Done when `seon.competency-test/t5-slug-removes-edge-hyphens` is green: `(comp.text/slug \"  --Hello   WORLD--  \")` answers `\"hello-world\"`, `\"---\"` answers `\"\"`, `\" a-b \"` answers `\"a-b\"`, `\"\"` answers `\"\"`, and `\"Hello World\"` and `\"  ABC \"` still answer `\"hello-world\"` and `\"abc\"`."
              :must-read #{comp.text/slug clojure.string/replace clojure.string/lower-case clojure.string/trim}
-             :evidence #{"docs/research/agent-platform/2026-10-10/astra-chain-friction.md"}}
- #:seon.task{:name "a-launch-grades-each-run-green"
-             :kind :function
-             :intent "Central round 2, e0bd37443: `a-fixture-model-run-grades-green` is green now; `seon.competency-grade-test/a-launch-grades-each-run` is still red alone (one of the four graded runs differs from `{:green? true :calls-to-green 1 :model-calls 1 :terminal :done :retired? true}`; the printed comparison is cut). Compare the four grades with the first form before assuming the attempt chain (R1 2b49056a8, 57388f28b). Done when it is green alone."
-             :must-read #{seon.competency/launch! seon.competency/grade seon.task/attempt-tx seon.competency-grade-test/a-launch-grades-each-run}
-             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-10/astra-chain-friction.md"}}]

@@ -45,8 +45,7 @@
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
-(deftest ^{:seon/tasks #{'seon.db/a-reopened-commit-carries-its-content-revisions
-                         'seon.db/a-write-keeps-its-cost-after-the-projection-hand-off}}
+(deftest ^{:seon/tasks #{'seon.db/a-reopened-commit-carries-its-content-revisions}}
   a-reopened-commit-carries-its-content-revisions
   (test-support/with-database
    (fn [connection]
@@ -3084,8 +3083,7 @@
          (doc! flow :seon.ns/doc "The read value changed.")
          (is (false? (db/read-evidence-current? @connection evidence))))))))
 
-(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
-  an-entity-pull-is-checked-only-on-the-attributes-that-changed
+(deftest an-entity-pull-is-checked-only-on-the-attributes-that-changed
   (doseq [retain? [false true]]
     (test-support/with-database
      (fn [connection]
@@ -3194,7 +3192,8 @@
           (is (not (identical? projection (#'db/content-projection after database)))
               "and the equal declaration content derives anew"))))))
 
-(deftest a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program
+(deftest ^{:seon/tasks #{'seon.db/a-retained-branch-fixture-writes-the-digest-its-definition-produces}}
+  a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program
   ;; A branch's adoption record names its historical program; the loaded code
   ;; builds the projection, so a record naming another builder keys nothing.
   (test-support/with-database

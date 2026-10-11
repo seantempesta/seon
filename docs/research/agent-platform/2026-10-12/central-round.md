@@ -367,3 +367,46 @@ C1 and C7 are retired: their tasks are deleted and their proof tags removed (`se
 
 Against revert-after.edn (c53c9306e), nothing else green then is red now outside the 125 and these four. The 2 bulk-noise tests are green. Not
 re-checked: tests that were red or error at c53c9306e and still are (about 340); they are not classified here.
+
+## Round 3: HEAD 2319152dc, after the fixes for all nine causes
+
+Same driver (`script/seon/central_round.clj`) on a fresh nuked root (`tmp/test-runs/central-round3`). 2,832 tests ran (the stored
+population grew by two since round 2). Bulk pass 114 batches, 61.2 min, 5 batches at the 240 s limit, no memory refusal;
+66 unrun rerun in batches of 5, 26 still unknown rerun one per request, then every test that was not green and
+could be a regression (16) rerun alone.
+
+| | c53c9306e | cd59c9fa3 | e0bd37443 | 2319152dc |
+|---|---|---|---|---|
+| tests run | 2,770 | 2,830 | 2,830 | 2,832 |
+| green | 2,365 | 2,346 | 2,456 | 2,486 |
+| red | 232 | 246 | 254 | 229 |
+| error | 106 | 238 | 120 | 117 |
+
+Against round 2: green to green 2,455; red to green 25; error to green 4; error to error 115; red to red 228; green to error 1;
+red to error 1; error to red 1.
+
+**All 125 round-1 regressions are green** (C1-C9 each 0 remaining; C4's last test and the two C2/C3 stragglers are green alone), and the
+2 noise tests stay green. Against revert-after.edn nothing that was green then is red now except the one new regression below
+and the config-load timing.
+
+### New or still open
+
+- New, green at c53c9306e and round 2, error alone: `seon.db-test/a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program`
+  (`The stored definition digest of [:seon.fn/sym seon.schema/shape-entity-in] is not the one its definition produces`; `shape-entity-in`
+  changed in d02a78686). Task `seon.db/a-retained-branch-fixture-writes-the-digest-its-definition-produces`.
+- `seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm`: 9.2 s against 5 s (round 2: 9.9 s). Task
+  `seon.config/the-packaged-population-loads-in-a-fresh-jvm-within-its-bound`.
+- `seon.start-flow-benchmark-test/commit-to-paused-flow-costs` still red (world calls 85 against 50, cold sci 1,346 ms against 1,300 ms);
+  it belongs to the existing task `seon.flow/cold-paused-graph-construction-keeps-its-cost-bound`.
+- Red in rounds 2 and 3 and not in the 125 (tests added since c53c9306e or already red there), unchanged: seon.cluster.agent-test (3 errors),
+  seon.cluster.armed-test (2), seon.cluster.agent-arming-test, seon.my.test-check-test/a-reused-check-answers-a-run-id-it-recorded,
+  seon.error-test/a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas, seon.sci.acquisition-cost-test (2),
+  and about 340 tests red or error at c53c9306e. These are not classified here.
+
+### Tasks
+
+Retired (deleted, every proof tag removed from the tests, 15 files): `seon.sci.eval/a-changed-programs-overlay-reads-the-agents-database`,
+`seon.config/a-reapplied-manifest-converges-with-zero-operations`, `seon.test/a-member-body-reads-the-world-its-seeds-prepared`,
+`seon.operator/the-move-test-calls-launch-form-by-its-current-arity`, `seon.competency/a-launch-grades-each-run-green`,
+`seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again`, `seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current`,
+`seon.db/a-write-keeps-its-cost-after-the-projection-hand-off`. Filed: the two above.

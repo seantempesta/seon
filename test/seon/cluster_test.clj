@@ -218,8 +218,7 @@
                       (drop-last 2 tx-data))
               "every datom of it is retracted by its own [e a v], never its entity"))))))
 
-(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
-  unrelated-writes-reuse-the-storage-declaration-difference
+(deftest unrelated-writes-reuse-the-storage-declaration-difference
   (test-support/with-database
    (fn [connection]
      (let [projection (db/carried-projection @connection)]
