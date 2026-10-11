@@ -116,7 +116,7 @@
             agent-request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (support/transacted! connection (support/agent-tx @connection agent-id))
-        (agent/arm! agent-request)
+        (agent/start-flow! agent-request)
         (let [result (agent/evaluate-source! (assoc agent-request :seon.agent/segmenter 'seon.turn/code-sources
                                                     :seon.cluster.reply/text "(/ 1 0)"))
               ;; the run on the reply's own value (answered when applied)

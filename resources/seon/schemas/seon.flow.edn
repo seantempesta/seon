@@ -66,6 +66,9 @@
               :seon.config.flow.io/concurrency]
              [:seon.config.agent/turn-completion-backstop-ms
               :seon.config.agent/turn-completion-backstop-ms]],
+            :plan-channel
+            [:and {:description "db<->flow's in-port: a payload-free wake asking it to plan again (seon.cluster.wake/route! offers on it)."}
+             :seon.flow/channel],
             :started
             [:map
              [:report-chan :seon.flow/channel]

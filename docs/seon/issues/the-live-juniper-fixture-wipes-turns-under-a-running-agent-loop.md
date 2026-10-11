@@ -19,7 +19,7 @@ evaluation of agent `juniper` at the writer:
 ```
 
 Its docstring says it runs "after the fixture agent and earlier arm wakes are
-idle", but it establishes no idleness: it calls `agent/disarm!` and then
+idle", but it establishes no idleness: it calls `agent/stop-flow!` and then
 wipes, while `install-running!` (`:303`) deliberately leaves the agent's
 ordinary flow graph running. Nothing bounds the wait for the loop to reach a
 closed turn, and nothing refuses the wipe when a turn is open — unlike

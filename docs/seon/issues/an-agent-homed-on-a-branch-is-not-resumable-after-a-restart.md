@@ -30,8 +30,8 @@ Opening a connection on demand inside `branch-connection` (the obvious patch)
 does not fix it, for two reasons:
 
 1. **A connection without a host has no wake route.** The route listener is
-   registered only by the armer that `host!` starts
-   (`seon.cluster.agent/armer-step`, init arity → `seon.cluster.wake/route!`).
+   registered only by db<->flow that `host!` starts
+   (`seon.cluster.agent/db<->flow`, init arity → `seon.cluster.wake/route!`).
    A message written through a bare connection is stored, and the agent never
    runs.
 2. **An unowned connection blocks retirement.** A connection opened outside a
@@ -54,7 +54,7 @@ does not fix it, for two reasons:
      `:seon.message/unknown-recipient` ("… holds no connection to; the message
      was not sent").
   4. `host/host!` on the existing branch answered a host in 49 ms, and
-     `branch-connection` then answered a connection. The armer primes itself
+     `branch-connection` then answered a connection. db<->flow primes itself
      on `::flow/resume`, so work written before hosting is derived.
   5. The probe was retired afterwards: admission closed and the branch
      removed.
@@ -97,7 +97,7 @@ Still open:
   So a `my.message/send` evaluated by root still answers
   `:seon.message/unknown-recipient` with `:seon.message/home`, until the world
   carries the handle.
-- **A hosted agent's armer doesn't take a message wake.**
+- **A hosted agent's db<->flow doesn't take a message wake.**
   `seon.cluster.host-test/an-ordinary-message-wakes-the-idle-hosted-agent` is
   red at HEAD d4ff12e13 (check run e84e6e4fb5d0, the 20 s await). The resume
   proof's final assertion is red for the same cause.

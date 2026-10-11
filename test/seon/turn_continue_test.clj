@@ -74,7 +74,7 @@
                             :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                             :seon.db.process/id cluster/boot-process-identity})
                           (fn [handle]
-                            (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+                            (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id "juniper"})
                             (d/unlisten connection ::continuation)
                             (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
                                          :seon.turn.loop/completion]]
@@ -129,7 +129,7 @@
                                                      "finish_reason" "stop"}]})
                                        reply)))]
                      (try
-                       (agent/arm! {:seon.turn.loop/cluster handle
+                       (agent/start-flow! {:seon.turn.loop/cluster handle
                                     :seon.agent/routing routing :seon.agent/id "juniper"})
                        (when (= scenario :slow-provider)
                          (support/await-event! @provider-progress ::provider-still-pending-at-eval-limit))
@@ -140,14 +140,14 @@
                        ; A system turn can finish before the proc opens its next
                        ; provider turn. Observe the required closed attempts and
                        ; the proc's completion event before inspecting next work.
-                       (let [completion (:seon.turn.loop/completion (agent/armed routing "juniper"))
+                       (let [completion (:seon.turn.loop/completion (agent/started routing "juniper"))
                              permit (support/await-event! completion ::last-pass-returned)]
                          (try
                            (is (nil? (turn/next-agent-work @connection work-request)))
                            (finally
                              (is (true? (async/offer! completion permit))))))
                        (finally
-                         (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"}))))
+                         (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id "juniper"}))))
                    (is (= expected (count @requests)))
                    (let [saved (evaluation/of-agent @connection "juniper")
                          opening (take-while #(= (:seon.cluster.eval/run (first saved))
@@ -232,7 +232,7 @@
     (.get wake)
     (async/offer! (:seon.cluster.wake/channel
                    (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @runtime/running-instances running)))
-                           [:seon.agent/armed agent-id]))
+                           [:seon.agent/started agent-id]))
                   :seon.agent/wake)
     nil))
 

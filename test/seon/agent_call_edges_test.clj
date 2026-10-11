@@ -68,7 +68,7 @@
         (swap! routing assoc :seon.agent/fault-channel faults)
         (try
           (support/transacted! connection (support/agent-tx @connection agent-id namespace-name))
-          (agent/arm! request)
+          (agent/start-flow! request)
           (submit "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
           (submit "(clojure.test/deftest target-test (clojure.test/is (= 3 (target 2))))")
           (let [after-calls (calls :seon.test/sym test-symbol)
@@ -93,7 +93,7 @@
                                                     [:seon.test/sym early-test]))
                  :seon.test/target target :seon.test/later later})))
           (finally
-            (agent/disarm! request)
+            (agent/stop-flow! request)
             (doseq [channel [faults (:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))

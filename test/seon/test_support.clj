@@ -1371,7 +1371,7 @@
           (body running agent-id connection)
           (finally
             (swap! operator.runtime/running-instances dissoc running)
-            (agent/disarm! request)
+            (agent/stop-flow! request)
             (doseq [channel [(:seon.cluster.wake/channel handle) (:seon.render/context-channel handle)
                              (:seon.turn.loop/completion handle)]]
               (when channel (async/close! channel)))))))))

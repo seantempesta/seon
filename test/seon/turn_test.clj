@@ -1992,5 +1992,5 @@
               (db/pull ended [:seon.task.attempt/end :seon.task.attempt/commit] [:seon.task/assignment (id/id [h 1])]))
            "the end and the branch commit it ended at are on the attempt, in the end's one transaction")
        (is (= [] (turn/end-task-call ended agent-id :done candidate commit)) "an attempt ends once")
-       (is (every? (wake/arming-attributes ended) [:seon.task.attempt/end :seon.task/needs])
+       (is (every? (wake/starting-attributes ended) [:seon.task.attempt/end :seon.task/needs])
            "an end and a need wake the cluster process that starts the next attempt")))))

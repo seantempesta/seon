@@ -24,7 +24,7 @@ Classified fields of the first refusal at `test/seon/loop_proof_test.clj:343`:
  :seon.turn/rule :seon.turn/agent-already-running}
 ```
 
-The fixture calls `agent/arm!` just before the three-form `submit` section
+The fixture calls `agent/start-flow!` just before the three-form `submit` section
 at lines 549–556. The explicit virtual submission receives no turn ID;
 subsequent assertions inspect the preceding system evaluations and send nil
 as `:seon.turn/id` to `render/acquire-context!`. That missing ID accounts for

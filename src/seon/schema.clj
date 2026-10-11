@@ -1325,7 +1325,7 @@
        mr/Registry
        (-schema [_ type]
          ;; Canonical names and loaded Var references remain opaque here.
-         ;; The armer's supplied var-registry resolves Vars later; syntax
+         ;; db<->flow's supplied var-registry resolves Vars later; syntax
          ;; preparation must neither dereference them nor reject them.
          (when (or (keyword? type) (qualified-symbol? type) (var? type))
            (m/-simple-schema {:type type :pred any? :min 0 :max nil})))

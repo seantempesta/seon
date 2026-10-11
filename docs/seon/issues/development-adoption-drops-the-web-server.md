@@ -34,7 +34,7 @@ refresh path (`hook-coalesce`, 2026-09-08).
 ## Refresh-path investigation (2026-09-08, 14:28–14:54)
 
 No call from `development-source-refresh!` to server or graph shutdown was
-found. The first-party `web/stop!` call is in `cluster/disarm-agents!`, called
+found. The first-party `web/stop!` call is in `cluster/stop-flows!`, called
 by `cluster/stop!`; the development adoption path reconciles facts, reloads
 Vars, acquires SCI, instruments, and offers a render notification. Treat the
 claimed stop/restart cause above as a hypothesis until a call is observed.

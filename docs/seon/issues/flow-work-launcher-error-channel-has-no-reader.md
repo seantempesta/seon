@@ -23,4 +23,4 @@ throwable, but the fault route never does, and the 101st fault evicts the first.
 existing `seon.flow/join-error-fanout!`, like every agent graph. Regression: a
 throwing submission reaches the fault channel.
 
-**Owner.** Boot/cluster wiring (`boot.clj` or `cluster/arm-agents!`). Audit §5 step 1.
+**Owner.** Boot/cluster wiring (`boot.clj` or `cluster/start-flows!`). Audit §5 step 1.

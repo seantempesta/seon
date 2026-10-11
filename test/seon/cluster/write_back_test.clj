@@ -73,12 +73,12 @@
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (support/transacted! connection (support/agent-tx @connection agent-id fixture-ns))
-        (agent/arm! request)
+        (agent/start-flow! request)
         (try
           (body request)
           nil
           (finally
-            (agent/disarm! request)
+            (agent/stop-flow! request)
             (doseq [channel [faults (:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))

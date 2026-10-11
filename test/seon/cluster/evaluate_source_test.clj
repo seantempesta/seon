@@ -37,9 +37,9 @@
   [result]
   (turn/receipt-identity (:seon.turn/id result) 0))
 
-(defn- with-armed-agent
-  "`f` called with a fresh armed agent's runs (`:code` evaluates text as one ordinary
-  MCP SCI run) on the execution's connection; the agent is disarmed after."
+(defn- with-started-agent
+  "`f` called with a fresh started agent's runs (`:code` evaluates text as one ordinary
+  MCP SCI run) on the execution's connection; the agent is stopped after."
   [f]
   (let [target (support/execution-handle nil)
         connection (:seon.db/connection target)
@@ -65,21 +65,21 @@
                                                  :seon.cluster.reply/text %))]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (support/transacted! connection (support/agent-tx @connection agent-id))
-        (agent/arm! request)
+        (agent/start-flow! request)
         (try
           (f {:connection connection :cluster-name cluster-name :agent-id agent-id :routing routing
               :handle handle :request request :code code})
           (finally
-            (agent/disarm! request)
+            (agent/stop-flow! request)
             (doseq [channel [faults (:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))
 
-(deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus arming and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
+(deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus starting and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
            :seon.test/long-ms 40000
            :seon/tasks #{(quote seon.turn/a-turn-pass-derives-its-work-twice)}}
   code-evaluates-as-one-ordinary-run-of-its-agent
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection cluster-name agent-id routing request code]}]
           (testing "every form of the code is one evaluation of the run, in order; nothing is read as prose"
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
@@ -233,14 +233,14 @@
             (let [submitted (agent/submit-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                          :seon.cluster.reply/text "(loop [] (recur))"))
                   reply (:seon.agent/reply submitted)
-                  requests (:seon.agent/requests (agent/armed routing agent-id))]
+                  requests (:seon.agent/requests (agent/started routing agent-id))]
               (is (:seon.turn/id submitted))
               (support/await-event! (async/go-loop []
                                       (if (zero? (count (.buf ^clojure.core.async.impl.channels.ManyToManyChannel requests)))
                                         true
                                         (do (async/<! (async/timeout 5)) (recur))))
                                     ::request-taken)
-              (agent/disarm! request)
+              (agent/stop-flow! request)
               (is (= reply (second (async/alts!! [reply (async/timeout 0)] :priority true)))
                   "the caller's reply is answered or closed when the stop returns")
               (let [database (db/db connection)]
@@ -259,7 +259,7 @@
 (deftest a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
   ;; A failed read is its form's read error; the forms around it run, and no
   ;; error rides another form.
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection cluster-name agent-id code]}]
      (let [result (code "(+ 1 2)\n(* 2 3)\n[1 bad: (+ 2 3)]\n(+ 4 4)")
            receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])
@@ -289,7 +289,7 @@
   ;; A form that closes its own agent's admission outside the run's custody
   ;; leaves the run unopenable and its settlement refused. The path is total:
   ;; the values return, unrecorded, the refusal beside them.
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [agent-id code]}]
      (code (str "(defn close-my-admission! \"Closes my admission outside my run's custody.\""
                 " {:malli/schema [:=> [:cat :seon.db/connection] :boolean]} [c]"
@@ -307,7 +307,7 @@
   ;; The agent's closure passes nil to an armed function; the compiled function
   ;; that called the closure did nothing wrong. The refusal is delivered on the
   ;; form and is never recorded as an open fault against first-party code.
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection code]}]
      (let [result (code "(seon.db/call-with-custody {} #(seon.db/transact! nil []))")]
        (is (some? (:seon.cluster.eval/error (:seon.sci.eval/evaluation (first (:seon.turn.loop/evaluated-sources result)))))
@@ -317,7 +317,7 @@
            "no open fault blames the compiled caller of the agent's closure")))))
 
 (deftest a-pass-captures-definitions-realized-after-the-form-body
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection agent-id code]}]
      (let [namespace-name (str "my.agents." agent-id)
            source-of (fn [sym]
@@ -330,11 +330,11 @@
          (code "(do (defn lazy-r [x] 1) (map (fn [_] (defn lazy-r [x] 2) 0) [1]))")
          (is (= "(defn lazy-r [x] 2)" (source-of 'lazy-r))))))))
 
-(deftest an-armed-agents-run-sees-a-program-change-committed-by-another-writer
-  ;; Boot arms agents, then adoption commits the loaded files' entities: the
+(deftest a-started-agents-run-sees-a-program-change-committed-by-another-writer
+  ;; Boot starts agents, then adoption commits the loaded files' entities: the
   ;; next run must evaluate against that program, so `(doc x)` and a call of
   ;; the new definition resolve in the agent's own context.
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection cluster-name code]}]
      (code "(+ 1 2)")
      (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name cluster-name
@@ -354,7 +354,7 @@
 (deftest an-agents-second-run-and-a-settings-write-construct-no-base
   ;; One cluster base per loaded program: a new agent's first run forks the
   ;; cluster's, and neither its next run nor its settings write derives another.
-  (with-armed-agent
+  (with-started-agent
    (fn [{:keys [connection code]}]
      (let [loaded (db/commit-id (#'sci.eval/loaded-program @connection))
            cluster-bases #(into {} (filter (fn [[[_ commit]]] (= loaded commit)))

@@ -17,12 +17,12 @@ boot also produced `Batch refusal settlement was refused.`: its original
 and refusal writes both failed `:seon.turn/run-closed` in
 `seon.turn/receipt-settle-call` during Juniper's generated opening.
 
-The live fixture directly calls `seon.cluster.agent/arm!` while the ordinary
-armer also acquires graphs. The entry check and graph creation were not
+The live fixture directly calls `seon.cluster.agent/start-flow!` while the ordinary
+db<->flow also acquires graphs. The entry check and graph creation were not
 serialized: concurrent calls returned different graphs for one routing
 entry on the canonical armed fixture. Their independent completion permits
 allow overlapping work on one turn. The old loop proof had no competing
-armer and did not assert fault absence. It also accepted a no-provider
+db<->flow and did not assert fault absence. It also accepted a no-provider
 reply that closed by recording `:seon.cluster.reply/no-forms`.
 
 The owning changes and measured proof are recorded in

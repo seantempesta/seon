@@ -114,13 +114,13 @@
                [?entity :seon.schema/key ?key]]
              database)))
 
-(defn arming-attributes
-  "The attributes whose assertion asks the armer to derive required graphs.
+(defn starting-attributes
+  "The attributes whose assertion asks db<->flow to derive required graphs.
 
   ONE DECLARATION, never a name and never a list. An agent's flow graph
   is process-local derived state, so the only durable evidence that an
-  agent exists is its identity datom. `:seon.wake/arms true` on that
-  attribute and schedule ownership notify the armer while
+  agent exists is its identity datom. `:seon.wake/starts true` on that
+  attribute and schedule ownership notify db<->flow while
   the cluster runs, rather than at the next boot — the belt that used to
   depend on the new agent also being addressed in the same commit
   (issue `a-worker-started-while-the-cluster-runs-is-never-armed`:
@@ -128,8 +128,8 @@
   answered `:generate`, and nothing ran because no wake-matching datom
   named it).
 
-  Unlike mailbox delivery, arming does not interpret the datom value as
-  an agent reference. The armer derives unarmed agents with work or schedules,
+  Unlike mailbox delivery, starting does not interpret the datom value as
+  an agent reference. db<->flow derives unstarted agents with work or schedules,
   so this wake carries no payload and needs no attribute-value lookup."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   :seon.cluster.wake/attributes]}
@@ -137,7 +137,7 @@
   (into #{}
         (d/q '[:find [?key ...]
                :where
-               [?entity :seon.wake/arms true]
+               [?entity :seon.wake/starts true]
                [?entity :seon.schema/key ?key]]
              database)))
 
@@ -253,29 +253,29 @@
             "read as absent; :seon.cluster.wake/attributes names them.")
        :seon.cluster.wake/attributes unindexed}))))
 
-(defn arming-refusal
-  "The refusal that says no declaration can ever arm a created agent, or nil.
+(defn starting-refusal
+  "The refusal that says no declaration can ever start a created agent, or nil.
 
   DELIBERATELY NOT PART OF `declarations-refusal`. That one answers
   whether this population can carry a TURN BOUND, and `seon.turn/opening-deferred?`
-  consumes it by deferring every opening — so folding arming into it turns a
-  missing arming declaration into an agent that never turns at all, which is
+  consumes it by deferring every opening — so folding starting into it turns a
+  missing starting declaration into an agent that never turns at all, which is
   the absence-as-health class in a new costume (measured 2026-09-16: the
   cluster-turn fixture stopped deriving work the moment the branch was added
-  there). Arming is a REGISTRATION-time property of the listener, so it
+  there). Starting is a REGISTRATION-time property of the listener, so it
   refuses at `route!` and nowhere else.
 
-  With nothing declaring `:seon.wake/arms`, an agent created while the
-  cluster runs is armed by nothing: `next-agent-work` answers, the work is
+  With nothing declaring `:seon.wake/starts`, an agent created while the
+  cluster runs is started by nothing: `next-agent-work` answers, the work is
   real, and no graph exists to execute it until the next boot."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:maybe :seon.cluster.wake/unroutable-declarations-error]]}
   [database]
-  (when (empty? (arming-attributes database))
-    (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/arming-refusal
+  (when (empty? (starting-attributes database))
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/starting-refusal
      {:seon.error/message
-     (str "No attribute declares :seon.wake/arms, so an agent created while "
-          "this cluster runs would never be armed and its derivable work "
+     (str "No attribute declares :seon.wake/starts, so an agent created while "
+          "this cluster runs would never be started and its derivable work "
           "would read as an idle cluster until the next boot.")
      :seon.cluster.wake/attributes #{}})))
 
@@ -345,9 +345,9 @@
   cannot establish that: a closed render route is a broken live
   registration and remains loud. The agent construction order is what
   makes its narrower answer derivable rather than assumed:
-  `agent/disarm!` drops the routing entry BEFORE it closes the mailbox,
+  `agent/stop-flow!` drops the routing entry BEFORE it closes the mailbox,
   so an ordinary teardown is never visible here at all — the recipient
-  simply has no entry and the armer belt takes the wake. A channel
+  simply has no entry and db<->flow belt takes the wake. A channel
   still REACHABLE through the routing map and already closed was
   therefore closed by the one thing that closes a mailbox in place: the
   terminal-settlement fence in `seon.turn`, which stops the
@@ -357,7 +357,7 @@
 
   Dropping a wake there loses nothing, by this namespace's own
   doctrine: the wake carries no information, the MESSAGE is a durable
-  fact, and the fresh mailbox `arm!` creates after reboot is primed
+  fact, and the fresh mailbox `start-flow!` creates after reboot is primed
   once with a pass that derives every message from facts. What the
   router must not do is call the fence a new failure — the fault the
   fence raised is the whole report, and its own explanation message
@@ -467,7 +467,7 @@
   REGISTRATION REFUSES AN UNUSABLE DECLARATION POPULATION
   (`declarations-refusal`): no listened attribute, no inside attribute,
   or a listened attribute Datahike's `:avet` index does not hold. It
-  also refuses a population that can never ARM (`arming-refusal`), which
+  also refuses a population that can never START (`starting-refusal`), which
   is a separate derivation on purpose: the turn bound consumes the
   first, and only registration consumes the second. Each
   of those reads as health at four separate derivations, and one of them
@@ -478,12 +478,12 @@
   the routing map the supplied `channels` fn returns: `offer!`
   a payload-free wake into that agent's mailbox. No query, no
   derivation, no commit. A recipient with NO routing entry offers to the
-  ARMER instead — the belt that arms an agent created and addressed in
+  DB<->FLOW instead — the belt that starts an agent created and addressed in
   one commit.
 
-  AN AGENT CREATED AND NOT ADDRESSED IS ARMED BY ITS OWN CREATION.
-  `arming-attributes` derives the attributes declared `:seon.wake/arms
-  true`; asserting one offers the armer a payload-free wake. The belt
+  AN AGENT CREATED AND NOT ADDRESSED IS STARTED BY ITS OWN CREATION.
+  `starting-attributes` derives the attributes declared `:seon.wake/starts
+  true`; asserting one offers db<->flow a payload-free wake. The belt
   above only ever covered an agent some other datom happened to name,
   and every other case waited for the next boot with `next-agent-work`
   reporting work nobody could execute.
@@ -504,24 +504,24 @@
   benign; a closed render route is still a failure. Coalescing on every
   `(sliding-buffer 1)` target is safe by the standing argument: a wake
   says only look, and the woken pass derives everything from facts.
-  L8 holds by construction: the armer's
-  own work commits no wake-set attribute (arming writes nothing; the
+  L8 holds by construction: db<->flow's
+  own work commits no wake-set attribute (starting writes nothing; the
   prime is an `offer!`).
 
   ## Errors
 
-  A declaration population that cannot route or arm (`declarations-refusal`,
-  `arming-refusal`) is RETURNED as that refusal and nothing is registered;
+  A declaration population that cannot route or start (`declarations-refusal`,
+  `starting-refusal`) is RETURNED as that refusal and nothing is registered;
   the proc that registers the route records it as its fault."
   {:malli/schema [:=> [:cat :seon.cluster.wake/route-request]
                   [:or :seon.cluster.wake/key :seon.cluster.wake/unroutable-declarations-error]]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
            :seon.cluster.wake/fenced?
-           :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
+           :seon.flow/plan-channel :seon.cluster.wake/render-channel
            :seon.render.web/interest
            :seon.cluster.wake/key]}]
   (if-let [refusal (or (declarations-refusal (d/db connection))
-                       (arming-refusal (d/db connection)))]
+                       (starting-refusal (d/db connection)))]
     refusal
   (do
   (d/listen
@@ -532,7 +532,7 @@
      ;; declaration or listen pattern committed with a matching datom already
      ;; governs it (about 0.2 ms per report on default, 2026-09-26).
      (let [matchers (wake-matchers (:db-after report))
-           arming (arming-attributes (:db-after report))
+           starting (starting-attributes (:db-after report))
            published-interest (some-> interest deref)
            render? (volatile! (= :all published-interest))
            refused (volatile! [])
@@ -546,19 +546,19 @@
              (when (and (not @render?)
                         (contains? published-interest attribute))
                (vreset! render? true))
-             ;; AN AGENT CREATED WHILE THE CLUSTER RUNS IS ARMED BY THE
-             ;; SAME ARMER THAT ARMS BOOT-TIME AGENTS. Its creation
-             ;; asserts a declared arming attribute, so the armer takes
-             ;; one derive-all pass; there is no second arming path and
-             ;; no caller that arms its own agent.
-             (when (and (contains? arming attribute) (:added datom))
-               (async/offer! armer-channel ::wake))
+             ;; AN AGENT CREATED WHILE THE CLUSTER RUNS IS STARTED BY THE
+             ;; SAME DB<->FLOW THAT STARTS BOOT-TIME AGENTS. Its creation
+             ;; asserts a declared starting attribute, so db<->flow takes
+             ;; one derive-all pass; there is no second starting path and
+             ;; no caller that starts its own agent.
+             (when (and (contains? starting attribute) (:added datom))
+               (async/offer! plan-channel ::wake))
              (when-let [matcher (get matchers attribute)]
                (doseq [agent-eid (into (if (::schema? matcher) #{(:v datom)} #{})
                                       (keep #(% datom)) (::matches matcher))]
                  (if-let [channel (get (channels) agent-eid)]
                    (offer-wake ::mailbox channel #(fenced? agent-eid channel))
-                   (async/offer! armer-channel ::wake))))))
+                   (async/offer! plan-channel ::wake))))))
          (when (and @render? render-channel)
            (offer-wake ::render render-channel (constantly false)))
          (doseq [refusal @refused]

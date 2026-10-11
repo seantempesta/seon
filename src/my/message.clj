@@ -69,7 +69,7 @@
         sent (message/send! message connection agent-id)
         home (:seon.message/home sent)]
     ;; a recipient admitted on a listed branch that no host runs is resumed:
-    ;; hosted on the cluster roster (its armer derives the message), then written to
+    ;; hosted on the cluster roster (its db<->flow derives the message), then written to
     (if-not (and cluster home)
       sent
       (if-not (contains? (registry/roster (:seon.store/store cluster)) home)

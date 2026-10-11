@@ -1,7 +1,7 @@
 (ns ^{:seon.test/long
-      "48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof."}
+      "48.642 s slowest pool member: every test boots a real started cluster; fault-to-fact delivery is the proof."}
   seon.cluster.armed-test
-  "The armed layers of a booted cluster: root, the loop, the fault path.
+  "The started layers of a booted cluster: root, the loop, the fault path.
 
   These are the falsifiers for the wiring whose ABSENCE was the highest
   -value defect in the error grounding (D4): `start!` completed boot and
@@ -95,9 +95,9 @@
 ;;; What boot leaves standing
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/fixture-observation "The assertions observe boot-created root agents, maintenance tasks and armed graphs, absent from an ordinary branch fixture."} boot-seeds-the-root-agent-and-arms-the-loop
+(deftest ^{:seon.test/fixture-observation "The assertions observe boot-created root agents, maintenance tasks and started graphs, absent from an ordinary branch fixture."} boot-seeds-the-root-agent-and-starts-the-loop
   (with-cluster
-    "armed"
+    "started"
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)]
         (testing "fresh boot reaches READY"
@@ -127,16 +127,16 @@
                          [?task :seon.schedule.task/schedule ?schedule]
                          [?schedule :seon.schedule/id ?schedule-id]]
                        @connection))))
-        (testing "the ARMER proc is running on the cluster's own graph"
+        (testing "the DB<->FLOW proc is running on the cluster's own graph"
           (is (= :running
                  (:clojure.core.async.flow/status
                   (flow/ping-proc (:seon.flow/graph instance)
-                                  :seon.agent/armer)))))
-        (testing "and the root agent has its OWN armed graph (F1): the
-        armer's boot prime derived the agent set from facts and armed
+                                  :seon.flow/db<->flow)))))
+        (testing "and the root agent has its OWN started graph (F1): the
+        db<->flow's boot prime derived the agent set from facts and started
         one graph per agent, mailbox and turn procs both running"
           (let [routing (:seon.agent/routing instance)
-                entry (seon.cluster.agent/armed routing "root")]
+                entry (seon.cluster.agent/started routing "root")]
             (is (some? entry))
             (is (= :running
                    (:clojure.core.async.flow/status
@@ -152,12 +152,12 @@
           (let [handle (:seon.turn.loop/cluster instance)]
             (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.turn.loop/cluster
                                                     handle))
-            (is (= "armed" (:seon.cluster/name handle)))
+            (is (= "started" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle))
                 "the shipped config delivers core faults to root (owner ruling 2026-09-25 20:50Z)")
             (is (empty? (select-keys handle [:seon.ai/primary])))
             (let [settings (ai/settings
-                            (config/effective @connection "armed")
+                            (config/effective @connection "started")
                             (ai/agent-overlay @connection "root"))
                   targets (ai/targets (seon.schema/handed-projection) settings)]
               (is (str/starts-with?
@@ -220,7 +220,7 @@
         "idle"
         (fn [instance]
           (let [routing (:seon.agent/routing instance)
-                entry (seon.cluster.agent/armed routing "root")
+                entry (seon.cluster.agent/started routing "root")
                 derived (CountDownLatch. 1)
                 next-agent-work turn/next-agent-work
                 connection (:seon.boot/cluster-connection instance)
@@ -246,12 +246,12 @@
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
 
-(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot arming, which an already-populated branch never executes."} a-message-committed-during-boot-arming-is-conserved
+(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot starting, which an already-populated branch never executes."} a-message-committed-during-boot-start-is-conserved
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)
         next-agent-work turn/next-agent-work
-        arm! agent/arm!]
+        start-flow! agent/start-flow!]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
     (with-redefs
@@ -260,13 +260,13 @@
          (let [result (apply next-agent-work arguments)]
            (.countDown primed)
            result))
-       agent/arm!
+       agent/start-flow!
        (fn [request]
-         (let [entry (arm! request)]
-           ;; This is the historical loss window: the arm prime has
-           ;; completed, then a message commits before arm! returns.
+         (let [entry (start-flow! request)]
+           ;; This is the historical loss window: the start prime has
+           ;; completed, then a message commits before start-flow! returns.
            ;; Boot must already have registered the routing listener.
-           (test-support/await-event! primed "boot arm prime")
+           (test-support/await-event! primed "boot start prime")
            (test-support/assign-task! (:seon.db/connection (:seon.turn.loop/cluster request)) "root")
            (test-support/transacted!
                         (:seon.db/connection
@@ -311,7 +311,7 @@
       (let [connection (:seon.boot/cluster-connection instance)
             handle (:seon.turn.loop/cluster instance)
             routing (:seon.agent/routing instance)
-            entry (seon.cluster.agent/armed routing "root")
+            entry (seon.cluster.agent/started routing "root")
             graph (:seon.flow/graph entry)]
         ;; INJECTED AT THE REAL SEAM: the turn proc's transform calls
         ;; `next-agent-work`, so a throw there is a throw inside a
@@ -398,26 +398,26 @@
 (deftest ^{:seon.test/fixture-observation "The failure is injected at the first real boot resume transition, before an ordinary branch fixture has any running proc."} the-first-cluster-proc-fault-at-resume-becomes-a-fact
   (let [name "first-cluster-fault"
         root (str "tmp/armed-test/" name)
-        armer-step agent/armer-step
+        db<->flow agent/db<->flow
         injected? (atom false)]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
     (with-redefs
-      [agent/armer-step
+      [agent/db<->flow
        (fn
          ([]
-          (armer-step))
+          (db<->flow))
          ([args]
-          (armer-step args))
+          (db<->flow args))
          ([state transition]
           (if (and (= ::flow/resume transition)
                    (compare-and-set! injected? false true))
             (throw
              (ex-info "first cluster proc fault"
                       {}))
-            (armer-step state transition)))
+            (db<->flow state transition)))
          ([state input message]
-          (armer-step state input message)))
+          (db<->flow state input message)))
        ai/complete
        (fn [_projection _request]
          {:seon.ai/text "(seon.run/complete \"fault observed\")"})]
@@ -436,7 +436,7 @@
             (is (true? @injected?)
                 "the fault was injected at the first resume transition")
             (is (= "first cluster proc fault" (:seon.error/message fact)))
-            (is (= :seon.agent/armer (:seon.error/proc fact)))
+            (is (= :seon.flow/db<->flow (:seon.error/proc fact)))
             (is (= (:seon.db.process/id
                     (:seon.turn.loop/cluster instance))
                    (:seon.error/process fact))
@@ -445,7 +445,7 @@
             ;; Flow reports a failed transition and retains the proc's
             ;; pre-transition status (`:paused`). Restore the lifecycle that
             ;; this test deliberately perturbed so cluster teardown can send
-            ;; its armer-quiescence request before stopping the graph.
+            ;; its db<->flow-quiescence request before stopping the graph.
             (flow/resume (:seon.flow/graph instance))
             (boot/stop! instance)))))))
 
@@ -504,6 +504,6 @@
   ;; context's acquisition compared the next value with the database value it
   ;; held from its previous acquisition and read that value's index, whose
   ;; nodes no head reached any more and the collection had reclaimed.
-  ;; Each boot arms the loaded contracts afresh; the test scopes that to itself.
+  ;; Each boot starts the loaded contracts afresh; the test scopes that to itself.
   (test-support/preserving-instrumentation-state
    #(collected-cluster-scenario)))

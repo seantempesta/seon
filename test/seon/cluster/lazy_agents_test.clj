@@ -21,9 +21,9 @@
                    [["root" 'lazy.graph.root] ["idle" 'lazy.graph.idle]
                     ["waiting" 'lazy.graph.waiting]])))
      (let [candidates #{"root" "idle" "waiting"}]
-       (is (empty? (#'agent/agents-to-arm (db/db connection) candidates)))
+       (is (empty? (#'agent/agents-to-start (db/db connection) candidates)))
        (support/transacted! connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])
-       (is (= #{"root"} (#'agent/agents-to-arm (db/db connection) candidates)))
+       (is (= #{"root"} (#'agent/agents-to-start (db/db connection) candidates)))
        (support/transacted!
         connection
         [[:db.fn/call #'message/inbound-tx
@@ -31,4 +31,4 @@
            :seon.config.eval.result/max-string
            (:seon.config.eval.result/max-string config/defaults)}]])
        (is (= #{"root" "waiting"}
-              (#'agent/agents-to-arm (db/db connection) candidates)))))))
+              (#'agent/agents-to-start (db/db connection) candidates)))))))

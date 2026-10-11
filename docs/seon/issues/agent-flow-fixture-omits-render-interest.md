@@ -75,7 +75,7 @@ contracts. Its routing setup now invokes `test-support/seed-cluster!` before
 constructing the handle; the former ordering constructed that handle without
 the configuration it declared. The producer-output regression creates its
 agent through `agent/creation-tx`, arms the real graph, and observes the
-declared idle report through the started value retained by `agent/arm!`.
+declared idle report through the started value retained by `agent/start-flow!`.
 The focused gate passed 22 tests / 146 assertions. Final combined/platform
 verification is handed to the orchestrator. The broader loop, streaming,
 message, and generative-loop fixture inventory remains in this note; the

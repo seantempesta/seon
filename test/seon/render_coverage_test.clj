@@ -339,7 +339,7 @@
   ;; the render proc's virtual thread sat past 1024 frames of
   ;; project-node → attempt-html → prepare → project-node, so its transform
   ;; never ended, its `::flow/stop` transition never ran, and the completion
-  ;; `disarm-agents!` joins before releasing the branch connection never
+  ;; `stop-flows!` joins before releasing the branch connection never
   ;; arrived. `invoke-selected` now records what it is running and
   ;; `project-node` refuses a producer already on the chain, so the cycle
   ;; cannot be built.

@@ -16,5 +16,5 @@
  #:seon.task{:name "a-paused-boot-arms-every-open-attempt-and-runs-nothing"
              :kind :function
              :intent "Card R3. `start --paused` writes `:seon.cluster/execution :paused` before the reconciler's prime, so every open attempt's graph exists and answers ping while no transform, proof or model call runs; an ordinary start re-hosts open attempts on their branches from their rows (today an assigned branch agent is not re-hosted after a restart)."
-             :must-read #{seon.cluster.boot/start! seon.cluster/arm-agents! seon.cluster/recover-runs!}
+             :must-read #{seon.cluster.boot/start! seon.cluster/start-flows! seon.cluster/recover-runs!}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

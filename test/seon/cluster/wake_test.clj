@@ -60,7 +60,7 @@
 (defn- route-probe!
   "Register the production listener with this test's own channels.
   Returns the channels plus the registered key, so every test speaks to
-  the same wiring `arm-agents!` builds."
+  the same wiring `start-flows!` builds."
   ([connection mailbox]
    (route-probe! connection mailbox (fn [_ _] false)))
   ([connection mailbox fenced?]
@@ -71,7 +71,7 @@
   ([connection mailbox fenced? interest render]
    (let [recipient-eid (agent-eid connection)
          channels {recipient-eid mailbox}
-         armer (async/chan (async/sliding-buffer 1))
+         db<->flow (async/chan (async/sliding-buffer 1))
          search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
      ;; the connection's failure recorder, as boot installs it
@@ -79,7 +79,7 @@
      (alter-meta! (:wrapped-atom connection) assoc :listener-failure
                   #(async/offer! faults (:exception %)))
      {:mailbox mailbox
-      :armer armer
+      :db<->flow db<->flow
       :render render
       :search search
       :faults faults
@@ -87,7 +87,7 @@
                          :seon.cluster.wake/channels
                          (constantly channels)
                          :seon.cluster.wake/fenced? fenced?
-                         :seon.cluster.wake/armer-channel armer
+                         :seon.flow/plan-channel db<->flow
                          :seon.cluster.wake/render-channel render
                          :seon.render.web/interest interest
                          :seon.cluster.wake/search-channel search
@@ -148,7 +148,7 @@
                                 {:seon.message/id "order-b" :seon.message/content "b"
                                  :seon.message/to [:seon.agent/id "agent-a"]}])))))
      (let [mailbox (async/chan (async/sliding-buffer 1))
-           {:keys [key faults armer render search]} (route-probe! connection mailbox)
+           {:keys [key faults db<->flow render search]} (route-probe! connection mailbox)
            write! (fn [tx]
                     (let [result (db/transact! connection tx)]
                       (is (some? (:db-after result)))
@@ -179,7 +179,7 @@
          (is (nil? (async/poll! faults)))
          (finally
            (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
-           (doseq [channel [mailbox faults armer render search]] (async/close! channel))))))))
+           (doseq [channel [mailbox faults db<->flow render search]] (async/close! channel))))))))
 
 (deftest a-constrained-listen-matcher-reads-both-declared-datom-shapes
   ;; A compiled matcher is a predicate over ONE datom, and the system has two
@@ -291,7 +291,7 @@
             listened (wake/wake-attributes database)
             opening (wake/turn-opening-attributes database)
             inside (wake/inside-attributes database)
-            arming (wake/arming-attributes database)]
+            starting (wake/starting-attributes database)]
         (is (= (declaring :seon.wake/listen) listened)
             "the families that wake an agent, derived from their
              own declarations")
@@ -300,8 +300,8 @@
         (is (= (declaring :seon.wake/inside) inside)
             "and the population's own activity never refills the turn
              bound it spends")
-        (is (= (declaring :seon.wake/arms) arming)
-            "and the one that means a new agent exists to arm")
+        (is (= (declaring :seon.wake/starts) starting)
+            "and the one that means a new agent exists to start")
         ;; The RULINGS the declarations encode, each stated where a reader
         ;; meets it. These are membership claims about one family, never a
         ;; second copy of the set.
@@ -311,42 +311,42 @@
                  (not (contains? opening :seon.schedule.fire/agent)))
             "a schedule firing surfaces in the next context; it never
              pays for a model call by itself")
-        (is (and (contains? arming :seon.agent/id)
+        (is (and (contains? starting :seon.agent/id)
                  (not (contains? listened :seon.agent/id)))
-            "creating an agent arms it and wakes nothing: the armer
-             derives (agents in facts) - (armed set), so the datom's
+            "creating an agent starts it and wakes nothing: db<->flow
+             derives (agents in facts) - (started set), so the datom's
              value is not a recipient and nothing is routed")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C3 — the handler's two absolute prohibitions, live
 ;;; ---------------------------------------------------------------------------
 
-(deftest an-unrouted-recipient-reaches-the-armer
-  ;; TWO WAYS TO THE ARMER, and neither is a second arming path.
+(deftest an-unrouted-recipient-reaches-db<->flow
+  ;; TWO WAYS TO THE DB<->FLOW, and neither is a second starting path.
   ;;
-  ;; 1. CREATION ITSELF. `:seon.agent/id` is declared `:seon.wake/arms`,
-  ;;    so committing an agent offers the armer a payload-free wake. Before
+  ;; 1. CREATION ITSELF. `:seon.agent/id` is declared `:seon.wake/starts`,
+  ;;    so committing an agent offers db<->flow a payload-free wake. Before
   ;;    that declaration an agent created and not addressed waited for the
   ;;    next boot while `next-agent-work` reported work nobody could run
   ;;    (`a-worker-started-while-the-cluster-runs-is-never-armed`).
   ;; 2. THE BELT. An agent created and addressed in ONE commit has no
   ;;    routing entry yet, so its message ALSO falls through here.
   ;;
-  ;; Both end in the same derive-all pass: (agents in facts) − (armed set).
+  ;; Both end in the same derive-all pass: (agents in facts) − (started set).
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
-            {:keys [armer key]} (route-probe! connection mailbox)]
+            {:keys [db<->flow key]} (route-probe! connection mailbox)]
         (try
           (test-support/transacted! connection (test-support/agent-tx @connection "agent-b"))
-          (is (some? (test-support/await-event! armer "creation arm wake"))
-              "creating an agent asserts its arming attribute, so the
-               armer takes a pass without anyone addressing it")
+          (is (some? (test-support/await-event! db<->flow "creation start wake"))
+              "creating an agent asserts its starting attribute, so the
+               db<->flow takes a pass without anyone addressing it")
           (test-support/transacted!
                        connection
                        [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello"}])
-          (is (some? (test-support/await-event! armer "armer wake"))
-              "the armer derives (agents in facts) − (armed set)")
+          (is (some? (test-support/await-event! db<->flow "db<->flow wake"))
+              "db<->flow derives (agents in facts) − (started set)")
           (is (nil? (async/poll! mailbox))
               "and agent-a's mailbox is untouched — the wake's VALUE is
                the recipient")
@@ -671,7 +671,7 @@
               (let [recipient-eid (agent-eid connection)
                     mailbox (async/chan 64)
                     channels {recipient-eid mailbox}
-                    armer (async/chan 64)
+                    db<->flow (async/chan 64)
                     ;; a COUNTING render channel: production slides,
                     ;; because a wake says only "look" and coalescing is
                     ;; free — here every delivery is kept so the
@@ -683,7 +683,7 @@
                           :seon.cluster.wake/channels
                           (constantly channels)
                           :seon.cluster.wake/fenced? (fn [_ _] false)
-                          :seon.cluster.wake/armer-channel armer
+                          :seon.flow/plan-channel db<->flow
                           :seon.cluster.wake/render-channel render
                           :seon.render.web/interest (atom :all)
                           :seon.cluster.wake/fault-channel faults
@@ -695,7 +695,7 @@
                                                        (str "pm-" index)))
                       ;; a bare agent creation asserts its ARMING
                       ;; attribute: it routes to nobody's mailbox and
-                      ;; offers the armer exactly one wake
+                      ;; offers db<->flow exactly one wake
                       :agent (db/transact! connection
                                          (test-support/agent-tx @connection (str "pa-" index)))
                       :run (db/transact! connection (run-tx
@@ -707,15 +707,15 @@
                                     n)))
                         rendered (drain render)
                         mailed (drain mailbox)
-                        armed (drain armer)]
+                        started (drain db<->flow)]
                     (and
                      ;; one render wake per REPORT, every report
                      (= (count commits) rendered)
                      ;; routing is unchanged by the added delivery
                      (= (count (filter #{:message} commits)) mailed)
-                     ;; and the armer hears every agent creation, and
+                     ;; and db<->flow hears every agent creation, and
                      ;; nothing else: a turn's own commits reach neither
-                     (= (count (filter #{:agent} commits)) armed)
+                     (= (count (filter #{:agent} commits)) started)
                      ;; and no fault was raised on any healthy path
                      (nil? (async/poll! faults))))
                   (finally

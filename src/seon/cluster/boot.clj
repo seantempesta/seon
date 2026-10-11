@@ -125,7 +125,7 @@
                      (assoc instance :seon.flow/work-launcher work-launcher))
            instance (publish!
                      (merge instance
-                            (cluster/arm-agents! instance connection cluster-name)))]
+                            (cluster/start-flows! instance connection cluster-name)))]
        (publish! (cluster/serve! instance boot-dials))))))
 
 (defn- changed-source-paths
@@ -563,7 +563,7 @@
 
   ## Errors
 
-  - A join `seon.cluster.host/release-children!` or `seon.cluster/disarm-agents!` misses is answered (the await
+  - A join `seon.cluster.host/release-children!` or `seon.cluster/stop-flows!` misses is answered (the await
     owner's timeout naming the missing exit) with the instance restored in
     the roster: nothing after the join is released."
   {:malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
@@ -584,7 +584,7 @@
       ;; hosts are newer than the cluster's own layers: they stop and release
       ;; their branch connections first, so no retired cluster keeps them
       (if-let [missed (or (some-> (:seon.agent/routing instance) host/release-children!)
-                          (cluster/disarm-agents! instance))]
+                          (cluster/stop-flows! instance))]
         (do (swap! running-instances assoc name instance)
             missed)
         (try

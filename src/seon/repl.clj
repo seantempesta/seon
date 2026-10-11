@@ -22,7 +22,7 @@
 ;;; LOAD-CYCLE BOUNDARY. `seon.cluster.agent` requires `seon.repl`
 ;;; transitively, so this namespace cannot require it back.
 (defonce ^:private cluster-agent-armed
-  (delay (requiring-resolve 'seon.cluster.agent/armed)))
+  (delay (requiring-resolve 'seon.cluster.agent/started)))
 
 (schema.edn/load! {})
 

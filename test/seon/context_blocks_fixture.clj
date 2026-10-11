@@ -178,7 +178,7 @@
         request {:seon.turn.loop/cluster handle
                  :seon.agent/routing routing :seon.agent/id "juniper"}]
     (try
-      (agent/arm! request)
+      (agent/start-flow! request)
       (let [id (submit! handle routing schema-source)
             errors (db/q '[:find [?error ...] :in $ ?id
                            :where [?turn :seon.turn/id ?id]
@@ -186,11 +186,11 @@
                                   [?evaluation :seon.cluster.eval/error ?error]] @connection id)]
         (when (seq errors)
           (throw (ex-info (str "Juniper schema declaration failed: " (pr-str errors)) {:seon.test/errors errors}))))
-      (agent/disarm! request)
+      (agent/stop-flow! request)
       (seed! connection settings-fn)
-      (finally (agent/disarm! request)))
+      (finally (agent/stop-flow! request)))
     (before-clear)
-    (agent/disarm! request)
+    (agent/stop-flow! request)
     (clear-history! connection)
     {:seon.test/orders (count orders)})))
 
@@ -239,10 +239,10 @@
            (async/put! (:seon.cluster.wake/channel handle) {:seon.agent/quiesce ack})
            (when-not (= :seon.agent/quiesced
                         (first (async/alts!! [ack (async/timeout bound)])))
-             (throw (ex-info "Fixture armer barrier did not arrive"
+             (throw (ex-info "Fixture db<->flow barrier did not arrive"
                              {:seon.cluster/name cluster-name})))
            (finally (async/close! ack)))))
      settings-fn)
-    (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
+    (agent/start-flow! {:seon.turn.loop/cluster handle :seon.agent/routing routing
                  :seon.agent/id "juniper"})
     (declared! handle))))

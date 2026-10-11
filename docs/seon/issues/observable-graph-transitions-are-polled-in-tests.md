@@ -16,11 +16,11 @@ publish directly.
 ## Evidence
 
 `test/seon/cluster/agent_test.clj:153-160` defines a 25 ms polling loop with 12
-remaining call sites. The hard core observes idle-pass counts and armer/routing
-settlement. `seon.cluster.agent/arm!` receives Flow's started map, including
+remaining call sites. The hard core observes idle-pass counts and db<->flow/routing
+settlement. `seon.cluster.agent/start-flow!` receives Flow's started map, including
 the report channel, but omits it from the armed handle
 (`src/seon/cluster/agent.clj:376-390`). The open
-`:seon.cluster.agent/armed` schema likewise has no report channel
+`:seon.cluster.agent/started` schema likewise has no report channel
 (`resources/seon/schema.edn:106`). Tests therefore cannot await those named
 graph events through the public handle.
 Render and turn fixtures also loop on `flow/ping`.

@@ -16,7 +16,7 @@
                       :seon.cluster.wake/channels]
                      [:seon.cluster.wake/fenced?
                       :seon.cluster.wake/fenced?]
-                     [:seon.cluster.wake/armer-channel
+                     [:seon.flow/plan-channel
                       :seon.flow/channel]
                      [:seon.cluster.wake/render-channel
                       {:optional true

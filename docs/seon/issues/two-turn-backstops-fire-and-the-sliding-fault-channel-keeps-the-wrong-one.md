@@ -10,7 +10,7 @@ date: 2026-09-08
 
 ## What
 
-`seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop`
+`seon.cluster.agent-test/stop-flow-has-a-declared-loud-turn-completion-backstop`
 asserts that the failure `disarm!` throws is the same value that reached the
 agent's fault channel. After the listened-attributes change it fails, twice,
 and the two halves say the same thing:

@@ -42,11 +42,11 @@
  :children [:set {:seon.db/component true :seon.db/component-schema :seon.task/task
                   :description "The child tasks a parent owns (runtime-follows-db §2): a parent never runs and is done when no leaf under it is open (seon.task/done?); its intent, must-read and evidence are what its children read. Authored in task EDN as lookup refs [:seon.task/sym ns/name]."}
             :seon.db/ref]
- :needs [:set {:seon.db/index true :seon.wake/arms true
+ :needs [:set {:seon.db/index true :seon.wake/starts true
                :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
          :seon.db/ref]
  :instructions [:string {:min 1 :description "The data a task's stage type renders for its worker beyond its intent (a test run's test set and program basis, a problem's class)."}]
- :execution [:enum {:seon.db/index true :seon.wake/arms true
+ :execution [:enum {:seon.db/index true :seon.wake/starts true
                     :description "The task's intent (runtime-follows-db §3); ingestion and create! write :held on a task with none, and only :running is launched (no inheritance from a parent). :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
              :held :running :paused :stopped :cancelled]
  :cron [:string {:min 1 :description "When a recurring task fires: a cron expression, parsed by the schedule's cron library (runtime-follows-db §6)."}]

@@ -266,7 +266,7 @@ seon.cluster.store	collection-lists-the-store-keys-twice	D	P9	no	runtime->file	p
 seon.cluster.store	each-commit-forces-the-directory-once-per-node	D	P9	no	file	fixed on konserve fork 08465d6, unpushed: push + adopt patch at a root restart
 seon.cluster.store	each-commit-serializes-its-root-record-twice	D	P9	no	file	Datahike fork commit!
 seon.cluster.store	index-roots-lose-their-subtree-counts	D	P9	no	file	PSS fix upstream
-seon.cluster	a-missed-quiescence-keeps-the-route-listener	D	P9	no	file	disarm-agents! stop path
+seon.cluster	a-missed-quiescence-keeps-the-route-listener	D	P9	no	file	stop-flows! stop path
 seon.cluster	adoption-readopts-what-the-jvm-loaded	D	P9	no	file	start --head adoption cost
 seon.cluster	adoption-write-costs-sixteen-seconds	D	P9	no	file	adoption write cost
 seon.cluster	boot-publication-phases-are-invisible	D	P9	no	file	boot publication observability

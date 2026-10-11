@@ -4,12 +4,12 @@
   `host!` composes existing owners: `acquire-context!` acquires the named
   branch into the child roster the cluster's roster records, `creation-tx`
   creates the agent on the cluster (naming its home branch) and on that
-  branch, and the ordinary `armer-step` runs in a
+  branch, and the ordinary `db<->flow` runs in a
   graph of its own on the execution's roster, owning the branch's
   `wake/route!` listener. The roster holds the live objects under `::host`;
   admission is the agent row's `:seon.agent/admission-closed-tx`, which the
   run writer checks. `retire!` closes admission on both rows and stops
-  through `seon.cluster/disarm-agents!`, unchanged."
+  through `seon.cluster/stop-flows!`, unchanged."
   (:require [clojure.core.async :as async]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -73,7 +73,7 @@
 (defn- start!
   "Admit the agent as homed on the execution's branch, on the cluster and on
   that branch (each writer decides, `home-call`), then start the branch's
-  armer graph; the armer's init registers the route listener."
+  db<->flow graph; db<->flow's init registers the route listener."
   {:malli/schema [:=> [:cat ::request :seon.agent/execution-handle]
                   [:or ::host :seon.db/transaction-refused-error]]}
   [{cluster-handle :seon.turn.loop/cluster agent-id :seon.agent/id namespace-name :seon.ns/name}
@@ -92,29 +92,29 @@
                       [(:seon.db/connection cluster-handle) connection])]
    (if refused
     refused
-    (let [armer-channel (async/chan (async/sliding-buffer 1))
+    (let [plan-channel (async/chan (async/sliding-buffer 1))
           handle (merge cluster-handle
                         (select-keys execution [:seon.db/connection :seon.sci.eval/ctx :seon.sci.eval/base-ctx
                                                 :seon.env/environment :seon.agent/routing :seon.agent/branch])
-                        {;; the cluster's own handle, which the agents this armer arms carry
+                        {;; the cluster's own handle, which the agents this db<->flow starts carry
                          :seon.agent/context-source (or (:seon.agent/context-source cluster-handle) cluster-handle)
                          :seon.sci.eval/projection-state
                          (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
-                         :seon.cluster.wake/channel armer-channel
+                         :seon.cluster.wake/channel plan-channel
                          :seon.turn.loop/stream-channel (async/chan (async/sliding-buffer 1))
                          :seon.turn.loop/completion (async/promise-chan)})
           route {:seon.cluster.wake/connection connection
                  :seon.cluster.wake/channels (fn [] (agent/channels roster))
                  :seon.cluster.wake/fenced? (fn [eid channel] (agent/fenced-route? roster eid channel))
-                 :seon.cluster.wake/armer-channel armer-channel
+                 :seon.flow/plan-channel plan-channel
                  :seon.cluster.wake/key :seon.agent/route}
           {graph :seon.flow/graph executor :seon.flow/executor}
           (flow/start-graph!
            {:seon.flow/projection-state (:seon.sci.eval/projection-state handle)
             :seon.flow/graph-definition
-            {:procs {:seon.agent/armer
+            {:procs {:seon.flow/db<->flow
                      {:proc (flow/var-process
-                             #'agent/armer-step :io
+                             #'agent/db<->flow :io
                              (env/carry {:seon.turn.loop/cluster handle :seon.agent/routing roster
                                          :seon.cluster.wake/route route}
                                         (env/of handle)))}}
@@ -134,7 +134,7 @@
   "Host `agent-id` on the existing `branch`, once per branch execution.
 
   Concurrent callers share one start: the execution's roster reserves `::host`
-  with a delay, as `arm!` reserves an arming. A failed start clears its claim
+  with a delay, as `start-flow!` reserves an starting. A failed start clears its claim
   and rethrows whole; a refused admission clears its claim and answers the
   writer's refusal. A branch hosts one agent: a request naming another agent
   than the one running there answers `::refused-error` by name. Answers the
@@ -173,7 +173,7 @@
   its execution is released, else the missed join's timeout with the host held."
   {:malli/schema [:=> [:cat ::host] [:or :nil :seon.await/timeout-error]]}
   [{roster :seon.agent/routing execution ::execution :as host}]
-  (or (cluster/disarm-agents! host)
+  (or (cluster/stop-flows! host)
       (do (swap! roster dissoc ::host)
           (agent/release-context! execution)
           nil)))
@@ -218,8 +218,8 @@
 
   After the admission commit the run writer refuses every later run for the
   agent by name; runs that committed first are joined by
-  `seon.cluster/disarm-agents!` (armer quiescence removes the route listener,
-  agent graphs join, the armer graph joins, all under one deadline). A missed
+  `seon.cluster/stop-flows!` (db<->flow quiescence removes the route listener,
+  agent graphs join, db<->flow graph joins, all under one deadline). A missed
   join is answered (the await owner's timeout naming the missing exit) with
   admission closed and the execution held, so a retry after exit completes.
   Then the execution is released. A refused read or a refused admission close

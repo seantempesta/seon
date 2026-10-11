@@ -3009,7 +3009,7 @@
     result))
 
 ;;; ---------------------------------------------------------------------------
-;;; The armed layers — the fault consumer, the root agent, and the loop
+;;; The started layers — the fault consumer, the root agent, and the loop
 ;;; ---------------------------------------------------------------------------
 
 ;;; THE ROOT AGENT. One entity, ensured at boot through the same atomic
@@ -3185,7 +3185,7 @@
 (defn seed-root-agent!
   "Ensure root and its agent-owned maintenance initialization exist.
 
-  Boot runs this before any agent is armed and root is never retracted, so a
+  Boot runs this before any agent is started and root is never retracted, so a
   pre-read of the current value cannot change before the writer acts: an
   existing root and complete maintenance seed commit no empty transaction
   (two per resume, 1,308 -> 386 ms, lane-resume-in-seconds-2026-09-23)."
@@ -3241,7 +3241,7 @@
         wanted (or (:seon.config.web/port dials)
                    (web/derived-port cluster-name))
         served (web/start!
-                ;; THE VIEW HALF comes from the armed layer, not from
+                ;; THE VIEW HALF comes from the started layer, not from
                 ;; here: the mult, the watched registration, and the
                 ;; render wake channel all belong to the render proc's
                 ;; pipeline, and the web service only taps and offers.
@@ -3355,21 +3355,21 @@
               #(.run ^Runnable command)))))))))
 
 (defn- cluster-graph-definition
-  "The cluster's OWN small graph (F1 R7, F2 §1): armer, render, and the
+  "The cluster's OWN small graph (F1 R7, F2 §1): db<->flow, render, and the
   render proc — a schedule proc later. One graph per cluster,
-  so the components that arm agents and derive pages have exactly the
+  so the components that start agents and derive pages have exactly the
   ping/error/pause uniformity every other proc has. The render proc's
-  channels are external ports (created by `arm-agents!`, carried on the
+  channels are external ports (created by `start-flows!`, carried on the
   handle and the view), so the graph definition stays pure data."
   [handle routing view]
   (let [environment (env/of handle)]
-    {:procs {:seon.agent/armer
+    {:procs {:seon.flow/db<->flow
              {:proc (flow/var-process
-                     #'cluster.agent/armer-step :io
+                     #'cluster.agent/db<->flow :io
                      (env/carry {:seon.turn.loop/cluster handle
                                  :seon.agent/routing routing
                                  ;; THE ROUTING DELIVERY (F1 §4): one listener per
-                                 ;; cluster, living exactly as long as the armer proc.
+                                 ;; cluster, living exactly as long as the db<->flow proc.
                                  :seon.cluster.wake/route
                                  {:seon.cluster.wake/connection (:seon.db/connection handle)
                                   :seon.cluster.wake/channels
@@ -3377,7 +3377,7 @@
                                   :seon.cluster.wake/fenced?
                                   (fn [agent-eid channel]
                                     (cluster.agent/fenced-route? routing agent-eid channel))
-                                  :seon.cluster.wake/armer-channel (:seon.cluster.wake/channel handle)
+                                  :seon.flow/plan-channel (:seon.cluster.wake/channel handle)
                                   :seon.cluster.wake/render-channel
                                   (:seon.render.web/render-channel view)
                                   :seon.render.web/interest (:seon.render.web/interest view)
@@ -3393,17 +3393,17 @@
      :conns []}))
 
 
-(defn arm-agents!
-  "Arm the cluster's shared graph, fan-out, routing listener and prime.
-  The armer acquires agent graphs only for current work or stored schedules.
+(defn start-flows!
+  "Start the cluster's shared graph, fan-out, routing listener and prime.
+  db<->flow acquires agent graphs only for current work or stored schedules.
   Idle agents remain facts until a wake or schedule needs their graph. A
   scheduled agent needs its existing timer proc even when it has no turn;
   its SCI program remains unacquired until evaluation. Recovery has already
   closed interrupted turns, and pending durable work is derived by the prime.
 
-  ORDER IS THE CONTRACT. The cluster graph starts first, and its armer
+  ORDER IS THE CONTRACT. The cluster graph starts first, and its db<->flow
   proc registers the routing listener as it starts (the listener's
-  lifetime is that proc's); the armer prime comes LAST, after the
+  lifetime is that proc's); db<->flow's prime comes LAST, after the
   listener, so an agent created between the
   prime's derivation and the listener's registration cannot exist —
   anything committed earlier is in the facts the prime's pass reads.
@@ -3411,21 +3411,21 @@
   cluster was dropped by a sliding buffer nobody read."
   [instance connection cluster-name]
   (let [process (process-identity (:seon.boot/advertisement instance))
-        armer-channel (async/chan (async/sliding-buffer 1))
+        plan-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
         io-executor
         (projection-executor
          (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance)))
         ;; The cluster owns its agents' routing; its handle carries it so each
-        ;; live acquisition, and so each arm, holds the same one.
+        ;; live acquisition, and so each start, holds the same one.
         routing (cluster.agent/routing)
         handle
         (assoc
          (loop-handle connection cluster-name process
                       (:seon.sci.eval/ctx instance)
                       (:seon.flow/work-launcher instance)
-                      armer-channel stream-channel completion)
+                      plan-channel stream-channel completion)
          :seon.flow/executor io-executor
          :seon.agent/routing routing)
         ;; the render pipeline's external ports (F2 §1): the wake
@@ -3472,21 +3472,21 @@
            (fn [{graph :seon.flow/graph}]
              (swap! routing assoc :seon.flow/graph graph))}})
         pages-mult (::pages-mult joins)]
-    ;; The armer proc registered the routing listener as the graph started.
+    ;; The db<->flow proc registered the routing listener as the graph started.
     ;; BOOT IS ONE WAKE through the ordinary render path. The listener is
     ;; already registered and the cold interest is `:all`, so commits before
     ;; this offer are covered by the same newest-database derivation as every
     ;; later pass.
     (async/offer! render-channel ::wake/render)
-    ;; Derive agents with work or schedules through the ordinary armer. The listener is already registered, so every arm's
+    ;; Derive agents with work or schedules through the ordinary db<->flow. The listener is already registered, so every start's
     ;; mailbox prime and every commit concurrent with it are conserved.
     ;; Direct invocation publishes readiness: a returned instance is
-    ;; armed, while the running proc owns every later wake.
-    (cluster.agent/armer-step
-     (cluster.agent/armer-step
+    ;; started, while the running proc owns every later wake.
+    (cluster.agent/db<->flow
+     (cluster.agent/db<->flow
       {:seon.turn.loop/cluster handle
        :seon.agent/routing routing})
-     :seon.agent/arm
+     :seon.flow/plan
      :seon.agent/boot)
     {:seon.turn.loop/cluster handle
      :seon.flow/graph graph
@@ -3500,15 +3500,15 @@
             :seon.agent/routing routing
             :seon.render.web/pages-mult pages-mult)}))
 
-(defn disarm-agents!
-  "Unwind the armed layers of ONE instance, newest first.
-  An explicit armer quiescence event removes the routing listener, so
+(defn stop-flows!
+  "Unwind the started layers of ONE instance, newest first.
+  An explicit db<->flow quiescence event removes the routing listener, so
   nothing new is routed while the graphs unwind, proves every
-  earlier arm wake has settled and closes that input, while the render
+  earlier start wake has settled and closes that input, while the render
   proc remains available to active agent turns. Each agent graph is
   then joined; only after those turns exit does the cluster graph stop
   and the fan-out detach its taps. Each layer is released only if it
-  stands — a degraded instance disarms the same way.
+  stands — a degraded instance stops the same way.
 
   ORDERLY STOP JOINS THE PROC THREADS. `flow/stop` only queues
   `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
@@ -3551,24 +3551,24 @@
                (web/stop! (merge served (select-keys view [:seon.render.web/registration
                                                            :seon.config.eval/time-limit-ms])))))
      (when handle
-       (let [armer-channel (:seon.cluster.wake/channel handle)
+       (let [plan-channel (:seon.cluster.wake/channel handle)
              quiesced (async/promise-chan)]
-         (when-not (async.protocols/closed? armer-channel)
-           (or (missed ::armer-quiesced
+         (when-not (async.protocols/closed? plan-channel)
+           (or (missed ::plan-quiesced
                        (await/await!
                         {:seon.await/bound bound
                          :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
-                                                 :seon.error/operation `disarm-agents!
-                                                 :seon.error/expected ::armer-quiesced}
+                                                 :seon.error/operation `stop-flows!
+                                                 :seon.error/expected ::plan-quiesced}
                          :seon.await/port-operations
-                         [[armer-channel {:seon.agent/quiesce quiesced}] quiesced]
+                         [[plan-channel {:seon.agent/quiesce quiesced}] quiesced]
                          :seon.await/accept? #(= :seon.agent/quiesced %)}))
                ;; Closure is the observable completion fact a later stop derives
-               ;; from. Publish it only after the armer acknowledged quiescence.
-               (async/close! armer-channel)))))
+               ;; from. Publish it only after db<->flow acknowledged quiescence.
+               (async/close! plan-channel)))))
      (when-let [routing (:seon.agent/routing instance)]
-       (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
-         (cluster.agent/disarm! {:seon.agent/id agent-id
+       (doseq [agent-id (sort (keys (:seon.agent/started @routing)))]
+         (cluster.agent/stop-flow! {:seon.agent/id agent-id
                                  :seon.agent/routing routing
                                  :seon.await/deadline-nanos
                                  (:seon.await/deadline-nanos bound)})))
@@ -3582,7 +3582,7 @@
                 (into (select-keys instance [:seon.flow/executor])
                       {:seon.await/bound bound
                        :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
-                                               :seon.error/operation `disarm-agents!
+                                               :seon.error/operation `stop-flows!
                                                :seon.error/expected ::cluster-graph-exited}}))))
      (do
        (some-> (:seon.turn.loop/stream-channel handle) async/close!)

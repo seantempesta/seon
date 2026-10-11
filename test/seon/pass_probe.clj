@@ -242,7 +242,7 @@
      :seon.boot/cluster-name (:seon.cluster/name handle)
      :seon.agent/id agent-id
      ::host hosted
-     ::reports (get-in @routing [:seon.agent/armed agent-id :seon.flow/started :report-chan])
+     ::reports (get-in @routing [:seon.agent/started agent-id :seon.flow/started :report-chan])
      ::store (:store @connection)
      ::base (get-in @connection [:config :store :path])
      ::branches (into #{live} (keep identity) [(get-in @connection [:config :branch])])}))

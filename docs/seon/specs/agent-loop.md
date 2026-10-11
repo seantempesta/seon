@@ -136,7 +136,7 @@ static prefix and the history are cache hits on every call after their first (`:
 an overlay per agent branch advanced by changed definitions, one fork advanced in place). Context projection,
 prompt, capture and refresh: deleted (`55ede54a9`, `94df1f74a`); the history is read per model call from the agent's call
 rows and the block rendered per call (§3.4).
-Seven machinery commits: one. The surviving writer's floor (13-14 MB) and the armer, provider and query residual
+Seven machinery commits: one. The surviving writer's floor (13-14 MB) and db<->flow, provider and query residual
 (3-7 MB) are accepted as measured. Work derivation: once per eval request. No competency model run starts until
 `seon.pass-probe/run-model` reports a model eval request within the owner's 20-40 MB with no owner 10× over its expectation.
 

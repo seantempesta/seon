@@ -92,7 +92,7 @@ work already agreed here are pre-approved, and a new design question waits.
    task owns step tasks (`:seon.task/children`), siblings run in parallel unless one `:seon.task/needs` another, a parent
    never runs; each step carries its own `:seon.task/instructions` as data; the frontier ("everything that should be
    running") is two reads (`seon.task/frontier`, design-probes P1); intents `:seon.task/execution` ∈ `#{:held :running :paused :stopped
-   :cancelled}` plus cluster `running/paused`, each one action of the reconciler (`seon.cluster.agent/armer-step`
+   :cancelled}` plus cluster `running/paused`, each one action of the reconciler (`seon.cluster.agent/db<->flow`
    generalized), the only thing that starts graphs, under the dial `:seon.config.agent/max-running` (default 4; per-agent
    cost in context MB and ms to start is a measured target of the path); the attempt row is the launch's write and the
    red-first proofs run in the agent's first pass; one clock proc fires cron tasks (a function firing for maintenance and

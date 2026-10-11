@@ -2420,7 +2420,7 @@
    ;; THE PORTS ARE A DEPENDENCY, SO SAY SO. A nil in-port does not
    ;; fail: Flow leaves the proc :running with an unreadable port, it
    ;; takes nothing forever, and — measured — its stop transition never
-   ;; runs either, so `disarm-agents!` waits on a completion that can
+   ;; runs either, so `stop-flows!` waits on a completion that can
    ;; never arrive. A silent wedge that turns into a hang at shutdown
    ;; is exactly the class the readiness rule exists to kill, so the
    ;; proc refuses to be built without the channels it reads.

@@ -10,13 +10,13 @@ tags: [issue, runtime, flow, agent, wave/flow-join]
 ## Problem
 
 Cluster teardown correctly waits on component-owned completion events, but
-several joins still omit the loud bounded half. One missing armer, proc, or
+several joins still omit the loud bounded half. One missing db<->flow, proc, or
 launcher publication can make `cluster/stop!` park forever after the per-agent
 disarm repair has succeeded.
 
 ## Evidence
 
-- `src/seon/cluster.clj:2363-2386` blocks on armer admission and quiescence.
+- `src/seon/cluster.clj:2363-2386` blocks on db<->flow admission and quiescence.
 - `src/seon/cluster.clj:2391-2402` blocks on cluster-loop, render, and search
   stop completions.
 - `src/seon/flow.clj:696-720` blocks on launcher drain and proc stop.
@@ -42,7 +42,7 @@ assertions.
 
 The class remains open. These members were held rather than edited:
 
-- `src/seon/cluster.clj:2437-2472`: armer admission/quiescence and the cluster
+- `src/seon/cluster.clj:2437-2472`: db<->flow admission/quiescence and the cluster
   loop, render, and search completion joins. This file is protected by the
   owner task.
 - `src/seon/flow.clj:1159-1170`: `stop-error-fanout!` still takes its proc
@@ -58,6 +58,6 @@ it does not misreport these protected members as resolved.
 
 Committed-source verification with `git show HEAD:<path>` and `git log`; no new JVM launch.
 
-UNVERIFIABLE-WITHOUT-GATE dynamically; the unbounded joins remain visible at HEAD. `src/seon/cluster.clj:2823` uses blocking armer admission, `:2832` takes quiescence, and `:2853` joins cluster/render/search completions with `<!!`. `src/seon/flow.clj:1271` and `:1275` still take both fault-fanout completion channels without `seon.await`. The work-launcher joins at `src/seon/flow.clj:740` and `:746` are bounded, as the prior partial repair states. No stop or never-settling fixture was invoked on default. Required namespaces: `seon.cluster.boot-test` and `seon.flow-test`, with a withheld completion publisher and the declared lifecycle bound; running source grep is not a shutdown reproduction. Keep blocker for reliable lifecycle/recovery; fix the existing joins with the carried bound, not a new timeout constant.
+UNVERIFIABLE-WITHOUT-GATE dynamically; the unbounded joins remain visible at HEAD. `src/seon/cluster.clj:2823` uses blocking db<->flow admission, `:2832` takes quiescence, and `:2853` joins cluster/render/search completions with `<!!`. `src/seon/flow.clj:1271` and `:1275` still take both fault-fanout completion channels without `seon.await`. The work-launcher joins at `src/seon/flow.clj:740` and `:746` are bounded, as the prior partial repair states. No stop or never-settling fixture was invoked on default. Required namespaces: `seon.cluster.boot-test` and `seon.flow-test`, with a withheld completion publisher and the declared lifecycle bound; running source grep is not a shutdown reproduction. Keep blocker for reliable lifecycle/recovery; fix the existing joins with the carried bound, not a new timeout constant.
 
 surface: store-process

@@ -75,7 +75,7 @@ Every observation available to an operator reported health while the loop was
 dead:
 
 - `mcp__seon__runtime_status` reports only the cluster plumbing procs
-  (`seon.agent/armer`, `seon.render.web/render`, `seon.search/index`), all
+  (`seon.flow/db<->flow`, `seon.render.web/render`, `seon.search/index`), all
   `ping "reply"`. It shows **no agent procs at all**, so a dead turn proc is
   invisible to the one tool an operator reaches for first.
 - `seon.oversight/flow-status` shows the worker `armed`, with

@@ -839,7 +839,7 @@
                          @connection)
             alice (async/chan (async/sliding-buffer 1))
             bob (async/chan (async/sliding-buffer 1))
-            armer (async/chan (async/sliding-buffer 1))
+            db<->flow (async/chan (async/sliding-buffer 1))
             render (async/chan (async/sliding-buffer 1))
             faults (async/chan (async/sliding-buffer 1))
             key (wake/route!
@@ -847,7 +847,7 @@
                   :seon.cluster.wake/channels
                   (fn [] {alice-eid alice bob-eid bob})
                   :seon.cluster.wake/fenced? (fn [_ _] false)
-                  :seon.cluster.wake/armer-channel armer
+                  :seon.flow/plan-channel db<->flow
                   :seon.cluster.wake/render-channel render
                   :seon.render.web/interest (atom :all)
                   :seon.cluster.wake/fault-channel faults

@@ -12,7 +12,7 @@
                      [:seon.ns/name :seon.ns/name]],
                     :host
                     [:map
-                     {:description "A running host: the branch handle, its roster, the hosted agent, the acquired execution and the armer graph that owns the branch's route listener."}
+                     {:description "A running host: the branch handle, its roster, the hosted agent, the acquired execution and the db<->flow graph that owns the branch's route listener."}
                      [:seon.turn.loop/cluster :seon.turn.loop/cluster]
                      [:seon.agent/routing :seon.agent/routing]
                      [:seon.agent/id :seon.agent/id]

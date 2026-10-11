@@ -76,14 +76,14 @@
                      [:map {:description "A call from an agent's world: the database value and the agent, both supplied by call preparation."}
                       [:seon.db/db :seon.db/database-value]
                       [:seon.agent/id :seon.agent/id]],
-                     :arm-request
+                     :start-request
                      [:map
                       [:seon.turn.loop/cluster
                        :seon.turn.loop/cluster]
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/routing
                        :seon.agent/routing]],
-                     :armed
+                     :started
                      [:map
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/eid :int]
@@ -116,7 +116,7 @@
                       [:seon.ns/name :seon.ns/name]
                       [:seon.cluster/name :seon.cluster/name]],
                      :creation-tx :seon.store/transaction-data,
-                     :disarm-request
+                     :stop-request
                      [:map
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/routing
@@ -126,9 +126,9 @@
                      [:string
                       {:min 1,
                        :seon.db/identity true :seon.program/row-schema :seon.agent/agent,
-                       :seon.wake/arms true,
+                       :seon.wake/starts true,
                        :description
-                       "The agent's identity: the name every message, run, and namespace assignment resolves it by. AN ARMING ATTRIBUTE: asserting it is the one durable evidence that an agent exists, so its commit wakes the cluster's armer and an agent created while the cluster runs is armed without waiting for the next boot."}],
+                       "The agent's identity: the name every message, run, and namespace assignment resolves it by. A STARTING ATTRIBUTE: asserting it is the one durable evidence that an agent exists, so its commit wakes db<->flow and an agent created while the cluster runs is started without waiting for the next boot."}],
                      :identity-request
                      [:map
                       [:seon.db/db :seon.db/database-value]
@@ -223,7 +223,7 @@
                      :turn-completion-backstop :seon.agent/id
                      :turn-completion-undeliverable :seon.agent/id
                      :creation-incomplete :seon.agent/id
-                     :armer-quiescence-undeliverable [:= true]
+                     :plan-quiescence-undeliverable [:= true]
                      :supervision-not-committed [:= true]
              :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/agent-overlay
                               :seon.render/ai seon.agent/render-settings-ai

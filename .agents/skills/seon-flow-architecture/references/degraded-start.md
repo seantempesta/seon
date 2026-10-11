@@ -51,7 +51,7 @@ Read the missing layers in boot order
 | `:seon.boot/config-result` | coherent-program validation, schema accretion, run recovery, or config application failed; use the exception cause to select among them |
 | `:seon.sci.eval/ctx` | cluster/root-agent convergence, host arming, base-context fork, or work-launcher start failed |
 | `:seon.flow/work-launcher` | environment construction after the context failed |
-| `:seon.flow/graph` | `arm-agents!` failed |
+| `:seon.flow/graph` | `start-flows!` failed |
 | `:seon.render.web/served` | web serve failed |
 
 `:seon.boot/ready-ms` is published only after the whole sequence returns

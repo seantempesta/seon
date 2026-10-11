@@ -103,7 +103,7 @@ and exactly-once answers were already or subsequently true, and orderly
 teardown observed the held turn complete. The parallel-turn trial threw only
 the shared 20-second test-event backstop, then orderly teardown observed the
 same held turn complete. Thus the specific interleaving was listener delivery
-→ armer derivation and route publication → mailbox prime → active turn held in
+→ db<->flow derivation and route publication → mailbox prime → active turn held in
 the provider stub → test clock expiration → terminal transaction during
 orderly teardown. No wake was lost and no agent remained unarmed.
 
@@ -169,9 +169,9 @@ proc is waiting for `seon.render/acquire-context!`, while the only runnable
 application virtual thread is executing
 `render.web/context-pass` → `render.walk/history` → `render/render-call` →
 `config/effective` → `schema/projection-from-database` → Datahike's temporal
-merge. The remaining agent and armer procs are ordinarily parked on their
+merge. The remaining agent and db<->flow procs are ordinarily parked on their
 Flow inputs. The dump therefore identifies active render derivation, not an
-executor deadlock, missing armer route, or absent terminal transaction.
+executor deadlock, missing db<->flow route, or absent terminal transaction.
 
 The post-property commits named in the recurrence were excluded by source
 inspection: `677f84f85` and `0ef66e742` only supplied the render interest
@@ -247,7 +247,7 @@ the wait test requires the exact terminal receipt count before consuming its
 database value; and the streaming test first observes the partial, then
 asserts the value returned by the terminal wait instead of issuing a second
 partial ping. The three exact tests pass together after the repair. No source
-under `src/seon/cluster/` changed, and the `de66c1e4a` armer/self-wake design
+under `src/seon/cluster/` changed, and the `de66c1e4a` db<->flow/self-wake design
 remains unchanged.
 
 The canonical focused gate then passed 73 tests / 491 assertions. The

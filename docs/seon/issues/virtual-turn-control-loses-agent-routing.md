@@ -23,7 +23,7 @@ routing value with the nested cluster's absent value.
 
 ## Owner
 
-`seon.cluster/arm-agents!`, `serve!`, and `seon.render.web/change-context`.
+`seon.cluster/start-flows!`, `serve!`, and `seon.render.web/change-context`.
 The bounded repair carries the existing atom through these boundaries.
 
 Repair verified on 2026-09-09: the canonical control gate passes 80 tests /

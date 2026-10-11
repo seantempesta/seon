@@ -4451,7 +4451,7 @@
                  run-id (assoc :seon.turn/id run-id)
                  (env/of cluster) (assoc :seon.env/environment (env/of cluster))
                  (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster))
-                 ;; the cluster's own handle the agent's arming recorded (`seon.cluster.agent/arm!`)
+                 ;; the cluster's own handle the agent's arming recorded (`seon.cluster.agent/start-flow!`)
                  (:seon.agent/context-source cluster) (assoc :seon.agent/context-source (:seon.agent/context-source cluster))))
         request (-> (turn.batch/program-request
                      {:seon.batch/world world
@@ -5726,15 +5726,15 @@
                                                     ;; the writer's processing and commits of the step's transactions
                                                     (and (:seon.cost/writer-meter seon.batch/*world*) (:seon.cost/counts report))
                                                     (update :seon.cost/counts merge (db/writer-cost (:seon.cost/writer-meter seon.batch/*world*))))))]
-               ;; Run closure is an armer wake because first-agent
+               ;; Run closure is a db<->flow wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
-               ;; The signal is disposable: the armer re-derives the complete
+               ;; The signal is disposable: db<->flow re-derives the complete
                ;; supervision transition from the current database value.
                       (when (and
                              (= :closed (:seon.turn.loop/outcome report))
-                             (:seon.cluster.wake/armer-channel cluster))
+                             (:seon.flow/plan-channel cluster))
                         (async/offer!
-                         (:seon.cluster.wake/armer-channel cluster)
+                         (:seon.flow/plan-channel cluster)
                          :seon.agent/wake))
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass

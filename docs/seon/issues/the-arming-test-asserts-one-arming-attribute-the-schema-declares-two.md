@@ -10,12 +10,12 @@ tags: [issue, test, wake, schedule]
 
 ## Evidence (red pass on archive 65bf078ec, `tmp/orchestrator/verify-1210.out.d/018.txt`)
 
-- `seon.cluster.agent-arming-test/an-agent-created-while-the-cluster-runs-is-armed-by-its-own-creation`
-  (`test/seon/cluster/agent_arming_test.clj:111`) asserts `(= #{:seon.agent/id} (wake/arming-attributes db))`.
+- `seon.cluster.agent-arming-test/an-agent-created-while-the-cluster-runs-is-started-by-its-own-creation`
+  (`test/seon/cluster/agent_arming_test.clj:111`) asserts `(= #{:seon.agent/id} (wake/starting-attributes db))`.
   The actual value is `#{:seon.agent/id :seon.schedule.task/owner}`.
-- `:seon.schedule.task/owner` declares `:seon.wake/arms true` (`resources/seon/schemas/seon.schedule.task.edn:2`).
+- `:seon.schedule.task/owner` declares `:seon.wake/starts true` (`resources/seon/schemas/seon.schedule.task.edn:2`).
   That landed in f6a463de6 (2026-09-20, "Defer idle agent graphs…"): a scheduled agent needs its armed timer proc
-  even without a turn. `wake/arming-attributes` derives the set from the declarations, as designed. The assertion
+  even without a turn. `wake/starting-attributes` derives the set from the declarations, as designed. The assertion
   predates that declaration and was never updated.
 
 ## Owner and acceptance

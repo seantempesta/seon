@@ -2,12 +2,12 @@
   "THE CLASS: a created agent whose absence of execution reads as health.
 
   A creation committed a worker and returned a healthy status, and nothing
-  armed it until the next boot, because the cluster's armer is woken only by
+  started it until the next boot, because db<->flow is woken only by
   a wake-matching datom and the creation wrote none.
 
   The fix is a declaration, not a code path: `:seon.agent/id` carries
-  `:seon.wake/arms true`, so the commit that creates an agent wakes the ONE
-  armer that arms boot-time agents."
+  `:seon.wake/starts true`, so the commit that creates an agent wakes the ONE
+  db<->flow that starts boot-time agents."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as async.flow]
             [clojure.test :refer [deftest is]]
@@ -21,10 +21,10 @@
             [seon.test-support :as support]))
 
 (defn- running-cluster
-  "Stand up one cluster the way boot does: armer graph plus the ONE route.
+  "Stand up one cluster the way boot does: db<->flow graph plus the ONE route.
 
   Everything an agent graph needs is present BEFORE any agent exists, so
-  the only thing under test is whether creating one arms it."
+  the only thing under test is whether creating one starts it."
   [connection cluster-name body]
   (support/seed-cluster! connection cluster-name)
   (let [ctx (support/fork-cluster-ctx connection cluster-name)
@@ -47,11 +47,11 @@
                      (cluster/projection-executor
                       (:seon.sci.eval/projection-state ctx))
                      :seon.db.process/id cluster/boot-process-identity})
-            armer (flow/start-graph!
+            db<->flow (flow/start-graph!
                    {:seon.flow/graph-definition
-                    {:procs {:seon.agent/armer
+                    {:procs {:seon.flow/db<->flow
                              {:proc (flow/var-process
-                                     #'agent/armer-step :io
+                                     #'agent/db<->flow :io
                                      (env/carry {:seon.turn.loop/cluster handle
                                                  :seon.agent/routing routing}
                                                 environment))}}
@@ -61,7 +61,7 @@
         (wake/route! {:seon.cluster.wake/connection connection
                       :seon.cluster.wake/channels #(agent/channels routing)
                       :seon.cluster.wake/fenced? #(agent/fenced-route? routing %1 %2)
-                      :seon.cluster.wake/armer-channel
+                      :seon.flow/plan-channel
                       (:seon.cluster.wake/channel handle)
                       :seon.cluster.wake/render-channel
                       (:seon.render/context-channel handle)
@@ -73,38 +73,48 @@
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key route-key})
-            (async.flow/stop (:seon.flow/graph armer))
-            (support/await-event! (:seon.turn.loop/completion handle)
-                                  ::armer-stopped)
-            (doseq [id (keys (:seon.agent/armed @routing))]
-              (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
+            ;; `flow/stop` is a command; the graph's exit is its executor's
+            ;; termination, and no proc publishes a completion on stop
+            (async.flow/stop (:seon.flow/graph db<->flow))
+            (is (nil? (flow/join-graph!
+                       {:seon.flow/executor (:seon.flow/executor db<->flow)
+                        :seon.await/bound
+                        {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+                         :seon.await/config-value 5000
+                         :seon.await/deadline-nanos (+ (System/nanoTime) (* 5000 1000000))}
+                        :seon.await/diagnostic {:seon.error/layer ::db<->flow
+                                                :seon.error/operation `running-cluster
+                                                :seon.error/expected ::db<->flow-exited}}))
+                "db<->flow exits within its bound")
+            (doseq [id (keys (:seon.agent/started @routing))]
+              (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id id}))
             (doseq [channel [(:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle)
                              (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))
 
-(defn- await-armed!
-  "Await the armer's own routing entry for `agent-id` under the backstop."
+(defn- await-started!
+  "Await db<->flow's own routing entry for `agent-id` under the backstop."
   [routing agent-id]
-  (support/await-event! routing [::armed agent-id]
+  (support/await-event! routing [::started agent-id]
                         (fn [state]
-                          (contains? (:seon.agent/armed state) agent-id))))
+                          (contains? (:seon.agent/started state) agent-id))))
 
-(deftest an-agent-created-while-the-cluster-runs-is-armed-by-its-own-creation
+(deftest an-agent-created-while-the-cluster-runs-is-started-by-its-own-creation
   ;; The reported blocker: creation committed, work derivable, nothing
-  ;; running. Nothing here calls `arm!`; the assertion is that the armer
-  ;; did, woken by the declared arming attribute the creation asserts.
+  ;; running. Nothing here calls `start-flow!`; the assertion is that db<->flow
+  ;; did, woken by the declared starting attribute the creation asserts.
   (support/with-database
    (fn [connection]
      (running-cluster
       connection "late-arming"
       (fn [{handle :seon.turn.loop/cluster routing :seon.agent/routing}]
-        (is (contains? (wake/arming-attributes (db/db connection)) :seon.agent/id)
-            "agent identity is a declared arming attribute")
+        (is (contains? (wake/starting-attributes (db/db connection)) :seon.agent/id)
+            "agent identity is a declared starting attribute")
         (is (nil? (wake/declarations-refusal (db/db connection)))
             "and the declaration population carries a cluster")
-        (is (nil? (wake/arming-refusal (db/db connection)))
-            "which `route!` refuses separately, so a missing arming
+        (is (nil? (wake/starting-refusal (db/db connection)))
+            "which `route!` refuses separately, so a missing starting
              declaration can never be mistaken for an idle cluster")
         (let [created (cluster/ensure-entity!
                        connection (:seon.db.process/id handle)
@@ -112,9 +122,9 @@
                         :seon.cluster/name "late-arming"
                         :seon.ns/name 'my.agents.late-worker})]
           (is (string? (:seon.agent/id created)))
-          (await-armed! routing "late-worker")
-          (is (some? (agent/armed routing "late-worker"))
-              "the armer armed an agent created while the cluster ran")
+          (await-started! routing "late-worker")
+          (is (some? (agent/started routing "late-worker"))
+              "db<->flow started an agent created while the cluster ran")
           ;; each proc records its own faults: none is stored
           (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]]
                             (db/db connection)))

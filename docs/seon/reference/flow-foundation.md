@@ -25,7 +25,7 @@ Each agent graph has two `:io` procs:
 
 The connection between them uses `(sliding-buffer 1)`. A wake means only
 "derive now"; all durable triggers are database facts, so coalescing wakes
-cannot lose work. `seon.cluster.agent/arm!` stamps, starts, resumes, routes, and
+cannot lose work. `seon.cluster.agent/start-flow!` stamps, starts, resumes, routes, and
 primes the graph. `disarm!` stops the graph and joins its published completion
 before removing the route.
 

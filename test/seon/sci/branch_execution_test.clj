@@ -558,11 +558,11 @@
              view (acquisition-view ctx)
              ;; Callers in class-value's current closure (the indexed program,
              ;; 2026-09-27): derive-page reads the private def stream-strip-id,
-             ;; request! the referred defonce running-instances, arm-agents!
+             ;; request! the referred defonce running-instances, start-flows!
              ;; the dependency alias async/chan. selected-instance no longer
              ;; reaches class-value.
              callers '[seon.render.web/derive-page seon.cluster.boot/request!
-                       seon.cluster/arm-agents!]
+                       seon.cluster/start-flows!]
              ;; The indexer marks handler and serve! host-bound: a branch never
              ;; changes the platform, so unchanged host-bound callers keep
              ;; their compiled roots and are never an SCI definition.

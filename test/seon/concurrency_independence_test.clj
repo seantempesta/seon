@@ -4,7 +4,7 @@
   "Fact-space proof that many agents independently fold on one branch.
 
   Every scenario creates all agents and caller-provided plans in one
-  transaction. The live armer then runs the model-free plans through the
+  transaction. The live db<->flow then runs the model-free plans through the
   production per-agent graphs. Assertions read receipts, custody history,
   program rows, message connections, transcript inputs, and committed test
   rows from the database; logs are never an oracle."
@@ -70,7 +70,7 @@
     (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                     :seon.boot/root root})]
       (try
-        (let [root-entry (agent/armed (:seon.agent/routing instance) "root")
+        (let [root-entry (agent/started (:seon.agent/routing instance) "root")
               graph (:seon.flow/graph root-entry)]
           (flow/pause-proc graph :seon.agent/mailbox)
           (is (= :paused (::flow/status (flow/ping-proc graph :seon.agent/mailbox))))
@@ -171,15 +171,15 @@
   (let [handle (:seon.turn.loop/cluster instance)
         routing (:seon.agent/routing instance)
         quiesced (async/promise-chan)]
-    ;; The armer channel orders this request after the creation wake. Its
+    ;; db<->flow channel orders this request after the creation wake. Its
     ;; acknowledgement therefore proves every scenario agent has an entry.
     (async/>!! (:seon.cluster.wake/channel handle)
                {:seon.agent/quiesce quiesced})
     (await-channel! quiesced "scenario agents armed")
     (doseq [spec specs]
-      (let [entry (agent/armed routing (::agent-id spec))
+      (let [entry (agent/started routing (::agent-id spec))
             graph (:seon.flow/graph entry)]
-        (is (some? entry) "the armer published the scenario agent")
+        (is (some? entry) "db<->flow published the scenario agent")
         (flow/pause-proc graph :seon.agent/mailbox)
         (is (= :paused
                (::flow/status (flow/ping-proc graph :seon.agent/mailbox)))

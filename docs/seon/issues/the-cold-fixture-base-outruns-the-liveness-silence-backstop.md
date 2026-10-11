@@ -176,7 +176,7 @@ indexed reads and removal of repeated projection work. Recorded armed run
 `a642f8d78e9f` now passes **5 tests / 39 assertions / 0 failures / 0 errors**:
 projection acquisition **809.586 ms**, first fixture **1604.175917 ms**,
 subsequent p50 **45.936584 ms**. All 3358 schema roots match and retain the
-armer's explicitly supplied declaration projection; 1521 function contracts
+db<->flow's explicitly supplied declaration projection; 1521 function contracts
 compile once. Declaration joins use AVET identities and AEVT values rather
 than repeated whole-population queries. Every fixture carries the same
 projection object. The landing note records the complete split and prior

@@ -19,14 +19,14 @@
   (let [recipient (:db/id (db/pull @connection [:db/id]
                                  [:seon.agent/id "recipient"]))
         mailbox (async/chan (async/sliding-buffer 1))
-        armer (async/chan (async/sliding-buffer 1))
+        db<->flow (async/chan (async/sliding-buffer 1))
         render (async/chan (async/sliding-buffer 1))
         faults (async/chan (async/sliding-buffer 1))
         listener-key (wake/route!
              {:seon.cluster.wake/connection connection
               :seon.cluster.wake/channels (constantly {recipient mailbox})
               :seon.cluster.wake/fenced? (fn [_ _] false)
-              :seon.cluster.wake/armer-channel armer
+              :seon.flow/plan-channel db<->flow
               :seon.cluster.wake/render-channel render
               :seon.render.web/interest (atom :all)
               :seon.cluster.wake/fault-channel faults
@@ -37,7 +37,7 @@
       (finally
         (wake/unlisten! {:seon.cluster.wake/connection connection
                         :seon.cluster.wake/key listener-key})
-        (doseq [channel [mailbox armer render faults]] (async/close! channel))))))
+        (doseq [channel [mailbox db<->flow render faults]] (async/close! channel))))))
 
 (deftest messages-stay-on-their-connection
   (support/with-database
@@ -91,7 +91,7 @@
                :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))}))]
          (when (:seon.db.write.attempt/request-id created)
            (throw (ex-info "Agent creation refused" created)))
-         (agent/arm! {:seon.turn.loop/cluster handle
+         (agent/start-flow! {:seon.turn.loop/cluster handle
                       :seon.agent/routing
                       (:seon.agent/routing instance)
                       :seon.agent/id agent-id}))))))
@@ -186,8 +186,8 @@
                 :seon.sci.eval/ctx ctx
                 :seon.agent/routing routing})
          (finally
-           (doseq [id (keys (:seon.agent/armed @routing))]
-             (agent/disarm! {:seon.agent/routing routing
+           (doseq [id (keys (:seon.agent/started @routing))]
+             (agent/stop-flow! {:seon.agent/routing routing
                             :seon.agent/id id}))
            (flow/stop-work-launcher! launcher)
            (doseq [channel [faults (:seon.cluster.wake/channel handle)

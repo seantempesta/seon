@@ -17,7 +17,7 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
-(deftest ^{:seon.test/long "Starts a work launcher and armer, installs the order scenario through a real turn, then settles two wakes and a withheld-permit fault; 10.1 s measured in the check JVM at 525d62694."
+(deftest ^{:seon.test/long "Starts a work launcher and db<->flow, installs the order scenario through a real turn, then settles two wakes and a withheld-permit fault; 10.1 s measured in the check JVM at 525d62694."
            :seon.test/long-ms 20000}
   running-fixture-settles-its-seeded-wake
   (support/with-database
@@ -48,11 +48,11 @@
                         :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
                         :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                         :seon.db.process/id cluster/boot-process-identity})
-               armer (flow/start-graph!
+               db<->flow (flow/start-graph!
                       {::flow/graph-definition
-                       {:procs {:seon.agent/armer
+                       {:procs {:seon.flow/db<->flow
                                 {:proc (flow/var-process
-                                        #'agent/armer-step :io
+                                        #'agent/db<->flow :io
                                         (env/carry {:seon.turn.loop/cluster handle
                                                     :seon.agent/routing routing} environment))}}
                         :conns [] :io-exec (:seon.flow/executor handle)}})
@@ -65,14 +65,14 @@
                                     (when-not (settled?)
                                       (when (= deadline (second (async/alts!! [deadline events] :priority true)))
                                         (throw (ex-info "Fixture wake did not settle within its evaluation limit"
-                                                        {:seon.probe/armed (keys (:seon.agent/armed @routing))
+                                                        {:seon.probe/armed (keys (:seon.agent/started @routing))
                                                          :seon.probe/next (turn/next-agent-work @connection {:seon.agent/id "juniper"})})))
                                       (recur)))))]
            (d/listen connection ::running-fixture (fn [_] (async/offer! events true)))
            (wake/route! {:seon.cluster.wake/connection connection
                          :seon.cluster.wake/channels #(agent/channels routing)
                          :seon.cluster.wake/fenced? #(agent/fenced-route? routing %1 %2)
-                         :seon.cluster.wake/armer-channel (:seon.cluster.wake/channel handle)
+                         :seon.flow/plan-channel (:seon.cluster.wake/channel handle)
                          :seon.cluster.wake/render-channel (:seon.render/context-channel handle)
                          :seon.render.web/interest (atom :all)
                          :seon.cluster.wake/key ::running-route})
@@ -123,7 +123,7 @@
                    (is (empty? (set/difference carried (population)))
                        "the carried projection declares nothing the database does not"))))
              (await-settled!)
-             (is (some? (agent/armed routing "juniper")))
+             (is (some? (agent/started routing "juniper")))
              (is (= 29 (turn/turns-left @connection "juniper")))
              (let [basis (db/basis-t @connection)]
                (support/transacted! connection [{:seon.message/id "running-fixture/wake"
@@ -143,7 +143,7 @@
                                          %)
                                recorded))))
              (testing "a lost turn permit faults at the declared completion allowance"
-               (let [entry (agent/armed routing "juniper")
+               (let [entry (agent/started routing "juniper")
                      completion (:seon.turn.loop/completion entry)
                      settings (:db/id (:seon.agent/settings
                                        (db/pull @connection '[{:seon.agent/settings [:db/id]}]
@@ -173,26 +173,26 @@
                      (async/offer! completion :seon.agent/ready)))))
              (finally
                (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key ::running-route})
-               (async.flow/stop (::flow/graph armer))
-               ;; the armer's exit is its executor's termination, not a
+               (async.flow/stop (::flow/graph db<->flow))
+               ;; db<->flow's exit is its executor's termination, not a
                ;; channel event (seon.flow/join-graph!)
                (is (nil? (flow/join-graph!
-                          {::flow/executor (::flow/executor armer)
+                          {::flow/executor (::flow/executor db<->flow)
                            :seon.await/bound
                            {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
                             :seon.await/config-value 5000
                             :seon.await/deadline-nanos (+ (System/nanoTime) (* 5000 1000000))}
                            :seon.await/diagnostic {:seon.error/layer ::running-fixture
                                                    :seon.error/operation `running-fixture-settles-its-seeded-wake
-                                                   :seon.error/expected ::armer-exited}})))
-               (doseq [id (keys (:seon.agent/armed @routing))]
-                 (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
+                                                   :seon.error/expected ::db<->flow-exited}})))
+               (doseq [id (keys (:seon.agent/started @routing))]
+                 (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id id}))
                (d/unlisten connection ::running-fixture)
                (doseq [channel [events (:seon.cluster.wake/channel handle)
                                 (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
                  (async/close! channel))))))))))
 
-(deftest concurrent-arms-share-one-graph
+(deftest concurrent-starts-share-one-graph
   (support/with-database
    (fn [connection]
      (let [_ (config/apply! {:seon.db/connection connection
@@ -216,28 +216,28 @@
                                                      :seon.ns/name 'my.agents.concurrent
                                                      :seon.cluster/name "loop-arm-proof"
                                                      :seon.agent/branch (get-in (db/db connection) [:config :branch])}))
-           arms (mapv (fn [_]
+           starts (mapv (fn [_]
                         (future
                           (.countDown ready)
-                          (support/await-event! start ::start-arms)
-                          (agent/arm! request)))
+                          (support/await-event! start ::start-starts)
+                          (agent/start-flow! request)))
                       (range 2))
            entries (atom [])]
        (try
-         (support/await-event! ready ::arms-ready)
+         (support/await-event! ready ::starts-ready)
          (.countDown start)
-         (doseq [arm arms]
-           (swap! entries conj (support/await-event! arm ::armed)))
+         (doseq [start starts]
+           (swap! entries conj (support/await-event! start ::started)))
          (let [same? (identical? (first @entries) (second @entries))
-               routed? (every? #(identical? % (agent/armed routing "concurrent")) @entries)]
-           (is same? "the live armer and source installer must acquire the same graph")
+               routed? (every? #(identical? % (agent/started routing "concurrent")) @entries)]
+           (is same? "the live db<->flow and source installer must acquire the same graph")
            (is routed? "every caller receives the published routing entry"))
          (finally
            (.countDown start)
            (doseq [entry (distinct @entries)]
-             (agent/disarm! {:seon.agent/id "concurrent" :seon.agent/routing routing})
+             (agent/stop-flow! {:seon.agent/id "concurrent" :seon.agent/routing routing})
              (async/close! (:seon.schedule/channel entry)))
-           (doseq [arm arms] (future-cancel arm))
+           (doseq [start starts] (future-cancel start))
            (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
                         :seon.turn.loop/completion]]
              (async/close! (get handle key)))))))))

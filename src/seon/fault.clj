@@ -144,7 +144,7 @@
 
   ## Edge cases
 
-  - An untagged fault (the cluster graph's own, from the armer or the render
+  - An untagged fault (the cluster graph's own, from db<->flow or the render
     proc) attributes to no run. That is correct, not missing: it is not a
     run's fault.
   - When the fault's agent branch is not the cluster branch and this process

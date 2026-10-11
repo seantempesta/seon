@@ -7,8 +7,8 @@
                          "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}
  #:seon.task{:name "a-missed-quiescence-keeps-the-route-listener"
              :kind :function
-             :intent "A stop that misses armer quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in disarm-agents!)."
-             :must-read #{seon.cluster/disarm-agents!}
+             :intent "A stop that misses db<->flow quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in stop-flows!)."
+             :must-read #{seon.cluster/stop-flows!}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/a-cluster-stop-that-misses-armer-quiescence-keeps-the-route-listener.md"}}
  #:seon.task{:name "adoption-write-costs-sixteen-seconds"
@@ -56,8 +56,8 @@
              :must-read #{seon.cluster/populate-source! seon.maintenance/project-collect-result}}
  #:seon.task{:name "a-missed-agent-join-throws-instead-of-answering"
              :kind :function
-             :intent "disarm-agents! declares [:or :nil `:seon.await/timeout-error`] and its docstring says a join that misses its bound answers the await owner's timeout value, but stop-graph! throws turn-completion-failure!'s ex-info (agent.clj:1402,1523-1530) and disarm-agents! has no handling around `seon.cluster.agent/disarm!`. Only the view, armer and cluster-graph joins answer a value; an agent join throws through `seon.cluster.boot/stop!` and `seon.cluster.host/stop!`. disarm! and disarm-agents! must return the typed timeout error naming the missing exit, keep the resources, and every caller (stop-owned-graphs!, arm!, `seon.cluster.boot/stop!`, `seon.cluster.host/stop!`) handle the returned value. Proof: a stuck agent's disarm! and a cluster stop with one stuck agent return the typed error and still stop the other agents."
-             :must-read #{seon.cluster/disarm-agents! seon.cluster.agent/disarm!}
+             :intent "stop-flows! declares [:or :nil `:seon.await/timeout-error`] and its docstring says a join that misses its bound answers the await owner's timeout value, but stop-graph! throws turn-completion-failure!'s ex-info (agent.clj:1402,1523-1530) and stop-flows! has no handling around `seon.cluster.agent/stop-flow!`. Only the view, db<->flow and cluster-graph joins answer a value; an agent join throws through `seon.cluster.boot/stop!` and `seon.cluster.host/stop!`. disarm! and stop-flows! must return the typed timeout error naming the missing exit, keep the resources, and every caller (stop-owned-graphs!, arm!, `seon.cluster.boot/stop!`, `seon.cluster.host/stop!`) handle the returned value. Proof: a stuck agent's disarm! and a cluster stop with one stuck agent return the typed error and still stop the other agents."
+             :must-read #{seon.cluster/stop-flows! seon.cluster.agent/stop-flow!}
              :evidence #{"docs/research/agent-platform/2026-10-08/inventory/q14-exit-deadline.md"}}
  #:seon.task{:name "contract-instruction-entity-changes"
              :kind :function

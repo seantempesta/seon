@@ -1504,7 +1504,7 @@
                  (is (empty? (filter :seon.cluster.eval/error evaluations))))
                (entities-from connection)
                (finally
-                 (agent/disarm! request)
+                 (agent/stop-flow! request)
                  (doseq [channel [(:seon.cluster.wake/channel handle)
                                   (:seon.render/context-channel handle)
                                   (:seon.turn.loop/completion handle)]]

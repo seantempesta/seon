@@ -22,7 +22,7 @@ or changing fault capture and `:record`/`:panic` behavior.
 ## The listeners a cluster connection holds
 
 There is one wake ROUTER per cluster, `seon.cluster.wake/route!`
-(`src/seon/cluster/wake.clj:433-532`), registered by the armer proc as it
+(`src/seon/cluster/wake.clj:433-532`), registered by db<->flow proc as it
 starts (`src/seon/cluster/agent.clj:1527`) under the key
 `:seon.agent/route` (`src/seon/cluster.clj:3440-3453`). It is not the only
 Datahike listener on the connection. At HEAD a cluster connection with N
@@ -91,10 +91,10 @@ The safe order is:
 Reversing the first two steps creates a lost interval between the initial read
 and listener registration.
 
-`arm-agents!` states this order as its contract
-(`src/seon/cluster.clj:3465-3479`): the cluster graph starts and its armer
+`start-flows!` states this order as its contract
+(`src/seon/cluster.clj:3465-3479`): the cluster graph starts and its db<->flow
 proc registers `route!` (`src/seon/cluster/agent.clj:1527`), one render wake is
-offered (`src/seon/cluster.clj:3551`), then the armer's derive-all pass runs
+offered (`src/seon/cluster.clj:3551`), then db<->flow's derive-all pass runs
 directly (`:3556-3561`). Keep
 that direct pass. A synthetic "boot wake" sent before route registration is
 not equivalent.
@@ -103,13 +103,13 @@ not equivalent.
 
 | consumer | current interest | source |
 |---|---|---|
-| armer | an asserted attribute declared `:seon.wake/arms true`, or a recipient with no routing entry | `src/seon/cluster/wake.clj:520-521`, `:528` |
+| db<->flow | an asserted attribute declared `:seon.wake/starts true`, or a recipient with no routing entry | `src/seon/cluster/wake.clj:520-521`, `:528` |
 | agent mailbox | attributes declared `:seon.wake/listen true` (the value addresses the agent) plus the agent's runtime `:seon.listen` patterns | `wake-matchers` `src/seon/cluster/wake.clj:392-431`; delivery `:522-528` |
 | cluster renderer | at most one wake per report, when a changed attribute is in `:seon.render.web/interest` (`:all` before the first complete derivation) | `src/seon/cluster/wake.clj:508-509`, `:512-514`, `:529-530` |
 
 The render interest is the union of retained reads' attributes, published by
 the render proc (`publish-interest!`, `src/seon/render/web.clj:2011-2023`).
-Every wake target holds one value: the armer and render channels are
+Every wake target holds one value: db<->flow and render channels are
 `(sliding-buffer 1)` (`src/seon/cluster.clj:3483`, `:3505`) and a mailbox is a
 sliding-one `CountedSlidingBuffer` that counts overwrites
 (`src/seon/cluster/agent.clj:108-135`). A wake says only "look".
@@ -142,7 +142,7 @@ decision; do not add per-site panic decisions.
 2. Use only non-blocking offers from a listener; keep queries out of it.
 3. Register the route before deriving current work.
 4. Derive interest from declared facts (`:seon.wake/listen`,
-   `:seon.wake/arms`, retained reads), not namespace or feature lists.
+   `:seon.wake/starts`, retained reads), not namespace or feature lists.
 5. Route agent mistakes as values and core faults through `seon.fault/fault!`.
 6. Preserve one cluster-level `:record`/`:panic` decision.
 7. Probe transaction latency and identical-value reassertion after listener

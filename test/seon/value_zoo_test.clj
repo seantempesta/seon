@@ -61,7 +61,7 @@
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}
             text (str/join "\n" zoo)]
         (support/transacted! connection (support/agent-tx @connection agent-id))
-        (agent/arm! request)
+        (agent/start-flow! request)
         (try
           (doseq [[entrant result] [[:mcp (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                                          :seon.cluster.reply/text text))]
@@ -88,7 +88,7 @@
               (is (some? (render.value/render-html-data prepared))
                   "the page has hiccup for the value")))
           (finally
-            (agent/disarm! request)
+            (agent/stop-flow! request)
             (doseq [channel [(:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))

@@ -28,7 +28,7 @@
   [running agent-id]
   (async/offer! (:seon.cluster.wake/channel
                  (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances running)))
-                         [:seon.agent/armed agent-id]))
+                         [:seon.agent/started agent-id]))
                 :seon.agent/wake)
   nil)
 

@@ -17,7 +17,7 @@ How it happens:
 
 1. `seon.cluster.boot/stop!` claims the instance by swapping a bare `(Object.)` marker into `running-instances`
    (`src/seon/cluster/boot.clj:495-499`). Start does the same with its reservation (`:419-423`).
-2. `stop!` then calls `cluster/disarm-agents!`, which reaches `seon.config/effective` and then
+2. `stop!` then calls `cluster/stop-flows!`, which reaches `seon.config/effective` and then
    `seon.db/carried-projection`.
 3. `carried-projection` passes `(vals @running-instances)`, unfiltered, into `loaded-builder`, whose contract takes
    `[:maybe [:sequential :map]]` (`src/seon/db.clj:1536-1542`).

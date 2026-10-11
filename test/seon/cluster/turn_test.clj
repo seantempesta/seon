@@ -257,7 +257,7 @@
       (with-render-context-proc
          connection
          ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`
-         ;; carries the declared channel members `seon.cluster.agent/arm!`
+         ;; carries the declared channel members `seon.cluster.agent/start-flow!`
          ;; creates for every armed agent, so `turn` is called with the shape
          ;; its contract declares instead of one this suite happens to read.
          (test-support/cluster-handle
@@ -2878,7 +2878,7 @@
   [running agent-id]
   (async/offer! (:seon.cluster.wake/channel
                  (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances running)))
-                         [:seon.agent/armed agent-id]))
+                         [:seon.agent/started agent-id]))
                 :seon.agent/wake)
   nil)
 

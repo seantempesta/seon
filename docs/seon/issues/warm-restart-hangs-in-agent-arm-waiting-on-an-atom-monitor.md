@@ -6,7 +6,7 @@ created: 2026-09-23
 tags: [issue, boot, agent, platform]
 ---
 
-# A warm restart hangs in `seon.cluster.agent/arm!` waiting on an atom monitor
+# A warm restart hangs in `seon.cluster.agent/start-flow!` waiting on an atom monitor
 
 **Evidence (2026-09-22, lane reload-per-declaration).** `bin/seon --root
 tmp/reload-b-root start head` from a `git archive` of `c1d2e6d7f` returned after
@@ -14,7 +14,7 @@ tmp/reload-b-root start head` from a `git archive` of `c1d2e6d7f` returned after
 was alive with no readiness. `jstack` (`tmp/reload-per-declaration-evidence/restart-d-threads.txt`):
 `main` BLOCKED "waiting to lock <0x000000701018b330> (a clojure.lang.Atom)" at
 `seon.cluster.agent$arm_BANG_ (agent.clj:876)` ← `armer_step (agent.clj:1172)` ←
-`seon.cluster/arm-agents! (cluster.clj:3093)` ← `seon.cluster.boot/stand-cluster-runtime!
+`seon.cluster/start-flows! (cluster.clj:3093)` ← `seon.cluster.boot/stand-cluster-runtime!
 (boot.clj:93)`. No platform thread in the dump holds that monitor, so the holder is
 probably a virtual thread (`jstack` omits them). The same root restarted in 10,298 ms at
 `2bd568c08`; `cluster/agent.clj` changed since in `7f6718507`, `da2086452`, `678009fcd`.
@@ -30,7 +30,7 @@ From `restart-d-threads.txt` and the source at `c1d2e6d7f`:
 
 - `main` waits on the `routing` atom's monitor. Only two sites take it:
   `arm!` (`agent.clj:876`) and `disarm!`. Nothing stops agents at boot, so the
-  holder is the cluster graph's armer proc running `arm!` for the same root
+  holder is the cluster graph's db<->flow proc running `arm!` for the same root
   agent on a virtual thread (`jstack` omits virtual threads). `main` is making
   its own prime call (`cluster.clj:3093` → `armer_step`).
 - `arm!` keeps the monitor across the whole of `acquire-context!`. That call

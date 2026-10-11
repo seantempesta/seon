@@ -49,7 +49,7 @@ Current proof:
 
 - the one blueprint, `graph-definition`, with its mailbox, turn and schedule
   procs (`src/seon/cluster/agent.clj:560-607`);
-- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1556`); and
+- the derive-all db<->flow, `db<->flow` (`src/seon/cluster/agent.clj:1556`); and
 - the measured parked-proc cost, about 8.5 KB and one virtual thread per idle
   graph
   (`git show 215447c46^:docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`,
@@ -99,7 +99,7 @@ The transport law divides values by recovery need (`AGENTS.md:239-240`):
   backpressure, or observation may drop.
 
 Current examples are the sliding-one agent wake channel
-(`src/seon/cluster/agent.clj:131-135`), the cluster's sliding-one armer,
+(`src/seon/cluster/agent.clj:131-135`), the cluster's sliding-one db<->flow,
 stream, render and pages channels (`src/seon/cluster.clj:3483-3505`).
 
 This replaced both extremes: committing high-churn partial presentation state
@@ -115,7 +115,7 @@ armed routing map. There is no `:type`, `:kind`, active-set entity, or status
 flag.
 
 The derivation is explicit in the routing map (`routing`,
-`src/seon/cluster/agent.clj:608`) and the armer (`armer-step`, `:1556`). The
+`src/seon/cluster/agent.clj:608`) and db<->flow (`db<->flow`, `:1556`). The
 data-model rules are maintained in
 [the data guide](../../../../docs/seon/architecture/data-modeling-guide.md).
 
@@ -130,7 +130,7 @@ facts and expensive values that are themselves durable domain truth.
 
 Current examples:
 
-- the armer derives missing graph custody from agents minus armed agents;
+- db<->flow derives missing graph custody from agents minus armed agents;
 - turn passes derive work after a payload-free wake; and
 - the renderer derives revisioned packages from the current database value; an
   unchanged page produces no new revision (`next-package`,

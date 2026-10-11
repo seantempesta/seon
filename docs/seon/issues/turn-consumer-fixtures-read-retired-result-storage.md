@@ -59,7 +59,7 @@ assertions / 10 failures / 4 errors**. All failures are in the agent
 namespace: parallel-turn counting, routing conservation, terminal wait,
 source-submission's `inst?` assertion on a transaction ref, park/wake,
 disarm backstop, and episode-cap observations. Routing again reports the
-missing fixture process `8111-1700000000000`; its armer remains running
+missing fixture process `8111-1700000000000`; its db<->flow remains running
 with zero armed agents. These are the same consumer boundaries recorded
 below, not a green owner-suite claim. Status and REPL tests pass.
 
@@ -174,7 +174,7 @@ legacy transcript expectations listed below remain unconverted.
 Schema sub-slice, 2026-09-09: the agent fixture now executes real SCI,
 observes saved `:seon.eval/value`, waits for terminal facts rather than
 truthiness of a read error, supplies complete compiler-produced config,
-and hands its armer the canonical projection executor and error fanout.
+and hands its db<->flow the canonical projection executor and error fanout.
 The old trigger fence test is deleted with that retired mechanism.
 Wake assertions permit coalescing and exclude non-answering turn provenance.
 An injected install-gate core exception is observed on Flow's error channel

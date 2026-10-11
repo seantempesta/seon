@@ -161,7 +161,7 @@
  #:seon.task{:name "a-stop-during-model-context-assembly-records-errors"
              :kind :function
              :intent "An orderly disarm while a model pass is assembling its context (seon.context/model-context inside the call turn's phase) interrupts the pass but records two error occurrences; a stop's wrapped interrupt is no error. Before CX-1 the test's stand-in redefined seon.cluster.prompt/prompt, which the pass no longer called, so the test hung instead (lane rip-context, 2026-10-08). Done when the interrupted pass closes as interrupted with no error recorded."
-             :must-read #{seon.turn/call-turn seon.context/model-context seon.cluster.agent/disarm!}}
+             :must-read #{seon.turn/call-turn seon.context/model-context seon.cluster.agent/stop-flow!}}
  #:seon.task{:name "a-throwing-test-step-loses-its-cause"
              :kind :function
              :intent "When the automatic test step throws a non-refusal (a NullPointerException inside seon.test/changes while lane test-step worked, 2026-10-09), seon.turn/test-step answers only {:seon.error/message \"The automatic test step threw; the pass's values stand.\" :seon.error/exception-class \"java.lang.NullPointerException\"}: no cause chain, no throw site, so the agent and root cannot tell which owner failed without a debug build. A deliberate translation keeps the cause. Done when the step's error carries the cause chain (`:seon.error/chain`) of the thrown exception and a reply test asserts it names the throwing function."
@@ -223,6 +223,6 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "an-end-is-written-on-the-attempt"
              :kind :function
-             :intent "Card S3, slice 3. `seon.turn/end-task-call` writes `:seon.task.attempt/end` and `:seon.task.attempt/commit` (the agent's branch commit at the end, which `seon.turn/end-task!` reads and passes) on the agent's open attempt (`seon.task/agent-attempt`) in the one end transaction it already makes; a second end writes nothing. `:seon.task.attempt/end` and `:seon.task/needs` declare `:seon.wake/arms` (`seon.cluster.wake/arming-attributes`), so an end or a need wakes the cluster process that starts the next attempt."
-             :must-read #{seon.turn/end-task-call seon.turn/end-task! seon.task/agent-attempt seon.cluster.wake/arming-attributes}
+             :intent "Card S3, slice 3. `seon.turn/end-task-call` writes `:seon.task.attempt/end` and `:seon.task.attempt/commit` (the agent's branch commit at the end, which `seon.turn/end-task!` reads and passes) on the agent's open attempt (`seon.task/agent-attempt`) in the one end transaction it already makes; a second end writes nothing. `:seon.task.attempt/end` and `:seon.task/needs` declare `:seon.wake/starts` (`seon.cluster.wake/starting-attributes`), so an end or a need wakes the cluster process that starts the next attempt."
+             :must-read #{seon.turn/end-task-call seon.turn/end-task! seon.task/agent-attempt seon.cluster.wake/starting-attributes}
              :evidence #{"docs/research/agent-platform/2026-10-11/r1-db-flow-design.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

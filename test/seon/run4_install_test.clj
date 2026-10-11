@@ -44,7 +44,7 @@
                       :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                       :seon.db.process/id cluster/boot-process-identity})
                     (fn [handle]
-                      (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+                      (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id "juniper"})
                       (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
                                    :seon.turn.loop/completion]]
                         (async/close! (get handle key)))))]
@@ -58,7 +58,7 @@
            (cluster/ensure-entity! connection cluster/boot-process-identity
                                    {:seon.agent/id "juniper" :seon.cluster/name "run4-install"
                                     :seon.ns/name 'my.agents.juniper})
-           (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
+           (agent/start-flow! {:seon.turn.loop/cluster handle :seon.agent/routing routing
                         :seon.agent/id "juniper"})
            (let [turn-id (fixture/submit! handle routing (str source "\n(dir my.agents.juniper)"))
                  saved (vec (entries turn-id))

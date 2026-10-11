@@ -61,8 +61,8 @@
              :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md"}}
  #:seon.task{:name "a-needs-cycle-is-refused-at-the-writer"
              :kind :schema
-             :intent "Card S1. Schema: `:seon.task/children` (component ref set of child tasks), `:seon.task/needs` (indexed ref set), `:seon.task/instructions`, `:seon.task/execution` (`:seon.wake/arms true`), `:seon.task/cron`, `:seon.task/zone`, `:seon.task/function`, the attempt facts on the assignment row (`:seon.task/attempt-of`, `:seon.task.attempt/end`, `:seon.task.attempt/target`, `:seon.task.attempt/reason`, `:seon.task.attempt/commit`) and the firing (`:seon.task.fire/id`, `:seon.task.fire/at`, `:seon.task.fire/of`, `:seon.task.fire/to`); task EDN authors children and needs as lookup refs; the writer refuses a needs cycle (`seon.task/refuse-needs-cycle`, called by `seon.task/create!` and `seon.task/index-tasks!`); adoption proven on a branch of the live store."
-             :must-read #{seon.task/create! seon.task/index-tasks! seon.cluster.wake/arming-attributes}
+             :intent "Card S1. Schema: `:seon.task/children` (component ref set of child tasks), `:seon.task/needs` (indexed ref set), `:seon.task/instructions`, `:seon.task/execution` (`:seon.wake/starts true`), `:seon.task/cron`, `:seon.task/zone`, `:seon.task/function`, the attempt facts on the assignment row (`:seon.task/attempt-of`, `:seon.task.attempt/end`, `:seon.task.attempt/target`, `:seon.task.attempt/reason`, `:seon.task.attempt/commit`) and the firing (`:seon.task.fire/id`, `:seon.task.fire/at`, `:seon.task.fire/of`, `:seon.task.fire/to`); task EDN authors children and needs as lookup refs; the writer refuses a needs cycle (`seon.task/refuse-needs-cycle`, called by `seon.task/create!` and `seon.task/index-tasks!`); adoption proven on a branch of the live store."
+             :must-read #{seon.task/create! seon.task/index-tasks! seon.cluster.wake/starting-attributes}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "the-frontier-is-the-leaves-whose-needs-are-done"
              :kind :function

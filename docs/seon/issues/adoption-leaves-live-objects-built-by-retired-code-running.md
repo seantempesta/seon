@@ -28,7 +28,7 @@ deletes a graph's code would therefore leave:
 - the graph running, executing retired Vars;
 - its executor alive;
 - its channels referenced from the instance and routing;
-- no current code path that stops it. `disarm-agents!`/`boot/stop!` at the new commit no longer name `:seon.flow/error-fanout`.
+- no current code path that stops it. `stop-flows!`/`boot/stop!` at the new commit no longer name `:seon.flow/error-fanout`.
 
 This is an unobserved exit under a program that claims the graph does not exist. It belongs to the same family as
 [a-hot-adopted-handle-shape-change-wedges-the-live-turn-proc-silently](a-hot-adopted-handle-shape-change-wedges-the-live-turn-proc-silently.md)

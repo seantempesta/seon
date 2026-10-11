@@ -1,5 +1,5 @@
 (ns seon.cluster.host-test
-  "A branch-hosted agent (`seon.cluster.host`) through real acquisition, armed
+  "A branch-hosted agent (`seon.cluster.host`) through real acquisition, started
   contracts and Flow: its runs land on its branch, siblings stay independent,
   an ordinary message wakes it, and retirement closes admission at the writer."
   (:require [clojure.core.async :as async]
@@ -263,7 +263,7 @@
             closed-runs #(db/q '[:find (count ?run) . :where [?agent :seon.agent/id "mcp/listener"]
                                  [?run :seon.turn/agent ?agent] [?run :seon.turn/closed-tx _]]
                                %)]
-        (is (= ["1"] (hosted-run! hosted "1")) "the first run arms the agent through the host's armer")
+        (is (= ["1"] (hosted-run! hosted "1")) "the first run starts the agent through the host's db<->flow")
         ;; A test member's world holds no agents but the ones it creates, so the
         ;; sender is created on the branch too.
         (as-host hosted #(support/transacted! connection (support/agent-tx @connection "listener-sender")))
@@ -320,7 +320,7 @@
                                                                         :seon.cluster.reply/text %))))
             first-run (submit! "(loop [] (recur))")
             ;; the turn proc has taken the first submission off its port
-            requests (:seon.agent/requests (agent/armed (:seon.agent/routing custody) "mcp/busy"))
+            requests (:seon.agent/requests (agent/started (:seon.agent/routing custody) "mcp/busy"))
             _ (support/await-event! (async/go-loop []
                                       (if (zero? (count (.buf ^clojure.core.async.impl.channels.ManyToManyChannel requests)))
                                         true
@@ -697,7 +697,7 @@
                              request))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/a-message-resumes-a-stopped-agent}}
-  a-message-to-a-stopped-admitted-agent-hosts-it-and-its-armer-takes-it
+  a-message-to-a-stopped-admitted-agent-hosts-it-and-its-db<->flow-takes-it
   (with-host-world {}
     (fn [{:keys [handle branch! connection]}]
       (let [_ (sender! connection "resume-sender")
@@ -716,7 +716,7 @@
           (when branch-connection
             (support/await-event! branch-connection ::resumed
                                   (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/sleeper"))))
-            (is (< 1 (closed-runs-of @branch-connection "mcp/sleeper")) "its armer took the message")))))))
+            (is (< 1 (closed-runs-of @branch-connection "mcp/sleeper")) "its db<->flow took the message")))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/a-message-resumes-a-stopped-agent}}
   an-sci-send-from-the-cluster-supplies-its-handle-and-resumes-a-stopped-agent
@@ -747,8 +747,8 @@
                                     (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/waker"))))
               (is (< 1 (closed-runs-of @branch-connection "mcp/waker")) "the resumed agent ran")))
           (finally
-            (doseq [id (keys (:seon.agent/armed @routing))]
-              (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))))))))
+            (doseq [id (keys (:seon.agent/started @routing))]
+              (agent/stop-flow! {:seon.agent/routing routing :seon.agent/id id}))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/retiring-a-branch-closes-its-agents-admission}}
   retiring-a-stopped-agents-branch-closes-its-admission

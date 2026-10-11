@@ -10,7 +10,7 @@ tags: [issue, flow, datahike, writer-path, swallowed-error]
 
 **Evidence ([flow usage audit](../../../docs/research/agent-platform/flow-usage-audit-2026-09-23.md) D4, source).** On any `seon.wake`,
 `seon.listen` or schema datom, `route!`'s listener rebuilds its matchers with
-`(wake-matchers (:db-after report))` and `arming-attributes` inside the Datahike
+`(wake-matchers (:db-after report))` and `starting-attributes` inside the Datahike
 callback (`src/seon/cluster/wake.clj:517-524`): database work on the one writer's
 delivery path. Its catch `offer!`s a bare Throwable onto the counted-dropping fault
 channel and ignores the result (`wake.clj:546-547`).
