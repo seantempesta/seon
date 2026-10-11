@@ -14,7 +14,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.cluster.db-flow-test :as db-flow-test]))
 
 (deftest interpreted-test-bodies-use-the-sci-interrupt-bound
   (test-support/with-database
@@ -485,3 +486,38 @@
        (let [run (request '[my.agents.observed/other])]
          (is (nil? (:seon.test/selection-refusal run)) "the observed change does not refuse the step")
          (is (= '#{my.agents.observed/ok-test} (executed run)) "the eligible reaching test runs"))))))
+
+(deftest ^{:seon/tasks #{'seon.test/same-test-symbol-on-two-branches-runs-each-bodys-content}}
+  same-test-symbol-on-two-branches-runs-each-bodys-content
+  (let [test-symbol 'tq.chain-proofs/proves-a
+        run-body
+        (fn [source]
+          (test-support/with-database
+           (fn [connection]
+             (#'db-flow-test/chain-world
+              connection {"a" [#{} source]}
+              (fn [handle]
+                (let [facts (cluster.agent/plan-facts (db/db connection))
+                      actions (cluster.agent/plan facts (cluster.agent/roster-facts (:seon.agent/routing handle)) 1)
+                      _ (cluster.agent/apply-plan! handle (:seon.agent/routing handle) facts
+                                                   (mapv #(cond-> % (= :start-flow (:seon.flow.plan/op %))
+                                                            (assoc :seon.task/execution :paused)) actions))
+                      attempt (cluster.agent/acquire-context! handle nil {:seon.agent/branch (:seon.task/branch (first actions))})
+                      conn (:seon.db/connection attempt)
+                      request {:seon.test/execution (assoc attempt :seon.agent/id "evidence-proof")
+                               :seon.test/recording-connection conn
+                               :seon.test/policy :named :seon.test/identities #{test-symbol}}
+                      check! #(db/call-with-custody {:seon.db/connection conn} (fn [] (sut/run %)))
+                      ran (check! (assoc request :seon.test/rerun? true))
+                      reused (check! request)]
+                  {:digest (sut/reach-digest (db/db connection) test-symbol)
+                   :ran ran :reused reused}))))))
+        red (run-body "(clojure.test/is (= 1 2))")
+        green (run-body "(clojure.test/is (= 1 1))")]
+    (is (not= (:digest red) (:digest green)))
+    (doseq [[result passed? fails] [[red false 1] [green true 0]]]
+      (is (= 1 (get-in result [:ran :seon.test/executed-count])))
+      (is (= passed? (get-in result [:ran :seon.test/passed?])))
+      (is (= [fails] (mapv :seon.test/fail-count (get-in result [:ran :seon.test/results]))))
+      (is (= passed? (get-in result [:reused :seon.test/passed?])))
+      (is (= 1 (get-in result [:reused :seon.test/reused-count]))))))

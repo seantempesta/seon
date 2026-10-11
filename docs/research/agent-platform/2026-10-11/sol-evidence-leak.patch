@@ -1,0 +1,27 @@
+--- a/test/seon/cluster/db_flow_test.clj
++++ b/test/seon/cluster/db_flow_test.clj
+@@ -242,7 +242,14 @@
+                  :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                  :seon.db.process/id cluster/boot-process-identity})]
+     (try (body handle)
+-         (finally (release! (:seon.agent/routing handle))))))
++         (finally
++           (release! (:seon.agent/routing handle))
++           (doseq [branch (db/q '[:find [?branch ...] :in $ [?handle ...]
++                                  :where [?attempt :seon.task/assigned ?handle]
++                                         [?attempt :seon.task/branch ?branch]]
++                                (db/db connection) (mapv chain-handle (keys tasks)))]
++             (registry/retire-branch! {:seon.store/store (agent/handle-store handle)
++                                      :seon.store/branch branch}))))))
+ 
+ (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+   a-fresh-attempt-proves-first-and-green-proofs-end-it-with-no-model-call
+@@ -313,7 +320,7 @@
+ 
+ (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+   a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
+-  (binding [*space* "tq.chaingreen"]
++  (binding [*space* "tq.chain"]
+   (test-support/with-database
+    (fn [connection]
+      (chain-world

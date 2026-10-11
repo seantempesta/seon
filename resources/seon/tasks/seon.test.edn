@@ -230,4 +230,10 @@
  #:seon.task{:name "the-merge-branch-key-is-seon-source-merge-branch"
              :kind :namespace
              :intent "Vocabulary row 'merge branch' retires 'candidate': `:seon.source/candidate` (the `:seon.store/branch` that `seon.cluster.source/prepare-merge!` creates and `seon.cluster.source/land!` and `seon.cluster/source-prepare` read, schema `resources/seon/schemas/seon.source.edn`, about 25 uses in src and tests) becomes `:seon.source/merge-branch`, and `:seon.source/candidate-bytes`, `:seon.source/candidate-digest`, `:seon.source/candidate-ms` follow where they name the merged result. A schema-resource rename: prove by publishing and adopting on a branch of the live store, then convert every use in one scripted sweep in the same commit."
-             :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/land!}}]
+             :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/land!}}
+ #:seon.task{:name "same-test-symbol-on-two-branches-runs-each-bodys-content"
+             :kind :function
+             :intent "Commit 2b49056a8's apparent evidence cross-read is an attempt-branch collision: `seon.cluster.agent/plan` names attempt branches by task handle and attempt number; `seon.cluster.agent/fork-attempt!` reuses an existing roster name. `seon.cluster.db-flow-test/chain-world` releases borrowed executions but never retires the branches it created, so the next fixture's same task runs the previous fixture's proof body. Direct same-symbol `my.test/check` requests on separate scratch branches run and reuse their own bodies correctly. Remove the namespace workaround after fixing fixture-owned branch retirement; keep restart branches until their fixture ends. The red proof is `seon.test-test/same-test-symbol-on-two-branches-runs-each-bodys-content`."
+             :must-read #{seon.cluster.agent/plan seon.cluster.agent/fork-attempt! seon.cluster.agent/release-context! seon.cluster.db-flow-test/chain-world seon.test/run seon.test.runner/reach-digests}
+             :evidence #{"docs/research/agent-platform/2026-10-11/sol-evidence-leak.md"}}
+]
