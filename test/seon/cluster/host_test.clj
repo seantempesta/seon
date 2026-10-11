@@ -23,7 +23,8 @@
             [seon.task :as task]
             [my.agent]
             [my.message]
-            [my.program]))
+            [my.program]
+            [my.root]))
 
 (def ^:private cluster-name "host")
 
@@ -421,17 +422,17 @@
                (db/pull (db/db connection) [:seon.task/intent {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id task-id]))
             "the task is on the cluster, written by the agent")))))
 
-(deftest ^{:seon.test/long "Two nested seon.test/run requests of one member each (red, then green), then root's prepare (one more nested run); 60 s per nested run is merge-test's measured bound."
+(deftest ^{:seon.test/long "Three nested seon.test/run requests of one member each (red, green, green again); 60 s per nested run is merge-test's measured bound."
            :seon.test/long-ms 180000}
-  a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root
+  a-merge-request-waits-for-its-assigned-tasks-proofs-then-reaches-root
   ;; Before, propose-merge! took any issue id the agent named, ran no test and
-  ;; messaged root at once; root inferred pending proposals from messages.
+  ;; messaged root at once; root inferred pending merge requests from messages.
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       (support/transacted! connection (support/agent-tx @connection "root"))
       (let [branch (branch!)
             hosted (host-on! handle branch "mcp/proposer")
-            refusal #(first (hosted-run! hosted "(:seon.task/refused (my.program/propose-merge! {}))"))
+            refusal #(first (hosted-run! hosted "(:seon.task/refused (my.program/request-merge! {}))"))
             to-root #(set (db/q '[:find [?about ...] :where [?r :seon.agent/id "root"] [?m :seon.message/to ?r]
                                   [?m :seon.message/about ?about]] (db/db connection)))
             declaration {:seon.task/ns host-ns :seon.task/name "square" :seon.task/kind :function :seon.task/intent "Square."}
@@ -439,47 +440,26 @@
             as-root #(db/call-with-custody {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
         (support/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
         (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
-        (is (= '(my.program/propose-merge! {})
-               (last (:seon.render/operations (as-root task/assign! {:seon.agent/context-source handle :seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]
-                                                                     :seon.task/branch branch}))))
-            "the assignment offers the agent its proposal")
+        (is (nil? (:seon.error/message (as-root task/assign! {:seon.agent/context-source handle :seon.task/assigned task-id
+                                                              :seon.task/agent [:seon.agent/id "mcp/proposer"] :seon.task/branch branch})))
+            "root assigns the task while its proof is red")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))")
         (hosted-run! hosted (str "(clojure.test/deftest ^{:seon/tasks #{'" (task/task-sym host-ns "square") "}} square-test"
                                  " (clojure.test/is (= 9 (square 3))))"))
         (is (= ":unproven" (refusal)) "a red proof refuses")
         (is (empty? (to-root)) "and root hears nothing")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
-        (let [[about] (hosted-run! hosted "(:seon.task/merge (my.program/propose-merge! {}))")
-              open (my.program/proposals {:seon.db/db (db/db connection)})]
-          (is (= #{(read-string about)} (to-root)) "a green proof tells root, naming the merge task")
+        (let [[about] (hosted-run! hosted "(:seon.task/merge (my.program/request-merge! {}))")
+              open (my.root/merge-requests {:seon.db/db (db/db connection)})]
           (is (= [[(read-string about) branch #{'my.agents.host-probe/square-test}]]
                  (mapv (juxt :seon.task/merge :seon.task/branch #(set (map first (:seon.task/proved %)))) open))
-              "root reads the open proposal from facts")
-          (hosted-run! hosted "(my.program/propose-merge! {})")
-          (is (= #{(read-string about)} (set (map :seon.task/merge (my.program/proposals {:seon.db/db (db/db connection)}))))
-              "proposing again finds the same merge task")
-          ;; Before (2026-09-28 dogfood loop), root's prepare took an issue id, so
-          ;; the proposal an agent made could not be prepared at all.
-          (let [context (assoc (select-keys handle [:seon.sci.eval/ctx :seon.db/connection :seon.cluster/name
-                                                    :seon.store/store :seon.env/environment])
-                               :my.program/base-ctx (:seon.sci.eval/ctx handle))
-                prepared (db/call-with-custody {:seon.db/connection connection}
-                                               #(my.program/prepare-merge! (assoc (first open) :my.program/context context)))]
-            (some->> (:seon.source/candidate prepared)
-                     (hash-map :seon.store/store (:seon.store/store handle) :seon.store/branch)
-                     registry/retire-branch!)
-            (is (true? (:seon.test/passed? prepared)) "root prepares the proposal it read")
-            (is (= [#{'my.agents.host-probe/square-test} (read-string about)]
-                   [(:seon.task/proofs prepared) (:seon.task/merge prepared)])
-                "the proposal's proofs gate the merge, and it names its merge task")
-            (is (= [(list 'my.program/prepare-merge! {:seon.task/merge (read-string about)})]
-                   (:seon.render/operations (first open)))
-                "a proposal offers its prepare")
-            (is (= 'my.program/accept-merge! (ffirst (:seon.render/operations prepared)))
-                "the prepared merge offers its accept")
-            (is (= {:seon.task/id (read-string about) :seon.task/outcome :declined}
-                   (task/decide! connection (read-string about) :declined)))
-            (is (empty? (my.program/proposals {:seon.db/db (db/db connection)})) "a decided merge task is closed")))
+              "root reads the open merge request from facts")
+          (is (= [(list 'my.root/merge! {:seon.task/merge (read-string about)})]
+                 (take 1 (:seon.render/operations (first open))))
+              "a merge request offers its merge")
+          (hosted-run! hosted "(my.program/request-merge! {})")
+          (is (= #{(read-string about)} (set (map :seon.task/merge (my.root/merge-requests {:seon.db/db (db/db connection)}))))
+              "requesting again finds the same merge task"))
         (is (= {:seon.task/changed? true}
                (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."
                                                          :seon.task/basis {task-id declaration}))
@@ -675,26 +655,21 @@
                (hosted-run! hosted "(:seon.error/offending (my.program/ns-unmap! 'my.agents.host-probe/breaks-helper))"))
             "the refusal names the surviving caller")))))
 
-(deftest a-message-is-no-proposal-and-a-branch-agent-accepts-in-its-own-context
-  ;; Before, root inferred a pending proposal from any message about an issue
+(deftest a-message-is-no-merge-request-and-a-branch-agent-merges-in-its-own-context
+  ;; Before, root inferred a pending merge request from any message about an issue
   ;; from an agent on another branch. Owner ruling 2026-10-06: no merge
   ;; function refuses a caller for not being root; a branch agent's
-  ;; accept-merge! acts on its own branch, and the merge's own checks answer
-  ;; (here: the tested branch it names does not exist).
+  ;; merge acts on its own branch, and the merge's own checks answer
+  ;; (here: the merge task it names has no open merge request).
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       (support/transacted! connection (support/agent-tx @connection "root"))
       (let [branch (branch!)
             hosted (host-on! handle branch "mcp/proposer")]
         (hosted-run! hosted "(my.message/send {:my.message/to \"root\" :my.message/about \"a-fix\" :my.message/content \"Please merge.\"})")
-        (is (= [] (my.program/proposals {:seon.db/db (db/db connection)})) "only a proven proposal is one")
-        (is (= ["[:tested true]"]
-               (hosted-run! hosted (str "((juxt :seon.store/branch :seon.cluster.registry/branch-missing) (my.program/accept-merge! "
-                                        "{:seon.source/candidate :tested :seon.test.run/id \"run\" "
-                                        ;; a complete request (0db8bf035 made proofs and the merge task required),
-                                        ;; so the merge's own candidate check is what answers
-                                        ":seon.task/proofs #{} :seon.task/merge \"000000000000\" "
-                                        ":seon.source/expected-digests {} :parents #{}}))"))))))))
+        (is (= [] (my.root/merge-requests {:seon.db/db (db/db connection)})) "only a proven merge request is one")
+        (is (= ["[:seon.task/merge \"000000000000\"]"]
+               (hosted-run! hosted "((juxt :seon.error/member :seon.error/offending) (my.root/merge! {:seon.task/merge \"000000000000\"}))")))))))
 
 ;;; A restart loses every host and its branch connection while the branch stays
 ;;; listed and the agent admitted; `host/stop!` drops exactly that.

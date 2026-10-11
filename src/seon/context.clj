@@ -319,7 +319,7 @@
         (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
                         :seon.render/operations
                         (cond-> [(list 'seon.context/model-context (list 'seon.db/branch-database (list 'seon.db/db) branch) {} agent-id)]
-                          merge (conj (list 'my.program/prepare-merge! {:seon.task/merge merge}))
+                          merge (conj (list 'my.root/merge! {:seon.task/merge merge}))
                           sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
                                                               :seon.task/basis task-id})))}
                        outcome)

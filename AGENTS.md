@@ -266,7 +266,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   Ordinary clusters keep their program; selected development clusters adopt explicitly.
 - **Merge is a root task.** An agent's green end requests the merge (`seon.task/request-merge!`) once its proofs pass
   and no test its change broke is red on its source branch; the merge request is a task. Root's tools live in `my.root`
-  (`merge-requests`, `review`, `merge!`, `close!`, `launch!`, `ended`) and use git's words: a merge request is
+  (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use git's words: a merge request is
   reviewed, then merged (`:merged`) or closed with a reason (`:closed`); root reads the diff before it merges until
   criteria for automatic merges are written. Root works it through the ordinary REPL holding both worlds — a
   merge branch forked from the target branch (main) and a copy of the agent's world — with easy tools to move data

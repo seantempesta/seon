@@ -15,7 +15,7 @@
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "offered-operations-cannot-name-the-prior-result"
              :kind :function
-             :intent "*1, *2 and *3 are nil at the SCI REPL (dogfood loop 2026-09-28), so a value that offers its next call as data cannot refer to itself: `my.program/prepare-merge!` offers (`my.program/accept-merge!` {...}) with its whole request literal. Bind *1/*2/*3 (and *e) in the agent's context from its own evaluations, as clojure.main does, or have the reply's printer substitute the result symbol it already prints (result/eN) into offered forms, so an offer is short and runs as shown."
+             :intent "*1, *2 and *3 are nil at the SCI REPL (dogfood loop 2026-09-28), so a value that offers its next call as data cannot refer to itself: `seon.cluster.source/prepare-merge!` offers (`seon.cluster.source/accept-merge!` {...}) with its whole request literal. Bind *1/*2/*3 (and *e) in the agent's context from its own evaluations, as clojure.main does, or have the reply's printer substitute the result symbol it already prints (result/eN) into offered forms, so an offer is short and runs as shown."
              :must-read #{seon.repl/response}
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "directory-render-returns-text-the-printer-clips-mid-form"

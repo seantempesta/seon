@@ -1,5 +1,6 @@
 (ns seon.turn-continue-test
   (:require [clojure.core.async :as async]
+            [my.root]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -292,7 +293,7 @@
 
 
 (deftest ^{:seon/tasks #{'seon.turn/a-task-end-never-reaches-root}
-           :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass, its proposal's proof run and root's merge gate."
+           :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass, its merge request's proof run."
            :seon.test/long-ms 60000}
   a-task-that-ends-green-sends-root-one-merge-request
   (support/with-running-agent
@@ -333,13 +334,13 @@
              [message] ended
              proposed (db/q '[:find ?merge . :in $ ?branch :where [?p :seon.task/branch ?branch] [?p :seon.task/merge ?merge]]
                             home branch)
-             prepared (agent-eval running "root" (str "(my.program/prepare-merge! {:seon.task/merge \"" (:seon.task/merge message) "\"})"))]
+             open (mapv :seon.task/merge (my.root/merge-requests {:seon.db/db home}))]
          (is (= 1 (count @ledger)) "one model call turned the proof green")
          (is (= 1 (count ended)) "root received exactly one message from the agent")
          (is (= {:seon.message/about id :seon.task/end :done} (select-keys message [:seon.message/about :seon.task/end]))
              "it names the task and how it ended")
-         (is (and (some? proposed) (= proposed (:seon.task/merge message))) "it names the proposal's merge task")
-         (is (some? (:seon.source/candidate (:seon.repl/value prepared))) "root's prepare-merge! on it answers a proposal")
+         (is (and (some? proposed) (= proposed (:seon.task/merge message))) "it names the merge request's merge task")
+         (is (= [(:seon.task/merge message)] open) "root's merge-requests lists it")
          (let [shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) %)
                            (get-in (seon.context/current-state home "root") [:seon.context/unread :seon.context/items]))]
            (is (= {:seon.task/end :done :seon.task/proof-counts {:green 1} :seon.task/calls 1}
@@ -430,7 +431,7 @@
                                (db/db connection) agent-id))
            "the stopped loop ended the task, and root heard it once")))))
 
-(deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's proposal run."
+(deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's merge-request run."
            :seon.test/long-ms 30000}
   a-task-end-is-its-message-and-the-agents-close-in-one-transaction
   (support/with-running-agent
@@ -492,12 +493,12 @@
     #(#'turn/end-task! (assoc execution :seon.db.process/id (:seon.db.process/id (support/running-cluster running))) agent-id)))
 
 (defn- answering
-  "The proposals recorded at `home` answering `agent-id`'s assignment."
+  "The merge requests recorded at `home` answering `agent-id`'s assignment."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :string]]}
   [home agent-id]
-  (vec (db/q '[:find [?proposal ...] :in $ ?agent-id
-               :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?p :seon.task/proposes ?a]
-               [?p :seon.task/proposal ?proposal]]
+  (vec (db/q '[:find [?request ...] :in $ ?agent-id
+               :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?p :seon.task/of-assignment ?a]
+               [?p :seon.task/merge-request ?request]]
              home agent-id)))
 
 (defn- end-messages
@@ -517,7 +518,7 @@
   nil)
 
 (deftest ^{:seon/tasks #{'seon.turn/an-end-proposes-at-most-once}
-           :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two proposal runs."
+           :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two merge-request runs."
            :seon.test/long-ms 60000}
   an-end-proposes-once-whatever-interrupted-it
   (support/with-running-agent
@@ -530,22 +531,22 @@
      (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endp "area")
            execution (fixed-end! running agent-id 'tq.endp "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")]
        (is (= :done (turn/task-end (db/db (:seon.db/connection execution)) agent-id)) "the fix turned the proof green")
-       ;; an end interrupted after it proposed and before it told root
+       ;; an end interrupted after it requested the merge and before it told root
        (db/call-with-custody {:seon.db/connection (:seon.db/connection execution)}
-         #((requiring-resolve 'my.program/proposal!)
+         #((requiring-resolve 'my.program/request-merge!)
            {:my.program/context (assoc execution :my.program/base-ctx (:seon.sci.eval/base-ctx execution))
             :seon.db/connection (:seon.db/connection execution) :seon.agent/id agent-id}))
        ;; the branch moves on before the end is observed again
        (agent-eval running agent-id "(+ 1 2)")
        (end! running execution agent-id)
        (let [home (db/db connection)
-             proposals (answering home agent-id)
+             requests (answering home agent-id)
              [message :as messages] (end-messages home agent-id)]
-         (is (= 1 (count proposals)) "the end proposed once")
+         (is (= 1 (count requests)) "the end requested the merge once")
          (is (= 1 (count messages)) "root heard the end once")
-         (is (= (db/q '[:find ?m . :in $ ?p :where [?x :seon.task/proposal ?p] [?x :seon.task/merge ?m]] home (first proposals))
+         (is (= (db/q '[:find ?m . :in $ ?p :where [?x :seon.task/merge-request ?p] [?x :seon.task/merge ?m]] home (first requests))
                 (:seon.task/merge message))
-             "the message names the one proposal's merge task"))))))
+             "the message names the one merge request's merge task"))))))
 
 (defn- git!
   "Run git in `root`; its trimmed output, thrown when it fails."
@@ -576,7 +577,7 @@
        "(deftest ^{:seon/tasks #{'tq.endl/side}} side-test (is (= 4 (side 2))))\n"))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge}
-           :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two proposal runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
+           :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two merge-request runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
            :seon.test/long-ms 240000}
   a-green-end-lands-its-merge-without-root
   (support/with-running-agent
@@ -605,7 +606,7 @@
                  shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) (:seon.task/ended %))
                              (get-in (seon.context/current-state (db/db connection) "root") [:seon.context/unread :seon.context/items]))]
              (is (= :done (:seon.task/end message)) "the task ended green")
-             (is (= :accepted (:seon.task/outcome landed)) "the merge task is decided with no root")
+             (is (= :merged (:seon.task/outcome landed)) "the merge request is merged with no root")
              (is (uuid? (:seon.task/landed landed)) "it names the main commit the landing made")
              (is (= (git! root "rev-parse" "HEAD") (:seon.task/landed-git landed)) "and the checkout's new git commit")
              (is (= before (git! root "rev-parse" "HEAD^")) "one commit on the previous head")

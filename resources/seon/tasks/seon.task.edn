@@ -82,7 +82,7 @@
  #:seon.task{:name "a-repeated-problem-writes-nothing"
              :kind :function
              :intent "Card Q1. A problem task is created by identity `seon.id/id [class subject]` with its instructions as data on the task, assigned to root (or to a fresh agent for error signatures and cost regressions); writing the same problem twice writes nothing; the merge request a green end records becomes one problem class (runtime-follows-db §5)."
-             :must-read #{seon.id/id seon.task/create! seon.task/propose!}
+             :must-read #{seon.id/id seon.task/create! seon.task/request-merge!}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "each-problem-class-is-detected-from-its-facts"
              :kind :function

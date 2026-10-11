@@ -864,7 +864,7 @@
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
   `proofs` (the test symbols that prove the change: a merge task's proofs),
-  and answer the proposal `accept-merge!` takes: the whole run's verdict and
+  and answer the prepared merge `accept-merge!` takes: the whole run's verdict and
   tally, and its red members by name, which refuse acceptance (AGENTS.md,
   merge). A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
@@ -884,13 +884,13 @@
   a namespace its file does not require refuses before any test runs."
   {:malli/schema [:function
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs]
-                   [:or :seon.source/proposal :seon.program/three-way :seon.error/value]]
+                   [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
                         [:maybe :seon.program/identity-set]]
-                   [:or :seon.source/proposal :seon.program/three-way :seon.error/value]]
+                   [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
                         [:maybe :seon.program/identity-set] [:maybe :seon.fn/root]]
-                   [:or :seon.source/proposal :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
+                   [:or :seon.source/prepared :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
   ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs nil nil))
   ([source held-store candidate proofs selection] (prepare-merge! source held-store candidate proofs selection nil))
   ([source held-store candidate proofs selection root]
@@ -997,12 +997,12 @@
       :seon.source/red-tests red-tests :seon.source/refused-test-run run-id :seon.test.run/branch s})))
 
 (defn accept-merge!
-  "Merge exactly the program tested by `prepare-merge!`'s proposal into
+  "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
   `source`: the named run on S complete, each of its `:seon.task/proofs` a
   member, every member green (`red-test-refusal`), every added or replaced
   function reached by a green member, and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
-  the head moved from the proposal's `:seon.source/expected-digests`; writes to
+  the head moved from the prepared merge's `:seon.source/expected-digests`; writes to
   other rows never stale it. The merge commit's parents add the candidate and
   S's head, and it writes the merged branch's fork entity with its advanced
   base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
@@ -1010,7 +1010,7 @@
   takes: its identities, the commit before it, its merge commit and the run.
 
   Example:
-  (accept-merge! source store proposal)"
+  (accept-merge! source store prepared)"
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:seon.task/proofs :seon.task/proofs]
@@ -1077,7 +1077,7 @@
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "
                            (vec uncontracted) ". Declare their data shapes as registered schemas, "
-                           "contract them on the candidate branch, run their tests and propose again.")
+                           "contract them on the candidate branch, run their tests and request the merge again.")
                       (vec uncontracted))
               (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
               (:seon.error/at tx) tx
@@ -1598,7 +1598,7 @@
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Landing: one green proposal onto main, its files and one git commit
+;;; Landing: one green merge request onto main, its files and one git commit
 ;;; ---------------------------------------------------------------------------
 
 (defn- git
@@ -1706,7 +1706,7 @@
   [database merge-task]
   (let [[task-sym agent-id] (db/q '[:find [?sym ?agent] :in $ ?m
                                    :where [?mt :seon.task/id ?m] [?mt :seon.task/created-by ?a] [?a :seon.agent/id ?agent]
-                                   [?p :seon.task/merge ?m] [?p :seon.task/proposes ?as] [?as :seon.task/assigned ?tid]
+                                   [?p :seon.task/merge ?m] [?p :seon.task/of-assignment ?as] [?as :seon.task/assigned ?tid]
                                    [?t :seon.task/id ?tid] [?t :seon.task/sym ?sym]]
                                  database merge-task)]
     (cond-> {:seon.task/merge merge-task}
@@ -1715,7 +1715,7 @@
 
 (defn- land-held!
   "`land!` through `execution`, which carries its `:seon.store/store`."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/merge-request-view :seon.fn/root]
                   [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
   [execution {merge-task :seon.task/merge branch :seon.task/branch proved :seon.task/proved} root]
   (let [store (:seon.store/store execution)
@@ -1726,10 +1726,15 @@
                              value))
         prepared (timed :prepare #(prepare-merge! execution store branch (into #{} (map first) proved) nil root))
         accepted (when (:seon.source/candidate prepared) (timed :accept #(accept-merge! execution store prepared)))
-        decided (when (:seon.source/commit-id accepted)
-                  (timed :decide #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
-                                      ((requiring-resolve 'seon.task/decide!) connection merge-task :accepted))))
-        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at decided)))
+        closed (when (:seon.source/commit-id accepted)
+                 (timed :close #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
+                                    ((requiring-resolve 'seon.task/close!)
+                                     (cond-> {:seon.db/connection connection :seon.store/store store}
+                                       (:seon.env/environment execution)
+                                       (assoc :seon.env/environment (:seon.env/environment execution)
+                                              :seon.agent/routing (:seon.agent/routing (:seon.env/environment execution))))
+                                     merge-task :merged nil))))
+        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at closed)))
                   (timed :write-back #(write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})))
         acceptance (when (:seon.source/changed-paths written)
                      (merge (acceptance-names (db/db connection) merge-task)
@@ -1739,11 +1744,11 @@
       (seq (:seon.program/conflict prepared))
       (seon.error.refusal/error :seon.source/conflict-error
        {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/land!
-        :seon.error/message "The candidate and main changed the same declarations since the merge base; resolve on the branch and propose again."
+        :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and request the merge again."
         :seon.task/merge merge-task :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
       (not (:seon.source/candidate prepared)) prepared
       (not (:seon.source/commit-id accepted)) accepted
-      (:seon.error/at decided) (assoc decided :seon.source/accepted accepted)
+      (:seon.error/at closed) (assoc closed :seon.source/accepted accepted)
       (:seon.error/at written) (assoc written :seon.source/accepted accepted)
       (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
       :else {:seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
@@ -1751,22 +1756,24 @@
              :seon.source/step-ms @clock})))
 
 (defn land!
-  "Land the green `proposal` (an open merge proposal, `my.program/proposals`) in one call:
-  `prepare-merge!` on a fresh branch of `execution`'s head, `accept-merge!` through the
-  unchanged gate (deciding the merge task `:accepted` and retiring the tested branch),
+  "Merge the green merge request `merge-request` (an open one, `my.root/merge-requests`) in one call:
+  `prepare-merge!` on a fresh merge branch of `execution`'s head, `accept-merge!` through the
+  unchanged gate, then `seon.task/close!` `:merged` (deleting the merge branch and the source branch),
   `write-back!` into the checkout `root` and `commit!` of exactly the written paths.
   Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
-  data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
-  undecided and writes nothing; a write-back or commit refusal after acceptance carries
+  data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge request
+  open and writes nothing; a write-back or commit refusal after acceptance carries
   `:seon.source/accepted` (main already holds the merge) for a retry.
 
   Example:
-  (land! execution proposal \"/Users/me/src/project\")"
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
+  (land! execution merge-request \"/Users/me/src/project\")"
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/merge-request-view :seon.fn/root]
                   [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
-  [execution proposal root]
+  [execution merge-request root]
   ;; A cluster handle holds its store in its SCI context's environment, where
   ;; `seon.cluster.agent/acquire-context!` reads it; an acquired context holds it directly.
-  (let [store (or (:seon.store/store execution)
-                  (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution)))))]
-    (land-held! (assoc execution :seon.store/store store) proposal root)))
+  (let [ctx (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))
+        environment (or (some-> ctx env/of) (:seon.env/environment execution))
+        store (or (:seon.store/store execution) (:seon.store/store environment))]
+    (land-held! (cond-> (assoc execution :seon.store/store store) environment (assoc :seon.env/environment environment))
+                merge-request root)))

@@ -148,10 +148,10 @@
           (testing "the parent head does not move before the merge"
             (is (= (before callee)
                    (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee)))))
-          (let [proposal (source/prepare-merge! target store c proofs)
-                _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-                _ (is (true? (:seon.test/passed? proposal)))
-                accepted (source/accept-merge! target store proposal)
+          (let [prepared (source/prepare-merge! target store c proofs)
+                _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+                _ (is (true? (:seon.test/passed? prepared)))
+                accepted (source/accept-merge! target store prepared)
                 _ (is (:seon.source/commit-id accepted))]
            ;; Each stage is asserted before the next reads it: a refused merge is
            ;; shown as the merge's own value, never handed to write-back.
@@ -226,10 +226,10 @@
                                          [:seon.error/offending :seon.program/identities])))
             (is (= [[:seon.fn/sym 'absent/declaration]]
                    (:seon.error/offending (source/prepare-merge! target store c proofs #{[:seon.fn/sym 'absent/declaration]})))))
-          (let [proposal (source/prepare-merge! target store c proofs #{added-fn added-test})
-                _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-                _ (is (true? (:seon.test/passed? proposal)))
-                accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
+          (let [prepared (source/prepare-merge! target store c proofs #{added-fn added-test})
+                _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+                _ (is (true? (:seon.test/passed? prepared)))
+                accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 _ (is (:seon.source/commit-id accepted))]
             (when (:seon.source/commit-id accepted)
               (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
@@ -315,10 +315,10 @@
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
              namespace-entity [:seon.ns/name fixture-ns]
-             proposal (source/prepare-merge! target store c proofs #{check} root)
-             _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-             _ (is (true? (:seon.test/passed? proposal)))
-             accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))]
+             prepared (source/prepare-merge! target store c proofs #{check} root)
+             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+             _ (is (true? (:seon.test/passed? prepared)))
+             accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
          (is (= #{check namespace-entity} (:seon.program/identities accepted)))
          (when (:seon.source/commit-id accepted)
            (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
@@ -368,9 +368,9 @@
               (submit! request "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
               (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest callee-check (clojure.test/is (= 3 ("
                                     fixture-ns "/callee 2))))"))))
-          (let [proposal (source/prepare-merge! target store c #{(second check)} nil root)
-                _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-                accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
+          (let [prepared (source/prepare-merge! target store c #{(second check)} nil root)
+                _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+                accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 written (when (:seon.source/commit-id accepted)
                           (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))]
             (is (= (sort paths) (:seon.source/changed-paths written)) "both files are written")

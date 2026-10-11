@@ -64,8 +64,8 @@
   (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private context-task-done?
   (delay (requiring-resolve 'seon.context/task-done?)))
-(defonce ^:private program-proposal!
-  (delay (requiring-resolve 'my.program/proposal!)))
+(defonce ^:private program-request-merge!
+  (delay (requiring-resolve 'my.program/request-merge!)))
 (defonce ^:private context-outcome-tx
   (delay (requiring-resolve 'seon.context/outcome-tx)))
 (defonce ^:private source-land!
@@ -2181,7 +2181,7 @@
 
 (defn- end-message
   "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
-  subject and, ended green, the merge task its proposal recorded (`merge`)."
+  subject and, ended green, the merge task its merge request recorded (`merge`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
                   :my.message/message]}
   [database agent-id end merge]
@@ -2191,25 +2191,25 @@
                                       (when merge " Its merge request is the merge task this message names."))}
       merge (assoc :seon.task/merge merge))))
 
-(defn- end-proposal
-  "The proposal the end of the task `agent-id` holds already recorded at the task home `home`, with its merge
-  task's outcome and landing refusal: the latest proposal answering the agent's assignment of that task; nil when
-  none was recorded, so one end proposes at most once whatever interrupted it."
+(defn- end-merge-request
+  "The merge request the end of the task `agent-id` holds already recorded at the task home `home`, with its merge
+  task's outcome and landing refusal: the latest merge request answering the agent's assignment of that task; nil
+  when none was recorded, so one end requests the merge at most once whatever interrupted it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
   [home agent-id]
   (let [held (task/agent-task home agent-id)
         found (when (string? held)
-                (db/q '[:find ?tx (pull ?p [:seon.task/proposal :seon.task/merge :seon.task/branch :seon.task/commit
+                (db/q '[:find ?tx (pull ?p [:seon.task/merge-request :seon.task/merge :seon.task/branch :seon.task/commit
                                             :seon.task/proved :seon.task/run-id :seon.task/program])
                         :in $ ?agent-id ?handle
                         :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?a :seon.task/assigned ?handle]
-                        [?p :seon.task/proposes ?a] [?p :seon.task/proposal _ ?tx]]
+                        [?p :seon.task/of-assignment ?a] [?p :seon.task/merge-request _ ?tx]]
                       home agent-id held))
-        proposal (when (and (seq found) (not (db/read-refusal? found)))
-                   (update (second (last (sort-by first found))) :seon.task/proved set))]
-    (when proposal
-      (merge proposal (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge proposal)])
-                              :db/id)))))
+        request (when (and (seq found) (not (db/read-refusal? found)))
+                  (update (second (last (sort-by first found))) :seon.task/proved set))]
+    (when request
+      (merge request (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge request)])
+                             :db/id)))))
 
 (defn- landing-tx
   "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
@@ -2237,16 +2237,16 @@
                                             (get-in database [:config :branch]))})))
 
 (defn- land-end!
-  "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
+  "Merge the green end's `request` with no root when the dial `:seon.config.root/land?` is on and its merge task
   is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
   root's world, then record its result on the merge task at the task home (`landing-tx`). Answers the landing, or
   nil when nothing was landed."
   {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
-  [cluster agent-id proposal]
+  [cluster agent-id request]
   (let [database (db/db (:seon.db/connection cluster))
         land? (agent-dial database cluster agent-id :seon.config.root/land?)]
-    (when (and (true? land?) (:seon.task/merge proposal)
-               (not (:seon.task/outcome proposal)) (not (:seon.task/refusal proposal)))
+    (when (and (true? land?) (:seon.task/merge request)
+               (not (:seon.task/outcome request)) (not (:seon.task/refusal request)))
       (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
             execution (root-execution cluster)
             home (:seon.db/connection execution)
@@ -2254,20 +2254,23 @@
             [landed recorded]
             (db/call-with-custody
              {:seon.db/connection home}
-             #(let [landed (@source-land! execution (select-keys proposal [:seon.task/proposal :seon.task/merge :seon.task/branch
-                                                                           :seon.task/commit :seon.task/proved :seon.task/run-id
-                                                                           :seon.task/program])
+             #(let [landed (@source-land! execution (select-keys request [:seon.task/merge-request :seon.task/merge :seon.task/branch
+                                                                          :seon.task/commit :seon.task/proved :seon.task/run-id
+                                                                          :seon.task/program])
                                           root)]
-                [landed (db/transact! home (landing-tx (:seon.task/merge proposal) landed))]))]
+                [landed (db/transact! home (landing-tx (:seon.task/merge request) landed))]))]
         (if (:db-after recorded) landed recorded)))))
 
 (defn- end-task!
-  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
-  it ended green (`my.program/proposal!`, the agent's own act; a proposal this end already recorded is reused,
-  `end-proposal`), land it with no root when the dial says so (`land-end!`), record the agent's outcome at the
-  task home (`seon.context/outcome-tx`), then send root the one end message and close the agent in one
-  transaction at the task home (`end-task-call`), so whoever sees the agent closed finds its message; nil
-  otherwise. A refused step is a fault recorded beside the pass."
+  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): request the merge of its
+  change when it ended green (`my.program/request-merge!`, the agent's own act; a merge request this end already
+  recorded is reused, `end-merge-request`), record the agent's outcome at the task home (`seon.context/outcome-tx`),
+  then send root the one end message and close the agent in one transaction at the task home (`end-task-call`), so
+  whoever sees the agent closed finds its message; then merge it with no root when the dial says so (`land-end!`,
+  whose close deletes the agent's branch).
+  A task sent back deletes the agent's branch (`seon.task/delete-branch!`): nothing of it will merge; a capped or
+  stalled end keeps it, resumable.
+  nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
   (let [connection (:seon.db/connection cluster)
@@ -2279,17 +2282,15 @@
                                 :seon.agent/id agent-id}))]
     (when-let [end (task-end (db/db connection) agent-id)]
       (let [home (task/home-connection connection)
-            recorded (when (= :done end) (end-proposal (db/db home) agent-id))
+            recorded (when (= :done end) (end-merge-request (db/db home) agent-id))
             execution (when (and (= :done end) (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
-            proposal (or recorded
-                         (when execution
-                           (@program-proposal! {:my.program/context (assoc execution :my.program/base-ctx
-                                                                           (:seon.sci.eval/base-ctx execution))
-                                                :seon.db/connection (:seon.db/connection execution)
-                                                :seon.agent/id agent-id})))
-            _ (when (:seon.error/at proposal) (fault! 'my.program/proposal! proposal))
-            landed (when (:seon.task/merge proposal) (land-end! cluster agent-id proposal))
-            _ (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))
+            request (or recorded
+                        (when execution
+                          (@program-request-merge! {:my.program/context (assoc execution :my.program/base-ctx
+                                                                               (:seon.sci.eval/base-ctx execution))
+                                                    :seon.db/connection (:seon.db/connection execution)
+                                                    :seon.agent/id agent-id})))
+            _ (when (:seon.error/at request) (fault! 'my.program/request-merge! request))
             ;; the outcome is written at the task home before the message, so whoever reads the message finds it
             outcome-tx (@context-outcome-tx (db/db connection) agent-id)
             kept (when (seq outcome-tx)
@@ -2297,13 +2298,27 @@
                      (db/transact! home outcome-tx)
                      (db/call-with-custody {:seon.db/connection home} #(db/transact! home outcome-tx))))
             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/outcome-tx kept))
-            candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge proposal)))
+            candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge request)))
             write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate]]
                                         :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
             outcome (cond (:seon.error/at candidate) candidate
                           (identical? home connection) (write!)
                           :else (db/call-with-custody {:seon.db/connection home} write!))]
-        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
+        (when-not (:db-after outcome) (fault! `end-task-call outcome))
+        ;; the merge comes after the end is recorded: closing the merge request deletes the agent's branch
+        (when (and (:db-after outcome) (:seon.task/merge request))
+          (let [landed (land-end! cluster agent-id request)]
+            (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))))
+        ;; a task sent back leaves nothing on the branch to merge; a capped or stalled end stays resumable
+        (when (and (:db-after outcome) (= :given-back end))
+          (let [environment (env/of cluster)
+                branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+            (when (and (keyword? branch) (:seon.store/store environment))
+              (when-let [refused (task/delete-branch! {:seon.db/connection home :seon.store/store (:seon.store/store environment)
+                                                      :seon.agent/routing (:seon.agent/routing environment)
+                                                      :seon.env/environment environment}
+                                                     branch)]
+                (fault! `task/delete-branch! refused)))))))
     nil))
 
 (defn next-agent-work

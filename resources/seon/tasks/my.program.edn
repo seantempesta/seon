@@ -1,11 +1,11 @@
 [#:seon.task{:name "proposals-refuses-its-own-result-on-main"
              :kind :function
-             :intent "`(my.program/proposals {:seon.db/db h})` on default's main (2026-10-10, archive 2d19dafb0, JVM mode as root) throws its output contract: entries at [0], [1] and [2] lack `:seon.task/proposal`, `:seon.task/branch`, `:seon.task/commit`, `:seon.task/run-id`, `:seon.task/program` and hold an empty `:seon.task/proved`, so root cannot list proposals. Done when every entry it answers is a proposal of `:seon.task/proposal-view` (or it omits merge tasks with no proposal row), with the regression on a main holding such a merge task."
-             :must-read #{my.program/proposals seon.task/propose! seon.turn/landing-tx}}
+             :intent "`(my.root/merge-requests {:seon.db/db h})` on default's main (2026-10-10, archive 2d19dafb0, JVM mode as root) throws its output contract: entries at [0], [1] and [2] lack `:seon.task/proposal`, `:seon.task/branch`, `:seon.task/commit`, `:seon.task/run-id`, `:seon.task/program` and hold an empty `:seon.task/proved`, so root cannot list proposals. Done when every entry it answers is a proposal of `:seon.task/proposal-view` (or it omits merge tasks with no proposal row), with the regression on a main holding such a merge task."
+             :must-read #{my.root/merge-requests seon.task/request-merge! seon.turn/landing-tx}}
  #:seon.task{:name "an-agent-cannot-see-or-choose-its-change"
              :kind :function
              :intent "(my.program/overrides {}) answers [] on a branch with 21 changed identities; propose-merge! takes only :seon.issue/id, sweeps in drift the branch inherits (my.plan-test/current-refuses-an-unknown-agent-by-name), omits deletions from `:seon.test/changed`, and sends its content as a pr-str string. Selection exists only in root's prepare-merge!."
-             :must-read #{my.program/overrides my.program/propose-merge!}
+             :must-read #{my.program/overrides my.program/request-merge!}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
  #:seon.task{:name "breaks-plans-a-contract-change-as-a-retraction"
@@ -26,13 +26,13 @@
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "propose-refusal-names-no-next-step"
              :kind :function
-             :intent "(`my.program/propose-merge!` {}) on an unassigned branch answers the bare string \"seon.task is refused: unassigned.\" (the declared renderer shows only the message): no offending branch/agent, no fix naming who assigns (root's `seon.task/assign!`) or how a file task in resources/seon/tasks becomes assignable. An agent also has no my.* entrance to create its own branch (MCP's branch tool has none for Seon agents). The refusal names its assignment query and the call that fixes it."
-             :must-read #{my.program/propose-merge! seon.task/assignment seon.task/assign!}
+             :intent "(`my.program/request-merge!` {}) on an unassigned branch answers the bare string \"seon.task is refused: unassigned.\" (the declared renderer shows only the message): no offending branch/agent, no fix naming who assigns (root's `seon.task/assign!`) or how a file task in resources/seon/tasks becomes assignable. An agent also has no my.* entrance to create its own branch (MCP's branch tool has none for Seon agents). The refusal names its assignment query and the call that fixes it."
+             :must-read #{my.program/request-merge! seon.task/assignment seon.task/assign!}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "a-merged-change-reaching-the-files-is-unproven"
              :kind :function
-             :intent "The last unproven step of the dogfood path: an agent's merged change reaches the files through write-back (`my.program/write-back!`). Done when a live branch change is proposed, merged and written back, the file diff equals the change, and the run is recorded as evidence (tmp/repl-audit/change.md lists the prior gaps)."
-             :must-read #{my.program/prepare-merge! my.program/write-back!}
+             :intent "The last unproven step of the dogfood path: an agent's merged change reaches the files through write-back (`seon.cluster.source/write-back!`). Done when a live branch change is proposed, merged and written back, the file diff equals the change, and the run is recorded as evidence (tmp/repl-audit/change.md lists the prior gaps)."
+             :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/write-back!}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
  #:seon.task{:name "history-shows-the-source-twice-and-no-commit-id"
              :kind :function
@@ -46,8 +46,8 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
  #:seon.task{:name "the-merge-prepare-costs-three-seconds-and-400k-calls"
              :kind :function
-             :intent "The merge path: `my.program/prepare-merge!` takes 2.6-3.1 s and about 400k calls regardless of change size. The cold-projection hypothesis was falsified (800a94abb); it needs a sampled profile (Astra after a bow-out), then the responsible armed functions named and fixed. Done when a small merge prepares under one second, timed on parent and change."
-             :must-read #{my.program/prepare-merge! seon.cluster.source/prepare-merge!}}
+             :intent "The merge path: `seon.cluster.source/prepare-merge!` takes 2.6-3.1 s and about 400k calls regardless of change size. The cold-projection hypothesis was falsified (800a94abb); it needs a sampled profile (Astra after a bow-out), then the responsible armed functions named and fixed. Done when a small merge prepares under one second, timed on parent and change."
+             :must-read #{seon.cluster.source/prepare-merge!}}
  #:seon.task{:name "alias-and-require-as-retarget-silently"
   :kind :function
   :intent "In SCI, (require '[clojure.set :as x]) after x -> clojure.string returns nil and retargets the alias; so does (alias 'x 'clojure.walk) (sci-alias is a bare assoc-in, namespaces.cljc:478-486). Clojure refuses a different target (Namespace.java:257-258, \"Alias x already exists in namespace .., aliasing ..\"). The silent retarget makes stored definitions position-dependent and is the source of the digest refusals in the alias design probes. Correct: alias and require :as with a different target refuse as Clojure does, ns-unalias! being the guarded path (SCI runs ns-unalias itself); a refer replacement stays legal (a warning in Clojure). Related issue docs/seon/issues/reload-refuses-an-alias-retargeted-by-the-new-source.md. Proof: evaluating (alias 'x 'clojure.set) after x -> clojure.string answers a refusal error and leaves the alias unchanged."
@@ -56,7 +56,7 @@
  #:seon.task{:name "merge-tools-throw-instead-of-returning"
              :kind :function
              :intent "propose-merge! and prepare-merge! are returning tools but throw: propose-merge! on a branch whose contract names an agent-registered schema throws :malli.core/invalid-schema out of `seon.test/run` (seon.test/check-fails-on-agent-registered-schemas), and prepare-merge! of a test-only new namespace throws entity-id/missing. Done when each returns its error map naming the failing proof or row, regressions through MCP SCI."
-             :must-read #{my.program/propose-merge! my.program/prepare-merge!}
+             :must-read #{my.program/request-merge! seon.cluster.source/prepare-merge!}
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "root-cannot-diff-a-proposal"
              :kind :function
@@ -65,8 +65,8 @@
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "accept-cannot-retire-a-hosted-proposers-branch"
              :kind :function
-             :intent "accept-merge!'s detached retire of the proposing branch fails while the proposer's hosted agent holds a connection ('branch :agent-099e88cb509c still has a connection in this process'), recorded as an open fault produced by `my.program/accept-merge!` (2026-10-08); the branch stays in the roster. Done when accepting a hosted agent's proposal releases its acquisition and retires its branch, regression through MCP SCI."
-             :must-read #{my.program/accept-merge! my.agent/retire-branch!}
+             :intent "accept-merge!'s detached retire of the proposing branch fails while the proposer's hosted agent holds a connection ('branch :agent-099e88cb509c still has a connection in this process'), recorded as an open fault produced by `seon.cluster.source/accept-merge!` (2026-10-08); the branch stays in the roster. Done when accepting a hosted agent's proposal releases its acquisition and retires its branch, regression through MCP SCI."
+             :must-read #{seon.task/delete-branch! my.agent/retire-branch!}
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "breaks-on-a-namespace-subject-takes-five-seconds"
              :kind :function

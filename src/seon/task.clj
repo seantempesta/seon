@@ -1,6 +1,6 @@
 (ns seon.task
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
-  record a merge proposal. Tasks live on the cluster, so every write goes to
+  record a merge request. Tasks live on the cluster, so every write goes to
   the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
   {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
   (:require [seon.cache :as cache]
@@ -610,7 +610,7 @@
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})
           (= 1 (count assigned))
-          (merge {:seon.task/key key :seon.task/assigned handle :seon.task/proposes [:seon.task/assignment key]
+          (merge {:seon.task/key key :seon.task/assigned handle :seon.task/of-assignment [:seon.task/assignment key]
                   :seon.task/proofs (:seon.task/proofs edges #{})}
                  (select-keys task [:seon.task/ns :seon.task/sym]))
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
@@ -651,41 +651,95 @@
                           (when (and (pos? (+ fail failure)) (not (green [proof reach]))) [proof reach])))
               members)))))
 
-(defn propose!
-  "Record on the cluster the merge task for the assigned `work` and one proposal
-  of the commit `view` names on its branch: its proofs at their definition digests, the run and its tested
-  program, and each proof observed red on the branch before the change
-  (`:seon.task/refuted`, read from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a repeat
-  proposal finds it; the recurrence key `[key commit]` records one proposal per
-  commit. Answers the proposal view."
+(defn request-merge!
+  "Record on the cluster the merge request for the assigned `work`: its merge task and one merge request
+  of the commit `view` names on its branch, with its proofs at their definition digests, the run and its
+  tested program, and each proof observed red on the branch before the change (`:seon.task/refuted`, read
+  from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a
+  repeat request finds it; the recurrence key `[key commit]` records one merge request per commit. Answers
+  the merge request view."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/assigned-work
                        [:map [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit]
                         [:seon.task/proved :seon.task/proved] [:seon.task/run-id :seon.task/run-id]
                         [:seon.task/program :seon.task/program]]]
-                  [:or :seon.task/proposal-view :seon.task/conflict-error :seon.error/value]]}
-  [connection agent-id {:seon.task/keys [key ns proposes]} view]
+                  [:or :seon.task/merge-request-view :seon.task/conflict-error :seon.error/value]]}
+  [connection agent-id {:seon.task/keys [key ns of-assignment]} view]
   (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge-" key) :seon.task/kind :merge
                        :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
                       agent-id)
         red (refuted (db/db connection) (into #{} (map first) (:seon.task/proved view)))
-        view (cond-> (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
+        view (cond-> (assoc view :seon.task/merge-request (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
                (seq red) (assoc :seon.task/refuted red))
-        report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/proposes proposes))))]
+        report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/of-assignment of-assignment))))]
     (cond (map? red) red
           (:seon.error/at report) report
           :else view)))
 
-(defn decide!
-  "Root records its `outcome` on the merge task `merge-task`, closing it: `proposals`
-  lists only merge tasks without one. Answers the closed merge task.
+(defonce ^:private retire-branch!
+  ;; my.agent closes a branch's agent before its roster entry goes; a my namespace is never required here
+  (delay (requiring-resolve 'my.agent/retire-branch!)))
+
+(defonce ^:private submit-work!
+  (delay (requiring-resolve 'seon.flow/submit!)))
+
+(defonce ^:private record-fault!
+  (delay (requiring-resolve 'seon.fault/fault!)))
+
+(defonce ^:private process-id
+  (delay (comp (requiring-resolve 'seon.cluster.process/id) (requiring-resolve 'seon.cluster.process/current-identity))))
+
+(defn delete-branch!
+  "Delete the agent branch `branch` through `context` once its agent is closed (`my.agent/retire-branch!`),
+  as io work on the environment's work launcher: retiring joins the agent's graphs and takes the store's
+  roster permit, which a running collection holds for seconds, so the caller (an ending agent's own pass
+  among them) never waits on it. Inline when no launcher accepts work, answering its refusal; a failure of the
+  detached work is recorded as a fault. main itself (an agent working on main has no branch of its own) is never
+  deleted. nil, or the inline refusal."
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.store/branch] [:or :nil :seon.error/value]]}
+  [{environment :seon.env/environment connection :seon.db/connection :as context} branch]
+  (let [main? (= branch (get-in (db/db (home-connection connection)) [:config :branch]))
+        retire! #(@retire-branch! {:seon.store/branch branch} context)
+        launcher (:seon.flow/work-launcher environment)
+        submitted (when (and launcher (not main?))
+                    (@submit-work! launcher
+                     {:seon.env/environment environment :seon.flow/workload :io
+                      :seon.flow/submission-id (str "delete-branch-" (name branch))
+                      :seon.flow/work-fn (fn [_] (let [retired (retire!)]
+                                                   (when (:seon.error/at retired)
+                                                     (throw (ex-info (:seon.error/message retired) retired)))))
+                      :seon.flow/complete!
+                      (fn [{failure :seon.flow/throwable}]
+                        (when failure
+                          (@record-fault! environment failure
+                           {:seon.error/layer :seon.task/close :seon.error/operation 'seon.task/delete-branch!
+                            :seon.db.process/id (@process-id)}))
+                        nil)}))]
+    (when-not (or main? submitted)
+      (let [retired (retire!)] (when (:seon.error/at retired) retired)))))
+
+(defn close!
+  "Close the merge request `merge-task`: write its `outcome` (`:merged`, or `:closed` with `reason`) at
+  main and delete the source branch each of its merge requests names, closing the agent there
+  (`delete-branch!`; a refused deletion is answered beside the closed request). The one close owner: root's merge (`seon.cluster.source/land!`, which deletes the merge
+  branch it tested) and root's decline (`my.root/close!`) both end here. Answers the closed merge request.
 
   Example:
-  (seon.task/decide! connection \"0123456789ab\" :declined)"
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/merge :seon.task/outcome]
-                  [:or :seon.task/decided :seon.error/value]]}
-  [connection merge-task outcome]
-  (let [report (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]])]
-    (if (:seon.error/at report) report {:seon.task/id merge-task :seon.task/outcome outcome})))
+  (seon.task/close! context \"0123456789ab\" :closed \"The change belongs in seon.db.\")"
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.task/merge :seon.task/outcome [:maybe :seon.task/reason]]
+                  [:or :seon.task/closed :seon.error/value]]}
+  [{connection :seon.db/connection :as context} merge-task outcome reason]
+  (let [report (written connection (cond-> [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]]
+                                     reason (conj [:db/add [:seon.task/id merge-task] :seon.task/reason reason])))
+        branches (when (:db-after report)
+                   (db/q '[:find [?branch ...] :in $ ?merge
+                           :where [?request :seon.task/merge ?merge] [?request :seon.task/branch ?branch]]
+                         (:db-after report) merge-task))]
+    (cond (:seon.error/at report) report
+          (:seon.error/at branches) branches
+          :else (let [refused (into [] (keep #(delete-branch! context %)) (sort branches))]
+                  (cond-> {:seon.task/id merge-task :seon.task/outcome outcome}
+                    reason (assoc :seon.task/reason reason)
+                    (seq refused) (assoc :seon.task/delete-refusals refused))))))
 
 (defn resolution
   "Why task `handle` is closed, or nil while it is open: derived from what

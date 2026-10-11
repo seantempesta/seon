@@ -394,18 +394,18 @@
       ;; so the writer's final value carries its definition's digest.
       (write! c-conn (test-support/replacement-tx (db/db c-conn) [:seon.fn/sym (sym "merge-tasked")]
                                                   "(defn merge-tasked {:seon/tasks #{'scratch.merge-tasks/merge-task} :malli/schema [:=> [:cat] :int]} [] 2)" {}))
-      (let [proposal (prepare)
+      (let [prepared (prepare)
             before (db/commit-id (db/db h-conn))
-            refused (source/accept-merge! target held-store proposal)]
-        (is (true? (:seon.test/passed? proposal)))
+            refused (source/accept-merge! target held-store prepared)]
+        (is (true? (:seon.test/passed? prepared)))
         (is (= {tag #{(sym "merge-tasked")}} (:seon.error/offending refused)))
         (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
-          ;; The task write touches no merged entity, so the same proposal now merges.
-          (is (:seon.source/commit-id (source/accept-merge! target held-store proposal)))
+          ;; The task write touches no merged entity, so the same prepared now merges.
+          (is (:seon.source/commit-id (source/accept-merge! target held-store prepared)))
           (is (= #{tag} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
           (is (= "Merge." (intent)))))
       (finally

@@ -76,10 +76,10 @@ Words no library names. Each has one meaning.
 | run | a budget of turns counted from a triggering message or task assignment to the reply or the cap; derived by query, never an entity (CN-19 retires "run" for one turn) | episode, session bound |
 | render function | a function of the data that selects what to show: an AI/HTML pair per entity schema, read-only | producer, view, face |
 | current-state block | the part of an agent's context rendered live from its record each turn | status tail |
-| write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`my.program/write-back!`) | export, push |
+| write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`seon.cluster.source/write-back!`) | export, push |
 | wake | a listened event the agent has not yet answered (a message, a task change) | notification, trigger |
 | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
-| subject, step | a subject task owns its step tasks as components (`:seon.task/steps`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
+| subject, step | a subject task owns its step tasks as components (`:seon.task/children`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
 | needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
 | frontier | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (`seon.task/frontier`); never stored | ready list, queue, scheduler state |
 | attempt | one assignment row of a task to an agent on a branch (`seon.id/id [handle agent branch]`), ended once by its end fact | run (of a task), launch |

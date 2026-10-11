@@ -59,8 +59,7 @@ Do not teach a serialization/restoration ladder.
 
 Accepted functions, schemas, and tests persist as program facts.
 The REPL admits a `defn` without a Malli contract (CLAUDE.md: it returns with
-a warning); the merge refuses it (`my.program/propose-merge!` over
-`seon.cluster.source`: every carried function declares a complete
+a warning); the merge refuses it (`seon.cluster.source/accept-merge!`: every carried function declares a complete
 `:malli/schema`). A plain `def` gets the temporary-state note from `def-note`
 (`src/seon/repl.clj`).
 
@@ -148,12 +147,11 @@ Forms and timings are in [the landing note](../../../docs/prds/agent-platform/la
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities.
 5. **Request a merge, then root merges.** Root assigns the task (`seon.task/assign!`);
-   the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`) and calls
-   `(my.program/propose-merge! {})`, which runs those proofs on its branch.
-   Root reads `(my.program/proposals)` and passes one open merge request to
-   `my.program/prepare-merge!`, then the answer to `accept-merge!` (which
-   closes the merge task) and that answer to `write-back!`
-   (`src/my/program.clj`, over `seon.cluster.source`). Only the proofs gate
+   the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`); its green end
+   records the merge request (`my.program/request-merge!`, which runs those proofs on its branch).
+   Root reads `(my.root/merge-requests)` and merges one with `(my.root/merge! {:seon.task/merge id})`
+   (`seon.cluster.source/land!`: prepare on a merge branch, accept, `seon.task/close!` `:merged`,
+   write-back and one git commit), or closes it with `my.root/close!` and a reason. Only the proofs gate
    acceptance; other reaching tests' reds are shown as `:seon.source/red`. They merge the branch's
    changed program entities through the tested head; the basis is each merged entity's
    definition digest, so other writes never stale a merge or its write-back.

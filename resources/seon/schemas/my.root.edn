@@ -1,0 +1,13 @@
+#:my.root{:instructions [:map {:description "The laws root applies to merge requests and agents, as data (my.root/instructions)."}
+                         [:my.root/laws [:vector [:string {:min 1}]]]]
+          :merge-request [:and {:description "An open merge request as root reads it, with the merge and the close offered."}
+                          :seon.task/merge-request-view [:map [:seon.render/operations :seon.render/operations]]]
+          :merge-requests [:vector :my.root/merge-request]
+          :merge-request-read [:map [:seon.db/db :seon.db/database-value]]
+          :merge-request-request [:map {:description "The merge task whose open merge request root merges, into the checkout :seon.fn/root (the cluster's :seon.config.fs/working-root when absent)."}
+                                  [:my.program/context :my.program/context] [:seon.task/merge :seon.task/merge]
+                                  [:seon.fn/root {:optional true} :seon.fn/root]]
+          :close-request [:map {:description "The merge task root closes without merging, and why."}
+                          [:my.program/context :my.program/context] [:seon.task/merge :seon.task/merge]
+                          [:seon.task/reason :seon.task/reason]]
+          :ended [:vector {:description "The task ends in root's unread inbox, each as the value its end message stands for."} :seon.task/ended]}
