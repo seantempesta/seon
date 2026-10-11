@@ -544,28 +544,32 @@ The benchmark now also checks positive read evidence after its attribution
 helper empties the central cache: every node-detail or schema-form read names
 an entity. This assertion is red on the old reader irrespective of index warmth.
 The measured cold/warm legs themselves retain their original budgets and
-ordering. Default's cache and JVM were never reset.
+ordering. This lane never emptied default's cache or stopped, reset or restarted
+its JVM; root independently refreshed default during the final gate.
 
 ### Combined after table
 
-Run `f0c7da5528f8`, candidate `8317b174f7fbc137d54094b67c070011916c8824`:
+Final gate `98ea9f055a1b`, candidate `fc7cd66b9c269022153a0037a24787e1b8aa2a10`
+(landed as `252107016`), seeded from root’s refreshed `d884d4c96`:
 12 named Vars, **108 pass / 0 fail / 0 error**. The full benchmark is included.
 MB are decimal caller-thread allocated MB. Floors remain the earlier
 hypotheses for warm operation, not measured guarantees.
 
 | Part | Cold ms / MB | Warm ms / MB | Hypothesized warm floor ms / MB |
 |---|---:|---:|---:|
-| Branch | 12.26 / 1.948 | 12.74 / 0.734 | 1–10 / 0.1–1 |
-| World | 0.19 / 0.013 | 0.10 / 0.013 | 0.01–0.1 / <0.02 |
-| SCI | 923.72 / 1,783.171 | 13.13 / 5.195 | 1–2 / <1 |
-| First context | 82.95 / 63.244 | 18.42 / 10.228 | 2–5 / 1–3 |
-| Paused Flow | 2.30 / 0.630 | 1.94 / 0.613 | 1–5 / <1 |
+| Branch | 8.74 / 1.964 | 12.98 / 0.707 | 1–10 / 0.1–1 |
+| World | 0.13 / 0.014 | 0.13 / 0.014 | 0.01–0.1 / <0.02 |
+| SCI | 917.94 / 1,841.278 | 12.54 / 4.926 | 1–2 / <1 |
+| First context | 47.81 / 39.083 | 15.50 / 9.994 | 2–5 / 1–3 |
+| Paused Flow | 1.83 / 0.622 | 1.27 / 0.605 | 1–5 / <1 |
 
-Cold context allocation is **80.4% lower** than the combined failing sample;
-calls fall from 4,349 to 4,093 and reads from 138 to 131. The warm context
-still derives no reached graph. An earlier candidate run also passed the
-original benchmark with the final read strategy; the latest table is one
-complete measured sample, not minima selected across runs.
+Cold context allocation is **87.9% lower** than the combined failing sample;
+calls fall from 4,349 to 4,095 and reads from 138 to 131. The warm context
+still derives no reached graph. The earlier full slice, `f0c7da5528f8`, also
+passed all 108 assertions: context cold **82.95 ms / 63.244 MB**, warm
+**18.42 ms / 10.228 MB**, seeded from `40d1416a2`. The table is one complete
+sample from the final gate, not minima selected across runs; the seed change
+means the additional 24 MB reduction is not attributed to the source fix.
 
 The named non-long reaching proofs are:
 
@@ -601,7 +605,8 @@ budgets and the new read-evidence proof passed. This timing miss is retained
 as evidence; no bound or branch implementation was changed for the rerun.
 
 Foreign boundary: HEAD advanced to `7d7da5865` (cluster-partition admission)
-during investigation. Candidate checks include committed HEAD but exclude the
+during investigation, then root refreshed default to `d884d4c96`, PID 57399.
+Candidate checks include committed HEAD but exclude the
 other lane's in-flight cluster-pick/partition files. This fix changes neither
 Datahike, schema/instrumentation, configuration nor SCI acquisition. The three
 identity/digest maps are still proportional to declarations; the remaining
