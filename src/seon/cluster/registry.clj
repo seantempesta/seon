@@ -350,9 +350,29 @@
        {:seon.error/message "The parent branch has no fork entity toward this target, so the fork would have no merge base."
         :seon.error/expected target :seon.error/offending parent :seon.store/branch branch}))))
 
+(defn base-branch
+  "The roster ref holding a work branch's immutable merge base."
+  {:malli/schema [:=> [:cat :seon.store/branch] :seon.store/branch]}
+  [branch]
+  (keyword "base" (str (when-let [space (namespace branch)] (str space "/")) (name branch))))
+
+(defn base-commit-id
+  "The commit retained by a work branch's base ref."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
+                  [:maybe :seon.source/commit-id]]}
+  [database branch]
+  (get-in (head-record (:store database) (base-branch branch)) [:meta :datahike/commit-id]))
+
+(defn advance-base!
+  "Move a work branch's retained base to the immutable value just merged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] :seon.source/commit-id]}
+  [database branch]
+  (d/force-branch! database (base-branch branch) (d/parent-commit-ids database)))
+
 (defn fork!
   "Create a work branch as `branch!` does and, when this call created it,
-  write in it the branch's fork entity (`branch-fork-entity`): its merge base
+  retain its immutable base commit in `base-branch` and write its fork entity
+  (`branch-fork-entity`): its merge base
   toward `:seon.branch/target` (default: the parent) until a merge advances
   it. The parent is `::from` when it names a branch, else the branch of the
   source value `:seon.db/db`. A commit with no source value refuses before
@@ -380,12 +400,18 @@
                                    (schema/projection-from-database database))]
                 (if (:seon.error/at fork)
                   fork
-                  ;; The new branch's own write, never the caller's custody.
-                  (db/call-with-custody
-                   {:seon.db/connection connection}
-                   #(schema/call-with-projection
-                     projection
-                     (fn [] (db/transact! connection {:tx-data [fork]}))))))
+                  (let [retained (branch! {:seon.store/store store :seon.store/branch (base-branch branch)
+                                           :seon.cluster.registry/from
+                                           (if (= parent (or target parent))
+                                             (db/commit-id database)
+                                             (base-commit-id database parent))})]
+                    (if (:seon.error/at retained)
+                      retained
+                      (db/call-with-custody
+                       {:seon.db/connection connection}
+                       #(schema/call-with-projection
+                         projection
+                         (fn [] (db/transact! connection {:tx-data [fork]}))))))))
               (finally (store/release-branch! connection)))]
         (if (:db-after written)
           result
@@ -458,7 +484,7 @@
       {:seon.store/branch branch :seon.cluster/created? true})))
 
 (defn retire-branch!
-  "Remove one branch from the roster. Idempotent; data survives until GC.
+  "Remove a branch and its retained base ref from the roster. Data survives until GC.
   `delete-branch!` removes the roster entry only
   (`versioning.cljc:279-320`); the bytes go when `collect!` runs, and a
   branch absent from the roster is ALREADY DONE — Datahike's
@@ -488,6 +514,8 @@
                  (str "branch " branch " still has a connection in this process")
                  {::dir (:seon.store/dir store) :seon.store/branch branch})
         (throw failure))))
+  (when (contains? (roster store) (base-branch branch))
+    (retire-branch! {:seon.store/store store :seon.store/branch (base-branch branch)}))
   nil)
 
 (defn- cluster-claims
@@ -530,7 +558,9 @@
   (let [connection (:seon.store/connection-object store)
         branches (roster store)
         claims (into (conj claimed :db) (mapcat #(cluster-claims connection %)) branches)
-        unclaimed (into #{} (remove #(or (claims %) (branch-connected? store %))) branches)]
+        held (into claims (filter #(branch-connected? store %)) branches)
+        held (into held (map base-branch) held)
+        unclaimed (into #{} (remove held) branches)]
     (run! #(retire-branch! {:seon.store/store store :seon.store/branch %}) unclaimed)
     unclaimed))
 

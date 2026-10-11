@@ -635,7 +635,7 @@
   (= :seon.ns/name a))
 
 #?(:clj
-   (defn digest-map
+   (defn- declaration-digest-map
      "Read every compared program declaration and its stored definition digest.
 
   The families come from `database`'s own carried projection, so a branch
@@ -770,7 +770,7 @@
                            identities)))))))))))
 
 #?(:clj
-   (defn changed-identities
+   (defn- declaration-changed-identities
      "Declarations whose digest `database` asserted or retracted after `base`
   (a value, or a basis-t on `database`'s own lineage),
   deleted ones named by history: `digest-map`'s scoping identities. Only
@@ -813,15 +813,82 @@
                  {:seon.error/offending outside})
          :else identities))))
 
+#?(:clj
+   (defn projected-values
+     "Stored value sets at selected entity/attribute coordinates, with collision refs remapped."
+     {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.program/identity]
+                         [:map-of :seon.db/entity-id :seon.db/entity-id]]
+                     [:map-of :seon.program/identity [:set :seon.schema/value]]]}
+     [database coordinates remap]
+     (let [datoms (requiring-resolve 'seon.db/undecoded-datoms)]
+       (into {}
+             (keep (fn [[attribute entity]]
+                     (let [ref? (= :db.type/ref (get-in database [:schema attribute :db/valueType]))
+                           values (into #{} (map (fn [[_ _ value]]
+                                                   (if ref? (get remap value value) value)))
+                                        (datoms database :eavt [entity attribute]))]
+                       (when (seq values)
+                         [[attribute (get remap entity entity)] values]))))
+             coordinates))))
+
+#?(:clj
+   (defn digest-map
+     "Stored declaration digests, or value digests under an explicit attribute projection."
+     {:malli/schema
+      [:function
+       [:=> [:cat :seon.db/database-value :map]
+        [:or :seon.program/digest-map :seon.program/digest-map-refusal]]
+       [:=> [:cat :seon.db/database-value
+             [:map [:seon.program/identities [:set :seon.program/identity]]
+              [::remap {:optional true} [:map-of :seon.db/entity-id :seon.db/entity-id]]]
+             [:set :qualified-keyword]]
+        [:map-of :seon.program/identity :seon.program/definition-digest]]]}
+     ([database bounds] (declaration-digest-map database bounds))
+     ([database {coordinates :seon.program/identities remap ::remap} attributes]
+      (into {} (map (fn [[coordinate values]] [coordinate (id/id values 64)]))
+            (projected-values database (into #{} (filter #(attributes (first %))) coordinates)
+                              (or remap {}))))))
+
+#?(:clj
+   (defn changed-identities
+     "Changed declaration identities, or entity/attribute coordinates under a projection."
+     {:malli/schema
+      [:function
+       [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t] :seon.db/database-value :map]
+        [:or :seon.program/identity-set :seon.program/digest-map-refusal]]
+       [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t] :seon.db/database-value :map
+             [:set :qualified-keyword]] [:set :seon.program/identity]]]}
+     ([base database bounds] (declaration-changed-identities base database bounds))
+     ([base database _bounds attributes]
+      (let [[history since basis datoms]
+            (map requiring-resolve '[seon.db/history seon.db/since seon.db/basis-t seon.db/undecoded-datoms])
+            changed (since (history database)
+                           (if (int? base) base (basis base)))]
+        (into #{} (mapcat (fn [attribute]
+                           (map (fn [[entity _ _]] [attribute entity])
+                                (datoms changed :aevt [attribute]))))
+              attributes)))))
+
 (defn three-way
   "Classify branch and head declaration identities relative to base.
 
    Absence is a state. Equal branch/head states are unchanged, including equal
    additions, edits and retractions. Conflicts retain all three states."
   {:malli/schema
-   [:=> [:cat :seon.program/digest-map :seon.program/digest-map
-         :seon.program/digest-map]
-    :seon.program/three-way]}
+   [:=> [:cat [:map-of :seon.program/identity :seon.program/definition-digest]
+         [:map-of :seon.program/identity :seon.program/definition-digest]
+         [:map-of :seon.program/identity :seon.program/definition-digest]]
+    [:map
+     [:seon.program/unchanged [:set :seon.program/identity]]
+     [:seon.program/changed-on-branch [:set :seon.program/identity]]
+     [:seon.program/changed-on-head [:set :seon.program/identity]]
+     [:seon.program/conflict [:set :seon.program/identity]]
+     [:seon.program/added [:set :seon.program/identity]]
+     [:seon.program/retracted [:set :seon.program/identity]]
+     [:seon.program/conflict-digests [:map-of :seon.program/identity
+       [:map [:seon.program/base-digest :seon.program/digest-or-absence]
+             [:seon.program/branch-digest :seon.program/digest-or-absence]
+             [:seon.program/head-digest :seon.program/digest-or-absence]]]]]]}
   [base branch head]
   (let [absent :seon.program/absent
         state (fn [digests declaration] (get digests declaration absent))]

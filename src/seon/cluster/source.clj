@@ -730,7 +730,7 @@
   [missing message members]
   (assoc (program/digest-map-refusal missing message members) :seon.error/operation 'seon.cluster.source/prepare-merge!))
 
-(defn- branch-base-t
+(defn branch-base-t
   "The base-t attribute toward `head` (the target's database) of `candidate`'s
   own fork entity in `branch` (`seon.cluster.registry/fork-of`): the one a
   merge recorded on the target under that fork's id, else the fork's own. A
@@ -749,19 +749,19 @@
                {:seon.store/branch candidate :seon.error/expected (:seon.branch/target fork) :seon.error/offending target})
       :else (or (registry/advanced-base-t head (:seon.branch/fork-id fork)) (:seon.branch/base-t fork)))))
 
-(defn- merge-base
-  "`branch` (the database of `candidate`) as of its base-t toward `head`
-  (`branch-base-t`): its fork, advanced to the merged value by each merge. It
-  is the branch's own value, not the target's: the base-t is a t of the
-  history the branch holds (a fork of a work branch inherits that branch's
-  base), so the base never reads another lineage's transaction numbers. Its
-  `seon.program/digest-map` reads are slower than a commit's
-  (`seon.cluster.source/as-of-merge-base-digest-reads-are-slower`)."
+(defn merge-base
+  "The immutable commit held by candidate's retained base ref, preserving
+  values whose attributes omit history. The caller releases the database."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch :seon.store/branch]
                   [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
   [branch head target candidate]
   (let [t (branch-base-t branch head target candidate)]
-    (if (:seon.error/at t) t (d/as-of branch t))))
+    (if (:seon.error/at t)
+      t
+      (if-let [commit (registry/base-commit-id branch candidate)]
+        (d/commit-as-db branch commit)
+        (refused :seon.program/history "The branch has no retained base ref."
+                 {:seon.store/branch candidate})))))
 
 (defn- replacement
   "Exact replacement transaction data onto `onto` for `delta`'s entities in `from`."
@@ -1089,6 +1089,10 @@
                                          {:tx-data (into [[:db.fn/call declarations-held-tx expected] advanced] tx)
                                           :parents (conj merged e-id)})]
                 (if (:db-after report)
+                  (do
+                    (let [merged-db (commit-database held-store (first merged))]
+                      (try (registry/advance-base! merged-db (:seon.branch/name advanced))
+                           (finally (d/release-materialized-db merged-db))))
                   {:seon.program/identities delta :seon.test.run/id run-id
                    ;; The head this commit merged into is its parent other than
                    ;; the merged ones: Datahike's own lineage. A report's
@@ -1096,7 +1100,7 @@
                    ;; an older commit (datahike writer.cljc:210).
                    :seon.source/base-commit-id
                    (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
-                   :seon.source/commit-id (db/commit-id (:db-after report))}
+                   :seon.source/commit-id (db/commit-id (:db-after report))})
                   report))))
           (finally (d/release-materialized-db tested)))))))
 
