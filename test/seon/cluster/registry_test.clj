@@ -30,9 +30,12 @@
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.cluster.squash :as squash]
             [seon.cluster.store :as store]
             [seon.schema]
             [seon.schema.datahike :as schema-datahike]
+            [seon.sci.eval :as sci.eval]
+            [seon.task :as task]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
@@ -758,3 +761,71 @@
                   [_ base] (base-markers)]
               (is (= fork base) "the base is the new fork, not src as of the stale t")))
           (finally (store/release-branch! src-connection)))))))
+
+(defn- with-program-store
+  "Call `body` with a file store of its own and its main connection, carrying the executing program's
+  attributes and projection, as `seon.test-support/with-database`'s fresh store does in memory: collection
+  is store-global, so its proof needs a store no other test writes."
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.store/store :seon.db/connection] :nil]] :nil]}
+  [body]
+  (let [root (str "tmp/registry-test/" (random-uuid))
+        opened (store/open-store! {:seon.store/dir (str root "/store")})
+        connection (:seon.store/connection-object opened)
+        handle (test-support/execution-handle db/*conn*)
+        source (db/db (:seon.db/connection handle))]
+    (try
+      (d/transact connection (into [] (keep (fn [[ident attribute]]
+                                              (when (and (keyword? ident) (namespace ident)
+                                                         (not (str/starts-with? (namespace ident) "db")))
+                                                (dissoc attribute :db/id))))
+                                   (d/schema source)))
+      (db/carry-connection-projection-state!
+       connection (sci.eval/projection-state @connection (db/carried-projection source) (:seon.cluster/name handle)))
+      (db/call-with-custody {:seon.db/connection connection} #(body opened connection))
+      (finally
+        (store/release-store! opened)
+        (delete-recursively! root)))
+    nil))
+
+(defn- clean-key-count
+  "The store's logical key count once collection left nothing unreachable."
+  {:malli/schema [:=> [:cat :seon.store/store] [:int {:min 0}]]}
+  [store]
+  (registry/collect! store registry/plain-cutoff {})
+  (:seon.cluster.registry/key-count (registry/collect! store registry/plain-cutoff {})))
+
+(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+  a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
+  ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every roster head; an end copy is a plain
+  ;; transaction with no parent link, so a deleted attempt's commits and nodes reach nothing and are swept.
+  (with-program-store
+   (fn [store connection]
+     (let [handle (task/task-handle 'fixture.tasks "reclaimed" :function)
+           branch :attempt-reclaimed
+           _ (test-support/transacted! connection [(test-support/task-row handle "Original")])
+           baseline (clean-key-count store)
+           base (db/db connection)]
+       (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch branch
+                                                     :seon.cluster.registry/from (db/commit-id base) :seon.db/db base})))
+       (let [fork (db/carry-connection-projection-state! (store/open-branch! store branch)
+                                                         (:seon.sci.eval/projection-state (meta connection)))
+             commits (try (db/call-with-custody
+                           {:seon.db/connection fork}
+                           #(doall (for [n (range 10)]
+                                     (do (test-support/transacted! fork [{:db/id [:seon.task/id handle]
+                                                                          :seon.task/intent (str "Refined " n ".")}])
+                                         (db/commit-id (db/db fork))))))
+                          (finally (store/release-branch! fork)))
+             before-copy (clean-key-count store)
+             copied (db/call-with-custody {:seon.db/connection connection} #(squash/copy! connection branch nil {}))
+             with-copy (clean-key-count store)]
+         (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
+         (is (pos? (:seon.squash/datoms copied)))
+         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+         (let [collected (registry/collect! store registry/plain-cutoff {})]
+           (is (pos? (:seon.cluster.registry/swept collected)) "the next collection sweeps the deleted branch")
+           (is (every? #(nil? (k/get (:store @connection) % nil {:sync? true})) commits)
+               "every commit only the branch wrote is gone")
+           (is (= (+ baseline (- with-copy before-copy)) (clean-key-count store))
+               "the store holds its baseline plus the one copied transaction")))
+       nil))))

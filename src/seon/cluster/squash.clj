@@ -2,8 +2,12 @@
   "Pure three-way squash merge of declared cluster facts."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.cluster.source :as source]
             [seon.db :as db]
-            [seon.program :as program]))
+            [seon.id :as id]
+            [seon.program :as program]
+            [seon.schema :as schema]
+            [seon.task :as task]))
 
 (defn- collision-remap
   "Target eids for branch-born entities sharing a natural identity with target."
@@ -109,3 +113,61 @@
                           :ours (shown-state target attribute o)
                           :theirs (shown-state source attribute t)}))))
      {:tx-data [] :conflicts []} changes)))
+
+(defn- conflict-task!
+  "Write root's problem task for one `:root` `conflict` of `branch`, named by its
+  identity `seon.id/id [:squash-conflict entity attribute]`, so a repeat writes nothing."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch :seon.squash/conflict] :nil]}
+  [connection branch {:keys [entity attribute]}]
+  (let [created (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'seon.task
+                               :seon.task/name (str "squash-conflict-" (id/id [:squash-conflict entity attribute]))
+                               :seon.task/kind :work
+                               :seon.task/intent (str "Branch " (name branch) " and main both changed " attribute
+                                                      " of entity " entity " since their merge base; main kept its value."
+                                                      " Read the three values with seon.cluster.squash/squash-merge and decide.")})]
+    (when (:seon.error/at created)
+      (throw (ex-info (:seon.error/message created "The conflict's problem task was refused.") created)))
+    nil))
+
+(defn copy!
+  "Squash `branch` onto main through `connection` as ONE transaction carrying `meta`
+  and the provenance (source branch and commit) as transaction metadata.
+  Each `:root` conflict is first written as root's problem task. Never a Datahike
+  merge: a parented commit would pin the branch's lineage to main for collection.
+  Answers what it copied."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch [:maybe [:set :seon.program/identity]] :map]
+                  :seon.squash/copy]}
+  [connection branch selection meta]
+  (let [target (db/db connection)
+        main-branch (get-in target [:config :branch])
+        source (db/branch-database target branch)
+        _ (when-not source
+            (throw (ex-info "The branch to squash has no head." {:seon.store/branch branch})))
+        base (source/merge-base source target main-branch branch)]
+    (when (:seon.error/at base) (throw (ex-info (:seon.error/message base "The branch has no merge base.") base)))
+    (try
+      (let [commit (db/commit-id source)
+            {:keys [tx-data conflicts]} (squash-merge source base target
+                                                      (or (db/carried-projection target) (schema/handed-projection))
+                                                      selection)
+            _ (run! #(conflict-task! connection branch %) conflicts)
+            report (db/transact! connection {:tx-data tx-data
+                                             :tx-meta (assoc meta :seon.squash/source-branch branch
+                                                             :seon.squash/source-commit commit)})]
+        (when-not (:db-after report)
+          (throw (ex-info (:seon.error/message report "The end copy was refused.") report)))
+        {:seon.squash/source-branch branch :seon.squash/source-commit commit
+         :seon.squash/datoms (count tx-data) :seon.squash/conflicts conflicts})
+      (finally (source/release! [base source])))))
+
+(defn squash-merge!
+  "Copy `branch`'s cluster facts onto main by hand, as an attempt's successful end
+  does (`copy!`), restricted to the identities `selection` names (nil: all).
+  Root's way to land an error end's branch; a second copy writes nothing new.
+
+  Example:
+  (seon.cluster.squash/squash-merge! {} :attempt-0123456789ab nil)"
+  {:malli/schema [:=> [:cat :seon.squash/context :seon.store/branch [:maybe [:set :seon.program/identity]]]
+                  :seon.squash/copy]}
+  [{connection :seon.db/connection} branch selection]
+  (db/call-with-custody {:seon.db/connection connection} #(copy! connection branch selection {})))

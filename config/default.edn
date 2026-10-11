@@ -205,6 +205,11 @@
  ; Unit: open attempts on this cluster.
  :seon.config.agent/max-running 4
 
+ ; AN ENDED ATTEMPT'S BRANCH GOES, so collection reclaims everything only it
+ ; wrote: main keeps the one end copy and what root merged. True keeps every
+ ; ended branch for audit until root retires it.
+ :seon.config.agent/keep-ended-branches? false
+
  ; A REFUSED TURN WRITE IS NEVER RETRIED WITHOUT BOUND. On 2026-09-17 every
  ; turn write on `default` was refused by one projection failure and the turn
  ; proc re-fired its own wake each time; each refused attempt still flushed
