@@ -587,6 +587,37 @@
           (empty? (:seon.task/proofs edges)) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
           :else {:seon.task/revision revision :seon.agent/id agent-id :seon.task/proofs (:seon.task/proofs edges)})))
 
+(defn- next-attempt
+  "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`:
+  one more than its ended attempts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or [:tuple [:int {:min 1}] :seon.task/assignment] :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [ended (db/q '[:find (count ?a) . :in $ ?handle
+                      :where [?t :seon.task/id ?handle] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _]]
+                    database handle)]
+    (or (read-error ended)
+        (let [number (inc (or ended 0))] [number (id/id [handle number])]))))
+
+(defn attempt-tx
+  "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main
+  `database`: its row, numbered one more than the task's ended attempts and identified by
+  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value; [] when that
+  attempt is already written. The agent it names may be created in the same transaction. An unknown
+  task refuses `:unknown-task`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id :seon.store/branch]
+                  [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
+  [database handle agent-id branch]
+  (let [[number attempt :as next] (next-attempt database handle)
+        revision (task-revision database handle)]
+    (cond (read-error next) next
+          (read-error revision) revision
+          (nil? revision) (refused 'seon.task/attempt-tx :unknown-task 'seon.task handle)
+          (:db/id (db/pull database [:db/id] [:seon.task/assignment attempt])) []
+          :else [{:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
+                  :seon.task.attempt/number number :seon.task/revision revision
+                  :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}])))
+
 (defonce ^:private acquire-context!
   ;; seon.cluster.agent requires this namespace through seon.turn: resolved once, at first use
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
@@ -666,19 +697,22 @@
   [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch
     cluster :seon.agent/context-source}]
   (let [read (assignment-read (db/db (main-connection connection)) handle agent)
-        {revision :seon.task/revision agent-id :seon.agent/id proofs :seon.task/proofs} read
+        {agent-id :seon.agent/id proofs :seon.task/proofs} read
         ran (when (and (not (:seon.error/at read)) cluster) (proof-run cluster agent-id branch proofs))]
     (cond (:seon.error/at read) read
           (nil? cluster) (refused 'seon.task/assign! :no-world 'seon.task {:seon.task/assigned handle :seon.agent/id agent-id})
           :else (or (assignment-refusal handle agent-id ran proofs)
-                    (let [assignment (id/id [handle agent-id branch])
-                          report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
-                                                       :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
-                                                       :seon.task/branch branch}])]
-                      (or (when (:seon.error/at report) report)
-                          {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
-                           :seon.task/branch branch :seon.render/operations []
-                           :seon.test.run/id (:seon.test.run/id ran)}))))))
+                    (let [home (main-connection connection)
+                          tx (attempt-tx (db/db home) handle agent-id branch)
+                          report (if (and (vector? tx) (seq tx)) (written connection tx) tx)
+                          [_ attempt] (next-attempt (db/db home) handle)
+                          row (when-not (:seon.error/at report)
+                                (db/pull (db/db home) [:seon.task/branch {:seon.task/agent [:seon.agent/id]}]
+                                         [:seon.task/assignment attempt]))]
+                      (or (some #(when (:seon.error/at %) %) [report row])
+                          {:seon.task/assignment attempt :seon.task/assigned handle
+                           :seon.agent/id (get-in row [:seon.task/agent :seon.agent/id]) :seon.task/branch (:seon.task/branch row)
+                           :seon.render/operations [] :seon.test.run/id (:seon.test.run/id ran)}))))))
 
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its

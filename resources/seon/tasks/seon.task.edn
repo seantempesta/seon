@@ -69,6 +69,11 @@
              :intent "Card S2. `seon.task/frontier` answers the handles that should run now over a database value as two `seon.db/q` reads with `seon.task/frontier-rules` (the eligible leaves minus `blocked`, evaluated unbound); `seon.task/done?` (a leaf by an attempt's :done end with no later :sent-back targeting it, a parent when no leaf under it is open); `seon.task/resolution` answers `:seon.task/children` for a done parent. Proof: P1's twelve scenarios on the fifty-leaf tree, and the frontier under 10 ms through `seon.profile/measure`."
              :must-read #{seon.task/frontier seon.task/done? seon.task/resolution seon.db/q seon.profile/measure}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md" "docs/research/agent-platform/2026-10-11/design-probes.md"}}
+ #:seon.task{:name "an-attempt-is-written-once-with-its-agent"
+             :kind :function
+             :intent "Card S3, slice 1. `seon.task/attempt-tx` answers the attempt row of task `handle` for `agent-id` on `branch`: `:seon.task/assignment` is `seon.id/id [handle n]` where `:seon.task.attempt/number` n is one more than the task's ended attempts, with `:seon.task/attempt-of` beside the handle value; the caller concatenates the agent's creation (`seon.cluster.agent/creation-tx`) so both are one transaction on main; an open attempt already written answers [], so a second write writes nothing. `seon.task/assign!` writes its row through it."
+             :must-read #{seon.task/attempt-tx seon.task/assign! seon.cluster.agent/creation-tx seon.id/id}
+             :evidence #{"docs/research/agent-platform/2026-10-11/r1-db-flow-design.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "a-sent-back-end-reopens-its-target"
              :kind :function
              :intent "Card S4. `seon.turn/end-task-call` records :sent-back with `:seon.task/target` and the decision in the attempt's one end transaction; `seon.task/done` honors it (the target is no longer done, its successors stop being ready). A row in the S2 table."

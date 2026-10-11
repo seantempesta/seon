@@ -94,14 +94,14 @@
  :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored."} :working :requested :done :bailed :capped]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
  :assignment [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/assignment-row
-                       :description "seon.id/id over [task agent branch]: root assigning a task to an agent's branch (2.8), written on the cluster."}]
+                       :description "seon.id/id over [task attempt-number]: one attempt of a task by an agent on its branch (seon.task/attempt-tx), written on the cluster; rows written before attempts were numbered derive from [task agent branch]."}]
  :assigned [:and {:seon.db/index true :description "The assigned task's handle, a value, never a ref (7.2)."} :seon.task/handle]
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                   [:seon.task/revision :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
-                  [:seon.task/attempt-of {:optional true} :seon.task/attempt-of]
+                  [:seon.task/attempt-of {:optional true} :seon.task/attempt-of] [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]]
  :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row

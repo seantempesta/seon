@@ -201,3 +201,25 @@
        (is (= 44 (count (:seon.profile/value measured))))
        ;; The first call in a fresh JVM also plans the two queries; the budget is the warm read.
        (is (< (:seon.profile/ms measured) 10.0) "the two reads over fifty leaves: P1 measured 4 ms at worst")))))
+
+(deftest ^{:seon/tasks #{'seon.task/an-attempt-is-written-once-with-its-agent}} an-attempt-is-written-once-with-its-agent
+  (test-support/with-database
+   (fn [connection]
+     (ingest! connection (entry "a" ""))
+     (let [h (handle "a")
+           agent-id "tq-attempt-agent"
+           created (db/with (db/db connection)
+                            (into (test-support/agent-tx (db/db connection) agent-id)
+                                  (task/attempt-tx (db/db connection) h agent-id :tq-attempt-1)))
+           row #(db/pull %1 [:seon.task.attempt/number :seon.task/assigned :seon.task/branch
+                             {:seon.task/attempt-of [:seon.task/id]} {:seon.task/agent [:seon.agent/id]}]
+                         [:seon.task/assignment (id/id [h %2])])]
+       (is (= {:seon.task.attempt/number 1 :seon.task/assigned h :seon.task/branch :tq-attempt-1
+               :seon.task/attempt-of {:seon.task/id h} :seon.task/agent {:seon.agent/id agent-id}}
+              (row created 1))
+           "the attempt and the agent it names are one transaction; its identity is the task and attempt number")
+       (is (= [] (task/attempt-tx created h agent-id :tq-attempt-1)) "a second write of the open attempt writes nothing")
+       (let [closed (db/with created [[:db/add [:seon.task/assignment (id/id [h 1])] :seon.task.attempt/end :sent-back]])
+             retried (db/with closed (task/attempt-tx closed h agent-id :tq-attempt-2))]
+         (is (= 2 (:seon.task.attempt/number (row retried 2))) "after an end the next attempt is the next number")
+         (is (= :tq-attempt-1 (:seon.task/branch (row retried 1))) "the ended attempt keeps its row"))))))

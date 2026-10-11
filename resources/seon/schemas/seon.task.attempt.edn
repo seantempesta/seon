@@ -3,5 +3,6 @@
               :description "How an attempt ended, asserted once on its assignment row by seon.turn/end-task-call: proofs green, given back, turns spent, stalled, sent back to :seon.task.attempt/target, or cancelled (runtime-follows-db §2)."}
        :done :given-back :capped :stalled :sent-back :cancelled]
  :target [:and {:description "The task a :sent-back end sends the work back to."} :seon.db/ref]
+ :number [:int {:min 1 :description "Which attempt of its task this row is: one more than the task's ended attempts when it was written (seon.task/attempt-tx); with the task's handle it derives the row's identity."}]
  :reason [:string {:min 1 :description "Why an attempt ended other than :done."}]
  :commit [:uuid {:description "The attempt's branch commit at its end: its successor's fork basis, keyed by commit id, never t."}]}
