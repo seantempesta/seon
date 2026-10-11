@@ -62,7 +62,7 @@ a word marked (target) names its rename, not yet landed.
 | norm | Datahike's named, once-only data change (`:tx/norm`, `reference-code/datahike/src/datahike/norm/norm.clj`); a merge may carry one to migrate main's rows | migration |
 | delete branch | `delete-branch!`: the branch leaves the roster, its commits wait for retention GC; "retire" is for agents only | unlink, retire a branch |
 | commit | a Datahike commit with parents; the program part has its own content identity, the program digest | basis (for a commit) |
-| cherry-pick | the pure identity-matched three-way selection of declared cluster facts from an agent branch onto main; returns transaction data and conflicts, without merging branch ancestry (`seon.cluster.pick/cherry-pick`) | data relay |
+| squash merge | git's merge --squash as the copy-back: the three-way of declared cluster facts between the merge base, a source branch and main, landed as one plain transaction on main with no parent link to the source (`seon.cluster.squash/squash-merge`) | cherry-pick, data relay |
 
 ## Seon's words
 
