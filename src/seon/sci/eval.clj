@@ -3635,7 +3635,12 @@
           (= (::armed-dials snapshot) (armed-dials database))
           (or (identical? previous database)
               (when (and commit-id (commit-id-of previous))
-                (let [attributes (acquisition-attributes (db/carried-projection previous))
+                ;; Only `previous`'s identity and cache-context are read, never
+                ;; its index: a collection reclaims the nodes of a value no
+                ;; branch head reaches, and the attributes come from the
+                ;; supplied value, read from its connection. A different set
+                ;; names a declaration change, so the bases differ either way.
+                (let [attributes (acquisition-attributes (db/carried-projection database))
                       acquired (program-identity previous)]
                   (or (= (program-basis acquired attributes)
                          (program-basis (program-identity database) attributes))

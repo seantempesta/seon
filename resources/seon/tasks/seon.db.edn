@@ -219,4 +219,8 @@
   :kind :function
   :intent "On default (2026-10-10, lane interp-honest-2) `seon.db/branch-connection` returned nil for a branch with no open connection and its caller dereferenced it, throwing a NullPointerException instead of an error map. Correct: a read of a branch with no connection answers a named refusal (the branch, why), or the caller derives the connection on demand as hosting does (d98ab13ed); never a null that crashes a later call."
   :must-read #{seon.db/branch-connection}
-  :evidence #{"docs/seon/plan.md"}}]
+  :evidence #{"docs/seon/plan.md"}}
+ #:seon.task{:name "a-failed-projection-derivation-stays-cached-under-its-commit"
+             :kind :function
+             :intent "`seon.db/carried-projection` stores a delay under the commit key before forcing it, and a Clojure delay whose body threw rethrows that exception on every later deref, so one failed derivation (a reclaimed node, an interrupted read) answers the same failure for that commit until the bounded cache evicts it. Done when a failed cell is evicted from `seon.db/projection-cache` under both its revision and commit keys before the failure propagates, as `seon.sci.eval/record-refusals-once!` does for its cache, so the next call derives again."
+             :must-read #{seon.db/carried-projection seon.db/content-projection seon.sci.eval/record-refusals-once!}}]

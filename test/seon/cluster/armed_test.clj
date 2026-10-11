@@ -24,6 +24,7 @@
   throw, so a call would both fail the count and fail loudly."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -32,6 +33,8 @@
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
+            [seon.mcp :as mcp]
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
@@ -445,3 +448,62 @@
             ;; its armer-quiescence request before stopping the graph.
             (flow/resume (:seon.flow/graph instance))
             (boot/stop! instance)))))))
+
+(defn- collected-cluster-scenario
+  "Boot, request, collect, request again: the assertions of
+  `an-eval-request-after-a-collection-reads-no-collected-value`; answers
+  whether the last one held."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (let [root "tmp/armed-test/collected"]
+    (test-support/delete-recursively! root)
+    (test-support/populate-published-root! root)
+    ;; A restarted cluster restores its value from the store, so the nodes
+    ;; the acquired value reads are the store's, not written in this process.
+    (boot/stop! (boot/start! {:seon.boot/cluster-name "collected" :seon.boot/root root}))
+    (let [instance (boot/start! {:seon.boot/cluster-name "collected" :seon.boot/root root})]
+      (try
+        (let [connection (:seon.boot/cluster-connection instance)
+              request (fn [code]
+                        (let [result (json/read-str
+                                      (mcp/call (json/write-str
+                                                 {"name" "eval_clj"
+                                                  "arguments" {"cluster" "collected" "agent" "root"
+                                                               "mode" "jvm" "code" code}})))]
+                          {:error? (get result "isError")
+                           :values (keep :seon.repl/value (test-support/mcp-replies result))}))]
+          (is (= {:error? false :values [3]} (request "(+ 1 2)"))
+              "the cluster context acquires the head")
+          ;; Hours of work in one step: the first declarations change, so the
+          ;; declaration nodes the acquired value reads are no head's, and
+          ;; enough commits derive their projections to age its own out.
+          (doseq [n (range 30)]
+            (test-support/transacted!
+             connection
+             (test-support/schema-entities
+              @connection [[(keyword "aaa.collected" (str "attribute-" n)) :int]])))
+          (is (pos? (registry/collect! (:seon.store/store instance) (Date.)))
+              "the collection reclaimed what no head reaches")
+          ;; Nothing in memory answers for the reclaimed nodes: the node cache
+          ;; is this disposable store's own, and index children are weak.
+          (.invalidateAll ^com.github.benmanes.caffeine.cache.Cache
+                          (:datahike.index.interface/node-cache (:store @connection)))
+          (System/gc)
+          (is (= {:error? false :values [3]} (request "(+ 1 2)"))
+              "the next request acquires from its connection"))
+        (finally
+          (boot/stop! instance)
+          (test-support/delete-recursively! root))))))
+
+(deftest ^{:seon.test/fixture-observation "A whole-store collection reclaims what no branch head reaches, which only a booted cluster on its own store may run."
+           :seon.test/long "Two real cluster boots on one published root, thirty declaration writes and a whole-store collection."
+           :seon.test/long-ms 180000}
+  an-eval-request-after-a-collection-reads-no-collected-value
+  ;; 2026-10-11: after a retention collection every eval request on default
+  ;; answered "Node not found in storage." until a restart. The cluster
+  ;; context's acquisition compared the next value with the database value it
+  ;; held from its previous acquisition and read that value's index, whose
+  ;; nodes no head reached any more and the collection had reclaimed.
+  ;; Each boot arms the loaded contracts afresh; the test scopes that to itself.
+  (test-support/preserving-instrumentation-state
+   #(collected-cluster-scenario)))
