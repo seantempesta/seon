@@ -36,6 +36,16 @@
                               :message (:seon.test/failure-message result#)))
                      (:seon.test/results run#))}))
 
+(defn batch-lines
+  "The EDN lines one batch of `part` appends: a member line per result, unrun and excluded
+  symbol, or, when the batch was refused or answered nothing, a refusal line per symbol."
+  [class-of part answer]
+  (if (and (:results answer) (not (:refusal answer)))
+    (concat (map #(assoc % :class (class-of (:seon.test/sym %))) (:results answer))
+            (map (fn [s] {:seon.test/sym s :class (class-of s) :unrun true}) (:unrun answer))
+            (map (fn [s] {:seon.test/sym s :class (class-of s) :excluded true}) (:excluded answer)))
+    (map (fn [s] {:seon.test/sym s :class (class-of s) :refusal (or (:refusal answer) (pr-str answer))}) part)))
+
 (defn -main
   "Run every batch of SYMBOLS-EDN and append its members to OUT-EDN."
   [root cluster agent-id symbols-file out & [batch]]
@@ -47,11 +57,7 @@
       (let [live (operator/live-root-value! root (pr-str (batch-form cluster agent-id part))
                                             {:seon.operator/command :check})
             answer (:seon.operator/value live)
-            lines (if (:results answer)
-                    (concat (map #(assoc % :class (class-of (:seon.test/sym %))) (:results answer))
-                            (map (fn [s] {:seon.test/sym s :class (class-of s) :unrun true}) (:unrun answer))
-                            (map (fn [s] {:seon.test/sym s :class (class-of s) :excluded true}) (:excluded answer)))
-                    (map (fn [s] {:seon.test/sym s :class (class-of s) :refusal (or (:refusal answer) (pr-str answer))}) part))]
+            lines (batch-lines class-of part answer)]
         (spit out (str/join (map #(str (pr-str %) "\n") lines)) :append true)
         (println "batch" n (count part) "tests" (:ms answer) "ms"
                  (count (filter #(pos? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))) (:results answer))) "red")))))
