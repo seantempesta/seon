@@ -1,0 +1,104 @@
+SEON check OK total-ms 45944
+run 6e4cdc0dd4b1 / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2529 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 2602, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1972, :seon.boot/ready-ms 25322, :seon.operator/adopt-ms 2277, :seon.operator/archive-ms 1970, :seon.operator/classpath-ms 536, :seon.operator/prepare-ms 3273, :seon.operator/share-ms 734, :seon.operator/boot-ms 31978, :seon.operator/source-ms 3240}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 12950, :adopted-ms 1541}, :seon.source/built? true, :seon.cluster/adopted-identities 1221, :seon.source/git-sha "db2c4cfcaafe6d21e312ace8bdda22d484f13008", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1915}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 2014, :rehearsal-ms 14602, :total-ms 45944}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run 6e4cdc0dd4b1 / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2529 ms / passed? true", :seon.source/commit-id #uuid "6acbf9ec-7ae0-5de8-8850-4abf824e6c55"}
+
+SEON check OK total-ms 46299
+run fc6f8285d215 / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2562 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 2638, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1877, :seon.boot/ready-ms 25375, :seon.operator/adopt-ms 2290, :seon.operator/archive-ms 1902, :seon.operator/classpath-ms 564, :seon.operator/prepare-ms 3253, :seon.operator/share-ms 750, :seon.operator/boot-ms 32522, :seon.operator/source-ms 3216}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 14124, :adopted-ms 1619}, :seon.source/built? true, :seon.cluster/adopted-identities 1221, :seon.source/git-sha "abe4487613a80583ceb4d154165a2d97b1924218", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1823}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1903, :rehearsal-ms 15868, :total-ms 46299}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run fc6f8285d215 / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2562 ms / passed? true", :seon.source/commit-id #uuid "6acbfa25-7798-5545-87a7-e666e02a6aef"}
+
+SEON check OK total-ms 48213
+run c4681866b984 / executed 1 / reused 0 / pass 2 / fail 0 / error 0 / 3433 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 3504, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1942, :seon.boot/ready-ms 25632, :seon.operator/adopt-ms 2541, :seon.operator/archive-ms 1902, :seon.operator/classpath-ms 561, :seon.operator/prepare-ms 3296, :seon.operator/share-ms 797, :seon.operator/boot-ms 32750, :seon.operator/source-ms 3260}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 14711, :adopted-ms 1655}, :seon.source/built? true, :seon.cluster/adopted-identities 1333, :seon.source/git-sha "d6ba8ce3fdd2c4970ce27b21281e1e706f25bbd3", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1885}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1946, :rehearsal-ms 16474, :total-ms 48213}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run c4681866b984 / executed 1 / reused 0 / pass 2 / fail 0 / error 0 / 3433 ms / passed? true", :seon.source/commit-id #uuid "6acbfb5a-d1b8-5e42-8278-1adeaf9da1c2"}
+
+Final source read proofs and cold bounds:
+SEON check OK total-ms 42680
+run cec7a01d51bb / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2528 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 2600, :seon.operator/slot-wait-ms 2, :seon.operator/seed-ms 2030, :seon.boot/ready-ms 24244, :seon.operator/adopt-ms 2351, :seon.operator/archive-ms 2059, :seon.operator/classpath-ms 591, :seon.operator/prepare-ms 3555, :seon.operator/share-ms 871, :seon.operator/boot-ms 28057, :seon.operator/source-ms 3521}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 15158, :adopted-ms 1588}, :seon.source/built? true, :seon.cluster/adopted-identities 1342, :seon.source/git-sha "5078c5f8948713ed54ddc81dcce4d3d807aa66f5", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1976}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 2131, :rehearsal-ms 16842, :total-ms 42680}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run cec7a01d51bb / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2528 ms / passed? true", :seon.source/commit-id #uuid "6acbfc55-6477-59cf-ac89-e3adb325fcae"}
+
+SEON check OK total-ms 42161
+run 296e4a96f66e / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2556 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 2628, :seon.operator/slot-wait-ms 6, :seon.operator/seed-ms 1898, :seon.boot/ready-ms 24190, :seon.operator/adopt-ms 2421, :seon.operator/archive-ms 1974, :seon.operator/classpath-ms 542, :seon.operator/prepare-ms 3362, :seon.operator/share-ms 812, :seon.operator/boot-ms 28020, :seon.operator/source-ms 3328}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 14103, :adopted-ms 1605}, :seon.source/built? true, :seon.cluster/adopted-identities 1342, :seon.source/git-sha "65fae041ead3cd2af09cfeef6acfb0485b7f5536", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1844}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1955, :rehearsal-ms 15804, :total-ms 42161}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run 296e4a96f66e / executed 1 / reused 0 / pass 5 / fail 0 / error 0 / 2556 ms / passed? true", :seon.source/commit-id #uuid "6acbfc7e-d0a9-5d2c-9beb-0620b1de40b9"}
+
+SEON check OK total-ms 45966
+run bc19c47f2c01 / executed 2 / reused 0 / pass 46 / fail 0 / error 0 / 6477 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51669, :seon.operator/test-phases {:seon.operator/tests-ms 6549, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1927, :seon.boot/ready-ms 24207, :seon.operator/adopt-ms 2371, :seon.operator/archive-ms 2040, :seon.operator/classpath-ms 525, :seon.operator/prepare-ms 3378, :seon.operator/share-ms 778, :seon.operator/boot-ms 27999, :seon.operator/source-ms 3343}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 14244, :adopted-ms 1628}, :seon.source/built? true, :seon.cluster/adopted-identities 1342, :seon.source/git-sha "84d9c8a483dad56bb17a31395ebf6ad2329e95c1", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "e0bd37443414666c62bd7b9f33eeaed2863f0cf9", :seon.operator/seed-ms 1876}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1921, :rehearsal-ms 15968, :total-ms 45966}, :seon.boot/start-instant #inst "2026-10-11T17:57:28.024-00:00", :seon.operator/test-summary "run bc19c47f2c01 / executed 2 / reused 0 / pass 46 / fail 0 / error 0 / 6477 ms / passed? true", :seon.source/commit-id #uuid "6acbfca9-ff74-5d52-bd7f-009451a96099"}
+
+Cold squash:
+{:seon.profile/alloc-bytes 3904248,
+ :seon.profile/alloc-scope :thread,
+ :seon.profile/calls 94,
+ :seon.profile/gc-count 0,
+ :seon.profile/gc-ms 0,
+ :seon.profile/ms 6.75,
+ :seon.profile/reads 0,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 8.164096,
+    :cpu-ms 44.672},
+ :seon.profile/called
+   {seon.id/id 3,
+    seon.cache/claim 1,
+    seon.db/entities-changed-after 1,
+    seon.program/digest-map 3,
+    seon.schema.internal/reference-id 6,
+    seon.schema.internal/entity-entries 3,
+    seon.program/three-way 1,
+    seon.cache/lookup 1,
+    seon.cluster.squash/selected-coordinates 1,
+    seon.program/cluster-attributes 1,
+    seon.program/changed-identities 1,
+    seon.cache/cache? 2,
+    seon.db/identity-attributes 1,
+    seon.cache/counters 1,
+    seon.db/basis-t 1,
+    seon.schema.internal/entity-properties 3,
+    seon.id/hex 3,
+    seon.cluster.squash/collision-remap 1,
+    seon.program/derived-cluster-attributes 1,
+    seon.db/database-value? 31,
+    seon.cache/kind-counters 1,
+    seon.db/changed-attributes 1,
+    seon.db/schema-database 1,
+    seon.schema.internal/entity-maps 6,
+    seon.id/structural-digest 3,
+    seon.schema/projection-cache-value 1,
+    seon.cluster.squash/attribute-tx 1,
+    seon.db/undecoded-datoms 6,
+    seon.cluster.squash/squash-merge 1,
+    seon.program/projected-values 6,
+    seon.cache/settle! 1},
+ :seon.profile/ranked-by-calls
+   [#:seon.profile{:sym seon.db/database-value?, :calls 31, :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/reference-id,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-maps,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/undecoded-datoms, :calls 6, :self-ms 0}
+    #:seon.profile{:sym seon.program/projected-values,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.id/id, :calls 3, :self-ms 0}
+    #:seon.profile{:sym seon.program/digest-map, :calls 3, :self-ms 0}
+    …13],
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.db/entities-changed-after,
+     :calls 1,
+     :self-ms 3}
+    #:seon.profile{:sym seon.db/database-value?, :calls 31, :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/reference-id,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.internal/entity-maps,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/undecoded-datoms, :calls 6, :self-ms 0}
+    #:seon.profile{:sym seon.program/projected-values,
+     :calls 6,
+     :self-ms 0}
+    #:seon.profile{:sym seon.id/id, :calls 3, :self-ms 0}
+    …13]}

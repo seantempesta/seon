@@ -218,6 +218,20 @@
                       (drop-last 2 tx-data))
               "every datom of it is retracted by its own [e a v], never its entity"))))))
 
+(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+  unrelated-writes-reuse-the-storage-declaration-difference
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection @connection)]
+       (is (empty? (cluster/branch-declaration-changes @connection projection)))
+       (test-support/transacted! connection
+                                 [[:db/add [:seon.ns/name 'seon.flow] :seon.ns/doc "Unrelated data changed."]])
+       (let [[tx calls] (test-support/armed-calls
+                        '#{seon.cluster/attribute-adoption}
+                        #(cluster/branch-declaration-changes @connection projection))]
+         (is (empty? tx))
+         (is (zero? (get calls 'seon.cluster/attribute-adoption 0))))))))
+
 (def ^:private indexable-marker ::indexable)
 (def ^:private indexable-entity-id ::indexable-row-id)
 

@@ -82,12 +82,14 @@
           ;; on (seon.db/index-evidence-current).
           :read-basis-instant [:and {:description "The :db/txInstant of the read's basis transaction, the lineage witness a later connection to the same branch checks."} :inst],
           :read-dependency-attributes [:or [:= :all] [:set :qualified-keyword]],
+          :read-no-history-digest :seon.blob/digest,
           :read-dependency-source
           [:map
            [:datahike.query.source/symbol :symbol]
            [:datahike.query.source/argument-position [:int {:min 0}]]
            [:datahike.query.source/attributes :seon.db/read-dependency-attributes]
            [:seon.db/read-index-patterns {:optional true} :seon.db/read-index-patterns]
+           [:seon.db/read-no-history-digest {:optional true} :seon.db/read-no-history-digest]
            [:seon.db/read-basis-t {:optional true} :seon.db/read-basis-t]
            [:seon.db/read-basis-instant {:optional true} :seon.db/read-basis-instant]],
           :read-dependency-plan

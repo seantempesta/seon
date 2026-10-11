@@ -1,0 +1,18 @@
+[{:current? false,
+  :moved
+    #{:seon.db/process :seon.db.transaction/operation
+      :seon.fn.cost/cold-calls :seon.fn.cost/cold-digest
+      :seon.fn.cost/cold-self-us :seon.fn.cost/cold-total-us
+      :seon.fn.cost/key :seon.fn.cost/warm-calls
+      :seon.fn.cost/warm-digest :seon.fn.cost/warm-self-us
+      :seon.fn.cost/warm-total-us :seon.render.root-pull-test/node-id
+      :seon.render.root-pull-test/value},
+  :no-history
+    #{:seon.fn.cost/cold-calls :seon.fn.cost/cold-digest
+      :seon.fn.cost/cold-self-us :seon.fn.cost/cold-total-us
+      :seon.fn.cost/warm-calls :seon.fn.cost/warm-digest
+      :seon.fn.cost/warm-self-us :seon.fn.cost/warm-total-us},
+  :patterns
+    [[#:seon.db{:pattern-attribute :seon.render.root-pull-test/root-id,
+       :pattern-value "root"}
+      {:seon.db/pattern-entity 57587}]]}]

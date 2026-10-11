@@ -171,6 +171,23 @@
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
 
+(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+  ranking-costs-computes-each-definitions-spending-once
+  (doseq [n [1 10 100]]
+    (let [sink (batch/sink)
+          symbols (mapv #(symbol "cost.rank" (str "f" %)) (range n))]
+      (doseq [[index sym] (map-indexed vector symbols)]
+        (let [^java.util.concurrent.atomic.AtomicLongArray counter
+              (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest-a] profile/new-adder)]
+          (.set counter 0 10)
+          (.set counter 1 (* 10000 (inc index)))
+          (.set counter 2 (* 10000 (inc index)))))
+      (let [[costs calls] (test-support/armed-calls
+                          '#{seon.batch/spent}
+                          #(profile/transaction-observation {:seon.batch/sink sink} {} 1 0 n))]
+        (is (= (vec (reverse symbols)) (mapv (comp first :seon.fn.cost/key) costs)))
+        (is (<= (get calls 'seon.batch/spent 0) n))))))
+
 (defn- stamping-world
   "A world over `connection` whose work is set by hand: `(step! warm-calls
   warm-us cold-calls cold-us digest)` adds that many warm and cold calls of

@@ -77,7 +77,8 @@
                                    :seon.db/read-result)
                           evidence)))))))
 
-(deftest another-recipients-message-keeps-junipers-inbox-current
+(deftest ^{:seon/tasks #{'seon.db/inbox-query-evidence-survives-another-recipients-message}}
+  another-recipients-message-keeps-junipers-inbox-current
   (is (true? (inbox-evidence-after-message "root" :same-connection))))
 
 (deftest junipers-message-invalidates-junipers-inbox
@@ -86,7 +87,8 @@
 ;; A read's currency is its bound patterns through the index; a fresh connection to the same branch (a new
 ;; JVM) compared whole-attribute revisions of another generation and reported
 ;; 9 of root's 10 retained reads changed with 0 changed datoms (2026-09-28).
-(deftest a-fresh-connection-keeps-an-unrelated-read-current
+(deftest ^{:seon/tasks #{'seon.db/inbox-query-evidence-survives-another-recipients-message}}
+  a-fresh-connection-keeps-an-unrelated-read-current
   (is (true? (inbox-evidence-after-message "root" :fresh-connection))))
 
 (deftest a-fresh-connection-sees-a-related-write

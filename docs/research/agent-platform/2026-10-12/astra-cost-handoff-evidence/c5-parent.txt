@@ -1,0 +1,52 @@
+SEON check FAILED (exit 1): The candidate d02a7868659565e7d3efbdba205b4d9b2dc8a3ec is red: run 449956f4b9f7 / executed 4 / reused 0 / pass 38 / fail 12 / error 0 / 12080 ms / passed? false (4 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T041345.923.edn
+run 449956f4b9f7 / executed 4 / reused 0 / pass 38 / fail 12 / error 0 / 12080 ms / passed? false (4 red)
+red seon.db-test/query-and-pull-append-evidence-only-when-captured: fail
+Test seon.db-test/query-and-pull-append-evidence-only-when-captured exceeded its declared duration: 5988.934875 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 5988.934875}
+red seon.read-evidence-test/a-fresh-connection-keeps-an-unrelated-read-current: fail test/seon/read_evidence_test.clj:90
+expected: (true? (inbox-evidence-after-message "root" :fresh-connection))
+actual: (not (true? false))
+red seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current: fail test/seon/read_evidence_test.clj:81
+expected: (true? (inbox-evidence-after-message "root" :same-connection))
+actual: (not (true? false))
+red seon.render.retained-test/equal-committed-database-skips-read-replay: fail test/seon/render/retained_test.clj:132
+expected: (=
+ "other connection"
+ (render/render-call (assoc (request) :seon.db/db (db/db other))))
+actual: (not (= "other connection" "two"))
+
+fail test/seon/render/retained_test.clj:92
+expected: (= "one" shown)
+actual: (not (= "one" "A:seon.render-simplification.fixture-a"))
+
+fail test/seon/render/retained_test.clj:85
+expected: (= "one" (render/render-call (request)))
+actual: (not (= "one" "A:seon.render-simplification.fixture-a"))
+
+fail test/seon/render/retained_test.clj:98
+expected: (= "two" shown)
+actual: (not (= "two" "A:seon.render-simplification.fixture-a"))
+
+fail test/seon/render/retained_test.clj:107
+redefining the selected renderer invalidates its program identity
+expected: (= "changed renderer" (render/render-call (request)))
+actual: (not (= "changed renderer" "A:seon.render-simplification.fixture-a"))
+
+fail test/seon/render/retained_test.clj:113
+expected: (= 'seon.render/raw-output (:seon.error/operation refusal))
+actual: (not (= seon.render/raw-output nil))
+
+fail test/seon/render/retained_test.clj:86
+expected: (seq
+ (:seon.render.call/read-evidence
+  (get (clojure.core/deref calls) call-id)))
+actual: (not (seq []))
+
+fail test/seon/render/retained_test.clj:112
+expected: (= :ai (:seon.render/invalid-output refusal))
+actual: (not (= :ai nil))
+
+fail test/seon/render/retained_test.clj:103
+expected: (= "two" shown)
+actual: (not (= "two" "A:seon.render-simplification.fixture-a"))

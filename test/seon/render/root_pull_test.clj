@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.render.web :as web]
             [seon.schema :as schema]
@@ -286,6 +287,21 @@
                                 #(#'web/refresh-root
                                   (assoc render-request :seon.db/db database)
                                   retained call-id candidates))]
+         (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff/c5-evidence.edn")
+               (value/core-text
+                (mapv (fn [evidence]
+                        (let [revision (:datahike.read/revision evidence)
+                              current (#'db/dependency-revision database
+                                        (:datahike.read/dependency-plan evidence)
+                                        (:seon.db/source-argument-position evidence))
+                              moved (#'db/changed-read-attributes revision current)]
+                          {:current? (db/read-evidence-current? database [evidence])
+                           :moved moved
+                           :no-history (into #{} (filter #(get-in database [:schema % :db/noHistory])) moved)
+                           :patterns (mapv :seon.db/read-index-patterns
+                                      (get-in evidence [:datahike.read/dependency-plan
+                                                        :datahike.query.dependency/sources]))}))
+                      (:seon.render.call/read-evidence initial-entry))))
          (is (empty? candidates)
              "the same attribute on an unrelated entity does not invalidate the root")
          (is (not-any? #{:pull} reads) "Datahike semantic evidence reuses the unchanged entity pull")
@@ -299,7 +315,8 @@
                       {call-id (:entry refreshed)} database false))
              "the consumed revision advances even when the result is equal"))))))
 
-(deftest another-entity-schema-cannot-add-a-reverse-read-to-this-root
+(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+  another-entity-schema-cannot-add-a-reverse-read-to-this-root
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]

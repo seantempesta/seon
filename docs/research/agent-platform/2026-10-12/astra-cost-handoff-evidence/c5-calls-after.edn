@@ -1,0 +1,79 @@
+{:context-vars 8410,
+ :seon.profile/alloc-bytes 7979120,
+ :seon.profile/alloc-scope :thread,
+ :seon.profile/calls 27153,
+ :seon.profile/gc-count 0,
+ :seon.profile/gc-ms 0,
+ :seon.profile/ms 69.78,
+ :seon.profile/reads 101,
+ :request
+   #:seon.cost{:alloc-mb 0.9,
+    :calls 7714,
+    :cpu-ms 0.9,
+    :entrance #:seon.cost{:alloc-mb 3.0, :cpu-ms 3.6},
+    :ms 62.4,
+    :reads 55,
+    :step #:seon.cost{:alloc-mb 43.1, :cpu-ms 45.0},
+    :transactions 1,
+    :commit #:seon.cost{:alloc-mb 0.4087, :cpu-ms 0.48, :batch-size 1},
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 62.78564,
+       :cpu-ms 124.134},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 7.8,
+       :cpu-ms 66.7,
+       :gc-ms 0.1,
+       :jit-ms 85.0},
+    :stages
+      {:custody 0.4,
+       :derive 0.0,
+       :evaluate 3.1,
+       :fork 13.9,
+       :print 1.0,
+       :read 0.3,
+       :settle 12.6,
+       :test-step 20.3,
+       :unattributed 10.8},
+    :writer #:seon.cost{:alloc-mb 8.4645, :cpu-ms 8.35, :transactions 1}},
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 71.76492,
+    :cpu-ms 167.723},
+ :seon.profile/ranked-by-calls
+   [#:seon.profile{:sym seon.db/database-value?,
+     :calls 2400,
+     :self-ms 0}
+    #:seon.profile{:sym seon.profile/adder?, :calls 2112, :self-ms 0}
+    #:seon.profile{:sym seon.batch/sample, :calls 1504, :self-ms 0}
+    #:seon.profile{:sym seon.render.value/more?,
+     :calls 1127,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/connection-object?,
+     :calls 791,
+     :self-ms 0}
+    #:seon.profile{:sym seon.batch/spent, :calls 746, …1}
+    #:seon.profile{:sym seon.profile/cost-entity, :calls 704, …1}
+    …13],
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.schema/call-with-projection-state,
+     :calls 3,
+     :self-ms 59}
+    #:seon.profile{:sym seon.await/await-port-operations,
+     :calls 1,
+     :self-ms 59}
+    #:seon.profile{:sym seon.sci.eval/fork-for-turn,
+     :calls 3,
+     :self-ms 29}
+    #:seon.profile{:sym seon.db/transact-call, :calls 1, …1}
+    #:seon.profile{:sym seon.db/vector-query-call, :calls 35, …1}
+    #:seon.profile{:sym seon.db/pull-logical, :calls 66, …1}
+    #:seon.profile{:sym seon.print/emit-both, :calls 4, …1}
+    …13]}

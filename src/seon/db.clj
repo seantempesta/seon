@@ -1058,12 +1058,39 @@
             (assoc :datahike.cache/conservative-revision
                    (:datahike.cache/conservative-revision context))))))))
 
+(defn- no-history-read-digest
+  "Digest the current index values read through patterns without retained history."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.db/read-index-patterns
+         :seon.db/read-dependency-attributes]
+    [:maybe :seon.db/read-no-history-digest]]}
+  [database patterns attributes]
+  (let [no-history (into #{} (filter #(or (= :all attributes) (contains? attributes %)))
+                         (dbi/-attrs-by database :db/noHistory))
+        selected (into #{}
+                       (mapcat (fn [pattern]
+                                 (if-let [attribute (:seon.db/pattern-attribute pattern)]
+                                   (when (no-history attribute) [pattern])
+                                   (map #(assoc pattern :seon.db/pattern-attribute %) no-history))))
+                       patterns)]
+    (when (seq selected)
+      (id/id
+       (into {}
+             (map (fn [{entity :seon.db/pattern-entity
+                        attribute :seon.db/pattern-attribute
+                        value :seon.db/pattern-value :as pattern}]
+                    [pattern (into #{} (map #(vector (:e %) (:a %) (:v %)))
+                                   (dbi/search database [entity attribute value]))]))
+             selected)
+       64))))
+
 (defn read-evidence
   "Retain dependency revisions without retaining database values.
 
   Process-local caches may explicitly retain the read request and its stable
-  result for semantic replay. The default holds neither: a request is code (a
-  `#\"…\"` literal is a host Pattern, not EDN). Equal evidence appears once."
+  result for semantic replay. The default holds neither; no-history index
+  values have a content digest. A request is code (a `#\"…\"` literal is a
+  host Pattern, not EDN). Equal evidence appears once."
   {:malli/schema
    [:function
     [:=> [:cat [:vector :seon.db/captured-read]]
@@ -1090,7 +1117,11 @@
                  [replayable? stable-result]
                  (when (bounded-read-request? request)
                    stable)
-                 result-digest (when stable (read-result-digest stable))]
+                 result-digest (when stable (read-result-digest stable))
+                 no-history-digest
+                 (when-let [patterns (:seon.db/read-index-patterns entry)]
+                   (no-history-read-digest database patterns
+                                           (d/dependency-plan-attributes plan source-position)))]
            (cond->
             {:seon.db/source-argument-position source-position
              :datahike.read/dependency-plan
@@ -1103,6 +1134,8 @@
                                       (:datahike.query.source/argument-position source))
                                    (-> (assoc :seon.db/read-index-patterns patterns
                                               :seon.db/read-basis-t (basis-t database))
+                                       (cond-> no-history-digest
+                                         (assoc :seon.db/read-no-history-digest no-history-digest))
                                        (as-> source (if-let [instant (basis-instant database)]
                                                       (assoc source :seon.db/read-basis-instant instant)
                                                       source)))))
@@ -1287,11 +1320,10 @@
   - Within one generation, only patterns of attributes whose revision moved
     are checked (`changed-read-attributes`); across generations revisions are
     not comparable (datahike/query.cljc:3008-3012) and every pattern is.
-  - A checked pattern must be witnessable in the since view: its attribute
-    keeps history, or is `:db/txInstant` (asserted once per transaction,
-    never retracted). An entity-only pattern (a pulled `:db/id`, or an entity
-    collapsed past the bound, `append-read-evidence!`) reads the plan's every
-    attribute: within a generation it is checked on the moved ones only.
+  - Historical attributes use the since view. No-history attributes compare
+    the retained digest of their current index values, including absence.
+    An unbound attribute expands to the plan's read attributes; within one
+    generation only moved attributes need historical checks.
 
   A speculative value keeps its basis's connection and generation
   (`datahike.db/speculative-cache-context`, datahike db.cljc:444), so a read
@@ -1319,30 +1351,27 @@
                                (when-let [instant (:seon.db/read-basis-instant source)]
                                  (= instant (:v (first (dbi/search database [basis :db/txInstant])))))))
         changed (when same-generation? (changed-read-attributes revision current))
-        entity-only? #(and (:seon.db/pattern-entity %) (nil? (:seon.db/pattern-attribute %)))
-        ;; An entity-only pattern stands for that entity's read attributes;
-        ;; within a generation only the moved ones can have changed, so it
-        ;; is checked as one pattern per moved attribute. Whole, it needed
-        ;; every read attribute to keep history, so a pulled `:db/id` beside
-        ;; an unmoved no-history attribute replayed on any unrelated write.
-        checked (if changed
-                  (into [] (comp (mapcat #(cond (entity-only? %) (map (fn [attribute] (assoc % :seon.db/pattern-attribute attribute))
-                                                                     (sort changed))
-                                                (contains? changed (:seon.db/pattern-attribute %)) [%]))
-                                 (distinct))
-                        patterns)
-                  patterns)
-        witnessable? (fn [pattern]
-                       (if-let [attribute (:seon.db/pattern-attribute pattern)]
-                         (history? attribute)
-                         (and (set? read-attributes) (every? history? read-attributes))))]
+        attributes (or changed
+                       (when (set? read-attributes) read-attributes)
+                       (set (keys installed)))
+        checked (into []
+                      (comp (mapcat (fn [pattern]
+                                      (if-let [attribute (:seon.db/pattern-attribute pattern)]
+                                        (when (or (nil? changed) (contains? changed attribute)) [pattern])
+                                        (map #(assoc pattern :seon.db/pattern-attribute %) attributes))))
+                            (distinct))
+                      patterns)
+        historical (filterv #(history? (:seon.db/pattern-attribute %)) checked)
+        digest (:seon.db/read-no-history-digest source)]
     (when (and patterns basis
                (instance? DB database)
-               (every? witnessable? checked)
+               (or (= (count checked) (count historical)) digest)
                same-lineage?)
-      (or (empty? checked)
-          (let [changes (d/since (d/history database) basis)]
-            (not-any? #(index-pattern-change changes %) checked))))))
+      (and (or (nil? digest)
+               (= digest (no-history-read-digest database patterns read-attributes)))
+           (or (empty? historical)
+               (let [changes (d/since (d/history database) basis)]
+                 (not-any? #(index-pattern-change changes %) historical)))))))
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision.

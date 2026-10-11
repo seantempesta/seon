@@ -2,6 +2,8 @@
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
+            [seon.render.value :as value]
             [seon.test-support :as support]))
 
 (defn- answer
@@ -60,13 +62,19 @@
            "compiled seon.db reads made from SCI are counted")
        (is (<= 3 (:seon.profile/reads reads)))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-trivial-form-makes-fifty-thousand-armed-calls}}
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-trivial-form-makes-fifty-thousand-armed-calls
+                       'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
   a-trivial-form-makes-fewer-armed-calls-than-its-context-holds-vars
   (support/with-running-agent
    (fn [running agent-id _]
      ;; the first request acquires the agent's branch and context; the later ones are warm
      (let [vars (:seon.repl/value (support/mcp-reply (answer running agent-id "(reduce + (map (comp count ns-interns) (all-ns)))")))
-           warm (support/mcp-request (do (answer running agent-id "(+ 1 2)") (answer running agent-id "(+ 1 2)")))]
+           _ (answer running agent-id "(+ 1 2)")
+           measured (profile/measure #(answer running agent-id "(+ 1 2)"))
+           warm (support/mcp-request (:seon.profile/value measured))]
+       (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff/c5-calls.edn")
+             (value/core-text (assoc (dissoc measured :seon.profile/value :seon.profile/called)
+                                     :context-vars vars :request warm)))
        ;; carrying the agent's private layer into each fork is work in what the context
        ;; wrote; an armed call per program Var adds at least `vars` calls per fork
        (is (< 1000 vars) "the context holds the whole program")

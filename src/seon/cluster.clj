@@ -845,20 +845,26 @@
   `projection` adopts in place, as on the cluster (`attribute-change-tx`),
   except an attribute this branch's agent admitted: the agent's program owns
   that change. Nothing is retired: the branch's own program may still write
-  an attribute the cluster retired. Converged, it answers [] after comparing
-  each installed attribute with its memoized declaration."
+  an attribute the cluster retired. The central cache retains the difference
+  by installed schema and declarations; branch authorship is read live."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
                   :seon.store/transaction-data]}
   [database projection]
   (let [installed (:schema database)
-        declarations (declared-attributes projection)]
+        declarations (declared-attributes projection)
+        changed (cache/lookup
+                 ::branch-attribute-changes [installed declarations]
+                 (fn [_] (* schema/declaration-projection-bytes-per-form
+                            (+ (count installed) (count declarations))))
+                 #(into []
+                        (comp (remove (fn [declaration]
+                                        (= :converged (attribute-adoption
+                                                       (get installed (:db/ident declaration)) declaration))))
+                              (map :db/ident))
+                        declarations))]
     (attribute-change-tx
      database
-     (into []
-           (comp (remove #(= :converged (attribute-adoption (get installed (:db/ident %)) %)))
-                 (map :db/ident)
-                 (remove #(agent-admitted? database %)))
-           declarations)
+     (into [] (remove #(agent-admitted? database %)) changed)
      (schema/projection-cache-value
       projection [::declarations-by-attribute]
       #(into {} (map (juxt :db/ident identity)) declarations)))))

@@ -1026,7 +1026,7 @@
                    @entries))
        (is (not-any?
             #(and (map? %) (contains? % :datahike.pull/plan))
-            (tree-seq coll? seq @entries))
+            (tree-seq coll? seq (mapv :seon.db/read-request @entries)))
            "captured pull replay arguments retain ordinary selector data")
        (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/captured-read) %)
                    @entries))))))
@@ -3084,42 +3084,35 @@
          (doc! flow :seon.ns/doc "The read value changed.")
          (is (false? (db/read-evidence-current? @connection evidence))))))))
 
-;; 24x (2026-09-23, lane-page-reads): an explicit-attribute pull's evidence
-;; gave up its index check whenever the pull read `:db/id` or any `:db/noHistory`
-;; attribute, so every unrelated commit replayed the whole pull (7-17 ms per
-;; entity on a page). Only the attributes whose revision moved need checking.
-(deftest an-entity-pull-is-checked-only-on-the-attributes-that-changed
-  (test-support/with-database
-   (fn [connection]
-     (let [digest (fn [n] (format "%064x" n))
-           entity [:seon.dev.mcp.artifact/id (digest 1)]
-           selector [:db/id :seon.dev.mcp.artifact/id :seon.dev.mcp.artifact/digest :seon.ns/doc]
-           captured (atom [])
-           _ (test-support/transacted! connection [{:seon.dev.mcp.artifact/id (digest 1)
-                                                    :seon.dev.mcp.artifact/digest (digest 2)}])
-           _ (binding [db/*read-evidence-sink* captured]
-               (db/pull @connection selector entity))
-           ;; Replay needs the request, which only process-local retained
-           ;; evidence keeps (b96d6e684).
-           evidence (db/read-evidence @captured {:seon.db/retain-read-results? true})
-           replays (atom 0)
-           replay @#'seon.db/replay-read
-           current? (fn [] (reset! replays 0)
-                      (with-redefs [seon.db/replay-read
-                                    (fn [database request] (swap! replays inc) (replay database request))]
-                        (db/read-evidence-current? @connection evidence)))]
-       (test-support/transacted! connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "An unrelated attribute changed."})])
-       (is (true? (current?)) "an unrelated commit keeps the pull current")
-       (is (zero? @replays) "without replaying it")
-       (test-support/transacted! connection [[:db/add [:seon.ns/name 'seon.flow] :seon.ns/doc "Another entity's value changed."]])
-       (is (true? (current?)) "another entity's value of a read attribute leaves the pull current")
-       (is (zero? @replays) "and the moved attribute's patterns answer from the index, :db/id included")
-       (test-support/transacted! connection [{:seon.dev.mcp.artifact/id (digest 3)
-                                              :seon.dev.mcp.artifact/digest (digest 4)}])
-       (is (true? (current?)) "a moved no-history attribute of another entity still proves current")
-       (is (pos? @replays) "by replay: no history can answer for it")
-       (test-support/transacted! connection [[:db/add entity :seon.dev.mcp.artifact/digest (digest 5)]])
-       (is (false? (current?)) "a change to the pulled entity's attribute invalidates it")))))
+(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+  an-entity-pull-is-checked-only-on-the-attributes-that-changed
+  (doseq [retain? [false true]]
+    (test-support/with-database
+     (fn [connection]
+       (let [digest (fn [n] (format "%064x" n))
+             entity [:seon.dev.mcp.artifact/id (digest 1)]
+             captured (atom [])
+             _ (test-support/transacted! connection [{:seon.dev.mcp.artifact/id (digest 1)
+                                                       :seon.dev.mcp.artifact/digest (digest 2)}])
+             eid (:db/id (db/pull @connection [:db/id] entity))
+             _ (binding [db/*read-evidence-sink* captured]
+                 (db/pull @connection [:db/id :seon.dev.mcp.artifact/digest :seon.ns/doc] eid))
+             evidence (db/read-evidence @captured {:seon.db/retain-read-results? retain?})]
+         (doseq [[tx expected]
+                 [[[(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!]
+                                           {:seon.fn/doc "An unrelated attribute changed."})] true]
+                  [[[:db/add [:seon.ns/name 'seon.flow] :seon.ns/doc "Another entity changed."]] true]
+                  [[{:seon.dev.mcp.artifact/id (digest 3)
+                     :seon.dev.mcp.artifact/digest (digest 4)}] true]
+                  [[[:db/add entity :seon.dev.mcp.artifact/digest (digest 5)]] false]
+                  [[[:db/add entity :seon.dev.mcp.artifact/digest (digest 2)]] true]
+                  [[[:db/retractEntity entity]] false]]]
+           (test-support/transacted! connection tx)
+           (let [[current? calls] (test-support/armed-calls
+                                  '#{seon.db/replay-read}
+                                  #(db/read-evidence-current? @connection evidence))]
+             (is (= expected current?))
+             (is (zero? (get calls 'seon.db/replay-read 0))))))))))
 
 (deftest an-index-page-depends-on-its-prefix-attribute
   (test-support/with-database

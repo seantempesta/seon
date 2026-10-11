@@ -1,0 +1,16 @@
+SEON check FAILED (exit 1): The candidate 07ea34894021a0add8368e502107062349c37026 is red: run 413d240f6d68 / executed 3 / reused 0 / pass 9 / fail 3 / error 0 / 3811 ms / passed? false (3 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T032251.177.edn
+run 413d240f6d68 / executed 3 / reused 0 / pass 9 / fail 3 / error 0 / 3811 ms / passed? false (3 red)
+red seon.eval-alloc-test/a-trivial-form-makes-fewer-armed-calls-than-its-context-holds-vars: fail test/seon/eval_alloc_test.clj:73
+a warm trivial form makes no armed call per Var of its context
+expected: (< (:seon.cost/calls warm) vars)
+actual: (not (< 9737 8409))
+red seon.render.root-pull-test/another-entity-schema-cannot-add-a-reverse-read-to-this-root: fail test/seon/render/root_pull_test.clj:315
+expected: (true?
+ (db/read-evidence-current?
+  (clojure.core/deref connection)
+  (:seon.render.call/read-evidence before)))
+actual: (not (true? false))
+red seon.render.root-pull-test/unrelated-entity-change-keeps-root-read-current: fail test/seon/render/root_pull_test.clj:289
+the same attribute on an unrelated entity does not invalidate the root
+expected: (empty? candidates)
+actual: (not (empty? #{:seon.render.root-pull-test/root}))

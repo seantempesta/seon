@@ -513,8 +513,9 @@
          (keep (fn [[_ rows]]
                  (let [[k row scope] (apply max-key #(first (second %)) rows)]
                    (cost-entity (into [k] row) scope qualifies?))))
-         (sort-by (fn [e] [(- (seon.batch/spent e)) (first (:seon.fn.cost/key e))]))
-         (into [] (take limit)))))
+         (map (fn [e] [[(- (seon.batch/spent e)) (first (:seon.fn.cost/key e))] e]))
+         (sort-by first)
+         (into [] (comp (take limit) (map second))))))
 
 (defn live-costs
   "The request's own per-definition values from its sink, as cost entities:

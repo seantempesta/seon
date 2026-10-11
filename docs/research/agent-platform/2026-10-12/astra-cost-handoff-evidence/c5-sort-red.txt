@@ -1,0 +1,13 @@
+SEON check FAILED (exit 1): The candidate d445967777ae54e82b037af7b1c11f2304545bf4 is red: run 5b9188d57391 / executed 1 / reused 0 / pass 3 / fail 3 / error 0 / 721 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T033727.838.edn
+run 5b9188d57391 / executed 1 / reused 0 / pass 3 / fail 3 / error 0 / 721 ms / passed? false (1 red)
+red seon.profile-test/ranking-costs-computes-each-definitions-spending-once: fail test/seon/profile_test.clj:189
+expected: (= n (get calls 'seon.batch/spent))
+actual: (not (= 1 0))
+
+fail test/seon/profile_test.clj:189
+expected: (= n (get calls 'seon.batch/spent))
+actual: (not (= 100 1050))
+
+fail test/seon/profile_test.clj:189
+expected: (= n (get calls 'seon.batch/spent))
+actual: (not (= 10 44))

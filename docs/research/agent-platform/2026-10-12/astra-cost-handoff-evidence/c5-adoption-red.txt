@@ -1,0 +1,5 @@
+SEON check FAILED (exit 1): The candidate 86f8d481fcdd1f7a3cd143a71dd28ceb77af9e11 is red: run 64570e11e7f3 / executed 1 / reused 0 / pass 2 / fail 1 / error 0 / 2020 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T040955.784.edn
+run 64570e11e7f3 / executed 1 / reused 0 / pass 2 / fail 1 / error 0 / 2020 ms / passed? false (1 red)
+red seon.cluster-test/unrelated-writes-reuse-the-storage-declaration-difference: fail test/seon/cluster_test.clj:233
+expected: (zero? (get calls 'seon.cluster/attribute-adoption 0))
+actual: (not (zero? 1146))
