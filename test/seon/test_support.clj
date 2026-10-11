@@ -316,14 +316,14 @@
 
 (defn- seeded-cluster-name
   "The one cluster this fixture stood up, else the executing handle's own.
-   A fixture branch inherits the rows of the database its handle acquired
-   (`:seon.db/db`); the clusters `database` adds to those are the ones it seeded."
+   A fixture branch inherits the rows of the commit its handle acquired
+   (`:seon.source/commit-id`); the clusters `database` adds to those are the ones it seeded."
   {:malli/schema [:=> [:cat [:or :nil :seon.db/connection] :seon.db/database-value]
                   [:or :nil :seon.boot/cluster-name]]}
   [connection database]
   (let [handle (execution-handle connection)
         present (cluster-names database)
-        seeded (remove (cluster-names (:seon.db/db handle)) present)]
+        seeded (remove (cluster-names (d/commit-as-db (:seon.db/connection handle) (:seon.source/commit-id handle))) present)]
     (cond
       (= 1 (count seeded)) (first seeded)
       (and (empty? seeded) (present (:seon.cluster/name handle))) (:seon.cluster/name handle))))
@@ -1218,7 +1218,7 @@
    Synthetic definitions require the database so the production analyzer owns
    their resolver context and producing digest; `overrides` are digested in."
   ([function-symbol]
-   (let [world (:seon.db/db (execution-handle db/*conn*))
+   (let [world (d/commit-as-db (:seon.db/connection (execution-handle db/*conn*)) (:seon.source/commit-id (execution-handle db/*conn*)))
          path (get-in (db/pull world [{:seon.fn/file [:seon.fn.file/relative-path]}]
                                [:seon.fn/sym function-symbol])
                       [:seon.fn/file :seon.fn.file/relative-path])]

@@ -1676,7 +1676,7 @@
       (not acquired?)
       (refuse :seon.test/program-mismatch "The SCI context did not acquire the tested program."
               {:seon.source/commit-id (db/commit-id database)
-               :seon.test/acquired-commit-id (some-> (:seon.db/db acquired) db/commit-id)})
+               :seon.test/acquired-commit-id (:seon.source/commit-id acquired)})
       (seq (:seon.test/acquisition-refusals acquired))
       (first (:seon.test/acquisition-refusals acquired))
       (not (or (= :agent admission) (and (= :core admission) (:seon.fn/file entity))))
@@ -2340,7 +2340,7 @@
             ;; Resolved on the body thread, inside its program-change detection.
             resolve! #(let [started (System/nanoTime)]
                         (try (doto (resolve-test
-                              {:seon.db/db (:seon.db/db child)
+                              {:seon.db/db (db/db (:seon.db/connection child))
                                :seon.db/connection (:seon.db/connection child)
                                :seon.test/identity test-symbol
                                :seon.sci.eval/ctx ctx
@@ -2476,7 +2476,7 @@
     (cond
       (:seon.error/at loaded-id) loaded-id
       (and commit-id (source/commit-database store commit-id)) (source/database store commit-id)
-      :else (:seon.sci.eval/loaded-database @(:seon.sci.kernel/program-snapshot ctx)))))
+      :else (sci.eval/loaded-database ctx (db/db (:seon.db/connection (env/of ctx)))))))
 
 (defn- namespace-declarations
   "Definition digest by symbol of namespace `namespace-name`'s row, functions

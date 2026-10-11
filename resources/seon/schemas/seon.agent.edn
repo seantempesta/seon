@@ -12,7 +12,6 @@
   [:seon.cluster/name :seon.cluster/name]
   [:seon.sci.eval/base-ctx :seon.sci.eval/ctx]
   [:seon.db/connection :seon.db/connection]
-  [:seon.db/db :seon.db/database-value]
   [:seon.source/commit-id :seon.source/commit-id]
   [:seon.schema/projection :seon.schema/projection]
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]

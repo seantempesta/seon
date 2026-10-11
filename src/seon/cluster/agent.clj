@@ -1199,7 +1199,6 @@
                  acquired (cond->
                            {:seon.cluster/name (:seon.cluster/name handle)
                             :seon.db/connection connection
-                            :seon.db/db selected
                             :seon.source/commit-id (db/commit-id selected)
                             :seon.schema/projection (db/carried-projection (db/db connection))
                             :seon.sci.eval/ctx ctx
