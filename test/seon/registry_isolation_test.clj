@@ -35,8 +35,10 @@
   {:malli/schema [:=> [:cat :seon.db/connection :string :qualified-keyword :seon.schema/definition] :seon.schema/projection]}
   [connection cluster-name schema-key definition]
   (support/seed-cluster! connection cluster-name)
-  (config/apply! {:seon.db/connection connection
-                  :seon.boot/cluster-name cluster-name})
+  (db/call-with-custody
+   {:seon.db/connection connection}
+   #(config/apply! {:seon.db/connection connection
+                   :seon.boot/cluster-name cluster-name}))
   ;; Fixture writes go through `transacted!` (custody of the connection it
   ;; names; a nested `with-database` otherwise wrote into the other world's
   ;; branch, f46f9d461), the schema as its canonical digested entity

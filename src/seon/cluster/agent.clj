@@ -1116,7 +1116,7 @@
                                  {:seon.agent/branch branch})))
              from (or (:seon.cluster.registry/from options) (db/commit-id database))
              created (when create?
-                       (registry/branch!
+                       (registry/fork!
                         {:seon.store/store held-store
                          :seon.store/branch branch
                          :seon.db/db database
@@ -1148,16 +1148,13 @@
                          (schema/projection-from-database
                           @connection (db/carried-projection database)))
                        (:seon.cluster/name handle))))
-                 ;; The new branch's first transaction writes its fork entity
-                 ;; (its merge base) and, for an agent, its assignment.
-                 _ (when create?
-                     (let [result (db/call-with-custody {}
+                 ;; The fork owner retains the merge base; acquisition assigns
+                 ;; the agent on the connection it just acquired.
+                 _ (when (and create? agent-id)
+                     (let [result (db/call-with-custody {:seon.db/connection connection}
                                     #(db/transact! connection
-                                      (cond-> [(let [parent (if (keyword? from) from (get-in database [:config :branch]))
-                                                  fork (registry/branch-fork-entity held-store parent parent branch @connection)]
-                                              (if (:seon.error/at fork) (throw (ex-info "The branch's fork entity was refused." fork)) fork))]
-                                        agent-id (conj {:db/id [:seon.agent/id agent-id]
-                                                        :seon.agent/branch branch}))))]
+                                      [{:db/id [:seon.agent/id agent-id]
+                                        :seon.agent/branch branch}]))]
                        (when-not (:db-after result)
                          (throw (ex-info "Branch assignment refused." result)))))
                  _ (adopt-cluster-declarations! connection (db/carried-projection database))
