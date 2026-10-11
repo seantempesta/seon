@@ -14,7 +14,6 @@
             [seon.ai.tokens :as tokens]
             [seon.fn :as function]
             [seon.render.value :as render.value]
-                    [seon.cluster.branch :as cluster.branch]
             [seon.task :as task]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -847,16 +846,22 @@
          :seon.program/not-found sym}))))
 
 (defn- head-comparison
-  "The branch compared with the cluster head as {:head :compared}, plus :answer when the comparison already decides the reply (a refusal, or the empty difference on the cluster's own branch). The caller releases it with `release-comparison!`."
-  {:malli/schema [:=> [:cat :my.program/context] :map]}
-  [{connection :seon.db/connection store :seon.store/store cluster :seon.cluster/name}]
-  (let [held (get-in (db/db connection) [:config :branch])
-        home (cluster.branch/cluster-branch cluster)
+  "The branch compared with its recorded target's head, or itself when it is no fork.
+  The caller releases the acquired values with `my.program/release-comparison!`."
+  {:malli/schema [:=> [:cat :my.program/context]
+                  [:map [:head-id [:or :seon.source/commit-id :seon.error/value]]
+                   [:head {:optional true} :seon.db/database-value] [:compared :map]]]}
+  [{connection :seon.db/connection store :seon.store/store}]
+  (let [database (db/db connection)
+        held (get-in database [:config :branch])
+        home (if-let [fork (registry/fork-of database held)] (:seon.branch/target fork) held)
         head-id (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})
-        head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
+        head (when (and (not= held home) (not (:seon.error/at head-id)))
+               (source/commit-database store head-id))
         compared (if head (source/compare-branch store held head home) {:c-id head-id})
         refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
-    (cond-> {:head head :head-id head-id :compared compared}
+    (cond-> {:head-id head-id :compared compared}
+      head (assoc :head head)
       refusal (assoc :answer refusal)
       (and (not refusal) (= held home)) (assoc :answer {:added [] :changed [] :removed []})
       (and (not refusal) (not= held home) (nil? (:three compared)))
@@ -870,7 +875,7 @@
   nil)
 
 (defn diff
-  "Your branch's program difference from your cluster's head, as small data:
+  "Your branch's program difference from its target branch's head, as small data:
   {:added [...] :changed [...] :removed [...]}. An entry is {:sym :kind
   :digest-before :digest-after}, a changed one with the form that reads it
   (`my.program/declaration-diff`). The same comparison merge takes

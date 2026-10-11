@@ -79,15 +79,18 @@
                                             [:seon.ns/name 'merge-m8.test-fixture]))))
          "the namespace keeps its refers"))))
 
-(deftest a-removed-namespace-the-agent-stays-in-leaves-diff-answering
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}}
+  a-removed-namespace-the-agent-stays-in-leaves-diff-answering
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id _connection]
      (eval! "(in-ns 'merge-m8.scratch) (defn merge-m8-scratch [x] x)" agent-id running)
      (eval! "(my.program/remove-ns! 'merge-m8.scratch)" agent-id running)
      ;; the next request starts in the removed namespace, as a REPL's *ns* does
      (eval! "(+ 1 1)" agent-id running)
-     (let [reply (eval! "(in-ns 'user) (when (:seon.program/missing-evidence (my.program/diff)) (throw (ex-info \"diff refused\" {})))"
+     (let [reply (eval! "(in-ns 'user) (my.program/diff)"
                         agent-id running)]
+       (is (= #{:added :changed :removed}
+              (set (keys (:seon.repl/value ((requiring-resolve 'seon.test-support/mcp-reply) reply))))))
        (is (false? (get reply "isError"))
            "diff answers, not a refusal, after the namespace the agent stood in was removed")))))
 

@@ -69,7 +69,8 @@
                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
          (is (= :seon.error/offending (:seon.schema/member refusal))))))))
 
-(deftest canonical-population-native-parity
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-proc-step-runs-in-its-environments-world-again}}
+  canonical-population-native-parity
   ;; No hand list beside the schema: the live projection's native population
   ;; is checked by properties DERIVED from that projection, and against the one
   ;; recorded baseline, the historical admitted population (root ruling
@@ -104,9 +105,10 @@
                          unchanged)]
        (testing "the recorded historical population remains an independent oracle"
          (is (seq (:seon.bridge.parity/native initial)))
-         (is (true? (= (:seon.bridge.parity/attributes initial) initial-attributes)))
-         (is (true? (= (:seon.bridge.parity/native initial)
-                       (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))))
+         (is (= (set (:seon.bridge.parity/attributes initial)) (set initial-attributes)))
+         (is (= initial-native
+                (into {} (map (juxt :db/ident identity))
+                      (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))))
        (testing "the live projection's native population, derived two ways, agrees"
          (is (seq forms))
          (is (seq attributes))

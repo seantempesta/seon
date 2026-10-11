@@ -28,10 +28,11 @@
      (let [environment (world connection "flow-world")
            ;; written after the environment was built, before the step runs
            _ (test-support/transacted! connection (test-support/agents-tx @connection ["flow-reader"]))
-           [observed seen] (#'flow/in-world environment {:seon.turn/id "t1" :seon.batch/ordinal 0}
-                                            (fn [] [seon.batch/*world*
-                                                    (db/pull (db/db (:seon.db/connection seon.batch/*world*))
-                                                             [:seon.agent/id] [:seon.agent/id "flow-reader"])]))]
+           [observed seen] (db/call-with-root-bindings
+                            #(#'flow/in-world environment {:seon.turn/id "t1" :seon.batch/ordinal 0}
+                                              (fn [] [seon.batch/*world*
+                                                      (db/pull (db/db (:seon.db/connection seon.batch/*world*))
+                                                               [:seon.agent/id] [:seon.agent/id "flow-reader"])])))]
        (is (= "flow-world" (:seon.boot/cluster-name observed)))
        (is (identical? connection (:seon.db/connection observed)))
        (is (not (contains? observed :seon.db/db)) "a world holds the connection, never a database value")

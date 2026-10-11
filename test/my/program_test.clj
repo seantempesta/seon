@@ -286,6 +286,12 @@
                            :seon.sci.eval/ctx (:seon.sci.eval/ctx held) :my.program/base-ctx (:seon.sci.eval/base-ctx held)}
                   written (program/write-branch! {:my.program/context context :seon.fn/root root})
                   branch-digest (:seon.program/definition-digest (db/pull (db/db connection) [:seon.program/definition-digest] callee))]
+              (let [home-held (agent/acquire-context! target nil {:seon.agent/branch home})]
+                (try
+                  (is (= {:added [] :changed [] :removed []}
+                         (program/diff (assoc context :seon.db/connection (:seon.db/connection home-held))))
+                      "a branch without a fork compares with itself")
+                  (finally (agent/release-context! home-held))))
               (testing "the branch's defn replaces the declaration in its file"
                 (is (= [(str "src/wbranch" suffix "/core.clj")] (:seon.source/changed-paths written)))
                 (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced]))))

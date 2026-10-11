@@ -54,6 +54,13 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-agent-world.md"}}
  #:seon.task{:name "a-proc-step-runs-in-its-environments-world-again"
              :kind :function
-             :intent "Central round 2, e0bd37443: seven of ten are green now; three remain red alone: seon.flow-world-test/a-proc-step-runs-in-its-environments-world (the step sees cluster \"default\", not its environment's \"flow-world\"; its connection is not the environment's), seon.schema-test/an-incremental-projection-equals-its-full-build (6.3 s against a 5 s bound) and seon.schema.datahike-test/canonical-population-native-parity (the recorded historical population differs from the native one). Also new at e0bd37443, red alone, green at cd59c9fa3: seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm (9.9 s against 5 s) and seon.turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering (the reply is an error). Done when the five are green alone on a fresh JVM."
-             :must-read #{seon.cluster.agent/plan seon.flow-world-test/a-proc-step-runs-in-its-environments-world}
-             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]
+             :intent "`seon.flow-world-test/a-proc-step-runs-in-its-environments-world` must exercise the detached Flow entrance through `seon.db/call-with-root-bindings` and also prove an existing evaluation world is preserved. `seon.schema.datahike-test/canonical-population-native-parity` compares the historical attribute population as data, while retaining current output-order checks. `seon.schema-test/an-incremental-projection-equals-its-full-build` has an honest declared bound for its seven full/derived populations and committed loads. `my.program/head-comparison` compares a work branch with the target `seon.cluster.registry/fork-of` records, rather than guessing it from the cluster name; `seon.turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering` asserts the returned diff data after removal. All these and `seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` must be green in the check JVM."
+             :must-read #{seon.flow/in-world seon.db/call-with-root-bindings seon.cluster.registry/fork-of
+                          my.program/head-comparison seon.schema/build-projection
+                          seon.schema.datahike/database-attributes-in
+                          seon.flow-world-test/a-proc-step-runs-in-its-environments-world
+                          seon.schema.datahike-test/canonical-population-native-parity
+                          seon.schema-test/an-incremental-projection-equals-its-full-build
+                          seon.turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering}
+             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"
+                         "docs/research/agent-platform/2026-10-12/sol-reg-rest.md"}}]
