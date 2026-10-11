@@ -1,4 +1,5 @@
-(ns seon.start-flow-benchmark-test
+(ns ^{:seon.test/platform "Cold-cache measurement and production Flow lifecycle in a disposable JVM."}
+    seon.start-flow-benchmark-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.config :as config]
@@ -17,7 +18,7 @@
    :warm {::benchmark/branch [25 4000000 10000]
           ::benchmark/world [1 30000 50]
           ::benchmark/sci [45 45000000 2000]
-          ::benchmark/context [80 120000000 6000]
+          ::benchmark/context [30 20000000 5000]
           ::benchmark/graph [5 800000 450]}})
 
 (deftest commit-to-paused-flow-costs
@@ -39,6 +40,9 @@
              (is (= 2 (count (get-in sample [::benchmark/context-value :seon.context/must-reads]))))
              (is (= 3 (count (get-in sample [::benchmark/graph ::benchmark/states]))))
              (is (= #{:paused} (set (vals (get-in sample [::benchmark/graph ::benchmark/states])))))
+             (when (= :warm temperature)
+               (is (zero? (get-in sample [::benchmark/context ::benchmark/owners
+                                         'seon.test.runner/reached-graph] 0))))
              (doseq [[part limits] (get bounds temperature)
                      [metric limit] (map vector [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/calls] limits)]
                (is (<= (get-in sample [part metric]) limit) (str temperature " " part " " metric)))

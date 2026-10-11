@@ -2,6 +2,8 @@
   (:require [seon.config]
             [seon.sci.eval]
             [seon.batch]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
@@ -11,6 +13,7 @@
             [seon.fn :as program-fn]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.test :as sut]
             [seon.test.runner :as runner]
@@ -98,6 +101,27 @@
                "digest and membership reads never rebuild the same graph's components")
            (is (zero? (get calls 'seon.test.runner/reached-graph))
                "nor walk the same program's reached graph again")))))))
+
+(deftest a-reopened-fork-reuses-its-programs-proof-reach
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           store (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "reach-reopen-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}
+           tests (vec (take 10 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database))))
+           expected (runner/reach-digests database tests)]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (let [measured (profile/measure #(runner/reach-digests (db/db fork) tests))]
+               (is (= expected (:seon.profile/value measured)))
+               (is (zero? (get-in measured [:seon.profile/called 'seon.test.runner/reached-graph] 0)))
+               (is (< (:seon.profile/alloc-bytes measured) 5000000)))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
 (deftest a-program-change-reads-only-the-reach-attributes-it-wrote
   (test-support/with-database

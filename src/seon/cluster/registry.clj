@@ -391,8 +391,9 @@
                      projection
                      (fn [] (db/transact! connection {:tx-data [fork]}))))))
               (finally (store/release-branch! connection)))]
-        (if (:db-after written)
-          result
+        (if-let [database (:db-after written)]
+          (do (db/remember-revisions! database)
+              result)
           (do (retire-branch! {:seon.store/store store :seon.store/branch branch})
               written))))))
 
