@@ -2016,10 +2016,15 @@
                                 [(get-else $ ?agent :seon.agent/branch ::none) ?branch]]
                               db))
            unstarted (remove #(contains? (:seon.agent/started @routing) %) agents)]
+       ;; each start fails alone: its fault is recorded and the pass goes on
        (doseq [agent-id (sort (agents-to-start db (set unstarted)))]
-         (start-flow! {:seon.turn.loop/cluster handle
-                :seon.agent/id agent-id
-                :seon.agent/routing routing}))
+         (try (start-flow! {:seon.turn.loop/cluster handle
+                            :seon.agent/id agent-id
+                            :seon.agent/routing routing})
+              (catch Exception failure
+                (fault/fault! (env/of handle) failure
+                              {:seon.error/layer :seon.flow/plan :seon.error/operation `start-flow!
+                               :seon.db.process/id (:seon.db.process/id handle) :seon.agent/id agent-id}))))
        ;; the attempts: write first, then make Flow follow (R1)
        (let [facts (plan-facts db)
              max-running (:seon.config.agent/max-running (config/effective db (:seon.cluster/name handle)))]

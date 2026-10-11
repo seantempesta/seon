@@ -119,16 +119,24 @@
 
 ;;; The two-step chain through the real db<->flow pass on a fixture branch.
 
-(def ^:private chain-path "resources/seon/tasks/tq.chain.edn")
+(def ^:private ^:dynamic *space*
+  "The task namespace of the chain world under test: each test names its own, so no two share proofs."
+  "tq.chain")
+
+(defn- proof
+  "The proof of the chain world's task `task-name`."
+  {:malli/schema [:=> [:cat :string] :qualified-symbol]}
+  [task-name]
+  (symbol (str *space* "-proofs") (str "proves-" task-name)))
 
 (defn- chain-handle
-  "The handle of the tq.chain task `task-name`."
+  "The handle of the chain world's task `task-name`."
   {:malli/schema [:=> [:cat :string] :seon.task/handle]}
   [task-name]
-  (task/task-handle 'tq.chain task-name :work))
+  (task/task-handle (symbol *space*) task-name :work))
 
 (defn- attempts
-  "Every attempt row of tq.chain task `task-name` at `connection`'s head: key, branch, agent, end."
+  "Every attempt row of the chain world's task `task-name` at `connection`'s head: key, branch, agent, end."
   {:malli/schema [:=> [:cat :seon.db/connection :string] [:set [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :keyword]]]}
   [connection task-name]
   (set (db/q '[:find ?k ?b ?id ?e :in $ ?h
@@ -164,7 +172,8 @@
   [connection observe event]
   (let [seen (async/promise-chan)
         key (keyword "seon.cluster.db-flow-test" (str (random-uuid)))
-        check! (fn [_] (when-some [value (observe)] (async/offer! seen value)))]
+        ;; the writer thread runs the listener: it observes under this test's bindings
+        check! (bound-fn [_] (when-some [value (observe)] (async/offer! seen value)))]
     (d/listen connection key check!)
     (try (check! nil)
          (test-support/await-event! seen event)
@@ -186,8 +195,15 @@
                :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/identities ?proof] [?run :seon.test.run/id ?id]]
              database (get-in database [:config :branch]) proof)))
 
+(defn- proof-runs-on
+  "The test runs of `proof` recorded on `database` for any branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :string]]}
+  [database proof]
+  (set (db/q '[:find [?id ...] :in $ ?proof :where [?run :seon.test.run/identities ?proof] [?run :seon.test.run/id ?id]]
+             database proof)))
+
 (defn- chain-world
-  "Call `body` with the tq.chain cluster handle over `connection` once `tasks` (name → needs, proof body) are
+  "Call `body` with the chain world's cluster handle over `connection` once `tasks` (name → needs, proof body) are
   ingested, each with its one proof, and set :running; every graph db<->flow started is released after."
   {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string [:tuple [:set :string] :string]]
                        [:=> [:cat :seon.agent/context-source] :seon.schema/value]]
@@ -195,10 +211,10 @@
   [connection tasks body]
   (test-support/seed-cluster! connection "tq-chain")
   (task/index-tasks! {:seon.db/connection connection
-                      :seon.task/files {chain-path (str "[" (apply str (for [[task-name [needs _]] (sort tasks)]
+                      :seon.task/files {(str "resources/seon/tasks/" *space* ".edn") (str "[" (apply str (for [[task-name [needs _]] (sort tasks)]
                                                                        (str "#:seon.task{:name \"" task-name "\" :kind :work :intent \"Do " task-name ".\""
                                                                             (when (seq needs)
-                                                                              (str " :needs #{" (apply str (map #(str "[:seon.task/sym tq.chain/" % "] ") needs)) "}"))
+                                                                              (str " :needs #{" (apply str (map #(str "[:seon.task/sym " *space* "/" % "] ") needs)) "}"))
                                                                             "} ")))
                                                         "]")}})
   ;; root, whom an attempt's end tells, homed on this cluster's branch, and the proofs' author
@@ -211,9 +227,9 @@
                                       :seon.batch/sink (seon.batch/sink)
                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
                                       :seon.agent/id "tq-chain-author"})
-                        'tq.chain-proofs
+                        (symbol (str *space* "-proofs"))
                         (apply str (for [[task-name [_ proof]] (sort tasks)]
-                                     (str "(clojure.test/deftest ^{:seon/tasks #{'tq.chain/" task-name "}} proves-" task-name " "
+                                     (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/" task-name "}} proves-" task-name " "
                                           proof ")\n"))))
   (test-support/transacted! connection (mapv #(vector :db/add [:seon.task/id (chain-handle %)] :seon.task/execution :running)
                                              (keys tasks)))
@@ -230,6 +246,7 @@
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-fresh-attempt-proves-first-and-green-proofs-end-it-with-no-model-call
+  (binding [*space* "tq.chaing"]
   (test-support/with-database
    (fn [connection]
      (chain-world
@@ -241,11 +258,12 @@
                              ::g-ended)
               branch-db (db/branch-database (db/db connection) branch)]
           (is (= :done end) "its first pass ran its green proofs and ended it")
-          (is (seq (proof-runs branch-db 'tq.chain-proofs/proves-g)) "on its own branch")
-          (is (zero? (model-turns branch-db agent-id)) "with no model call")))))))
+          (is (seq (proof-runs branch-db (proof "g"))) "on its own branch")
+          (is (zero? (model-turns branch-db agent-id)) "with no model call"))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-chain-starts-its-first-step-and-its-end-starts-the-next-from-its-commit
+  (binding [*space* "tq.chain"]
   (test-support/with-database
    (fn [connection]
      (chain-world
@@ -264,7 +282,7 @@
            (is (= #{agent-a} (started routing)) "and starts nothing")
            (let [a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                                   :seon.store/branch branch-a})]
-             (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) 'tq.chain-proofs/proves-a)) ::a-proved)
+             (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) (proof "a"))) ::a-proved)
              (is (zero? (model-turns (db/db a-connection) agent-a))
                  "its first pass ran its red proofs on its branch and called no model"))
            ;; A's work on its branch, through the connection its execution holds
@@ -284,7 +302,7 @@
              (is (contains? (started routing) agent-b))
              (let [b-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                                     :seon.store/branch branch-b})]
-               (await-on! b-connection #(not-empty (proof-runs (db/db b-connection) 'tq.chain-proofs/proves-b)) ::b-proved))
+               (await-on! b-connection #(not-empty (proof-runs (db/db b-connection) (proof "b"))) ::b-proved))
              (release! routing)
              (is (empty? (started routing)) "a restart drops the roster")
              (pass! handle routing)
@@ -292,4 +310,22 @@
              (is (contains? (started routing) agent-b) "and starts the open attempt on its branch")
              (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                  "with no fault recorded")))
-         (finally (release! routing)))))))))
+         (finally (release! routing))))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+  a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
+  (binding [*space* "tq.chaingreen"]
+  (test-support/with-database
+   (fn [connection]
+     (chain-world
+      connection {"a" [#{} "(clojure.test/is (= 1 1))"] "b" [#{"a"} "(clojure.test/is (= 1 1))"]}
+      (fn [handle]
+        (let [ended (fn [task-name] #(some (fn [[_ _ _ e]] (when (not= :open e) e)) (attempts connection task-name)))]
+          (pass! handle (:seon.agent/routing handle))
+          (is (empty? (attempts connection "b")) "B waits on A")
+          (is (= :done (await-on! connection (ended "a") ::a-ended)) "A's green proofs end it, with no model call")
+          (pass! handle (:seon.agent/routing handle))
+          (let [[[_ branch-b]] (seq (attempts connection "b"))]
+            (is (seq (proof-runs-on (db/branch-database (db/db connection) branch-b) (proof "a")))
+                "B's branch forked from A's end commit: it holds A's proof run")
+            (is (= :done (await-on! connection (ended "b") ::b-ended)) "and B ends the chain")))))))))
