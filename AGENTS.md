@@ -584,10 +584,18 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   should cost as wrong work. Tests read reply items by content (the shared test-support reader), never by position.
 - **Plan before implementing; keep lanes short.** Design decisions are made up front in implementation cards
   (`docs/seon/schedule/cards/`) by an agent with full context; implementers follow one card in about fifteen minutes and
-  stop and report when the code contradicts it. Work past about fifteen minutes is split. Hard designs get iteration
-  from real use, a research lane and an independent outside check before they are fixed; a fix that fights the design
+  stop and report when the code contradicts it. Work past about fifteen minutes is split. A fix that fights the design
   goes to the owner with options. `bin/lane commit` takes one `--test` per test and runs a declared-long test only when
   named by var.
+- **Design by independent plans and a hybrid** (owner, 2026-10-11: "that's how we do planning and design from now on").
+  Any design whose spec we are not sure of is a task tree: a subject task (what we know, what to look into, the
+  questions) → a **dig** (Haiku: buried data in `reference-code/`, our code, docs, notes and git history, including
+  earlier attempts and why they failed, so we never repeat them) → **two independent plans** written in parallel by
+  Opus and Sol (gpt-6.1-sol), neither seeing the other, each experimenting at the REPL, explaining how the existing
+  system and libraries already do the work, adding no infrastructure the libraries own, and phased with a proof per
+  phase → a **hybrid** by Fable after both return: the best of each, or something better if both missed it → the
+  phases as implementation tasks with red proofs. The models were trained on different distributions; use them to
+  design, not only to review. Root runs this shape by hand until the scheduler runs it as a task tree.
 - **Restart in batches.** A restart or reset is a batch: root lands every ready dependency or fork bump and pending fix
   just before it. Nothing is ever left staged in the shared index (it blocks every lane's commit).
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
