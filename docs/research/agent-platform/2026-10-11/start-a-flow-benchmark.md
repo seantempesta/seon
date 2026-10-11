@@ -141,17 +141,19 @@ the same request. Red candidate `71b9fb53`, run `701efe16775e`: identical answer
 **one graph rebuild / 210.577 MB**, failing both the no-rebuild and 5 MB bounds.
 Green candidate `1254b98ecd518541cfefa374743d5772c7b504ba`, run `c90c93d90ab0`:
 **zero graph rebuilds / below 5 MB**, all four selected Vars passed, 64 assertions.
-The full benchmark in that same candidate produced these after rows:
+The final landing `7267d54fb` passed 65 assertions in those four Vars, run
+`af2891467a78` (candidate `72996e6605078f770edcf7f2f759b35fd49e080d`).
+Its benchmark produced these after rows:
 
 | Part | Cold ms / MB / calls / reads (datoms) | Fresh warm fork ms / MB / calls / reads (datoms) | Warm before → after, ms / MB |
 |---|---|---|---|
-| Branch | 11.52 / 1.974 / 1,868 / 0 (0) | 10.75 / 0.746 / 6,863 / 0 (0) | 13.71 / 0.740 → 10.75 / 0.746 |
-| World | 0.18 / 0.013 / 33 / 0 (0) | 0.09 / 0.013 / 33 / 0 (0) | 0.19 / 0.015 → 0.09 / 0.013 |
-| SCI environment | 950.32 / 1,796.441 / 81,231 / 29 (8) | 29.45 / 29.406 / 1,323 / 18 (4) | 29.37 / 30.966 → 29.45 / 29.406 |
-| First context | 91.34 / 118.158 / 4,707 / 138 (99) | 14.65 / 10.161 / 3,991 / 127 (88) | 58.74 / 97.979 → 14.65 / 10.161 |
-| Paused Flow, including readiness | 2.35 / 0.642 / 357 / 1 (0) | 1.28 / 0.625 / 357 / 1 (0) | 1.13 / 0.626 → 1.28 / 0.625 |
+| Branch | 10.24 / 2.041 / 1,696 / 0 (0) | 9.00 / 0.730 / 6,427 / 0 (0) | 13.71 / 0.740 → 9.00 / 0.730 |
+| World | 0.10 / 0.012 / 33 / 0 (0) | 0.08 / 0.012 / 33 / 0 (0) | 0.19 / 0.015 → 0.08 / 0.012 |
+| SCI environment | 849.54 / 1,801.051 / 81,241 / 29 (8) | 25.79 / 31.342 / 1,323 / 18 (4) | 29.37 / 30.966 → 25.79 / 31.342 |
+| First context | 84.76 / 118.841 / 4,707 / 138 (99) | 12.55 / 10.111 / 3,991 / 127 (88) | 58.74 / 97.979 → 12.55 / 10.111 |
+| Paused Flow, including readiness | 1.78 / 0.634 / 357 / 1 (0) | 1.57 / 0.616 / 357 / 1 (0) | 1.13 / 0.626 → 1.57 / 0.616 |
 
-Warm measured parts total **56.22 ms / 40.951 MB**, down from
+Warm measured parts total **48.99 ms / 42.811 MB**, down from
 **103.11 ms / 130.326 MB**. The first-context allocation fell 89.6%; its warm
 regression bounds are tightened to **30 ms / 20 MB / 5,000 calls**, with a zero
 reach-graph-rebuild assertion. Cold bounds remain unchanged. Small timing changes
@@ -166,7 +168,7 @@ proposed time/allocation floor. First context remains above its 2–5 ms target;
 its 24 vector-query calls and 88 datoms entrances are the next measured work.
 
 `seon.schema/contract-references` is still uncached. The cold SCI acquisition calls
-it **3,604 times**, accounting for **262 ms self time**; the warm fresh fork calls
+it **3,604 times** (the preceding green sample measured **262 ms self time**); the warm fresh fork calls
 it **zero times** in this fixture. This does not prove repeated changed-contract
 registration is cheap. CACHE-2 is deferred, not retired, and the existing schema
 registration task is unchanged.
@@ -181,8 +183,9 @@ registration task is unchanged.
   `seon.test.runner-test/a-program-change-reads-only-the-reach-attributes-it-wrote`,
   `seon.test.runner-test/reach-digests-and-memberships-share-content-valid-work`,
   and `seon.start-flow-benchmark-test/commit-to-paused-flow-costs`.
-- The candidate check took 36,741 ms overall: 8,103 ms ready, 1,018 ms adoption,
-  9,458 ms tests including fixtures. These are platform-check costs outside the
+- The final candidate check took 28,238 ms overall: 6,340 ms ready, 888 ms adoption,
+  8,458 ms tests including fixtures. Its gate lint also passed: 0 errors, 1,513
+  warnings, 5,149 ms. These are platform-check costs outside the
   five measured parts, not an ordinary agent-start claim.
 - Default remained on `c6113d2f3`; post-fix numbers come from the isolated candidate
   JVM, not an uncommitted reload into default. The live root/default pre-fix probe
