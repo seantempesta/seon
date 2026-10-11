@@ -612,3 +612,41 @@ Datahike, schema/instrumentation, configuration nor SCI acquisition. The three
 identity/digest maps are still proportional to declarations; the remaining
 context reference reads and the SCI configuration derivation still exceed the
 hypothesized floors. Default remains root's installation responsibility.
+
+## H3–H5: one identity, one source, one fork
+
+Each row is one complete `seon.start-flow-benchmark-test/commit-to-paused-flow-costs`
+sample from the named `bin/seon check` run (decimal caller-thread MB). The
+combined table above (252107016) is the before.
+
+### H3: one program identity
+
+`seon.sci.eval/program-identity`, its core.cache LRU, `inherited-basis`,
+`revision-basis`, `remember-program-identity!`, `watch-program-identity!` (a
+Datahike listener per connection) and `program-cache-policy` are deleted. A
+program is `seon.sci.eval/program-revisions`: `seon.db/content-revisions` over
+the acquisition attributes, which every commit carries since H2. The overlay
+plan, the overlay source and `acquired-database?` compare that map; a test
+world states its equality with `seon.sci.eval/program-equal` in the fork
+request instead of rewriting a process-wide identity, and the refusal-recording
+LRU is the `seon.cache` kind `:seon.sci.eval/refusal-recording`.
+
+Red at HEAD (check run on candidate `ef9653cb0`): `base-ctx` on a fresh fork
+of the test world derived the overlay plan and the overlay context,
+**358.27 ms / 1,135.8 MB**; `program-identity` was called four times. Green
+(run `27651dcac80c`): no overlay derivation, under 3 ms / 3 MB.
+
+| Part | Cold ms / MB | Warm ms / MB |
+|---|---:|---:|
+| Branch | 7.62 / 1.948 | 8.56 / 0.717 |
+| World | 0.23 / 0.013 | 0.12 / 0.013 |
+| SCI | 551.26 / 860.034 | 10.96 / 4.953 |
+| First context | 39.68 / 32.987 | 11.68 / 10.050 |
+| Paused Flow | 2.64 / 0.627 | 1.62 / 0.610 |
+
+The cold SCI leg falls from 917.94 ms / 1,841 MB: the cold base no longer
+pays a duplicate overlay derivation for the fork. A fresh fork's
+`seon.db/carried-projection` still misses its revision key (the key names the
+connection id and generation, `seon.db/projection-cache-key`) and reads the
+declaration datoms: about 8 ms / 2.7 MB on default per fresh branch, measured
+outside `base-ctx` by the H3 proof.

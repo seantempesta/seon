@@ -2204,10 +2204,6 @@
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
                        [#(store/release-branch! connection) retire! drop!])))
     (let [database (db/db connection)
-          ;; The overlay makes the world's program the candidate's, so the
-          ;; execution's acquisition of the candidate serves the world: no
-          ;; whole-program acquisition per request.
-          _ (sci.eval/program-equal! database candidate)
           ;; The candidate's program: the execution's program-only base when it
           ;; already acquired the candidate, else the cluster base with the
           ;; candidate's changes interpreted on a fork (`sci.eval/base-ctx`).
@@ -2224,9 +2220,13 @@
           ;; each member forks this and finds its program by commit. The fork
           ;; acquires `database` itself and refuses when its refusals cannot be
           ;; recorded (`seon.sci.eval/fork-cluster-ctx`).
+          ;; The overlay makes the world's program the candidate's, so the
+          ;; source's acquisition of the candidate serves the world: no
+          ;; whole-program acquisition per request (`sci.eval/program-equal`).
           ctx (try (sci.eval/fork-cluster-ctx source database connection
                                               (:seon.sci.eval/projection-state (meta connection))
-                                              {:seon.env/environment environment})
+                                              (assoc (sci.eval/program-equal database)
+                                                     :seon.env/environment environment))
                    (catch Throwable failure
                      (throw (release! failure [#(store/release-branch! connection) retire! drop!]))))]
       ;; The execution's value with this request's own world: a fresh roster,

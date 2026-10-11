@@ -26,20 +26,19 @@ There is one wake ROUTER per cluster, `seon.cluster.wake/route!`
 starts (`src/seon/cluster/agent.clj:1527`) under the key
 `:seon.agent/route` (`src/seon/cluster.clj:3440-3453`). It is not the only
 Datahike listener on the connection. At HEAD a cluster connection with N
-armed agents holds 2 + N long-lived listeners:
+armed agents holds 1 + N long-lived listeners:
 
 | key | owner | registered at |
 |---|---|---|
 | `:seon.agent/route` | the wake router | `src/seon/cluster.clj:3440-3453` |
 | a `random-uuid` per agent | each agent's schedule proc, on `::flow/resume` | `src/seon/schedule.clj:761-765` |
-| `::program-identity` | the SCI program-identity observer | `src/seon/sci/eval.clj:3276-3285`, called from `:3618`, `:3693` |
 
 `seon.eval.drive/await-fact!` adds one short-lived listener per wait
 (`src/seon/eval/drive.clj:50-54`). The census is recorded in
 `docs/research/agent-platform/flow-usage-audit-2026-09-23.md` (D3) and
 `docs/seon/issues/one-cluster-holds-two-plus-n-datahike-listeners.md`. The
-call-preparation listener that note names was deleted in `306f32431`; the
-`::program-identity` observer it predates took its place in the count.
+call-preparation listener that note names was deleted in `306f32431`, and the
+SCI program-identity observer in H3: each commit carries its content revisions.
 
 Do not add another per-agent, per-render, per-web-surface or per-feature
 listener. Derive the interest behind the router and route it to an existing

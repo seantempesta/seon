@@ -41,7 +41,7 @@
     (is (every? #(nil? (.get ^WeakReference %)) references)
         "a released branch's node cache is reachable from a retained value")
     (is (not-any? #(instance? datahike.connector.Connection (second %))
-                  (keys @@#'eval/refusal-recording-cache))
+                  (keys (seon.cache/retained :seon.sci.eval/refusal-recording)))
         "the refusal-recording cache keys on connection identity data")
     (is (not-any? (fn [base]
                     (some #(contains? @(::kernel/program-snapshot base) %)

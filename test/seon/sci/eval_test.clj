@@ -21,9 +21,13 @@
             [datahike.pull-api :as pull-api]
             [seon.config :as config]
             [seon.ai.tokens :as tokens]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
+            [seon.profile :as profile]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.blob :as blob]
+            [seon.cache]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
@@ -1466,7 +1470,7 @@
      (is
       (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
      (is
-      (contains? (set (map second (keys @@#'eval/refusal-recording-cache)))
+      (contains? (set (map second (keys (seon.cache/retained :seon.sci.eval/refusal-recording))))
                  (db/connection-identity connection))
       "the recording target is the dependency's connection identity, writer backend included")
      (is
@@ -2701,3 +2705,37 @@
         held (first (get snapshot [namespace-name 'sink]))]
     (is (= ::root held) "the snapshot holds the root")
     (is (not (identical? request-value held)) "never the request's binding")))
+
+(defn- with-fresh-fork
+  "Call `f` with a connection to a fresh committed fork of `connection`'s head, then retire it."
+  [connection f]
+  (let [database (db/db connection)
+        store (:seon.store/store (test-support/execution-handle connection))
+        branch (keyword (str "fresh-fork-" (seon.id/id)))
+        request {:seon.store/store store :seon.store/branch branch
+                 :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}]
+    (is (:seon.cluster/created? (registry/fork! request)))
+    (try
+      (let [fork (store/open-branch! store branch)]
+        (try (f fork) (finally (store/release-branch! fork))))
+      (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-fresh-fork-of-an-unchanged-program-acquires-from-the-base}}
+  a-fresh-fork-of-an-unchanged-program-acquires-from-the-base
+  (test-support/with-database
+   (fn [connection]
+     (let [acquired (eval/base-ctx (db/db connection))]
+       (with-fresh-fork
+        connection
+        (fn [fork]
+          (let [forked (db/db fork)
+                ;; The value's own projection is `seon.db`'s derivation, not this acquisition's.
+                _ (db/carried-projection forked)
+                measured (profile/measure #(eval/base-ctx forked))
+                called (:seon.profile/called measured)]
+            (is (eval/acquired-database? acquired forked)
+                "the head's acquisition holds the fork's program by its content revisions")
+            (is (zero? (get called 'seon.sci.eval/derive-overlay-plan 0)))
+            (is (zero? (get called 'seon.sci.eval/derive-overlay-ctx 0)))
+            (is (< (:seon.profile/ms measured) 3))
+            (is (< (:seon.profile/alloc-bytes measured) 3000000)))))))))

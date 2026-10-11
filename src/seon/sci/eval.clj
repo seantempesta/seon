@@ -96,7 +96,6 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require
-            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
             [clojure.set :as set]
@@ -196,7 +195,7 @@
 (schema.edn/load! {})
 
 (declare carried-cluster-name agent-require acquired-basis context-database loaded-database
-         program-identity program-basis acquisition-attributes)
+         program-revisions acquisition-attributes)
 
 (defn projection-state
   "Create `cluster-name`'s context environment replacement reference; the
@@ -2868,19 +2867,18 @@
      ::tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)}))
 
 (defn- overlay-plan
-  "The overlay of one program identity against the loaded commit, shared across data writes."
+  "The overlay of one program against the loaded commit, shared across data writes."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
   [database loaded]
-  (if-let [identity (when (commit-id-of loaded) (program-identity database))]
-    (let [basis (program-basis identity (acquisition-attributes (db/carried-projection database)))]
-      (seon.cache/lookup
-       ::overlay-plan [(store-identity database) basis (db/commit-id loaded)]
-       (fn [{::keys [overridden added namespaces tests]}]
-         (+ (* 128 (count basis))
-            (* 256 (+ (count overridden) (count added) (count namespaces) (count tests)))
-            (* 2 (+ (reduce + 0 (map (comp count :seon.ns/source) namespaces))
-                    (reduce + 0 (map (comp count second) tests))))))
-       #(derive-overlay-plan database loaded)))
+  (if-let [basis (when (commit-id-of loaded) (program-revisions database (db/carried-projection database)))]
+    (seon.cache/lookup
+     ::overlay-plan [(store-identity database) basis (db/commit-id loaded)]
+     (fn [{::keys [overridden added namespaces tests]}]
+       (+ (* 128 (count basis))
+          (* 256 (+ (count overridden) (count added) (count namespaces) (count tests)))
+          (* 2 (+ (reduce + 0 (map (comp count :seon.ns/source) namespaces))
+                  (reduce + 0 (map (comp count second) tests))))))
+     #(derive-overlay-plan database loaded))
     (derive-overlay-plan database loaded)))
 
 (defn- function-rows-in
@@ -3436,16 +3434,6 @@
         ;; entrant to deliver
         unbound (assoc :seon.sci.eval/unbound-results unbound)))))
 
-(def ^:private program-cache-policy
-  "Bound the memoized program identities independently of commits."
-  {::program-identity-cache-size 256
-   ::program-identity-cache-reason
-   "One entry per recently acquired commit: agent turns, MCP evaluations and test requests on a few live branches; an evicted commit derives its identity again from its own cache-context."})
-
-(defonce ^:private program-identity-cache
-  (cache/lru-cache-factory
-   {} :threshold (::program-identity-cache-size program-cache-policy)))
-
 (defn- acquisition-attributes
   "Every attribute an acquisition reads, derived from the projection's declarations.
 
@@ -3454,101 +3442,39 @@
   Dials are not among them: a context compares the dial values its wrappers
   armed with (`armed-dials`). Retained on the projection's own holder
   (`schema/projection-cache-value`)."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
   [projection]
   (schema/projection-cache-value
    projection ::acquisition-attributes
    (fn []
      (-> (program/program-attributes projection)
          (into schema/projection-attributes)
-         (conj :seon.config/cluster :seon.source/commit-id)))))
+         (conj :seon.config/cluster :seon.source/commit-id)
+         sort
+         vec))))
 
-(defn- revision-basis
-  "The part of a value's Datahike cache-context that names its attribute revisions.
-
-  Datahike advances one attribute revision per attribute a commit touched and the
-  conservative revision on a schema or unknown change
-  (`reference-code/datahike/src/datahike/query.cljc:2568-2589`); its query cache
-  carries results across commits by comparing exactly these members
-  (`datahike.query/source-context-unchanged?`). Each revision is a commit id:
-  a connection opens with that commit as its conservative revision
-  (`datahike.connector/connect`), so an attribute's revision, else the
-  conservative one, names a commit whose datoms of that attribute equal this
-  value's, on any connection (`datahike.db/advance-cache-context`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
-  [database]
-  (select-keys (:cache-context database)
-               [:datahike.cache/connection-id
-                :datahike.cache/generation
-                :datahike.cache/conservative-revision
-                :datahike.cache/attribute-revisions]))
-
-(defn- program-basis
-  "Each attribute an acquisition reads with the commit its datoms equal: its own
-  revision, else the conservative one. Equal bases hold equal datoms of those
-  attributes, whichever connection produced them."
-  {:malli/schema [:=> [:cat :map [:set :qualified-keyword]] [:map-of :qualified-keyword [:maybe :uuid]]]}
-  [{revisions :datahike.cache/attribute-revisions conservative :datahike.cache/conservative-revision} attributes]
-  (into {} (map (fn [attribute] [attribute (get revisions attribute conservative)])) attributes))
-
-(defn- inherited-basis
-  "`basis` over the identity remembered for the commit its conservative revision
-  names: a branch opened at a known commit keeps that commit's program, plus the
-  attributes it wrote since."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{conservative :datahike.cache/conservative-revision :as basis}]
-  (if-let [opened (some-> conservative (->> (cache/lookup program-identity-cache)) deref)]
-    (update opened :datahike.cache/attribute-revisions merge (:datahike.cache/attribute-revisions basis))
-    basis))
-
-(defn- remember-program-identity!
-  "Record a commit's revision basis unless its commit already has one."
-  {:malli/schema [:=> [:cat :uuid :map] :map]}
-  [commit-id basis]
-  @(cache/lookup-or-miss program-identity-cache commit-id (fn [_] (delay basis))))
-
-(defn program-identity
-  "The revision basis naming the program a committed value holds, or nil.
-
-  Memoized by commit id, which names one immutable root
-  (`reference-code/datahike/src/datahike/db.cljc:385`): a branch opened at a commit
-  reads the basis its parent recorded when the commit landed
-  (`watch-program-identity!`), so its program compares with the parent's, and a
-  commit written there keeps that program for every attribute it did not write
-  (`inherited-basis`). A commit
-  proven program-equal to an acquired value takes that value's basis
-  (`acquired-database?`). Compare two identities through `program-basis` over the
-  acquisition attributes. A value without committed identity has none."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :map]]}
-  [database]
-  (when-let [commit-id (commit-id-of database)]
-    (remember-program-identity! commit-id (inherited-basis (revision-basis database)))))
+(defn- program-revisions
+  "The program `database` holds: each acquisition attribute to the commit whose
+  datoms of it equal `database`'s (`seon.db/content-revisions`). Each commit
+  carries its revisions, so equal maps name equal programs on every branch,
+  connection and restart. Nil for a value with no committed revisions."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  [:or :nil [:map-of :qualified-keyword :uuid]]]}
+  [database projection]
+  (db/content-revisions database (acquisition-attributes projection)))
 
 (defn- acquired-basis
-  "The commit, revision basis and program identity acquired from `database`."
+  "The commit and program revisions acquired from `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:map [:seon.db/basis-t :seon.db/basis-t]
-                   [::revision-basis :map]
-                   [::program-identity {:optional true} :map]
+                   [::program-revisions {:optional true} [:map-of :qualified-keyword :uuid]]
                    [:seon.source/commit-id {:optional true} :seon.source/commit-id]]]}
   [database]
-  (let [identity (program-identity database)
+  (let [revisions (program-revisions database (db/carried-projection database))
         commit (db/commit-id database)]
-    (cond-> {:seon.db/basis-t (db/basis-t database)
-             ::revision-basis (revision-basis database)}
-      identity (assoc ::program-identity identity)
+    (cond-> {:seon.db/basis-t (db/basis-t database)}
+      revisions (assoc ::program-revisions revisions)
       (uuid? commit) (assoc :seon.source/commit-id commit))))
-
-(defn- watch-program-identity!
-  "Record each committed value's revision basis as its commit lands.
-
-  A system-side `d/listen` observer (the seam AGENTS names for notification): the
-  callback is one select over the committed value's cache-context, no read."
-  {:malli/schema [:=> [:cat :seon.db/connection] :keyword]}
-  [connection]
-  (d/listen connection ::program-identity
-            (fn [report] (program-identity (:db-after report))))
-  ::program-identity)
 
 (defn- derive-base-ctx
   "Derive the cluster base: load the loaded program's JVM namespaces, build the
@@ -3648,10 +3574,9 @@
                    (derive-base))
          projection (or (db/carried-projection database) (schema/projection-from-database database))
          derive-overlay #(derive-overlay-ctx cluster database loaded projection)
-         source (if-let [identity (when base-key (program-identity database))]
+         source (if-let [revisions (when base-key (program-revisions database projection))]
                   (seon.cache/lookup ::overlay-context
-                                     [base-key (program-basis identity (acquisition-attributes projection))
-                                      (armed-dials database)]
+                                     [base-key revisions (armed-dials database)]
                                      context-weight derive-overlay)
                   (derive-overlay))
          recorder (:seon.flow/commit-fault! arm-request)
@@ -3664,10 +3589,10 @@
   "The revision of the adoption record's attribute in the loaded source.
 
   Datahike advances an attribute's revision exactly when a commit touches it
-  (`revision-basis`), so an equal basis proves the record did not move."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  (`seon.db/content-revisions`), so an equal basis proves the record did not move."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
   [source]
-  (program-basis (revision-basis source) #{:seon.source/commit-id}))
+  (db/content-revisions source [:seon.source/commit-id]))
 
 (defn- loaded-program-current?
   "Whether the program this acquisition compared against is still the JVM's loaded one.
@@ -3680,7 +3605,7 @@
   (let [snapshot @(::kernel/program-snapshot ctx)
         source (loaded-source snapshot database)
         basis (loaded-basis source)]
-    (or (= (::loaded-basis snapshot) basis)
+    (or (and basis (= (::loaded-basis snapshot) basis))
         (when (= (::loaded-commit-id snapshot)
                  (loaded-commit-id source))
           (swap! (::kernel/program-snapshot ctx) assoc ::loaded-basis basis)
@@ -3690,65 +3615,35 @@
 (defn acquired-database?
   "Whether this context already acquired the program the supplied value holds.
 
-  True for the acquired value itself, and for any committed value whose program
-  identity (restricted to the acquisition attributes) equals the acquired one: a
-  commit that wrote only receipts, turns, messages, test results or artifacts
-  leaves those revisions alone, and a branch opened at such a commit reads its
-  parent's recorded basis. A later value of the acquired value's own lineage with
-  equal revisions also matches and records its commit under the acquired identity.
-  Dial values the wrappers armed with must also be unchanged. A value without
-  committed identity never matches."
+  True for every committed value whose program revisions (`program-revisions`)
+  equal the acquired value's: a commit that wrote only receipts, turns,
+  messages, test results or artifacts leaves them alone, and a branch opened at
+  a commit carries that commit's revisions. Dial values the wrappers armed with
+  must also be unchanged. A value without committed revisions never matches."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        previous (::acquired-basis snapshot)
-        commit-id (commit-id-of database)]
+        acquired (get-in snapshot [::acquired-basis ::program-revisions])]
     (boolean
      (and (::acquisition snapshot)
-          previous
+          acquired
           ;; An adoption moves the JVM's loaded program without touching this
           ;; branch's rows; an acquisition compared against the older one is stale.
           (loaded-program-current? ctx database)
           ;; A settings write re-arms only when it moved a value the
           ;; context's interpreted wrappers armed with.
           (= (::armed-dials snapshot) (armed-dials database))
-          (or (and commit-id (::program-identity previous)
-                   (= commit-id (:seon.source/commit-id previous)))
-              (when (and commit-id (::program-identity previous))
-                ;; Only `previous`'s identity and cache-context are read, never
-                ;; its index: a collection reclaims the nodes of a value no
-                ;; branch head reaches, and the attributes come from the
-                ;; supplied value, read from its connection. A different set
-                ;; names a declaration change, so the bases differ either way.
-                (let [attributes (acquisition-attributes (db/carried-projection database))
-                      acquired (::program-identity previous)]
-                  (or (= (program-basis acquired attributes)
-                         (program-basis (program-identity database) attributes))
-                      ;; Equal effective revisions name commits with equal
-                      ;; datoms of every acquisition attribute.
-                      (when (= (program-basis (revision-basis database) attributes)
-                               (program-basis (::revision-basis previous) attributes))
-                        ;; A branch opened at this commit reads the acquired
-                        ;; program by commit id from here on.
-                        (cache/evict program-identity-cache commit-id)
-                        (remember-program-identity! commit-id acquired)
-                        true)))))))))
+          ;; Only revisions are compared, never the acquired value's index: a
+          ;; collection reclaims the nodes of a value no branch head reaches.
+          (= acquired (program-revisions database (db/carried-projection database)))))))
 
-(defn program-equal!
-  "Returns the program identity `database`'s commit now holds: `source`'s.
-  The caller proved `database` holds `source`'s program, so a context that
-  acquired it acquires `database` at once (`acquired-database?`). Nil when
-  either value has no committed identity."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :nil :map]]}
-  [database source]
-  (when-let [commit-id (commit-id-of database)]
-    (when-let [identity (program-identity source)]
-      (cache/evict program-identity-cache commit-id)
-      (remember-program-identity! commit-id identity))))
-
-(defonce ^:private refusal-recording-cache
-  (cache/lru-cache-factory
-   {} :threshold (::program-identity-cache-size program-cache-policy)))
+(defn program-equal
+  "The fork request member stating that the fork source holds `database`'s
+  program: a caller that proved it (a test world built as its candidate's
+  program) forks without acquiring `database` again (`fork-cluster-ctx`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:map [::acquired-basis :map]]]}
+  [database]
+  {::acquired-basis (acquired-basis database)})
 
 (defn- record-refusals-once!
   "Record one program's acquisition refusals once per recording target.
@@ -3759,9 +3654,7 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map
                        [:or :nil :seon.flow/commit-fault!]] :map]}
   [ctx database acquired commit-fault!]
-  (let [program (some-> (program-identity database)
-                        (program-basis (acquisition-attributes
-                                        (db/carried-projection database))))
+  (let [program (program-revisions database (db/carried-projection database))
         ;; The target's identity, never the Connection object: a released
         ;; Connection keeps its metadata and so its whole world reachable.
         ;; `db/connection-identity` is the dependency's connection key, or the
@@ -3775,19 +3668,13 @@
              ::acquisition-recording-error target)
 
       (and refusals? program target)
-      (let [cache-key [program target]
-            cell (cache/lookup-or-miss
-                  refusal-recording-cache cache-key
-                  (fn [_] (delay (select-keys
-                                  (record-acquisition-refusals!
-                                   ctx database acquired commit-fault!)
-                                  [::acquisition-refusals-recorded?
-                                   ::acquisition-recording-error]))))]
-        (merge acquired
-               (try @cell
-                    (catch Throwable failure
-                      (cache/evict refusal-recording-cache cache-key)
-                      (throw failure)))))
+      ;; Recorded once per program and target; an evicted entry records again,
+      ;; which the error owner counts as a recurrence.
+      (merge acquired
+             (seon.cache/lookup ::refusal-recording [program target] (constantly 512)
+                                #(select-keys (record-acquisition-refusals! ctx database acquired commit-fault!)
+                                              [::acquisition-refusals-recorded?
+                                               ::acquisition-recording-error])))
 
       :else (record-acquisition-refusals! ctx database acquired commit-fault!))))
 
@@ -3925,9 +3812,6 @@
               projection-state)
          ;; `my.program/supplied-context` names the cluster base it mutates.
          ctx (assoc ctx :my.program/base-ctx ctx)]
-     ;; Only the program identity observer needs the live connection.
-     (when connection
-       (watch-program-identity! connection))
      ctx))
 
 (defn fork-cluster-ctx
@@ -3951,7 +3835,8 @@
           :seon.db/connection :seon.sci.eval/projection-state
           [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
            [:seon.env/environment {:optional true} :seon.env/environment]
-           [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]]]
+           [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]
+           [:seon.sci.eval/acquired-basis {:optional true} :map]]]
      :seon.sci.eval/ctx]]}
   ;; The fork keeps the base context's cluster, else the one its world names.
   ([base-ctx db connection]
@@ -3989,7 +3874,8 @@
                       (atom (merge (dissoc @(::kernel/program-snapshot base-ctx)
                                            :seon.flow/commit-fault!)
                                    (select-keys arm-request
-                                                [:seon.flow/commit-fault! ::loaded-connection])))
+                                                [:seon.flow/commit-fault! ::loaded-connection
+                                                 ::acquired-basis])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state)
@@ -4003,8 +3889,6 @@
                           (::instrument/interpreted-original (meta @candidate)))]
          (install-function-contract!
           ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db)))
-     (when connection
-       (watch-program-identity! connection))
      ;; A fork of an acquired program holds the program of the value it is
      ;; forked onto: rows committed after the base was acquired are acquired
      ;; here (`acquire!` answers at once when the program is equal). An
