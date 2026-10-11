@@ -84,8 +84,9 @@
   [:seon.program/unresolved-callers :seon.program/unresolved-callers]
   [:seon.program/stale-test-reach :seon.program/stale-test-reach]]
  :seon.program/partition
- [:enum {:description "Explicit entity-schema ownership: declarations and their analysis are program; execution state and observations are data. Missing ownership is refused, never defaulted."}
-  :seon.program :seon.data]
+ [:enum {:description "Entity-schema ownership: program merges through root; cluster facts copy at a successful attempt end; runtime observations stay data on their branch."}
+  :seon.program :seon.data :seon.cluster]
+ :seon.program/cluster-attributes [:map-of :qualified-keyword :seon.cluster/conflict]
  :seon.program/identity-attribute :qualified-keyword
  :seon.program/source-attribute :qualified-keyword
  :seon.program/row-schema

@@ -1,4 +1,5 @@
-#:seon.cluster{:cluster
+#:seon.cluster{:conflict [:enum {:description "Concurrent edit rule on a cluster entity or entry: root reports while keeping main; ours keeps main; theirs takes the branch; add combines numeric deltas."} :root :ours :theirs :add]
+              :cluster
                [:map
                 {:seon.db/attributes true
                  :seon.render/ai seon.cluster/render-ai

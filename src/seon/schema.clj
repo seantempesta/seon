@@ -1419,21 +1419,29 @@
   {:malli/schema [:=> [:cat :seon.schema/registry-key
                        [:fn malli.core/schema?] [:fn malli.registry/registry?]] :nil]}
   [schema-key compiled registry]
-  (let [properties (internal/entity-properties compiled)]
-    (when (and (:seon.db/attributes properties)
-               (some (fn [[attribute _ _]]
-                       (some-> (mr/schema registry attribute)
-                               m/properties :seon.db/identity))
-                     (internal/entity-entries compiled))
-               (not (#{:seon.program :seon.data}
+  (let [properties (internal/entity-properties compiled)
+        identity? (some (fn [[attribute _ _]]
+                          (some-> (mr/schema registry attribute)
+                                  m/properties :seon.db/identity))
+                        (internal/entity-entries compiled))]
+    (when (and (:seon.db/attributes properties) identity?
+               (not (#{:seon.program :seon.data :seon.cluster}
                      (:seon.program/partition properties))))
       (throw
        (ex-info "An identity-bearing entity schema must declare its partition."
                 {:seon.error/operation 'seon.schema/build-projection
                  :seon.schema/identity schema-key
                  :seon.schema/member :seon.program/partition
-                 :seon.schema/expected #{:seon.program :seon.data}
-                 :seon.schema/offending properties}))))
+                 :seon.schema/expected #{:seon.program :seon.data :seon.cluster}
+                 :seon.schema/offending properties})))
+    (when (and (:seon.db/attributes properties)
+               (= :seon.cluster (:seon.program/partition properties))
+               (not identity?))
+      (throw (ex-info "A cluster entity schema must declare an identity."
+                      {:seon.error/operation 'seon.schema/build-projection
+                       :seon.schema/identity schema-key
+                       :seon.schema/member :seon.db/identity
+                       :seon.schema/offending properties}))))
   nil)
 
 (defn assert-complete-contract!
