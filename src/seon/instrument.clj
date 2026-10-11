@@ -952,7 +952,9 @@
                                       (mr/var-registry))})
         forms (:seon.schema.projection/forms projection)
         dependencies (:seon.schema.projection/schema-dependencies projection)]
-    (loop [pending ((mi/-f->original schema/direct-references) projection contract)
+    (loop [pending (if-let [references (get (:seon.schema.projection/function-products projection) contract)]
+                     (reduce into #{} (mapcat identity references))
+                     ((mi/-f->original schema/direct-references) projection contract))
            definitions (sorted-map)]
       (if-let [schema-key (first pending)]
         (if (find definitions schema-key)

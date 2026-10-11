@@ -36,6 +36,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.batch]
+            [seon.cache :as cache]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster :as cluster]
@@ -51,7 +52,9 @@
             [seon.instrument :as instrument]
             [seon.print :as print]
             [seon.problems :as problems]
+            [seon.profile :as profile]
             [seon.repl :as repl]
+            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as kernel]
@@ -1049,6 +1052,74 @@
          (is (not (identical? armed @candidate)) "changed content rearms")
          (is (= {::value "one"} (candidate {::value "one"})))
          (is (thrown? clojure.lang.ExceptionInfo (candidate {::value 1}))))))))
+
+(deftest ^{:seon/tasks #{'seon.instrument/arming-a-projections-contract-walks-no-references}}
+  arming-a-projections-contract-walks-no-references
+  (with-disposable-namespace
+   (fn [namespace-name]
+     (let [contract [:=> [:cat ::input] ::output]
+           candidates (mapv #(intern namespace-name
+                                     (with-meta % {:malli/schema contract}) identity)
+                            '[first-contract second-contract])
+           contracts (zipmap (map symbol candidates) (repeat contract))
+           projection (schema/build-projection
+                       {::input :int ::output :int} contracts
+                       {:seon.schema/schema-admissions
+                        {::input {:seon.schema.admission/source :core}
+                         ::output {:seon.schema.admission/source :core}}
+                        :seon.schema/function-admissions
+                        (zipmap (keys contracts)
+                                (repeat {:seon.schema.admission/source :core}))})
+           measured (profile/measure
+                     #(do
+                        (doseq [form (vals contracts)]
+                          (is (= [[#{::input} #{::output} #{}]]
+                                 (:seon.schema/references
+                                  (schema/contract-product
+                                   projection {:seon.schema/form form
+                                               :seon.schema/mode :armed})))))
+                        (instrument/apply!
+                         {:seon.schema/projection projection
+                          :seon.instrument/changed-identities
+                          (into #{} (map (fn [sym] [:seon.fn/sym sym])) (keys contracts))})))
+           differing (profile/measure
+                      #(schema/contract-product
+                        projection {:seon.schema/form [:=> [:cat ::output] ::input]
+                                    :seon.schema/mode :armed}))]
+       (is (= (count contracts)
+              (:seon.instrument/registered (:seon.profile/value measured))))
+       (is (zero? (profile/calls-of measured 'seon.schema/contract-references)))
+       (is (= 2 (profile/calls-of differing 'seon.schema/contract-references)))
+       (is (= [[#{::output} #{::input} #{}]]
+              (:seon.schema/references (:seon.profile/value differing))))
+       (doseq [candidate candidates]
+         (is (= 7 (candidate 7))))))))
+
+(deftest ^{:seon.test/platform "Evicts SCI base sources in the disposable candidate JVM."}
+  a-cold-base-reads-retained-contract-references
+  (let [connection (:seon.db/connection (test-support/execution-handle nil))
+        database (db/db connection)
+        projection (db/carried-projection database)
+        _ (cache/evict-kinds! #{:seon.sci.eval/base-context :seon.sci.eval/overlay-context})
+        cold (profile/measure #(sci.eval/base-ctx database))
+        delta (schema/begin-registration-delta projection)
+        registration (profile/measure
+                      #(schema/call-with-registration-delta
+                        delta (fn [] (schema/register! ::registration-cost [:int]))))]
+    (let [path (or (System/getenv "SEON_H10_MEASUREMENTS")
+                   (str (io/file (System/getenv "SEON_CHECKOUT") "tmp/sol-h10-measurements.edn")))]
+      (spit path (value/core-text
+              {::cold-base (assoc (select-keys cold [:seon.profile/ms :seon.profile/alloc-bytes])
+                                  ::reference-walks (profile/calls-of cold 'seon.schema/contract-references)
+                                  ::base-derivations (profile/calls-of cold 'seon.sci.eval/derive-base-ctx))
+               ::registration (assoc (select-keys registration [:seon.profile/ms :seon.profile/alloc-bytes
+                                                                :seon.profile/calls])
+                                     ::reference-walks (profile/calls-of registration
+                                                                       'seon.schema/contract-references))}) :append true))
+    (is (sci.eval/ctx? (:seon.profile/value cold)))
+    (is (= 1 (profile/calls-of cold 'seon.sci.eval/derive-base-ctx)))
+    (is (zero? (profile/calls-of cold 'seon.schema/contract-references)))
+    (is (= ::registration-cost (:seon.schema/key (:seon.profile/value registration))))))
 
 (deftest cold-arming-keeps-acquired-predicates-without-an-ambient-binding
   ;; `apply!` arms from the supplied projection's retained contract, so the

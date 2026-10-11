@@ -127,6 +127,16 @@
                   [:input :output :guard])))
         (m/-function-schema-arities compiled)))
 
+(defn- compiled-contract-product
+  "The compiled contract paired with its per-arity references in its compilation world."
+  {:malli/schema [:=> [:cat [:fn malli.registry/registry?] [:set :keyword] [:fn malli.core/schema?]]
+                  [:map [:seon.schema/compiled [:fn malli.core/schema?]]
+                   [:seon.schema/references
+                    [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
+  [registry canonical-keys compiled]
+  {:seon.schema/compiled compiled
+   :seon.schema/references (arity-references registry canonical-keys compiled)})
+
 (defn- reference-cycle
   "First deterministic cycle in `graph` reachable from `roots`, or nil."
   [graph roots]
@@ -378,46 +388,26 @@
         (m/-function-schema-arities compiled)))
 
 (defn- with-compiled-cache
-  "Give one projection its own holder for state compiled FROM it.
-
-   Malli's pattern, applied: a validator is a pure function of the schema it
-   was compiled from, so it lives on that instance and cache identity is
-   structural — there is nothing to invalidate and nothing to compare.
-
-   Plain validators and explainers belong to Malli's retained schemas. This
-   holder owns only additional products, including arity descriptors and
-   selector-derived projections. It never stores a second plain validator.
-
-   The holder is installed FRESH at every construction and never inherited: a
-   projection derived by changing forms would otherwise carry its parent's
-   compiled answers for definitions it no longer has. It needs no key,
-   because its key is the value it hangs on. It starts empty: a function's
-   arities derive on first use from the registry (`function-arities-in`).
-
-   ## Costs
-
-   Measured on default's carried projection, 2026-09-27: 3,898 entries, each
-   keyed by one declaration (2,563 write-attribute plans, 1,262 write
-   validators, 73 others), so it is bounded by the projection's declarations
-   and dies with it. A hit costs 47 ns unarmed, 240 ns armed; the same entry
-   as a `seon.cache` kind cost 1,171 ns armed, and its key would pin what the
-   key names (a compiled schema pins its whole registry) past the
-   projection's life.
-
-   ## Known issues
-
-   `seon.db/write-validator` stores a second plain validator here, contrary
-   to this contract: Malli already caches it on the compiled schema
-   (`malli.core/validator`, `-cached`), 1,262 of the 3,898 entries
-   (tmp/value-hygiene-opus/db-write-validator.patch)."
-  [projection]
+  "Give a projection its own runtime holder, seeded with its compiled contract products.
+   Plain validators and explainers remain on Malli's retained schemas."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.schema/projection] :seon.schema/projection]
+    [:=> [:cat :seon.schema/projection
+          [:map-of :seon.schema/value
+           [:map [:seon.schema/compiled [:fn malli.core/schema?]]
+            [:seon.schema/references
+             [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]]
+     :seon.schema/projection]]}
+  ([projection] (with-compiled-cache projection {}))
+  ([projection products]
   (assoc projection
          :seon.config.db/validation-node-limit
          (:seon.config/default
           (some-> (mr/schema (:seon.schema.projection/registry projection)
                              :seon.config.db/validation-node-limit)
                   m/properties))
-         :seon.schema.projection/compiled (cache/basic-cache-factory {})))
+         :seon.schema.projection/compiled (cache/basic-cache-factory {::contract-products products}))))
 
 (defn- projection-cache
   "The holder [[with-compiled-cache]] installed, or nil.
@@ -2258,12 +2248,20 @@
                     dependencies))
           {}
           schema-dependencies)
+        function-products
+        (reduce-kv (fn [products sym form]
+                     (if (contains? products form)
+                       products
+                       (assoc products form
+                              (compiled-contract-product
+                               registry canonical-keys (get compiled-function-contracts sym)))))
+                   {} function-contracts)
         function-dependencies
         (into (sorted-map)
-              (map (fn [[sym _form]]
-                     [sym (contract-references
-                           registry canonical-keys
-                           (get compiled-function-contracts sym))]))
+              (map (fn [[sym form]]
+                     [sym (reduce into #{} (mapcat identity
+                                                  (:seon.schema/references
+                                                   (get function-products form))))]))
               function-contracts)
         reverse-function-dependencies
         (reduce-kv
@@ -2328,6 +2326,7 @@
           :seon.schema.projection/reverse-schema-dependencies
           reverse-schema-dependencies
           :seon.schema.projection/function-contracts function-contracts
+          :seon.schema.projection/function-products (update-vals function-products :seon.schema/references)
           :seon.schema.projection/function-dependencies function-dependencies
           :seon.schema.projection/reverse-function-dependencies
           reverse-function-dependencies
@@ -2341,7 +2340,7 @@
          predicate-functions)]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
-    (with-compiled-cache projection))))
+    (with-compiled-cache projection function-products))))
 
 
 (defn build-projection
@@ -2571,6 +2570,7 @@
    :seon.schema.projection/function-contracts
    :seon.schema.projection/schema-dependencies
    :seon.schema.projection/reverse-schema-dependencies
+   :seon.schema.projection/function-products
    :seon.schema.projection/function-dependencies
    :seon.schema.projection/reverse-function-dependencies
    :seon.schema.projection/shape-rows
@@ -2758,11 +2758,21 @@
                                  [affected-keys affected-fns])
             old-function-dependencies
             (:seon.schema.projection/function-dependencies projection)
+            function-products
+            (reduce (fn [products function-symbol]
+                      (assoc products (get function-contracts function-symbol)
+                             (compiled-contract-product
+                              registry canonical-keys (mr/schema registry function-symbol))))
+                    (select-keys (cache/lookup (projection-cache projection) ::contract-products {})
+                                 (vals function-contracts))
+                    affected-fns)
             function-dependencies
             (reduce (fn [dependencies function-symbol]
                       (assoc dependencies function-symbol
-                             (contract-references registry canonical-keys
-                                                  (mr/schema registry function-symbol))))
+                             (reduce into #{} (mapcat identity
+                                                      (:seon.schema/references
+                                                       (get function-products
+                                                            (get function-contracts function-symbol)))))))
                     (apply dissoc old-function-dependencies removed-fns)
                     affected-fns)
             reverse-function-dependencies
@@ -2813,6 +2823,7 @@
                      :seon.schema.projection/reverse-schema-dependencies
                      reverse-schema-dependencies
                      :seon.schema.projection/function-contracts function-contracts
+                     :seon.schema.projection/function-products (update-vals function-products :seon.schema/references)
                      :seon.schema.projection/function-dependencies function-dependencies
                      :seon.schema.projection/reverse-function-dependencies
                      reverse-function-dependencies
@@ -2847,7 +2858,7 @@
                          (comp (filter #(contains? affected-fns (:seon.render/function %)))
                                (map :seon.schema/key))
                          (render-declarations-in candidate (keys forms)))))))
-        (with-compiled-cache candidate)))))
+        (with-compiled-cache candidate function-products)))))
 
 (defn- projection-entities
   "Join attribute ranges, retaining historical values for duplicate refusal."
@@ -4252,21 +4263,8 @@
    contract))
 
 (defn contract-product
-  "Compile one authored function contract against `projection` and derive its references.
-
-   Symbol-free: the product carries the compiled contract and, per Malli arity,
-   its `[input output guard]` canonical references derived in the SAME world
-   ([[arity-references]]), so every consumer takes both together and never
-   re-walks. `:shape` compiles the normalized form ([[compilable-form]]) in the
-   projection registry, as the projection itself compiles contracts; `:armed`
-   also binds predicates and `:error/fn` ([[bind-contract-predicates]]) and
-   compiles in the registry composed with Malli's var registry, as arming does.
-   A host form holding a compiled schema keeps that schema's own options.
-
-   ## Costs
-
-   One Malli compile and one reference walk; nothing is retained here
-   (retention is the population table, §10, disabled until slice 4)."
+  "The projection's retained contract product, or a compile and per-role reference derivation
+   for a form it does not hold. Products stay in their projection's registry world."
   {:malli/schema [:=> [:cat :seon.schema/projection
                        [:map [:seon.schema/form :seon.schema/value]
                         [:seon.schema/mode [:enum :shape :armed]]]]
@@ -4274,18 +4272,18 @@
                    [:seon.schema/references
                     [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
   [projection {form :seon.schema/form mode :seon.schema/mode}]
-  (let [registry (:seon.schema.projection/registry projection)
-        normalized (compilable-form form (predicate-functions-in projection))
-        compiled (case mode
-                   :shape (m/function-schema normalized {:registry registry})
-                   :armed (m/schema (bind-contract-predicates projection normalized)
-                                    {:registry (mr/composite-registry registry (mr/var-registry))}))]
-    {:seon.schema/compiled compiled
-     :seon.schema/references
-     (arity-references (:registry (m/options compiled))
-                       (or (:seon.schema.projection/canonical-keys projection)
-                           (set (keys (:seon.schema.projection/forms projection))))
-                       compiled)}))
+  (or (some-> (projection-cache projection) (cache/lookup ::contract-products {}) (get form))
+      (let [registry (:seon.schema.projection/registry projection)
+            normalized (compilable-form form (predicate-functions-in projection))
+            compiled (case mode
+                       :shape (m/function-schema normalized {:registry registry})
+                       :armed (m/schema (bind-contract-predicates projection normalized)
+                                        {:registry (mr/composite-registry registry (mr/var-registry))}))]
+        (compiled-contract-product
+         (:registry (m/options compiled))
+         (or (:seon.schema.projection/canonical-keys projection)
+             (set (keys (:seon.schema.projection/forms projection))))
+         compiled))))
 
 (defn function-contract
   "Admit one authored function contract against `projection`: its product
