@@ -144,6 +144,27 @@ provider call or evaluation at the crash (the work is due again and repeats unle
 already made outside the store (provider spend, git commits, written files, messages read by outsiders); and the
 compiled JVM program, which is HEAD's, not `t`'s (only what the branch interprets from source is at `t`).
 
+### A6. Resume path and its keys
+
+Resume is a chain of content-keyed lookups; a warm cache answers almost instantly and a cold one recomputes from
+facts. The key is the **commit id** (one immutable root; a branch name moves and `t` repeats across forks).
+
+| Leg | Key | Owner (verified by symbol) | Warm | Cold | Gap |
+|---|---|---|---|---|---|
+| commit → program identity | commit id | `seon.sci.eval/program-identity`, memoized in `program-identity-cache` | 0.008 ms (measured) | 0.03 ms | none |
+| program identity → cluster base context | `[store commit]` of the **loaded** program (`cluster-base-key`) | `seon.sci.eval/base-ctx` → `seon.cache` kind `::base-context` | 7.6 ms on main (measured; the fork `copy-base-ctx`) | 24 ms on main; a boot derives it once | none for the base |
+| base → the branch's own changes | none today | `seon.sci.eval/overlay!` recomputes `overlay-plan` and `interpret-overlay!` **on every acquisition** whose commit differs from the loaded one | = cold | proportional to the branch's changed definitions and affected callers (the hundreds of MB of item 12) | **the gap**: cache the acquired context by `[cluster-base-key, commit id]` as a `seon.cache` kind, weighed like the base; a branch whose head did not move answers from it; `:stopped` → `:running` and t-resume become a lookup |
+| context → rendered current-state | content digest of what it read (law: a render is cached by what it read) | `seon.context/current-state`; no `seon.cache` kind found for it by grep (verify before relying on it) | a lookup | one render over the task's references | add the kind when the render cost is measured |
+| large values | blob digest | `seon.blob/inline-or-stage` at the writer; `read-chunk` lazily at the reader | konserve read | same | none; the stored form is decided once |
+| what is due | `t` of listened datoms vs the latest answering turn | `seon.turn/unanswered-wakes` (3.2 ms measured for root) | query | query | none |
+
+So a resume to any commit is: identity (µs) → base (ms) → overlay (the gap: ms when cached, seconds cold) → render
+(cached by content) → wakes (ms). Never recoverable, by leg: live result values once evicted from `seon.cache` (a
+handle answers "gone"); the contents of SCI atoms and other places that are not program entities; an in-flight model
+call or evaluation (its work is due again and repeats unless idempotent); effects already outside the store.
+Measurements above are JVM-mode on default's main at commit `6acb4715…`, where the overlay plan is empty; the overlay
+leg must be measured on a branch with changes before the cache is sized.
+
 ## B. Differences from the written designs and the code
 
 | Where | Says | Change |
