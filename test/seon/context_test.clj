@@ -267,7 +267,8 @@
            "no counts are manufactured for evidence that is gone")
        (is (= [] (context/outcome-tx (db/db connection) "ended-unknown")) "and nothing is recorded for it")))))
 
-(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch}
+(deftest ^{:seon/tasks #{'seon.task/an-ended-summary-survives-retiring-its-branch
+                         'seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row}
            :seon.test/long "The assignment's proof run, the fix with its test step and the end's proposal run."
            :seon.test/long-ms 30000}
   the-outcome-recorded-at-the-end-equals-the-one-the-branch-shows

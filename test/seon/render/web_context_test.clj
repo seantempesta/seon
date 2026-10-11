@@ -12,7 +12,8 @@
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
-(deftest unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot
+(deftest ^{:seon/tasks #{'seon.render.web/the-root-page-shows-a-newly-adopted-commit-after-the-fence-revert}}
+  unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot
   (#'web-test/with-server
    (fn [connection server context]
      (flow/pause (:graph context))
