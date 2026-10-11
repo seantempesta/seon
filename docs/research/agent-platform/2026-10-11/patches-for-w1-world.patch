@@ -1,0 +1,51 @@
+# Patch for lane w1-world (holder of runtime-follows-db.md), from lane fable-runtime, 2026-10-11: the one-assembly principle in section 1, its line in section 3b, and R1 through seon.cluster.host/assemble!. Apply with git apply.
+diff --git a/docs/research/agent-platform/2026-10-11/runtime-follows-db.md b/docs/research/agent-platform/2026-10-11/runtime-follows-db.md
+index effcfded1..c6da1f802 100644
+--- a/docs/research/agent-platform/2026-10-11/runtime-follows-db.md
++++ b/docs/research/agent-platform/2026-10-11/runtime-follows-db.md
+@@ -16,6 +16,14 @@ round revises in place.
+ 
+ ## 1. The one path, and what is not on it
+ 
++**Starting anything is one assembly** (owner, 2026-10-11: "getting the flow attached and a task to drive the context
++and whatever we want should all be the same; it's assembly work from reused parts"). `seon.cluster.host/assemble!`
++composes four reused parts: (1) the world from W1's one constructor; (2) an environment forked from the nearest cached
++fork point (the cluster base, or R4's interpreted fork of the branch's program); (3) the task, which drives the context
++(`seon.context/current-state` over the task, its references, proofs and instructions); (4) a Flow graph attached by the
++reconciler, omitted for a test member. A chain step, a test run (W2), root's scheduling task, a problem task and an
++ad-hoc `eval_clj` agent are the same assembly with a different task and fork point.
++
+ Wake (`seon.cluster.wake/route!`) → the turn proc pins one database value and derives work (`seon.turn/next-agent-work`)
+ → task loaded, validated, context rendered (`seon.context/current-state`) → proofs run on the branch (`test-step`) →
+ green ends it (`end-task-call`, one transaction) or red opens one model call → recording transaction → next wake.
+@@ -152,7 +160,7 @@ test member's world is that value alone, built from the run's branch, never inhe
+ ("check these tests for this change") **is a task on the one path**: created with its test set and program basis as
+ data, launched by the reconciler, observed, restorable, its end carrying the run id; its members run inside that attempt
+ in worlds from the constructor, not as tasks of their own (about 2,800 members at milliseconds each is too heavy for
+-attempt rows). `seon.test`'s own world building goes.
++attempt rows). `seon.test`'s own world building goes. The world is part (1) of the one assembly (§1); the member's assembly is the same call with the graph omitted.
+ 
+ ## 4. Boot, resume, and the resume path's keys
+ 
+@@ -314,8 +322,19 @@ already the first pass's proof run, and `task-end` → `:done` with zero calls w
+ transaction it already makes (S4 folds in here). Red proofs: `seon.turn-test/a-fresh-attempt-is-work-without-a-message`;
+ `seon.turn-test/an-already-green-attempt-ends-with-no-model-call`; `seon.turn-test/an-end-is-written-on-the-attempt`.
+ 
+-**R1 — the reconciler launches** (owns `src/seon/cluster/agent.clj` armer section, `test/seon/cluster/agent_test.clj`).
+-`seon.cluster.agent/launch!` `[:=> [:cat :seon.agent/launch-request] [:or :seon.agent/launched :seon.task/refused-error]]`
++**R1 — the reconciler launches, through the one assembly** (owns `src/seon/cluster/agent.clj` armer section,
++`src/seon/cluster/host.clj`, `test/seon/cluster/agent_test.clj`). `seon.cluster.host/assemble!` `[:=> [:cat
++:seon.cluster.host/assembly-request] [:or :seon.cluster.host/assembled :seon.task/refused-error]]`, request
++`{:seon.turn.loop/cluster handle, :seon.task/handle h, :seon.agent/id id, :seon.store/branch b, :seon.cluster.host/fork-point
++commit-id, :seon.cluster.host/graph? bool}`: the world (`seon.batch/world`, W1), the environment forked from the fork point
++(`seon.sci.eval/base-ctx` + R4's cached overlay), the task driving the context (nothing stored: `current-state` renders
++it), and, when `graph?`, the agent graph attached (`arm!`); answers the world with its graph entry. Folded into it:
++today's `host!` (the `eval_clj` ad-hoc path becomes `assemble!` with a `:work` task), `arm!`'s acquisition for cluster
++agents, `seon.test/bounded-result`'s member world (W1; `graph? false`), the test-support launch helpers (D1), C2's attempt
++firings. Per-part cost targets, measured as profile evidence: world under 5 ms; environment 8 ms warm from the cached
++base and under 50 ms with R4's cached fork (cold: the overlay leg); context render proportional to the must-read count,
++under 200 ms and 50 MB (today hundreds of MB, plan item 12); graph attach under 20 ms (`start-graph!` + resume); the
++whole start under 1 s and 300 MB (the lightness proof below). `seon.cluster.agent/launch!` `[:=> [:cat :seon.agent/launch-request] [:or :seon.agent/launched :seon.task/refused-error]]`
+ with request `{:seon.turn.loop/cluster handle :seon.task/handle h}`: the branch name derived from the attempt identity;
+ `seon.cluster.registry/fork!` from the predecessor attempt's `:seon.task.attempt/commit` (handed `commit-as-db`, released
+ after; main's current value when there is none; by commit id, never `t`), answering `created? false` on a repeat;

@@ -63,6 +63,11 @@ it belongs to: the laws its instructions cite and the tool help; the step's inst
 resolved to docs, sources and schemas, evidence, decisions); the step's proofs with their current red data; the agent's
 own history. Byte stability buys cache hits; correctness of the task section matters most.
 
+**A step starts as one assembly** (owner, 2026-10-11): `seon.cluster.host/assemble!` composes the world (one constructor),
+an environment forked from the nearest cached fork point (the predecessor attempt's commit), the step task driving the
+context, and the Flow graph the reconciler attaches; a test run, root's tasks and an ad-hoc agent are the same assembly
+with another task and fork point (runtime-follows-db §1, R1).
+
 **Vocabulary** (owner, 2026-10-11; catalogue §3). Agent side: `my.task/current` (my step, the subject, the proofs with
 status and failing data, decisions, offered operations), `my.task/refine!` (edit any subject field, including a
 decision), `my.task/send-back!` (reason, target step, counterexample; it writes the `:send-back` decision and ends the
