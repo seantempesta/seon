@@ -1,8 +1,8 @@
 ---
 title: "The runtime follows the database: one path, one scheduling system, every state as primitives"
 type: research
-status: round 3 of an owner iteration (2026-10-11); not agreed
-basis: HEAD e7dbabe9b, read by symbol; old plan model at cea904e92^; read-only JVM probes on default (roster 11 ms; resume legs below)
+status: final candidate after four owner rounds (2026-10-11); build order in §10
+basis: HEAD 05139fa1f (overlay plan reuse 0c3916000 read), read by symbol; old plan model at cea904e92^; read-only JVM probes on default (roster 11 ms; resume legs below)
 ---
 
 # Runtime follows DB
@@ -82,6 +82,15 @@ open attempt and no graph → re-host (after a restart); with no attempt → lau
 leaves and their needs (reverse `:avet` on `:seon.task/needs`), never the 705 tasks (closed subjects are skipped by the
 first `done` clause). The exact Datalog is a probe before building; the shape is `seon.plan/derived-frontier`'s.
 
+**The plan is shown, not stored.** `needs` carries the order: a render pair on the subject task (`:seon.render/ai` and
+`:seon.render/html` on `:seon.task/subject-plan`, a schema-selected render as any other) layers the tree by needs,
+layer n = the tasks whose needs all lie in earlier layers (Kahn's order over the pulled tree; a cycle is refused at the
+writer, as `seon.plan/refuse-dependency-cycle!` did), so the same layer reads as parallel and successive layers as the
+sequence; each task is annotated from the same derivations the reconciler uses: done, running (open attempt with a
+graph), paused, held, waiting (a need open), problem (an open problem task names it). The HTML face is the layers as
+rows with the tree nesting as indentation; the AI face is the same data pruned to the open layers. Read-only, cached
+by what it read; a changed end or intent re-renders it.
+
 ## 3. Intents and the reconciler
 
 Intent lives on the task, `:seon.task/execution`, absent = `:running`; the cluster carries `:seon.cluster/execution`
@@ -116,7 +125,8 @@ through the same `host!`.
 |---|---|---|---|---|
 | commit → program identity | commit id | `seon.sci.eval/program-identity`, `program-identity-cache` | 0.008 / 0.03 ms | none |
 | → cluster base context | `[store commit]` of the loaded program | `seon.sci.eval/base-ctx`, kind `::base-context` | 7.6 / 24 ms | none |
-| → the branch's own changes | **none today** | `seon.sci.eval/overlay!` re-interprets `overlay-plan` every acquisition whose commit differs from the loaded one | = cold: proportional to changed definitions and affected callers (hundreds of MB, plan item 12) | cache the acquired context by `[base-key commit]` as a `seon.cache` kind; `:stopped`→`:running` and t-resume become a lookup |
+| → the branch's own changes: the plan | `[store, program basis, loaded commit]` | `seon.sci.eval/overlay-plan`, kind `::overlay-plan` (Astra, 0c3916000: plan data cached; `branch-database` opens a head once) | lookup / one derivation | none |
+| → the branch's own changes: the interpreted context | **none today** | `seon.sci.eval/interpret-overlay!`, called by `overlay!` on every acquisition whose commit differs from the loaded one, re-interprets the plan's overridden and added definitions on a fresh fork of the base | = cold: proportional to changed definitions and affected callers (plan item 12) | **the remaining gap**: cache the interpreted fork by `[base-key, program basis]` as a `seon.cache` kind weighed like the base; an acquisition of a branch whose program did not move answers from it; `:stopped`→`:running` and t-resume become a lookup. A context holds atoms (`::kernel/program-snapshot`, installed functions), so the cached value is the fork to copy from (`copy-base-ctx`'s shape), never a shared live context |
 | → rendered current-state | content digest of what it read | `seon.context/current-state` (no `seon.cache` kind found by grep: verify) | lookup / one render | add the kind once measured |
 | large values | blob digest | `seon.blob/inline-or-stage`, `read-chunk` lazily | konserve read | none |
 | what is due | `t` of listened datoms vs the latest answering turn | `seon.turn/unanswered-wakes` | 3.2 ms | none |
@@ -208,15 +218,53 @@ is work. `armer-step`: hosts from attempt rows (today an assigned branch agent i
 `:cancelled` interrupts. `seon.schedule`: folded into §6. `seon.task/resolution`: adds the derived `done`. Vocabulary:
 record `:held :running :paused :stopped :cancelled`, attempt, firing, problem task; retire "schedule task".
 
-## 9. Round-4 owner questions (recommended first)
+## 9. Decided (owner, rounds 1–4)
 
-1. **No position: parallel by default, order by `needs`, parents never run.** Alternative: keep position as display order only.
-2. **Problems are root-assigned tasks by identity; nominal ends wake nobody.** Alternative: root also gets a daily digest task (cron, no function).
-3. **Which problem classes get a fresh agent rather than root**: error signatures and cost regressions (ordinary tasks); everything else root. Alternative: root for all until the classes are measured.
-4. **One clock proc; the heartbeat is a cron task with a function.** Alternative: a dedicated heartbeat proc as in round 2.
-5. **A firing to a live agent is a listened wake, otherwise an attempt; refused delivery is a problem task.** Alternative: always an attempt.
-6. **The overlay cache (`[base-key commit]`) is the first performance lane of the path.** Alternative: current-state render cache first.
+Progress derived, intent stored, on the task; cluster `running/paused`; `needs` only, no position, the plan rendered;
+five intents each one reconciler action; only the reconciler starts graphs; root works every problem task except error
+signatures and cost regressions (fresh agents); nominal ends wake nobody; one clock proc, the heartbeat a cron task with
+a function; a firing to a live agent is a message wake, else an attempt, refused delivery a problem task; `start`
+resumes, `--paused` for debugging; the interpreted-overlay cache is the first performance lane.
 
-Not verified (probes before building): the §2 query's cost and Datahike rule support for `done`/`needs*` on the live
-store; `host!` from the reconciler's proc thread; `fork!` from a historical commit; `flow/pause` + join as "finish the
-current pass" against the turn-completion bound.
+## 10. Build order: cards of about fifteen minutes, each with its red proof
+
+Probes first (P), then schema and derivations (S), the reconciler (R), the scheduling system (C), problems and the
+render (Q), deletions (D). Every card is one lane, one owner, `--branch-evidence` or `--test`; a slice that contradicts
+the design stops and reports.
+
+| # | Card | Red proof (deftest, tagged with the card's task) |
+|---|---|---|
+| P1 | probe: recursive rules `done`/`needs*` in `seon.db/q` on the live store; cost of §2's query on a synthetic 50-leaf tree under `d/with` | `seon.task-test/the-frontier-query-answers-in-under-50-ms-for-fifty-leaves` (cost assertion through `seon.profile/measure`) |
+| P2 | probe: `seon.cluster.host/host!` from the armer's proc thread for a new branch; `registry/fork!` from a historical commit id | `seon.cluster.host-test/the-reconciler-hosts-a-branch-agent-from-its-own-pass`; `seon.cluster.registry-test/a-fork-from-a-historical-commit-reads-that-commit` |
+| P3 | probe: `flow/pause` then `join-graph!` ends after the current transform, under the turn-completion bound | `seon.cluster.agent-test/a-stop-intent-finishes-the-current-pass-before-the-graph-exits` |
+| S1 | schema: `:seon.task/steps` (component), `:seon.task/needs` (indexed ref set), `:seon.task/execution`, `:seon.cluster/execution` (both `:seon.wake/arms true`), `:seon.task/cron`, `/zone`, `/function`, `:seon.task.fire/*`; cycle refusal at the writer; vocabulary rows | `seon.task-test/a-needs-cycle-is-refused-at-the-writer`; schema adoption proven on a branch of the live store |
+| S2 | `seon.task/done` and `seon.task/frontier` (the §2 query as one function; `done` adds `seon.task/resolution`'s clause) | `seon.task-test/the-frontier-is-the-leaves-whose-needs-are-done` (table: chain, fan-out, nested, join, send-back) |
+| S3 | the attempt is the launch's write: `assign!` writes the row without running proofs; `seon.turn/next-agent-work` treats a held unanswered attempt as work; `test-step` runs the red-first proofs in the first pass; green ends `:done` with zero calls | `seon.turn-test/a-fresh-attempt-is-work-without-a-message`; `seon.turn-test/an-already-green-attempt-ends-with-no-model-call` |
+| S4 | `:sent-back` with `:seon.task/target` in `end-task-call`; `done` honors it | row in S2's table |
+| R1 | `armer-step` reads the frontier and intents, launches under `:seon.config.agent/max-running`: fork from the predecessor attempt's commit, `host!`, attempt row; idempotent by identity | `seon.cluster.agent-test/two-reconciler-passes-launch-one-attempt`; `…/a-held-leaf-is-never-launched` |
+| R2 | intents → Flow verbs: `:paused` launches without resume or pauses; `:running` resumes; `:stopped` pause-join-stop-release; `:cancelled` interrupts and closes; cluster `:paused` wins; `start-graph!` resumes only under the intent | `…/each-intent-names-one-roster-state` (table over the five) |
+| R3 | boot: `start --paused` writes the cluster intent before the prime; the prime re-hosts open attempts on branches | `seon.cluster.boot-test/a-paused-boot-arms-every-open-attempt-and-runs-nothing`; `…/a-restart-re-hosts-an-open-branch-attempt` |
+| R4 | the interpreted-overlay cache kind keyed `[base-key, program basis]` (§4) | `seon.sci.acquisition-cost-test/a-second-acquisition-of-an-unmoved-branch-interprets-nothing` (cost assertion) |
+| C1 | the clock proc in the cluster graph: due instants from every task with `:seon.task/cron`, one firing fact per `[task nominal-at]`; `:seon.task/function` firings call the Var and record the result | `seon.schedule-test/a-firing-is-written-once-per-nominal-instant` (move the existing nominal-fire test) |
+| C2 | firings without a function: a live agent gets a listened wake (`:seon.task.fire/to`), else an attempt child by identity; a refused delivery writes the problem task | `…/a-firing-to-a-live-agent-is-a-wake-and-to-none-an-attempt`; `…/a-refused-delivery-is-a-problem-task` |
+| C3 | the heartbeat as a cron task with a function: `ping` the roster and children, `:seon.agent/observed` on change, `:seon.cluster/heartbeat-t` per period; health reads two periods as unknown | `seon.health-test/a-stale-heartbeat-reads-unknown`; `…/an-unchanged-observation-writes-nothing` |
+| Q1 | problem tasks by identity `seon.id/id [class subject]`, assigned to root (or to a fresh agent for error signatures and cost regressions), with instruction types; the merge request becomes one | `seon.task-test/a-repeated-problem-writes-nothing`; `…/a-merge-request-is-a-problem-task-of-root` |
+| Q2 | detection per class in the pass that already sees the facts (one card per two classes: ends; send-back loop + stuck chain; observed≠intent + stale heartbeat; delivery + reference; error signature + cost) | one table row per class in `seon.task-test/each-problem-class-is-detected-from-its-facts` |
+| Q3 | the plan render pair on the subject task: layers by needs, live annotations | `seon.render.task-test/the-plan-render-layers-a-tree-by-needs` (data assertion on the AI face) |
+| D1 | delete `seon.test-support/start-run!`, `own-branch-agent!`'s setup eval, `outside-wake-on-branch!`; the bench writes trees | the bench test green through the reconciler |
+| D2 | delete the per-agent `seon.schedule/schedule-step` proc, `:seon.schedule.task/*`, `seon.schedule/recover-tx`; `graph-definition` loses the schedule proc | `seon.schedule-test` rows moved to C1; `seon.cluster.agent-test/an-agent-graph-has-two-procs` |
+| D3 | `disarm!` splits: `:stopped` without interrupt, `:cancelled` with; the turn-completion backstop stays as the declared bound | P3's test green |
+| D4 | revise TASK-CHAIN §2/§6, task-graph-design, plan §0 item 6 in place; vocabulary rows | documentation, no program input |
+
+Order: P1–P3 and S1 beside each other; S2–S4 after S1; R1–R3 after S2 and P2; R4 any time; C1–C3 after S1 and R1;
+Q1–Q3 after S2; D1 after R1 and S3; D2 after C1–C3; D3 after P3; D4 last. First experiment (plan §0 item 7) runs after
+R1 and S3 with a two-leaf tree.
+
+## 11. Remaining owner questions
+
+1. **Instruction types for problem tasks: one `resources/seon/tasks/problems.edn` template per class, rendered by
+   `current-state` as a stage type is.** Alternative: one generic "problem" template with the class as data.
+2. **`max-running` default: 4 attempts on a 16 GB machine** (hundreds of MB per hosted context until R4 lands).
+   Alternative: unbounded until measured.
+3. **Does the first experiment wait for R1 (automatic launch) or run with root creating the second leaf's attempt by
+   hand through the same `host!`?** Recommended: wait for R1; it is one card.
