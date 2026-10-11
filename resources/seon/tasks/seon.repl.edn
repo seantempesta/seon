@@ -10,7 +10,7 @@
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "a-slow-reply-names-counts-not-proportionality"
              :kind :function
-             :intent "A reply over one second lists :repeated [[sym calls ms] ...] sorted by call count (propose-merge!: `seon.schema.datahike/logical-attribute?` 199,406 calls first) but not what the work was proportional to or which armed call held the wall time, so the agent cannot tell a hub traversal from a per-member recording. Order by inclusive time, name the top call's input size (members, datoms, program entities), and state the ratio to the evaluation's own input."
+             :intent "A reply over one second lists :repeated [[sym calls ms] ...] sorted by call count (request-merge!: `seon.schema.datahike/logical-attribute?` 199,406 calls first) but not what the work was proportional to or which armed call held the wall time, so the agent cannot tell a hub traversal from a per-member recording. Order by inclusive time, name the top call's input size (members, datoms, program entities), and state the ratio to the evaluation's own input."
              :must-read #{seon.repl/response-entries seon.profile/summary}
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "offered-operations-cannot-name-the-prior-result"

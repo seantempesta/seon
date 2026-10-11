@@ -476,7 +476,7 @@
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
 
-(deftest ^{:seon/tasks #{'my.program/proposals-refuses-its-own-result-on-main}
+(deftest ^{:seon/tasks #{'my.program/merge-requests-refuses-its-own-result-on-main}
            :seon.test/long "One own-branch agent's first request, assignment and request run."
            :seon.test/long-ms 120000}
   an-end-message-naming-a-merge-task-is-not-a-request

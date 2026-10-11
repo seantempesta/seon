@@ -19,7 +19,7 @@ proof (`seon.task/assign!` refuses `:no-proofs` and `:proofs-green`, installed).
 Root's work arrives today as messages: on default (2026-10-08 evening, one query, 2.4 ms) root holds **10** messages
 and **0** assignments; **9** messages are error notifications whose content is a printed `#:seon.error{…}` map
 (`seon.error/commit-call`'s recipients, task `seon.error/error-notifications-to-root-are-printed-maps`), 3 of them sent
-by root to itself, and 1 is "Hello". A merge request sends one more message (`my.program/propose-merge!`'s
+by root to itself, and 1 is "Hello". A merge request sends one more message (`my.program/request-merge!`'s
 `message/send!` "Please merge branch …"). Each message is a listened wake and, before CX-2, opens a root model turn.
 Wakes are datoms on attributes declared `:seon.wake/listen true` whose value is the agent (`seon.wake`; today
 `:seon.message/to`, `:seon.schedule.fire/…`, `:seon.effect/…`). An assignment (`:seon.task/agent`) is not one.

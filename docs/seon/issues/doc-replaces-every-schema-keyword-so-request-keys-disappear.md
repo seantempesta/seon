@@ -70,6 +70,6 @@ every non-supplied key and no supplied one.
 
 `(doc my.issue/add!)` still prints every `:in` entry as `[<schema form> <schema form>]`, `:example ""`, and still lists the
 supplied `:seon.db/connection` and `:seon.agent/id` inside `:in` beside a new `:supplied [:seon.agent/id :seon.db/connection]`.
-`(dir my.program)` shows the same doubled entries in `propose-merge!`'s `:in`. Building `my.issue/add!`'s request took
+`(dir my.program)` shows the same doubled entries in `request-merge!`'s `:in`. Building `my.issue/add!`'s request took
 three attempts: `:seon.issue/functions #{'sym}` refused with sixteen alternative lines (int, string, tuple, map per member);
 lookup refs `[:seon.fn/sym 'sym]` were needed, which nothing printed.

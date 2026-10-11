@@ -17,7 +17,7 @@ next work derive from it; no function looks up the home by hand.
 ## Functions
 - CHANGE, each to take or read the record: `seon.context/current-state`, `seon.render.ns/held-task`,
   `seon.turn/next-agent-work`, `seon.turn/task-proofs`, `my.task` (the three `home-connection` reads),
-  `my.program/propose-merge!`, `seon.cluster.status` (its home read).
+  `my.program/request-merge!`, `seon.cluster.status` (its home read).
 - DELETE `seon.task/agent-task` (its callers read `:seon.agent/assignments` of the record, oldest held first) and
   `seon.task/home` (callers use `seon.agent/home`); `home-connection` stays for task writes.
 

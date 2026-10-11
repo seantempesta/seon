@@ -239,7 +239,7 @@ Each names its red proof (asserting on data, in the owning test namespace) and i
 (agents launched by hand land without root); the tick after 7 makes it run alone.
 
 1. **`land!` is one call** (lane A). `seon.cluster.source/land!`: prepare, accept, write-back, returning the first
-   refusal as data. Proof `seon.cluster.merge-test/a-green-proposal-lands-on-main-and-disk-in-one-call` (fixture
+   refusal as data. Proof `seon.cluster.merge-test/a-green-request-lands-on-main-and-disk-in-one-call` (fixture
    proposal; asserts main holds the digest, the file holds the span, the value is `:seon.source/landed`; a red
    reaching test yields the gate's refusal and no outcome).
 2. **The green end lands** (lane B, after 1). `seon.turn/end-task!` calls `land!` on `:done`; the message carries

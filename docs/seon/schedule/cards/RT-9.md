@@ -20,7 +20,7 @@ no-change rule). An update with a newer source commit changes no assignment.
 ## Functions
 - CHANGE F5's request writer in `seon.task` (today `propose!`) to add `:seon.task/proofs` and
   `[:db.fn/call #'assign-tx …]` in its one transaction (TX-6b).
-- CHANGE `my.program/request-merge!` (today `propose-merge!`): delete the `message/send!` to root and the
+- CHANGE `my.program/request-merge!` (today `request-merge!`): delete the `message/send!` to root and the
   `:seon.task/undelivered` branch.
 
 ## Deleted

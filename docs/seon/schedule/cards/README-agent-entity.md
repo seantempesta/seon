@@ -19,7 +19,7 @@ exists on both. Writers then pick a side by whatever connection they hold, and r
 
 | Fact about the agent | Written today | Read today |
 |---|---|---|
-| assignment (`:seon.task/agent`) | the task home (`seon.task/written` → `home-connection`) | at the home, by seven hand-written `(or (some-> (task/home db) db/db) db)` lookups: `seon.context/current-state`, `seon.render.ns/held-task`, `seon.turn/next-agent-work`, `seon.turn/task-proofs`, `my.task` (three), `my.program/propose-merge!`, `seon.cluster.status` |
+| assignment (`:seon.task/agent`) | the task home (`seon.task/written` → `home-connection`) | at the home, by seven hand-written `(or (some-> (task/home db) db/db) db)` lookups: `seon.context/current-state`, `seon.render.ns/held-task`, `seon.turn/next-agent-work`, `seon.turn/task-proofs`, `my.task` (three), `my.program/request-merge!`, `seon.cluster.status` |
 | settings (`:seon.agent/settings` component) | whatever connection the caller holds (`seon.agent/settings!`) | the agent's own branch (`seon.ai/agent-overlay` in `seon.turn`, `seon.turn/max-episode-runs`, `seon.bootstrap`) |
 | messages to the agent | the recipient's `:seon.agent/branch` (`seon.cluster.message/send!` routes by it) | its branch |
 | call cap anchor | none: derived as the latest outside wake's `t` on the branch (`seon.turn/outside-wake-t`) | its branch |

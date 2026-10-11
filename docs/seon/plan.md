@@ -67,7 +67,7 @@ work already agreed here are pre-approved, and a new design question waits.
    `done!`, `seon.task/steps!`, `:seon.step/*` and the old `:seon.task/steps` schema; child tasks take the new name `:seon.task/children` in
    item 6 then takes over) and `seon.task/resolution`'s fault and signal clauses. Root's namespace `my.root`:
    `instructions`, `merge-requests`, `merge!` (over `land!`), `close!`, `ended`; no `launch!` (the reconciler launches);
-   `seon.task/propose!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`. Stored attributes with
+   `seon.task/request-merge!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`. Stored attributes with
    their functions: home → main, refuted → red-first, outcome → end, proposal → merge request. After 2. Unblocks 6.
 6. **The runtime follows the database** ([runtime-follows-db](../research/agent-platform/2026-10-11/runtime-follows-db.md),
    settled by the owner in four rounds, 2026-10-11; its §10 is the build order, 22 cards of about fifteen minutes each

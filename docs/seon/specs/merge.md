@@ -6,7 +6,7 @@ tags: [spec, merge, root]
 ---
 # Merge: root reviews and merges an agent's branch
 
-What exists: an agent opens a merge request for its branch (today `my.program/propose-merge!`), root tests the merge on
+What exists: an agent opens a merge request for its branch (today `my.program/request-merge!`), root tests the merge on
 a fresh merge branch off the target (today `prepare-merge!`), then merges exactly what was tested (today
 `accept-merge!`); the writer checks the replaced rows' digests. Data flow: the merge request at the task home →
 three-way digest comparison (merge base, ours, theirs) → one transaction onto the merge branch → test run on the merge
@@ -48,7 +48,7 @@ to files without a merge (`my.program/write-branch!`, installed) and commit by b
   `:seon.merge/target-branch`, `:seon.merge/proofs` (each proof with its definition digest), `:seon.merge/run` and
   `:seon.merge/program-digest`, plus optional `:seon.merge/norms`. A task is a merge request because it carries
   `:seon.merge/source-branch`, validated by a specific Malli schema composed over the task schema; there is no kind
-  (ledger §3.15). Today: `seon.task/propose!` (src/seon/task.clj:655) writes `:seon.task/kind :merge` and a separate
+  (ledger §3.15). Today: `seon.task/request-merge!` (src/seon/task.clj:655) writes `:seon.task/kind :merge` and a separate
   proposal row; the rename slice folds the proposal row into the request (ledger §3.16, merge request data).
 - The source branch, read through `compare-branch` (src/seon/cluster/source.clj:824).
 - The merge branch, created off the target by `merge!` and named on the request as `:seon.merge/merge-branch`. It is
@@ -62,7 +62,7 @@ to files without a merge (`my.program/write-branch!`, installed) and commit by b
 
 | Form | Git | Answers | Today |
 |---|---|---|---|
-| `(my.program/request-merge!)` / `{:seon.merge/norms [...]}` | `git request-pull`; open a merge request | the open request, assigned to root in the same transaction (ledger RT-9); the agent waits | `propose-merge!` program.clj:416 |
+| `(my.program/request-merge!)` / `{:seon.merge/norms [...]}` | `git request-pull`; open a merge request | the open request, assigned to root in the same transaction (ledger RT-9); the agent waits | `request-merge!` program.clj:416 |
 | `(my.program/merge-requests)` | the forge's open list | open requests at the home | `proposals` program.clj:473 |
 | `(my.program/diff {:seon.merge/request m})`, or with a symbol | `git diff main...branch [-- path]` | the diff value (§2) | `diff` is the agent's own branch only (program.clj:974); `declaration-diff` program.clj:991 folds in |
 | `(my.program/merge! {:seon.merge/request m})` | `git merge` | merged, or stopped with the merge branch kept (§4) | `prepare-merge!` program.clj:513 and `accept-merge!` program.clj:547 |
@@ -225,7 +225,7 @@ norm becomes its own root task.
 ## 7. What exists and what is missing
 
 Exists (file:line at `81020da6a`, today's names):
-- request and proofs gate and message: `my.program/propose-merge!` program.clj:416, `seon.task/propose!` task.clj:655;
+- request and proofs gate and message: `my.program/request-merge!` program.clj:416, `seon.task/request-merge!` task.clj:655;
 - open requests: `my.program/proposals` program.clj:473;
 - comparison: `compare-branch` source.clj:824, `merge-base` source.clj:727, `three-way` program.cljc:704;
 - the agent's own diff: `my.program/diff` program.clj:974, `declaration-diff` program.clj:991;
@@ -264,7 +264,7 @@ and 10× over that expectation is a defect to diagnose; AGENTS.md's 1 s and 10 s
 |---|---|---|
 | `proposals` | 39 ms, 212 calls | one query of the open requests at the home |
 | `seon.task/assign!` | 41-54 ms (479 ms first call), ~820 calls | one checked write of the assignment |
-| `propose-merge!` (one proof run on the branch) | 0.46-1.05 s, 39k-159k calls | the proofs' own bodies plus one write of the request |
+| `request-merge!` (one proof run on the branch) | 0.46-1.05 s, 39k-159k calls | the proofs' own bodies plus one write of the request |
 | compare (the diff, 4 identities) | 174 ms (JVM, `compare-branch`) | digests of the changed identities only (§2 Cost) |
 | `prepare-merge!`, 1 proof | 1.7 s warm, 175k calls; 8.7 s first call (8.0 s in the run) | the tests' bodies plus one branch and one write of the changes |
 | `prepare-merge!`, 1 proof + 2 reaching tests | 2.8 s, 602k calls | as above |
@@ -282,7 +282,7 @@ Agents `mcp/merge-dogfood` to `…7` requested merges; reviewers `mcp/merge-root
 off default as targets. Default's program was not changed. Every branch and merge branch was deleted; the open merge
 requests were closed.
 
-1. A branch with a registered schema could not request a merge: `propose-merge!` threw `:malli.core/invalid-schema`
+1. A branch with a registered schema could not request a merge: `request-merge!` threw `:malli.core/invalid-schema`
    (G3, G4), even after the contract stopped naming the schema.
 2. A function and test in a new namespace requested green (1.05 s) and tested red on the merge branch (G1). The same
    with one function (G1 again).

@@ -1,6 +1,6 @@
 [#:seon.task{:name "a-deftest-reply-shows-only-its-var"
              :kind :function
-             :intent "Entering a deftest at the REPL answers #'ns/test-name and nothing else: no run, no pass/fail, no pending marker and no next operation, so the agent learns whether its regression is red or green only by proposing (dogfood loop 2026-09-28, loop 1: the proof's first verdict arrived 7 s later inside propose-merge!'s refusal). The Var render of a test shows its status at its current reach digest (green, red with the first failing assertion, or pending) and offers the run of exactly that test, as the defn Var render shows reaching-test status."
+             :intent "Entering a deftest at the REPL answers #'ns/test-name and nothing else: no run, no pass/fail, no pending marker and no next operation, so the agent learns whether its regression is red or green only by proposing (dogfood loop 2026-09-28, loop 1: the proof's first verdict arrived 7 s later inside request-merge!'s refusal). The Var render of a test shows its status at its current reach digest (green, red with the first failing assertion, or pending) and offers the run of exactly that test, as the defn Var render shows reaching-test status."
              :must-read #{seon.render.var/status}
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "reaching-tests-are-never-run-and-a-first-red-is-silent"

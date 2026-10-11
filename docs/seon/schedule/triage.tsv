@@ -2,7 +2,7 @@ ns	name	bucket	phase-or-slice	has-proof-test	source	reason
 seon.error	a-converted-error-keeps-its-transient-type	A	errors S1b	unknown	new	new: review of 33fb994f2 finding 1
 seon.error	s1-left-metadata-readers-and-stamps-in-three-test-files	A	errors S1b	unknown	new	new: review of 33fb994f2 finding 2; declared_identity_test red
 seon.db	the-missing-connection-refusal-has-no-fix-key	A	errors S2	no	file	constructor sweep gives every refusal :seon.error/fix
-seon.error.refusal	a-refusal-omits-the-data-that-explains-it	A	errors S2	no	file	variant members carry the producer's evidence; propose-merge!'s variant names the changed definitions reached
+seon.error.refusal	a-refusal-omits-the-data-that-explains-it	A	errors S2	no	file	variant members carry the producer's evidence; request-merge!'s variant names the changed definitions reached
 seon.error.refusal	errors-reference-worlds-never-copy-them	A	errors S2	yes	file	references run once in the constructor and per chain link (S3)
 seon.error.refusal	hand-built-error-maps-remain-across-the-namespaces	A	errors S2	no	runtime->file	persisted; S2 sweeps the hand literals (S2 notes count 120)
 seon.fn	dependency-analysis-error-is-not-an-error	A	errors S2	no	file	every -error key gains the :and :seon.error/base wrapper by script
@@ -100,7 +100,7 @@ my.agent	retire-branch-refuses-a-finished-agent-as-admission-closed	D	P6	no	runt
 my.fs	fs-read-ignores-limit-and-has-no-line-addressing	D	P6	no	runtime->file	persisted
 my.program	a-merged-change-reaching-the-files-is-unproven	D	P6	no	runtime->file	persisted; last unproven dogfood step
 my.program	a-one-line-change-resends-the-whole-definition	D	P6	no	file	no form-level edit entrance yet
-my.program	an-agent-cannot-see-or-choose-its-change	D	P6	unknown	file	overrides/propose-merge!; merge-as-root-task ruling stands, the agent view is still missing
+my.program	an-agent-cannot-see-or-choose-its-change	D	P6	unknown	file	overrides/request-merge!; merge-as-root-task ruling stands, the agent view is still missing
 my.program	breaks-costs-seconds-on-a-hub	D	P6	no	file	perf of my.program/breaks (call reach)
 my.program	breaks-plans-a-contract-change-as-a-retraction	D	P6	no	file	my.program/breaks still exists
 my.program	history-shows-the-source-twice-and-no-commit-id	D	P6	no	runtime->file	persisted

@@ -9,7 +9,7 @@ created: 2026-10-08
 
 New row (group M; constrains MA-11). Census: `accept-merge!` is 5 commits (Opus §2: merged program 103 datoms with
 copied `seon.turn/*` and `seon.cluster.eval/*` rows, task outcome 5, the cluster row's admission closure 4, the agent
-branch's closure 4, root's eval record 549); `propose-merge!` writes the merge request (18) and root's message (9) as
+branch's closure 4, root's eval record 549); `request-merge!` writes the merge request (18) and root's message (9) as
 two home commits (Astra: "2 → 1 home commits; full installed proposal 5 → 4"). Lane: Sonnet. Cited at HEAD
 `e7f120672`. Two slices.
 
@@ -33,12 +33,12 @@ commits, the target's transactions after the merge base number 1 (plus root's ev
 `:seon.db.transaction/merge-request`; MA-11's `…/a-merged-definition-carries-no-evaluation-pointer` covers the dropped rows.
 
 ## TX-6b: the merge request and its message
-- CHANGE `seon.task/propose!` (`src/seon/task.clj:669-694`; GV-4 renames it `request-merge!`): optional last argument
+- CHANGE `seon.task/request-merge!` (`src/seon/task.clj:669-694`; GV-4 renames it `request-merge!`): optional last argument
   `message-candidate` (the value `seon.cluster.message/send` builds, `src/seon/cluster/message.clj:786`); when present
   its `[:db.fn/call #'seon.cluster.message/send-call candidate agent-id]` (`:803`) joins the `written` transaction.
-- CHANGE `my.program/propose-merge!` (`src/my/program.clj:416`): builds the candidate with `message/send` (same content
+- CHANGE `my.program/request-merge!` (`src/my/program.clj:416`): builds the candidate with `message/send` (same content
   as today's `send!` at `:464-467`) and passes it; delete the separate `send!`.
-- Proof: `my.program-test/a-merge-request-and-its-message-are-one-transaction` (new): after `propose-merge!`, the merge
+- Proof: `my.program-test/a-merge-request-and-its-message-are-one-transaction` (new): after `request-merge!`, the merge
   task row and root's message share one transaction on the home.
 - Commit: `bin/lane commit <lane> -m "TX-6b: a merge request and root's message are one home transaction" --test my.program-test --test seon.task-ingestion-test src/seon/task.clj src/my/program.clj test/my/program_test.clj`
 

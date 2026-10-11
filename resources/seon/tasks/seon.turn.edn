@@ -184,7 +184,7 @@
              :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so `my.program/request-merge!` never runs and root's `seon.cluster.source/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (`my.program/request-merge!`) named by `:seon.task/merge`, which `seon.cluster.source/prepare-merge!` takes."
              :must-read #{seon.turn/task-end seon.turn/end-task-call my.program/request-merge! seon.cluster.source/prepare-merge! seon.cluster.message/send!}
              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md" "docs/seon/plan.md"}}
- #:seon.task{:name "an-end-proposes-at-most-once"
+ #:seon.task{:name "an-end-requests-a-merge-at-most-once"
              :kind :function
              :intent "One task end records at most one proposal: `seon.turn/end-task!` reused nothing, so an end observed again after an interruption between `my.program/request-merge!` and the end's close ran the proofs and recorded a second proposal on the merge task. Done when `seon.turn/end-task!` reuses the proposal already answering the agent's assignment (`seon.turn/end-merge-request`) and proposes only when there is none."
              :must-read #{seon.turn/end-task-call my.program/request-merge! seon.task/request-merge!}

@@ -1,10 +1,10 @@
-[#:seon.task{:name "proposals-refuses-its-own-result-on-main"
+[#:seon.task{:name "merge-requests-refuses-its-own-result-on-main"
              :kind :function
              :intent "`(my.root/merge-requests {:seon.db/db h})` on default's main (2026-10-10, archive 2d19dafb0, JVM mode as root) throws its output contract: entries at [0], [1] and [2] lack `:seon.task/proposal`, `:seon.task/branch`, `:seon.task/commit`, `:seon.task/run-id`, `:seon.task/program` and hold an empty `:seon.task/proved`, so root cannot list proposals. Done when every entry it answers is a proposal of `:seon.task/proposal-view` (or it omits merge tasks with no proposal row), with the regression on a main holding such a merge task."
              :must-read #{my.root/merge-requests seon.task/request-merge! seon.turn/landing-tx}}
  #:seon.task{:name "an-agent-cannot-see-or-choose-its-change"
              :kind :function
-             :intent "(my.program/overrides {}) answers [] on a branch with 21 changed identities; propose-merge! takes only :seon.issue/id, sweeps in drift the branch inherits (my.plan-test/current-refuses-an-unknown-agent-by-name), omits deletions from `:seon.test/changed`, and sends its content as a pr-str string. Selection exists only in root's prepare-merge!."
+             :intent "(my.program/overrides {}) answers [] on a branch with 21 changed identities; request-merge! takes only :seon.issue/id, sweeps in drift the branch inherits (my.plan-test/current-refuses-an-unknown-agent-by-name), omits deletions from `:seon.test/changed`, and sends its content as a pr-str string. Selection exists only in root's prepare-merge!."
              :must-read #{my.program/overrides my.program/request-merge!}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
@@ -55,7 +55,7 @@
   :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md" "docs/seon/issues/reload-refuses-an-alias-retargeted-by-the-new-source.md"}}
  #:seon.task{:name "merge-tools-throw-instead-of-returning"
              :kind :function
-             :intent "propose-merge! and prepare-merge! are returning tools but throw: propose-merge! on a branch whose contract names an agent-registered schema throws :malli.core/invalid-schema out of `seon.test/run` (seon.test/check-fails-on-agent-registered-schemas), and prepare-merge! of a test-only new namespace throws entity-id/missing. Done when each returns its error map naming the failing proof or row, regressions through MCP SCI."
+             :intent "request-merge! and prepare-merge! are returning tools but throw: request-merge! on a branch whose contract names an agent-registered schema throws :malli.core/invalid-schema out of `seon.test/run` (seon.test/check-fails-on-agent-registered-schemas), and prepare-merge! of a test-only new namespace throws entity-id/missing. Done when each returns its error map naming the failing proof or row, regressions through MCP SCI."
              :must-read #{my.program/request-merge! seon.cluster.source/prepare-merge!}
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "root-cannot-diff-a-proposal"

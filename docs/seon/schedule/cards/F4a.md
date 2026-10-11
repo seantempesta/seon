@@ -40,7 +40,7 @@ serially inside the pass; the reply and the next pass see its results.
 `task-proofs`: home = `(or (some-> (seon.task/home database) db/db) database)` (`task.clj:381`, as
 `seon.context/current-state` does); handle = `(seon.task/agent-task home agent-id)` (`task.clj:600`); nil → `#{}`;
 sym = pull `:seon.task/sym`; proofs = union of `(:seon.task/proofs (task-edges home sym))` and
-`(:seon.task/proofs (task-edges database sym))` (the branch may hold new proofs; `my.program/propose-merge!` unions
+`(:seon.task/proofs (task-edges database sym))` (the branch may hold new proofs; `my.program/request-merge!` unions
 the same two, `src/my/program.clj:437-438`). Require `[seon.task :as task]` in `seon.turn`: probed at the REPL, `seon.task`'s transitive alias closure does not
 contain `seon.turn` (and `seon.turn` already reaches `seon.task` transitively), so no load cycle.
 
@@ -55,7 +55,7 @@ contain `seon.turn` (and `seon.turn` already reaches `seon.task` transitively), 
 Body: `execution` = `(@cluster-agent-acquire-context! cluster agent-id)` (`turn.clj:59`, `seon.cluster.agent/acquire-context!`
 `cluster/agent.clj:1022`); proofs from `task-proofs` on `(db/db (:seon.db/connection execution))`; empty → nil; else
 `(seon.test/run {:seon.test/execution execution :seon.test/recording-connection (:seon.db/connection execution)
-:seon.test/policy :named :seon.test/identities proofs})` — exactly the request `propose-merge!` makes
+:seon.test/policy :named :seon.test/identities proofs})` — exactly the request `request-merge!` makes
 (`my/program.clj:446`). The pass id is NOT put on the request or the run: it is carried in the reply's summary only;
 recording it with the run waits on EN-6, which rewrites run recording. `seon.test.edn` is not touched.
 

@@ -425,7 +425,7 @@
 (deftest ^{:seon.test/long "Three nested seon.test/run requests of one member each (red, green, green again); 60 s per nested run is merge-test's measured bound."
            :seon.test/long-ms 180000}
   a-merge-request-waits-for-its-assigned-tasks-proofs-then-reaches-root
-  ;; Before, propose-merge! took any issue id the agent named, ran no test and
+  ;; Before, request-merge! took any issue id the agent named, ran no test and
   ;; messaged root at once; root inferred pending merge requests from messages.
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]

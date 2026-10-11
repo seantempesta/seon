@@ -517,10 +517,10 @@
                              (:seon.cluster/name (support/execution-handle nil))]])
   nil)
 
-(deftest ^{:seon/tasks #{'seon.turn/an-end-proposes-at-most-once}
+(deftest ^{:seon/tasks #{'seon.turn/an-end-requests-a-merge-at-most-once}
            :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two merge-request runs."
            :seon.test/long-ms 60000}
-  an-end-proposes-once-whatever-interrupted-it
+  an-end-requests-a-merge-once-whatever-interrupted-it
   (support/with-running-agent
    (fn [running _ connection]
      (root-home! connection)
