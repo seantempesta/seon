@@ -92,15 +92,13 @@
     (into {}
           (mapcat (fn [{schema-key :seon.schema/key}]
                     (let [compiled (mr/schema registry schema-key)
-                          properties (if (= :map (m/type compiled))
-                                       (m/properties compiled)
-                                       (internal/entity-properties compiled))]
-                      (when (= :seon.cluster (:seon.program/partition properties))
-                        (map (fn [[attribute entry-properties _]]
-                               [attribute (get entry-properties :seon.cluster/conflict
-                                               (get properties :seon.cluster/conflict :root))])
-                             (internal/entity-entries compiled))))))
-          (:seon.schema.projection/catalog projection))))
+                          properties (internal/entity-properties compiled)]
+                      (map (fn [[attribute entry-properties _]]
+                             [attribute (get entry-properties :seon.cluster/conflict
+                                             (get properties :seon.cluster/conflict :root))])
+                           (internal/entity-entries compiled)))))
+          (filter #(= :seon.cluster (:seon.program/partition %))
+                  (:seon.schema.projection/catalog projection)))))
 
 (defn cluster-attributes
   "Attributes copied at an attempt's successful end, with the rule for each."

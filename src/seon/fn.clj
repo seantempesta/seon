@@ -3845,21 +3845,29 @@
 
 (defn report-identities
   "Identities touched by a writer report or datoms between two database values.
-  The explicit arity also accepts composed report datoms and retained history."
+  The explicit arities accept composed report datoms and retained history;
+  supplied identity attributes select the population whose changes are reported."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/transaction-report]
      [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]
     [:=> [:cat :seon.db/database-value :seon.db/database-value
           [:vector [:or :seon.db/transaction-report-datom :map]]]
+     [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]
+    [:=> [:cat :seon.db/database-value :seon.db/database-value
+          [:vector [:or :seon.db/transaction-report-datom :map]]
+          [:maybe [:vector :qualified-keyword]]]
      [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]]}
   ([{before :db-before after :db-after :as report}]
    ;; Logical datoms: a vector element changed in a cell names its owner.
    (report-identities before after (vec (db/logical-datoms report))))
   ([before after datoms]
+   (report-identities before after datoms nil))
+  ([before after datoms attributes]
   (let [entities (into [] (comp (map :e) (distinct)) datoms)
         identities (fn [database]
-                     (entity-identities database entities (db/identity-attributes database)))
+                     (entity-identities database entities
+                                        (or attributes (db/identity-attributes database))))
         previous (identities before)
         current (identities after)]
     (or (when (:seon.db/invalid-read previous) previous)
@@ -4221,7 +4229,10 @@
                           true vec)}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
-             changed-identities (require-committed! (report-identities report)
+             changed-identities (require-committed!
+                                (report-identities (:db-before report) (:db-after report)
+                                                   (vec (db/logical-datoms report))
+                                                   (vec (keys entity-shapes)))
                                                      :seon.fn/population)
              caller-paths (when (and (not source-database) (:seon.fn/changed-paths request))
                             (set/difference (caller-files report) reconciled))
@@ -4259,7 +4270,10 @@
                     :seon.fn/population))))
              changed-identities (into changed-identities
                                       (when findings-report
-                                        (require-committed! (report-identities findings-report)
+                                        (require-committed!
+                                         (report-identities (:db-before findings-report) (:db-after findings-report)
+                                                            (vec (db/logical-datoms findings-report))
+                                                            (vec (keys entity-shapes)))
                                                             :seon.fn/population)))]
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)

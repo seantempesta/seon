@@ -1,0 +1,121 @@
+SEON check FAILED (exit 1): The candidate e0bd37443414666c62bd7b9f33eeaed2863f0cf9 is red: run b3f62fc0c364 / executed 4 / reused 0 / pass 46 / fail 3 / error 1 / 26627 ms / passed? false (3 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T033455.170.edn
+run b3f62fc0c364 / executed 4 / reused 0 / pass 46 / fail 3 / error 1 / 26627 ms / passed? false (3 red)
+red seon.cluster.publication-delta-test/transaction-report-identities-select-only-changed-program-entities: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message
+    "Fixture write was refused at the write: The stored definition digest of [:seon.fn/sym my.turn/report-changed-f4559388ec55] is not the one its definition produces. Write the entity its canonical writer produced.",
+  :data
+    {:seon.db/transaction-refused true,
+     :seon.db.write.attempt/request-id "a3479298be89",
+     :seon.error/at #inst "2026-10-11T20:34:29.988Z",
+     :seon.error/layer :seon.db/database-write,
+     :seon.error/member :seon.program/definition-digest,
+     :seon.error/operation seon.db/transact!,
+     :seon.error/type :seon.db.write/validation-refusal,
+     :seon.error/expected
+       "d6fe42950b004aefc992ffaccf960c15e119935567e7793d6a72ff405bf17b4f",
+     :seon.error/message
+       "The stored definition digest of [:seon.fn/sym my.turn/report-changed-f4559388ec55] is not the one its definition produces. Write the entity its canonical writer produced.",
+     :seon.error/offending
+       "5639a0e9d1fed831de659f03dca8bad8dca1db7304b983a9059bc062c743d706",
+     :seon.db/tx-data
+       [#:seon.fn{:sym my.turn/report-changed-f4559388ec55,
+         :doc "Changed documentation"}],
+     :seon.error/basis
+       #:seon.error.basis{:store
+          #uuid "754f8724-6aa3-3ca9-b89d-1f02c726b5fa",
+        :branch :agent-0abc0622eccc,
+        :commit #uuid "6acbf2d5-4d0b-598f-b751-40a61a8b01d9",
+        :t 536870929},
+     :seon.error/data
+       {:seon.db/entity
+          {:seon.fn/sym my.turn/report-changed-f4559388ec55},
+        :seon.db.write.attempt/transaction
+          [#:seon.fn{:sym my.turn/report-changed-f4559388ec55,
+            :doc "Changed documentation"}]}},
+  :frames
+    [[seon.test_support$transacted_BANG_ invokeStatic "test_support.clj"
+      258]
+     [seon.test_support$transacted_BANG_ invoke "test_support.clj" 234]
+     [seon.cluster.publication_delta_test$fn__29494$fn__29495 invoke
+      "publication_delta_test.clj" 25]
+     [seon.test_support$run_database_body$fn__129129$fn__129130 invoke
+      "test_support.clj" 968]
+     [seon.schema$call_with_projection_state$fn__1385 invoke
+      "schema.clj" 1162]
+     [seon.schema$call_with_projection_state invokeStatic "schema.clj"
+      1161]
+     [seon.schema$call_with_projection_state invoke "schema.clj" 1157]
+     [seon.test_support$run_database_body$fn__129129 invoke
+      "test_support.clj" 963]
+     [seon.db$call_with_custody invokeStatic "db.clj" 471]
+     [seon.db$call_with_custody invoke "db.clj" 443]
+     [seon.test_support$run_database_body invokeStatic
+      "test_support.clj" 961]
+     [seon.test_support$run_database_body invoke "test_support.clj" 954]
+     [seon.test_support$with_branched_database invokeStatic
+      "test_support.clj" 1019]
+     [seon.test_support$with_branched_database invoke "test_support.clj"
+      1006]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      1047]
+     [seon.test_support$with_database invoke "test_support.clj" 1022]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      1043]
+     [seon.test_support$with_database invoke "test_support.clj" 1022]
+     [seon.cluster.publication_delta_test$fn__29494 invokeStatic
+      "publication_delta_test.clj" 17]
+     [seon.cluster.publication_delta_test$fn__29494 invoke
+      "publication_delta_test.clj" 14]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 501]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 470]
+     [seon.test.runner$run_vars_BANG_$fn__15825$fn__15830$fn__15831
+      invoke "runner.clj" 420]
+     [seon.db$call_with_custody invokeStatic "db.clj" 471]
+     [seon.db$call_with_custody invoke "db.clj" 443]
+     [seon.test.runner$run_vars_BANG_$fn__15825$fn__15830 invoke
+      "runner.clj" 419]
+     [seon.test.runner$run_vars_BANG_$fn__15825 invoke "runner.clj" 411]
+     [seon.test.runner$run_vars_BANG_ invokeStatic "runner.clj" 394]
+     [seon.test.runner$run_vars_BANG_ invoke "runner.clj" 384]
+     [seon.test.runner$run_var_BANG_ invokeStatic "runner.clj" 467]
+     [seon.test.runner$run_var_BANG_ invoke "runner.clj" 432]
+     [seon.test$bounded_result$fn__19600$fn__19602$fn__19603$fn__19604$fn__19606$fn__19607
+      invoke "test.clj" 342]
+     [seon.test$with_test_loader$fn__19562 invoke "test.clj" 122]
+     [seon.test$with_test_loader invokeStatic "test.clj" 122]
+     [seon.test$with_test_loader invoke "test.clj" 115]
+     [seon.test$with_test_loader invokeStatic "test.clj" 116]
+     [seon.test$with_test_loader invoke "test.clj" 115]
+     [seon.test$bounded_result$fn__19600$fn__19602$fn__19603$fn__19604$fn__19606
+      invoke "test.clj" 330]
+     [seon.test$bounded_result$fn__19600$fn__19602$fn__19603$fn__19604
+      invoke "test.clj" 327]
+     [seon.test$measured_body$fn__19592 invoke "test.clj" 241]
+     [seon.test$measured_body invokeStatic "test.clj" 241]
+     [seon.test$measured_body invoke "test.clj" 229]
+     [seon.test$bounded_result$fn__19600$fn__19602$fn__19603 invoke
+      "test.clj" 321]
+     [seon.sci.eval$call_detecting_program_change$fn__16840 invoke
+      "eval.clj" 1202]
+     [seon.sci.eval$call_detecting_program_change invokeStatic
+      "eval.clj" 1201]
+     [seon.sci.eval$call_detecting_program_change invoke "eval.clj" 1164]
+     [seon.test$bounded_result$fn__19600$fn__19602 invoke "test.clj" 305]
+     [seon.db$call_with_custody invokeStatic "db.clj" 471]
+     [seon.db$call_with_custody invoke "db.clj" 443]
+     [seon.test$bounded_result$fn__19600 invoke "test.clj" 303]]}]
+red seon.reconcile-test/apply-then-reapply-converges-over-generated-populations: fail
+Whole-domain reconciliation idempotence failed.
+expected: (nil? (when-not passed? (without-duplicate-error check)))
+
+fail
+Test seon.reconcile-test/apply-then-reapply-converges-over-generated-populations exceeded its declared duration: 18433.181958 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 18433.181958}
+red seon.start-flow-benchmark-test/commit-to-paused-flow-costs: fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/branch :seon.profile/alloc-bytes
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 8443536 4000000))

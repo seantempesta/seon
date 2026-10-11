@@ -1333,6 +1333,10 @@
   (let [projection (schema/handed-projection)
         attributes (program/cluster-attributes projection)
         measured (profile/measure #(program/cluster-attributes projection))]
+    (is (= :seon.cluster
+           (:seon.program/partition
+            (some #(when (= :seon.task/task (:seon.schema/key %)) %)
+                  (:seon.schema.projection/catalog projection)))))
     (is (= :root (:seon.task.attempt/end attributes)))
     (is (= :root (:seon.task/intent attributes)))
     (is (= :add (:seon.error.occurrence/count attributes)))

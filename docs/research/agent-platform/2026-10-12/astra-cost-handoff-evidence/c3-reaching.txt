@@ -1,0 +1,116 @@
+SEON check FAILED (exit 1): The candidate 14b47701dca60cb01b5bb727e5c47c2abfc6e346 is red: run a6c142d3a994 / executed 26 / reused 0 / pass 189 / fail 19 / error 0 / 142333 ms / passed? false (7 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T031058.558.edn
+run a6c142d3a994 / executed 26 / reused 0 / pass 189 / fail 19 / error 0 / 142333 ms / passed? false (7 red)
+red seon.config-test/apply-compiles-once-and-round-trips-through-database-facts: fail test/seon/config_test.clj:745
+expected: (zero? (:seon.reconcile/operations converged))
+actual: (not (zero? 7))
+
+fail test/seon/config_test.clj:746
+a converged apply writes no transaction
+expected: (= committed-basis (:max-tx (clojure.core/deref connection)))
+actual: (not (= 536870932 536870933))
+
+fail test/seon/config_test.clj:744
+expected: (true? (:seon.reconcile/converged? converged))
+actual: (not (true? false))
+red seon.config-test/config-writer-submits-only-the-fact-difference: fail test/seon/config_test.clj:252
+expected: (= basis (:max-tx (clojure.core/deref connection)))
+actual: (not (= 536870933 536870934))
+
+fail test/seon/config_test.clj:256
+expected: (=
+ [[:db.fn/retractAttribute
+   [:seon.config/cluster "difference"]
+   :seon.config.flow.io/queue-depth]]
+ (filterv vector? tx-data))
+actual: (not
+ (=
+  [[:db.fn/retractAttribute
+    [:seon.config/cluster "difference"]
+    :seon.config.flow.io/queue-depth]]
+  [[:db.fn/retractAttribute
+    [:seon.config/cluster "difference"]
+    :seon.config.flow.io/queue-depth]
+   [:db.fn/retractEntity 57594]
+   [:db.fn/retractEntity 57595]
+   [:db.fn/retractEntity 57596]
+   [:db.fn/retractEntity 57597]
+   [:db.fn/retractEntity 57598]
+   [:db.fn/retractEntity 57599]]))
+
+fail test/seon/config_test.clj:251
+expected: (true? (:seon.reconcile/converged? (config/apply! changed)))
+actual: (not (true? false))
+
+fail test/seon/config_test.clj:253
+expected: (= 1 (count (clojure.core/deref transactions)))
+actual: (not (= 1 2))
+red seon.config-test/converged-apply-uses-carried-projection-and-remains-exact: fail test/seon/config_test.clj:307
+expected: (= basis (:max-tx (clojure.core/deref connection)))
+actual: (not (= 536870932 536870933))
+
+fail test/seon/config_test.clj:300
+expected: (=
+ #:seon.reconcile{:converged? true, :operations 0}
+ (config/apply! request))
+actual: (not
+ (=
+  #:seon.reconcile{:converged? true, :operations 0}
+  #:seon.reconcile{:converged? false, :operations 6}))
+
+fail test/seon/config_test.clj:305
+a real exact read observes convergence without rebuilding
+expected: (= [0] (clojure.core/deref planned-operations))
+actual: (not (= [0] [6]))
+red seon.config-test/initialization-entities-apply-query-and-converge-with-the-config-entity: fail test/seon/config_test.clj:230
+an identical config and population write no transaction
+expected: (= committed-basis (:max-tx (clojure.core/deref connection)))
+actual: (not (= 536870932 536870933))
+
+fail test/seon/config_test.clj:229
+expected: (zero? (:seon.reconcile/operations second-result))
+actual: (not (zero? 6))
+
+fail test/seon/config_test.clj:228
+expected: (true? (:seon.reconcile/converged? second-result))
+actual: (not (true? false))
+red seon.index-reconcile-test/indexing-an-existing-population-uses-one-writer: fail test/seon/index_reconcile_test.clj:27
+expected: (zero? (:seon.reconcile/operations result))
+actual: (not (zero? 4))
+
+fail test/seon/index_reconcile_test.clj:26
+expected: (true? (:seon.reconcile/converged? result))
+actual: (not (true? false))
+red seon.reconcile-test/first-apply-writes-and-reapply-is-zero-writes: fail test/seon/reconcile_test.clj:99
+converged means no transaction entity and unchanged :max-tx
+expected: (= after-first after-second)
+actual: (not (= 536870933 536870934))
+
+fail test/seon/reconcile_test.clj:96
+expected: (= #:seon.reconcile{:converged? true, :operations 0} second-result)
+actual: (not
+ (=
+  #:seon.reconcile{:converged? true, :operations 0}
+  #:seon.reconcile{:converged? false, :operations 6}))
+red seon.reconcile-test/planning-pulls-only-the-provenance-managed-slice: fail test/seon/reconcile_test.clj:175
+foreign identities are unrepresentable in the pull slice
+expected: (= [managed-eid] pulled-eids)
+actual: (not
+ (=
+  [57767]
+  [57772 57767 57770 57774 57775 57776 57769 57771 57768 57777 57773]))
+
+fail test/seon/reconcile_test.clj:174
+the managed entity is already exact
+expected: (empty? tx-data)
+actual: (not
+ (empty?
+  [[:db.fn/retractEntity 57768]
+   [:db.fn/retractEntity 57769]
+   [:db.fn/retractEntity 57770]
+   [:db.fn/retractEntity 57771]
+   [:db.fn/retractEntity 57772]
+   [:db.fn/retractEntity 57773]
+   [:db.fn/retractEntity 57774]
+   [:db.fn/retractEntity 57775]
+   [:db.fn/retractEntity 57776]
+   [:db.fn/retractEntity 57777]]))

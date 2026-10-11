@@ -2001,6 +2001,14 @@
   projection)
 
 (defn- shape-entity-in
+  "The entity catalog entry with its resolved partition and renderers."
+  {:malli/schema
+   [:=> [:cat [:fn malli.registry/registry?] :seon.schema/registry-key]
+    [:maybe [:map
+             [:seon.schema/key :seon.schema/registry-key]
+             [:seon.schema/required-attrs [:maybe [:set :keyword]]]
+             [:seon.schema/entity? :boolean]
+             [:seon.program/partition {:optional true} :seon.program/partition]]]]}
   [registry schema-key]
   (let [compiled (mr/schema registry schema-key)]
     ;; Only maps and conjunctions can contribute entity entries. Scalar
@@ -2033,6 +2041,7 @@
             {:seon.schema/key schema-key
              :seon.schema/required-attrs required-attrs
              :seon.schema/entity? (boolean (:seon.db/attributes props))}
+            (select-keys props [:seon.program/partition])
             renderers))))))
 
 (defn- validate-declarations!

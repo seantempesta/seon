@@ -22,7 +22,8 @@
           ::benchmark/context [30 20000000 5000]
           ::benchmark/graph [5 800000 450]}})
 
-(deftest commit-to-paused-flow-costs
+(deftest ^{:seon/tasks #{'seon.flow/cold-paused-graph-construction-keeps-its-cost-bound}}
+  commit-to-paused-flow-costs
   (support/with-database
    (fn [connection]
      (let [agent-id "astra-flow-benchmark"]

@@ -1,0 +1,6 @@
+SEON check FAILED (exit 1): The candidate 5023dd7f16e21e8713359fb3ddb643106138d904 is red: run 690104c954d8 / executed 2 / reused 0 / pass 45 / fail 1 / error 0 / 6879 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T033051.362.edn
+run 690104c954d8 / executed 2 / reused 0 / pass 45 / fail 1 / error 0 / 6879 ms / passed? false (1 red)
+red seon.start-flow-benchmark-test/commit-to-paused-flow-costs: fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/graph :seon.profile/ms
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 9.86 5))

@@ -512,7 +512,11 @@
          15.0 10 [15.0 nil]
          15.0 10 [15.0 nil])
        (is (nil? (stored 'seon.db-test/cost-never))
-           "nothing is stored for what never ran")))))
+           "nothing is stored for what never ran")
+       (is (= {:seon.db/process {:seon.db.process/id "seon.db.process/cost"}}
+              (db/pull (db/db connection)
+                       [{:seon.db/process [:seon.db.process/id]}]
+                       [:seon.fn.cost/key [probe :seon.profile/host]])))))))
 
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database

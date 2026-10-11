@@ -87,12 +87,20 @@
             before (:max-tx @connection)
             first-result (reconcile/reconcile! connection (request desired))
             after-first (:max-tx @connection)
+            next-plan (reconcile/plan @connection (request desired))
+            planned-entities (mapv (fn [operation]
+                                    (if (= :db.fn/retractEntity (first operation))
+                                      [:db.fn/retractEntity
+                                       (db/pull @connection [:seon.fn.cost/key] (second operation))]
+                                      operation))
+                                  next-plan)
             second-result (reconcile/reconcile! connection (request desired))
             after-second (:max-tx @connection)]
         (is (= {::reconcile/converged? false
                 ::reconcile/operations 1}
                first-result))
         (is (< before after-first) "the first apply commits")
+        (is (= [] planned-entities))
         (is (= {::reconcile/converged? true
                 ::reconcile/operations 0}
                second-result))
@@ -233,7 +241,8 @@
     {:min-elements 0
      :max-elements 12})))
 
-(deftest apply-then-reapply-converges-over-generated-populations
+(deftest ^{:seon/tasks #{'seon.reconcile/generated-convergence-fits-its-work-bound}}
+  apply-then-reapply-converges-over-generated-populations
   (let [check
         (tc/quick-check
          60

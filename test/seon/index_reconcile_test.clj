@@ -5,7 +5,8 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest indexing-an-existing-population-uses-one-writer
+(deftest ^{:seon/tasks #{'seon.config/a-reapplied-manifest-converges-with-zero-operations}}
+  indexing-an-existing-population-uses-one-writer
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -25,6 +26,7 @@
                                    :seon.reconcile/adopt-identities (set selected)}))))]
            (is (true? (:seon.reconcile/converged? result)))
            (is (zero? (:seon.reconcile/operations result)))
+           (is (empty? (:seon.reconcile/adopt-identities result)))
            (is (= 1 (get calls 'seon.db/transact!)))
            (is (= (index/published-index-entities database selected)
                   (index/published-index-entities (db/db connection) selected)))))))))

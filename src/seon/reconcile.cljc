@@ -5,9 +5,9 @@
   The model:
 
   - The managed slice is defined by PROVENANCE, never a taxonomy: an
-    entity is managed when its identity's first assertion carries the
-    managing process identity in its transaction metadata, or when its
-    identity was explicitly adopted. Reconcile takes no kind argument
+    entity is managed by its explicit process provenance, otherwise by its
+    identity's first assertion transaction, or when its identity was
+    explicitly adopted. Reconcile takes no kind argument
     and runs in attribute space.
   - Every desired entity map carries exactly ONE identity attribute —
     the upsert handle. Zero or two refuse, never guess.
@@ -127,13 +127,16 @@
        {}
        identity-attrs))))
 
-(defn- process-by-transaction
+(defn- process-by-entity
+  "Explicit process provenance on entities, transaction entities included."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map-of :seon.db/entity-id :seon.db.process/id]]}
   [db]
   (into {}
         (seon.db/q
-         '[:find ?tx ?process-id
+         '[:find ?entity ?process-id
            :where
-           [?tx :seon.db/process ?process]
+           [?entity :seon.db/process ?process]
            [?process :seon.db.process/id ?process-id]]
          db)))
 
@@ -329,6 +332,8 @@
      projection #(plan-transaction-data projection db request))))
 
 (defn- plan-transaction-data
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value ::request]
+                  :seon.store/transaction-data]}
   [projection db request]
   (let [{::keys [desired process adopt-identities retain-identities]} request
         adopt-identities (or adopt-identities #{})
@@ -350,7 +355,7 @@
               facts)
         first-tx
         (first-assertion-transactions db installed-attrs)
-        process-by-tx (process-by-transaction db)
+        provenance (process-by-entity db)
         managed-eids
         (into #{}
               (keep
@@ -362,8 +367,8 @@
                     (fn [identity]
                       (or (contains? adopt-identities identity)
                           (= process
-                             (get process-by-tx
-                                  (get first-tx [eid identity])))))
+                             (get provenance eid
+                                  (get provenance (get first-tx [eid identity]))))))
                     entity-ids))
                    eid)))
               entity-identities)

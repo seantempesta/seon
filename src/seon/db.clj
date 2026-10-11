@@ -3551,12 +3551,18 @@
           attributes)))
 
 (defn entities-changed-after
-  "Entities asserting or retracting `attribute` after transaction `basis`."
+  "Entities asserting or retracting `attribute` after transaction `basis`.
+  Filter each native index before Datahike merges its historical datoms."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t :qualified-keyword]
                   [:set :seon.db/entity-id]]}
   [database basis attribute]
-  (into #{} (comp (filter #(> (:tx %) basis)) (map :e))
-        (d/datoms (d/history database) :aevt attribute)))
+  (into #{} (map :e)
+        (dbi/batch-search
+         (d/history database) [nil attribute]
+         (fn [_ backend xform]
+           (into [] (comp xform (filter #(> (:tx %) basis)))
+                 (backend nil (dbi/-ref-for database attribute) nil nil nil)))
+         identity)))
 
 (defn history
   "Historical view of an explicit or current database value."
@@ -3829,9 +3835,11 @@
   digest, and accounting adds no transaction. Its dials read through the
   projection the write was prepared with: the writer's value carries no
   construction projection and its thread no handed one. None when the branch
-  declares no cost dials."
+  declares no cost dials. Each stored cost names the accounting process as its
+  own provenance, independent of the transaction's managing process."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.batch/sink]
-                  [:vector :seon.fn.cost/entity]]}
+                  [:vector [:and :seon.fn.cost/entity
+                            [:map [:seon.db/process :seon.db.process/process]]]]]}
   [database projection sink]
   (let [dial #(branch-dial database projection %)
         [min-calls min-total-us hysteresis top] (map dial [:seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us
@@ -3853,7 +3861,13 @@
                                                (profile/moved? hysteresis (batch/sample (stored k) %) s))
                                             [:warm :cold])]
                           (when (seq moved)
-                            (reduce #(batch/with-sample %1 %2 (batch/sample live %2)) {:seon.fn.cost/key k} moved))))))
+                            (reduce #(batch/with-sample %1 %2 (batch/sample live %2))
+                                    {:seon.fn.cost/key k
+                                     :seon.db/process
+                                     {:db/id "seon-cost-process"
+                                      :seon.db.process/id "seon.db.process/cost"
+                                      :seon.db/process "seon-cost-process"}}
+                                    moved))))))
               observed))
       [])))
 
@@ -3872,7 +3886,7 @@
         sink (:seon.batch/sink world)
         costs? (instance? java.util.concurrent.ConcurrentHashMap sink)
         attributes (cond-> [:seon.db.transaction/operation :seon.db.transaction/agent]
-                     costs? (into cost-attributes))
+                     costs? (into (conj cost-attributes :seon.db/process :seon.db.process/id)))
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
         ;; The whole packaged population, so the stamp's referenced schemas

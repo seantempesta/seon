@@ -1,0 +1,13 @@
+SEON check FAILED (exit 1): The candidate 9093ba9f0f2c3bec0483005ccdcfdaafdd033eef is red: run 7c47bf0d749d / executed 9 / reused 0 / pass 95 / fail 4 / error 0 / 9029 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T031420.904.edn
+run 7c47bf0d749d / executed 9 / reused 0 / pass 95 / fail 4 / error 0 / 9029 ms / passed? false (1 red)
+red seon.index-reconcile-test/indexing-an-existing-population-uses-one-writer: fail test/seon/index_reconcile_test.clj:27
+expected: (zero? (:seon.reconcile/operations result))
+actual: (not (zero? 11))
+
+fail test/seon/index_reconcile_test.clj:26
+expected: (true? (:seon.reconcile/converged? result))
+actual: (not (true? false))
+
+fail test/seon/index_reconcile_test.clj:27
+expected: (zero? (:seon.reconcile/operations result))
+actual: (not (zero? 3))
