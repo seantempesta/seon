@@ -2,6 +2,8 @@
   "Run admission uses the canonical writer and preserves selected obligations."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is]]
+            [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.config :as config]
             [seon.id :as id]
@@ -354,3 +356,33 @@
     (is (= 1 (:seon.test/executed-count result)))
     (is (true? (:seon.test/passed? result)) "the body finds its member's connection")))
 
+
+(deftest ^{:seon/tasks #{'seon.test/change-reds-judges-a-test-main-does-not-hold-as-not-red-there}
+           :seon.test/long "One fork, one nested seon.test/run of one red member on it and change-reds' read of main."
+           :seon.test/long-ms 15000}
+  a-red-test-only-the-branch-holds-is-the-changes
+  ;; agent pv-probe's red deftests, defined only on its branch, answered select's
+  ;; identity-unresolved refusal from main instead of the red.
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        test-symbol 'seon.test-test/only-on-the-branch
+        branch (keyword (str "change-reds-" (id/id)))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch branch
+                           :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        conn (:seon.db/connection candidate)]
+    (try
+      (test-support/transacted! conn [(test-support/program-entity
+                                       (db/db conn) [:seon.test/sym test-symbol]
+                                       "(clojure.test/deftest only-on-the-branch (clojure.test/is (= 1 2)))")])
+      (let [ran (db/call-with-custody {:seon.db/connection conn}
+                  #(sut/run {:seon.test/policy :named :seon.test/execution candidate
+                             :seon.test/recording-connection conn :seon.test/identities #{test-symbol}}))]
+        (is (= [1] (mapv :seon.test/fail-count (:seon.test/results ran))) "the test is red on the branch")
+        (is (empty? (db/datoms (db/db main-conn) :avet :seon.test/sym test-symbol)) "main does not hold it")
+        (is (= [test-symbol] (sut/change-reds (db/db conn) target [test-symbol]))
+            "a red main does not hold is the change's"))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))

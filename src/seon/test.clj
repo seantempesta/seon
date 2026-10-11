@@ -3030,7 +3030,8 @@
   "Of `tests`, those red on `branch` (a branch's database) whose same test, under
   the same evaluator, is not red on main at main's current reach: the reds the
   branch's change made, sorted. A test not red on the branch (green, unrun or
-  unknown) is not the change's. Main's side is its recorded result of the branch
+  unknown) is not the change's, and one main does not hold is not red there.
+  Main's side is its recorded result of the branch
   member's evaluator at main's current reach; where main holds none, those tests
   are evaluated once on `main` (root's world on the merge target, recording
   there), an interpreted member's namespace interpreted there too."
@@ -3046,18 +3047,21 @@
         red (when (map? on-branch)
               (into [] (comp (filter #(runner/red-result? (val %))) (map key)) (sort-by key on-branch)))
         evaluator #(:seon.test.member/evaluator (get on-branch %))
-        ;; main's result of the same test under the same evaluator at its current reach: red or not
+        ;; main's result of the same test under the same evaluator at its current reach: red or not;
+        ;; a test main does not hold is not red there
         judged (fn [database]
-                 (let [on-main (latest database red)
-                       reach (if (seq red) (runner/reach-digests database red) {})]
+                 (let [held (filterv #(seq (db/datoms database :avet :seon.test/sym %)) red)
+                       on-main (latest database held)
+                       reach (if (seq held) (runner/reach-digests database held) {})]
                    (or (some #(when (:seon.error/at %) %) [on-main reach])
-                       (into {} (for [test-symbol red
-                                      :let [result (get on-main test-symbol)]]
-                                  [test-symbol
-                                   (when (and (:seon.test/pass-count result) (evaluator test-symbol)
-                                              (= (evaluator test-symbol) (:seon.test.member/evaluator result))
-                                              (= (get reach test-symbol) (:seon.test.member/reach-digest result)))
-                                     (runner/red-result? result))])))))
+                       (into (zipmap red (repeat false))
+                             (for [test-symbol held
+                                   :let [result (get on-main test-symbol)]]
+                               [test-symbol
+                                (when (and (:seon.test/pass-count result) (evaluator test-symbol)
+                                           (= (evaluator test-symbol) (:seon.test.member/evaluator result))
+                                           (= (get reach test-symbol) (:seon.test.member/reach-digest result)))
+                                  (runner/red-result? result))])))))
         main-db #(db/db (:seon.db/connection main))
         before (when (seq red) (judged (main-db)))
         due (when (map? before) (vec (keep (fn [[test-symbol red?]] (when (nil? red?) test-symbol)) before)))
