@@ -34,6 +34,23 @@ never a value) still to apply to `::loaded-database` and execution handles. The 
 (filed 0256a98b5, being fixed in item 3). Default was restarted on HEAD and reset: 3 branches, 1 agent (root), 705
 tasks from the task files, 0 merge requests. Round 8's merge request went with the reset.
 
+**Build sequence (owner, 2026-10-11 evening; supersedes the order of items 5-7 below where they differ).** One focus,
+at most two lanes on disjoint files, the start-a-flow benchmark rerun after each landing. Designs:
+[hybrid-start-a-flow](../research/agent-platform/2026-10-11/hybrid-start-a-flow.md) (round 1),
+[hybrid-agent-world](../research/agent-platform/2026-10-11/hybrid-agent-world.md) (round 2),
+[r1-db-flow-design](../research/agent-platform/2026-10-11/r1-db-flow-design.md).
+1. The combined cold-context regression (322 MB > 180 MB after H2+H9+H10).
+2. Round 1 H3-H5: one program identity, no duplicate overlays, one fork per agent.
+3. Round 2 P0-P1: the `:seon.cluster` partition and the pure cherry-pick.
+4. S3 and R1 slices: the attempt as the launch write; renames; `plan`; `seon.flow/db<->flow`; `start-flow!` (H6-H7).
+5. Round 2 P2/P3/P7 and IO effects inside each agent's own graph (proof: a whole task runs on its graph's proc threads;
+   pausing the graph halts all of it): end copy-back and branch deletion, messages over channels (inbox 64, a dial).
+6. The first chain experiment: a two-step tree set `:running` by hand.
+7. W2: a test run is a task; members under `d/with`, in parallel under a dial.
+Implementers: Sol 6.1 (medium) for specified phases, Opus for the one REPL path's semantics, Astra for hard performance,
+Haiku for digs; design rounds are Haiku dig, Opus and Sol plans, Fable hybrid. Conflicts on copy-back keep main's value
+and become root's problem task unless the entity schema declares a rule.
+
 **The order.** Each item names its owner and what it unblocks; an item starts when its dependency has landed unless
 marked "beside". Design is interactive: a lane implements an agreed design; when the owner is unreachable, bug fixes and
 work already agreed here are pre-approved, and a new design question waits.
