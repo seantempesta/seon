@@ -13,7 +13,25 @@
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
-(defn- with-probe {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :qualified-symbol :seon.schema/value :seon.schema/value] :seon.schema/value]] :seon.schema/value]}
+(def ^:private probe-bodies
+  "The probe's test body per mode, as program source."
+  {:red "(clojure.test/testing \"outer\" (clojure.test/testing \"inner\" (clojure.test/is (= 1 2) \"first claim\") (clojure.test/is (= :a :b) \"second claim\")))"
+   :green "(clojure.test/is true)"
+   :blob "(clojure.test/is (= :small (apply str (repeat 5000 \"é\"))) \"large actual\")"
+   :thrown "(throw (ex-info \"probe thrown\" {:probe :thrown}))"})
+
+(defn- probe-source
+  "The probe namespace's source with the probe test written for `mode`."
+  {:malli/schema [:=> [:cat :seon.ns/name :keyword] :string]}
+  [namespace-name mode]
+  (str (pr-str (list 'ns namespace-name))
+       "\n(clojure.test/deftest probe " (probe-bodies mode) ")"))
+
+(defn- with-probe
+  "Declare the probe test as program rows in a fresh namespace and call
+  `check` with its symbol (twice, the second the run handle) and a function
+  that redeclares the probe's body for a mode."
+  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :qualified-symbol :qualified-symbol [:=> [:cat :keyword] :seon.schema/value]] :seon.schema/value]] :seon.schema/value]}
   [connection check]
   (support/seed-cluster! connection "default")
   (support/transacted!
@@ -22,39 +40,19 @@
                                (db/db connection))
      :seon.source/test-input-digest (id/digest 64 [::failure-inputs])}])
   (let [namespace-name (symbol (str "failure.probe" (id/id)))
-        namespace-object (create-ns namespace-name)
         test-symbol (symbol (str namespace-name) "probe")
-        mode (atom :red)
-        test-var (intern namespace-object 'probe)
-        path (get-in (db/pull (db/db connection)
-                       '[{:seon.fn/file [:seon.fn.file/relative-path]}]
-                       [:seon.test/sym 'seon.test-failure-facts-test/recorded-reach-belongs-to-the-tested-value-and-is-replaced])
-                     [:seon.fn/file :seon.fn.file/relative-path])]
-    (alter-meta! test-var assoc :test
-      (fn []
-        (case @mode
-          :green (is true)
-          :blob (is (= :small (apply str (repeat 5000 "é"))) "large actual")
-          :thrown (throw (ex-info "probe thrown" {::probe :thrown}))
-          :red (testing "outer" (testing "inner"
-                 (is (= 1 2) "first claim")
-                 (is (= :a :b) "second claim"))))))
-    (try
-      ;; The probe is a HOST test: `resolve-test` runs a `:core` entity's compiled
-      ;; Var (the one interned above, whose body follows `mode`), while an
-      ;; `:agent` entity runs its interpreted source, which never changes mode.
-      (let [database (db/db connection)
-            tx (db/transact! connection
-                 [(support/namespace-entity database namespace-name)
-                  (support/program-entity database [:seon.test/sym test-symbol]
-                                       "(deftest probe (is (= 1 2)) (is (= :a :b)))"
-                                       {:seon.fn/file [:seon.fn.file/relative-path path]
-                                        :seon.schema.admission/source :core})])]
-        (is (:db-after tx))
-        (when (:seon.db.write.attempt/request-id tx)
-          (throw (ex-info "The failure fixture transaction was refused." tx))))
-      (check test-symbol test-var mode)
-      (finally (remove-ns namespace-name)))))
+        database (db/db connection)
+        tx (db/transact! connection
+             [(support/namespace-entity database namespace-name)
+              (support/program-entity database [:seon.test/sym test-symbol]
+                                      (probe-source namespace-name :red) {})])]
+    (when (:seon.db.write.attempt/request-id tx)
+      (throw (ex-info "The failure fixture transaction was refused." tx)))
+    (check test-symbol test-symbol
+           (fn [mode]
+             (support/transacted! connection
+               (support/replacement-tx (db/db connection) [:seon.test/sym test-symbol]
+                                       (probe-source namespace-name mode) {}))))))
 
 (defn- replace-declaration!
   "Replace one declaration exactly; see `seon.test-support/replacement-tx`."
@@ -64,33 +62,29 @@
   (support/transacted! connection (support/replacement-tx (db/db connection) declaration source overrides)))
 
 (defn- redeclare-probe!
-  "Declare `forms` in the probe's namespace and the probe as the host test
+  "Declare `forms` in the probe's namespace and the probe as the test
   `test-form`, from one analyzed source, replacing each stored row exactly."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym :string [:* :string]]
                   :seon.db/transaction-report]}
   [connection test-symbol test-form & forms]
   (let [database (db/db connection)
         namespace-name (symbol (namespace test-symbol))
-        source (str/join "\n" (concat [(pr-str (list 'ns namespace-name))] forms [test-form]))
-        path (get-in (db/pull database '[{:seon.fn/file [:seon.fn.file/relative-path]}]
-                              [:seon.test/sym test-symbol])
-                     [:seon.fn/file :seon.fn.file/relative-path])
+        source (str/join "\n" (concat [(pr-str (list 'ns namespace-name '(:require [clojure.test :refer [deftest is testing]])))] forms [test-form]))
         replacement #(support/replacement-tx database %1 source %2)]
     (support/transacted!
      connection
      (into (replacement [:seon.test/sym test-symbol]
-                        {:seon.fn/file [:seon.fn.file/relative-path path]
-                         :seon.schema.admission/source :core})
+                        {})
            (mapcat #(replacement [:seon.fn/sym (symbol (str namespace-name)
                                                        (str (second (read-string %))))] {}))
            forms))))
 
-(defn- run-probe [connection test-var]
+(defn- run-probe [connection test-symbol]
   (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
                          :seon.test/recording-connection connection
                          :seon.test/policy :named :seon.test/rerun? true
                          :seon.test/identities
-                         #{(symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))}})]
+                         #{test-symbol}})]
     (if (:seon.error/at result) result (first (:seon.test/results result)))))
 
 (defn- reports
@@ -116,8 +110,7 @@
               (is (= :fail (:seon.test.failure/type failure)))
               (is (string? (:seon.test.failure/expected failure)))
               (is (string? (:seon.test.failure/actual failure)))
-              (is (pos-int? (:seon.test.failure/line failure)))
-              (is (= "test/seon/test_failure_facts_test.clj" (:seon.test.failure/reported-file failure)))
+              (is (nil? (:seon.test.failure/reported-file failure)) "an interpreted probe has no host site")
               (is (= ["outer" "inner"] (:seon.test.failure/testing-contexts failure))))
             (is (= 2 (count (db/q '[:find ?report :in $ ?s
                                     :where [?member :seon.test.member/symbol ?s]
@@ -153,7 +146,7 @@
     (fn [connection]
       (with-probe connection
         (fn [s _ mode]
-          (reset! mode :thrown)
+          (mode :thrown)
           (let [record #(sut/run {:seon.test/execution (support/execution-handle connection)
                                   :seon.test/recording-connection connection
                                   :seon.test/policy :named :seon.test/identities #{s}
@@ -183,7 +176,7 @@
         (fn [s v mode]
           (let [red (run-probe connection v)]
             (is (= 2 (count (reports red))))
-            (reset! mode :green)
+            (mode :green)
             (let [green (run-probe connection v)
                   latest (sut/recorded-result (db/db connection) s)]
               (is (= 1 (:seon.test/pass-count green)))
@@ -204,7 +197,7 @@
       (support/seed-cluster! connection "default")
       (with-probe connection
         (fn [_ v mode]
-          (reset! mode :blob)
+          (mode :blob)
           (let [failure (first (reports (run-probe connection v)))
                 digest (:seon.test.failure/actual-blob failure)
                 content (when digest (blob/get connection digest))]
@@ -250,19 +243,18 @@
                 links (filter #(and (vector? %) (= :a (first %))) nodes)]
             (is (str/includes? ai "expected:"))
             (is (str/includes? ai "actual:"))
-            (is (str/includes? ai "test/seon/test_failure_facts_test.clj:"))
             (is (every? #(not (str/includes? ai %)) (:seon.test/failing-assertions result)))
-            (is (some #(str/ends-with? (get (second %) :data-file "")
-                                       "test/seon/test_failure_facts_test.clj") links))))))))
+            (is (empty? (filter #(:data-file (second %)) (filter (comp map? second) links)))
+                "an interpreted probe links no file site")))))))
 
 (deftest a-recorded-test-renders-its-sites-and-changed-dependencies
   (support/with-database
     (fn [connection]
       (with-probe connection
         (fn [s v mode]
-          (reset! mode :green)
+          (mode :green)
           (is (= 1 (:seon.test/pass-count (run-probe connection v))))
-          (reset! mode :red)
+          (mode :red)
           ;; The change that makes it red: the test now calls `reached`. Reach
           ;; derives from the entity's analyzed calls, so `reached` is a changed
           ;; dependency, and the changed program is executed, not reused.
@@ -275,23 +267,15 @@
                 changed (sut/changed-since-green database s)
                 unit {:seon.db/db database
                       :seon.render/value (db/pull database '[*] [:seon.test/sym s])}
-                [summary _evidence changed-form]
-                (rest (read-string (str "(do\n" (render/render-ai unit) "\n)")))
-                sites (set (map (juxt :seon.test.failure/reported-file :seon.test.failure/line)
-                                (reports red)))
+                shown (read-string (str (render/render-ai unit)))
                 links (filter #(and (vector? %) (= :a (first %)) (map? (second %)))
                               (tree-seq coll? seq (render/render-html unit)))]
             (is (:db-after tx))
             (is (= 2 (:seon.test/fail-count red)))
-            (is (= 2 (count sites)))
+            (is (= 2 (count (reports red))))
             (is (= [reached] changed))
-            (is (= (str "Test " s ": fail") (first (str/split-lines (second summary)))))
-            (is (every? (fn [[path line]] (str/includes? (second summary) (str path ":" line))) sites))
-            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote s)) changed-form))
-            (is (= sites (set (keep (fn [[_ attributes]]
-                                      (when-let [path (:data-file attributes)]
-                                        [path (:data-line attributes)]))
-                                    links))))
+            (is (= "fail" (:seon.render.test/state shown)))
+            (is (= [reached] (:seon.render.test/changed-since-green shown)))
             (is (contains? (set (mapcat #(drop 2 %) links)) reached))))))))
 
 (deftest ^{:seon/tasks #{'seon.test-failure-facts-test/the-failure-probe-is-declared-program-not-an-interned-host-var}}
@@ -307,7 +291,8 @@
             (is (= (:seon.test/failures result) (:seon.test/failures entry)))
             (is (str/includes? (problems/ai-prose found) "first claim"))
             (is (str/includes? (sut/failure-message (dissoc result :seon.test/failure-message)) "second claim"))
-            (is (str/includes? (pr-str (problems/html-report found)) "data-file"))))))))
+            (is (some #(and (string? %) (str/includes? % "second claim"))
+                      (tree-seq coll? seq (problems/html-report found))))))))))
 
 (deftest a-red-counts-only-while-the-program-it-ran-on-is-current
   ;; Unknown or red cannot reuse green: a red recorded for a reach the test no
@@ -469,8 +454,8 @@
       (with-probe connection
         (fn [s v mode]
           (let [a (symbol (namespace s) "a")
-                calls-a "(deftest probe (a))"]
-            (reset! mode :green)
+                calls-a "(deftest probe (is (some? (a))))"]
+            (mode :green)
             (redeclare-probe! connection s calls-a
                               "(defn a {:malli/schema [:=> [:cat] :int]} [] 1)" "(defn b [] 2)")
             (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
