@@ -1,7 +1,7 @@
 ---
 title: "TASK-CHAIN: tasks that improve as they move through a pipeline of agents"
 type: card
-status: draft for review (root, 2026-10-11); Fable then Astra review in sequence, then owner discussion
+status: agreed design (owner, 2026-10-11, fable-replan §8 Q13–Q16); §1–§7 revised in place by pass 2; §8 keeps the reviews
 created: 2026-10-11
 ---
 
@@ -9,9 +9,12 @@ created: 2026-10-11
 
 What exists: tasks are entities (`seon.task/create!` upserts with `:seon.task/basis`; history is Datahike's), their
 proofs are tagged deftests, an agent's context is rendered live from its task by `seon.context/current-state`, a task's
-end sends root one message (DYNAMIC-CONTEXT stages 1–3) and a green end lands automatically (ROOT-AGENT stages 1–2).
-The approach: one general mechanism (a task value, a list of stage types as data, one context-generation function) so
-pipeline variations are data, run side by side and measured, rather than code.
+end sends root one message and closes the agent (DYNAMIC-CONTEXT stages 1–3), `seon.task/assign!` runs a task's proofs in
+the agent's world before assigning, and `seon.cluster.source/land!` takes a green merge request to main, disk and git in
+one call. The approach: one general mechanism (a task value, stage types as data, one context function, one stage-aware
+proof selection) so pipeline variations are data, run side by side and measured, rather than code. No pipeline proc,
+supervisor, poller, done-check registry, stored instructions, send-back cap or advance dial: the agent lifecycle that
+exists is the transition, and a fence is refused (AGENTS.md, NO GUARDS OR FENCES).
 
 ## 1. The idea
 
@@ -19,162 +22,199 @@ Software work is a chain of stages, each worked by a fresh agent whose only cont
 left it, rendered by one function. Each stage reads the task, does its work, and **edits the task**: it adds what it
 found, removes what misled it, and rewrites what it now understands better. The task is the handoff. The next agent's
 work depends mostly on the quality of that task, above all on its references: removing a reference to the wrong function
-or schema, or adding the right one, changes what the next agent reads and does.
+or schema, or adding the right one, changes what the next agent reads and does. It is red-green TDD across agents: the
+red is written by a different agent than the green, the interface (contracted stubs) before the tests, the diff reviewed
+before it merges.
 
-Owner (2026-10-11): build it generally, then experiment with variations step by step and keep the steps that make the
-task better at each stage, as many as are worth their model calls.
+Owner (2026-10-11): build it generally, then experiment with variations step by step and keep the stages that make the
+task better, as many as are worth their model calls. "We need passing tests at each level of the task pipeline, so the
+agent explicitly knows what to do at each step before they can advance; that way it's the same system end to end."
 
 ## 2. The model
 
-**The task is one evolving entity.** Every stage may update any field. Datahike keeps every version, so nothing is
-lost and every change is attributable to the stage and agent that made it (transaction provenance). Fields:
+**The task is one evolving entity at main** (`seon.task/main`, the cluster's branch; "home" is retired). Every stage may
+update any field through `my.task/refine!`; Datahike keeps every version and the transaction's provenance names the
+stage and agent. Fields:
 
 | Field | What it holds | Usually edited by |
 |---|---|---|
 | `:seon.task/intent` | what must become true, typed (fully qualified symbols and keywords) | every stage refines it |
 | `:seon.task/must-read` | the references the next agent reads first | every stage adds and removes |
-| `:seon.task/evidence` | reproduction forms, values, paths | mine, survey |
-| schema keys | the data the work produces and consumes | survey, model |
-| proofs | deftests tagged with the task | prove, check |
-| `:seon.task/notes` (new) | one line per edit: what changed and why ("removed `seon.foo/bar`: not on the data flow") | every stage |
-| `:seon.task/stage` (new) | the stage type now working it | the pipeline, not the agent |
-| `:seon.task/instructions` (new) | the stage's instruction template, rendered | overwritten by the pipeline per stage |
+| `:seon.task/evidence` | reproduction forms, values, paths | Mine, Design |
+| schema keys and contracted stubs | the data the work produces and consumes, and the symbols Prove's tests compile against; they live on the working branch, reached by the successor through the predecessor's program basis | Design |
+| proofs | deftests tagged with the task, on the working branch | Prove; Implement updates tests asserting the old behavior when Prove left that decision |
+| `:seon.task/decisions` (new) | cardinality-many component: `:seon.task.stage/name`, `/decision` (per stage type, e.g. `:added :changed :removed :unchanged :send-back`), `/reason`, `/keys`, `/target` for a send-back | every stage, through `refine!` or `send-back!` |
+| `:seon.task/stage` (new) | a ref to the stage type now working it | the transition in `seon.turn/end-task!`, never the agent |
+| `:seon.task/basis-commit` (new) | the predecessor's program basis the successor's branch forks from | the transition |
 
-**The pipeline overwrites a few fields between stages; agents own the rest.** When a stage is done, the pipeline sets
-`:seon.task/stage` to the next stage type and `:seon.task/instructions` from that type's template, assigns a fresh agent,
-and nothing else changes. Agents may edit any other field.
+"Nothing to do" is `:unchanged` with a reason and the observed interface or diff that supports it, never an absence.
 
-**Stage types are data.** A stage type is an entity: its name, its instruction template, its done-check (a function over
-the task value), its next stage, and where it may send work back. A pipeline is a vector of stage types. A variation is a
-different vector, a different template, or a different done-check — all data, so variations can run side by side on the
-same task family and be compared.
+**Stage types are data.** A stage type is an entity: its name, its instruction template, its stage proofs (test
+symbols), its next stage, and the stages it may send back to. A pipeline is the `next` chain of its stage entities (a
+pipeline entity comes when a second pipeline exists). A variation is a different chain, template or stage proof, all
+data, so variations run side by side on the same task family and are compared.
 
-**One context function.** Every agent's context comes from `seon.context/current-state` over its task, so changing the
-task changes the context with no new code. Order it for caching, most stable first:
-1. the laws excerpt and tool help (stable across all stages);
-2. the stage's instructions (stable across all tasks at that stage);
-3. the task: intent, must-read resolved to docs, sources and schemas, evidence, proofs with their current red data;
-4. the agent's own working set and history (DYNAMIC-CONTEXT).
+**One context function.** Every agent's context is `seon.context/current-state` over its task; changing the task changes
+the context with no new code. Ordered most stable first for caching: the laws the stage's template cites and the tool
+help; the stage's instructions, rendered from the stage type at render time (never stored on the task); the task (intent,
+must-read resolved to docs, sources and schemas, evidence, decisions, the stage's proofs with their current red data);
+the agent's own history. Byte stability buys cache hits; correctness of the task section matters most.
 
-Byte stability buys cache hits; correctness of section 3 is what matters most.
+**Vocabulary** (owner, 2026-10-11; catalogue §3). Agent side, three verbs and nothing else about tasks: `my.task/current`
+(my task, its stage, the stage's proofs with status and failing data, decisions, offered operations), `my.task/refine!`
+(edit any field, including a decision), `my.task/send-back!` (reason, optional target stage, counterexample; it writes the
+`:send-back` decision and ends the turn). Success has no verb: green stage proofs end the stage. `my.message/send` and
+`my.turn/wait` stay. Root side, `my.root`: `instructions`, `launch!`, `merge-requests`, `review`, `merge!`, `close!`,
+`ended`. Platform: `seon.task/proofs`, `request-merge!`, `close!`; `seon.turn/end-task!` is the one transition.
 
-## 3. The stages (the first pipeline to try)
+## 3. The stages (pipeline A)
 
-Each has a template, a done-check expressed as data, and what it typically adds, removes and modifies.
+Each has a template, one stage proof (a deftest owned by the stage type, §3b), and what it typically adds, removes and
+modifies on the task.
 
-0. **Mine** (often a query, sometimes the owner): the reproduction form, evidence values, the task kind. Done when the
-   reproduction shows the bad behavior on main and no open task duplicates it.
-1. **Survey**: search what exists (`my.program/search`, `callers`, `reads-key`, `source`, docs); name the owner and the
-   data flow (producers, consumers, keys); sketch the change and how it can be tested. Adds must-read, data-flow keys,
-   reuse candidates; removes references off the flow; rewrites the intent from symptom to change. Done when every
-   reference resolves and the intent names the owner and the change in typed symbols.
-2. **Model** (skipped when no schema is new): register missing schemas at their producers, declare consumers, generate
-   samples, validate real values, measure validation cost; the samples and cost are shown and the agent confirms they
-   are what it means. Done when schemas compile, real values validate and cost is within budget.
-3. **Prove**: an `are` table holding the reported input; a seeded property where a one-line law exists (samples and
-   runtime shown); one `is` on a count for a cost task; update every existing test that asserts the old behavior.
-   Proofs read the program, never files, and cover every change the intent names. Done when the proofs are red on main
-   for the stated reason and cheap to run.
-4. **Check proofs** (a separate, short agent): do the proofs encode the intent, are they provable on a branch, red for
-   the right reason, cheap? Sends back to Prove with a reason, or passes.
-5. **Implement**: the simplest body that turns the proofs green with no known break to a reached test. May send back to
-   Prove (or Survey) with data when a proof or the intent is wrong; never patches around it.
-6. **Land** (automatic): gate, merge, write-back, git commit. A refusal routes back: a break to Implement, a wrong proof
-   to Prove.
-7. **Review** (root, later the root agent): reads the end summary (proofs, errors by signature, calls, send-backs);
-   green proofs on main retire the task automatically; files follow-ups; and edits the instruction template of the
-   stage that caused any friction. This is the self-improvement step: templates get better round over round.
+0. **Mine** (a query, sometimes the owner): the smallest reproducible input, expected and actual data, execution mode,
+   program basis and configuration; reproduced through the affected entrance; a product defect distinguished from a
+   broken fixture; an existing task with the same subject and evidence is chosen over a new one. A new feature records an
+   acceptance example, never a fabricated incident. Mined queries today: slow functions (cost entities), guessed names
+   (agent-error signatures), uncontracted functions (`seon.contracts/task`), the interpreted census.
+1. **Design** (survey, schemas, interface): trace producer → transforms → storage → consumers; verify the owner by a
+   probe; reuse a library seam before designing; register missing schemas at their producers and declare consumers,
+   with generated samples validated against real values and their cost shown; declare the new or changed symbols as
+   contracted stubs (`defn` with its `:malli/schema`, body `(fail! …)`) so Prove's tests compile against real symbols;
+   specify arities, error behavior, what the change replaces and which callers convert. Adds must-read, data-flow keys,
+   stubs; removes references off the flow; rewrites the intent from symptom to change. Stubs are for new meanings; a
+   working body is never replaced to manufacture red. Decision `:added`/`:changed`/`:removed` with keys and samples, or
+   `:unchanged` with the observed interface.
+2. **Prove**: an `are` table holding the reported input plus boundary and negative cases; a seeded property only for a
+   stated law; a deterministic work count for a cost claim; integration or lifecycle behavior when that is the defect;
+   every existing test that asserts the old behavior updated, or the decision that none exist. Proofs read the program
+   through its owner, never files, and a relevant new red is required, not every test red. Decision `:changed #{old
+   tests}` or `:unchanged` with a reason.
+3. **Implement**: read the tests first; the simplest body that turns the behavior proofs green with no newly broken
+   reached test; change the producer, convert all callers and docs, remove what the change replaces; measure the same
+   real workload before and after with like evaluators. Its first turn checks that the proofs encode the intent and may
+   **send back** (`my.task/send-back!` to Prove or Design with the counterexample) instead of patching around a wrong
+   proof. Decision `:changed #{syms}` or `:send-back`.
+4. **Land** (root, then automatic): the end records the merge request (`seon.task/request-merge!`); root reads the diff
+   since the merge base with the gate's verdict (`my.root/review`) and merges (`my.root/merge!` over
+   `seon.cluster.source/land!`: gate, `merge!`, write-back, one git commit, `seon.task/close!` `:merged`). A gate red
+   is a send-back to Implement (a reached test newly red) or Prove (a proof that cannot be made green); root closes a
+   merge request it declines with a reason (`:closed`). Non-controversial merges land without root once the criteria are
+   written from what the reviews find.
+5. **Retrospective** (root): the end summary (proofs, errors by signature, calls, send-backs, cost before and after);
+   closure derived from green proofs on main; follow-ups filed as tasks with red proofs; the stage template that caused
+   a friction edited when the evidence supports it, or the decision `:none`. This is the self-improvement step:
+   templates get better run over run.
 
-**Send-back** is a stage transition like any other: the sending agent writes the reason in `:seon.task/notes`, the
-pipeline sets the earlier stage, a fresh agent picks it up with the notes in context.
+**Send-back** is a stage transition like any other: the sending agent writes the decision with its target, reason and
+counterexample; the transition sets the target stage; a fresh agent picks it up with the decision in context. All
+successors charge the same task budget, so fresh agents do not replenish it; exhaustion is the ordinary resumable task
+end. There is no send-back cap and no root watcher: root sees every end message.
 
-## 3b. Stages advance by proofs: one system end to end (owner, 2026-10-11)
+## 3b. Stages advance by proofs: one system end to end
 
-A stage is done when its **stage proofs** are green, exactly as a task is done when its proofs are green: no separate
-done-check machinery. Stage proofs are ordinary deftests owned by the pipeline, one per stage type, parameterized by the
-task and evaluated against the task entity. The agent's context shows which stage proof is red and its failing data,
-so it knows exactly what is left before it can advance. A variation may swap a stage's proof; the comparison stays fair.
+A stage is done when its **stage proof** is green, exactly as a task is done when its proofs are green. Stage proofs are
+ordinary deftests owned by the stage type, run against the task revision and the branch program supplied as explicit
+test inputs (never discovered by asking which task the test's agent holds). The agent's context shows the red stage proof
+and its failing data, so it knows exactly what is left before it can advance. A variation may swap a stage's proof.
 
-**Every stage records a decision; "nothing to do" is explicit, never an absence.** A component on the task:
-
-```clojure
-{:seon.task.stage/name     :model
- :seon.task.stage/decision :unchanged          ; per stage type, e.g. :added :changed :removed :unchanged
- :seon.task.stage/reason   "the flow's keys already exist; the change is in the producer only"
- :seon.task.stage/keys     #{}}                ; what the stage added, changed or removed
-```
-
-| Stage | Its stage proof asserts |
+| Stage | Its stage proof asserts (data in, data compared; a missing observation is unknown, never a pass) |
 |---|---|
-| Survey | every reference resolves; the intent names an owner by typed symbols that exist; the reproduction form is recorded |
-| Model | decision `:added`/`:changed`/`:removed` with each key compiling and validating real samples within its cost budget, **or** `:unchanged` with a reason |
-| Prove | proofs tagged and red on main; failure matches the stated reason; they read the program, never files; run cost within budget; tests asserting the old behavior updated, or a decision that none exist |
-| Check | decision `:pass` with notes, or `:send-back` with reason and target stage |
-| Implement | the task's proofs green, no known reached break (today's rule) |
-| Land | landed (git sha recorded) or a typed refusal routed to a stage |
-| Review | retired (proofs green on main), follow-ups filed or decision `:none` |
+| Mine | expected input = observed input; expected main basis = observed; reported actual = observed actual; expected ≠ actual; a nonempty case set |
+| Design | no unresolved reference; the required interface = the compiled interface (contracts compile in the candidate registry); each schema sample validates as expected; no consumer unaccounted (converted or preserved); a decision present |
+| Prove | required cases = observed cases (entrance, input, expected and actual data, proof digest); expected failures = observed baseline failures on the captured pre-change program with the candidate tests and declared stubs, and nonempty; no unexpected errors; companion tests still green; a decision present |
+| Implement | required proofs nonempty and all green on the branch; no newly broken reaching test; no remaining replacement (callers, docs); the cost formula where the task states one; a decision present (a send-back is an evidenced handoff, never green) |
+| Land | reviewed program = merged program = written program; the recorded git commit; the proofs green on main |
+| Retrospective | every observed friction has a follow-up, a template change or a reasoned `:none`; no follow-up without a red proof |
+
+Reproduction, reference resolution, contract compilation, recorded test comparison and transaction observation need no
+model. Localization, interface tradeoffs, proof relevance and diff review do; a model's decision recorded as data is
+inspectable judgment and is scored downstream (send-backs, declines, calls), never claimed as proof. No file-I/O
+blacklist: a proof shows it observes the branch program by changing with it.
 
 ## 4. Proofs: the weak point, and a catalogue
 
 This weekend most failures traced to the proof or the task, not the implementer: a census that read files (unprovable
 on a branch), an intent naming one of two changes, "keep the contract" on an uncontracted function, reached tests
-asserting ruled-out behavior. Keep a **proof catalogue** page of good and bad proofs with why, seeded from
-`docs/research/agent-platform/2026-10-10/designed-task-examples.md` (a pure transform with a seeded law; a read doing
-whole-program work with a count budget; a write path with storage cost) and this weekend's green proofs (`slug`,
-`edn-symbol-text?`, the search snippet, refined `ref-section`) and failures. The Prove and Check templates cite it.
+asserting ruled-out behavior. With merges on green, a wrong proof lands wrong code or blocks right code. Keep a **proof
+catalogue** page of good and bad proofs with why, seeded from Astra's table in §8.2 (example plus law; read cost plus
+answer; writer behavior plus storage; and the bad kinds: arbitrary red, a single input as specification, a proxy for
+success), `designed-task-examples.md` (minus its runtime guards) and this weekend's green and failed proofs. The Design,
+Prove and Implement templates cite it.
 
 ## 5. Measurement and experiments
 
-Per stage: calls, tokens, errors by signature, send-backs, time. Per task: did the next stage succeed without sending
-back; did Implement go green; did it land. Per variation: the same task set through pipeline A and pipeline B, compared
-in one table (`seon.competency/table` grows a stage column). Keep a step only if it pays for its calls: fewer
-downstream send-backs, fewer implementer calls, more green landings.
+Per stage: calls, tokens, errors by signature, send-backs, time, cost before and after. Per task: did the successor need
+root; did Implement go green; did it merge. Per variation: paired tasks at the same starting program through pipelines A
+and B, one table (`seon.competency/table` grows a stage column); task-id parity does not balance a small sample. Keep a
+stage only if it pays for its calls: fewer downstream send-backs, fewer implementer calls, more merges.
 
-Questions each experiment answers: does Survey's reference pruning cut Implement's calls? Is Check-proofs worth a
-separate agent? Should Survey and Model merge? Which template edits from Review actually helped?
+**The first experiment** (owner, Q13): two agents, Design+Prove → Implement, on one small existing defect with settled
+policy and an existing symbol. Root mines it and launches the Design+Prove agent; when its stage proof is green, root
+reads the refined task and launches Implement by hand from the predecessor's program basis (`my.root/launch!` with
+`:seon.task/basis-commit`), so the successor sees the stub and the red test; root reviews the diff, merges, and writes the
+retrospective. That tests task quality before automatic chaining. Then the same handoff moves into `seon.turn/end-task!`
+and the two-model experiment runs unattended. Questions the next experiments answer: does Design's reference pruning cut
+Implement's calls; is a separate Check agent worth its call (pipeline B); should Design split into survey and model
+(pipeline B); which template edits helped.
 
-## 6. What must be built (smallest first)
+## 6. What must be built (smallest first; plan §0 items 5–7)
 
-1. `my.task/refine!`: an agent edits its task's fields at its REPL (over `seon.task/create!`'s upsert with
-   `:seon.task/basis`), recording a note per edit. The database is the task's source of truth; files are written back
-   in batches. (Today there is no REPL face; this is the missing handoff medium.)
-2. Stage types and pipelines as entities (`:seon.task/stage`, instruction templates, done-checks as named functions).
-3. The transition: when a stage's done-check holds at the end of an agent's work, set the next stage, render its
-   instructions, assign a fresh agent (`seon.task/assign!` already runs the proofs in the agent's world).
-4. Auto-retire: a task whose proofs are green on main retires itself.
-5. `current-state` renders the stage instructions and the task sections in the stable order above.
-6. The proof catalogue page; first templates drafted from it and this weekend's evidence.
-7. The per-stage measurement columns.
+1. `my.task/refine!`: an agent edits its task's fields at main over `seon.task/create!`'s upsert with
+   `:seon.task/basis`, the agent as provenance, each edit carrying a decision component; a conflicting basis refuses with
+   current and proposed. `my.task/current` and `my.task/send-back!` beside it (the vocabulary cut, plan §0 item 5).
+2. `:seon.task/stage`, `:seon.task/decisions`, `:seon.task/basis-commit` and the stage type entity with its template and
+   stage proofs (`resources/seon/schemas/seon.task.edn`); two stage proofs for pipeline A's first run (Design+Prove,
+   Implement) as deftests.
+3. **One stage-aware selection, `seon.task/proofs`** (Astra): the current stage's obligations selected once in the task
+   owner and shared by `assign!`, `seon.turn/test-step`, `seon.context/proofs` and completion; Design+Prove wants the
+   behavior proofs red and its stage proof green, Implement wants the behavior proofs green. Deletes
+   `seon.turn/task-proofs`, the selection in `assignment-read` and `seon.context/task-done?`'s own.
+4. **The predecessor-basis launch**: `my.root/launch!` (from `seon.competency/start-run!`, moved into `src` without the
+   test-support helpers) forks the successor's branch from `:seon.task/basis-commit`, assigns (which runs the stage's
+   proofs red first) and wakes once. Proven once through a real turn with injected provider replies: the successor sees
+   the predecessor's stub and test, the Design+Prove obligation is green while the behavior proof is red, then Implement
+   makes it green, and the predecessor has exited.
+5. The transition in `seon.turn/end-task!`: for a `:done` end whose task has a next stage, or a `:send-back` decision,
+   commit the stage result, the next assignment's identity and the predecessor basis at main in the recording
+   transaction, and let the existing lifecycle acquire and wake that assignment after the commit; identity comes from
+   the assignment, never a new random launch; boot derives outstanding assignments from the same facts. Merge request
+   and landing run only after Implement.
+6. Auto-retire: `seon.task/resolution` derives `:closed-by :seon.task/proofs` from a nonempty set of current green
+   behavior proofs on main; old or absent evidence is unknown. Proof links stay while closure derives from them.
+7. The proof catalogue page and the first templates; the per-stage measurement columns; the pipeline entity when a
+   second pipeline exists.
 
-## 6b. Learning from guessed names
+## 6b. Learning from guessed names (owner decision 7; plan §0 item 9)
 
-Every "Unable to resolve symbol X" is a signal of what an agent expected to exist (health's agent-error signatures
-already group them, with the guessed names as values; 58 occurrences of the top one on 2026-10-11:
-`seon.task/current`, `seon.print/inspect`, `my.cluster.source/write`, `my.agent/messages`, ...).
+Every "Unable to resolve symbol X" is a signal of what an agent expected to exist (health's agent-error signatures group
+them; 58 occurrences of the top one on 2026-10-11: `seon.task/current`, `seon.print/inspect`, `my.cluster.source/write`,
+`my.agent/messages`).
 
-1. **Answer at the failure.** The refusal carries the nearest real symbols (spelling distance via
-   `seon.error/names-in`, plus name-token matches) with each one's one-line doc and calling form as an offered
-   operation. Most guesses are near misses; the agent's next form uses the right one.
-2. **Learn the mapping from behavior.** When the agent's next successful form uses an offered candidate, record
-   guessed X → resolved Y (agent, task) as a fact: confirmed by what the agent did, not inferred.
-3. **Link it to the task.** A resolved guess adds Y to the task's references, so the next agent on the task (the next
-   stage or a rerun) reads Y and never guesses X. Review (stage 7) lifts recurring mappings into the stage's template.
-4. **Repeated guesses become mined tasks.** A name guessed by two or more agents is a missing affordance: a task whose
-   proof is the next round's count for that name at zero. Its fix is, in order of preference: teach it (a help or block
-   line naming the real operation), build it (when the wanted operation does not exist, e.g. "my current task"), or
-   alias it (only when the guess is the standard Clojure or library word; aliases multiply names, against the
-   one-word-per-concept rule).
+1. **Answer at the failure.** The refusal carries the nearest real symbols across public declarations and `my.*` (name
+   parts, not only spelling distance within the guessed namespace) with each one's one-line doc and calling form as an
+   offered operation; tool markup is stripped at read.
+2. **Learn the mapping from behavior.** When the agent's next successful form uses an offered candidate, record guessed
+   X → resolved Y (agent, task) as a fact.
+3. **Link it to the task.** A resolved guess adds Y to the task's references, so the next agent on the task reads Y and
+   never guesses X; the Retrospective lifts recurring mappings into the stage's template.
+4. **Repeated guesses become mined tasks.** A name guessed by two or more agents is a missing affordance: teach it, build
+   it (`my.task/current` was one), or alias it only when the guess is the standard Clojure or library word.
 
-Measured by guessed-name signatures and calls spent on failed guesses per round; they should fall round over round.
+Measured by guessed-name occurrences and calls spent on failed guesses per run; a help line only if the count does not
+fall.
 
-## 7. Open questions
+## 7. Resolved questions, and what stays open
 
-- Is Check-proofs a separate agent or the start of Implement?
-- Survey and Model separate or one Design stage?
-- May Implement send back by itself, or only through root?
-- Done-checks: which are pure data predicates, which need a judgment call (a short model call)?
-- How much of the laws excerpt and help belongs in the stable prefix for each stage?
-- How are pipeline variations assigned (per task family, random, round-robin) so comparisons are fair?
+Resolved (reviews §8.1–§8.2, owner Q13–Q16): Check is not a separate agent in pipeline A (Implement's first turn, with a
+send-back right; a Check agent is pipeline B); Survey and Model are one Design stage in A (split in B); Implement sends
+back by itself; every stage proof is a data predicate, no model call; instructions are rendered from the stage type,
+never stored; there is no send-back cap, advance dial or "ever assigned" retirement condition; variations are compared on
+paired tasks at the same starting program; root reviews each diff before it merges until criteria for automatic merges
+exist.
+
+Open: how a test declares itself host-bound (plan §0 open question 2); how much of the laws excerpt belongs in each
+stage's stable prefix (measure cache hits per stage); the first experiment's task (plan §0 open question 3).
 
 ## 8. Reviews
 

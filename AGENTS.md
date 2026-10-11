@@ -264,8 +264,11 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and arming converge; never call an unchanged record healthy.
   Ordinary clusters keep their program; selected development clusters adopt explicitly.
-- **Merge is a root task.** An agent requests a merge only after its proofs pass and no test its change broke is red
-  on its source branch; the merge request is a task. Root works it through the ordinary REPL holding both worlds — a
+- **Merge is a root task.** An agent's green end requests the merge (`seon.task/request-merge!`) once its proofs pass
+  and no test its change broke is red on its source branch; the merge request is a task. Root's tools live in `my.root`
+  (`merge-requests`, `review`, `merge!`, `close!`, `launch!`, `ended`) and use git's words: a merge request is
+  reviewed, then merged (`:merged`) or closed with a reason (`:closed`); root reads the diff before it merges until
+  criteria for automatic merges are written. Root works it through the ordinary REPL holding both worlds — a
   merge branch forked from the target branch (main) and a copy of the agent's world — with easy tools to move data
   between them, and chooses exactly what to take by identity from the diff value (since the merge base; ours is the
   target, theirs the source); the task never lists what to merge. `merge!` commits only when every test on the merge
@@ -348,8 +351,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   functions are back-filled as generated tasks (`seon.contracts/task`, the [contracts guide](docs/seon/architecture/contracts-guide.md)),
   skipping those with a pending deletion task or no live use.
   A new or changed function without a complete contract: the edit hook refuses it; the REPL admits it with a
-  warning beside its value that grows as the agent's uncontracted definitions accumulate; merge acceptance refuses
-  a proposal that carries one.
+  warning beside its value that grows as the agent's uncontracted definitions accumulate; the merge gate refuses
+  a merge request that carries one.
 - **Keep entry policy separate from merge.** Schema and test entry default to `:gate`, refusing before evaluation;
   explicit `:warn` admits experiments with declared diagnostics. A missing function contract is never refused at
   the REPL: the value returns with the growing warning above. Preserve malformed authored contracts as data; never
@@ -444,8 +447,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   that eval request (unchanged results answered from their record, the step's time limit a dial defaulting to 10 s),
   and all green completes the task, the only success; a question task declares its answer's Malli schema and
   `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read;
-  `my.task/complete!`, with a required reason, only gives a broken or impossible task back to its assigner, who is
-  notified; a reply is `my.message/send` then `my.turn/wait`; a model agent launches only on an assigned task with
+  `my.task/send-back!`, with a required reason, an optional target stage and a counterexample, gives a broken or
+  impossible task back to the stage that owns the mistake (its assigner is notified); an agent's other task verbs are
+  `my.task/current` and `my.task/refine!`, and success has no verb; a reply is `my.message/send` then `my.turn/wait`; a model agent launches only on an assigned task with
   proofs, and its own `:work` task ends by `my.turn/wait` or the call cap; the
   answered basis is `:seon.agent/answered-t`, and system turns and context capture are gone. Archive agents; preserve
   task and agent identity on loud, resumable budget exhaustion.
