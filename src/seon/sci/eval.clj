@@ -195,7 +195,8 @@
 
 (schema.edn/load! {})
 
-(declare carried-cluster-name agent-require acquired-basis context-database loaded-database)
+(declare carried-cluster-name agent-require acquired-basis context-database loaded-database
+         program-identity program-basis acquisition-attributes)
 
 (defn projection-state
   "Create `cluster-name`'s context environment replacement reference; the
@@ -1332,9 +1333,9 @@
   whose compiled Var it runs."
   {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.db/database-value :map] :boolean]}
   [loaded database row]
-  (let [sym (:seon.fn/sym row)
-        previous (when loaded (db/pull loaded '[*] [:seon.fn/sym sym]))]
-    (and (= :agent (:seon.schema.admission/source row))
+  (and (= :agent (:seon.schema.admission/source row))
+       (let [sym (:seon.fn/sym row)
+             previous (when loaded (db/pull loaded '[*] [:seon.fn/sym sym]))]
          (or (nil? (:seon.fn/sym previous))
              (and (not= (row-definition-digest row) (row-definition-digest previous))
                   (behavior-changed? database loaded sym))))))
@@ -1441,15 +1442,14 @@
           ::function-admission admission
           ::agent-authored? (= :agent admission)})
         (let [snapshot @(::kernel/program-snapshot ctx)
-              loaded (loaded-database ctx db)
-              interpreted? (or (get (::interpreted snapshot) function-symbol)
-                               (overridden-row? loaded db committed))
+              loaded (delay (loaded-database ctx db))
+              changed? (and (= :agent admission) (overridden-row? @loaded db committed))
+              interpreted? (or (get (::interpreted snapshot) function-symbol) changed?)
               host-row (when interpreted?
                          (if (host-bound-row? committed)
                            committed
-                           (when loaded
-                             (let [previous (db/pull loaded '[*] [:seon.fn/sym function-symbol])]
-                               (when (and previous (host-bound-row? previous)) previous)))))
+                           (let [previous (db/pull @loaded '[*] [:seon.fn/sym function-symbol])]
+                             (when (and previous (host-bound-row? previous)) previous))))
               ;; A BRANCH NEVER CHANGES THE PLATFORM (owner, AGENTS ddd3cf9a2):
               ;; compiled code keeps running as compiled on every branch and
               ;; sees a change only after merge and reload. An unchanged
@@ -1465,7 +1465,6 @@
               unloaded? (source-namespace? ctx namespace-name)
               interpreted? (or interpreted? unloaded?)
               evaluated-row? (boolean (or evaluated? (::evaluated? row)))
-              changed? (overridden-row? loaded db committed)
               compiled? (and host-row (not changed?) (not unloaded?))
               refusal (when (and host-row (not compiled?) (not unloaded?))
                         (interpretation-error function-symbol
@@ -2846,7 +2845,7 @@
     (db/pull-many database (conj namespace-pattern {:seon.test/ns [:seon.ns/name]})
                   (into [] (keep (fn [datom] (when (= :agent (:v datom)) (:e datom)))) datoms))))
 
-(defn- overlay-plan
+(defn- derive-overlay-plan
   "What `database` changes of the `loaded` program: the authored functions whose
   digest the loaded program lacks or holds otherwise, the other functions it
   lacks, and the authored namespace and test rows it does not hold as they are."
@@ -2873,6 +2872,22 @@
                                          (not (held-namespaces (namespace-key %)))))
                         rows)
      ::tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)}))
+
+(defn- overlay-plan
+  "The overlay of one program identity against the loaded commit, shared across data writes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
+  [database loaded]
+  (if-let [identity (when (commit-id-of loaded) (program-identity database))]
+    (let [basis (program-basis identity (acquisition-attributes (db/carried-projection database)))]
+      (seon.cache/lookup
+       ::overlay-plan [(store-identity database) basis (db/commit-id loaded)]
+       (fn [{::keys [overridden added namespaces tests]}]
+         (+ (* 128 (count basis))
+            (* 256 (+ (count overridden) (count added) (count namespaces) (count tests)))
+            (* 2 (+ (reduce + 0 (map (comp count :seon.ns/source) namespaces))
+                    (reduce + 0 (map (comp count second) tests))))))
+       #(derive-overlay-plan database loaded)))
+    (derive-overlay-plan database loaded)))
 
 (defn- function-rows-in
   "`[sym source namespace admission private?]` of each admitted function among
@@ -3131,10 +3146,9 @@
 (defn- overlay!
   "Interpret on `ctx`, a fork of the cluster base, what `database` changes of
   the loaded program; the acquisition, the base's own when nothing changed."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :map]}
-  [ctx database]
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value] :map]}
+  [ctx database loaded]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        loaded (loaded-database ctx database)
         commit (commit-id-of database)
         plan (when-not (or (identical? loaded database)
                            (and commit (= commit (commit-id-of loaded))))
@@ -3618,7 +3632,7 @@
          projection (or (db/carried-projection database) (schema/projection-from-database database))
          ctx (assoc (copy-base-ctx cluster database loaded (:seon.flow/commit-fault! arm-request))
                     :seon.schema/projection projection)]
-     (assoc ctx ::acquisition (overlay! ctx database)))))
+     (assoc ctx ::acquisition (overlay! ctx database loaded)))))
 
 (defn- loaded-basis
   "The revision of the adoption record's attribute in the loaded source.

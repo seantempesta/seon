@@ -9,6 +9,7 @@
             [clojure.walk :as walk]
             [editscript.core :as editscript]
             [editscript.edit :as editscript.edit]
+            [konserve.core :as k]
             [malli.core :as m]
             [malli.error]
             [datahike.api :as d]
@@ -390,23 +391,17 @@
   (connections/active-connection
    (datahike.store/connection-id (assoc (dbi/-config database) :branch branch))))
 
-(defn branch-database
-  "The head database value of `branch` in `database`'s store, else nil.
-  A read: it opens no connection and owns nothing to release. The head is
-  loaded as its commit through `database` (`datahike.versioning/branch-as-db`
-  then `commit-as-db`, `versioning.cljc:503`, `:473`), so it carries a
-  committed identity under `database`'s connection generation and retained
-  render calls on it are reused; a bare `branch-as-db` value is detached and
-  would re-render every face.
+(declare schema-database)
 
-  # Costs
-  Unarmed, about 7 ms for both loads on the default store (measured
-  2026-09-27); its projection derives once per declaration content."
+(defn branch-database
+  "Open the branch head's commit with primary indexes and the caller's cache identity."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
                   [:maybe :seon.db/database-value]]}
   [database branch]
-  (when-let [head (d/branch-as-db database branch)]
-    (d/commit-as-db database (d/commit-id head) {:secondary-indices? false})))
+  (let [origin (schema-database database)
+        head (k/get (:store origin) branch nil {:sync? true})]
+    (when-let [commit (get-in head [:meta :datahike/commit-id])]
+      (d/commit-as-db origin commit {:secondary-indices? false}))))
 
 (defn undecoded-datoms
   "The datoms of `index` at `components` over `database`, as `[entity attribute value]` triples
