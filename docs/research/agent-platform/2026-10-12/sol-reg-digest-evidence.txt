@@ -31,3 +31,18 @@ writer expected 4e54ed5ce6d5d089759f72c10a0de97da1d24b1031ecc46aa58e87f0df6ec95f
 Full-tree lint: 6416 ms, 0 errors / 1541 warnings.
 
 Reusable script cached-classpath verification: exit 0, 1959.664208 ms child overall, 1534.508833 ms requires; packaged provider present. The value printer reported one declaration-population fallback during post-measurement rendering (152 reads), excluded from requires.
+
+Final lane gate and commit:
+== lane sol-reg-digest commits: Restore retained-builder fixture through the canonical digest producer
+== bin/seon check test/seon/db_test.clj resources/seon/tasks/seon.db.edn resources/seon/tasks/seon.config.edn script/seon/config_load_timing.clj docs/research/agent-platform/2026-10-12/sol-reg-digest.md docs/research/agent-platform/2026-10-12/sol-reg-digest-evidence.txt --test seon.db-test/a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program --test seon.db-test/a-changed-projection-builder-misses-the-projection-cache --test seon.config-test/apply-compiles-once-and-round-trips-through-database-facts --test seon.config-test/config-writer-submits-only-the-fact-difference --test seon.config-test/converged-apply-uses-carried-projection-and-remains-exact --test seon.config-test/initialization-entities-apply-query-and-converge-with-the-config-entity --test seon.index-reconcile-test/indexing-an-existing-population-uses-one-writer --test seon.reconcile-test/first-apply-writes-and-reapply-is-zero-writes --test seon.reconcile-test/planning-pulls-only-the-provenance-managed-slice --test seon.program-test/cluster-attributes-are-the-declared-cluster-entities --test seon.schema-test/matching-shapes-derive-required-attributes-through-and-refs --test seon.program-test/resolved-shapes-match-the-current-declarations --test seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm
+SEON check OK total-ms 37361
+run c88242016bc7 / executed 13 / reused 0 / pass 77 / fail 0 / error 0 / 12203 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 94708, :seon.operator/test-phases {:seon.operator/tests-ms 12274, :seon.operator/slot-wait-ms 2, :seon.operator/seed-ms 2102, :seon.boot/ready-ms 7603, :seon.operator/adopt-ms 1204, :seon.operator/archive-ms 2100, :seon.operator/classpath-ms 523, :seon.operator/prepare-ms 3405, :seon.operator/share-ms 749, :seon.operator/boot-ms 14421, :seon.operator/source-ms 3372}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 3363, :adopted-ms 395}, :seon.source/built? true, :seon.cluster/adopted-identities 330, :seon.source/git-sha "3e3dd4501794b4047c484e355d77c3940f2b9b1b", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "2319152dc6365747127acd3af1cc2de69cbfa644", :seon.operator/seed-ms 2043}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 2113, :rehearsal-ms 3855, :total-ms 37361}, :seon.boot/start-instant #inst "2026-10-11T21:22:23.023-00:00", :seon.operator/test-summary "run c88242016bc7 / executed 13 / reused 0 / pass 77 / fail 0 / error 0 / 12203 ms / passed? true", :seon.source/commit-id #uuid "6acc1862-4148-5997-9cb4-8aba8ef12f38"}
+linting took 5536ms, errors: 0, warnings: 1542
+== proved in 38 s; committing under .git/lane-commit.lock
+[refactor/agent-platform a379516d2] Restore retained-builder fixture through the canonical digest producer
+ 6 files changed, 88 insertions(+), 14 deletions(-)
+ create mode 100644 docs/research/agent-platform/2026-10-12/sol-reg-digest-evidence.txt
+ create mode 100644 docs/research/agent-platform/2026-10-12/sol-reg-digest.md
+ create mode 100644 script/seon/config_load_timing.clj
+a379516d2 Restore retained-builder fixture through the canonical digest producer
