@@ -27,42 +27,47 @@ cluster context held a database value across it; fixed at the owner (f51240f34),
 never a value) still to apply to `::loaded-database` and execution handles. The chain of separate agents per task
 (the owner's design, card TASK-CHAIN) has never run: agents cannot edit their task at the REPL yet.
 
-Live census (basis 536871981): 722 tasks, 119 with a tagged proof; 9 merge requests, 3 merged, 6 undecided; 59
-branches, 58 agents holding one; health `:faulted` (12 open faults, 112 errored receipts, 9 agent-error signatures, the
-top one 58 guessed names).
+**Since the rewrite (2026-10-11 afternoon):** the fence revert landed (c53c9306e: src −593, test −503, resources
+−107 lines) and was verified against a full compiled tier before and after (d9715071e, 1aad413c1:
+[revert-verification](../research/agent-platform/2026-10-11/revert-verification.md)): 2,398 → 2,365 green; of 40 lost,
+13 deleted with the machinery, 3 kept red as root-fix proofs, 22 bulk-run noise (green alone), **2 real regressions**
+(filed 0256a98b5, being fixed in item 3). Default was restarted on HEAD and reset: 3 branches, 1 agent (root), 705
+tasks from the task files, 0 merge requests. Round 8's merge request went with the reset.
 
 **The order.** Each item names its owner and what it unblocks; an item starts when its dependency has landed unless
 marked "beside". Design is interactive: a lane implements an agreed design; when the owner is unreachable, bug fixes and
 work already agreed here are pre-approved, and a new design question waits.
 
-1. **Revert the night's fences** (lane `fence-revert`, in flight; Q15). One batched revert of the sixteen fence
+1. **Done: revert the night's fences** (c53c9306e; Q15). One batched revert of the sixteen fence
    commits since 2026-10-10 20:30, generated with `git revert --no-commit` in a throwaway shared clone under `tmp/`,
    applied to claimed files; `seon.turn/end-task!` rewritten to send the end message and close the agent in one
    transaction; the observed-failure tests kept as red proofs for root fixes; about −1,500 lines. Kept: the interpreter
    fixes, f51240f34, e71e60a47, `land!`, `land-end!`, the dial, typed refusals, `:seon.test.run/evaluator`. The four
    fences outside the night (`bin/lane`'s commit lock, archive and pin sealing, `:root-refused`, the `"root"` string
    check) each get a root-cause task. Unblocks 2.
-2. **Verification and a database reset** (lane `revert-verify`, root). One central test round on the reverted HEAD;
+2. **Done: verification and a database reset** (d9715071e, 1aad413c1, 0256a98b5). One central test round on the reverted HEAD;
    schema retirement proven on a branch of the live store; then `bin/seon reset` (nothing in the store is sacred;
    the renames of item 5 need it anyway) and default restarted on HEAD. Unblocks 3–5.
 3. **The round-8 interpreter bugs, then the first landing** (Opus, owners of `seon.sci.eval`, `seon.test`; Q3, Q11).
    The two refusing tests are red the same way interpreted on unchanged main, so they are interpreter bugs: a nil
    connection supplied on the interpreted path, the failure-facts reader mismatch; and the gate labels its run by agent
    id (`seon.test/run-request`), a bug: label each member by its actual resolution. Red proofs: the round-8 tests
-   interpreted. Then root reviews merge request `57ad6cd33297`'s diff, drops the unused scratch schema
-   `:seon.problems/qty`, and `land!` lands it. That is the first landing through the path. Unblocks 7.
-4. **One close owner and the cleanup** (Sonnet; Q6). `seon.task/close!` decides a merge request (`:merged` or
-   `:closed` with a reason) and deletes its merge branch and the source branch, closing the agent; called by `land!`
-   and by root's decline; an ended agent with no open merge request deletes its branch at its close. By hand today,
-   with a receipt: root closes the three stale merge requests (fda9b3f7af69, 3ea28f83185c, 25ad5b9045b0) and deletes
-   ended agents' branches. Beside 3.
+   interpreted. With them, the revert's two regressions: `seon.turn/land-end!` passes a nil root branch
+   (`seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row`) and the root page misses a newly adopted
+   commit (`seon.render.web/the-root-page-shows-a-newly-adopted-commit-after-the-fence-revert`); and the dial
+   `:seon.config.root/land?` off. Round 8's merge request went with the reset, so the first landing is the round-8 task
+   rerun by a fresh DeepSeek agent: its green end records a merge request, root works that task and merges. Unblocks 7.
+4. **One close owner** (Sonnet, with item 5's sweep; Q6). `seon.task/close!` (the renamed `decide!`) closes a merge
+   request (`:merged`, or `:closed` with a reason) and deletes its merge branch and the source branch, closing the
+   agent; `my.root/merge!` and root's decline both end in it; an ended agent with no open merge request deletes its
+   branch at its close. The by-hand cleanup is moot: the reset removed the stale merge requests and branches.
 5. **The vocabulary cut, all renames now** (Sonnet, scripted sweep; Q16, catalogue §3–§4). Agent side, three verbs:
    `my.task/current`, `my.task/refine!`, `my.task/send-back!` (reason, optional target stage, counterexample; replaces
    `my.turn/complete` as give-back, `my.agent/done`, `my.message/decline`, the `my.task/complete!` of AGENTS.md);
    success has no verb. Delete the queue (`my.task/open`, `claim!`), the steps (`plan!`, `step!`, `done!`, `steps`,
    `seon.task/steps!` and its schema) and `seon.task/resolution`'s fault and signal clauses that read facts nothing
    writes. Root's namespace `my.root`: `instructions`, `launch!` (from `seon.competency/start-run!`, branching from the
-   predecessor's commit), `merge-requests`, `review`, `merge!` (over `land!`), `close!`, `ended`; `my.program`'s merge
+   predecessor's commit), `merge-requests`, `merge!` (over `land!`), `close!`, `ended`; `my.program`'s merge
    wrappers deleted; `seon.task/propose!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`.
    Stored attributes with their functions: home → main, refuted → red-first, outcome → end, proposal → merge request.
    After 2. Unblocks 6.
@@ -75,13 +80,15 @@ work already agreed here are pre-approved, and a new design question waits.
    it. Unblocks 7.
 7. **The first chain experiment, hand handoff first** (root; Q13, TASK-CHAIN §5). One small existing defect with
    settled policy and an existing symbol; two DeepSeek agents, Design+Prove → Implement. Root mines it, launches the
-   Design+Prove agent, reads its refined task, launches Implement by hand from the predecessor's basis, reviews the
-   diff and merges. Measured per stage: calls, tokens, errors by signature, send-backs, whether the successor needed
+   Design+Prove agent, reads its refined task, launches Implement by hand from the predecessor's basis, then works
+   the merge request task and merges. Measured per stage: calls, tokens, errors by signature, send-backs, whether the successor needed
    root. Then the same handoff moves into `seon.turn/end-task!` and the two-model experiment runs unattended. After 3,
    6. Unblocks the loop as the owner described it.
-8. **Root reviews every merge before it lands** (Q8). `my.root/review` shows the merge request's diff since its merge
-   base with the gate's verdict; `my.root/merge!` lands it. The dial `:seon.config.root/land?` is off until criteria for
-   non-controversial merges are written from what the reviews find. Beside 3–7.
+8. **The merge request is a task assigned to root** (Q8, round 3). No review mechanism: the merge request carries its
+   data (the diff since the merge base, every reached test with its result, the proofs, the intent and decisions, the
+   merge instructions), root's context renders it like any agent's task, and root's work ends in `my.root/merge!` or
+   `close!`. Building it is making that data complete and its render good. The dial stays off until criteria for
+   non-controversial merges are written from what root's merges find. Beside 3–7.
 9. **Guessed names are answered at the failure** (Sonnet, `seon.error` owner; Q7, TASK-CHAIN §6b). The refusal names
    the nearest real symbols across public declarations and `my.*` (name parts, not only spelling distance in the guessed
    namespace) with their calling forms; tool markup stripped at read; the agent's next successful form records guessed →
@@ -100,7 +107,7 @@ work already agreed here are pre-approved, and a new design question waits.
     14.8×, a ten-read query at 650 MB, a test run at 0.5–4.6 GB, `land!` 5–11 GB: acquisition that does not reuse the
     program-only base by identity (tasks filed: `seon.sci.eval/install-row-is-twice-as-slow-after-the-stale-var-fix`,
     `seon.test/arm-first-loads-costs-many-times-its-main-baseline`,
-    `seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte`,
+    `seon.task/one-test-run-at-the-repl-allocates-over-a-gigabyte`,
     `seon.context/one-agents-current-state-costs-hundreds-of-megabytes`). Hold a basis, never a value
     (`seon.sci.eval/a-context-holds-the-basis-it-acquired-not-the-database-value`,
     `seon.db/a-failed-projection-derivation-stays-cached-under-its-commit`).
@@ -116,7 +123,7 @@ work already agreed here are pre-approved, and a new design question waits.
   A fence found in code is a defect with a root-cause task.
 - **Design is interactive.** The owner decides designs in conversation; lanes implement agreed designs; bug fixes and
   work agreed in this list are pre-approved when the owner is unreachable; a new design question waits for the owner.
-- **Root reviews each merge request's diff before it lands** until criteria for automatic merges are written (Q8).
+- **Merge requests are root's tasks** until criteria for automatic merges are written (Q8).
 - **One probe always in flight.** One lane always serves the loop (a landing, a chain run); the head of the list is
   work with a named owner. Rounds are runs of the chain; a run is graded against the previous one before the next.
 - **A round's tasks are small ordinary owner functions picked by reach** until the chain runs; the instrument's own
@@ -134,11 +141,11 @@ work already agreed here are pre-approved, and a new design question waits.
 
 **Merges, host-bound tests and the first task (owner, 2026-10-11, round 3):**
 
-- **Root reviews from data, not a mechanism.** `:seon.config.root/land? false`. A green end records the merge request;
-  everything root needs to judge it is attached to that task as data (the diff, every reached test with its result,
+- **The merge request is a task assigned to root; no new mechanism.** `:seon.config.root/land? false`. A green end
+  records the merge request; everything root needs to judge it is attached to that task as data (the diff, every reached test with its result,
   the proofs, the task's intent and decisions, the merge instructions) and root's context renders it through render
-  functions and the value printer. `my.root/merge!` is root's decision; there is no review step, flag or `:reviewed`
-  fact beside it. Missing data in that rendering is a defect of the render or the task, fixed at its producer.
+  functions and the value printer. Root works it as any agent works its task; `my.root/merge!` or `close!` ends it; there is
+  no review function, flag or `:reviewed` fact. Missing data in that rendering is a defect of the render or the task, fixed at its producer.
 - **Host-bound tests are derived.** Whether a test can run interpreted is decided by the same analysis that decides it
   for functions (what the body references, from SCI's and clj-kondo's reading of it), never authored.
 - **The experiment's first task** is a mined open task with a reproduction form and an existing owner symbol, picked by
@@ -165,7 +172,7 @@ ordinary work is sub-second.
    or unobserved proofs (7ce008211, c95848065). 119 of 722 tasks carry a tagged proof. Proof quality is the weak point:
    nearly every failed round traced to the proof or the task, not the implementer, so the chain gives proofs their own
    stage and the catalogue (TASK-CHAIN §4).
-4. **Default runs HEAD.** Routine: `bin/seon start --head` per landing batch; readiness 5.1–5.3 s on a quiet machine.
+4. **Default runs HEAD.** Routine: `bin/seon start --head` per landing batch; readiness 5.1–5.3 s on a quiet machine (`start --head` with adoption measured 32 s on 2026-10-11).
    The lag workarounds are not yet deleted (§0 item 13).
 5. **Correctness and efficiency over size, for now** (owner, 2026-10-10). Temporary growth is acceptable; Seon agents
    trim it later using the cost data; every change is judged by correctness and measured cost. Growth that is a fence
@@ -209,7 +216,7 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
   corrected when it is next touched.
 - DYNAMIC-CONTEXT stages 4–7 (shown declarations, working set, history by reference, reflection on a snapshot): after
   guessed names are answered at the failure (§0 item 9) and only if a chain run shows prompt growth caps agents.
-- Publication (26 s per check) and boot's whole-program derivation: platform landings pay the existing check; per-file
+- Publication (a compiled check is 32–45 s measured) and boot's whole-program derivation: platform landings pay the existing check; per-file
   derivation inputs when the chain table shows the cost dominating.
 - Landing through git objects or a dedicated checkout (fable-replan §4.3 fix A): the revert removes the fences the
   shared tree motivated; the root fix lands only if a real collision is observed.
@@ -265,10 +272,10 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
 - 2026-10-10 Only reliable, like-for-like cost data is surfaced; one cost entity per [symbol, scope], cold and warm.
 
 **Merge and landing**
-- 2026-10-10 Auto-merge on green is the target; 2026-10-11 (Q8): until criteria for non-controversial merges are
-  written from root's reviews, root reviews each diff before it lands.
-- 2026-10-11 The first landing through the path is round 8's merge request after its two interpreter bugs are fixed
-  (Q11). Interpreted/compiled mismatches at the gate are bugs (Q3).
+- 2026-10-10 Auto-merge on green is the target; 2026-10-11 (Q8, round 3): until criteria for non-controversial merges
+  are written, a merge request is a task assigned to root, rendered from the data attached to it; no review mechanism.
+- 2026-10-11 The first landing through the path is the round-8 task, rerun by a fresh agent after its two interpreter
+  bugs are fixed (Q11; the original merge request went with the reset). Interpreted/compiled mismatches at the gate are bugs (Q3).
 - 2026-10-11 One close owner `seon.task/close!` decides a merge request and deletes its branches; the stale merge
   requests and ended agents' branches are cleaned by hand today (Q6).
 - 2026-10-10 Land the Datahike fork's commit-cost change (done, 5acc29e23).

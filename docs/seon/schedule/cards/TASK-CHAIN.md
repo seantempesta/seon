@@ -64,7 +64,7 @@ the agent's own history. Byte stability buys cache hits; correctness of the task
 (my task, its stage, the stage's proofs with status and failing data, decisions, offered operations), `my.task/refine!`
 (edit any field, including a decision), `my.task/send-back!` (reason, optional target stage, counterexample; it writes the
 `:send-back` decision and ends the turn). Success has no verb: green stage proofs end the stage. `my.message/send` and
-`my.turn/wait` stay. Root side, `my.root`: `instructions`, `launch!`, `merge-requests`, `review`, `merge!`, `close!`,
+`my.turn/wait` stay. Root side, `my.root`: `instructions`, `launch!`, `merge-requests`, `merge!`, `close!`,
 `ended`. Platform: `seon.task/proofs`, `request-merge!`, `close!`; `seon.turn/end-task!` is the one transition.
 
 ## 3. The stages (pipeline A)
@@ -95,8 +95,9 @@ modifies on the task.
    real workload before and after with like evaluators. Its first turn checks that the proofs encode the intent and may
    **send back** (`my.task/send-back!` to Prove or Design with the counterexample) instead of patching around a wrong
    proof. Decision `:changed #{syms}` or `:send-back`.
-4. **Land** (root, then automatic): the end records the merge request (`seon.task/request-merge!`); root reads the diff
-   since the merge base with the gate's verdict (`my.root/review`) and merges (`my.root/merge!` over
+4. **Land** (root, then automatic): the end records the merge request (`seon.task/request-merge!`); the merge request is a
+   task assigned to root, carrying the diff since the merge base, every reached test with its result, the proofs and the
+   decisions as data rendered in root's context (no review mechanism); root merges (`my.root/merge!` over
    `seon.cluster.source/land!`: gate, `merge!`, write-back, one git commit, `seon.task/close!` `:merged`). A gate red
    is a send-back to Implement (a reached test newly red) or Prove (a proof that cannot be made green); root closes a
    merge request it declines with a reason (`:closed`). Non-controversial merges land without root once the criteria are
