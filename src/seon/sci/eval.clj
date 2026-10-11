@@ -2858,13 +2858,19 @@
         test-row (fn [row] [(:seon.test/sym row) (:seon.test/source row)
                             (get-in row [:seon.test/ns :seon.ns/name]) (:seon.schema.admission/source row)])
         held-namespaces (into #{} (comp (filter :seon.ns/name) (map namespace-key)) previous)
-        held-tests (into #{} (comp (filter :seon.test/sym) (map test-row)) previous)]
+        held-tests (into #{} (comp (filter :seon.test/sym) (map test-row)) previous)
+        added (into #{} (remove #(or (contains? digests %) (overridden %))) (keys held))
+        namespaces (into [] (filter #(and (:seon.ns/name %) (:seon.ns/source %)
+                                          (not (held-namespaces (namespace-key %)))))
+                         rows)
+        tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)]
     {::overridden overridden
-     ::added (into #{} (remove #(or (contains? digests %) (overridden %))) (keys held))
-     ::namespaces (into [] (filter #(and (:seon.ns/name %) (:seon.ns/source %)
-                                         (not (held-namespaces (namespace-key %)))))
-                        rows)
-     ::tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)}))
+     ::added added
+     ::namespaces namespaces
+     ::tests tests
+     ;; What the plan's interpretation is a function of: its definitions by
+     ;; digest, its namespace and test rows by content.
+     ::digest (id/digest 32 [(select-keys held (concat overridden added)) namespaces tests])}))
 
 (defn- overlay-plan
   "The overlay of one program against the loaded commit, shared across data writes."
@@ -3141,21 +3147,27 @@
           (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
           acquired)))))
 
+(defn- program-changes
+  "What `database` changes of the `loaded` program (`overlay-plan`), or nil when
+  it changes nothing: its program revisions are the loaded commit's, or its
+  plan is empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+                  [:or :nil :map]]}
+  [database loaded projection]
+  (let [revisions (program-revisions database projection)]
+    (when-not (or (identical? loaded database)
+                  (and revisions (= revisions (program-revisions loaded projection))))
+      (let [plan (overlay-plan database loaded)]
+        (when (some seq (vals (dissoc plan ::digest)))
+          plan)))))
+
 (defn- overlay!
-  "Interpret on `ctx`, a fork of the cluster base, what `database` changes of
-  the loaded program; the acquisition, the base's own when nothing changed."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value] :map]}
-  [ctx database loaded]
-  (let [snapshot @(::kernel/program-snapshot ctx)
-        commit (commit-id-of database)
-        plan (when-not (or (identical? loaded database)
-                           (and commit (= commit (commit-id-of loaded))))
-               (overlay-plan database loaded))
-        acquired (if (some seq (vals plan))
-                   (interpret-overlay! ctx database plan)
-                   (::acquisition snapshot))]
-    (swap! (::kernel/program-snapshot ctx) assoc
-           ::acquisition acquired ::armed-dials (armed-dials database))
+  "Interpret on `ctx`, a fork of the cluster base, the `plan` of what `database`
+  changes of the loaded program; the acquisition."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
+  [ctx database plan]
+  (let [acquired (interpret-overlay! ctx database plan)]
+    (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
     acquired))
 
 (defn- latest-print-fact
@@ -3542,13 +3554,13 @@
   (* 12288 (count (:functions @(::kernel/program-snapshot ctx)))))
 
 (defn- derive-overlay-ctx
-  "Interpret one program on a private fork source with no custody or recorder."
+  "Interpret one program's `plan` on a private fork source with no custody or recorder."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
-                       :seon.schema/projection] :seon.sci.eval/ctx]}
-  [cluster database loaded projection]
+                       :seon.schema/projection :map] :seon.sci.eval/ctx]}
+  [cluster database loaded projection plan]
   (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
                    ::custody {} :seon.schema/projection projection)]
-    (assoc ctx ::acquisition (overlay! ctx database loaded))))
+    (assoc ctx ::acquisition (overlay! ctx database plan))))
 
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
@@ -3556,8 +3568,10 @@
   Matching definitions copy the loaded JVM Var root. Overrides and affected
   callers interpret their admitted source. Acquisition refusals remain values on the context;
   the caller records them in its custody and restores no private state.
-  Both the cluster base and each interpreted program are content-keyed fork
-  sources in `seon.cache`; every caller receives its own SCI and kernel atoms."
+  The cluster base is the fork source of every value that changes nothing of
+  the loaded program; a changed program's interpretation is keyed by its plan's
+  content, so equal changes on many branches share one entry. Every caller
+  receives its own SCI and kernel atoms."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
@@ -3573,16 +3587,22 @@
                    (seon.cache/lookup ::base-context base-key context-weight derive-base)
                    (derive-base))
          projection (or (db/carried-projection database) (schema/projection-from-database database))
-         derive-overlay #(derive-overlay-ctx cluster database loaded projection)
-         source (if-let [revisions (when base-key (program-revisions database projection))]
-                  (seon.cache/lookup ::overlay-context
-                                     [base-key revisions (armed-dials database)]
-                                     context-weight derive-overlay)
-                  (derive-overlay))
+         plan (program-changes database loaded projection)
+         dials (armed-dials database)
+         derive-overlay #(derive-overlay-ctx cluster database loaded projection plan)
+         source (cond
+                  (nil? plan) (assoc cluster :seon.schema/projection projection)
+                  base-key (seon.cache/lookup ::overlay-context
+                                              [base-key (::digest plan)
+                                               ;; the declarations its wrappers arm under
+                                               (db/content-revisions database schema/projection-attributes)
+                                               dials]
+                                              context-weight derive-overlay)
+                  :else (derive-overlay))
          recorder (:seon.flow/commit-fault! arm-request)
          ctx (copy-base-ctx source database loaded recorder)
          acquired (record-acquisition-refusals! ctx database (::acquisition source) recorder)]
-     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
+     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired ::armed-dials dials)
      (assoc ctx ::acquisition acquired))))
 
 (defn- loaded-basis

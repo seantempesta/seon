@@ -2739,3 +2739,25 @@
             (is (zero? (get called 'seon.sci.eval/derive-overlay-ctx 0)))
             (is (< (:seon.profile/ms measured) 3))
             (is (< (:seon.profile/alloc-bytes measured) 3000000)))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/branches-without-program-changes-add-no-overlay-entry}}
+  branches-without-program-changes-add-no-overlay-entry
+  (test-support/with-database
+   (fn [connection]
+     (eval/base-ctx (db/db connection))
+     (let [overlay #(select-keys (get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/overlay-context])
+                                 [:seon.cache/misses :seon.cache/bytes])
+           before (overlay)]
+       (dotimes [_ 3]
+         (with-fresh-fork
+          connection
+          (fn [fork]
+            (let [[entity doc] (db/q '[:find [?e ?d] :where [?e :seon.fn/sym seon.id/digest] [?e :seon.fn/doc ?d]]
+                                     (db/db fork))]
+              ;; One program datom rewritten as it was: new revisions, the same program.
+              (test-support/transacted! fork [[:db/retract entity :seon.fn/doc doc] [:db/add entity :seon.fn/doc doc]]))
+            (is (= (seon.id/digest 4 [1])
+                   (sci/eval-string* (eval/base-ctx (db/db fork)) "(seon.id/digest 4 [1])"))))))
+       (is (= (:seon.cache/misses before 0) (:seon.cache/misses (overlay) 0))
+           "an unchanged program forks the cluster base: no overlay is derived")
+       (is (<= (:seon.cache/bytes (overlay) 0) (:seon.cache/bytes before 0)))))))

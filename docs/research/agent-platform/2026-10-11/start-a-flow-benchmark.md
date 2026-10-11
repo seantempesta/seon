@@ -650,3 +650,42 @@ pays a duplicate overlay derivation for the fork. A fresh fork's
 connection id and generation, `seon.db/projection-cache-key`) and reads the
 declaration datoms: about 8 ms / 2.7 MB on default per fresh branch, measured
 outside `base-ctx` by the H3 proof.
+
+A second H3 benchmark sample (`bin/seon check --at 2e06e5d38`) measured cold
+SCI **930.29 ms / 1,844.6 MB** (warm 10.73 / 5.142): the cold leg varies with
+whether the cold fork's program revisions equal the loaded commit's, since H3
+still derived an overlay context, a copy of the base, for an unchanged program.
+
+### H4: no duplicate programs in the cache
+
+`seon.sci.eval/base-ctx` asks `program-changes` first: a value whose program
+revisions are the loaded commit's, or whose overlay plan is empty, forks the
+cluster base itself and writes no `:seon.sci.eval/overlay-context` entry. A
+changed program keys its interpreted source by the plan's content digest
+(definitions by digest, namespace and test rows by content), the projection
+attributes' content revisions and the armed dials, so equal changes on many
+branches share one entry. `overlay!` takes the plan; the armed dials are set
+once on the caller's copy.
+
+Red at H3 (candidate `784863725`): three fresh forks, each rewriting one
+program datom as it was (new revisions, the same program), added three
+overlay misses and **+157 MB** of `:seon.sci.eval/overlay-context` (235.7 →
+392.7 MB). Green (run `3eb9bb11ee6c`, 12 Vars, 135 pass): no miss, no bytes.
+
+| Part | Cold ms / MB | Warm ms / MB |
+|---|---:|---:|
+| Branch | 5.58 / 1.932 | 7.50 / 0.706 |
+| World | 0.09 / 0.014 | 0.09 / 0.014 |
+| SCI | 548.73 / 813.839 | 13.00 / 7.198 |
+| First context | 35.96 / 32.824 | 15.59 / 9.872 |
+| Paused Flow | 1.62 / 0.622 | 1.17 / 0.605 |
+
+Cold SCI held at 549–589 ms / 814–830 MB over four H4 runs. Warm SCI
+regressed against H3's two samples (10.73–10.96 ms / 4.95–5.14 MB) by about
+2.3 ms and 2.1 MB in four samples (13.0–14.8 ms / 7.2–8.2 MB). `base-ctx`
+alone stays under 3 ms / 3 MB in the H3 proof, and the plan lookup, both
+revision reads and the loaded commit measure 0.1–1 MB together on default, so
+the difference lies in `fork-cluster-ctx` over the base source. H5 removes that
+second fork from the start path; it is not attributed further here. One run
+(`b7a088a0f559`) failed only the unchanged warm context bound (31.28 ms > 30),
+which three other runs of the same candidate passed.
