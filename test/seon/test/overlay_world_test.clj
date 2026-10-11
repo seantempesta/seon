@@ -4,7 +4,9 @@
   branch's operational rows and live default's agents stay out, a retracted
   declaration is absent and a changed callee runs its candidate definition.
   The world is a checkpoint prepared once and read only when complete."
-  (:require [clojure.string :as str]
+  (:require [seon.sci.eval]
+            [seon.batch]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
             [seon.cluster.process :as cluster.process]
@@ -33,10 +35,10 @@
        (support/transacted! connection [{sentinel "operational"}])
        (support/transacted! connection [[:db/retractEntity [:seon.test/sym victim]]])
        (support/define!
-        (world/agent-world {:seon.db/connection connection :seon.cluster/name (:seon.cluster/name handle)
+        (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
                             ;; the execution's own context: its environment holds the handle
-                            :seon.sci.eval/base-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))}
-                           {:seon.agent/id "overlay-candidate"})
+                            :seon.sci.eval/ctx (seon.sci.eval/fork-cluster-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "overlay-candidate"})
         probe-ns
         (str "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 1)"
              " (defn overlay-caller {:malli/schema [:=> [:cat] :int]} [] (overlay-callee))"

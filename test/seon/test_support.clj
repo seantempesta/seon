@@ -1,6 +1,7 @@
 (ns seon.test-support
   "Shared test constructions which invoke production owners."
   (:require [seon.error.refusal]
+            [seon.turn.world :as world]
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.data.json :as json]
@@ -411,21 +412,15 @@
         request (assoc request :seon.sci.eval/ctx ctx)
         start (or (second namespace-ref) 'user)
         limit (or limit (:seon.config.eval/time-limit-ms config/defaults))
-        world (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
-                       :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
-                       :seon.batch/sink (seon.batch/sink)}
-                ;; the world an agent's evaluation has: its custody's connection
-                ;; and its identity, from which omitted inputs are supplied
-                connection (as-> world
-                             (let [environment (or (env/of ctx)
-                                                   (env/environment {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
-                                                                     :seon.db/connection connection}))]
-                               ;; the context's own environment (its routing, store), else one
-                               ;; naming the cluster and connection; its store and routing are
-                               ;; world members, as `seon.turn.world/agent-world` merges them
-                               (merge world {:seon.db/connection connection :seon.env/environment environment}
-                                      (seon.batch/environment-members environment))))
-                (:seon.agent/id request) (assoc :seon.agent/id (:seon.agent/id request)))
+        ;; the world an agent's evaluation has: its custody's connection,
+        ;; the context's own environment (its routing, store) and its identity,
+        ;; from which omitted inputs are supplied
+        world (world/world (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
+                                    :seon.db/connection (or connection (:seon.db/connection (env/of ctx)) (:seon.db/connection (execution-handle nil)))
+                                    :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
+                                    :seon.batch/sink (seon.batch/sink)}
+                             (env/of ctx) (assoc :seon.env/environment (env/of ctx))
+                             (:seon.agent/id request) (assoc :seon.agent/id (:seon.agent/id request))))
         batch (seon.batch/evaluate-batch
                (-> (turn.batch/code-request
                     {:seon.batch/world world

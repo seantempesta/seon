@@ -3,7 +3,8 @@
   section 2 that no other test covers, asserted on the batch's data. Each
   test drives the public entry with stage values passed as data (one symbol
   per form, each form's value is itself); the ids are the spec's item numbers."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [seon.config]
+            [clojure.test :refer [deftest is]]
             [seon.batch :as batch]
             [seon.db :as db]
             [seon.id :as id]
@@ -171,9 +172,9 @@
     (fn [connection]
       (let [basis (db/db connection)
             request (support/code-request
-                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
-                                                           {:seon.agent/id "d8-row"})
+                     {:seon.batch/world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                                            :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx basis) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "d8-row"})
                       :seon.batch/start-ns 'user
                       :seon.batch/text "(defn d8-f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"})
             entry (first (:seon.batch/entries (batch/evaluate-batch (dissoc request :seon.batch/settle))))]
@@ -187,7 +188,8 @@
         connection (:seon.db/connection handle)
         agent-id (str "settle-custody-" (id/id))
         _ (support/transacted! connection (support/agent-tx @connection agent-id))
-        world (world/jvm-world (:seon.cluster/name handle) connection {:seon.agent/id agent-id :seon.turn/id (id/id)})
+        world (world/world {:seon.boot/cluster-name (:seon.cluster/name handle) :seon.db/connection connection
+                            :seon.agent/id agent-id :seon.turn/id (id/id) :seon.batch/sink (seon.batch/sink)})
         batch (support/with-database
                (fn [_] (batch/evaluate-batch
                         (turn.batch/jvm-request {:seon.batch/world world :seon.batch/text "(+ 1 2)"

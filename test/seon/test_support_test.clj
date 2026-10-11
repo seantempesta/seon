@@ -435,9 +435,9 @@
 (deftest a-code-request-batch-evaluates-each-form
   (test-support/with-database
    (fn [connection]
-     (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                     :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                    {:seon.agent/id "code-request"})
+     (let [world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                     :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "code-request"})
            batch (seon.batch/evaluate-batch
                   (dissoc (test-support/code-request {:seon.batch/world world :seon.batch/text "(inc 1) (inc 2)"})
                           :seon.batch/settle))]

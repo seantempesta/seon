@@ -427,7 +427,31 @@
                            :seon.test/policy :named :seon.test/rerun? true
                            :seon.test/identities #{'seon.error-test/attribution-is-a-lookup-ref-or-nothing}}))]
     (is (true? (:seon.test/passed? result))
-        "the member's omitted agent id is its own world's, never the requester's")))
+        "the member's omitted agent id is its own world's, never the requester's")
+    (is (= [{:seon.test/fail-count 0 :seon.test/error-count 0}]
+           (mapv #(select-keys % [:seon.test/fail-count :seon.test/error-count :seon.test/failure-message])
+                 (:seon.test/results
+                  (binding [seon.batch/*world* {:seon.boot/cluster-name "default"
+                                                :seon.env/environment (:seon.env/environment execution)
+                                                :seon.agent/id "member-world-requester"}]
+                    (sut/run {:seon.test/execution execution
+                              :seon.test/recording-connection (:seon.db/connection execution)
+                              :seon.test/policy :named :seon.test/rerun? true
+                              :seon.test/identities #{'seon.test-test/a-member-body-runs-in-the-constructors-world-for-its-branch}})))))
+        "the member's world is the constructor's value for its own branch")))
+
+(deftest ^{:seon/tasks #{'seon.batch/every-world-is-built-by-one-constructor}}
+  a-member-body-runs-in-the-constructors-world-for-its-branch
+  ;; Run as a member (every deftest is one, `seon.test/run`): the world its
+  ;; body sees is `seon.turn.world/world`'s closed value for the member's own
+  ;; branch, never its requester's.
+  (let [world seon.batch/*world*]
+    (is (schema/valid-candidate-value? (db/carried-projection (db/db (:seon.db/connection world))) :seon.batch/world-base world)
+        "the body's world is the constructor's closed value")
+    (is (identical? (:seon.db/connection world) (:seon.db/connection sut/*member*))
+        "its custody is the member's branch")
+    (is (nil? (:seon.agent/id world))
+        "it carries no requester's agent")))
 
 (deftest an-observed-change-a-script-test-reaches-does-not-refuse-the-step
   ;; Before, a definition changed since the previous run, reached by a test this

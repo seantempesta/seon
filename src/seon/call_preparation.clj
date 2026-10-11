@@ -543,21 +543,27 @@
     {:seon.call-preparation/ambiguous? true
      :seon.call-preparation/candidates (candidate-indexes derived)}))
 
+(def ^:private world-supplied
+  "What an evaluation's world supplies, by declared schema name: its members
+  (`seon.batch/world-members`) and the database, which no world holds: the
+  world connection's current value, read at the call."
+  (assoc seon.batch/world-members :seon.db/database-value :seon.db/db))
+
 (def ^:private world-candidates
-  "A supplied default for each member of an evaluation's world
-  (`seon.batch/world-members`), keyed by the schema name a function declares
-  it under. Its value comes from the calling evaluation's world
-  (`seon.batch/*world*`) and nowhere else."
-  (into {} (for [[schema-key member] seon.batch/world-members]
+  "A supplied default for each input an evaluation's world supplies
+  (`world-supplied`), keyed by the schema name a function declares it under.
+  Its value comes from the calling evaluation's world (`seon.batch/*world*`)
+  and nowhere else."
+  (into {} (for [[schema-key member] world-supplied]
              [schema-key {:seon.call-preparation/key member
                           :seon.call-preparation/schema-key schema-key
                           :seon.call-preparation/supplier-symbol `seon.batch/world-members}])))
 
 (defn- world-member?
-  "Whether `schema-key` names a member of an evaluation's world."
+  "Whether `schema-key` names an input an evaluation's world supplies."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An argument slot's declared schema is any Malli form.", :gen/elements [nil :k [] {}]}]] :boolean]}
   [schema-key]
-  (contains? seon.batch/world-members schema-key))
+  (contains? world-supplied schema-key))
 
 (defn- slot-of
   [candidate position]
@@ -879,8 +885,8 @@
       (:seon.call-preparation/optional? slot) (supply-from-world slot sym)
       (not= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
       (supply-from-row current environment slot sym)
-      ;; an evaluation of the one path: its world is the only source; a
-      ;; world without an environment (a test member's call sink) is none
+      ;; an evaluation of the one path: its world (`seon.turn.world/world`,
+      ;; which always holds an environment) is the only source
       (:seon.env/environment seon.batch/*world*) (supply-from-world slot sym)
       ;; an entrant not yet converted to the one path binds no world: its
       ;; member's row supplier answers, as before (deleted with the last
@@ -909,7 +915,7 @@
     (if (or (nil? v) (= ::absent v))
       (unavailable sym slot {:seon.error/message
                              (str "This evaluation's world holds no "
-                                  (some (fn [[k m]] (when (= m member) k)) seon.batch/world-members)
+                                  (some (fn [[k m]] (when (= m member) k)) world-supplied)
                                   (when-not world " (no evaluation is running on this thread)")
                                   "; pass it explicitly.")})
       v)))

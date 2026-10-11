@@ -1,5 +1,6 @@
 (ns seon.test-reaching-test
-  (:require [clojure.java.io]
+  (:require [seon.batch]
+            [clojure.java.io]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is]]
             [malli.instrument]
@@ -330,9 +331,9 @@
             _ (support/transacted! connection [(support/namespace-entity (db/db connection) namespace-name)])
             sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [entities] (apply max-key :seon.test/pass-count entities))"
                      "(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))"]]
-        (support/define! (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                             :seon.sci.eval/base-ctx (seon.sci.eval/base-ctx (db/db connection))}
-                                            {:seon.agent/id "reach-digest"})
+        (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                             :seon.sci.eval/ctx (seon.sci.eval/fork-cluster-ctx (seon.sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "reach-digest"})
                          namespace-name (str/join " " sources))
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test

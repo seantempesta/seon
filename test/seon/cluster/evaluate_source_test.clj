@@ -275,7 +275,7 @@
            sci (let [result (code text)] (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)]))
            jvm (:seon.batch/entries
                 (batch/evaluate-batch
-                 (dissoc (turn.batch/jvm-request {:seon.batch/world (world/jvm-world cluster-name connection {:seon.agent/id agent-id})
+                 (dissoc (turn.batch/jvm-request {:seon.batch/world (world/world {:seon.boot/cluster-name cluster-name :seon.db/connection connection :seon.agent/id agent-id :seon.batch/sink (seon.batch/sink)})
                                                   :seon.batch/text text})
                          :seon.batch/settle :seon.batch/show)))]
        (is (= [2 nil 4] (mapv #(when-not (:seon.cluster.eval/error %) (edn/read-string (:seon.eval/shown %))) sci))
@@ -337,9 +337,9 @@
   (with-armed-agent
    (fn [{:keys [connection cluster-name code]}]
      (code "(+ 1 2)")
-     (support/define! (world/agent-world {:seon.db/connection connection :seon.cluster/name cluster-name
-                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                         {:seon.agent/id "later-writer"})
+     (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name cluster-name
+                                          :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "later-writer"})
                       'my.agents.later-writer
                       "(defn later-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
      (let [result (code (str "(my.agents.later-writer/later-inc 1)\n"

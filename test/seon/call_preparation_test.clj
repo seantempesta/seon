@@ -696,9 +696,11 @@
       (env/carry (environment-for world-connection))))
 
 (defn- armed-eval
-  "Evaluate `source` in `ctx` as an evaluation: under the kernel arm naming it."
+  "Evaluate `source` in `ctx` as an evaluation off the one path: under the
+  kernel arm naming it, in no world (not the test member's own)."
   [ctx source]
-  (kernel/with-arm ctx 5000 (fn [_] (sci/eval-string* ctx source))))
+  (binding [seon.batch/*world* nil]
+    (kernel/with-arm ctx 5000 (fn [_] (sci/eval-string* ctx source)))))
 
 (defn- probe
   [ctx source]
@@ -960,7 +962,8 @@
                 (cp/prepare current environment optional-plan [{:sample/label "caller"}])))
            "the omitted connection is filled from the evaluation's world")
        (is (= [{:sample/label "caller"}]
-              (cp/prepare current environment optional-plan [{:sample/label "caller"}]))
+              (binding [seon.batch/*world* nil]
+                (cp/prepare current environment optional-plan [{:sample/label "caller"}])))
            "with no evaluation's world the optional connection stays absent")
        (is (= [{:sample/label "caller" :seon.db/connection ::the-callers}]
               (cp/prepare current environment optional-plan [{:sample/label "caller" :seon.db/connection ::the-callers}]))

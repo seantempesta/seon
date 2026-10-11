@@ -1,5 +1,8 @@
 (ns seon.test.runner-test
-  (:require [clojure.java.io :as io]
+  (:require [seon.config]
+            [seon.sci.eval]
+            [seon.batch]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [sci.core :as sci]
@@ -103,9 +106,9 @@
            symbols (vec (take 10 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] (db/db connection)))))
            _ (runner/reach-digests (db/db connection) symbols)
            report (test-support/define!
-                   (world/agent-world {:seon.db/connection connection :seon.cluster/name (:seon.cluster/name handle)
-                                       :seon.sci.eval/base-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))}
-                                      {:seon.agent/id "reach-attribute-change"})
+                   (world/world {:seon.db/connection connection :seon.boot/cluster-name (:seon.cluster/name handle)
+                                       :seon.sci.eval/ctx (seon.sci.eval/fork-cluster-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "reach-attribute-change"})
                    'seon.id "(defn reach-attribute-probe {:malli/schema [:=> [:cat] :int]} [] 1)")
            changed (:db-after report)
            reach-attributes #{:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key

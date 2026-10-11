@@ -9,7 +9,8 @@
   absent — and it must decide from recorded facts (`:seon.fn/calls` edges
   and content digests), never from a modification time, a filename, or a
   maintained list."
-  (:require [seon.schema] [babashka.process :as process]
+  (:require [seon.batch]
+            [seon.schema] [babashka.process :as process]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -374,9 +375,9 @@
                     (apply str (repeat 64 "a")))
            _ (support/transacted! connection [{:seon.source/digest seal
                                                :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
-           world (world/agent-world {:seon.db/connection connection :seon.cluster/name "fileless-selection"
-                                     :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                    {:seon.agent/id "fileless-selection"})
+           world (world/world {:seon.db/connection connection :seon.boot/cluster-name "fileless-selection"
+                                     :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "fileless-selection"})
            test-symbol 'fileless.selection/fileless-selection
            written (support/define! world 'fileless.selection
                                     "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))")

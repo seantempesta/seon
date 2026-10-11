@@ -20,6 +20,7 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.turn.world :as world]
             [seon.error.refusal]
             [seon.fault :as fault]
             [seon.fn :as functions]
@@ -276,6 +277,7 @@
   (let [started? (volatile! false)]
     (try
       (let [member (:seon.test/member custody)
+            parent-sink (:seon.batch/sink seon.batch/*world*)
             ;; A development adoption spanning this body makes it unknown.
             task (FutureTask.
                   ;; The body thread is the member branch's own work from its
@@ -284,15 +286,20 @@
                   ;; Its reads are its member's, never the calling form's
                   ;; evidence: the form's sink would hold every member's
                   ;; database values and results until the request ends.
-                  ;; Nor is its world the creator's: it keeps only the calling
-                  ;; world's call sink, so its calls still count there, and no
-                  ;; requester member (agent, connection, task) is supplied to
-                  ;; it; its calls are prepared from its own context
-                  ;; (`kernel/*host-world*`), as in a JVM no agent called.
+                  ;; Nor is its world the creator's: its world is the one
+                  ;; constructor's for the member's own branch (connection,
+                  ;; context, that context's environment), counting its calls
+                  ;; into the calling world's sink; no requester member (agent,
+                  ;; task, connection, store) is supplied to it.
                   (bound-fn []
                     (binding [db/*read-evidence-sink* nil
-                              seon.batch/*world* (some->> (:seon.batch/sink seon.batch/*world*)
-                                                          (hash-map :seon.batch/sink))]
+                              seon.batch/*world* (when-let [environment (when (:seon.db/connection custody)
+                                                                          (env/of (:seon.sci.eval/ctx custody)))]
+                                                   (world/world (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name environment)
+                                                                         :seon.db/connection (:seon.db/connection custody)
+                                                                         :seon.sci.eval/ctx (:seon.sci.eval/ctx custody)
+                                                                         :seon.env/environment environment}
+                                                                  parent-sink (assoc :seon.batch/sink parent-sink))))]
                     (db/call-with-custody
                      (select-keys custody [:seon.db/connection])
                      (fn [] (sci.eval/call-detecting-program-change

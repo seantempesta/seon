@@ -1,5 +1,6 @@
 (ns seon.fn-test
-  (:require [clojure.edn :as edn]
+  (:require [seon.config]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -513,9 +514,9 @@
                               (test-support/agent-tx @connection "settlement-parity-agent" namespace-name)]))
           ;; the fold derives the agent's definition from its runtime
           ;; analysis; its edges equal the static index's for the same source
-          (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                         {:seon.agent/id "settlement-parity-agent"})
+          (let [world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                          :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "settlement-parity-agent"})
                 batch (seon.batch/evaluate-batch
                        (dissoc (test-support/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe
@@ -1662,9 +1663,9 @@
                                  [:seon.test/sym (quote sample.observation/ordinary)])))))
           ;; An agent's deftest derives its entity in the fold (the one REPL
           ;; path's derive stage), with the observation its metadata declares.
-          (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                         {:seon.agent/id "observation-probe"})
+          (let [world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                          :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "observation-probe"})
                 batch (seon.batch/evaluate-batch
                        (dissoc (test-support/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe

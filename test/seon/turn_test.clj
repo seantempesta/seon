@@ -1728,9 +1728,9 @@
    (fn [connection]
      (let [basis (db/db connection)
            request (support/code-request
-                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
-                                                          {:seon.agent/id "stale-writer"})
+                    {:seon.batch/world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                                           :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx basis) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "stale-writer"})
                      :seon.batch/observe observe/observe
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(defn stale-f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"})
@@ -1761,9 +1761,9 @@
    (fn [connection]
      (let [basis (db/db connection)
            request (support/code-request
-                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
-                                                          {:seon.agent/id "empty-removal"})
+                    {:seon.batch/world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                                           :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx basis) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "empty-removal"})
                      :seon.batch/start-ns 'user
                      :seon.batch/text "nil"})
            facts (turn.batch/form-facts request basis {:seon.batch/entities [] :seon.batch/schema-keys #{}
@@ -1866,7 +1866,14 @@
    (fn [connection]
      (let [execution (support/execution-handle connection)
            request (support/code-request
-                    {:seon.batch/world (world/agent-world execution {:seon.agent/id "branch-lister"})
+                    {:seon.batch/world (world/world (cond-> {:seon.boot/cluster-name (:seon.cluster/name execution)
+                                                          :seon.db/connection (:seon.db/connection execution)
+                                                          :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (:seon.sci.eval/base-ctx execution)
+                                                                                                        (db/db (:seon.db/connection execution))
+                                                                                                        (:seon.db/connection execution))
+                                                          :seon.batch/sink (seon.batch/sink) :seon.agent/id "branch-lister"
+                                                          :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults)}
+                                                   (:seon.env/environment execution) (assoc :seon.env/environment (:seon.env/environment execution))))
                      :seon.batch/observe observe/observe
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(my.agent/branches)"})
@@ -1882,9 +1889,9 @@
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "sees-own-write"))
      (let [request (support/code-request
-                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                                          {:seon.agent/id "sees-own-write"})
+                    {:seon.batch/world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                                           :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "sees-own-write"})
                      :seon.batch/observe observe/observe
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(do (my.agent/settings! {:seon.config.eval/time-limit-ms 4321}) (my.agent/settings))"})
@@ -1899,9 +1906,9 @@
   (support/with-database
    (fn [connection]
      (let [request (support/code-request
-                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
-                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                                          {:seon.agent/id "stale-schema-writer"})
+                    {:seon.batch/world (world/world {:seon.db/connection connection :seon.boot/cluster-name "default"
+                                                           :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection)) (db/db connection) connection)
+ :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "stale-schema-writer"})
                      :seon.batch/observe observe/observe
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(seon.schema/register! :stale.schema/label :string)"})

@@ -340,11 +340,11 @@
   (let [connection (:seon.db/connection handle)
         run-id (id/id)
         ;; the agent's own context holds each value under its result handle
-        world (world/jvm-world cluster-name connection
-                               (cond-> {:seon.agent/id agent-id :seon.turn/id run-id
-                                        :seon.sci.eval/ctx (:seon.sci.eval/ctx (agent/acquire-context! handle agent-id))}
-                                 (env/of handle) (assoc :seon.env/environment (env/of handle))
-                                 (:seon.db.process/id handle) (assoc :seon.db.process/id (:seon.db.process/id handle))))
+        world (world/world (cond-> {:seon.boot/cluster-name cluster-name :seon.db/connection connection
+                                    :seon.agent/id agent-id :seon.turn/id run-id :seon.batch/sink (seon.batch/sink)
+                                    :seon.sci.eval/ctx (:seon.sci.eval/ctx (agent/acquire-context! handle agent-id))}
+                             (env/of handle) (assoc :seon.env/environment (env/of handle))
+                             (:seon.db.process/id handle) (assoc :seon.db.process/id (:seon.db.process/id handle))))
         mark (cluster/loaded-code-mark)
         batch (seon.batch/evaluate-batch
                (turn.batch/jvm-request {:seon.batch/world world :seon.batch/text code

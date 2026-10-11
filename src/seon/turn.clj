@@ -44,6 +44,7 @@
             [seon.sci.observe :as observe]
             [seon.task :as task]
             [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as world]
             [seon.sci.reader :as reader])
   (:import [java.util Date]
            [java.util.concurrent Executor]))
@@ -4427,22 +4428,22 @@
                   (:seon.turn.loop/submission cluster)
                   (assoc :seon.db/pending-open
                          (get-in cluster [:seon.turn.loop/submission :seon.db/tx-data]))))
-        world (cond-> {:seon.boot/cluster-name (:seon.cluster/name cluster)
-                       :seon.db/connection connection :seon.db/writer db/transact!
-                       :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
-                       :seon.render/profile profile
-                       ;; THE PASS'S ONE SINK: inside a turn proc the batch counts into the
-                       ;; pass's sink (`seon.cluster.agent/turn-step`), so the reply reads
-                       ;; the request's whole work from one place
-                       :seon.batch/sink (or (:seon.batch/sink seon.batch/*world*) (seon.batch/sink))
-                       :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
-                       :seon.agent/id agent-id}
-                run-id (assoc :seon.turn/id run-id)
-                (env/of cluster) (-> (assoc :seon.env/environment (env/of cluster))
-                                     (merge (seon.batch/environment-members (env/of cluster))))
-                (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster))
-                ;; the cluster's own handle the agent's arming recorded (`seon.cluster.agent/arm!`)
-                (:seon.agent/context-source cluster) (assoc :seon.agent/context-source (:seon.agent/context-source cluster)))
+        world (world/world
+               (cond-> {:seon.boot/cluster-name (:seon.cluster/name cluster)
+                        :seon.db/connection connection
+                        :seon.sci.eval/ctx ctx
+                        :seon.render/profile profile
+                        ;; THE PASS'S ONE SINK: inside a turn proc the batch counts into the
+                        ;; pass's sink (`seon.cluster.agent/turn-step`), so the reply reads
+                        ;; the request's whole work from one place
+                        :seon.batch/sink (or (:seon.batch/sink seon.batch/*world*) (seon.batch/sink))
+                        :seon.agent/id agent-id}
+                 limit (assoc :seon.sci.eval/time-limit-ms limit)
+                 run-id (assoc :seon.turn/id run-id)
+                 (env/of cluster) (assoc :seon.env/environment (env/of cluster))
+                 (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster))
+                 ;; the cluster's own handle the agent's arming recorded (`seon.cluster.agent/arm!`)
+                 (:seon.agent/context-source cluster) (assoc :seon.agent/context-source (:seon.agent/context-source cluster))))
         request (-> (turn.batch/program-request
                      {:seon.batch/world world
                       ;; the batch starts from the value this turn read

@@ -24,6 +24,7 @@
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
+            [seon.turn.world :as world]
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang IBlockingDeref]
            [java.util.concurrent Executor Executors ExecutorService Future FutureTask
@@ -260,36 +261,25 @@
   "The submitting evaluation's identities an io submission carries as data."
   [:seon.agent/id :seon.agent/branch :seon.turn/id :seon.batch/ordinal :seon.task/id])
 
-(defn- proc-world
-  "The world a proc step or an io task runs in (`seon.batch/*world*`),
-  derived from the environment its args or submission carry, since Flow
-  conveys no bindings: its cluster, connection and environment, its agent,
-  and the submitting evaluation's identities (`origin`). It holds no database
-  value: a step is no evaluation with a basis, and a value read at its start
-  would be supplied to every omitted optional database input it makes, stale
-  after its own first write (a test member's body, a turn's settlement).
-  Nil for an environment holding no connection. Capture, supply and error
-  context then know where the work runs (health plan §0).
-
-  ## Costs
-
-  - One connection deref and a small map per step; measured in the landing."
-  {:malli/schema [:=> [:cat [:maybe :seon.env/environment] [:maybe :map]] [:maybe :seon.batch/world]]}
-  [environment origin]
-  (when-let [connection (:seon.db/connection environment)]
-    (merge (select-keys origin origin-keys)
-           (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name environment)
-                    :seon.db/connection connection
-                    :seon.env/environment environment}
-             (:seon.agent/id environment) (assoc :seon.agent/id (:seon.agent/id environment))))))
-
 (defn- in-world
-  "Run `f` in the world `proc-world` derives, unless one is already bound on
-  this thread (an evaluation inside a turn proc binds its own)."
+  "Run `f` in the world of a proc step or an io task, unless one is already
+  bound on this thread (an evaluation inside a turn proc binds its own).
+  Flow conveys no bindings, so the world is built (`seon.turn.world/world`)
+  from the environment its args or submission carry: its cluster, connection
+  and environment, its agent, and the submitting evaluation's identities
+  (`origin`). It has no call sink, so its calls count into the host profile.
+  An environment holding no connection gives no world."
   {:malli/schema [:=> [:cat [:maybe :seon.env/environment] [:maybe :map] [:=> [:cat] :any]] :any]}
   [environment origin f]
-  (if-let [world (when-not seon.batch/*world* (proc-world environment origin))]
-    (binding [seon.batch/*world* world] (f))
+  (if-let [connection (when-not seon.batch/*world* (:seon.db/connection environment))]
+    (binding [seon.batch/*world* (cond-> (world/world
+                                          (merge (dissoc (select-keys origin origin-keys) :seon.batch/ordinal)
+                                                 (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name environment)
+                                                          :seon.db/connection connection
+                                                          :seon.env/environment environment}
+                                                   (:seon.agent/id environment) (assoc :seon.agent/id (:seon.agent/id environment)))))
+                                   (:seon.batch/ordinal origin) (assoc :seon.batch/ordinal (:seon.batch/ordinal origin)))]
+      (f))
     (f)))
 
 (defn thread-counters

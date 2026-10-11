@@ -48,11 +48,10 @@
   "Each world member by the schema name a function declares it under: an
   omitted input declared under one of these names is supplied from the
   calling evaluation's world, required or optional. A function whose meaning
-  needs the member absent declares another name. The database is no stored
-  member: it is the world connection's current value, read at the call
-  (`seon.call-preparation/supply`)."
-  {:seon.db/database-value :seon.db/db
-   :seon.db/connection :seon.db/connection
+  needs the member absent declares another name. The database is no member:
+  no world holds one; a call omitting it is supplied the world connection's
+  current value, read at the call (`seon.call-preparation/supply`)."
+  {:seon.db/connection :seon.db/connection
    :seon.db/writer :seon.db/writer
    :seon.agent/id :seon.agent/id
    :seon.task/id :seon.task/id
@@ -79,7 +78,7 @@
   (instance? java.util.concurrent.ConcurrentHashMap x))
 
 (defn stamped-clock?
-  "True for a world's stamp clock."
+  "True for an AtomicLong count (a profile cell's ordinal, `:seon.profile/ordinal`)."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [x]
   (instance? java.util.concurrent.atomic.AtomicLong x))

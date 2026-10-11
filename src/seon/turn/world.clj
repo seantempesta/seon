@@ -1,6 +1,6 @@
 (ns seon.turn.world
   "The one world an entrant hands the one REPL path (`:seon.batch/world`):
-  one constructor per entrant kind, `with-world` to re-establish it on any
+  one constructor, `world`, for agents and test members, `with-world` to re-establish it on any
   thread, where its run is recorded, and the fault stage that records a
   diagnostic in it. Every stage reads the world from its request."
   (:require [clojure.test.check.generators :as gen]
@@ -8,8 +8,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
-            [seon.schema :as schema]
-            [seon.sci.eval :as eval]))
+            [seon.schema :as schema]))
 
 ;; `seon.batch` requires nothing of Seon, so the call sink's predicate and
 ;; generator are registered by the world's owner.
@@ -37,61 +36,27 @@
   [cluster conn]
   (env/environment {:seon.boot/cluster-name cluster :seon.db/connection conn}))
 
-(defn agent-world
-  "A Seon agent's world from its acquired execution (`agent/acquire-context!`):
-  its cluster and branch, its connection, the writer, its SCI context forked
-  onto that connection's current value, its id and
-  task, render profile and settlement inputs. An MCP SCI run's world is this
-  one (MCP only supplies the agent id and transport)."
-  {:malli/schema [:=> [:cat :map :map] :seon.batch/world]}
-  [{conn :seon.db/connection base :seon.sci.eval/base-ctx cluster :seon.cluster/name branch :seon.agent/branch
-    environment :seon.env/environment}
-   {agent-id :seon.agent/id turn-id :seon.turn/id task :seon.task/id profile :seon.render/profile
-    limit :seon.sci.eval/time-limit-ms writer :seon.db/writer process :seon.db.process/id}]
-  (let [db (db/db conn)
-        environment (or environment (execution-environment cluster conn))]
-    (cond-> {:seon.boot/cluster-name cluster
-             :seon.db/connection conn
-             :seon.db/writer (or writer db/transact!)
-             :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
-             :seon.sci.eval/base-ctx base
-             :seon.batch/sink (seon.batch/sink)
-             :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
-             :seon.sci.eval/time-limit-ms (or limit 30000)}
-      agent-id (assoc :seon.agent/id agent-id)
-      turn-id (assoc :seon.turn/id turn-id)
-      environment (-> (assoc :seon.env/environment environment)
-                      (merge (seon.batch/environment-members environment)))
-      process (assoc :seon.db.process/id process)
-      branch (assoc :seon.agent/branch branch)
-      task (assoc :seon.task/id task)
-      profile (assoc :seon.render/profile profile))))
+(def ^:private carried
+  "The request keys a world carries as given."
+  [:seon.boot/cluster-name :seon.db/connection :seon.sci.eval/ctx
+   :seon.db.process/id :seon.agent/id :seon.agent/branch :seon.turn/id :seon.task/id
+   :seon.render/profile :seon.batch/sink :seon.sci.eval/time-limit-ms :seon.batch/settlement
+   :seon.agent/context-source])
 
-(defn test-agent-world
-  "A test agent's world: its own execution's branch, connection and context,
-  its run recorded on the requesting agent's branch (`requester`)."
-  {:malli/schema [:=> [:cat :map :seon.db/connection :map] :seon.batch/world]}
-  [execution requester opts]
-  (assoc (agent-world execution opts) :seon.batch/settlement {:seon.db/connection requester}))
-
-(defn jvm-world
-  "An MCP JVM evaluation's world: the agent's connection and the writer. The host evaluates; the agent's SCI context, when given, holds
-  each value under its result handle."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection :map] :seon.batch/world]}
-  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer ctx :seon.sci.eval/ctx
-                 environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
-  (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn
-           :seon.env/environment (or environment (execution-environment cluster conn))
-           :seon.db/writer (or writer db/transact!)
-           :seon.batch/sink (seon.batch/sink)
-           :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
-    agent-id (assoc :seon.agent/id agent-id)
-    turn-id (assoc :seon.turn/id turn-id)
-    ctx (assoc :seon.sci.eval/ctx ctx)
-    environment (-> (assoc :seon.env/environment environment)
-                    (merge (seon.batch/environment-members environment)))
-    process (assoc :seon.db.process/id process)
-    profile (assoc :seon.render/profile profile)))
+(defn world
+  "The one world an evaluation runs in, an agent's or a test member's: its
+  identity, custody (the connection and the writer), its environment with that
+  environment's store and routing, its SCI context (the caller's fork) and
+  its call sink, as the request gives them. It holds no database value. An agent's world is this value plus its Flow graph and task facts; a
+  test member's is this value alone."
+  {:malli/schema [:=> [:cat :seon.batch/world-request] :seon.batch/world-base]}
+  [{conn :seon.db/connection cluster :seon.boot/cluster-name environment :seon.env/environment
+    writer :seon.db/writer :as request}]
+  (let [environment (or environment (execution-environment cluster conn))]
+    (merge (select-keys request carried)
+           {:seon.db/writer (or writer db/transact!)
+            :seon.env/environment environment}
+           (seon.batch/environment-members environment))))
 
 (defn basis
   "The world's connection's current value: the value a batch starts from
@@ -100,13 +65,6 @@
   {:malli/schema [:=> [:cat :seon.batch/world] :seon.db/database-value]}
   [{conn :seon.db/connection}]
   (db/db conn))
-
-(defn merge-world
-  "Root's world on a merge branch: merge moves entities by identity and
-  evaluates nothing, so it reads the same members as any agent world."
-  {:malli/schema [:=> [:cat :map :map] :seon.batch/world]}
-  [execution opts]
-  (agent-world execution (merge {:seon.agent/id "root"} opts)))
 
 (defn with-world
   "Run `f` with the world's bindings re-established on this thread: its
