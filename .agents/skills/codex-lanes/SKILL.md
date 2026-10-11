@@ -25,17 +25,16 @@ Launch as a harness-tracked background command, BARE (never piped, no
 redirect), one lane per shell. Confirm the launch with `status` before
 assuming it ran.
 
-## Models (from `~/.codex/models_cache.json`, codex-cli 0.156.1, 2026-09-23)
+## Models (from `~/.codex/models_cache.json`, codex-cli 0.162.1, 2026-10-11)
 
-| `LANE_MODEL` | Efforts (default) | Use for (owner 2026-09-23) |
-|---|---|---|
-| `gpt-6-astra` (launcher default) | low … max, ultra (medium) | the FIXER (owner 2026-09-28): follows each landed Opus slice, profiles it at the REPL and commits fixes for super-linear or repeated work and law violations in root-assigned files; also diff review and diagnosis |
-| `gpt-6-sol` | low … max, ultra (medium) | implementation from a written PRD or plan doc — owner: "try out gpt 6 sol that's new"; compare against Opus lanes on clean, small, bug-free code |
-| `gpt-6-luna` | low … max (medium) | fast and cheap: probes, mechanical edits |
+| `LANE_MODEL` | Use for (owner 2026-10-11) |
+|---|---|
+| `gpt-6.1-sol` (always pass `LANE_MODEL=gpt-6.1-sol LANE_EFFORT=medium`) | the default Codex lane: cheaper and faster than Astra. Above all an independent **designer**: one of the two plans in every design round (AGENTS.md "Design by independent plans and a hybrid"); also implementation, fixes and diagnosis. Raise effort only for deep, focused work. |
+| `gpt-6-astra` | hard performance work and audits when named explicitly |
+| `gpt-6-luna` | fast and cheap: probes, mechanical edits |
 
-Only the GPT-6 versions are used (owner 2026-09-23). Dials: `LANE_MODEL`
-(default `gpt-6-astra`), `LANE_EFFORT` (launcher default `low`, not the model's
-`medium`) (`bin/codex-agent:26`, `:54-55`).
+Dials: `LANE_MODEL` and `LANE_EFFORT`, read on `run` and `resume`. The launcher's own defaults are still `gpt-6-astra` and
+`low`, because no test reaches `bin/codex-agent` to prove a change to them; pass both dials explicitly on every launch.
 
 ## Writing a spec
 
