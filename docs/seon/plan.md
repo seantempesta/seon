@@ -132,19 +132,17 @@ work already agreed here are pre-approved, and a new design question waits.
 - **Lanes**: claim before editing; delete with `rm`, never `git rm`; leave nothing staged; a dependency bump lands last
   in a batch, then one restart; a closing lane leaves one committed evidence link and a disposition per scratch root.
 
-**Open questions for the next round** (answers go to fable-replan §8 or here):
+**Merges, host-bound tests and the first task (owner, 2026-10-11, round 3):**
 
-1. **The dial while root reviews.** Q2 says auto-merge on green; Q8 says root reviews each diff before it lands.
-   Options: (a) `:seon.config.root/land? false`; a green end records the merge request and root runs `my.root/review`
-   then `my.root/merge!` (recommended: one path, root's call is the review); (b) the dial stays on and `land!` waits
-   for a `:reviewed` fact root writes; (c) on, with review after landing. Recommend (a).
-2. **How a test declares itself host-bound** (Q3). Options: (a) `:seon.fn/host-bound?` derived for tests as it is for
-   functions, from what the body references (`proxy`, `&env`, `dev/` namespaces, host Var redefinition), so no author
-   writes it (recommended); (b) an authored `:seon/host-bound` metadata on the deftest; (c) a namespace-level
-   declaration. Recommend (a); it is a derivation, not a fence.
-3. **The experiment's first task** (Q13). Options: (a) root picks one open task with a reproduction form and an existing
-   symbol from the mined set (slow functions, guessed names); (b) one of this weekend's green tasks replayed through
-   the two stages for a controlled comparison; (c) a new small defect found by the census. Recommend (a).
+- **Root reviews from data, not a mechanism.** `:seon.config.root/land? false`. A green end records the merge request;
+  everything root needs to judge it is attached to that task as data (the diff, every reached test with its result,
+  the proofs, the task's intent and decisions, the merge instructions) and root's context renders it through render
+  functions and the value printer. `my.root/merge!` is root's decision; there is no review step, flag or `:reviewed`
+  fact beside it. Missing data in that rendering is a defect of the render or the task, fixed at its producer.
+- **Host-bound tests are derived.** Whether a test can run interpreted is decided by the same analysis that decides it
+  for functions (what the body references, from SCI's and clj-kondo's reading of it), never authored.
+- **The experiment's first task** is a mined open task with a reproduction form and an existing owner symbol, picked by
+  reach.
 
 ## 1. The goal
 
@@ -303,5 +301,5 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
 
 ## 8. Open questions
 
-Only the three listed at the end of §0. Q1–Q16 of the replan are answered in
+None open. Q1–Q16 of the replan and the three round-3 questions are answered in
 [fable-replan](../research/agent-platform/2026-10-11/fable-replan.md) §8 and folded above.
