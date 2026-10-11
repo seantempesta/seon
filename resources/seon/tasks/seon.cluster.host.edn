@@ -21,4 +21,9 @@
  #:seon.task{:name "a-concurrent-hosted-turn-keeps-a-forms-elided-write-receipt"
   :kind :function
   :intent "`seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged` is green alone and red (\"a form's own elided write lands on the branch, naming its evaluation\": no `:seon.db/receipt` on the transaction) when run in one `seon.test/run` with tests whose hosted agents take model turns concurrently (`an-ordinary-message-wakes-the-idle-hosted-agent`, `a-message-to-a-stopped-admitted-agent-hosts-it-and-its-armer-takes-it`). Reproduced with HEAD 18919b663 source plus only the test file's assignment fix (bin/seon check run 01a956c05caa); green alone (run 451a51827903). The receipt is kept only when the write's connection is identical to the custody `seon.db/*conn*` (`seon.db/call-with-custody`), bound per evaluation by `seon.sci.eval/evaluate`; find which concurrent turn's binding or supplied connection displaces it."
-  :must-read #{seon.db/call-with-custody seon.db/transact! seon.sci.eval/evaluate}}]
+  :must-read #{seon.db/call-with-custody seon.db/transact! seon.sci.eval/evaluate}}
+ #:seon.task{:name "the-reconciler-hosts-a-branch-agent-from-its-own-pass"
+             :kind :function
+             :intent "Card P2 (probe). `seon.cluster.host/host!` is callable from the armer proc's own thread for a new branch, and `seon.cluster.registry/fork!` forks from an arbitrary historical commit id and reads that commit (the t-resume path of runtime-follows-db §4)."
+             :must-read #{seon.cluster.host/host! seon.cluster.registry/fork!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

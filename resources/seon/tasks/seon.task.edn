@@ -58,4 +58,34 @@
              :kind :function
              :intent "`seon.context/ended` derived an ended task's calls, tokens and proofs from the agent's branch, so once the branch was retired it reported zero calls and tokens and omitted the proofs (astra day audit finding 8). Done when the small historical outcome (`:seon.task/calls`, `:seon.task/prompt-tokens`, `:seon.task/completion-tokens`, `:seon.task/proof-counts`, `:seon.task/red-proofs`) is recorded as `:seon.agent/outcome` on the ending agent at the writer when the task ends, `seon.context/ended` reads it when the branch is gone, and when neither the branch nor the record remains the summary carries `:seon.task/outcome-unknown` and no zero counts."
              :must-read #{seon.context/ended seon.turn/end-task-call seon.turn/end-task!}
-             :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md"}}
+ #:seon.task{:name "the-frontier-query-answers-in-under-50-ms-for-fifty-leaves"
+             :kind :function
+             :intent "Card P1 (probe). Recursive Datalog rules `done` and `needs*` run through `seon.db/q` on the live store, and the frontier query of runtime-follows-db §2 (leaves, not done, needs done, intent permitting, no open attempt) answers under 50 ms for a synthetic fifty-leaf tree written under d/with; the cost assertion goes through `seon.profile/measure`. Refutes or confirms that the frontier can be one query with no scheduler state."
+             :must-read #{seon.db/q seon.profile/measure seon.task/resolution}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "a-needs-cycle-is-refused-at-the-writer"
+             :kind :schema
+             :intent "Card S1. Schema: `:seon.task/steps` (component ref set, replacing the deleted step components), `:seon.task/needs` (indexed ref set), `:seon.task/instructions`, `:seon.task/execution` and `:seon.cluster/execution` (both `:seon.wake/arms true`), `:seon.task/cron`, `:seon.task/zone`, `:seon.task/function`, `:seon.task.fire/at`, `:seon.task.fire/of`, `:seon.task.fire/to`; the writer refuses a needs cycle (as `seon.plan/refuse-dependency-cycle!` did); adoption proven on a branch of the live store; vocabulary rows landed first."
+             :must-read #{seon.task/create! seon.cluster.wake/arming-attributes seon.schema.edn/load!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "the-frontier-is-the-leaves-whose-needs-are-done"
+             :kind :function
+             :intent "Card S2. `seon.task/done` (an attempt ended :done with no later :sent-back targeting it; a parent when its children are) and `seon.task/frontier` (runtime-follows-db §2) as functions over a database value; `seon.task/resolution` gains the derived done clause. Proof: an are table over a chain, a fan-out, a nested fan-out, a join and a send-back."
+             :must-read #{seon.task/resolution seon.task/task-edges seon.db/q}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "a-sent-back-end-reopens-its-target"
+             :kind :function
+             :intent "Card S4. `seon.turn/end-task-call` records :sent-back with `:seon.task/target` and the decision in the attempt's one end transaction; `seon.task/done` honors it (the target is no longer done, its successors stop being ready). A row in the S2 table."
+             :must-read #{seon.turn/end-task-call seon.turn/task-end}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "a-repeated-problem-writes-nothing"
+             :kind :function
+             :intent "Card Q1. A problem task is created by identity `seon.id/id [class subject]` with its instructions as data on the task, assigned to root (or to a fresh agent for error signatures and cost regressions); writing the same problem twice writes nothing; the merge request a green end records becomes one problem class (runtime-follows-db §5)."
+             :must-read #{seon.id/id seon.task/create! seon.task/propose!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "each-problem-class-is-detected-from-its-facts"
+             :kind :function
+             :intent "Card Q2. Each problem class of runtime-follows-db §5 (an end other than done; a send-back loop; a stuck chain; observed not matching intent; a stale heartbeat; refused delivery; an unresolved reference; an error signature; a cost regression) is detected in the pass that already sees its facts (the reconciler's, the heartbeat's, or a listened fact) and creates its problem task; one table row per class, two classes per lane."
+             :must-read #{seon.turn/task-end seon.cluster.wake/delivery seon.health/report}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

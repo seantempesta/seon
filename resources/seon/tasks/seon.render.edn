@@ -47,4 +47,9 @@
  #:seon.task{:name "landing-reds-2-render-bow-outs"
              :kind :namespace
              :intent "Bow-outs from landing-reds-2: render-simplification (selection for [] no longer differs from `seon.agent/render-settings-ai` :161; one extra `seon.sci.kernel/invoke` on first render). Also web reds from web-shrink-reds (5574927cb): the next-turn fixture opening starts with the `:seon.agent/cluster` pull, `seon.error/render-html`'s 500 body drops the exception class, agent-render-profile budget 3200 < 3238 needed, and the reconnect tests take 23-42 s (held-pass promise never fires). Done when each is fixed or recorded in the render area spec with its number."
-             :must-read #{seon.repl/entity-emission}}]
+             :must-read #{seon.repl/entity-emission}}
+ #:seon.task{:name "the-plan-render-layers-a-tree-by-needs"
+             :kind :function
+             :intent "Card Q3. A render pair on the subject task layers its steps by needs (layer n = steps whose needs lie in earlier layers; one layer reads as parallel, successive layers as the sequence; nesting as indentation) and annotates each from the reconciler's derivations: done, running, paused, held, waiting, problem; read-only, cached by what it read, nothing stored. Asserted on the AI face's data."
+             :must-read #{seon.context/current-state seon.task/task-edges}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

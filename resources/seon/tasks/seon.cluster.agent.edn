@@ -21,4 +21,24 @@
  #:seon.task{:name "finished-agents-and-their-branches-accumulate"
              :kind :function
              :intent "Default holds 185 agents, each with a `:seon.agent/branch` (measured through JVM eval_clj on default: 185 `:seon.agent/id` entities, 185 branch values), and bin/seon start --head captured about 110 agent branch heads at a restart. Agents from finished lanes and probes are never archived and their branches never unlinked, so every restart captures and restores them. Related: my.agent/retire-branch-refuses-a-finished-agent-as-admission-closed (retire at run exit). Done when a finished agent's branch is unlinked and the agent archived at its run's exit, and the agent count on default after a probe batch returns to its prior value."
-             :must-read #{my.agent/retire-branch! seon.cluster.registry/retire-branch!}}]
+             :must-read #{my.agent/retire-branch! seon.cluster.registry/retire-branch!}}
+ #:seon.task{:name "a-stop-intent-finishes-the-current-pass-before-the-graph-exits"
+             :kind :function
+             :intent "Card P3 (probe). `clojure.core.async.flow/pause` followed by `seon.flow/join-graph!` ends an agent graph after its current transform (Flow reads control with priority between transforms), within the turn-completion bound; confirms the :stopped intent needs no interrupt and only :cancelled interrupts."
+             :must-read #{seon.cluster.agent/disarm! seon.flow/join-graph!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "two-reconciler-passes-launch-one-attempt"
+             :kind :function
+             :intent "Card R1. `seon.cluster.agent/armer-step` reads `seon.task/frontier` and the intents and launches under `:seon.config.agent/max-running`: fork from the predecessor attempt's commit (`seon.cluster.registry/fork!`), `seon.cluster.host/host!`, the attempt row; idempotent by identity so two passes launch one attempt; a :held leaf is never launched; only this proc starts graphs. Per-agent cost (context MB, ms to start) is recorded as profile evidence."
+             :must-read #{seon.cluster.agent/armer-step seon.cluster.agent/arm! seon.cluster.host/host! seon.cluster.registry/fork!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "each-intent-names-one-roster-state"
+             :kind :function
+             :intent "Card R2. Intents to Flow verbs: :paused launches without resume or pauses a running graph; :running resumes or re-hosts; :stopped pauses, joins, stops and releases the SCI context keeping agent, branch and attempt; :cancelled interrupts, ends :cancelled with a reason and deletes the branch; cluster :paused wins; `seon.flow/start-graph!` resumes only under the intent. A table over the five intents."
+             :must-read #{seon.cluster.agent/arm! seon.cluster.agent/disarm! seon.flow/start-graph!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "disarm-splits-into-stop-and-cancel"
+             :kind :function
+             :intent "Card D3. `seon.cluster.agent/disarm!` splits: a :stopped intent pauses and joins without interrupting, a :cancelled intent interrupts as today; the turn-completion bound stays as the declared bound (AGENTS.md: bound admission and await actual exit)."
+             :must-read #{seon.cluster.agent/disarm!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]
