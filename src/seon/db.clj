@@ -3796,15 +3796,18 @@
   never replaces a warm one nor the reverse. A warm sample needs `min-calls`
   warm calls; either needs `min-total-us` of self time. An entity already
   stored is re-checked wherever it ranks; a new one must rank in the `top` by
-  self time. Invoked by the writer as `[:db.fn/call #'cost-upserts sink]`
-  after the transaction's other data (`stamp-transaction`), so it decides on
-  that mid-transaction value: an interpreted definition the same transaction
-  writes resolves its definition digest, and accounting adds no transaction.
-  None when the branch declares no cost dials."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/sink] [:vector :seon.fn.cost/entity]]}
-  [database sink]
-  (let [projection (carried-projection database)
-        dial #(branch-dial database projection %)
+  self time. Invoked by the writer as
+  `[:db.fn/call #'cost-upserts projection sink]` after the transaction's other
+  data (`stamp-transaction`), so it decides on that mid-transaction value: an
+  interpreted definition the same transaction writes resolves its definition
+  digest, and accounting adds no transaction. Its dials read through the
+  projection the write was prepared with: the writer's value carries no
+  construction projection and its thread no handed one. None when the branch
+  declares no cost dials."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.batch/sink]
+                  [:vector :seon.fn.cost/entity]]}
+  [database projection sink]
+  (let [dial #(branch-dial database projection %)
         [min-calls min-total-us hysteresis top] (map dial [:seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us
                                                             :seon.config.fn.cost/hysteresis :seon.config.test.cost/top])]
     (if (and min-calls min-total-us hysteresis top)
@@ -3835,9 +3838,9 @@
   and nothing read it (store-structure 2026-09-28).
   A caller may name its operation; otherwise the first named transaction function
   identifies it, or `transact!` does. No agent is invented for a system caller."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.store/transaction
                        [:maybe :map]] :seon.store/transaction]}
-  [database transaction world]
+  [database basis-projection transaction world]
   (let [request (if (map? transaction) transaction {:tx-data transaction})
         ;; a world's work is observed on the writer's mid-transaction value
         sink (:seon.batch/sink world)
@@ -3869,7 +3872,7 @@
     (assoc request :tx-data (-> (vec declarations)
                                 (into (when *receipt* *open*))
                                 (into (:tx-data request))
-                                (cond-> costs? (conj [:db.fn/call #'cost-upserts sink]))
+                                (cond-> costs? (conj [:db.fn/call #'cost-upserts basis-projection sink]))
                                 (conj stamp)))))
 
 (defn absent-call
@@ -6013,7 +6016,7 @@
                 ;; R6): a synchronous fault writer must never park forever.
                 write-time-limit-ms (branch-dial database projection :seon.config.db/write-time-limit-ms)
                 request (prepared-write projection database
-                                        (stamp-transaction database transaction batch/*world*))
+                                        (stamp-transaction database projection transaction batch/*world*))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
                 ;; writer's put! into its transaction queue runs inside the
