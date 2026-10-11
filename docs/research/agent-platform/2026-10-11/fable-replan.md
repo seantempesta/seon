@@ -484,6 +484,8 @@ only `must-read` removal by the agent (the next context reads less because the t
 set (DYNAMIC-CONTEXT stage 5) for the agent's own reads; (iii) a budget dial. **Recommendation: (a) and (i)** first; (ii)
 when measured prompt growth asks for it.
 
+> **Owner answer (2026-10-11):** `my.task/refine!` over `seon.task/create!`'s upsert, any field, with the stage decision; see Q16 for the vocabulary.
+
 **Q15 (added by root). Revert the night's fences?** Audit (read-only Opus, 2026-10-11): of 73 commits since 2026-10-10
 20:30, 16 add fences; reverting them in reverse order is clean except trivial task/schema EDN hunks, one `merge_test`
 hunk and one real conflict (f540268a1 in `seon.turn/end-task!`); about −1,500 lines; ~40 good commits kept (interpreter
@@ -496,3 +498,21 @@ fixes, f51240f34, e71e60a47, `land!`, `land-end!`, the dial, typed refusals, `:s
 > `git clone --shared` under `tmp/` (never the shared index), applied to claimed files; `end-task!` rewritten to send the
 > end message and close the agent in one transaction; observed-failure tests kept as red proofs for the root fixes; one
 > central test round; schema retirement proven on a live-store branch.
+
+**Q16 (added by root). The task vocabulary.** Catalogue: `task-verbs-catalogue.md` (c4525e6f2): ~90 functions in 9
+namespaces, ~26 verbs for 12 concepts (8 for finishing), proofs selected in 5 places, a queue nothing feeds.
+
+> **Owner answer (2026-10-11):**
+> - Agent side, three verbs: `my.task/current` (my task, its stage, its proofs with status), `my.task/refine!` (edit
+>   the task, including the stage decision), **`my.task/send-back!`** (reason, optional target stage, counterexample;
+>   replaces `my.turn/complete` as give-back, `my.agent/done`, `my.message/decline` and AGENTS.md's `my.task/complete!`).
+>   Success has no verb: green stage proofs end the stage. `my.message/send` and `my.turn/wait` stay.
+> - Delete now: the queue (`my.task/open`, `claim!`), the step functions (`plan!`, `step!`, `done!`), and
+>   `seon.task/resolution`'s fault and signal clauses that read facts nothing writes, with their tests.
+> - Root's namespace is **`my.root`** (instructions plus required tools: `launch!` from `seon.competency/start-run!`
+>   branching from the predecessor's commit, `merge-requests`, `review`, `merge!` over `land!`, `close!`, `ended`);
+>   merge words become git's (`request-merge!`, `merge!`, `close!`, `:merged`/`:closed`); `my.program`'s merge wrappers
+>   are deleted. Platform: one stage-aware `seon.task/proofs`; one `seon.task/close!` (the Q6 close owner);
+>   `seon.turn/end-task!` stays the single transition.
+> - **Rename everything now**, functions and stored attributes together (home → main, refuted → red-first, outcome →
+>   end, proposal → merge request), before the experiment; the database is being reset anyway.
