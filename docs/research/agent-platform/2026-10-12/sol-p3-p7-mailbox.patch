@@ -29,7 +29,7 @@
  (defn mailbox-step
    "The mailbox transform, in Flow's four arities.
    Total and instant: one payload-free `:seon.agent/episode` signal downstream per
-@@ -489,10 +504,17 @@
+@@ -489,13 +504,20 @@
      :ping-map-fn (fn [state] (select-keys state [:seon.agent/deliveries]))})
    ([args]
     (assoc args
@@ -52,7 +52,10 @@
 +       [state nil])
 +     [(update state :seon.agent/deliveries inc)
 +      {:seon.agent/episode [:seon.agent/wake]}])))
-@@ -587,7 +607,9 @@
+ 
+ (defn- interrupted?
+   "True when `failure`'s cause chain holds an `InterruptedException`. The walk
+@@ -587,7 +609,9 @@
         {:proc (seon.flow/var-process
                 #'mailbox-step :io
                 (env/carry {:seon.cluster.wake/channel
@@ -63,7 +66,7 @@
                            environment))}
         :seon.agent/turn
         {:proc (seon.flow/var-process
-@@ -1340,6 +1362,7 @@
+@@ -1340,6 +1364,7 @@
            turn-backstop-state (atom nil)
            settings (merge (config/effective @connection (:seon.cluster/name handle))
                            (ai/agent-overlay @connection agent-id))
@@ -71,7 +74,7 @@
            turn-completion-backstop-ms
            (:seon.config.agent/turn-completion-backstop-ms settings)
            _ (async/>!! completion :seon.agent/ready)
-@@ -1351,6 +1374,7 @@
+@@ -1351,6 +1376,7 @@
                                :seon.flow/plan-channel
                                (:seon.cluster.wake/channel handle)
                                :seon.cluster.wake/channel wake-ch
@@ -79,7 +82,7 @@
                                :seon.agent/requests requests
                                :seon.schedule/channel schedule-channel
                                :seon.turn.loop/completion completion
-@@ -1393,6 +1417,7 @@
+@@ -1393,6 +1419,7 @@
                   :seon.flow/started started
                   :seon.flow/executor executor
                   :seon.cluster.wake/channel wake-ch
@@ -87,7 +90,7 @@
                   :seon.agent/requests requests
                   :seon.schedule/channel schedule-channel
                   :seon.turn.loop/completion completion
-@@ -1587,6 +1612,7 @@
+@@ -1587,6 +1614,7 @@
                     (update :seon.agent/channels dissoc
                             (:seon.agent/eid entry)))))
        (async/close! (:seon.cluster.wake/channel entry))
