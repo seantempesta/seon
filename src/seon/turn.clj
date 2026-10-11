@@ -2224,6 +2224,16 @@
        (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
        (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]))
 
+(defn- root-execution
+  "Root's world in `cluster`, as the MCP entrance names it (no isolation, no new branch): its home branch, or the
+  cluster's live branch when root holds none, since root's own context is its cluster."
+  {:malli/schema [:=> [:cat :map] :seon.agent/execution-handle]}
+  [cluster]
+  (let [database (db/db (:seon.db/connection cluster))]
+    (@cluster-agent-acquire-context!
+     cluster "root" {:seon.agent/branch (or (:seon.agent/branch (db/pull database [:seon.agent/branch] [:seon.agent/id "root"]))
+                                            (get-in database [:config :branch]))})))
+
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
   is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
@@ -2236,10 +2246,7 @@
     (when (and (true? land?) (:seon.task/merge proposal)
                (not (:seon.task/outcome proposal)) (not (:seon.task/refusal proposal)))
       (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
-            ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
-            execution (@cluster-agent-acquire-context!
-                       cluster "root" {:seon.agent/branch (:seon.agent/branch (db/pull database [:seon.agent/branch]
-                                                                                       [:seon.agent/id "root"]))})
+            execution (root-execution cluster)
             home (:seon.db/connection execution)
             ;; the landing is root's work on root's branch: its writes run in that branch's custody
             [landed recorded]

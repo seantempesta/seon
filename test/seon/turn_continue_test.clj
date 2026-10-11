@@ -683,3 +683,16 @@
                            (db/db connection) agent-id)]
          (is (= :done (:seon.task/end message))
              "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row}}
+  root-without-a-branch-row-lands-in-the-clusters-world
+  ;; Root's own context is its cluster: a root row with no home branch (this world's) is the cluster's live
+  ;; branch, never a nil branch handed to `seon.cluster.agent/acquire-context!`.
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [live (get-in (db/db connection) [:config :branch])
+           cluster-handle (support/running-cluster running)]
+       (is (nil? (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "root"])))
+           "root holds no branch row here")
+       (is (= live (get-in (db/db (:seon.db/connection (#'turn/root-execution cluster-handle))) [:config :branch]))
+           "root's world is the cluster's live branch")))))
