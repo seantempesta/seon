@@ -2118,12 +2118,11 @@
 
 (defn- interpret-source-namespaces!
   "Interpret every function and test row of the source namespaces
-  `namespace-names` in `ctx` from its acquired database (`install-selected!`),
-  each after those it binds, recording the refusals; the acquisition."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:set :symbol]] :map]}
-  [ctx namespace-names]
+  `namespace-names` in `ctx` from `database` (`install-selected!`), each after
+  those it binds, recording the refusals; the acquisition."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:set :symbol]] :map]}
+  [ctx database namespace-names]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        database (context-database ctx)
         names (vec (sort-by str namespace-names))
         function-rows (into []
                             (map (fn [[sym source namespace-name admission private?]]
@@ -2157,17 +2156,10 @@
     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
     acquired))
 
-(defn enter-namespace!
-  "`ctx` with the program namespace a form runs in, and each it aliases, bound as
-  its file declares it, once per context: its loaded JVM namespace's interns,
-  private ones included, its refers and the public Vars of what it aliases
-  (`install-caller-host-bindings!`). A source namespace (`source-namespace?`:
-  a test namespace, or one this JVM has not loaded) and the source namespaces
-  it binds are interpreted from their rows instead
-  (`interpret-source-namespaces!`); nothing is loaded into the shared JVM. A
-  namespace without a program row is left as SCI holds it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] :seon.sci.eval/ctx]}
-  [ctx namespace-name]
+(defn- enter-namespace*
+  "The namespace entry of `enter-namespace!`, with `read-database` called once only when a source namespace interprets."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol [:=> [:cat] :seon.db/database-value]] :seon.sci.eval/ctx]}
+  [ctx namespace-name read-database]
   (let [snapshot (::kernel/program-snapshot ctx)
         rows (:namespaces @snapshot)
         entered (::entered-namespaces @snapshot #{})
@@ -2187,8 +2179,25 @@
           (doseq [row entering]
             (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))
           (when (seq sources)
-            (interpret-source-namespaces! ctx sources)))))
+            (interpret-source-namespaces! ctx (read-database) sources)))))
     ctx))
+
+(defn enter-namespace!
+  "`ctx` with the program namespace a form runs in, and each it aliases, bound as
+  its file declares it, once per context: its loaded JVM namespace's interns,
+  private ones included, its refers and the public Vars of what it aliases
+  (`install-caller-host-bindings!`). A source namespace (`source-namespace?`:
+  a test namespace, or one this JVM has not loaded) and the source namespaces
+  it binds are interpreted from their rows instead
+  (`interpret-source-namespaces!`); nothing is loaded into the shared JVM. A
+  namespace without a program row is left as SCI holds it. The sources read
+  `database` when given: an acquisition interprets from the value it acquires,
+  else the context's connection at use (`context-database`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/ctx :symbol] :seon.sci.eval/ctx]
+                  [:=> [:cat :seon.sci.eval/ctx :symbol :seon.db/database-value] :seon.sci.eval/ctx]]}
+  ([ctx namespace-name] (enter-namespace* ctx namespace-name #(context-database ctx)))
+  ([ctx namespace-name database] (enter-namespace* ctx namespace-name (constantly database))))
 
 (defn- required-libs
   "The namespace names `require`'s arguments name: a lib symbol, a libspec
@@ -2511,7 +2520,7 @@
       ;; Interpreted callers and tests analyze against every other name their
       ;; file namespace reaches; only this branch's rows become SCI definitions.
       (doseq [namespace-name (sort-by str (distinct (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))]
-        (enter-namespace! ctx namespace-name))
+        (enter-namespace! ctx namespace-name db))
       ;; Copy inherited Vars into this generation before analyzing any caller.
       ;; SCI definitions then replace roots in those same Vars; a caller analyzed
       ;; before its callee must not retain the old generation's copied root.
