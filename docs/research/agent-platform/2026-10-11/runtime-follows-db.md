@@ -135,6 +135,23 @@ derived branch names, `fork!` answers `created? false`, the attempt upserts by `
 two starters of one roster is the dual-writer problem). `eval_clj` hosting is root's act at the entrant boundary
 through the same `host!`.
 
+### 3b. One world, for agents and test members
+
+Owner (2026-10-11, after lane live-root-reds, 4347f6cce): a test member running in its own world "sounds like the task
+system". Today a world is built in several places: `seon.cluster.agent/acquire-context!` and `seon.cluster.host/host!`
+build an agent's (branch connection, SCI fork, routing entry, environment); `seon.test/bounded-result` built a member's
+by inheriting the requester's `seon.batch/*world*` through `bound-fn` (identity, faults, connection, store leaked from
+root into members; now it keeps only the call sink); `seon.batch/*world*` with `seon.batch/world-members` is the value
+`seon.call-preparation/supply` fills omitted inputs from; `seon.cluster.boot/request-world` and the MCP entrance derive
+the world a failed request records in. Decision: **one world constructor** (`seon.batch/world`), shared by agents and
+test members: identity (`:seon.agent/id`, or the member's test symbol), custody (branch connection, writer), the SCI
+context fork, the supplied members and a call sink; an agent's world is that value plus a Flow graph and task facts; a
+test member's world is that value alone, built from the run's branch, never inherited from a thread. **A test run**
+("check these tests for this change") **is a task on the one path**: created with its test set and program basis as
+data, launched by the reconciler, observed, restorable, its end carrying the run id; its members run inside that attempt
+in worlds from the constructor, not as tasks of their own (about 2,800 members at milliseconds each is too heavy for
+attempt rows). `seon.test`'s own world building goes.
+
 ## 4. Boot, resume, and the resume path's keys
 
 | Mode | Pass |
@@ -312,12 +329,36 @@ the armer about 100 ms plus acquisition); then today's arming of agents with wor
 64 ms + host 107 ms + base context 24 ms + overlay, and four agents at 300 MB fit a 16 GB machine beside the user's
 work; R4 brings the overlay leg under it), recorded as profile evidence so a slower run than main's is red.
 
+**W1 — one world constructor** (owns `src/seon/batch.clj` world section, `src/seon/test.clj` `bounded-result`,
+`src/seon/call_preparation.clj` supply, `test/seon/batch_test.clj`, `test/seon/test_test.clj`; beside R1). `seon.batch/world`
+`[:=> [:cat :seon.batch/world-request] :seon.batch/world]` with request `{:seon.agent/id or :seon.test/sym, :seon.db/connection,
+:seon.sci.eval/ctx (the fork), :seon.env/environment, :seon.render/profile?, :seon.batch/sink?}` returns the validated
+world map whose keys are exactly `seon.batch/world-members`' values (the registered `:seon.batch/world` schema, closed);
+`seon.cluster.agent/acquire-context!` and `seon.cluster.host/host!` call it for the agent's world; `seon.test/bounded-result`
+calls it for the member (identity the test symbol, custody the run's branch, the fork from the run's program) and binds
+that value, deleting its own `bound-fn` and `select-keys` world; `seon.call-preparation/supply` reads only this value;
+`seon.cluster.boot/request-world` answers it. Red proofs: `seon.batch-test/every-world-is-built-by-one-constructor`
+(a census over the loaded program: no other binding of `seon.batch/*world*` than the constructor's and the fold's);
+`seon.test-test/a-member-runs-in-its-own-world-never-its-requesters` (exists, 4347f6cce) extended with a row asserting
+the member's world is the constructor's value for the run's branch.
+
+**W2 — a test run is a task** (owns `src/seon/test.clj` `run`/`run-request`, `src/my/test.clj`, `test/seon/test_test.clj`;
+after R1 and W1). `my.test/check` and the gate's `seon.test/run-request` create a task (`:seon.task/instructions` the
+test set and the program basis as data, intent `:running`, identity `seon.id/id [basis tests]` so a repeated request is
+one task) instead of running inline; the attempt runs the members inside `seon.test/run` with W1 worlds; its end
+`:done` carries the run id and the results are the facts `seon.test/run` already records; a request that only reads
+answers from the recorded run (reuse by reach digest unchanged). Red proofs: `seon.test-test/a-test-run-is-an-attempt-on-the-path`
+(the task exists, the reconciler launched it, the end names the run); `seon.test-test/members-are-not-tasks` (one
+attempt row for a run of fifty members).
+
 | # | Card | Red proof (deftest, tagged with the card's task) |
 |---|---|---|
 | S1 | the facts (above) | `seon.task-test/a-needs-cycle-is-refused-at-the-writer`; `…/the-task-facts-adopt-on-a-branch-of-the-live-store` |
 | S2 | the frontier (above) | `seon.task-test/the-frontier-is-the-leaves-whose-needs-are-done` (12 rows); `…/the-frontier-answers-in-under-10-ms-for-fifty-leaves` |
 | S3 | attempt as the launch's write; first-pass proofs; the end on the attempt (above; S4 folded in) | `seon.turn-test/a-fresh-attempt-is-work-without-a-message`; `…/an-already-green-attempt-ends-with-no-model-call`; `…/an-end-is-written-on-the-attempt` |
 | R1 | the reconciler launches (above) | `seon.cluster.agent-test/two-reconciler-passes-launch-one-attempt`; `…/a-held-leaf-is-never-launched`; `…/a-successor-forks-from-its-predecessors-end-commit`; `…/starting-one-agent-on-a-task-costs-under-a-second-and-300-mb` |
+| W1 | one world constructor `seon.batch/world` for agents and test members (above; beside R1) | `seon.batch-test/every-world-is-built-by-one-constructor`; `seon.test-test/a-member-runs-in-its-own-world-never-its-requesters` (new row) |
+| W2 | a test run is a task on the path; members are worlds inside its attempt (above) | `seon.test-test/a-test-run-is-an-attempt-on-the-path`; `…/members-are-not-tasks` |
 | R2 | intents → Flow verbs: `:paused` launches without resume, or `flow/pause` then `flow/ping-proc` under the bound acknowledges the pass's end (P3); `:running` resumes or re-hosts; `:stopped` = `stop-graph!` without `interrupt-turn!` (P3: `flow/stop` + `join-graph!` exits after the current transform) and releases the SCI context; `:cancelled` interrupts and closes; cluster `:paused` wins; `start-graph!` resumes only under the intent | `seon.cluster.agent-test/each-intent-names-one-roster-state` (table over the five) |
 | R3 | boot: `start --paused` writes the cluster intent before the prime; the prime re-hosts open attempts on branches | `seon.cluster.boot-test/a-paused-boot-arms-every-open-attempt-and-runs-nothing`; `…/a-restart-re-hosts-an-open-branch-attempt` |
 | R4 | the interpreted-overlay cache kind keyed `[base-key, program basis]` (§4); the resume-to-a-commit path is `fork!` from the commit id handed `commit-as-db` (P2) and this cache | `seon.sci.acquisition-cost-test/a-second-acquisition-of-an-unmoved-branch-interprets-nothing`; R1's lightness proof under budget with a changed branch |
@@ -333,7 +374,7 @@ work; R4 brings the overlay leg under it), recorded as profile evidence so a slo
 | D4 | revise TASK-CHAIN, task-graph-design, plan §0 item 6 in place | documentation |
 | B1 | bug: `seon.db/q` lets a `StackOverflowError` escape as a thrown `Error` instead of answering a refusal (P1) | `seon.db-test/a-stack-overflow-in-a-query-is-answered-as-a-refusal` |
 
-Order: S1 after plan §0 item 5's deletion; S2, S3 after S1; R1 after S2 and S3; R2–R3 after R1; R4 and B1 any time;
+Order: S1 after plan §0 item 5's deletion; S2, S3 after S1; W1 any time; R1 after S2 and S3; W2 after R1 and W1; R2–R3 after R1; R4 and B1 any time;
 C1–C3 after S1 and R1; Q1–Q3 after S2; D1 after R1 and S3; D2 after C1–C3; D3 with R2; D4 last. First experiment
 (plan §0 item 7) runs after R1 with a two-leaf tree.
 
