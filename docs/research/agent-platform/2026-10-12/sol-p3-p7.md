@@ -4,7 +4,7 @@ Sending previously opened the recipient's branch and transacted there. P3 now pr
 
 ## Boundaries
 
-`src/seon/cluster/agent.clj` is held by `p4-branch-writes`. It was not edited by this lane. `sol-p3-p7-mailbox.patch` carries the mailbox's inbox, receipt write, episode signal, configured buffer and lifecycle closure. It is a handoff, not installed evidence: P7, root receipt, repeated receipt and the offer-to-write 30 ms bound remain unproven. Until the owner applies P7, existing hosted graphs have no inbox and P3 returns undeliverable. `db<->flow`'s running/no-graph rehosting belongs to that owner too.
+`src/seon/cluster/agent.clj` is held by `p4-branch-writes`. It was not edited by this lane. `sol-p3-p7-mailbox.patch` carries the mailbox's inbox, receipt write, episode signal, configured buffer and lifecycle closure. Receipt uses the message's existing listened datom to wake the same mailbox and signal the episode once, instead of emitting a second episode alongside the listener. It is a handoff, not installed evidence: P7, root receipt, repeated receipt and the offer-to-write 30 ms bound remain unproven. Until the owner applies P7, existing hosted graphs have no inbox and P3 returns undeliverable. `db<->flow`'s running/no-graph rehosting belongs to that owner too.
 
 The transport's `:seon.message/undeliverable` names recipient, task execution intent (typed `:unknown` when this database has no open attempt), and `:no-graph`, `:closed` or `:full`. `:seon.message/accepted-result` means offered, not durably received. Input identity is preserved for a resend. Existing inbound-message unknown-recipient declarations remain for the outside-message entrance.
 
@@ -16,9 +16,9 @@ Default remained running at pid 94708, start instant 2026-10-11T21:22:23.023Z. O
 
 Red behavioral run `357609a18ac7`, candidate `ee907d30ca5be4f565ced4d193ea70a707d62abf`: two tests, 17 failures, zero errors, 2301 ms. The failures show ordinary sends advancing the basis, no offered value and no undeliverable outcome. Earlier preparation attempts were refused for a wrong test-call arity and an unquoted task annotation; those were corrected before the behavioral red.
 
-First green run `def8a66f9672`, candidate `8524f38a504e584532dce625a105e9f56747efab`: two tests, 19 passes, zero failures/errors, 2225 ms. Publication 11338 ms, adoption 1179 ms, throwaway boot 22923 ms (readiness 15645 ms), whole check 36373 ms. These are candidate/platform acquisition costs, not a message-offer latency claim. The final lane gate additionally names `my.message-test/send-preserves-routing-until-turn-settlement` and the warm offer's 2 ms/count proof; its outcome is the lane commit's evidence.
+First green run `def8a66f9672`, candidate `8524f38a504e584532dce625a105e9f56747efab`: two tests, 19 passes, zero failures/errors, 2225 ms. Publication 11338 ms, adoption 1179 ms, throwaway boot 22923 ms (readiness 15645 ms), whole check 36373 ms. These are candidate/platform acquisition costs, not a message-offer latency claim. Final gate run `25f02c809057`, candidate `67b2740e3e8a2f07af455605cdbe14e82e0e9732`: three tests, 35 passes, zero failures/errors, 2892 ms; warm resend under 2 ms with zero writer and recipient-connection calls. Publication 13230 ms, adoption 1367 ms, throwaway boot 25970 ms, whole check 42370 ms. Landed as `c1e0c97c9`.
 
-Full lint `src script test --cache false`: zero errors, 1552 warnings (6470 ms) before the final measurement assertion; repeated immediately before commit. No foreign source or shared index was changed.
+Full lint `src script test --cache false`: zero errors, 1552 warnings (6470 ms) before the final measurement assertion; the shared tree subsequently had seven unresolved references after another lane removed task/main and task/main-connection. The HEAD-plus-slice candidate lint passed with zero errors / 1552 warnings, 5914 ms in the commit gate and 7509 ms in a separate archive. That foreign cut was excluded from the candidate. No foreign source or shared index was changed.
 
 ## Dependency seams and work
 

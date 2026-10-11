@@ -29,7 +29,7 @@
  (defn mailbox-step
    "The mailbox transform, in Flow's four arities.
    Total and instant: one payload-free `:seon.agent/episode` signal downstream per
-@@ -489,13 +504,18 @@
+@@ -489,13 +504,20 @@
      :ping-map-fn (fn [state] (select-keys state [:seon.agent/deliveries]))})
    ([args]
     (assoc args
@@ -45,14 +45,13 @@
 -   [(update state :seon.agent/deliveries inc)
 -    {:seon.agent/episode [:seon.agent/wake]}]))
 +  ([state input value]
-+   (if (or (= input :seon.agent/wake)
-+           (receive-message! (:seon.db/connection state) value))
++   (if (= input :seon.agent/inbox)
++     (do
++       ;; The message's listened datom sends the one wake through this mailbox.
++       (receive-message! (:seon.db/connection state) value)
++       [state nil])
 +     [(update state :seon.agent/deliveries inc)
-+      {:seon.agent/episode [:seon.agent/wake]}]
-+     [state nil])))
- 
- (defn- interrupted?
-   "True when `failure`'s cause chain holds an `InterruptedException`. The walk
++      {:seon.agent/episode [:seon.agent/wake]}])))
 @@ -587,7 +607,9 @@
         {:proc (seon.flow/var-process
                 #'mailbox-step :io
@@ -84,7 +83,7 @@
                   :seon.flow/started started
                   :seon.flow/executor executor
                   :seon.cluster.wake/channel wake-ch
-+                              :seon.agent/inbox inbox
++                 :seon.agent/inbox inbox
                   :seon.agent/requests requests
                   :seon.schedule/channel schedule-channel
                   :seon.turn.loop/completion completion
