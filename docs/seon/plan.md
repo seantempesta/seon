@@ -64,7 +64,7 @@ work already agreed here are pre-approved, and a new design question waits.
 5. **The vocabulary cut, all renames now** (Sonnet, scripted sweep; Q16, catalogue §3–§4). Agent side:
    `my.task/current`, `my.task/refine!`, `my.task/send-back!`, `my.task/create!` (steps with needs and instructions);
    success has no verb. Delete the queue (`my.task/open`, `claim!`), the old step components (`plan!`, `step!`,
-   `done!`, `seon.task/steps!`, `:seon.step/*` and the old `:seon.task/steps` schema, which the new component ref of
+   `done!`, `seon.task/steps!`, `:seon.step/*` and the old `:seon.task/steps` schema; child tasks take the new name `:seon.task/children` in
    item 6 then takes over) and `seon.task/resolution`'s fault and signal clauses. Root's namespace `my.root`:
    `instructions`, `merge-requests`, `merge!` (over `land!`), `close!`, `ended`; no `launch!` (the reconciler launches);
    `seon.task/propose!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`. Stored attributes with
@@ -72,17 +72,18 @@ work already agreed here are pre-approved, and a new design question waits.
 6. **The runtime follows the database** ([runtime-follows-db](../research/agent-platform/2026-10-11/runtime-follows-db.md),
    settled by the owner in four rounds, 2026-10-11; its §10 is the build order, 22 cards of about fifteen minutes each
    with a red proof, filed as tasks in `resources/seon/tasks/`). One path: an agent wakes and runs a task. A subject
-   task owns step tasks (`:seon.task/steps`), siblings run in parallel unless one `:seon.task/needs` another, a parent
+   task owns step tasks (`:seon.task/children`), siblings run in parallel unless one `:seon.task/needs` another, a parent
    never runs; each step carries its own `:seon.task/instructions` as data; the frontier ("everything that should be
-   running") is one query (`seon.task/frontier`); intents `:seon.task/execution` ∈ `#{:held :running :paused :stopped
+   running") is two reads (`seon.task/frontier`, design-probes P1); intents `:seon.task/execution` ∈ `#{:held :running :paused :stopped
    :cancelled}` plus cluster `running/paused`, each one action of the reconciler (`seon.cluster.agent/armer-step`
    generalized), the only thing that starts graphs, under the dial `:seon.config.agent/max-running` (default 4; per-agent
    cost in context MB and ms to start is a measured target of the path); the attempt row is the launch's write and the
    red-first proofs run in the agent's first pass; one clock proc fires cron tasks (a function firing for maintenance and
    the heartbeat, an attempt otherwise); problems are tasks assigned to root (fresh agents for error signatures and cost
    regressions), nominal ends wake nobody; the plan is rendered from needs, never stored; `start --paused` for
-   debugging; the interpreted-overlay cache is the first performance lane. Order: probes P1–P3 (separate lane, running)
-   and S1 beside; S2–S4, R1–R4, C1–C3, Q1–Q3, D1–D4 as §10 says. Unblocks 7.
+   debugging; the interpreted-overlay cache is the first performance lane. The probes ran (design-probes.md): the frontier is
+   two reads, P2/P3 retired into R1/R4/D3, a `seon.db/q` stack-overflow bug filed (B1). Order: S1 after item 5, then
+   S2–S3, R1–R4, C1–C3, Q1–Q3, D1–D4 as §10 says. Unblocks 7.
 7. **The first chain experiment** (root; Q13, TASK-CHAIN §5) after R1 and S3: one small existing defect with settled
    policy and an existing symbol; root creates a two-step tree, Design+Prove → Implement; the reconciler launches both in
    turn, the successor from the predecessor attempt's commit; root works the merge request and the retrospective.

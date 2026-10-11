@@ -35,7 +35,7 @@ one path (an agent wakes and runs a task), a tree of tasks ordered by `needs`, i
 ## 2. The model
 
 **One task per step; the subject task is the handoff.** The subject (`seon.task/create!`, at main) owns its steps as
-component children (`:seon.task/steps`); every step is an ordinary task with its own assignment, proofs, instructions
+component children (`:seon.task/children`); every step is an ordinary task with its own assignment, proofs, instructions
 and end. Siblings run in parallel unless one `:seon.task/needs` another; a parent never runs and is done when its
 children are. Every stage may update any field of the **subject** through `my.task/refine!`; Datahike keeps every
 version and the transaction's provenance names the step and agent. The step an agent holds is never revised, so
@@ -46,7 +46,7 @@ version and the transaction's provenance names the step and agent. The step an a
 | `:seon.task/intent` | subject | what must become true, typed (fully qualified symbols and keywords) | every stage refines it |
 | `:seon.task/must-read` | subject | the references the next agent reads first | every stage adds and removes |
 | `:seon.task/evidence` | subject | reproduction forms, values, paths | Mine, Design |
-| `:seon.task/steps` | subject (component) | the step tasks; nested steps allowed | the creator; a stage may add steps |
+| `:seon.task/children` | subject (component) | the step tasks; nested steps allowed | the creator; a stage may add steps |
 | `:seon.task/needs` | step | the steps this one runs after; a join names several | the creator |
 | `:seon.task/instructions` | step | **what this step's agent is to do, as data on the task**, written when the step is created (from the pipeline the creator chose); no template file, no stage-type render | the creator; the Retrospective edits future pipelines by editing what it writes |
 | `:seon.task/execution` | step | the intent `:held :running :paused :stopped :cancelled` (runtime-follows-db §3); absent = running | root |
@@ -156,7 +156,7 @@ survey and model (pipeline B); which instructions edits helped.
 
 The build order is runtime-follows-db §10 (22 cards with red proofs). Of it, this card owns: S1's
 `:seon.task/instructions` on the step (with `steps`, `needs`, `execution`), `my.task/refine!`, `my.task/send-back!`
-and `my.task/create!` (the vocabulary cut, plan §0 item 5), S4's `:sent-back` end, the two pipeline-A trees (Design+Prove
+and `my.task/create!` (the vocabulary cut, plan §0 item 5), the `:sent-back` end on the attempt (S3), the two pipeline-A trees (Design+Prove
 → Implement first; the full six later) as EDN the bench writes, and the proof catalogue page. Gone from earlier drafts:
 the stage type entity, the rendered template, `:seon.task/stage`, `:seon.task/basis-commit`, the stage-aware proof
 selection (each step's proofs are its own), `advance-end!` and its dial, `my.root/launch!`.
