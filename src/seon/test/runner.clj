@@ -819,7 +819,7 @@
    [:seon.fn/spec false] [:seon.test/subject false]])
 
 (defn- reach-revision-key
-  "Each attribute `reach-declarations` reads to the commit whose datoms of it
+  "Each attribute `reached-graph` reads to the commit whose datoms of it
   equal `database`'s (`seon.db/content-revisions`), or nil. Equal on every
   branch of one program; a commit writing only test results keeps it."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
@@ -874,28 +874,16 @@
       (derive))))
 
 (defn- reach-declarations
-  "Every function, test and schema declaration on `database`: symbol to row,
-  row to definition digest and to its reach facts (calls, references and
-  keywords as sets, contract source and test subject as values), schema key
-  to form, and each documented declaration to its docstring. Eleven attribute
-  reads ([[reach-attribute]]), each cached under its own revision; the answer
-  itself is not cached: it only assembles those maps, and a second holder
-  would keep an evicted revision's maps alive unweighed.
-  Facts are read whole, never inferred from the definition digest: a
-  declaration-population retarget changes an invoker's calls under an
-  unchanged digest."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :keyword :map]]}
+  "Function and test identities and definition digests, each read through its
+  content revision. Reach facts, contracts, docstrings and schema forms are
+  read only for declarations and schemas visited by `reached-graph`."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map [::rows [:map-of :qualified-symbol :int]]
+                   [::digests [:map-of :int :seon.program/definition-digest]]]]}
   [database]
-  (let [read (partial reach-attribute database (reach-revision-key database))
-        schema-keys (read :seon.schema/key :by-entity)]
+  (let [read (partial reach-attribute database (reach-revision-key database))]
     {::rows (merge (read :seon.fn/sym :by-value) (read :seon.test/sym :by-value))
-     ::digests (read :seon.program/definition-digest :by-entity)
-     ::documented (read :seon.fn/doc :by-entity)
-     ::facts (into {} (map (fn [[attribute many?]]
-                             [attribute (read attribute (if many? :many :by-entity))]))
-                   reach-fact-attributes)
-     ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
-                   (read :seon.schema/form :by-entity))}))
+     ::digests (read :seon.program/definition-digest :by-entity)}))
 
 (defn- reach-fixed-point
   "Every name reachable from `start` through each node's `edges`, by name:
@@ -923,18 +911,25 @@
                   [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
                    [::schemas [:map-of :seon.schema/value [:maybe :map]]]]]}
   [database test-symbols]
-  (let [{::keys [rows digests documented facts forms]} (reach-declarations database)
+  (let [{::keys [rows digests]} (reach-declarations database)
+        selector (into [:seon.fn/doc] (map first) reach-fact-attributes)
         node-of (fn [s]
                   (when-let [e (get rows s)]
-                    (let [leaf (when-let [digest (get digests e)]
-                                 (if (get documented e) (db/behavior-digest database e) digest))
-                          row (into (if leaf {::leaf leaf} {})
-                                    (keep (fn [[attribute by-entity]]
-                                            (when-some [v (get by-entity e)] [attribute v])))
-                                    facts)]
+                    (let [declaration (reach-read!
+                                       (db/pull database selector e))
+                          leaf (when-let [digest (get digests e)]
+                                 (if (:seon.fn/doc declaration) (db/behavior-digest database e) digest))
+                          row (cond-> (into {}
+                                            (keep (fn [[attribute many?]]
+                                                    (when-some [v (get declaration attribute)]
+                                                      [attribute (if many? (set v) v)])))
+                                            reach-fact-attributes)
+                                leaf (assoc ::leaf leaf))]
                       (cache/lookup ::reach-node row reach-weight #(reach-node row)))))
         schema-node-of (fn [k]
-                         (when-let [form (get forms k)]
+                         (when-let [form (:seon.schema/form
+                                          (reach-read! (db/pull database [:seon.schema/form]
+                                                               [:seon.schema/key k])))]
                            (cache/lookup ::reach-schema-node [k form] reach-weight #(reach-schema-node k form))))
         nodes (reach-fixed-point node-of ::out (set test-symbols))]
     {::nodes nodes

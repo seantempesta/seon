@@ -7,6 +7,7 @@
             [seon.render.value :as value]
             [seon.task :as task]
             [seon.test-support :as support]
+            [seon.test.runner :as runner]
             [start-flow-benchmark :as benchmark]))
 
 (def bounds
@@ -44,7 +45,18 @@
                (is (zero? (get-in sample [::benchmark/context ::benchmark/owners
                                          'seon.test.runner/reached-graph] 0)))
                (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-h9-cold-base-queries.edn")
-                     (value/core-text (benchmark/base-query-costs (db/db connection) false))))
+                     (value/core-text (benchmark/base-query-costs (db/db connection) false)))
+               (let [reads (atom [])
+                     names (mapv :seon.test/sym
+                                 (get-in sample [::benchmark/context-value :seon.context/proofs :seon.context/proof-list]))
+                     _ (binding [db/*read-evidence-sink* reads]
+                         (runner/reach-digests (db/db connection) names))
+                     details #{:seon.fn/calls :seon.fn/references :seon.fn/keywords :seon.fn/spec
+                               :seon.fn/doc :seon.test/subject :seon.schema/form}
+                     patterns (filter #(details (:seon.db/pattern-attribute %))
+                                      (mapcat :seon.db/read-index-patterns @reads))]
+                 (is (and (seq patterns) (every? :seon.db/pattern-entity patterns))
+                     "a cold proof reads details only for the declarations and schemas it reaches")))
              (doseq [[part limits] (get bounds temperature)
                      [metric limit] (map vector [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/calls] limits)]
                (is (<= (get-in sample [part metric]) limit) (str temperature " " part " " metric)))

@@ -85,7 +85,7 @@
   (let [content (#'runner/reach-revision-key database)
         held (into #{} (map (fn [[attribute _ revision]] [attribute revision]))
                    (keys (seon.cache/retained :seon.test.runner/reach-attribute)))]
-    (when (and content (every? held content)) content)))
+    (when (and content (every? held (select-keys content [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]))) content)))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database

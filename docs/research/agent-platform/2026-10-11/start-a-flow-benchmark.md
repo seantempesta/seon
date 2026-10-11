@@ -492,3 +492,118 @@ zero-work assertions. It requires preserving branch-local and newer JVM dials
 and their shipped defaults. This is separate from H10's contract arming work;
 the config owner is outside the H9 source slice. The task and red proof remain
 pending deliberately, not a claimed green result.
+
+## Combined H2/H9/H10: first-context allocation
+
+The context reader still built eleven whole-program attribute maps before
+visiting the requested proof. The change is at `seon.test.runner/reach-declarations`
+and `seon.test.runner/reached-graph`: retain the three small identity/digest
+maps, and pull each visited declaration's reach facts and each visited schema's
+form through `seon.db/pull`. The existing content-revision graph cache,
+content-keyed node caches and component algorithm remain. Eight whole-column
+reads disappear; no cache, invalidation, prewarming or budget increase is added.
+
+### Attribution and the apparent combined regression
+
+Root's combined `40d1416a2` run `505a1cd58979` failed only cold context
+allocation: **152.74 ms / 322.012 MB**, 4,349 calls and 138 reads.
+Pinned replay `a355700dc410` reproduced **170.51 ms / 321.632 MB**.
+The full-depth JFR replay used:
+
+```sh
+JAVA_TOOL_OPTIONS='-XX:FlightRecorderOptions=stackdepth=256 -XX:StartFlightRecording=filename=/Users/sean/src/seon/tmp/astra-h9-40d-deep.jfr,settings=profile,dumponexit=true' bin/seon check --at 40d1416a2 --test seon.start-flow-benchmark-test/commit-to-paused-flow-costs
+jfr print --json --events jdk.ObjectAllocationSample --stack-depth 256 tmp/astra-h9-40d-deep.jfr
+```
+
+| Cold context attribution | Allocation evidence |
+|---|---:|
+| Complete calling-thread measurement | 321.632 MB |
+| Bulk reach-fact attribute derivation, sampled inclusive | approximately 228 MB |
+| Within that derivation: index restoration below datom conversion | approximately 171 MB |
+| Within that derivation: building cardinality-many sets | approximately 37 MB |
+| Within that derivation: decoded datom maps | approximately 21 MB |
+
+The sampled rows are estimates and the last three are parts of the bulk-read
+row, not additional totals. Restoration stacks pass through
+`datahike.index.persistent-set/CachedStorage`, Konserve Fressian deserialization
+and LZ4 frame buffers. Datahike's pinned revision is
+`b2ffa4af0f555483e1a146a98c2546b0a42debad`.
+
+The evidence identifies an acquisition-state interaction, not a newly incorrect
+H2 revision or H10 contract result. Previous candidate checks adopted onto an
+older published template; their preparation had already read program indexes.
+Checking the already-published combined commit exposes the same broad reader
+with colder Datahike indexes. A test-only candidate, with the old production
+reader, passed all 39 original assertions but failed the new read-evidence
+assertion (run `7a7c9e1ba3a6`, candidate `bceee9610fce723b7c3908fd17a024325ce25d7d`).
+Its evidence explicitly lists unbounded doc, calls, references, keywords,
+contract, subject and schema-form reads. Thus an allocation-only green after
+candidate adoption did not prove the underlying cold-read work was removed.
+
+The benchmark now also checks positive read evidence after its attribution
+helper empties the central cache: every node-detail or schema-form read names
+an entity. This assertion is red on the old reader irrespective of index warmth.
+The measured cold/warm legs themselves retain their original budgets and
+ordering. Default's cache and JVM were never reset.
+
+### Combined after table
+
+Run `f0c7da5528f8`, candidate `8317b174f7fbc137d54094b67c070011916c8824`:
+12 named Vars, **108 pass / 0 fail / 0 error**. The full benchmark is included.
+MB are decimal caller-thread allocated MB. Floors remain the earlier
+hypotheses for warm operation, not measured guarantees.
+
+| Part | Cold ms / MB | Warm ms / MB | Hypothesized warm floor ms / MB |
+|---|---:|---:|---:|
+| Branch | 12.26 / 1.948 | 12.74 / 0.734 | 1–10 / 0.1–1 |
+| World | 0.19 / 0.013 | 0.10 / 0.013 | 0.01–0.1 / <0.02 |
+| SCI | 923.72 / 1,783.171 | 13.13 / 5.195 | 1–2 / <1 |
+| First context | 82.95 / 63.244 | 18.42 / 10.228 | 2–5 / 1–3 |
+| Paused Flow | 2.30 / 0.630 | 1.94 / 0.613 | 1–5 / <1 |
+
+Cold context allocation is **80.4% lower** than the combined failing sample;
+calls fall from 4,349 to 4,093 and reads from 138 to 131. The warm context
+still derives no reached graph. An earlier candidate run also passed the
+original benchmark with the final read strategy; the latest table is one
+complete measured sample, not minima selected across runs.
+
+The named non-long reaching proofs are:
+
+- `seon.start-flow-benchmark-test/commit-to-paused-flow-costs`
+- `seon.test.runner-test/reach-digests-and-memberships-share-content-valid-work`
+- `seon.test.runner-test/a-reopened-fork-reuses-its-programs-proof-reach`
+- `seon.test.runner-test/a-program-change-reads-only-the-reach-attributes-it-wrote`
+- `seon.test-reaching-test/reach-digests-follow-only-changed-closures`
+- `seon.test-reaching-test/two-branches-of-one-program-share-reach-declarations`
+- `seon.test-reaching-test/a-reach-digest-is-its-closures-alone-across-cycles`
+- `seon.test-reaching-test/a-call-edge-changed-under-an-unchanged-definition-digest-changes-the-reach`
+- `seon.test-reaching-test/concurrent-reach-reads-of-one-value-derive-once`
+- `seon.test-reaching-test/a-fresh-branch-with-unchanged-program-entities-derives-nothing`
+- `seon.test-runner-test/a-metadata-only-change-changes-the-reach-digest`
+- `seon.test-runner-test/undigested-declarations-never-share-a-reuse-key`
+
+The changed-attribute test now observes misses of the three retained attribute
+maps; selected-node pulls are checked by the benchmark's read evidence.
+The branch-sharing helper likewise checks the three retained maps. Cycles,
+retargeting under an unchanged definition digest, schema changes, metadata,
+undigested declarations and concurrent reuse remain proven.
+
+Full-tree `clj-kondo --lint src script test --cache false`: **0 errors**,
+1,515 warnings, 6,869 ms. Source/test delta before this evidence update:
+**source −5 lines, tests +14 lines**. No selected proof is red. The previously
+named H9 dependency-visibility, data-only-overlay, occasional branch-allocation
+and config-projection reds remain outside this passing slice; broad tiers
+belong to root. The config-projection task above remains pending.
+
+The first commit-gate attempt, run `d00706da526e`, passed 107 assertions and
+failed the unchanged warm branch-time bound: **26.66 ms > 25 ms**. All context
+budgets and the new read-evidence proof passed. This timing miss is retained
+as evidence; no bound or branch implementation was changed for the rerun.
+
+Foreign boundary: HEAD advanced to `7d7da5865` (cluster-partition admission)
+during investigation. Candidate checks include committed HEAD but exclude the
+other lane's in-flight cluster-pick/partition files. This fix changes neither
+Datahike, schema/instrumentation, configuration nor SCI acquisition. The three
+identity/digest maps are still proportional to declarations; the remaining
+context reference reads and the SCI configuration derivation still exceed the
+hypothesized floors. Default remains root's installation responsibility.

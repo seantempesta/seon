@@ -1,5 +1,6 @@
 (ns seon.test.runner-test
   (:require [seon.config]
+            [seon.cache :as cache]
             [seon.sci.eval]
             [seon.batch]
             [seon.cluster.registry :as registry]
@@ -135,16 +136,17 @@
  :seon.batch/sink (seon.batch/sink) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms seon.config/defaults) :seon.agent/id "reach-attribute-change"})
                    'seon.id "(defn reach-attribute-probe {:malli/schema [:=> [:cat] :int]} [] 1)")
            changed (:db-after report)
-           reach-attributes #{:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key
-                              :seon.schema/form :seon.fn/calls :seon.fn/references :seon.fn/keywords
-                              :seon.fn/spec :seon.test/subject}
+           reach-attributes #{:seon.fn/sym :seon.test/sym :seon.program/definition-digest}
            written (into #{} (comp (map :a) (filter reach-attributes))
                          (:tx-data report))
-           [digests calls] (test-support/armed-calls '#{seon.db/datoms} #(runner/reach-digests changed symbols))]
+           misses #(get-in (cache/status) [:seon.cache/kinds :seon.test.runner/reach-attribute :seon.cache/misses] 0)
+           before (misses)
+           digests (runner/reach-digests changed symbols)
+           derived (- (misses) before)]
        (is (= 10 (count digests)))
        (is (< 0 (count written) (count reach-attributes)))
-       (is (= (count written) (get calls 'seon.db/datoms))
-           "a change re-reads the reach attributes it wrote, never all ten")))))
+       (is (= (count written) derived)
+           "a change re-reads only the cached reach attributes it wrote")))))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces
