@@ -347,6 +347,26 @@ reproduces that same assertion (3 pass, 1 fail, 3,277 ms). That Var is excluded
 from the passing slice gate; the cold-base and config cost proofs remain the
 two deliberately red H9 follow-ups described above and below.
 
+### Read selected test declarations before their bodies
+
+`885489132` landed the four-range acquisition. Its final check ran ten named
+Vars with 78 assertions green (`0f60c003a5ee`, 50,144 ms check, 9,813 ms tests).
+The next removal binds `:agent` at the entrance to the test query, instead of
+joining all 2,807 test bodies and discarding core rows in Clojure. The query
+retains the same four-column result for selected tests.
+
+Candidate `584ae48e669b6c36071c1e528efae4d93dde5d85`, run `54031a28e407`,
+reduces the isolated cold base from **517.79 ms / 1,242.088 MB** to **236.65 ms /
+566.663 MB**. Time and zero-installation/zero-reference-walk assertions pass;
+allocation remains red. Five queries now fall below the top eight self-time
+owners; range reads account for 108 ms and namespace pull 65 ms. The complete
+SCI benchmark also passes, but its separately evicted sample is **799.77 ms /
+1,631.871 MB**, warm **28.09 ms / 29.433 MB**: this full-leg sample regresses
+against the preceding 580.51 ms / 787.920 MB sample and is not counted as a
+full-leg gain. The samples retain different preceding test/library-cache
+histories. The isolated base is the direct comparison for this removal.
+Full-tree lint: 0 errors, 1,513 warnings, 7,319 ms.
+
 ### Configuration owner task
 
 `seon.config/a-config-read-rebuilds-the-packaged-projection` names

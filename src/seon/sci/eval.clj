@@ -2699,17 +2699,16 @@
             all-namespace-row-by-name
             (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
             test-rows
-            (into
-             []
-             (filter (fn [[_ _ _ admission]] (= :agent admission)))
+            (vec
              (db/q '[:find ?sym ?source ?namespace-name ?admission
+                     :in $ ?admission
                      :where
+                     [?test :seon.schema.admission/source ?admission]
                      [?test :seon.test/sym ?sym]
                      [?test :seon.test/source ?source]
-                     [?test :seon.schema.admission/source ?admission]
                      [?test :seon.test/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
-                   db))]
+                   db :agent))]
         (kernel/cache-program!
          ctx
          (into {} (map (fn [row] [(symbol (first row)) (function-entry row)])) all-function-rows)
