@@ -120,6 +120,27 @@ separate agent? Should Survey and Model merge? Which template edits from Review 
 6. The proof catalogue page; first templates drafted from it and this weekend's evidence.
 7. The per-stage measurement columns.
 
+## 6b. Learning from guessed names
+
+Every "Unable to resolve symbol X" is a signal of what an agent expected to exist (health's agent-error signatures
+already group them, with the guessed names as values; 58 occurrences of the top one on 2026-10-11:
+`seon.task/current`, `seon.print/inspect`, `my.cluster.source/write`, `my.agent/messages`, ...).
+
+1. **Answer at the failure.** The refusal carries the nearest real symbols (spelling distance via
+   `seon.error/names-in`, plus name-token matches) with each one's one-line doc and calling form as an offered
+   operation. Most guesses are near misses; the agent's next form uses the right one.
+2. **Learn the mapping from behavior.** When the agent's next successful form uses an offered candidate, record
+   guessed X → resolved Y (agent, task) as a fact: confirmed by what the agent did, not inferred.
+3. **Link it to the task.** A resolved guess adds Y to the task's references, so the next agent on the task (the next
+   stage or a rerun) reads Y and never guesses X. Review (stage 7) lifts recurring mappings into the stage's template.
+4. **Repeated guesses become mined tasks.** A name guessed by two or more agents is a missing affordance: a task whose
+   proof is the next round's count for that name at zero. Its fix is, in order of preference: teach it (a help or block
+   line naming the real operation), build it (when the wanted operation does not exist, e.g. "my current task"), or
+   alias it (only when the guess is the standard Clojure or library word; aliases multiply names, against the
+   one-word-per-concept rule).
+
+Measured by guessed-name signatures and calls spent on failed guesses per round; they should fall round over round.
+
 ## 7. Open questions
 
 - Is Check-proofs a separate agent or the start of Implement?
