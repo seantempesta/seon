@@ -1,0 +1,33 @@
+Standalone candidate regression check:
+SEON check OK total-ms 25505
+run f8068e1a6e31 / executed 1 / reused 0 / pass 2 / fail 0 / error 0 / 4654 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 94708, :seon.operator/test-phases {:seon.operator/tests-ms 4727, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1975, :seon.boot/ready-ms 7123, :seon.operator/adopt-ms 1108, :seon.operator/archive-ms 1959, :seon.operator/classpath-ms 518, :seon.operator/prepare-ms 3225, :seon.operator/share-ms 715, :seon.operator/boot-ms 10759, :seon.operator/source-ms 3192}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 3247, :adopted-ms 348}, :seon.source/built? true, :seon.cluster/adopted-identities 328, :seon.source/git-sha "cd702c7cb79600ae3db4744504f65db5fabb61ef", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "2319152dc6365747127acd3af1cc2de69cbfa644", :seon.operator/seed-ms 1916}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1970, :rehearsal-ms 3692, :total-ms 25505}, :seon.boot/start-instant #inst "2026-10-11T21:22:23.023-00:00", :seon.operator/test-summary "run f8068e1a6e31 / executed 1 / reused 0 / pass 2 / fail 0 / error 0 / 4654 ms / passed? true", :seon.source/commit-id #uuid "6acc1781-6354-5062-95f5-720a5dbd73a8"}
+
+Standalone candidate config check:
+SEON check OK total-ms 24197
+run e0d2f097bb1b / executed 1 / reused 0 / pass 3 / fail 0 / error 0 / 2676 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 94708, :seon.operator/test-phases {:seon.operator/tests-ms 2753, :seon.operator/slot-wait-ms 1, :seon.operator/seed-ms 1935, :seon.boot/ready-ms 7562, :seon.operator/adopt-ms 1272, :seon.operator/archive-ms 1904, :seon.operator/classpath-ms 530, :seon.operator/prepare-ms 3175, :seon.operator/share-ms 709, :seon.operator/boot-ms 11367, :seon.operator/source-ms 3143}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 2626, :adopted-ms 374}, :seon.source/built? true, :seon.cluster/adopted-identities 328, :seon.source/git-sha "b0b4d4c64bef1e2c43779e014c7ae6c3fce6de63", :seon.operator/seed {:seon.operator/seeded :template, :seon.source/git-sha "2319152dc6365747127acd3af1cc2de69cbfa644", :seon.operator/seed-ms 1882}, :seon.operator/swept [], :seon.operator/phases #:seon.operator{:archive-ms 1954, :rehearsal-ms 3111, :total-ms 24197}, :seon.boot/start-instant #inst "2026-10-11T21:22:23.023-00:00", :seon.operator/test-summary "run e0d2f097bb1b / executed 1 / reused 0 / pass 3 / fail 0 / error 0 / 2676 ms / passed? true", :seon.source/commit-id #uuid "6acc17be-3488-538c-846a-c5926ee94d5c"}
+
+Read-only JVM probes on archive 2319152dc, Java 26.0.1, fresh child each time:
+Both class directories: 1856.913042 ms overall; require seon.config+seon.schema 1478.238708 ms.
+Without dev-program-classes: 2545.406542 ms overall.
+Without either class directory: 9862.800834 ms overall (print-first order).
+Without either class directory, dependency-first order: 8781.796750 ms overall:
+malli.core 408.879625 ms
+datahike.api 6046.326875 ms
+seon.schema 134.667709 ms
+seon.schema.edn 13.998333 ms
+seon.print 239.154792 ms
+seon.error.refusal 0.022250 ms
+seon.db 394.165208 ms
+seon.error 983.481125 ms
+seon.reconcile 10.949000 ms
+seon.config 147.912417 ms
+Child exit 0 for every sample. These are sequential attribution probes, not independent per-namespace loads.
+MCP result handles: eb200cab5cc45, e19d31bd5cc12, ef3146963ccc9, ea6cf16dcd320, ec4910e561d32.
+Regression red before fix: 60f593040b70, 0 passes / 0 failures / 1 error, 3183.54 ms.
+Refused restore omitted the doc introduced in d02a78686, while copying digest 7b7c4e4ad487e877b429f72a453b1911b15bf708e85fcd43e4f5793c417a000f;
+writer expected 4e54ed5ce6d5d089759f72c10a0de97da1d24b1031ecc46aa58e87f0df6ec95f.
+Full-tree lint: 6416 ms, 0 errors / 1541 warnings.
+
+Reusable script cached-classpath verification: exit 0, 1959.664208 ms child overall, 1534.508833 ms requires; packaged provider present. The value printer reported one declaration-population fallback during post-measurement rendering (152 reads), excluded from requires.

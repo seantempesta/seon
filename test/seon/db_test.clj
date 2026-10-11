@@ -3192,8 +3192,7 @@
           (is (not (identical? projection (#'db/content-projection after database)))
               "and the equal declaration content derives anew"))))))
 
-(deftest ^{:seon/tasks #{'seon.db/a-retained-branch-fixture-writes-the-digest-its-definition-produces}}
-  a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program
+(deftest a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program
   ;; A branch's adoption record names its historical program; the loaded code
   ;; builds the projection, so a record naming another builder keys nothing.
   (test-support/with-database
@@ -3201,16 +3200,15 @@
       (let [database (db/db connection)
             projection (db/carried-projection database)
             entity [:seon.fn/sym 'seon.schema/shape-entity-in]
-            original (:seon.program/definition-digest (d/pull database [:seon.program/definition-digest] entity))
+            original (db/pull database [:seon.fn/doc] entity)
             record (or (:e (first (d/datoms database :aevt :seon.source/commit-id)))
                        (db/q '[:find ?e . :where [?e :seon.cluster/name]] database))
             _ (test-support/transacted!
                connection [(test-support/revision database entity {:seon.fn/doc "Another builder."})])
             other-program (db/commit-id (db/db connection))
-            ;; Retracting the doc restores the original entity, so its digest.
+            ;; Restore the original documentation and derive its final digest.
             _ (test-support/transacted!
-               connection [[:db/retract entity :seon.fn/doc "Another builder."]
-                           {:seon.fn/sym 'seon.schema/shape-entity-in :seon.program/definition-digest original}
+               connection [(test-support/revision (db/db connection) entity original)
                            {:db/id record :seon.source/commit-id other-program}])
             retained (db/db connection)]
         (is (not= (#'db/builder-digest database)

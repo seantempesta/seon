@@ -22,6 +22,11 @@
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "the-packaged-population-loads-in-a-fresh-jvm-within-its-bound"
              :kind :function
-             :intent "Central round 3, HEAD 2319152dc: `seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` takes 9.2 s against its 5 s bound (also red in round 2 at 9.9 s; green in the c53c9306e tier and at cd59c9fa3). Time the same probe on cd59c9fa3 and on each landing since to find the commit, then bring the load back under its bound or justify the bound beside the measured number."
-             :must-read #{seon.config/effective seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm}
-             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]
+             :intent "`seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm` must fit its unchanged 5 s bound on a source-only classpath as well as one carrying compiled classes. Round 3's nuked root launched without either class directory (`seon.operator/launch-child!` skips them for nuke); its child inherits that classpath even after boot compiles classes. At archive 2319152dc, fresh child probes took 1,857 ms with both class directories, 2,545 ms without program classes, and 8,782-9,863 ms without either. Sequential source-only attribution: `datahike.api` require 6,046 ms (69% of total), `malli.core` 409 ms, `seon.schema` 135 ms, `seon.error` 983 ms, `seon.config` 148 ms; remaining work is other requires plus process entrance and exit. The exact config test is green through the ordinary archived lane check (2,676 ms, run e0d2f097bb1b), which supplies compiled dependencies. Trace `datahike.api` loading at the pinned dependency and the operator's source-only child classpath; improve the owning dependency load or declared classpath composition without widening the test bound or adding a test-side cache. No commit attribution is established: these comparisons hold source constant and vary class directories."
+             :must-read #{seon.config-test/config-loads-the-packaged-population-in-a-fresh-jvm
+                          seon.operator/launch-child! seon.operator/start-classpath
+                          seon.operator/dependency-classes datahike.api/transact
+                          seon.schema.edn/load!}
+             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"
+                         "docs/research/agent-platform/2026-10-12/sol-reg-digest.md"
+                         "docs/research/agent-platform/2026-10-12/sol-reg-digest-evidence.txt"}}]
