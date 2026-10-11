@@ -61,29 +61,33 @@ work already agreed here are pre-approved, and a new design question waits.
    request (`:merged`, or `:closed` with a reason) and deletes its merge branch and the source branch, closing the
    agent; `my.root/merge!` and root's decline both end in it; an ended agent with no open merge request deletes its
    branch at its close. The by-hand cleanup is moot: the reset removed the stale merge requests and branches.
-5. **The vocabulary cut, all renames now** (Sonnet, scripted sweep; Q16, catalogue §3–§4). Agent side, three verbs:
-   `my.task/current`, `my.task/refine!`, `my.task/send-back!` (reason, optional target stage, counterexample; replaces
-   `my.turn/complete` as give-back, `my.agent/done`, `my.message/decline`, the `my.task/complete!` of AGENTS.md);
-   success has no verb. Delete the queue (`my.task/open`, `claim!`), the steps (`plan!`, `step!`, `done!`, `steps`,
-   `seon.task/steps!` and its schema) and `seon.task/resolution`'s fault and signal clauses that read facts nothing
-   writes. Root's namespace `my.root`: `instructions`, `launch!` (from `seon.competency/start-run!`, branching from the
-   predecessor's commit), `merge-requests`, `merge!` (over `land!`), `close!`, `ended`; `my.program`'s merge
-   wrappers deleted; `seon.task/propose!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`.
-   Stored attributes with their functions: home → main, refuted → red-first, outcome → end, proposal → merge request.
-   After 2. Unblocks 6.
-6. **The handoff medium and stage-aware proofs** (Sonnet after 5; Q13, Q14, TASK-CHAIN §6). `my.task/refine!` over
-   `seon.task/create!`'s upsert at the task's main, any field, with the stage decision component
-   (`:seon.task.stage/name`, `/decision`, `/reason`, `/keys`); `:seon.task/stage` on the task; one stage-aware
-   selection `seon.task/proofs` shared by assignment, test execution, context and completion (Design+Prove wants the
-   behavior proofs red and its own stage proof green; Implement wants them green), deleting the three selections of
-   today; `my.root/launch!` forks the successor from the predecessor's program basis so unmerged stubs and tests reach
-   it. Unblocks 7.
-7. **The first chain experiment, hand handoff first** (root; Q13, TASK-CHAIN §5). One small existing defect with
-   settled policy and an existing symbol; two DeepSeek agents, Design+Prove → Implement. Root mines it, launches the
-   Design+Prove agent, reads its refined task, launches Implement by hand from the predecessor's basis, then works
-   the merge request task and merges. Measured per stage: calls, tokens, errors by signature, send-backs, whether the successor needed
-   root. Then the same handoff moves into `seon.turn/end-task!` and the two-model experiment runs unattended. After 3,
-   6. Unblocks the loop as the owner described it.
+5. **The vocabulary cut, all renames now** (Sonnet, scripted sweep; Q16, catalogue §3–§4). Agent side:
+   `my.task/current`, `my.task/refine!`, `my.task/send-back!`, `my.task/create!` (steps with needs and instructions);
+   success has no verb. Delete the queue (`my.task/open`, `claim!`), the old step components (`plan!`, `step!`,
+   `done!`, `seon.task/steps!`, `:seon.step/*` and the old `:seon.task/steps` schema, which the new component ref of
+   item 6 then takes over) and `seon.task/resolution`'s fault and signal clauses. Root's namespace `my.root`:
+   `instructions`, `merge-requests`, `merge!` (over `land!`), `close!`, `ended`; no `launch!` (the reconciler launches);
+   `seon.task/propose!` → `request-merge!`, `decide!` → `close!`, outcomes `:merged`/`:closed`. Stored attributes with
+   their functions: home → main, refuted → red-first, outcome → end, proposal → merge request. After 2. Unblocks 6.
+6. **The runtime follows the database** ([runtime-follows-db](../research/agent-platform/2026-10-11/runtime-follows-db.md),
+   settled by the owner in four rounds, 2026-10-11; its §10 is the build order, 22 cards of about fifteen minutes each
+   with a red proof, filed as tasks in `resources/seon/tasks/`). One path: an agent wakes and runs a task. A subject
+   task owns step tasks (`:seon.task/steps`), siblings run in parallel unless one `:seon.task/needs` another, a parent
+   never runs; each step carries its own `:seon.task/instructions` as data; the frontier ("everything that should be
+   running") is one query (`seon.task/frontier`); intents `:seon.task/execution` ∈ `#{:held :running :paused :stopped
+   :cancelled}` plus cluster `running/paused`, each one action of the reconciler (`seon.cluster.agent/armer-step`
+   generalized), the only thing that starts graphs, under the dial `:seon.config.agent/max-running` (default 4; per-agent
+   cost in context MB and ms to start is a measured target of the path); the attempt row is the launch's write and the
+   red-first proofs run in the agent's first pass; one clock proc fires cron tasks (a function firing for maintenance and
+   the heartbeat, an attempt otherwise); problems are tasks assigned to root (fresh agents for error signatures and cost
+   regressions), nominal ends wake nobody; the plan is rendered from needs, never stored; `start --paused` for
+   debugging; the interpreted-overlay cache is the first performance lane. Order: probes P1–P3 (separate lane, running)
+   and S1 beside; S2–S4, R1–R4, C1–C3, Q1–Q3, D1–D4 as §10 says. Unblocks 7.
+7. **The first chain experiment** (root; Q13, TASK-CHAIN §5) after R1 and S3: one small existing defect with settled
+   policy and an existing symbol; root creates a two-step tree, Design+Prove → Implement; the reconciler launches both in
+   turn, the successor from the predecessor attempt's commit; root works the merge request and the retrospective.
+   Measured per step: calls, tokens, errors by signature, send-backs, the path's seams, whether the successor needed root.
+   Then the six-step tree runs unattended. Unblocks the loop as the owner described it.
 8. **The merge request is a task assigned to root** (Q8, round 3). No review mechanism: the merge request carries its
    data (the diff since the merge base, every reached test with its result, the proofs, the intent and decisions, the
    merge instructions), root's context renders it like any agent's task, and root's work ends in `my.root/merge!` or
@@ -180,12 +184,14 @@ ordinary work is sub-second.
 
 ## 3. The method: the chain of agents
 
-The method is the TASK-CHAIN card (`schedule/cards/TASK-CHAIN.md`): Mine (a query) → Design (survey, schemas,
-contracted stubs) → Prove → Implement (with a send-back right) → Land after root's review → Retrospective. Each stage
-is a fresh agent; the handoff is the task entity at main, edited by `my.task/refine!`; a stage ends when its stage
-proofs are green, the same rule as a task; every stage records an explicit decision. Variations of the pipeline are
-data and are compared on the same task family. The first experiment is two agents, Design+Prove → Implement, with a
-hand handoff (§0 item 7).
+The method is the TASK-CHAIN card (`schedule/cards/TASK-CHAIN.md`) on the runtime of
+[runtime-follows-db](../research/agent-platform/2026-10-11/runtime-follows-db.md): Mine (a query) → Design (survey,
+schemas, contracted stubs) → Prove → Implement (with a send-back right) → Land (root's merge-request task) →
+Retrospective. Each stage is a step task of one subject, worked by a fresh agent the reconciler launches when the
+step's needs are done; the handoff is the subject task at main, edited by `my.task/refine!`; a step ends when its proofs
+are green, the same rule as any task; its instructions are data on the step; every stage records an explicit decision.
+Variations of the pipeline are trees and instructions, compared on the same subject family. The first experiment is two
+steps, Design+Prove → Implement (§0 item 7).
 
 Every new mechanism is run by hand once before it is automated: the chain runs of 2026-10-10 found two to five
 frictions each at minutes of cost, the cheapest learning of the weekend.
@@ -220,7 +226,7 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
   derivation inputs when the chain table shows the cost dominating.
 - Landing through git objects or a dedicated checkout (fable-replan §4.3 fix A): the revert removes the fences the
   shared tree motivated; the root fix lands only if a real collision is observed.
-- Child tasks, task graphs and fan-out; COST-REG slices 2–3; growth tests and guards; embeddings (after lexical search
+- COST-REG slices 2–3; growth tests and guards; embeddings (after lexical search
   is used and found wanting); the Datahike fork rebase; a stateful lifecycle test suite; a Flow-hosted writer (refused).
 - The positive-wording pass over AGENTS.md's remaining negatives: root, in small commits.
 
@@ -241,11 +247,12 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
 - 2026-10-10 Full history is kept with the one-hour retention window; `as-of`, `since` and `history` are unaffected.
 
 **Tasks and the chain**
-- 2026-10-10 Work is a chain of separate agents; run by hand first; nail a single task before child tasks.
+- 2026-10-10 Work is a chain of separate agents; run by hand first; nail a single task before child tasks (the
+  deferral of child tasks ended 2026-10-11 with the task tree below).
 - 2026-10-11 The chain is TASK-CHAIN: build it generally, experiment with variations, keep the stages worth their
-  calls; agents may edit any task field; stages advance by stage proofs (one system end to end); every stage records
-  an explicit decision, `:unchanged` with a reason, never an absence; the first experiment is two agents with a hand
-  handoff (Q13).
+  calls; agents may edit any subject field; every stage records an explicit decision, `:unchanged` with a reason, never
+  an absence. Superseded the same day (runtime-follows-db rounds 1–4): stages are step tasks, not stages of one task;
+  "stage proofs" are the step's own proofs; the first experiment's handoff is the reconciler's, not by hand.
 - 2026-10-10 Tasks are entities upserted as the chain refines them, with history; author little, derive the rest;
   authored = name, intent, must-read; derived = proofs, interface, schemas, status. Task names are fully namespaced
   symbols. The database is the source of truth; files are lossless write-back, proven by a round trip.
@@ -258,6 +265,25 @@ and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check ga
   automatic when proofs are green.
 - 2026-10-11 Guessed names: answer at the failure with the nearest real symbols and calling forms; learn guessed →
   resolved from the agent's next form; link it to the task; a name guessed twice becomes a mined task.
+
+**Runtime, scheduling and the task tree** (runtime-follows-db, owner rounds 1–4, 2026-10-11)
+- One path: an agent wakes and runs a task; everything uses it (steps, merge requests, problems, recurring attempts);
+  the reconciler, the clock and the heartbeat are the procs that host it, not tasks. Agents never start agents.
+- Progress is derived from facts written once (steps, needs, attempt, end); intent is stored on the task
+  (`:held :running :paused :stopped :cancelled`, each one reconciler action in Flow's verbs) plus cluster
+  `running/paused`; nothing writes "actual" to the database except the heartbeat's audit.
+- Order is `needs` only, parallel by default, parents never run; no position; the plan is rendered from needs.
+- Instructions are data on the task (steps and problem tasks alike); no templates, no stage types.
+- Problems are tasks assigned to root by identity, created where their facts already pass; nominal ends wake nobody;
+  error signatures and cost regressions go to fresh agents. Merge requests are one problem class.
+- One scheduling system: a recurring thing is a task with a cron; one clock proc writes firings; a function firing runs
+  in the clock (maintenance, heartbeat); an attempt firing runs on the path; a firing to a live agent is a message
+  wake; refused delivery is a problem task. `seon.schedule`'s per-agent proc goes.
+- Flow owns process and computation; channels carry only ephemeral data; everything of consequence is a fact, so a
+  crash and a resume to any commit are derivations. `start` resumes; `start --paused` for debugging.
+- `max-running` is a dial, default 4; agents are to be lightweight: context MB and ms to start are measured targets.
+- The interpreted-overlay cache (`seon.sci.eval/interpret-overlay!` per branch) is the first performance lane; Astra's
+  0c3916000 already caches the plan.
 
 **Proofs and tests**
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog.

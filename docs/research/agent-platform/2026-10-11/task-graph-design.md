@@ -1,7 +1,7 @@
 ---
 title: "Task graph: every unit of agent work is a task, linked, advanced by derivation (proposal for owner discussion)"
 type: research
-status: proposal, not agreed
+status: superseded by runtime-follows-db.md (owner rounds 1–4, 2026-10-11): one task per step and the armer as launcher were taken; `:seon.task/after`/`:of` became `:seon.task/needs`/`:seon.task/steps`; kept as history
 created: 2026-10-11
 basis: HEAD f43646710; seams verified by symbol in source at that commit, no JVM probe
 ---

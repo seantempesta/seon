@@ -79,6 +79,16 @@ Words no library names. Each has one meaning.
 | write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`my.program/write-back!`) | export, push |
 | wake | a listened event the agent has not yet answered (a message, a task change) | notification, trigger |
 | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
+| subject, step | a subject task owns its step tasks as components (`:seon.task/steps`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
+| needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
+| frontier | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (`seon.task/frontier`); never stored | ready list, queue, scheduler state |
+| attempt | one assignment row of a task to an agent on a branch (`seon.id/id [handle agent branch]`), ended once by its end fact | run (of a task), launch |
+| intent | `:seon.task/execution`, the stored permission for an attempt: `:held` (never launched), `:running`, `:paused` (graph exists, nothing runs), `:stopped` (graph gone, resumable), `:cancelled` (terminal); cluster `:seon.cluster/execution` is `:running` or `:paused` | desired state, status, run state |
+| reconciler | the one proc that makes the roster match the facts (`seon.cluster.agent/armer-step` generalized): launches the frontier under `:seon.config.agent/max-running`, applies intents with Flow's pause, resume, stop; the only thing that starts graphs | scheduler, dispatcher, launcher, armer (as a name) |
+| problem task | a task created by identity `[class subject]` when a problem is detected from facts (an end other than done, a send-back loop, a stale heartbeat, refused delivery, …), assigned to root or a fresh agent, carrying its instructions | alert, escalation, fault notification |
+| clock | the one proc that writes a firing fact for every cron task at its due instant and calls a cron task's function when it has one | timer, schedule proc, `seon.schedule.task` |
+| firing | `:seon.task.fire/*`: one due instant of a cron task, idempotent by `[task nominal-at]`; delivered to a live agent as a wake, else an attempt | tick, schedule fire |
+| heartbeat | the cron task with a function that pings every graph and writes `:seon.agent/observed` on change and `:seon.cluster/heartbeat-t` per period; older than two periods reads as unknown | liveness probe, health poll |
 
 ## Other grounded terms
 
