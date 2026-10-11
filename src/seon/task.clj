@@ -10,6 +10,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.registry :as mr]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.fn :as functions]
@@ -789,7 +790,8 @@
 (defn close!
   "Close the merge request `merge-task`: write its `outcome` (`:merged`, or `:closed` with `reason`) at
   main and delete the source branch each of its merge requests names, closing the agent there
-  (`delete-branch!`; a refused deletion is answered beside the closed request). The one close owner: root's merge (`seon.cluster.source/land!`, which deletes the merge
+  (`delete-branch!`; a refused deletion is answered beside the closed request), unless the requesting agent's
+  cluster keeps ended branches for audit (`:seon.config.agent/keep-ended-branches?`). The one close owner: root's merge (`seon.cluster.source/land!`, which deletes the merge
   branch it tested) and root's decline (`my.root/close!`) both end here. Answers the closed merge request.
 
   Example:
@@ -799,10 +801,19 @@
   [{connection :seon.db/connection :as context} merge-task outcome reason]
   (let [report (written connection (cond-> [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]]
                                      reason (conj [:db/add [:seon.task/id merge-task] :seon.task/reason reason])))
+        ;; a branch whose agent's cluster keeps ended branches stays for audit
+        kept? (fn [database branch]
+                (let [agents (db/q '[:find [?id ...] :in $ ?merge ?branch
+                                     :where [?request :seon.task/merge ?merge] [?request :seon.task/branch ?branch]
+                                     [?request :seon.task/of-assignment ?a] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                                   database merge-task branch)]
+                  (and (sequential? agents)
+                       (some #(true? (config/agent-cluster-dial database % :seon.config.agent/keep-ended-branches?)) agents))))
         branches (when (:db-after report)
                    (db/q '[:find [?branch ...] :in $ ?merge
                            :where [?request :seon.task/merge ?merge] [?request :seon.task/branch ?branch]]
-                         (:db-after report) merge-task))]
+                         (:db-after report) merge-task))
+        branches (cond->> branches (sequential? branches) (remove #(kept? (:db-after report) %)))]
     (cond (:seon.error/at report) report
           (:seon.error/at branches) branches
           :else (let [refused (into [] (keep #(delete-branch! context %)) (sort branches))]

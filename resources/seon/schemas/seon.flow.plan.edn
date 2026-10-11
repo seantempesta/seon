@@ -41,4 +41,12 @@
           [:seon.task/execution {:optional true} :seon.task/execution]
           [:seon.flow.plan/fork-point {:optional true} :seon.flow.plan/fork-point]
           [:seon.flow.plan/class {:optional true} :seon.flow.plan/class]]
- :actions [:vector :seon.flow.plan/action]}
+ :actions [:vector :seon.flow.plan/action]
+ :ended-attempt [:map {:description "An ended attempt db<->flow has not yet landed on main: its end read on main, else on its branch's head, which the store still holds."}
+                 [:db/id :seon.db/entity-id]
+                 [:seon.task/assignment :seon.task/assignment]
+                 [:seon.task/assigned :seon.task/assigned]
+                 [:seon.agent/id :seon.agent/id]
+                 [:seon.task/branch :seon.task/branch]
+                 [:seon.task.attempt/end :seon.task.attempt/end]]
+ :ends [:vector {:description "Every ended attempt db<->flow lands this pass, by key."} :seon.flow.plan/ended-attempt]}

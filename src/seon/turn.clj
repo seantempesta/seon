@@ -2283,15 +2283,27 @@
                 [landed (db/transact! home (landing-tx (:seon.task/merge request) landed))]))]
         (if (:db-after recorded) landed recorded)))))
 
+(defn land-ended!
+  "Merge the merge request the green end of `agent-id`'s task recorded at main `cluster` with no root when the dial
+  `:seon.config.root/land?` says so (`land-end!`); db<->flow's work once the end is landed on main. A refused
+  landing is a fault recorded beside it. nil."
+  {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
+  [cluster agent-id]
+  (when-let [request (end-merge-request (db/db (:seon.db/connection cluster)) agent-id)]
+    (let [landed (land-end! cluster agent-id request)]
+      (when (and (:seon.error/at landed) (not (:seon.error/message landed)))
+        (fault/fault! (env/of cluster) (ex-info "The task's end was refused." landed)
+                      {:seon.error/layer :seon.turn/task-end :seon.error/operation `land-end!
+                       :seon.db.process/id (:seon.db.process/id cluster) :seon.agent/id agent-id}))))
+  nil)
+
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): request the merge of its
   change when it ended green (`my.program/request-merge!`, the agent's own act; a merge request this end already
   recorded is reused, `end-merge-request`), record the agent's outcome at main (`seon.context/end-summary-tx`),
   then send root the one end message and close the agent in one transaction at main (`end-task-call`), so
-  whoever sees the agent closed finds its message; then merge it with no root when the dial says so (`land-end!`,
-  whose close deletes the agent's branch).
-  A task sent back deletes the agent's branch (`seon.task/delete-branch!`): nothing of it will merge; a capped or
-  stalled end keeps it, resumable.
+  whoever sees the agent closed finds its message. Landing the end, stopping the agent's graph and settling its
+  branch are db<->flow's (`seon.cluster.agent/land-ends!`): an agent never retires itself from its own graph.
   nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
@@ -2330,21 +2342,7 @@
                           (not (uuid? commit)) commit
                           (identical? home connection) (write!)
                           :else (db/call-with-custody {:seon.db/connection home} write!))]
-        (when-not (:db-after outcome) (fault! `end-task-call outcome))
-        ;; the merge comes after the end is recorded: closing the merge request deletes the agent's branch
-        (when (and (:db-after outcome) (:seon.task/merge request))
-          (let [landed (land-end! cluster agent-id request)]
-            (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))))
-        ;; a task sent back leaves nothing on the branch to merge; a capped or stalled end stays resumable
-        (when (and (:db-after outcome) (#{:given-back :sent-back} end))
-          (let [environment (env/of cluster)
-                branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
-            (when (and (keyword? branch) (:seon.store/store environment))
-              (when-let [refused (task/delete-branch! {:seon.db/connection home :seon.store/store (:seon.store/store environment)
-                                                      :seon.agent/routing (:seon.agent/routing environment)
-                                                      :seon.env/environment environment}
-                                                     branch)]
-                (fault! `task/delete-branch! refused)))))))
+        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
     nil))
 
 (declare first-proof-run-t latest-answering-turn-t proof-run-recorded? prove-turn step-limit-ms)

@@ -7,7 +7,9 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
+            [seon.cluster.squash :as squash]
             [seon.batch]
             [seon.config :as config]
             [seon.db :as db]
@@ -321,6 +323,10 @@
       (fn [handle]
      (let [routing (:seon.agent/routing handle)
            started (fn [routing] (:seon.flow.plan/started (agent/roster-facts routing)))]
+       ;; A's hand-written end has no merge request, so landing it would delete A's branch before B forks from
+       ;; its end commit: the dial keeps it, as an open merge request does in the real chain
+       (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                       :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}})
        (try
          (pass! handle routing)
          (let [[[key-a branch-a agent-a]] (seq (attempts connection "a"))]
@@ -404,3 +410,117 @@
                       (:seon.task.attempt/target (db/pull (db/db connection) [{:seon.task.attempt/target [:seon.task/sym]}]
                                                           [:seon.task/assignment key-r])))
                    "naming its target on the attempt")))))))))))
+
+;;; P2: an attempt's end lands on main from its branch, once, and its branch goes or stays.
+
+(defn- eventually
+  "Poll `ready?` every 20 ms for at most two seconds; its last answer. Branch deletion is detached io work."
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
+  [ready?]
+  (loop [n 100]
+    (let [answer (ready?)]
+      (if (or answer (zero? n)) answer (do (Thread/sleep 20) (recur (dec n)))))))
+
+(defn- end-on-branch!
+  "Write the attempt of `task-name`'s end `end` on its own branch, as its last transaction does: the
+  task's intent refined, a message to root and the end on the attempt. Answers [key branch agent-id attempt]."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :string :seon.task.attempt/end]
+                  [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :int]]}
+  [handle connection task-name end]
+  (let [[[key branch agent-id]] (seq (attempts connection task-name))
+        branch-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
+                                                              :seon.store/branch branch})]
+    ;; the agent's first pass ran its red proofs: it is idle when its end is written
+    (await-on! branch-connection #(not-empty (proof-runs (db/db branch-connection) (proof task-name))) ::proved)
+    (test-support/transacted!
+     branch-connection
+     (into [{:db/id [:seon.task/id (chain-handle task-name)] :seon.task/intent "Refined on the branch."}
+            [:db/add [:seon.task/assignment key] :seon.task.attempt/end end]
+            [:db/add [:seon.task/assignment key] :seon.task.attempt/commit (db/commit-id (db/db branch-connection))]]
+           (concat (when (not= :done end)
+                     [[:db/add [:seon.task/assignment key] :seon.task.attempt/reason "The proof asks the impossible."]])
+                   (message/send-call (db/db branch-connection)
+                                      (message/candidate {:my.message/to "root" :my.message/content "Only on my branch."})
+                                      agent-id))))
+    [key branch agent-id (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))]))
+
+(defn- copies
+  "The end copies on main `database` naming attempt `a`, as transaction ids."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:set :int]]}
+  [database a]
+  (set (db/q '[:find [?tx ...] :in $ ?a :where [?tx :seon.squash/attempt ?a]] database a)))
+
+(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+  an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted
+  (doseq [keep? [false true]]
+    (binding [*space* (if keep? "tq.endkeep" "tq.endcopy")]
+      (test-support/with-database
+       (fn [connection]
+         (chain-world
+          connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+          (fn [handle]
+            (let [routing (:seon.agent/routing handle)
+                  store (agent/handle-store handle)]
+              (when keep?
+                (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}}))
+              (pass! handle routing)
+              (let [[key branch agent-id a] (end-on-branch! handle connection "e" :done)
+                    intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
+                (is (= #{[key branch agent-id :open]} (attempts connection "e")) "before the pass main lacks the end")
+                (pass! handle routing)
+                (let [database (db/db connection)
+                      [tx :as txs] (seq (copies database a))]
+                  (is (= 1 (count txs)) "one end copy")
+                  (is (= tx (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
+                      "carrying the end")
+                  (is (= tx (db/q '[:find ?tx . :in $ ?h :where [?t :seon.task/id ?h] [?t :seon.task/intent "Refined on the branch." ?tx]]
+                                  database (chain-handle "e")))
+                      "and the refinement")
+                  (is (= branch (db/q '[:find ?b . :in $ ?tx :where [?tx :seon.squash/source-branch ?b]] database tx))
+                      "with its provenance")
+                  (is (empty? (db/q '[:find ?m :where [?m :seon.message/content "Only on my branch."]] database))
+                      "and no message")
+                  (is (= "Refined on the branch." (intent)))
+                  (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id))
+                      "its graph is stopped"))
+                (pass! handle routing)
+                (is (= 1 (count (copies (db/db connection) a))) "a second pass copies nothing")
+                (if keep?
+                  (is (contains? (registry/roster store) branch) "the dial keeps the ended branch for audit")
+                  (is (eventually #(not (contains? (registry/roster store) branch)))
+                      "with no merge request the branch is deleted"))
+                (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                    "with no fault recorded"))))))))))
+
+(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+  an-error-end-copies-nothing-and-writes-roots-problem-task
+  (binding [*space* "tq.enderror"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
+            (pass! handle routing)
+            (let [[key branch _ a] (end-on-branch! handle connection "e" :given-back)
+                  problem #(db/pull (db/db connection) [:seon.task/intent]
+                                    [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" key))])]
+              (pass! handle routing)
+              (is (= #{[key branch (str "attempt/" key) :given-back]} (attempts connection "e")) "main holds the end")
+              (is (= "Do e." (intent)) "and no refinement")
+              (is (contains? (registry/roster store) branch) "the branch stays")
+              (is (str/includes? (str (:seon.task/intent (problem))) (name branch))
+                  "root's problem task names the branch")
+              (is (str/includes? (str (:seon.task/intent (problem))) "The proof asks the impossible.")
+                  "and the reason")
+              (pass! handle routing)
+              (is (= 1 (count (copies (db/db connection) a))) "a second pass writes nothing")
+              (testing "root's by-hand copy lands what the success path would"
+                (let [copied (squash/squash-merge! {:seon.db/connection connection} branch nil)]
+                  (is (pos? (:seon.squash/datoms copied)))
+                  (is (= "Refined on the branch." (intent)))
+                  (is (zero? (:seon.squash/datoms (squash/squash-merge! {:seon.db/connection connection} branch nil)))
+                      "and a second copy writes nothing new")))))))))))
