@@ -281,7 +281,11 @@
                   ;; The body thread is the member branch's own work from its
                   ;; first step (resolution, seeds, the body): the custody its
                   ;; creator's bindings carried is replaced, never inherited.
+                  ;; Its reads are its member's, never the calling form's
+                  ;; evidence: the form's sink would hold every member's
+                  ;; database values and results until the request ends.
                   (bound-fn []
+                    (binding [db/*read-evidence-sink* nil]
                     (db/call-with-custody
                      (select-keys custody [:seon.db/connection])
                      (fn [] (sci.eval/call-detecting-program-change
@@ -332,7 +336,7 @@
                                       (or (:seon.test/long-ms
                                            (let [test-meta (test-var-meta (:seon.sci.eval/ctx custody) test-var)]
                                              (program/test-markers test-meta (meta (:ns test-meta)))))
-                                          5000)))))))))))))))))
+                                          5000))))))))))))))))))
             ;; a platform thread: HotSpot counts a platform thread's
             ;; allocation and none of a virtual thread's, so a body's
             ;; allocation bounds measure it

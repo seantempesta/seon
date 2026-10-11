@@ -386,3 +386,27 @@
       (finally
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
+
+(deftest ^{:seon/tasks #{'seon.test/a-members-reads-stay-out-of-its-callers-evidence}
+           :seon.test/long "Two member runs, one of them a canonical problems fixture (measured 1,572 ms run on default)."
+           :seon.test/long-ms 15000}
+  a-members-reads-stay-out-of-its-callers-evidence
+  ;; A form's read-evidence sink lives until its request ends; conveyed into the
+  ;; member's body thread it held every member's databases and query results
+  ;; (86 members as root held about 400 MB, default 2026-10-11).
+  (let [execution (assoc (test-support/execution-handle nil) :seon.agent/id "members-reads-stay-out")
+        captured (fn [test-symbol]
+                   (let [sink (atom [])
+                         result (binding [db/*read-evidence-sink* sink]
+                                  (sut/run {:seon.test/execution execution
+                                            :seon.test/recording-connection (:seon.db/connection execution)
+                                            :seon.test/policy :named :seon.test/rerun? true
+                                            :seon.test/identities #{test-symbol}}))]
+                     {:passed? (:seon.test/passed? result) :reads (count @sink)}))
+        quiet (captured 'seon.id-test/a-host-object-has-no-identity)
+        reading (captured 'seon.problems-test/a-resolved-fault-stays-closed-until-it-recurs)]
+    (is (= [true true] [(:passed? quiet) (:passed? reading)]))
+    ;; The caller's own reads (selection, acquisition, recording) are alike for
+    ;; both; the problems fixture's body reads about 200 more.
+    (is (< (:reads reading) (* 1.5 (:reads quiet)))
+        "a body that reads its fixture adds nothing to the caller's evidence")))
