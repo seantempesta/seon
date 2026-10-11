@@ -294,7 +294,8 @@
                                     links))))
             (is (contains? (set (mapcat #(drop 2 %) links)) reached))))))))
 
-(deftest failure-readers-use-the-structured-claims
+(deftest ^{:seon/tasks #{'seon.test-failure-facts-test/the-failure-probe-is-declared-program-not-an-interned-host-var}}
+  failure-readers-use-the-structured-claims
   (support/with-database
     (fn [connection]
       (with-probe connection

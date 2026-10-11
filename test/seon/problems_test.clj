@@ -272,37 +272,29 @@
         :seon.test/extra "ignored until declared"})))
 
 (deftest a-deleted-function-var-is-derived-from-the-loaded-image
+  ;; A loaded function whose entity the graph no longer holds is stale. The
+  ;; deletion is data (the program entity retracted with its one call edge),
+  ;; never a Var created in the loaded image: an interpreted body's `eval` or
+  ;; `intern` reaches its own SCI image, not the one this reader derives from.
   (with-db
     (fn [connection]
-      (let [database @connection
-            namespace-name 'seon.problems-test
-            intern-name 'slice-3-stale-var-proof
-            qualified-name 'seon.problems-test/slice-3-stale-var-proof
-            qualified-text (str qualified-name)
-            loaded-namespace (the-ns namespace-name)
-            derive-problems #(problems/problems database {})]
-        (is (nil? (ns-resolve loaded-namespace intern-name)))
+      ;; built, not quoted, so this test is no referrer the deletion must repair
+      (let [deleted (symbol "seon.problems" "stale-var-ai")
+            deleted-text (str deleted)
+            derive-problems #(problems/problems (db/db connection) {})]
+        (is (some? (resolve deleted)) "the deleted function is loaded")
         (is (nil? (:seon.problems/stale-vars (derive-problems)))
             "the synchronized source image and program graph are clean")
-        (when-not (ns-resolve loaded-namespace intern-name)
-          (let [created
-                (binding [*ns* loaded-namespace]
-                  (eval (list 'defn intern-name [] :stale)))]
-            (try
-              (let [value (derive-problems)
-                    stale-vars (:seon.problems/stale-vars value)]
-                (is (= [{:seon.fn/sym qualified-name}] stale-vars))
-                (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
-                (is (str/includes? (problems/ai-prose value) qualified-text))
-                (is (= [qualified-text] (keep #(get % "var") (page-rows (problems/html-report value))))
-                    "the page shows the stale Var's row"))
-              (finally
-                (when (identical? created
-                                  (ns-resolve loaded-namespace intern-name))
-                  (ns-unmap loaded-namespace intern-name))))))
-        (is (nil? (ns-resolve loaded-namespace intern-name)))
-        (is (nil? (:seon.problems/stale-vars (derive-problems)))
-            "removing the process-local Var makes the finding disappear")))))
+        (is (:db-after (test-support/transacted!
+                        connection
+                        [[:db/retract [:seon.fn/sym 'seon.problems/ai-prose] :seon.fn/calls deleted]
+                         [:db/retractEntity [:seon.fn/sym deleted]]])))
+        (let [value (derive-problems)]
+          (is (= [{:seon.fn/sym deleted}] (:seon.problems/stale-vars value)))
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
+          (is (str/includes? (problems/ai-prose value) deleted-text))
+          (is (= [deleted-text] (keep #(get % "var") (page-rows (problems/html-report value))))
+              "the page shows the stale Var's row"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One family at a time
