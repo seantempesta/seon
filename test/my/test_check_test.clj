@@ -121,3 +121,17 @@
        (is (= reaching (set (:seon.turn.loop/pending platform))) "the tests reaching it wait for the platform check")
        (is (= ['(my.test/check-platform {})] (:seon.render/operations platform)))
        (is (empty? (filter reaching ran)) "none of them ran in SCI")))))
+
+(deftest ^{:seon/tasks #{'seon.test/a-reused-answer-names-a-recorded-run}}
+  a-reused-check-answers-a-run-id-it-recorded
+  ;; Parity probe 2026-10-11: agent parity-slug-1's merge request cited run 9e1a613bbcdb, recorded nowhere,
+  ;; because its proof run answered a reused green under a freshly minted id.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [check (str "(let [r (my.test/check {:seon.test/identities #{'seon.id-test/a-host-object-has-no-identity}})]"
+                      " (some? (seon.db/q '[:find ?r . :in $ ?id :where [?r :seon.test.run/id ?id]]"
+                      " (seon.db/db) (:seon.test.run/id r))))")
+           first-run (answered check agent-id running)
+           reused (answered check agent-id running)]
+       (is (true? first-run))
+       (is (true? reused) "the run id a reused answer carries names a recorded run")))))

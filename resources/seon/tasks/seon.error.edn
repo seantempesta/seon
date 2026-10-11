@@ -88,4 +88,9 @@
  #:seon.task{:name "error-notifications-to-root-are-printed-maps"
              :kind :function
              :intent "Error notifications to root are outside messages whose text is a pr-str of the error map (a second printer), delivered through :seon.config.error/escalate-to. Done when the notification carries the error's identity (signature, task, handle) as data and no printed copy."
-             :must-read #{seon.error/commit-call}}]
+             :must-read #{seon.error/commit-call}}
+ #:seon.task{:name "a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas"
+             :kind :function
+             :intent "A schema key an agent guesses (`(malli.core/validate :inst x)`, `:seon.render.transcript/instant`) fails with Malli's `:malli.core/invalid-schema` and `seon.error/reply-value` answers only that bare message, so agent parity-duration-1 (default c53c9306e) spent its fifteen calls hunting a schema for an instant and never wrote a contract; the registry's instant schema is the predicate `inst?`, a symbol key, which its `(filter keyword?)` listings also missed. Like `seon.error/nearest-names` for a guessed symbol, the reply names the registered schemas nearest the guessed key under `:seon.error/nearest`. Asserted by `seon.error-test/a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas`."
+             :must-read #{seon.error/reply-value seon.error/nearest-names malli.core/validate}
+             :evidence #{"docs/research/agent-platform/2026-10-11/parity-probe.md"}}]

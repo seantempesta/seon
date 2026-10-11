@@ -1818,3 +1818,17 @@
     (testing "a name nothing resembles has no key"
       (is (not (contains? (seon.error/reply-value database {:seon.error/message "x" :seon.program/not-found 'qqqq.zzzz/xxyyzz})
                           :seon.error/nearest))))))
+
+(deftest ^{:seon/tasks #{'seon.error/a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas}}
+  a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas
+  ;; Parity probe 2026-10-11: agent parity-duration-1 spent its calls guessing a schema for an instant
+  ;; (:inst, :seon.render.transcript/instant); each answered only ":malli.core/invalid-schema".
+  (let [database (seon.db/db)
+        guessed (fn [schema] (try (malli.core/validate schema (java.util.Date.)) nil
+                                  (catch clojure.lang.ExceptionInfo e
+                                    ;; the error the entrance recorded for this call, as the agent got it
+                                    (seon.error/reply-value database {:seon.error/message (ex-message e)
+                                                                      :seon.error/chain [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+                                                                                          :seon.error/data (ex-data e)}]}))))]
+    (is (some #{'inst?} (:seon.error/nearest (guessed :inst)))
+        "the refusal names the registered schema nearest the guess")))
