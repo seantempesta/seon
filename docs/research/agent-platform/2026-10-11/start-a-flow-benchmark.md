@@ -116,7 +116,6 @@ owners must remove program-size work before their call floor can be measured.
   ancestry. Remembering only the source commit is insufficient. The revision owner
   must provide content-valid read-through after close/reopen and eviction.
 
-
 ## Fork-revision fix and after measurements
 
 `seon.cluster.registry/fork!` already remembers its source. Its own fork-fact
@@ -167,11 +166,12 @@ warm fresh fork. Thus SCI's duplicate derivation remains and is still >10× the
 proposed time/allocation floor. First context remains above its 2–5 ms target;
 its 24 vector-query calls and 88 datoms entrances are the next measured work.
 
-`seon.schema/contract-references` is still uncached. The cold SCI acquisition calls
-it **3,604 times** (the preceding green sample measured **262 ms self time**); the warm fresh fork calls
-it **zero times** in this fixture. This does not prove repeated changed-contract
-registration is cheap. CACHE-2 is deferred, not retired, and the existing schema
-registration task is unchanged.
+The cold SCI acquisition calls `seon.schema/contract-references` **3,604 times**
+(the preceding green sample measured **262 ms self time**); the warm fresh fork
+calls it **zero times**. H9's attribution below identifies these as the packaged
+configuration declaration projection's schema walks, not function arming. This
+does not prove repeated changed-contract registration is cheap. CACHE-2 remains
+separate work; the schema registration task is unchanged.
 
 ### Verification boundary and remaining evidence
 
@@ -212,3 +212,69 @@ registration task is unchanged.
   current value. Historical commit acquisition, branch connection reopen time,
   retained heap, physical index reads, and test-member p50/p90 are not measured.
   No lower bound for those is claimed. Every sampled branch and Flow is released.
+
+## H9 attribution: base copying and configuration derivation
+
+The SCI leg copies already armed JVM roots into SCI, then derives an overlay and
+forks custody. The smallest changes must remove measured query or derivation
+work; adding new wrappers to copied JVM roots would add work and change execution.
+No runtime change has been made for these attribution samples.
+
+Candidate `fbb05fc459d9d86780c6a9c15ae71f0a1433b5a2`, run `36046e420696`,
+ran the benchmark in the check JVM: 39 assertions passed. Cold SCI measured
+**891.92 ms / 1,795.448 MB / 81,231 calls / 29 reads**. These counts come from
+`:seon.profile/called`; times are the profile's self-time counters (integer ms).
+
+| Owner | Cold SCI calls | Self ms | Attribution |
+|---|---:|---:|---|
+| `seon.db/vector-query-call` | 11 | 384 | Datalog execution and its unarmed descendants |
+| `seon.schema/contract-references` | 3,604 | 253 | Config's packaged declaration projection, not arming |
+| `seon.db/pull-logical` | 10 | 43 | Namespace and other pulled facts |
+| `seon.schema.internal/assert-compilable-schema!` | 3,604 | 26 | Same packaged projection rebuild |
+| `seon.schema.edn/read-schema-resource` | 217 | 23 | Packaged schema input reads |
+| `seon.sci.eval/acquire-program!` | 1 | 21 | Acquisition's remaining unarmed work |
+| `seon.sci.eval/function-digests` | 3 | 6 | Base once, overlay's loaded and held values once each |
+| `seon.sci.eval/copy-host-var` | 7,711 | 4 | First-party and library Var copies |
+| `seon.sci.eval/install-function-contract!` | 0 | — | Existing wrappers are copied with their roots |
+| `seon.sci.eval/behavior-changed?` | 0 | — | No changed authored functions in this sample |
+
+The 29 reads are 11 queries, 8 datoms entrances and 10 pull entrances, not one
+database read per function. `seon.sci.eval/loaded-digests` is entered twice;
+`seon.sci.eval/function-digests` is derived three times. The base's direct digest
+derivation does not populate the cache the overlay then uses.
+
+The isolated base-only proof was run separately after emptying `seon.cache`, with
+the loaded database and its carried projection in hand. Candidate
+`b6c6361500e98a71bae0d3a337f568d208183b80`, run `f5d8cf9a75a4`, measured
+**763.86 ms / 2,446.279 MB**: 6 queries took **633 ms** self time, one namespace
+pull **39 ms**, acquisition **20 ms**, and the 7,711 Var copies **4 ms**.
+`function-digests` ran once. Both `contract-references` and
+`install-function-contract!` ran **zero times**. The proof's 300 ms / 300 MB
+bounds fail; its specified once-per-contract assertion also fails (**3,442 ≠ 0**).
+The context-value and zero-reference-walk assertions pass. Whole test execution
+including fixture setup was 4,535 ms. These are separate cache histories: the
+whole SCI leg follows a measured branch and world, while the base-only sample
+starts immediately after central eviction; their allocations are not additive.
+
+The call path explaining the reference walks is
+`seon.sci.eval/armed-dials` → `seon.sci.eval/database-effective-config` →
+`seon.config/effective` → `seon.config/declared-projection` →
+`seon.schema/declaration-projection`. The last reads all packaged forms and builds
+their reference graph after eviction. There is no `contract-product` or
+`instrumented` call in the sample. Thus H10's retained-function-contract change
+cannot remove these particular 3,604 walks. H9's base already reuses compiled
+wrappers; its requested re-arming count contradicts the installed path.
+
+Dependency seams checked: SCI pin `f455b3b4a6a4fe92cd2adde2e19821ab1fe5bece`,
+`sci.core/copy-var*` copies the existing root and `sci.core/fork` shares it through
+generation isolation. Malli pin `dd13ff81139159778edb0a67b491eccc0baa991d`,
+`malli.core/-instrument` constructs a wrapper and `malli.core/validator` caches on
+the compiled schema. No new cache kind or dependency change is needed to share
+the wrapper already held by the host Var.
+
+Initial H9 health observation: default remained on `c6113d2f3`, PID 8540, with one
+open fault, two failed tests and one cache-discipline warning. Its cache was not
+emptied. The older archive's edit hook cannot resolve `start-flow-benchmark`;
+that acquisition error is not benchmark evidence. All measurements above use
+the committed candidate check path. H10's files and all unrelated working-tree
+changes are excluded from H9 candidates.

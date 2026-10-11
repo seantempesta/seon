@@ -30,7 +30,8 @@
   {:malli/schema [:=> [:cat :seon.profile/measured-call] :map]}
   [measured]
   (assoc (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/calls
-                               :seon.profile/reads :seon.cost/jvm-window])
+                               :seon.profile/reads :seon.cost/jvm-window
+                               :seon.profile/called :seon.profile/ranked-by-self])
          ::datoms (get-in measured [:seon.profile/called 'seon.db/datoms] 0)
          ::owners (select-keys (:seon.profile/called measured)
                               '[seon.test.runner/reached-graph seon.test.runner/reach-components

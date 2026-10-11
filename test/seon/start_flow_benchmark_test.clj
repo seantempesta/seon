@@ -46,12 +46,12 @@
              (doseq [[part limits] (get bounds temperature)
                      [metric limit] (map vector [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/calls] limits)]
                (is (<= (get-in sample [part metric]) limit) (str temperature " " part " " metric)))
-             (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cache-1-2-" (name temperature) ".edn")
+             (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-h9-cold-base-" (name temperature) ".edn")
                    (value/text {:seon.render/value (dissoc sample ::benchmark/context-value)
                                 :seon.render.value/root [::benchmark/sample temperature]
                                 :seon.db/db (db/db connection)
                                 :seon.render/profile (assoc (render/agent-render-profile config/defaults)
-                                                            :seon.render.profile/token-budget 10000
-                                                            :seon.render.profile/max-children 100
+                                                            :seon.render.profile/token-budget 50000
+                                                            :seon.render.profile/max-children 1000
                                                             :seon.render.profile/max-depth 20)
                                 :seon.render.value/options {:seon.render.value/structural? true}})))))))))
