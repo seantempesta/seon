@@ -24,7 +24,7 @@
                [:seon.task/evidence {:optional true} :seon.task/evidence]
                [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
- :task [:map {:seon.db/attributes true :seon.program/partition :seon.data
+ :task [:map {:seon.db/attributes true :seon.program/partition :seon.cluster
               :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
               :seon.render/form seon.render.ns/task-form}
         [:seon.task/id :seon.task/id] [:seon.task/sym :seon.task/sym] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -98,7 +98,7 @@
  :assigned [:and {:seon.db/index true :description "The assigned task's handle, a value, never a ref (7.2)."} :seon.task/handle]
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
- :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+ :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                   [:seon.task/revision :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
                   [:seon.task/attempt-of {:optional true} :seon.task/attempt-of]

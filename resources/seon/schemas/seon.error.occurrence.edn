@@ -22,9 +22,9 @@
  ; the branch where the error happened; a core fault's cluster-branch copy names its origin
  :branch :seon.store/branch
  :occurrence
- [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+ [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
   [:seon.error.occurrence/id :seon.error.occurrence/id]
-  [:seon.error.occurrence/count :seon.error.occurrence/count]
+  [:seon.error.occurrence/count {:seon.cluster/conflict :add} :seon.error.occurrence/count]
   [:seon.error.occurrence/first-at :seon.error.occurrence/first-at]
   [:seon.error.occurrence/last-at :seon.error.occurrence/last-at]
   [:seon.error.occurrence/process :seon.error.occurrence/process]

@@ -84,6 +84,36 @@
                                (fn [] (derived-program-attributes projection)))
       :cljs #(derived-program-attributes projection))))
 
+(defn- derived-cluster-attributes
+  "Cluster entity attributes and their declared concurrent edit rules."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.program/cluster-attributes]}
+  [projection]
+  (let [registry (:seon.schema.projection/registry projection)]
+    (into {}
+          (mapcat (fn [schema-key]
+                    (let [compiled (mr/schema registry schema-key)
+                          properties (internal/entity-properties compiled)]
+                      (when (= :seon.cluster (:seon.program/partition properties))
+                        (map (fn [[attribute entry-properties _]]
+                               [attribute (get entry-properties :seon.cluster/conflict
+                                               (get properties :seon.cluster/conflict :root))])
+                             (internal/entity-entries compiled))))))
+          (keys (:seon.schema.projection/forms projection)))))
+
+(defn cluster-attributes
+  "Attributes copied at an attempt's successful end, with the rule for each."
+  {:seon/tasks #{'seon.program/cluster-attributes-are-the-declared-cluster-entities}
+   :malli/schema [:=> [:cat :seon.schema/projection] :seon.program/cluster-attributes]}
+  [projection]
+  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+   projection ::cluster-attributes
+   #?(:clj #(seon.cache/lookup ::cluster-attributes
+                               [(:seon.schema.projection/forms projection)
+                                (:seon.schema.projection/schema-admissions projection)]
+                               (fn [attributes] (* 96 (count attributes)))
+                               (fn [] (derived-cluster-attributes projection)))
+      :cljs #(derived-cluster-attributes projection))))
+
 (defn- edn-symbol-text?
   "Whether `s` reads with clojure's EDN reader as one symbol token
   (EdnReader `read`, `readToken`, `interpretToken`, `matchSymbol` and its

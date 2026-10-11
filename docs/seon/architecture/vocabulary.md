@@ -62,6 +62,7 @@ a word marked (target) names its rename, not yet landed.
 | norm | Datahike's named, once-only data change (`:tx/norm`, `reference-code/datahike/src/datahike/norm/norm.clj`); a merge may carry one to migrate main's rows | migration |
 | delete branch | `delete-branch!`: the branch leaves the roster, its commits wait for retention GC; "retire" is for agents only | unlink, retire a branch |
 | commit | a Datahike commit with parents; the program part has its own content identity, the program digest | basis (for a commit) |
+| cherry-pick | the pure identity-matched three-way selection of declared cluster facts from an agent branch onto main; returns transaction data and conflicts, without merging branch ancestry (`seon.cluster.pick/cherry-pick`) | data relay |
 
 ## Seon's words
 
@@ -70,6 +71,9 @@ Words no library names. Each has one meaning.
 | Term | Meaning | Retired words |
 |---|---|---|
 | task | the one family for work an agent does: an intent, linked facts, optional agent; a merge request is a task | issue, work packet |
+| `:seon.cluster` | the entity-schema partition for facts copied onto main at an attempt's successful end, with conflict rules declared on the schema or its entries (`seon.program/cluster-attributes`); messages remain `:seon.data` | mergeable data roster |
+| end copy | one transaction copying a successful attempt's cluster facts onto main, with source branch and commit as transaction metadata; an error end copies nothing | live relay |
+| inbox | the Flow channel carrying message values to an agent; its recipient writes received messages on its own branch | stored transport |
 | proof | a deftest naming a task in `:seon/tasks`; a task completes when its proofs are green | gate (for a task's tests) |
 | reaching test | a test whose current dependencies reach a changed definition (`my.program/tests-reaching`); differs from a test's recorded past `:seon.test/reach` | gate set, test closure |
 | turn | the unit a model call answers: an agent's ordered evaluations and provider attempts, open until closed (`seon.turn`) | run (meaning one turn), `seon.cluster.run` |

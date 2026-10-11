@@ -21,6 +21,7 @@
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.program :as program]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]
@@ -1326,6 +1327,26 @@
       (is (not-any? attributes #{:seon.test/failures
                                  :seon.test/adoption-inputs :seon.schedule.task/id
                                  :seon.turn/id :seon.message/id}))))))
+
+(deftest ^{:seon/tasks #{'seon.program/cluster-attributes-are-the-declared-cluster-entities}}
+  cluster-attributes-are-the-declared-cluster-entities
+  (let [projection (schema/handed-projection)
+        attributes (program/cluster-attributes projection)
+        measured (profile/measure #(program/cluster-attributes projection))]
+    (is (= :root (:seon.task.attempt/end attributes)))
+    (is (= :root (:seon.task/intent attributes)))
+    (is (= :add (:seon.error.occurrence/count attributes)))
+    (is (not (contains? attributes :seon.message/to)))
+    (is (empty? (set/intersection (set (keys attributes))
+                                  (program/program-attributes projection))))
+    (is (< (:seon.profile/ms measured) 5))
+    (let [refusal (refusal-data
+                   #(schema/build-projection
+                     {:cluster.example/value :string
+                      :cluster.example/entity
+                      [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
+                       [:cluster.example/value :cluster.example/value]]}))]
+      (is (= :seon.db/identity (:seon.schema/member refusal))))))
 
 (deftest identity-bearing-entity-refuses-an-undeclared-partition
   (let [forms {:partition.example/id [:string {:seon.db/identity true}]
