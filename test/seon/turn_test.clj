@@ -7,6 +7,8 @@
             [seon.mcp :as mcp]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.message :as message]
+            [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
@@ -17,6 +19,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.observe :as observe]
             [seon.test-support :as support]
+            [seon.task :as task]
             [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]
@@ -1969,3 +1972,25 @@
   (let [r (turn/planned-sources ";; Look at the task first (see below)." 'user 100000)]
     (is (= true (:seon.cluster.reply/no-forms r)))
     (is (not (contains? r :seon.cluster.reply/commented-forms)) "prose is not a form")))
+
+(deftest ^{:seon/tasks #{'seon.turn/an-end-is-written-on-the-attempt}} an-end-is-written-on-the-attempt
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.ends.edn"
+                                           "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"}]"}})
+     (let [h (task/task-handle 'tq.ends "a" :work)
+           agent-id "tq-end-agent"
+           _ (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+           _ (support/transacted! connection (task/attempt-tx (db/db connection) h agent-id :tq-end))
+           database (db/db connection)
+           commit (random-uuid)
+           candidate (message/candidate {:my.message/to "root" :my.message/about h :seon.task/end :done
+                                         :my.message/content "My task ended: done."})
+           ended (db/with database (turn/end-task-call database agent-id :done candidate commit))]
+       (is (= {:seon.task.attempt/end :done :seon.task.attempt/commit commit}
+              (db/pull ended [:seon.task.attempt/end :seon.task.attempt/commit] [:seon.task/assignment (id/id [h 1])]))
+           "the end and the branch commit it ended at are on the attempt, in the end's one transaction")
+       (is (= [] (turn/end-task-call ended agent-id :done candidate commit)) "an attempt ends once")
+       (is (every? (wake/arming-attributes ended) [:seon.task.attempt/end :seon.task/needs])
+           "an end and a need wake the cluster process that starts the next attempt")))))

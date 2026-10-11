@@ -42,7 +42,7 @@
  :children [:set {:seon.db/component true :seon.db/component-schema :seon.task/task
                   :description "The child tasks a parent owns (runtime-follows-db §2): a parent never runs and is done when no leaf under it is open (seon.task/done?); its intent, must-read and evidence are what its children read. Authored in task EDN as lookup refs [:seon.task/sym ns/name]."}
             :seon.db/ref]
- :needs [:set {:seon.db/index true
+ :needs [:set {:seon.db/index true :seon.wake/arms true
                :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
          :seon.db/ref]
  :instructions [:string {:min 1 :description "The data a task's stage type renders for its worker beyond its intent (a test run's test set and program basis, a problem's class)."}]

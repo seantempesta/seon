@@ -220,4 +220,9 @@
              :kind :function
              :intent "Card S3. The attempt row is the launch's write: `seon.task/assign!` writes it without running proofs; `seon.turn/next-agent-work` treats a held attempt no answering turn has covered since its t as work (replacing the \"Work your task.\" message of seon.test-support/outside-wake-on-branch!); the red-first proofs run in the agent's first pass (test-step), so a :paused intent holds them and an already-green attempt ends :done with no model call."
              :must-read #{seon.turn/next-agent-work seon.task/assign! seon.turn/unanswered-wakes}
-             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "an-end-is-written-on-the-attempt"
+             :kind :function
+             :intent "Card S3, slice 3. `seon.turn/end-task-call` writes `:seon.task.attempt/end` and `:seon.task.attempt/commit` (the agent's branch commit at the end, which `seon.turn/end-task!` reads and passes) on the agent's open attempt (`seon.task/agent-attempt`) in the one end transaction it already makes; a second end writes nothing. `:seon.task.attempt/end` and `:seon.task/needs` declare `:seon.wake/arms` (`seon.cluster.wake/arming-attributes`), so an end or a need wakes the cluster process that starts the next attempt."
+             :must-read #{seon.turn/end-task-call seon.turn/end-task! seon.task/agent-attempt seon.cluster.wake/arming-attributes}
+             :evidence #{"docs/research/agent-platform/2026-10-11/r1-db-flow-design.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

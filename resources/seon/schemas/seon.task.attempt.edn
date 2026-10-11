@@ -1,5 +1,5 @@
 #:seon.task.attempt
-{:end [:enum {:seon.db/index true
+{:end [:enum {:seon.db/index true :seon.wake/arms true
               :description "How an attempt ended, asserted once on its assignment row by seon.turn/end-task-call: proofs green, given back, turns spent, stalled, sent back to :seon.task.attempt/target, or cancelled (runtime-follows-db §2)."}
        :done :given-back :capped :stalled :sent-back :cancelled]
  :target [:and {:description "The task a :sent-back end sends the work back to."} :seon.db/ref]

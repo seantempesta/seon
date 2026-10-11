@@ -2170,15 +2170,21 @@
 
 (defn end-task-call
   "Record the end of the task `agent-id` holds at the writer on main `database`: the end message `candidate`
-  to root (`seon.cluster.message/send-call`) and the agent's admission closed, as one transaction; nothing when the
-  admission is already closed, so a task's end is recorded once."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message]
+  to root (`seon.cluster.message/send-call`), the agent's admission closed and, on its open attempt
+  (`seon.task/agent-attempt`), `:seon.task.attempt/end` with the branch `commit` it ended at, as one
+  transaction; nothing when the admission is already closed, so a task's end is recorded once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message
+                       :seon.task.attempt/commit]
                   :seon.store/transaction-data]}
-  [database agent-id _end candidate]
-  (if (closed-on? database agent-id)
-    []
-    (conj (vec (message/send-call database candidate agent-id))
-          [:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"])))
+  [database agent-id end candidate commit]
+  (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))]
+    (cond (closed-on? database agent-id) []
+          ;; a transaction function's throw is its writer's refusal
+          (:seon.error/at attempt) (throw (ex-info (:seon.error/message attempt) attempt))
+          :else (cond-> (conj (vec (message/send-call database candidate agent-id))
+                              [:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"])
+                  attempt (into [[:db/add attempt :seon.task.attempt/end end]
+                                 [:db/add attempt :seon.task.attempt/commit commit]])))))
 
 (defn- end-message
   "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
@@ -2300,9 +2306,12 @@
                      (db/call-with-custody {:seon.db/connection home} #(db/transact! home end-summary-tx))))
             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
             candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge request)))
-            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate]]
+            ;; the branch commit the attempt ended at: its successor's fork basis
+            commit (db/commit-id (db/db connection))
+            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate commit]]
                                         :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
             outcome (cond (:seon.error/at candidate) candidate
+                          (not (uuid? commit)) commit
                           (identical? home connection) (write!)
                           :else (db/call-with-custody {:seon.db/connection home} write!))]
         (when-not (:db-after outcome) (fault! `end-task-call outcome))

@@ -753,6 +753,17 @@
                    database agent-id)]
     (or (read-error held) (first (apply max-key second [nil 0] (seq held))))))
 
+(defn agent-attempt
+  "The open attempt `agent-id` holds in `database` (main's): the entity of its latest assignment row
+  with no end; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.db/invalid-read-error]]}
+  [database agent-id]
+  (let [open (db/q '[:find ?a ?tx :in $ ?id
+                     :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?tx]
+                     (not [?a :seon.task.attempt/end _])]
+                   database agent-id)]
+    (or (read-error open) (first (apply max-key second [nil 0] (seq open))))))
+
 (defn- red-first
   "The `proofs` observed red on `database` (the proposing branch) at a reach
   no green member of the same test shares, as `[test reach-digest]`: each
