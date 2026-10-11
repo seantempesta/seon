@@ -3223,7 +3223,10 @@
              (map (fn [[binding-name binding]]
                     [[namespace-name binding-name]
                      (if (sci.utils/var? binding)
-                       [(if (sci.vars/hasRoot binding) @binding absent-intern)
+                       ;; the root, never this thread's binding: a copied host
+                       ;; dynamic Var derefs to the request's own value (its
+                       ;; read-evidence sink), which the snapshot would keep
+                       [(if (sci.vars/hasRoot binding) (sci.vars/getRawRoot binding) absent-intern)
                         (dissoc (meta binding) :sci/generation)]
                        [binding])])
                   bindings)))
@@ -3276,7 +3279,7 @@
                  [local-name entry] entries
                  :when (sci.utils/var? entry)
                  :let [path [namespace-name local-name]
-                       root (if (sci.vars/hasRoot entry) @entry absent-intern)
+                       root (if (sci.vars/hasRoot entry) (sci.vars/getRawRoot entry) absent-intern)
                        held (get current path)
                        transferred? (boolean (and held (same-program-root? root (first held))))
                        binding (get own-binding entry)

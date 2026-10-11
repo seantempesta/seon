@@ -2688,3 +2688,16 @@
          (is (eval/acquired-database? ctx current))
          (is (identical? acquisition (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db current})))
          (is (= (db/commit-id current) (:seon.source/commit-id (eval/acquired-program ctx)))))))))
+
+(deftest a-context-snapshot-holds-a-dynamic-roots-value-never-the-requests-binding
+  ;; A copied host dynamic Var bound for one request (seon.db/*read-evidence-sink*) derefs to that
+  ;; request's value on its thread; the snapshot a context keeps past the request holds the root, so
+  ;; the request's sink is unreachable from the context once the request ends.
+  (let [namespace-name 'probe.request-sink
+        sink (sci/new-dynamic-var 'sink ::root {:ns (sci/create-ns namespace-name nil)})
+        ctx (sci/init {:namespaces {namespace-name {'sink sink}}})
+        request-value (Object.)
+        snapshot (sci/binding [sink request-value] (#'eval/base-bindings ctx))
+        held (first (get snapshot [namespace-name 'sink]))]
+    (is (= ::root held) "the snapshot holds the root")
+    (is (not (identical? request-value held)) "never the request's binding")))
