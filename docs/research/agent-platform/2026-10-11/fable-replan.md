@@ -406,8 +406,12 @@ are data, R-class tests deleted or rewritten; (c) stop interpreting tests; agent
 owner tasks picked by reach; the loop's findings go to Claude lanes with red proofs; (c) mixed. **Recommendation: (b)**
 until item 6, then chain runs decide.
 
+> **Owner answer (2026-10-11):** Answered with Q5: root gets its own namespace.
+
 **Q5. ROOT-AGENT stages 4–13.** Options: (a) build as the card orders; (b) `launch!` and the tick after three chain runs,
 the rest deferred until a judgment duty has occurred three times; (c) stop the card. **Recommendation: (b)**.
+
+> **Owner answer (2026-10-11):** Root needs its own namespace anyway, holding root's instructions and requiring the tools root uses (launch from `seon.competency/start-run!` moves there into `src`). Before building it: **simplify the mess of functions and verbs used for task design and progression.** Catalogue them all (`my.task/*`, `seon.task/*`, `seon.turn` ends, `my.program` merge functions, `seon.competency` launch/grade, root's tools) and decide what to refine, rename, merge or delete; the catalogue goes into the TASK-CHAIN review and is discussed with the owner before pass 2 fixes the plan.
 
 **Q6. The undecided merges and the 56 live agent branches.** Options: (a) root decides and retires by hand with a receipt
 as soon as item 0 lands; (b) build retirement-on-close first; (c) leave them. **Recommendation: (a)**; (b) lands later from
@@ -419,12 +423,18 @@ a lane; (c) is what broke the entrance.
 order first, measured by the guessed-name signature count over three rounds; working set after if prompts cap agents; (c)
 BENCH-9's history window as a dial. **Recommendation: (b)**.
 
+> **Owner answer (2026-10-11):** Decided the same morning (owner-decisions item 7): answer at the failure. Research: widen `seon.error` name suggestions beyond the guessed namespace (name parts across public declarations and `my.*`, with arglists as calling forms) and strip tool markup at read; measure guessed-name occurrences per round; a help line only if the count does not fall.
+
 **Q8. Review cadence.** Context: the night's landings carried nine over-claims (§5.4) and no dual review ran. Options:
 (a) dual review per landing as ruled; (b) Astra audits each day's landings once, Opus reviews each platform landing,
 ordinary landings are reviewed by the gate alone (the auto-merge ruling); (c) weekly. **Recommendation: (b)**.
 
+> **Owner answer (2026-10-11):** Between stages of the chain, automatic conditions are fine where we can state them as stage proofs. **Merges: root reviews each diff before it lands, for now**; non-controversial merges land automatically eventually (criteria to be defined from what root's reviews find). The automatic landing on a green end waits for root's review until then.
+
 **Q9. Lanes overnight and documents.** Options: (a) as this weekend; (b) two code lanes (probe and fix), one evidence page
 per day, cards revised in place; (c) no unattended lanes. **Recommendation: (b)**.
+
+> **Owner answer (2026-10-11):** Not decided as a lane policy: the owner wants to be **interactive** in this phase, to make sure we design the system the owner has in mind rather than something that satisfies a spec root wrote. Design decisions go to the owner; lanes implement agreed designs.
 
 **Q10. Publication at 26 s per check and boot's whole-program derivation.** Context: deferred; fix B (one compiled gate)
 would pay it on every landing of a platform task. Options: (a) stay deferred; ordinary landings gate on the merge branch
@@ -464,6 +474,8 @@ Prove stage proof never disagrees with it); may Implement send back by itself (r
 `:changed` decision with its reason); are instructions stored on the task or rendered from the stage type (recommend
 rendered); and may a stage's proof be a short model call where no data predicate exists (recommend no for the first
 experiment: every stage proof is a data deftest, and a judgment that cannot be written as one is a send-back).
+
+> **Owner answer (2026-10-11):** Astra's version: two agents, Design+Prove → Implement, on one small existing defect. Root launches the successor by hand once from the predecessor's program basis (stubs and tests are unmerged on the predecessor's branch), to test task quality; then the same handoff is automated at `seon.turn/end-task!`. Build: `refine!`, the stage decision, one stage-aware proof selection shared by assignment, test execution, context and completion (Prove wants its proofs red, Implement green), and the predecessor-basis launch.
 
 **Q14. How the task entity is written at the REPL and how context is pruned.** Options for writing: (a) `my.task/refine!`
 over `seon.task/create!`'s upsert, any field, one note per edit, file write-back in batches at landing; (b) per-field
