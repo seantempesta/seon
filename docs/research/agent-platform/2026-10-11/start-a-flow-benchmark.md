@@ -442,6 +442,44 @@ binding Vars, excluding this benchmark Var as well as the two pre-existing
 Vars named above. On unchanged HEAD its cold SCI leg is **838.18 ms /
 1,834.565 MB**, establishing the refreshed-store comparison.
 
+### Final H9 verification
+
+The self-comparison deletion landed as `8e6972952`. With namespace joins, the
+refreshed-store candidate `1abc642b42c49238793ce0f25ec0e3e185ec56d8`, run
+`94303b0f155f`, passes all 49 assertions in the base cost proof, namespace
+equivalence and complete benchmark. The base is **130.46 ms / 294.781 MB**,
+versus the original **763.86 ms / 2,446.279 MB**; the 300 ms / 300 MB bounds and
+all five zero-work assertions pass. Full cold SCI is **776.02 ms / 1,643.217 MB**,
+warm **10.35 ms / 4.942 MB**. The branch is 6.36 ms / 1.961 MB in this sample;
+the previously reproduced branch-budget reds remain reported, not erased by
+this passing sample. The complete check took 28,997 ms: 7,344 ms ready, 1,086 ms
+adoption and 7,774 ms tests. No ordinary-operation claim includes that platform
+setup. Final full-tree lint: 0 errors, 1,514 warnings, 7,003 ms.
+
+The final passing slice gate names these non-long Vars individually:
+
+- `seon.sci.acquisition-cost-test/a-cold-base-derivation-is-proportional-to-declarations`
+- `seon.sci.acquisition-cost-test/base-namespace-acquisition-preserves-declarations-and-bindings`
+- `seon.sci.acquisition-cost-test/function-acquisition-preserves-the-loaded-declarations`
+- `seon.sci.acquisition-cost-test/a-second-acquisition-of-an-unmoved-branch-interprets-nothing`
+- `seon.sci.acquisition-cost-test/a-core-row-installs-without-opening-the-loaded-program`
+- `seon.sci.acquisition-cost-test/a-branch-head-read-costs-one-primary-materialization`
+- `seon.sci.eval-test/base-context-bindings-resolve-without-dependency-stubs`
+- `seon.sci.eval-test/every-public-capability-function-in-the-graph-resolves-in-the-ctx`
+- `seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs`
+- `seon.sci.eval-test/a-branch-change-leaves-its-compiled-callers-compiled`
+- `seon.sci.eval-test/an-interpreted-namespace-runs-its-fixture-around-a-deftest`
+- `seon.sci.entry-gate-test/every-program-namespace-carries-its-stored-aliases`
+
+The benchmark's separate final run is green as recorded above. The earlier
+pre-existing dependency-visibility, data-only-overlay and branch-budget reds
+are named with baseline runs in their owning sections. The config cost proof
+below remains intentionally red. Root owns broad tiers and installation of the
+landed evaluator into default. The foreign boundary is H2's Datahike/revision
+change and H10's schema/instrumentation work; this lane changes neither owner's
+files. Across these H9 removals, evaluator source is **−6 lines**, tests **+71**,
+and the reusable measurement script **+54**, relative to `00da22467`.
+
 ### Configuration owner task
 
 `seon.config/a-config-read-rebuilds-the-packaged-projection` names

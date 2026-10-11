@@ -2596,6 +2596,42 @@
          ::namespace-admission (when source admission)
          ::agent-authored? (boolean (and source (= :agent admission)))))
 
+(defn- base-namespace-rows
+  "Namespace declarations and bindings read as attribute joins."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :symbol]
+                       [:set [:tuple :symbol :string :keyword]]]
+                  [:map-of :symbol :map]]}
+  [database names assertions]
+  (let [rows (into {} (map (fn [name] [name (namespace-row {:seon.ns/name name})])) names)
+        rows (reduce (fn [rows [name source admission]]
+                       (assoc rows name (namespace-row {:seon.ns/name name :seon.ns/source source
+                                                        :seon.schema.admission/source admission})))
+                     rows assertions)]
+    (reduce
+     (fn [rows [attribute fields query]]
+       (let [bindings (db/q query database)]
+         (when (db/read-refusal? bindings)
+           (throw (ex-info (:seon.error/message bindings) bindings)))
+         (reduce (fn [rows [name & values]]
+                   (update-in rows [name attribute] (fnil conj #{})
+                              (if fields (zipmap fields values) (first values))))
+                 rows bindings)))
+     rows
+     [[:seon.ns/requires nil
+       '[:find ?name ?required :where [?ns :seon.ns/requires ?required] [?ns :seon.ns/name ?name]]]
+      [:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]
+       '[:find ?name ?local ?target :where [?binding :seon.ns.alias/local ?local]
+         [?binding :seon.ns.alias/target-ns ?target] [?ns :seon.ns/aliases ?binding]
+         [?ns :seon.ns/name ?name]]]
+      [:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]
+       '[:find ?name ?local ?target :where [?binding :seon.ns.import/local ?local]
+         [?binding :seon.ns.import/target-class ?target] [?ns :seon.ns/imports ?binding]
+         [?ns :seon.ns/name ?name]]]
+      [:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns :seon.ns.refer/target-name]
+       '[:find ?name ?local ?target-ns ?target-name :where [?binding :seon.ns.refer/local ?local]
+         [?binding :seon.ns.refer/target-ns ?target-ns] [?binding :seon.ns.refer/target-name ?target-name]
+         [?ns :seon.ns/refers ?binding] [?ns :seon.ns/name ?name]]]])))
+
 (defn- acquire-program!
   "Acquire the loaded program into its base context. Compiled definitions bind
   their JVM roots; namespaces the JVM has not loaded interpret their source.
@@ -2649,12 +2685,8 @@
             (into (into #{} (map #(nth % 2)) function-rows)
                   (comp (filter (fn [[_ _ admission]] (= :agent admission))) (map first))
                   namespace-assertions)
-            all-namespace-rows
-            (mapv namespace-row
-                  (db/pull-many db namespace-pattern
-                                (mapv #(vector :seon.ns/name %) all-namespace-names)))
-            all-namespace-row-by-name
-            (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
+            all-namespace-row-by-name (base-namespace-rows db all-namespace-names namespace-assertions)
+            all-namespace-rows (vec (vals all-namespace-row-by-name))
             test-rows
             (vec
              (db/q '[:find ?sym ?source ?namespace-name ?admission

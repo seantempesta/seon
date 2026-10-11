@@ -49,6 +49,22 @@
        (is (zero? (profile/calls-of acquired 'seon.db/pull-many)))
        (is (= 4 (profile/calls-of acquired 'seon.db/datoms)))))))
 
+(deftest base-namespace-acquisition-preserves-declarations-and-bindings
+  (support/with-database
+   (fn [connection]
+     (let [loaded (#'evaluation/loaded-program (db/db connection))
+           names (db/q (::benchmark/namespace-names benchmark/base-queries) loaded)
+           assertions (db/q (::benchmark/namespace-assertions benchmark/base-queries) loaded)
+           acquired (measured ::namespace-rows #(#'evaluation/base-namespace-rows loaded names assertions))
+           expected (db/pull-many loaded @#'evaluation/namespace-pattern
+                                  (mapv #(vector :seon.ns/name %) names))
+           meaning (fn [row] [(:seon.ns/source row)
+                              (when (:seon.ns/source row) (:seon.schema.admission/source row))
+                              (#'evaluation/row-bindings row)])]
+       (is (= (into {} (map (juxt :seon.ns/name meaning)) expected)
+              (update-vals (:seon.profile/value acquired) meaning)))
+       (is (zero? (profile/calls-of acquired 'seon.db/pull-many)))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-cold-base-derivation-is-proportional-to-declarations}
            :seon.test/platform "Empties the central cache in the disposable check JVM."}
   a-cold-base-derivation-is-proportional-to-declarations
