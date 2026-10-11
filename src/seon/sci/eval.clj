@@ -2973,21 +2973,20 @@
 (defn- lazy-root
   "The root of closure member `sym` at `sci-var` until its first call: that
   call interprets the member, in the context executing it, from the stored
-  source at `database`'s commit, reopened from `ctx`'s connection then so the
+  source at `database`'s commit, reopened from the executing context's custody so the
   closure retains no database value (`promote-member!`), so cost follows the members called; then
   it and every later call run what that context binds."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
                   [:fn clojure.core/ifn?]]}
   [ctx database sym sci-var]
-  (let [connection (:seon.db/connection (env/of ctx))
-        commit (db/commit-id database)
+  (let [commit (db/commit-id database)
         projection (db/carried-projection database)]
     (fn lazy-member [& args]
       (let [executing (executing-ctx ctx)
             held #(sci.ctx-store/with-ctx executing @sci-var)]
         (when (identical? lazy-member (held))
           (promote-member! executing
-                           (cond-> (d/commit-as-db connection commit {:secondary-indices? false})
+                           (cond-> (d/commit-as-db (context-database executing) commit {:secondary-indices? false})
                              projection (vary-meta assoc :seon.schema/projection projection))
                            sym sci-var lazy-member))
         (apply (held) args)))))
@@ -3616,14 +3615,29 @@
                               ::loaded-commit-id (db/commit-id loaded))
                  recorder (assoc :seon.flow/commit-fault! recorder)))))
 
+(defn- context-weight
+  "Estimated retained bytes of a program fork source, including interpreted bindings."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] nat-int?]}
+  [ctx]
+  (* 12288 (count (:functions @(::kernel/program-snapshot ctx)))))
+
+(defn- derive-overlay-ctx
+  "Interpret one program on a private fork source with no custody or recorder."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
+                       :seon.schema/projection] :seon.sci.eval/ctx]}
+  [cluster database loaded projection]
+  (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
+                   ::custody {} :seon.schema/projection projection)]
+    (assoc ctx ::acquisition (overlay! ctx database loaded))))
+
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
 
   Matching definitions copy the loaded JVM Var root. Overrides and affected
   callers interpret their admitted source. Acquisition refusals remain values on the context;
-  construction has no connection, writes no facts, and restores no private state.
-  Each call forks the one cluster base of the JVM's loaded program (a `seon.cache`
-  kind) and interprets the value's own changes on that fork (`overlay!`)."
+  the caller records them in its custody and restores no private state.
+  Both the cluster base and each interpreted program are content-keyed fork
+  sources in `seon.cache`; every caller receives its own SCI and kernel atoms."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
@@ -3633,16 +3647,24 @@
   ([database] (base-ctx database {}))
   ([database arm-request]
    (let [loaded (or (::loaded-database arm-request) (loaded-program database))
+         base-key (cluster-base-key loaded)
          derive-base #(derive-base-ctx loaded)
-         cluster (if-let [cache-key (cluster-base-key loaded)]
-                   (seon.cache/lookup ::base-context cache-key
-                                      #(* 2048 (count (:functions @(::kernel/program-snapshot %))))
-                                      derive-base)
+         cluster (if base-key
+                   (seon.cache/lookup ::base-context base-key context-weight derive-base)
                    (derive-base))
          projection (or (db/carried-projection database) (schema/projection-from-database database))
-         ctx (assoc (copy-base-ctx cluster database loaded (:seon.flow/commit-fault! arm-request))
-                    :seon.schema/projection projection)]
-     (assoc ctx ::acquisition (overlay! ctx database loaded)))))
+         derive-overlay #(derive-overlay-ctx cluster database loaded projection)
+         source (if-let [identity (when base-key (program-identity database))]
+                  (seon.cache/lookup ::overlay-context
+                                     [base-key (program-basis identity (acquisition-attributes projection))
+                                      (armed-dials database)]
+                                     context-weight derive-overlay)
+                  (derive-overlay))
+         recorder (:seon.flow/commit-fault! arm-request)
+         ctx (copy-base-ctx source database loaded recorder)
+         acquired (record-acquisition-refusals! ctx database (::acquisition source) recorder)]
+     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
+     (assoc ctx ::acquisition acquired))))
 
 (defn- loaded-basis
   "The revision of the adoption record's attribute in the loaded source.
@@ -4826,4 +4848,3 @@
   [request]
   (let [results (run-tests (assoc request :seon.test/vars [(:seon.test/var request)]))]
     (if (contains? results :seon.test/not-runnable) results (first results))))
-

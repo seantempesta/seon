@@ -1,0 +1,102 @@
+{:seon.measure/lane "astra-r4-fork-cache"
+ :seon.measure/date "2026-10-11"
+ :seon.measure/task seon.sci.eval/a-second-acquisition-of-an-unmoved-branch-interprets-nothing
+ :seon.measure/design "base-ctx forks a content-keyed interpreted source; source derivation replaces repeated overlay interpretation. The source has no custody or recorder. SCI fork and new kernel atoms isolate every returned context. The cache key includes loaded store/commit, program attribute basis and the contract dial values. Lookup/fork cost is independent of overlay size; a miss interprets the changed definitions and affected callers."
+ :seon.measure/dependency {:sci {:revision "f455b3b4a6a4fe92cd2adde2e19821ab1fe5bece" :seam sci.core/fork :guarantee "Both contexts get a new generation; writes use the executing context's Var bindings."}
+                           :malli {:revision "dd13ff81139159778edb0a67b491eccc0baa991d" :seams [malli.core/validator malli.core/-instrument]}
+                           :cache {:version "3.2.4" :seam seon.cache/lookup :guarantee "Caffeine single derivation, producer weight at insertion, one configured byte budget."}}
+ :seon.measure/weights {:producer seon.sci.eval/context-weight
+                        :kinds [:seon.sci.eval/base-context :seon.sci.eval/overlay-context]
+                        :old-bytes-per-function 2048 :bytes-per-function 12288
+                        :basis "Owner's assignment reports live-root-memory measured approximately sixfold cache undercount. This applies that supplied correction to these two context kinds; this lane did not independently measure retained heap. Both charges include their referenced base, conservatively double-counting shared structures."
+                        :cache-owner-change "No change to seon.cache is needed; weight belongs to the producer and is supplied at insert."}
+ :seon.measure/live-baseline {:root "default" :agent "root" :mode :jvm :result result/e22ad54d3eece
+                              :ms 14.43 :alloc-bytes 17513072 :interpret-overlay-calls 1
+                              :health "Degraded before work: cache-discipline warning, four errored receipts, fourteen untested-hot warnings; heap-live 1.163 GB; cache weight 511.55 MB of 512 MB."}
+ :seon.measure/red {:run "7431e6529195" :candidate "34a6710099d8beea8a34cc095fd3d8943c6b1aa8"
+                    :assertions {:pass 5 :fail 2 :error 1}
+                    :failure "Warm interpretation called once and allocated 399354480 bytes. The separate fixture error was an overlong task handle, corrected before green."
+                    :samples [{:seon.profile/ms 761.77,
+ :seon.profile/alloc-bytes 747674800,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-first,
+ :seon.profile/called
+   #:seon.sci.eval{copy-host-var 3711,
+    authored-rows 2,
+    loaded-database 120,
+    overlay-plan 1,
+    install-row! 229,
+    base-ctx 1,
+    interpret-overlay! 1}}
+{:seon.profile/ms 387.77,
+ :seon.profile/alloc-bytes 399354480,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-warm,
+ :seon.profile/called
+   #:seon.sci.eval{copy-host-var 3711,
+    loaded-database 120,
+    overlay-plan 1,
+    install-row! 229,
+    base-ctx 1,
+    interpret-overlay! 1}}
+]}
+ :seon.measure/green {:run "4fb117b92dd2" :candidate "9543ce09e9d2dc422b4bf0fba9a6571088f1a35a"
+                      :tests 4 :assertions {:pass 20 :fail 0 :error 0}
+                      :samples [{:seon.profile/ms 0.18,
+ :seon.profile/alloc-bytes 50144,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/commit,
+ :seon.profile/called {}}
+{:seon.profile/ms 0.3,
+ :seon.profile/alloc-bytes 52920,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/branch,
+ :seon.profile/called {}}
+{:seon.profile/ms 1.15,
+ :seon.profile/alloc-bytes 293720,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/install,
+ :seon.profile/called #:seon.sci.eval{copy-host-var 1, install-row! 1}}
+{:seon.profile/ms 1.21,
+ :seon.profile/alloc-bytes 838856,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/fork,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 743.85,
+ :seon.profile/alloc-bytes 784912936,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-first,
+ :seon.profile/called
+   #:seon.sci.eval{copy-host-var 3711,
+    authored-rows 2,
+    loaded-database 120,
+    overlay-plan 1,
+    install-row! 229,
+    base-ctx 1,
+    interpret-overlay! 1}}
+{:seon.profile/ms 1.5,
+ :seon.profile/alloc-bytes 821344,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-warm,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 1.22,
+ :seon.profile/alloc-bytes 793760,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-successor,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+{:seon.profile/ms 1.24,
+ :seon.profile/alloc-bytes 866264,
+ :seon.sci.acquisition-cost-test/operation
+   :seon.sci.acquisition-cost-test/overlay-data-write,
+ :seon.profile/called {seon.sci.eval/base-ctx 1}}
+]}
+ :seon.measure/compatibility {:run "63f751e6ab2e" :candidate "b30446153ecb34e08662cad4af8357972d76868d"
+                              :tests 7 :assertions {:pass 46 :fail 0 :error 0}}
+ :seon.measure/lint {:command "clj-kondo --lint src script test --cache false" :ms 7062 :errors 0 :warnings 1511}
+ :seon.measure/limits ["First interpretation remains 743.85 ms / 784912936 allocated bytes; warm reuse is the claim, not a cold-start allocation fix."
+                       "R1's complete starting-one-agent-on-a-task proof belongs to its owner and was not run here. No changes or patch needed in W1/R1 owned files for this cache entrance."
+                       "Default was never stopped, reset, restarted or loaded with uncommitted JVM source. Installed JVM behavior remains at its committed archive until root batches a restart."
+                       "The edit hook's SCI lane reported unresolved context-weight while installing the host platform slice. The candidate archive published, adopted and booted successfully; live branch evidence is not claimed."
+                       "Known earlier unrelated red seon.db-test/equal-declaration-content-shares-one-projection-across-values was not selected; the seven selected eval tests were all green."]
+ :seon.measure/foreign-boundary {:files ["src/seon/task.clj" "src/seon/turn/world.clj" "src/seon/turn.clj" "src/seon/flow.clj" "src/seon/mcp.clj" "src/seon/test.clj" "resources/seon/schemas/seon.batch.edn"]
+                                  :method "Each check used HEAD plus exactly this slice's two paths; in-flight changes to other owners' files were excluded."}}
