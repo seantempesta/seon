@@ -765,7 +765,7 @@
            request #(changed-request connection (conj change 'my.agents.narrow/p-test)
                                      {:seon.test/policy :named :seon.test/since-previous-run? true})
            executed (fn [run] (set (keep #(when-not (:seon.test/unchanged %) (:seon.test/sym %)) (:seon.test/results run))))
-           selected (fn [run] (set (map :seon.test/sym (:seon.test/results run))))]
+           selected (fn [run] (if (:seon.error/at run) run (set (map :seon.test/sym (:seon.test/results run)))))]
        (is (= '#{my.agents.narrow/q-test my.agents.narrow/red-test}
               (executed (changed-request connection change {:seon.test/policy :named :seon.test/since-previous-run? true})))
            "without an earlier run the whole change is reached")

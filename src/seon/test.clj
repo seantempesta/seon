@@ -1020,7 +1020,8 @@
               ;; it finds only tests reaching it.
               (into (into (into (into identities (if (= :named policy) requested-reached reached))
                                 (when (= :incremental policy) requested-changed))
-                          (keys pending))
+                          ;; Only incremental requests carry outstanding work forward.
+                          (when (= :incremental policy) (keys pending)))
                     (concat
                      (when (and (= :incremental policy) (not work?))
                        (map #(one % :seon.test.member/symbol) (mapcat members runs)))

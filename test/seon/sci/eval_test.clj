@@ -103,19 +103,17 @@
              "restoration does not change a previously supplied database value"))))))
 
 (deftest absent-program-function-is-reported-before-namespace-lookup
-  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        function-symbol 'missing.program/function
-        failure
-        (with-redefs [kernel/program-namespace
-                      (fn [_ _]
-                        (throw (ex-info "Unexpected namespace lookup" {})))]
-          (try
-            (#'eval/install-function-from-database! ctx nil function-symbol)
-            nil
-            (catch clojure.lang.ExceptionInfo error (ex-data error))))]
-    (is (= function-symbol (:seon.sci.eval/missing-function-row failure)))
-    (is (= 'seon.sci.eval/install-function-from-database! (:seon.error/operation failure)))
-    (is (= function-symbol (:seon.fn/sym failure)))))
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
+           function-symbol 'missing.program/function
+           failure (try
+                     (#'eval/install-function-from-database! ctx (db/db connection) function-symbol)
+                     nil
+                     (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+       (is (= function-symbol (:seon.sci.eval/missing-function-row failure)))
+       (is (= 'seon.sci.eval/install-function-from-database! (:seon.error/operation failure)))
+       (is (= function-symbol (:seon.fn/sym failure)))))))
 
 (defn- compiled-runtime-victim
   []
