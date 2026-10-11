@@ -31,6 +31,19 @@
    :seon.cluster.status/virtual-threads
    (unknown "Virtual threads are not counted: the JVM's thread bean counts platform threads only.")})
 
+(defn- cluster-row
+  "My cluster's name and adopted commit on `database`: the cluster the caller's
+  context names (`:seon.boot/cluster-name`), since a forked branch holds its
+  parent's cluster entities too; without a context, the one cluster entity.
+  Two reads, not a pull inside :find: Datahike plans a find-pull as a
+  dependency on every attribute, so any commit re-rendered the block."
+  [database carrier]
+  (let [named (:seon.boot/cluster-name (or (env/of (:seon.sci.eval/ctx carrier)) (env/of carrier)))]
+    (some->> (if named
+               (db/q '[:find ?c . :in $ ?name :where [?c :seon.cluster/name ?name]] database named)
+               (db/q '[:find ?c . :where [?c :seon.cluster/name]] database))
+             (db/pull database [:seon.cluster/name :seon.source/commit-id]))))
+
 (defn snapshot
   "Observe this cluster and JVM. SCI supplies the database and connection.
   Store size is an explicit operator diagnostic: routine observations never
@@ -43,18 +56,7 @@
                    :seon.cluster.status/unavailable-error]]}
   [{database :seon.db/db connection :seon.db/connection :as request}]
   (try
-    (let [;; THE CALLER'S CONTEXT NAMES THE CLUSTER: a forked branch holds
-          ;; its parent's cluster entities too, so "some cluster entity" observed
-          ;; another cluster's commit (web-context-test unrelated-adoption).
-          ;; Without a context, a database holding one cluster entity names it.
-          named (:seon.boot/cluster-name (or (env/of (:seon.sci.eval/ctx request)) (env/of request)))
-          ;; two reads, not a pull inside :find: Datahike plans a find-pull
-          ;; as a dependency on every attribute, so any commit re-rendered
-          ;; the status block
-          cluster (some->> (if named
-                             (db/q '[:find ?c . :in $ ?name :where [?c :seon.cluster/name ?name]] database named)
-                             (db/q '[:find ?c . :where [?c :seon.cluster/name]] database))
-                           (db/pull database [:seon.cluster/name :seon.source/commit-id]))
+    (let [cluster (cluster-row database request)
           heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
       (if-not (:seon.cluster/name cluster)
         (unknown "This database has no cluster identity.")
@@ -165,8 +167,8 @@
 
   `snapshot` reads JVM and turn statistics on demand."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.cluster.status/view :seon.db/error-result]]}
-  [{database :seon.db/db}]
-  (let [cluster (db/q cluster-query database)]
+  [{database :seon.db/db :as unit}]
+  (let [cluster (cluster-row database unit)]
     (if (db/read-refusal? cluster)
       cluster
       (assoc cluster :seon.render/operations ['(seon.cluster.status/snapshot {})]))))
