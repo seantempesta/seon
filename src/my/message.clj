@@ -1,8 +1,7 @@
 (ns ^{:seon.ns/context-relevant? true} my.message
   "The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity."
   (:refer-clojure :exclude [read send])
-  (:require [seon.cluster.message :as message]
-            [seon.cluster.registry :as registry]))
+  (:require [seon.cluster.message :as message]))
 
 (defn inbox
   "Read my unread messages, oldest first.
@@ -47,36 +46,13 @@
   (message/received! message-id connection agent-id))
 
 (defn send
-  "Send a message now and return the written message with its identity.
+  "Offer a message to the recipient's Flow inbox and return its accepted identity.
 
-  Returns the stored :seon.message/id, :seon.message/content and endpoint refs.
-  Sending inside let or do delivers even when its return value is discarded.
-  Optional :my.message/about is a nonempty string subject identity token, stored
-  verbatim without looking up a target; omit it when there is no subject.
-  Optional :my.message/assignment names the evaluation assigned for repair,
-  independently of the subject. The sender is supplied from my agent identity:
-  :seon.message/from alone marks an inside wake, never the subject or assignment.
-  Handling is recorded when the turn settles. A recipient on a branch no host
-  runs (every agent after a restart) is hosted first, through the cluster handle
-  supplied as :seon.agent/context-source, so it wakes.
-
-  Example:
-  (my.message/send {:my.message/to \"root\" :my.message/content \"The verification passed.\"})"
+  Accepted means queued. `:my.message/keep? true` also stores my own copy.
+  A resend may carry `:seon.message/id`; the recipient writes that identity once.
+  An undeliverable value names recipient, intent and cause. A running recipient
+  without a graph is hosted by db<->flow's next pass; resend after it runs."
   {:malli/schema [:=> [:cat :my.message/send-request]
-                  [:or :seon.message/message :seon.error/value]]}
-  [{cluster :seon.agent/context-source connection :seon.db/connection agent-id :seon.agent/id :as request}]
-  (let [message (dissoc request :seon.db/connection :seon.agent/id :seon.agent/context-source)
-        sent (message/send! message connection agent-id)
-        home (:seon.message/home sent)]
-    ;; a recipient admitted on a listed branch that no host runs is resumed:
-    ;; hosted on the cluster roster (its db<->flow derives the message), then written to
-    (if-not (and cluster home)
-      sent
-      (if-not (contains? (registry/roster (:seon.store/store cluster)) home)
-        ;; a home the store roster no longer lists can never be hosted again
-        (assoc sent :seon.cluster.store/branch-absent home
-               :seon.error/message "The recipient's home branch is no longer in the store; the message was not sent.")
-        (let [host ((requiring-resolve 'seon.cluster.host/host!)
-                    {:seon.turn.loop/cluster cluster :seon.agent/branch home
-                     :seon.agent/id (:my.message/to request) :seon.ns/name 'user})]
-          (if (:seon.error/at host) host (message/send! message connection agent-id)))))))
+                  [:or :seon.message/accepted-result :seon.error/value]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (message/send! request connection agent-id))

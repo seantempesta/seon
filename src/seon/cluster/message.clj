@@ -1,7 +1,8 @@
 (ns seon.cluster.message
-  "Durable messages with permanent routing and settlement claims."
+  "Message values offered through Flow and stored by their recipient."
   (:refer-clojure :exclude [read send])
-  (:require [seon.db :as db]
+  (:require [clojure.core.async :as async]
+            [seon.db :as db]
             [seon.error.refusal]
             [seon.id :as id]
             [clojure.string :as str]
@@ -807,24 +808,15 @@
   ([to content about]
    (send-value to content true about)))
 
-(defn send-call
-  "The rows writing `candidate` from `agent-id`, decided by the writer on `database`: its recipients, the active
-  turn's cause and the configured conversation bound; a refusal throws, refusing the transaction."
+(defn- prepared-message
+  "The message admitted against the sender's database, or its declared refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/message
-                       :seon.agent/id] :seon.db/tx-data]}
+                       :seon.agent/id] [:or :seon.message/message :seon.error/value]]}
   [database candidate agent-id]
   (let [limits (db/q '[:find [?limit ...]
                        :where [?cluster :seon.cluster/config ?config]
                               [?config :seon.config.message/max-chain ?limit]] database)
         limit (when (= 1 (count limits)) (first limits))
-        _ (when-not (pos-int? limit)
-            (throw (ex-info "Messaging requires one configured chain bound."
-                            {:seon.message/no-limit true
-                             :seon.error/at (java.util.Date.)
-                             :seon.error/layer :seon.message/delivery
-                             :seon.error/operation 'seon.cluster.message/send-call
-                             :seon.error/message "Messaging requires one configured chain bound."
-                             :seon.error/data {:seon.config.message/max-chain limits}})))
         run-id (db/q '[:find ?id . :in $ ?agent-id
                        :where [?agent :seon.agent/id ?agent-id]
                               [?turn :seon.turn/agent ?agent]
@@ -837,9 +829,24 @@
                                   :seon.agent/id agent-id
                                   :seon.config.message/max-chain limit}
                            cause (assoc :seon.message/trigger cause)))]
-    (if-let [failure (first (:seon.error/values result))]
-      (throw (ex-info (:seon.error/message failure) failure))
-      (:seon.message/rows result))))
+    (or (first (:seon.error/values result))
+        (first (:seon.message/rows result)))))
+
+(defn send-call
+  "Write an admitted message once by identity, or prepare a legacy candidate at the writer."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.message/message] :seon.db/tx-data]
+                  [:=> [:cat :seon.db/database-value :my.message/message :seon.agent/id] :seon.db/tx-data]]}
+  ([database message]
+   (if (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]]
+             database (:seon.message/id message))
+     []
+     [message]))
+  ([database candidate agent-id]
+   (let [message (prepared-message database candidate agent-id)]
+     (if (:seon.error/at message)
+       (throw (ex-info (:seon.error/message message) message))
+       (send-call database message)))))
 
 (defn candidate
   "The message `request` writes, with its minted id and the members it carries (assignment, reason, a task's end and
@@ -852,51 +859,63 @@
                           (some? (:my.message/about request)) (:my.message/about request))]
     (if (:seon.error/at value)
       value
-      (merge value (select-keys request [:my.message/assignment :my.message/reason :seon.task/end :seon.task/merge])))))
+      (merge value (select-keys request [:seon.message/id :my.message/assignment :my.message/reason :seon.task/end :seon.task/merge])))))
+
+(defn- inbox-port
+  "The recipient's inbox in the execution roster and its branch children."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.agent/id]
+                  [:maybe :seon.flow/channel]]}
+  [routing recipient]
+  (when routing
+    (let [root (loop [roster routing]
+                 (if-let [parent (:seon.agent/parent @roster)] (recur parent) roster))]
+      (some #(get-in @% [:seon.agent/started recipient :seon.agent/inbox])
+            (cons root (vals (:seon.agent/children @root)))))))
+
+(defn- undeliverable
+  "The sender's undeliverable value, naming recipient intent and channel outcome."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.message/cause]
+                  :seon.message/undeliverable]}
+  [database recipient cause]
+  (let [intent (db/q '[:find ?intent . :in $ ?id
+                       :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g]
+                              [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
+                              [?t :seon.task/execution ?intent]] database recipient)]
+    (seon.error.refusal/error
+     :seon.message/undeliverable
+     {:seon.error/operation `send!
+      :seon.error/message "The recipient's inbox could not accept this message."
+      :seon.message/recipient recipient
+      :seon.message/intent (or intent :unknown)
+      :seon.message/cause cause})))
 
 (defn send!
-  "Write a message and its permanent recipient atomically; return the stored message.
-
-  The message is written on the recipient's home branch (its row's
-  `:seon.agent/branch`), through this process's connection to it, so an agent
-  on a branch reaches root on the cluster; with no such connection it refuses
-  by name. The writer resolves recipients, the active turn's cause, and the
-  configured conversation bound against its current database. Subject tokens
-  need no target."
+  "Offer a message without parking; keep a sender copy only under `:my.message/keep?`."
   {:malli/schema [:=> [:cat :my.message/message :seon.db/connection :seon.agent/id]
-                  [:or :seon.message/message :seon.error/value]]}
+                  [:or :seon.message/accepted-result :seon.error/value]]}
   [request connection agent-id]
   (let [candidate (candidate request)
-        database (db/db connection)
-        ;; The recipient's entity names its home branch; the message is written
-        ;; there, where the recipient reads and is woken.
-        home (when (string? (:my.message/to candidate))
-               (db/q '[:find ?branch . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?branch]]
-                     database (:my.message/to candidate)))
-        target (if (and (keyword? home) (not= home (get-in database [:config :branch])))
-                 (db/branch-connection database home)
-                 connection)]
-    (cond
-      (or (:my.message/no-recipient candidate) (:my.message/no-content candidate)
-          (:my.message/no-about candidate))
+        database (db/db connection)]
+    (if (:seon.error/at candidate)
       candidate
-      (nil? target)
-      {:seon.message/unknown-recipient (:my.message/to candidate)
-       :seon.message/home home
-       :seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.message/delivery
-       :seon.error/operation 'seon.cluster.message/send!
-       :seon.error/message (str (pr-str (:my.message/to candidate)) " lives on branch " (pr-str home)
-                                ", which this process holds no connection to; the message was not sent.")}
-      :else
-      (let [write! #(db/transact! target
-                                  {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
-                                   :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
-            ;; A write to another branch is that branch's own work.
-            result (if (identical? target connection) (write!) (db/call-with-custody {:seon.db/connection target} write!))]
-        (if (or (:seon.db.write.attempt/request-id result)
-                (:seon.db/invalid-read result) (:seon.schema/expected-value result)) result
-            (read (:seon.message/id candidate) (:db-after result)))))))
+      (let [message (prepared-message database candidate agent-id)
+            recipient (:my.message/to candidate)
+            port (inbox-port (:seon.agent/routing request) recipient)]
+        (if (:seon.error/at message)
+          (if (:seon.message/unknown-recipient message)
+            (undeliverable database recipient :no-graph)
+            message)
+          (let [offered (when port (async/offer! port message))]
+            (if (true? offered)
+              (let [kept (when (:my.message/keep? request)
+                           (db/transact! connection
+                                         {:tx-data [[:db.fn/call #'send-call message]]
+                                          :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))]
+                (if (and kept (not (:db-after kept)))
+                  kept
+                  {:seon.message/id (:seon.message/id message) :seon.message/accepted true}))
+              (undeliverable database recipient
+                             (cond (nil? port) :no-graph (false? offered) :closed :else :full)))))))))
 
 (defn decline
   "Decline an assignment and explain why to its sender.

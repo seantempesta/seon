@@ -1,4 +1,5 @@
 {:my.message/read-request [:map [:my.message/id :my.message/id] [:seon.db/db :seon.db/database-value]]
+ :my.message/keep? :boolean,
  :my.message/about [:string {:min 1}],
  :my.message/assignment :seon.cluster.eval/id,
  :my.message/content [:string {:min 1}],
@@ -28,18 +29,23 @@
  :my.message/message
              [:map
               [:my.message/to :my.message/to]
+              [:seon.message/id {:optional true} :seon.message/id]
+              [:my.message/keep? {:optional true} :my.message/keep?]
+              [:seon.agent/routing {:optional true} :seon.agent/routing]
               [:my.message/content :my.message/content]
               [:my.message/about {:optional true} :my.message/about]
               [:my.message/assignment {:optional true} :my.message/assignment]],
  :my.message/send-request
              [:map
               [:my.message/to :my.message/to]
+              [:seon.message/id {:optional true} :seon.message/id]
+              [:my.message/keep? {:optional true} :my.message/keep?]
+              [:seon.agent/routing {:optional true} :seon.agent/routing]
               [:my.message/content :my.message/content]
               [:my.message/about {:optional true} :my.message/about]
               [:my.message/assignment {:optional true} :my.message/assignment]
               [:seon.db/connection :seon.db/connection]
-              [:seon.agent/id :seon.agent/id]
-              [:seon.agent/context-source {:optional true :description "The running cluster's handle with its store: a recipient admitted on a listed branch no host runs (every agent after a restart) is hosted through it, then written to."} :seon.agent/context-source]],
+              [:seon.agent/id :seon.agent/id]],
  :my.message/reason [:string {:min 1}],
  :my.message/to :seon.agent/id,
  :my.message/value

@@ -8,7 +8,8 @@
   adds over `my.turn`'s — that the error value is a REAL
   `:seon.error/value`, so the declared output schemas are ones the
   functions actually keep."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.async :as async]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [my.message]
@@ -114,28 +115,26 @@
 (deftest send-preserves-routing-until-turn-settlement
   (with-messages
     (fn [connection _]
-      (support/seed-cluster! connection "message-write")
-      (let [sent (my.message/send {:my.message/to "alice"
-                                   :my.message/content "Verified."
-                                   :my.message/about "m-1"
-                                   :seon.db/connection connection
-                                   :seon.agent/id "bob"})
-            stored (message/read (:seon.message/id sent) @connection)
-            original (db/pull @connection '[*] [:seon.message/id "m-1"])]
-        (is (string? (:seon.message/id sent)))
-        (is (= sent stored))
-        (is (= [:seon.agent/id "alice"] (:seon.message/to stored)))
-        (is (= [:seon.agent/id "bob"] (:seon.message/from stored)))
-        (is (some? (:seon.message/to original)))
-        (is (nil? (:seon.turn/_handled original)))
-        (let [missing (my.message/send {:my.message/to "absent"
-                                        :my.message/content "No recipient."
-                                        :seon.db/connection connection
-                                        :seon.agent/id "bob"})]
-          (is (= "absent" (:seon.message/unknown-recipient missing)))
-          (is (= 'seon.cluster.message/delivery
-                 (:seon.error/operation missing)))
-          (is (= 3 (db/q '[:find (count ?m) . :where [?m :seon.message/id _]] @connection))))))))
+      (let [inbox (async/chan 1)
+            routing (atom {:seon.agent/started {"alice" {:seon.agent/inbox inbox}}})
+            before (db/basis-t @connection)]
+        (try
+          (let [sent (my.message/send {:my.message/to "alice" :my.message/content "Verified."
+                                       :my.message/about "m-1" :seon.agent/routing routing
+                                       :seon.db/connection connection :seon.agent/id "bob"})
+                offered (async/poll! inbox)]
+            (is (true? (:seon.message/accepted sent)))
+            (is (= (:seon.message/id sent) (:seon.message/id offered)))
+            (is (= [:seon.agent/id "alice"] (:seon.message/to offered)))
+            (is (= [:seon.agent/id "bob"] (:seon.message/from offered)))
+            (is (= before (db/basis-t @connection))))
+          (let [missing (my.message/send {:my.message/to "absent" :my.message/content "No recipient."
+                                          :seon.agent/routing routing :seon.db/connection connection
+                                          :seon.agent/id "bob"})]
+            (is (= :seon.message/undeliverable (:seon.error/type missing)))
+            (is (= "absent" (:seon.message/recipient missing)))
+            (is (= before (db/basis-t @connection))))
+          (finally (async/close! inbox)))))))
 
 (deftest a-bad-argument-is-an-error-value-never-a-throw
   ;; `:my.message/to`, `/content`, `/about` and `/reason` all admit any

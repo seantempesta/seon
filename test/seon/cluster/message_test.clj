@@ -21,6 +21,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.turn :as turn]
             [seon.cluster.message :as message]
 
@@ -887,3 +888,53 @@
     (is (not-any? (set units)
                   [:seon.def/_agent :seon.def/_ns
                    :seon.schema.admission/_source :seon.render.route/_data]))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.message/a-send-writes-nothing-unless-it-keeps}}
+  a-send-writes-nothing-unless-it-keeps
+  (with-database
+    (fn [connection]
+      (let [inbox (async/chan 2)
+            routing (atom {:seon.agent/started {"bob" {:seon.agent/inbox inbox}}})
+            request {:my.message/to "bob" :my.message/content "hello"}
+            before (db/basis-t @connection)]
+        (try
+          (let [sent (message/send! (assoc request :seon.agent/routing routing) connection "alice")]
+            (is (true? (:seon.message/accepted sent)))
+            (is (= before (db/basis-t @connection)))
+            (is (= (:seon.message/id sent) (:seon.message/id (async/poll! inbox))))
+            (let [measured (profile/measure
+                            #(message/send! (assoc request :seon.agent/routing routing
+                                                   :seon.message/id (:seon.message/id sent))
+                                            connection "alice"))]
+              (is (= (:seon.message/id sent) (:seon.message/id (:seon.profile/value measured))))
+              (is (= (:seon.message/id sent) (:seon.message/id (async/poll! inbox))))
+              (is (zero? (profile/calls-of measured 'seon.db/branch-connection)))
+              (is (zero? (profile/calls-of measured 'seon.db/transact!)))
+              (is (< (:seon.profile/ms measured) 2.0))))
+          (let [sent (message/send! (assoc request :my.message/keep? true :seon.agent/routing routing) connection "alice")]
+            (is (true? (:seon.message/accepted sent)))
+            (is (= (inc before) (db/basis-t @connection)))
+            (is (= "hello" (:seon.message/content (message/read (:seon.message/id sent) @connection)))))
+          (finally (async/close! inbox)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.message/a-send-writes-nothing-unless-it-keeps}}
+  a-send-to-an-agent-that-is-not-running-is-answered-as-undeliverable
+  (with-database
+    (fn [connection]
+      (let [closed (async/chan 1)
+            full (async/chan 1)
+            before (db/basis-t @connection)]
+        (async/close! closed)
+        (async/offer! full :occupied)
+        (try
+          (doseq [[inbox cause] [[nil :no-graph] [closed :closed] [full :full]]]
+            (let [routing (atom {:seon.agent/started {"bob" {:seon.agent/inbox inbox}}})
+                  result (message/send! {:my.message/to "bob" :my.message/content "hello" :seon.agent/routing routing}
+                                        connection "alice")]
+              (is (= :seon.message/undeliverable (:seon.error/type result)))
+              (is (= "bob" (:seon.message/recipient result)))
+              (is (= cause (:seon.message/cause result)))
+              (is (= :unknown (:seon.message/intent result)))
+              (is (= before (db/basis-t @connection)))))
+          (is (= :occupied (async/poll! full)))
+          (finally (async/close! full)))))))

@@ -203,6 +203,7 @@
  ; beside the user's work fit a 16 GB machine (each graph is three procs, a
  ; SCI fork and its turns' provider calls).
  ; Unit: open attempts on this cluster.
+ :seon.config.agent/inbox-size 64
  :seon.config.agent/max-running 4
 
  ; AN ENDED ATTEMPT'S BRANCH GOES, so collection reclaims everything only it

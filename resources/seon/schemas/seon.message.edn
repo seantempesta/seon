@@ -1,4 +1,14 @@
 #:seon.message{,
+ :accepted [:= true]
+ :accepted-result [:map [:seon.message/id :seon.message/id] [:seon.message/accepted :seon.message/accepted]]
+ :recipient :seon.agent/id
+ :intent [:or :seon.task/execution [:= :unknown]]
+ :cause [:enum :no-graph :closed :full]
+ :undeliverable [:and :seon.error/base
+                 [:map [:seon.message/recipient :seon.message/recipient]
+                       [:seon.message/intent :seon.message/intent]
+                       [:seon.message/cause :seon.message/cause]]]
+
                :reply-request
                [:map
                 [:my.turn/result :my.turn/result]

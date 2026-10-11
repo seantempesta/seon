@@ -1,0 +1,98 @@
+--- a/src/seon/cluster/agent.clj
++++ b/src/seon/cluster/agent.clj
+@@ -95,6 +95,7 @@
+             [seon.schedule :as schedule]
+             [seon.task :as task]
+             [seon.cluster.wake :as wake]
++            [seon.cluster.message :as message]
+             [seon.sci.eval :as sci.eval]
+             [seon.sci.reader :as reader]
+             [seon.schema.edn :as schema.edn])
+@@ -474,6 +475,20 @@
+ ;;; The agent proc steps
+ ;;; ---------------------------------------------------------------------------
+ 
++(defn- receive-message!
++  "Write a received message once on this mailbox's connection; return whether it was new."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.message/message] :boolean]}
++  [connection value]
++  (if (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]]
++            (db/db connection) (:seon.message/id value))
++    false
++    (let [result (db/call-with-custody
++                  {:seon.db/connection connection}
++                  #(db/transact! connection [[:db.fn/call #'message/send-call value]]))]
++      (if (:db-after result)
++        true
++        (throw (ex-info "The recipient could not write its received message." result))))))
++
+ (defn mailbox-step
+   "The mailbox transform, in Flow's four arities.
+   Total and instant: one payload-free `:seon.agent/episode` signal downstream per
+@@ -489,13 +504,18 @@
+     :ping-map-fn (fn [state] (select-keys state [:seon.agent/deliveries]))})
+   ([args]
+    (assoc args
+-          ::flow/in-ports {:seon.agent/wake (:seon.cluster.wake/channel args)}
++          ::flow/in-ports {:seon.agent/wake (:seon.cluster.wake/channel args)
++                           :seon.agent/inbox (:seon.agent/inbox args)}
+           :seon.agent/deliveries 0))
+-  ([state _transition]
++  ([state transition]
++   (when (= ::flow/stop transition) (async/close! (:seon.agent/inbox state)))
+    state)
+-  ([state _input _message]
+-   [(update state :seon.agent/deliveries inc)
+-    {:seon.agent/episode [:seon.agent/wake]}]))
++  ([state input value]
++   (if (or (= input :seon.agent/wake)
++           (receive-message! (:seon.db/connection state) value))
++     [(update state :seon.agent/deliveries inc)
++      {:seon.agent/episode [:seon.agent/wake]}]
++     [state nil])))
+ 
+ (defn- interrupted?
+   "True when `failure`'s cause chain holds an `InterruptedException`. The walk
+@@ -587,7 +607,9 @@
+        {:proc (seon.flow/var-process
+                #'mailbox-step :io
+                (env/carry {:seon.cluster.wake/channel
+-                           (:seon.cluster.wake/channel handle)}
++                           (:seon.cluster.wake/channel handle)
++                           :seon.agent/inbox (:seon.agent/inbox handle)
++                           :seon.db/connection (:seon.db/connection handle)}
+                           environment))}
+        :seon.agent/turn
+        {:proc (seon.flow/var-process
+@@ -1340,6 +1362,7 @@
+           turn-backstop-state (atom nil)
+           settings (merge (config/effective @connection (:seon.cluster/name handle))
+                           (ai/agent-overlay @connection agent-id))
++          inbox (async/chan (:seon.config.agent/inbox-size settings))
+           turn-completion-backstop-ms
+           (:seon.config.agent/turn-completion-backstop-ms settings)
+           _ (async/>!! completion :seon.agent/ready)
+@@ -1351,6 +1374,7 @@
+                               :seon.flow/plan-channel
+                               (:seon.cluster.wake/channel handle)
+                               :seon.cluster.wake/channel wake-ch
++                              :seon.agent/inbox inbox
+                               :seon.agent/requests requests
+                               :seon.schedule/channel schedule-channel
+                               :seon.turn.loop/completion completion
+@@ -1393,6 +1417,7 @@
+                  :seon.flow/started started
+                  :seon.flow/executor executor
+                  :seon.cluster.wake/channel wake-ch
++                              :seon.agent/inbox inbox
+                  :seon.agent/requests requests
+                  :seon.schedule/channel schedule-channel
+                  :seon.turn.loop/completion completion
+@@ -1587,6 +1612,7 @@
+                    (update :seon.agent/channels dissoc
+                            (:seon.agent/eid entry)))))
+       (async/close! (:seon.cluster.wake/channel entry))
++      (async/close! (:seon.agent/inbox entry))
+       ;; A submission the stopped graph never took is answered closed now:
+       ;; its caller's await ends instead of spending its bound.
+       (when-let [requests (:seon.agent/requests entry)]

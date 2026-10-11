@@ -1,4 +1,8 @@
-#:seon.config.agent{:show-all-settings
+#:seon.config.agent{:inbox-size
+                    [:int {:min 1 :seon.config/dial true
+                           :seon.config/display-label "Inbox size"
+                           :description "Message values an agent's Flow inbox accepts before a send answers full. Acquired when the graph starts."}],
+:show-all-settings
                     [:=
                      {:seon.config/display-label "Show all settings" :seon.config/per-agent true,
                       :seon.config/optional true,
