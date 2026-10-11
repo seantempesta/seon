@@ -1595,6 +1595,66 @@
 ;;; db<->flow — hosted in the cluster's own graph (R7)
 ;;; ---------------------------------------------------------------------------
 
+;;; ---------------------------------------------------------------------------
+;;; plan: facts and roster in, actions out (R1)
+;;; ---------------------------------------------------------------------------
+
+(defn- follow
+  "The actions that make `open`'s graph follow its intent `intent` (the
+  cluster's :paused wins), given whether the roster holds it and has paused it."
+  {:malli/schema [:=> [:cat :seon.flow.plan/open-attempt :seon.task/execution :boolean :boolean]
+                  :seon.flow.plan/actions]}
+  [open intent started? paused?]
+  (let [action (fn [op] [(assoc (select-keys open [:seon.task/assigned :seon.task/assignment :seon.agent/id
+                                                   :seon.task/branch])
+                                :seon.flow.plan/op op)])]
+    (case intent
+      (:running :paused) (cond (not started?) (mapv #(assoc % :seon.task/execution intent) (action :start-flow))
+                               (and (= :paused intent) (not paused?)) (action :pause)
+                               (and (= :running intent) paused?) (action :resume)
+                               :else [])
+      :stopped (if started? (action :stop) [])
+      :cancelled (action :cancel))))
+
+(defn plan
+  "The actions db<->flow takes next, as a vector.
+  From `facts` read on main and the `roster`'s live
+  graphs: each open attempt's graph follows its task's intent (`:held` and a
+  paused cluster read as `:paused`); each startable leaf with no open attempt,
+  oldest first, gets its next attempt and its flow while the open attempts that
+  count (running, paused or held) are fewer than `max-running`; an invalid
+  leaf gets a problem. Pure; a second pass over the same facts plans the same
+  attempts, so their writes are no-ops by identity."
+  {:malli/schema [:=> [:cat :seon.flow.plan/facts :seon.flow.plan/roster :seon.config.agent/max-running]
+                  :seon.flow.plan/actions]}
+  [{:seon.flow.plan/keys [startable invalid open ended created basis cluster]}
+   {:seon.flow.plan/keys [started paused]} max-running]
+  (let [running? (= :running cluster)
+        intent (fn [{intent :seon.task/execution}]
+                 (if (or (not running?) (#{:held :paused} intent)) :paused intent))
+        followed (into [] (mapcat #(follow % (intent %) (contains? started (:seon.agent/id %))
+                                           (contains? paused (:seon.agent/id %))))
+                       (sort-by :seon.task/assignment open))
+        attempted (into #{} (map :seon.task/assigned) open)
+        counted (count (filter (comp #{:running :paused :held} :seon.task/execution) open))
+        fresh (when running?
+                (->> startable (remove attempted) (sort-by (juxt #(get created % 0) identity))
+                     (take (max 0 (- max-running counted)))))
+        launches (into [] (mapcat (fn [handle]
+                                    (let [number (inc (get ended handle 0))
+                                          key (id/id [handle number])
+                                          row {:seon.task/assigned handle :seon.task/assignment key
+                                               :seon.agent/id (str "attempt/" key)
+                                               :seon.task/branch (keyword (str "attempt-" key))}]
+                                      [(assoc row :seon.flow.plan/op :attempt :seon.task.attempt/number number
+                                              :seon.flow.plan/fork-point (or (not-empty (get basis handle)) :main))
+                                       (assoc row :seon.flow.plan/op :start-flow :seon.task/execution :running)])))
+                       fresh)
+        problems (mapv (fn [handle] {:seon.flow.plan/op :problem :seon.flow.plan/class :invalid-task
+                                     :seon.task/assigned handle})
+                       (sort (remove attempted invalid)))]
+    (into problems (concat followed launches))))
+
 (defn- agents-to-start
   "Unstarted agents with work, or schedules whose timers need a running proc."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.agent/id]]

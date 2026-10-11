@@ -195,8 +195,15 @@
  ; above the shipped maximum primary-provider retry budget (3 × 180 s plus
  ; 3 s total retry delay) and leaves 57 s for prompt/eval/settlement after the
  ; last remote attempt, while making a missing internal event finite.
- ; Unit: milliseconds without turn completion after disarm requests stop.
+ ; Unit: milliseconds without turn completion after a stop request.
  :seon.config.agent/turn-completion-backstop-ms 600000
+
+ ; HOW MANY ATTEMPTS RUN AT ONCE. db<->flow starts a ready leaf only while the
+ ; open attempts on main (running or paused) are fewer than this; four agents
+ ; beside the user's work fit a 16 GB machine (each graph is three procs, a
+ ; SCI fork and its turns' provider calls).
+ ; Unit: open attempts on this cluster.
+ :seon.config.agent/max-running 4
 
  ; A REFUSED TURN WRITE IS NEVER RETRIED WITHOUT BOUND. On 2026-09-17 every
  ; turn write on `default` was refused by one projection failure and the turn

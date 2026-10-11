@@ -5,6 +5,12 @@
                       :description
                       "Show every effective agent setting in the settings read. Presence asserts true; absence shows model, no-provider, evaluation deadline, and turn budget. Clear this setting by retracting it.",
                       :seon.config/dial true} true],
+                    :max-running
+                    [:int
+                     {:seon.config/display-label "Running attempts" :min 1,
+                      :description
+                      "Open attempts db<->flow keeps running or paused at once on this cluster; a ready leaf beyond it waits for an end. Counted on facts (attempts with no end), so it holds across a restart.",
+                      :seon.config/dial true}],
                     :write-refusal-bound
                     [:int
                      {:seon.config/display-label "Write refusal bound" :min 1,

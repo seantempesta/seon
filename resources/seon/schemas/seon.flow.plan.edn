@@ -1,0 +1,43 @@
+#:seon.flow.plan
+{:startable [:set {:description "The frontier's leaves that validate (seon.task/frontier ∩ valid): what db<->flow may start."} :seon.task/handle]
+ :invalid [:set {:description "The :running leaves that do not validate: each becomes a problem task, never an attempt."} :seon.task/handle]
+ :open-attempt [:map {:description "One attempt with no end, as db<->flow plans over it: its task, key, agent, branch and the task's intent now."}
+                [:seon.task/assigned :seon.task/assigned]
+                [:seon.task/assignment :seon.task/assignment]
+                [:seon.agent/id :seon.agent/id]
+                [:seon.task/branch :seon.task/branch]
+                [:seon.task/execution :seon.task/execution]]
+ :open [:vector {:description "Every attempt on main with no end."} :seon.flow.plan/open-attempt]
+ :ended [:map-of {:description "Per task, its ended attempts: its next attempt is one more."} :seon.task/handle [:int {:min 0}]]
+ :created [:map-of {:description "Per task, the transaction of its identity datom: the oldest starts first."} :seon.task/handle [:int {:min 0}]]
+ :basis [:map-of {:description "Per task, the end commits of its done needs: the fork point of its next attempt."} :seon.task/handle [:set :uuid]]
+ :cluster [:enum {:description "The cluster's intent: :paused starts nothing new and pauses every graph."} :running :paused]
+ :facts [:map {:description "What db<->flow reads on main before it plans (seon.cluster.agent/plan-facts)."}
+         [:seon.flow.plan/startable :seon.flow.plan/startable]
+         [:seon.flow.plan/invalid :seon.flow.plan/invalid]
+         [:seon.flow.plan/open :seon.flow.plan/open]
+         [:seon.flow.plan/ended :seon.flow.plan/ended]
+         [:seon.flow.plan/created :seon.flow.plan/created]
+         [:seon.flow.plan/basis :seon.flow.plan/basis]
+         [:seon.flow.plan/cluster :seon.flow.plan/cluster]]
+ :started [:set {:description "The agents whose graph the roster holds."} :seon.agent/id]
+ :paused [:set {:description "The started agents whose graph db<->flow paused."} :seon.agent/id]
+ :roster [:map {:description "What db<->flow reads of the roster before it plans: the live graphs by agent."}
+          [:seon.flow.plan/started :seon.flow.plan/started]
+          [:seon.flow.plan/paused :seon.flow.plan/paused]]
+ :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, or make a graph follow its intent."}
+      :attempt :start-flow :problem :pause :resume :stop :cancel]
+ :fork-point [:or {:description "Where an attempt's branch forks: main's head, or the end commits of the task's done needs."}
+              [:= :main] [:set {:min 1} :uuid]]
+ :class [:enum {:description "Which problem a :problem action records."} :invalid-task]
+ :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under."}
+          [:seon.flow.plan/op :seon.flow.plan/op]
+          [:seon.task/assigned :seon.task/assigned]
+          [:seon.task/assignment {:optional true} :seon.task/assignment]
+          [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
+          [:seon.agent/id {:optional true} :seon.agent/id]
+          [:seon.task/branch {:optional true} :seon.task/branch]
+          [:seon.task/execution {:optional true} :seon.task/execution]
+          [:seon.flow.plan/fork-point {:optional true} :seon.flow.plan/fork-point]
+          [:seon.flow.plan/class {:optional true} :seon.flow.plan/class]]
+ :actions [:vector :seon.flow.plan/action]}
