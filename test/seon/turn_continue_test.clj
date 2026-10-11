@@ -361,7 +361,8 @@
                                       (str "(ns tq.endr (:require [clojure.test :refer [deftest is]]))\n"
                                            "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                            "(deftest ^{:seon/tasks #{'tq.endr/area}} area-test (is (= 25 (area 5))))\n"
-                                           "(deftest identity-test (is (= 3 (area 3))))\n"))
+                                           "(deftest identity-test (is (= 3 (area 3))))\n")
+                                      "test")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
                                             :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/kind :function

@@ -2335,9 +2335,11 @@
                                     (env/scope (env/of ctx) {:seon.agent/id agent-id}))))
       (let [ctx (:seon.sci.eval/ctx child)
             resolved (volatile! 0.0)
+            ;; What ran the body: the host JVM's compiled Var or SCI's, as resolved.
+            evaluator (volatile! nil)
             ;; Resolved on the body thread, inside its program-change detection.
             resolve! #(let [started (System/nanoTime)]
-                        (try (resolve-test
+                        (try (doto (resolve-test
                               {:seon.db/db (:seon.db/db child)
                                :seon.db/connection (:seon.db/connection child)
                                :seon.test/identity test-symbol
@@ -2347,6 +2349,8 @@
                                :seon.schema/projection (:seon.schema/projection child)
                                :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
                                                            (clojure.lang.RT/baseLoader))})
+                               (as-> v (when (runner/var-reference? v)
+                                         (vreset! evaluator (if (var? v) :compiled :interpreted)))))
                              (finally (vreset! resolved (elapsed started)))))
             started (System/nanoTime)
             registry-before (runner/live-cluster-schema-states)
@@ -2383,7 +2387,8 @@
         (when-not @handed? (vreset! handed? true) (release! false))
         {:seon.test/result (cond-> (with-cleanup-failure result)
                              (not (:seon.test.run/terminated? result))
-                             (assoc :seon.agent/branch (:seon.agent/branch child)))
+                             (assoc :seon.agent/branch (:seon.agent/branch child))
+                             @evaluator (assoc :seon.test.member/evaluator @evaluator))
          :seon.test/timings (timing @resolved executed)})
       (catch Throwable failure
         (when-not @handed? (release! false))
@@ -2618,8 +2623,10 @@
                                     (map (comp symbol namespace)))
                           runnable))
             loaded (when (seq fresh) (loaded-program (:seon.sci.eval/ctx execution)))
-            interpreted (when (and (seq fresh) (not (:seon.error/at loaded)))
-                          (interpreted-namespaces database loaded fresh))
+            ;; A request may name namespaces to interpret whoever asks (`change-reds`).
+            interpreted (into (set (:seon.test/interpreted-namespaces request))
+                              (when (and (seq fresh) (not (:seon.error/at loaded)))
+                                (interpreted-namespaces database loaded fresh)))
             armed (cond
                     (:seon.error/at loaded) loaded
                     (seq fresh) (arm-first-loads! database effective (:seon.sci.eval/ctx execution) loaded
@@ -3018,3 +3025,54 @@
                              (:seon.test/sym entry) ": " (:seon.test/long entry))))
            (when-let [refusal (:seon.test/recording-refusal result)]
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
+
+(defn change-reds
+  "Of `tests`, those red on `branch` (a branch's database) whose same test, under
+  the same evaluator, is not red on main at main's current reach: the reds the
+  branch's change made, sorted. A test not red on the branch (green, unrun or
+  unknown) is not the change's. Main's side is its recorded result of the branch
+  member's evaluator at main's current reach; where main holds none, those tests
+  are evaluated once on `main` (root's world on the merge target, recording
+  there), an interpreted member's namespace interpreted there too."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source [:sequential :seon.test/sym]]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [branch main tests]
+  (let [latest (fn [database names]
+                 (let [results (if (seq names) (runner/latest-results database (vec names)) [])]
+                   (if (:seon.error/at results)
+                     results
+                     (into {} (map (juxt (some-fn :seon.test/sym :seon.test/error-test-symbol) identity)) results))))
+        on-branch (latest branch (sort (distinct tests)))
+        red (when (map? on-branch)
+              (into [] (comp (filter #(runner/red-result? (val %))) (map key)) (sort-by key on-branch)))
+        evaluator #(:seon.test.member/evaluator (get on-branch %))
+        ;; main's result of the same test under the same evaluator at its current reach: red or not
+        judged (fn [database]
+                 (let [on-main (latest database red)
+                       reach (if (seq red) (runner/reach-digests database red) {})]
+                   (or (some #(when (:seon.error/at %) %) [on-main reach])
+                       (into {} (for [test-symbol red
+                                      :let [result (get on-main test-symbol)]]
+                                  [test-symbol
+                                   (when (and (:seon.test/pass-count result) (evaluator test-symbol)
+                                              (= (evaluator test-symbol) (:seon.test.member/evaluator result))
+                                              (= (get reach test-symbol) (:seon.test.member/reach-digest result)))
+                                     (runner/red-result? result))])))))
+        main-db #(db/db (:seon.db/connection main))
+        before (when (seq red) (judged (main-db)))
+        due (when (map? before) (vec (keep (fn [[test-symbol red?]] (when (nil? red?) test-symbol)) before)))
+        interpreted (into #{} (comp (filter #(= :interpreted (evaluator %))) (map (comp symbol namespace))) due)
+        request (cond-> {:seon.test/policy :named :seon.test/execution main
+                         :seon.test/recording-connection (:seon.db/connection main)
+                         :seon.test/identities (set due) :seon.test/rerun? true :seon.test/include-long? true}
+                  (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted))
+        ;; main's own evidence, recorded in main's custody
+        ran (when (seq due)
+              (db/call-with-custody {:seon.db/connection (:seon.db/connection main)} (fn [] (run request))))
+        after (cond (seq due) (if (:seon.error/at ran) ran (judged (main-db)))
+                    :else before)]
+    (cond
+      (:seon.error/at on-branch) on-branch
+      (empty? red) []
+      (:seon.error/at after) after
+      :else (into [] (comp (remove #(true? (get after %)))) red))))

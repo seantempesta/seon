@@ -61,10 +61,11 @@
         (let [_ (write! h-conn [(fn-entity h-conn "merge-extra" "(defn merge-extra {:malli/schema [:=> [:cat] :int]} [] 0)")])
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
               red (prepare)
-              before (db/commit-id (db/db h-conn))]
+              before (digest h-conn "merge-callee")]
           (is (false? (:seon.test/passed? red)))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
-          (is (= before (db/commit-id (db/db h-conn))))))
+          ;; main may record its own side of the red (seon.test/change-reds); its program is unchanged
+          (is (= before (digest h-conn "merge-callee")))))
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
         (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
               green (prepare)
@@ -200,31 +201,34 @@
         made (volatile! [])
         prepare #(let [p (source/prepare-merge! target store c #{(sym "gate-proof")})]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
-        refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))]
+        refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
+        ;; main may record its own side of a red (seon.test/change-reds); its program stays as it was
+        callee-digest #(:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest]
+                                                                 [:seon.fn/sym (sym "gate-callee")]))]
     (try
       (testing "a green proof with another reaching test red on the merge refuses, naming that test"
         (write! c-conn [(fn-entity c-conn "gate-callee" (callee 2))])
         (let [proposal (prepare)
-              before (db/commit-id (db/db h-conn))
+              before (callee-digest)
               refusal (source/accept-merge! target store proposal)]
           (is (= [(sym "gate-exact")] (:seon.source/red proposal)) "the gate ran it red")
           (is (= :seon.source/red-test-error (:seon.error/type refusal)))
           (is (= #{[(sym "gate-exact") :red]} (refused-tests refusal)))
           (is (= #{(:seon.test.run/id proposal)} (set (map :seon.test.run/id (:seon.source/red-tests refusal))))
               "each red test names the run that recorded it")
-          (is (= before (db/commit-id (db/db h-conn))) "main's head is unchanged")))
+          (is (= before (callee-digest)) "main's program is unchanged")))
       (testing "a test already red on the target refuses separately, named for root"
         (write! h-conn [(test-entity h-conn "gate-broken" "(clojure.test/deftest gate-broken (clojure.test/is (= 0 (seon.cluster.merge-test/gate-callee))))")])
         (seon.test/run {:seon.test/policy :named :seon.test/execution target :seon.test/recording-connection h-conn
                         :seon.test/changed [(sym "gate-broken")]})
         (write! c-conn [(fn-entity c-conn "gate-callee" (callee "(* 1 1)"))])
         (let [proposal (prepare)
-              before (db/commit-id (db/db h-conn))
+              before (callee-digest)
               refusal (source/accept-merge! target store proposal)]
           (is (= [(sym "gate-broken")] (:seon.source/red proposal)))
           (is (= :seon.source/red-on-target-error (:seon.error/type refusal)))
           (is (= #{[(sym "gate-broken") :red-on-target]} (refused-tests refusal)))
-          (is (= before (db/commit-id (db/db h-conn))) "main's head is unchanged")))
+          (is (= before (callee-digest)) "main's program is unchanged")))
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

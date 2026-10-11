@@ -78,6 +78,8 @@
   (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-reaching
   (delay (requiring-resolve 'seon.test/reaching)))
+(defonce ^:private test-change-reds
+  (delay (requiring-resolve 'seon.test/change-reds)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -5369,33 +5371,31 @@
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
 (defn- reached-red
-  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, whose
-  latest result there is not green (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, that
+  the change made red: red there and not red on main, root's world `main`, under the same evaluator
+  (`seon.test/change-reds`), sorted; [] when the branch changed nothing a test sees."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source :seon.agent/id
+                       [:or :seon.test/changed :seon.error/value]]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [database agent-id changed]
+  [database main agent-id changed]
   (if (:seon.error/at changed)
     (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) [] changed)
     (let [proofs (task-proofs database agent-id)
           reached (when-not (:seon.error/at proofs)
                     (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
-          tests (when (sequential? reached) (vec (remove (set proofs) reached)))
-          results (when (seq tests) (@test-latest-results database tests))]
-      (or (some #(when (:seon.error/at %) %) [proofs reached results])
-          (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0))
-                                                  (zero? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
-                                         (:seon.test/sym %)))
-                            results)]
-            (vec (sort (remove green tests))))))))
+          tests (when (sequential? reached) (vec (remove (set proofs) reached)))]
+      (or (some #(when (:seon.error/at %) %) [proofs reached])
+          (if (seq tests) (@test-change-reds database main tests) [])))))
 
 (defn- record-reached-red!
-  "Record on the agent's row on its branch `connection` the tests its whole change `changed` reaches that are not
-  green there (`reached-red`), replacing the previous step's: what `seon.context/task-done?` reads. Answers them."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+  "Record on the agent's row on its branch `connection` the tests its whole change `changed` made red
+  (`reached-red`, judged against main, root's world in `cluster`), replacing the previous step's: what
+  `seon.context/task-done?` reads. Answers them."
+  {:malli/schema [:=> [:cat :map :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [connection agent-id changed]
+  [cluster connection agent-id changed]
   (let [database (db/db connection)
-        red (reached-red database agent-id changed)
+        red (reached-red database (root-execution cluster) agent-id changed)
         held (set (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))
         tx (when (vector? red)
              (into (mapv #(vector :db/retract [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove (set red) held))
@@ -5424,7 +5424,7 @@
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
       (let [reaching (run-reaching execution (max 1 left) changed platform)
             ;; a derivation that fails is shown beside the step's values, never in place of them
-            red (try (record-reached-red! connection agent-id changed)
+            red (try (record-reached-red! cluster connection agent-id changed)
                      (catch Throwable failure
                        (or (error/refusal failure)
                            (seon.error.refusal/diagnostic

@@ -963,21 +963,21 @@
 (defn- red-test-verdicts
   "Each of `not-green` (test symbols of run `run-id` with no green member) with
   the run that recorded its result and its verdict: `:unknown` with no
-  executed failure, `:red-on-target` when it is red on `head` for its current
-  reach there, else `:red`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :seon.test/results [:sequential :seon.test/sym]]
+  executed failure, `:red` when it is of `changed` (red on the tested branch
+  and not red on the target under the same evaluator, `seon.test/change-reds`),
+  else `:red-on-target`."
+  {:malli/schema [:=> [:cat :seon.test.run/id :seon.test/results [:sequential :seon.test/sym] [:set :seon.test/sym]]
                   [:vector :seon.source/red-test]]}
-  [head run-id results not-green]
+  [run-id results not-green changed]
   (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
-        red? (requiring-resolve 'seon.test.runner/red-result?)
-        red-on-target? (requiring-resolve 'seon.test.runner/red-at-current-reach?)]
+        red? (requiring-resolve 'seon.test.runner/red-result?)]
     (into [] (map (fn [test-symbol]
                     (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
                       {:seon.test/sym test-symbol
                        :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
                        :seon.source/verdict (cond (not (and result (red? result))) :unknown
-                                                  (red-on-target? head test-symbol) :red-on-target
-                                                  :else :red)})))
+                                                  (changed test-symbol) :red
+                                                  :else :red-on-target)})))
           (sort (distinct not-green)))))
 
 (defn- red-test-refusal
@@ -1041,7 +1041,12 @@
                 green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
                 green (set (vals (select-keys members green-ids)))
                 unproven (vec (sort (remove (set (vals members)) proofs)))
-                red-tests (when (vector? results) (red-test-verdicts head run-id results (remove green (vals members))))
+                not-green (vec (remove green (vals members)))
+                ;; one predicate: a red is the change's unless main is red under the same evaluator
+                changed (when (and (vector? results) (seq not-green))
+                          ((requiring-resolve 'seon.test/change-reds) tested source not-green))
+                red-tests (when (and (vector? results) (not (:seon.error/at changed)))
+                            (red-test-verdicts run-id results not-green (set changed)))
                 ;; A retracted function has nothing to cover: its surviving
                 ;; callers are the writer's refs and the run's reaching tests.
                 ;; What an agent merges back is specified (owner 2026-09-27): the
@@ -1067,6 +1072,7 @@
               (refuse "Every proof must be a member of the named run." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
+              (:seon.error/at changed) changed
               (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "

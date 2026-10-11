@@ -163,8 +163,9 @@
 
 (defn task-done?
   "True when the task `agent-id` holds has proofs, all green on `database`, the agent's branch, and its turn's
-  test step found no test its change reaches red there (`:seon.agent/reached-red` absent): the task is done for
-  the agent, pending root's merge, and the turn loop opens no continuation for it."
+  test step found no reached test its change made red (`:seon.agent/reached-red` absent: red on the branch and not
+  red on main under the same evaluator, `seon.test/change-reds`): the task is done for the agent, pending root's
+  merge, and the turn loop opens no continuation for it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [held (held-task database agent-id)]

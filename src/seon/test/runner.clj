@@ -1420,7 +1420,8 @@
                                :seon.test.member/error-count :seon.test.member/began?
                                :seon.test.member/ended? :seon.test.member/error
                                :seon.test.member/reach-digest :seon.test.member/calls
-                               :seon.test.member/alloc-bytes :seon.test.member/run-ms]
+                               :seon.test.member/alloc-bytes :seon.test.member/run-ms
+                               :seon.test.member/evaluator]
                               (mapv second current)))]
     (mapv
      (fn [[run] member]
@@ -1686,7 +1687,8 @@
              {:seon.test.member/value member :seon.test.member/outcome outcome
               ;; What the body cost, measured on its own thread and sink.
               ::cost (select-keys result [:seon.test.member/calls :seon.test.member/alloc-bytes
-                                          :seon.test.member/run-ms :seon.test.member/top])
+                                          :seon.test.member/run-ms :seon.test.member/top
+                                          :seon.test.member/evaluator])
               :seon.test.run/terminated? (true? (get result :seon.test.run/terminated? terminated?))
               :seon.test.report/values reports})) results)
         _ (when (not= (count results) (count (set (map :seon.test/sym results))))
@@ -1872,7 +1874,8 @@
               ;; A member's cost is its own evidence (`complete-members`), never copied here.
               (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?
                                      :seon.test.member/calls :seon.test.member/alloc-bytes
-                                     :seon.test.member/run-ms :seon.test.member/top)
+                                     :seon.test.member/run-ms :seon.test.member/top
+                                     :seon.test.member/evaluator)
                              :db/id test-entity-id
                              :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t
@@ -2022,7 +2025,8 @@
                                     :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
                                     :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
                                    (select-keys member [:seon.test.member/reach-digest :seon.test.member/calls
-                                                 :seon.test.member/alloc-bytes :seon.test.member/run-ms]))
+                                                 :seon.test.member/alloc-bytes :seon.test.member/run-ms
+                                                 :seon.test.member/evaluator]))
                       ;; Reports only: text is built where it is shown
                       ;; (`seon.test/failure-message`), never per read.
                       (seq member-reports)
