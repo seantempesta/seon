@@ -21,6 +21,7 @@
          [:seon.flow.plan/basis :seon.flow.plan/basis]
          [:seon.flow.plan/cluster :seon.flow.plan/cluster]]
  :started [:set {:description "The agents whose graph the roster holds."} :seon.agent/id]
+ :paused? [:boolean {:description "Whether db<->flow left or put this started graph paused (its intent, or the cluster's, is not :running)."}]
  :paused [:set {:description "The started agents whose graph db<->flow paused."} :seon.agent/id]
  :roster [:map {:description "What db<->flow reads of the roster before it plans: the live graphs by agent."}
           [:seon.flow.plan/started :seon.flow.plan/started]

@@ -4,19 +4,15 @@
   `host!` composes existing owners: `acquire-context!` acquires the named
   branch into the child roster the cluster's roster records, `creation-tx`
   creates the agent on the cluster (naming its home branch) and on that
-  branch, and the ordinary `db<->flow` runs in a
-  graph of its own on the execution's roster, owning the branch's
-  `wake/route!` listener. The roster holds the live objects under `::host`;
-  admission is the agent row's `:seon.agent/admission-closed-tx`, which the
-  run writer checks. `retire!` closes admission on both rows and stops
-  through `seon.cluster/stop-flows!`, unchanged."
-  (:require [clojure.core.async :as async]
-            [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
+  branch, and `seon.cluster.agent/start-branch-flow!` registers the branch's
+  `wake/route!` listener and starts the agent's graph on the execution's
+  roster. The roster holds the live objects under `::host`; admission is the
+  agent row's `:seon.agent/admission-closed-tx`, which the run writer checks.
+  `retire!` closes admission on both rows and stops through `stop!`."
+  (:require [seon.cluster.agent :as agent]
+            [seon.cluster.wake :as wake]
             [seon.db :as db]
-            [seon.env :as env]
             [seon.error.refusal]
-            [seon.flow :as flow]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
@@ -72,8 +68,9 @@
 
 (defn- start!
   "Admit the agent as homed on the execution's branch, on the cluster and on
-  that branch (each writer decides, `home-call`), then start the branch's
-  db<->flow graph; db<->flow's init registers the route listener."
+  that branch (each writer decides, `home-call`), then start its graph there
+  through `seon.cluster.agent/start-branch-flow!`, which registers the branch's
+  route listener; db<->flow is the only other starter, and no graph runs per branch."
   {:malli/schema [:=> [:cat ::request :seon.agent/execution-handle]
                   [:or ::host :seon.db/transaction-refused-error]]}
   [{cluster-handle :seon.turn.loop/cluster agent-id :seon.agent/id namespace-name :seon.ns/name}
@@ -92,36 +89,9 @@
                       [(:seon.db/connection cluster-handle) connection])]
    (if refused
     refused
-    (let [plan-channel (async/chan (async/sliding-buffer 1))
-          handle (merge cluster-handle
-                        (select-keys execution [:seon.db/connection :seon.sci.eval/ctx :seon.sci.eval/base-ctx
-                                                :seon.env/environment :seon.agent/routing :seon.agent/branch])
-                        {;; the cluster's own handle, which the agents this db<->flow starts carry
-                         :seon.agent/context-source (or (:seon.agent/context-source cluster-handle) cluster-handle)
-                         :seon.sci.eval/projection-state
-                         (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
-                         :seon.cluster.wake/channel plan-channel
-                         :seon.turn.loop/stream-channel (async/chan (async/sliding-buffer 1))
-                         :seon.turn.loop/completion (async/promise-chan)})
-          route {:seon.cluster.wake/connection connection
-                 :seon.cluster.wake/channels (fn [] (agent/channels roster))
-                 :seon.cluster.wake/fenced? (fn [eid channel] (agent/fenced-route? roster eid channel))
-                 :seon.flow/plan-channel plan-channel
-                 :seon.cluster.wake/key :seon.agent/route}
-          {graph :seon.flow/graph executor :seon.flow/executor}
-          (flow/start-graph!
-           {:seon.flow/projection-state (:seon.sci.eval/projection-state handle)
-            :seon.flow/graph-definition
-            {:procs {:seon.flow/db<->flow
-                     {:proc (flow/var-process
-                             #'agent/db<->flow :io
-                             (env/carry {:seon.turn.loop/cluster handle :seon.agent/routing roster
-                                         :seon.cluster.wake/route route}
-                                        (env/of handle)))}}
-             :conns []}})]
-      {:seon.turn.loop/cluster handle :seon.agent/routing roster :seon.agent/id agent-id
-       ::execution execution ::parent (:seon.db/connection cluster-handle)
-       :seon.flow/graph graph :seon.flow/executor executor}))))
+    (do (agent/start-branch-flow! cluster-handle execution agent-id :running)
+        {:seon.turn.loop/cluster (agent/branch-handle cluster-handle execution) :seon.agent/routing roster
+         :seon.agent/id agent-id ::execution execution ::parent (:seon.db/connection cluster-handle)}))))
 
 (defn hosted
   "The host running on `branch` under `cluster-handle`, or nil when none is."
@@ -169,14 +139,17 @@
                      :seon.agent/id (:seon.agent/id host) agent-id))))
 
 (defn stop!
-  "Stop a host without closing its admission: nil once its graphs have exited and
-  its execution is released, else the missed join's timeout with the host held."
+  "Stop a host without closing its admission: nil once its agent's graph has exited,
+  its branch route is removed and its execution is released."
   {:malli/schema [:=> [:cat ::host] [:or :nil :seon.await/timeout-error]]}
-  [{roster :seon.agent/routing execution ::execution :as host}]
-  (or (cluster/stop-flows! host)
-      (do (swap! roster dissoc ::host)
-          (agent/release-context! execution)
-          nil)))
+  [{roster :seon.agent/routing execution ::execution}]
+  (wake/unlisten! {:seon.cluster.wake/connection (:seon.db/connection execution)
+                   :seon.cluster.wake/key (agent/branch-route-key (:seon.agent/branch execution))})
+  (doseq [agent-id (sort (keys (:seon.agent/started @roster)))]
+    (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster}))
+  (swap! roster dissoc ::host)
+  (agent/release-context! execution)
+  nil)
 
 (defn release-children!
   "Stop every host recorded in `routing`'s children, then release every
@@ -217,12 +190,10 @@
   cluster row (one transaction each), then `stop!`.
 
   After the admission commit the run writer refuses every later run for the
-  agent by name; runs that committed first are joined by
-  `seon.cluster/stop-flows!` (db<->flow quiescence removes the route listener,
-  agent graphs join, db<->flow graph joins, all under one deadline). A missed
-  join is answered (the await owner's timeout naming the missing exit) with
-  admission closed and the execution held, so a retry after exit completes.
-  Then the execution is released. A refused read or a refused admission close
+  agent by name; runs that committed first are joined by `stop!` (the route
+  listener is removed, then the agent's graph joins under its stop bound; a
+  missed join throws with admission closed and the execution held, so a retry
+  after exit completes). Then the execution is released. A refused read or a refused admission close
   is answered and nothing further happens."
   {:malli/schema [:=> [:cat ::host] [:or :nil :seon.db/invalid-read-error :seon.db/transaction-refused-error
                                      :seon.await/timeout-error]]}

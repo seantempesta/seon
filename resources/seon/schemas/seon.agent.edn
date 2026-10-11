@@ -82,7 +82,9 @@
                        :seon.turn.loop/cluster]
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/routing
-                       :seon.agent/routing]],
+                       :seon.agent/routing]
+                      [:seon.task/execution {:optional true :description "The intent the graph starts under: only :running resumes it."}
+                       :seon.task/execution]],
                      :started
                      [:map
                       [:seon.agent/id :seon.agent/id]
@@ -93,7 +95,8 @@
                       [:seon.turn.loop/completion
                        :seon.flow/channel]
                       [:seon.agent/requests {:optional true} :seon.agent/requests]
-                      [:seon.flow/executor {:optional true} :seon.flow/executor]],
+                      [:seon.flow/executor {:optional true} :seon.flow/executor]
+                      [:seon.flow.plan/paused? {:optional true} :seon.flow.plan/paused?]],
                      :blueprint-request
                      [:map
                       [:seon.turn.loop/cluster

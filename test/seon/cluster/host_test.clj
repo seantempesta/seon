@@ -231,8 +231,8 @@
                          branches)
             _ (.countDown start)
             outcomes (mapv #(support/await-event! % ::hosted) racing)
-            [winner] (filter :seon.flow/graph outcomes)
-            [loser] (remove :seon.flow/graph outcomes)
+            [winner] (filter :seon.cluster.host/execution outcomes)
+            [loser] (remove :seon.cluster.host/execution outcomes)
             home (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/twin"]))]
         (is (some? winner))
         (is (= :seon.agent/branch (:seon.error/member loser)))

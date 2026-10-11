@@ -117,12 +117,15 @@
               :else runnable)))))))
 
 (defn start-graph!
-  "Create one Flow graph on its own executor, join declared fan-outs, resume."
+  "Create one Flow graph on its own executor, join declared fan-outs, then resume
+  it unless `::resume?` is false: Flow starts a graph paused, so a graph started
+  under a paused intent stays pingable and runs nothing until `flow/resume`."
   {:malli/schema
    [:=>
     [:cat
      [:map
       [::graph-definition :map]
+      [::resume? {:optional true} :boolean]
       [::projection-state {:optional true} :seon.sci.eval/projection-state]
       [::projection {:optional true} :seon.schema/projection]
       [::joins {:optional true}
@@ -132,7 +135,7 @@
      [::started ::started]
      [::executor ::executor]
      [::joins :map]]]}
-  [{::keys [graph-definition joins] :as request}]
+  [{::keys [graph-definition joins resume?] :or {resume? true} :as request}]
   ;; Flow's mult and tap go-loops, and the joins', keep the frame they start in
   (db/call-with-root-bindings
    (fn []
@@ -153,7 +156,7 @@
                               (assoc results join-key (join! construction)))
                             {}
                             (or joins {}))]
-      (flow/resume graph)
+      (when resume? (flow/resume graph))
       (assoc construction ::joins joined)))))
 
 (defn join-graph!

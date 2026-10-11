@@ -91,6 +91,7 @@
             [seon.render.route :as route]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
+            [seon.task :as task]
             [seon.cluster.wake :as wake]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
@@ -1310,7 +1311,8 @@
   {:malli/schema [:=> [:cat :seon.agent/start-request] :seon.agent/started]}
   [{handle :seon.turn.loop/cluster
     agent-id :seon.agent/id
-    routing :seon.agent/routing}]
+    routing :seon.agent/routing
+    intent :seon.task/execution}]
   (try
     (let [connection (:seon.db/connection handle)
           eid (db/q '[:find ?agent .
@@ -1371,11 +1373,14 @@
                               :seon.config.agent/turn-completion-backstop-ms
                               turn-completion-backstop-ms
                               :seon.agent/turn-thread (AtomicReference.))
+          ;; Flow starts a graph paused: only a :running intent resumes it (H6)
+          paused? (not (contains? #{nil :running} intent))
           {graph :seon.flow/graph started :seon.flow/started
            executor :seon.flow/executor}
           (seon.flow/start-graph!
            {:seon.flow/projection-state
             (:seon.sci.eval/projection-state agent-handle)
+            :seon.flow/resume? (not paused?)
             :seon.flow/graph-definition
             (graph-definition
              {:seon.turn.loop/cluster agent-handle
@@ -1390,7 +1395,8 @@
                  :seon.agent/requests requests
                  :seon.schedule/channel schedule-channel
                  :seon.turn.loop/completion completion
-                 :seon.agent/turn-backstop-state turn-backstop-state}]
+                 :seon.agent/turn-backstop-state turn-backstop-state
+                 :seon.flow.plan/paused? paused?}]
       (swap! routing
              (fn [current]
                (-> current
@@ -1655,6 +1661,246 @@
                        (sort (remove attempted invalid)))]
     (into problems (concat followed launches))))
 
+(defn- read-failure
+  "The read refusal among `reads`, or nil."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]] [:maybe :seon.db/invalid-read-error]]}
+  [reads]
+  (some #(when (and (map? %) (:seon.error/at %)) %) reads))
+
+(defn plan-facts
+  "What db<->flow reads on main `database` before it plans.
+  The frontier's leaves split by validity (a leaf is valid with at least one
+  proof), the open attempts with their task's intent, ended counts, creation
+  order, and the end commits of each leaf's done needs."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.flow.plan/facts :seon.db/invalid-read-error]]}
+  [database]
+  (let [frontier (task/frontier database)
+        leaves (when (set? frontier) (vec frontier))
+        syms (when leaves (db/q '[:find ?h ?s :in $ [?h ...] :where [?t :seon.task/id ?h] [?t :seon.task/sym ?s]]
+                                database leaves))
+        open (db/q '[:find ?h ?k ?id ?b ?i
+                     :where [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
+                     [?a :seon.task/assigned ?h] [?a :seon.task/assignment ?k] [?a :seon.task/branch ?b]
+                     [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] [?t :seon.task/execution ?i]]
+                   database)
+        ended (db/q '[:find ?h (count ?a) :where [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _]
+                      [?t :seon.task/id ?h]]
+                    database)
+        created (when leaves (db/q '[:find ?h ?tx :in $ [?h ...] :where [_ :seon.task/id ?h ?tx]] database leaves))
+        basis (when leaves (db/q '[:find ?h ?c :in $ % [?h ...]
+                                   :where [?t :seon.task/id ?h] (needs* ?t ?n) (self-or-under ?n ?l)
+                                   [?a :seon.task/attempt-of ?l] [?a :seon.task.attempt/end :done]
+                                   [?a :seon.task.attempt/commit ?c]]
+                                 database task/frontier-rules leaves))
+        proved (when (and syms (not (map? syms)))
+                 (into #{} (keep (fn [[handle sym]]
+                                   (let [edges (task/task-edges database sym)]
+                                     (when (seq (:seon.task/proofs edges)) handle))))
+                       syms))]
+    (or (read-failure [frontier syms open ended created basis])
+        {:seon.flow.plan/startable (into #{} (filter proved) leaves)
+         :seon.flow.plan/invalid (into #{} (remove proved) leaves)
+         :seon.flow.plan/open (mapv (fn [[h k id b i]] {:seon.task/assigned h :seon.task/assignment k :seon.agent/id id
+                                                        :seon.task/branch b :seon.task/execution i})
+                                    open)
+         :seon.flow.plan/ended (into {} ended)
+         :seon.flow.plan/created (into {} created)
+         :seon.flow.plan/basis (reduce (fn [m [h c]] (update m h (fnil conj #{}) c)) {} basis)
+         :seon.flow.plan/cluster :running})))
+
+(defn- started-entries
+  "Every started entry `routing` holds, its own and its branch children's."
+  {:malli/schema [:=> [:cat :seon.agent/routing] [:sequential :seon.agent/started]]}
+  [routing]
+  (concat (vals (:seon.agent/started @routing))
+          (mapcat #(vals (:seon.agent/started @%)) (vals (:seon.agent/children @routing)))))
+
+(defn roster-facts
+  "What db<->flow reads of `routing` before it plans.
+  The started graphs by agent, its own and its branch children's, and the
+  paused among them."
+  {:malli/schema [:=> [:cat :seon.agent/routing] :seon.flow.plan/roster]}
+  [routing]
+  (let [entries (started-entries routing)]
+    {:seon.flow.plan/started (into #{} (map :seon.agent/id) entries)
+     :seon.flow.plan/paused (into #{} (keep #(when (:seon.flow.plan/paused? %) (:seon.agent/id %))) entries)}))
+
+(defn branch-handle
+  "The cluster handle `cluster-handle` seen from the branch `execution`.
+  Its connection, contexts and roster are the branch's, while wakes for
+  db<->flow still go to the cluster's plan channel."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/execution-handle] :seon.agent/context-source]}
+  [cluster-handle execution]
+  (merge cluster-handle
+         (select-keys execution [:seon.db/connection :seon.sci.eval/ctx :seon.sci.eval/base-ctx
+                                 :seon.env/environment :seon.agent/routing :seon.agent/branch])
+         {:seon.agent/context-source (or (:seon.agent/context-source cluster-handle) cluster-handle)
+          :seon.sci.eval/projection-state (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
+          :seon.turn.loop/stream-channel (async/chan (async/sliding-buffer 1))
+          :seon.turn.loop/completion (async/promise-chan)}))
+
+(defn branch-route-key
+  "The key of the wake route db<->flow registers on `branch`'s connection."
+  {:malli/schema [:=> [:cat :seon.store/branch] :seon.cluster.wake/key]}
+  [branch]
+  (keyword "seon.agent.route" (str (when-let [space (namespace branch)] (str space ".")) (name branch))))
+
+(defn start-branch-flow!
+  "Start `agent-id`'s graph on `execution`'s branch under `intent`.
+  Answers its started entry.
+  The branch's wake route is registered first: its mailbox wakes route to the
+  agent, and an unrouted recipient wakes the cluster's db<->flow."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/execution-handle :seon.agent/id
+                       :seon.task/execution]
+                  :seon.agent/started]}
+  [cluster-handle execution agent-id intent]
+  (let [roster (:seon.agent/routing execution)
+        route (wake/route! {:seon.cluster.wake/connection (:seon.db/connection execution)
+                            :seon.cluster.wake/channels (fn [] (channels roster))
+                            :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? roster eid channel))
+                            :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
+                            :seon.cluster.wake/key (branch-route-key (:seon.agent/branch execution))})]
+    (when (map? route)
+      (throw (ex-info (:seon.error/message route "The branch's wake declarations cannot route.") route)))
+    (start-flow! {:seon.turn.loop/cluster (branch-handle cluster-handle execution)
+                  :seon.agent/id agent-id :seon.agent/routing roster :seon.task/execution intent})))
+
+(defn- write!
+  "Transact `tx` on `connection` under its own custody; throws the writer's refusal."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/tx-data] :seon.db/transaction-report]}
+  [connection tx]
+  (let [report (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx))]
+    (when-not (:db-after report)
+      (throw (ex-info (:seon.error/message report "db<->flow's write was refused.") report)))
+    report))
+
+(defn- attempt-agent
+  "The creation request of the agent an attempt action names, in the cluster `cluster-name`."
+  {:malli/schema [:=> [:cat :seon.flow.plan/action :seon.cluster/name] :seon.agent/creation-request]}
+  [{agent-id :seon.agent/id key :seon.task/assignment branch :seon.task/branch} cluster-name]
+  {:seon.agent/id agent-id :seon.agent/branch branch :seon.cluster/name cluster-name
+   :seon.ns/name (symbol (str "my.attempt-" key))})
+
+(defn- write-attempt!
+  "Write an `:attempt` action on main before anything runs.
+  The agent's creation and the attempt row are ONE transaction; nothing is
+  written when the attempt already is."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
+  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch :as action}]
+  (let [connection (:seon.db/connection handle)
+        database (db/db connection)
+        tx (task/attempt-tx database h agent-id branch)
+        known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)]
+    (when (map? tx) (throw (ex-info (:seon.error/message tx "The attempt could not be derived.") tx)))
+    (when (seq tx)
+      (write! connection (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle)))) tx)))
+    nil))
+
+(defn handle-store
+  "The store `handle` holds: its own, else its SCI context's environment's, as acquisition reads it."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] [:maybe :seon.store/store]]}
+  [handle]
+  (or (:seon.store/store handle)
+      (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))))))
+
+(defn- fork-attempt!
+  "Fork the attempt's `branch` from its `fork-point` unless the store holds it.
+  The fork point is main's head, or the end commit of the task's need (a nested
+  fork toward main from the need's branch); a need whose branch is gone forks
+  main, which its merge reached."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch :seon.flow.plan/fork-point] :nil]}
+  [handle branch fork-point]
+  (let [database (db/db (:seon.db/connection handle))
+        store (handle-store handle)
+        main-branch (get-in database [:config :branch])
+        commit (when (set? fork-point) (first (sort fork-point)))
+        parent (when commit (db/q '[:find ?b . :in $ ?c :where [?a :seon.task.attempt/commit ?c] [?a :seon.task/branch ?b]]
+                                  database commit))
+        source (when (and (keyword? parent) (contains? (registry/roster store) parent))
+                 (db/branch-database database parent))
+        result (when-not (contains? (registry/roster store) branch)
+                 (registry/fork! (if source
+                                   {:seon.store/store store :seon.store/branch branch :seon.db/db source
+                                    :seon.cluster.registry/from commit :seon.branch/target main-branch}
+                                   {:seon.store/store store :seon.store/branch branch :seon.db/db database
+                                    :seon.cluster.registry/from main-branch})))]
+    (when (:seon.error/at result) (throw (ex-info (:seon.error/message result "The attempt's fork was refused.") result)))
+    nil))
+
+(defn- start-attempt!
+  "Start a `:start-flow` action's graph under its intent.
+  Fork its branch, acquire the branch execution, create its agent there when the
+  fork point predates it, and start its flow. A repeat finds the branch and the
+  started graph and does nothing new."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/facts :seon.flow.plan/action] :nil]}
+  [handle facts {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch
+                 intent :seon.task/execution :as action}]
+  (fork-attempt! handle branch (or (not-empty (get-in facts [:seon.flow.plan/basis h])) :main))
+  (let [execution (acquire-context! handle nil {:seon.agent/branch branch})
+        connection (:seon.db/connection execution)]
+    (when-not (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (db/db connection) agent-id)
+      (write! connection (creation-tx (attempt-agent action (:seon.cluster/name handle)))))
+    (start-branch-flow! handle execution agent-id (or intent :running))
+    nil))
+
+(defn- entry-roster
+  "The roster, `routing` or one of its branch children, holding `agent-id`'s started entry."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/id] [:maybe :seon.agent/routing]]}
+  [routing agent-id]
+  (some #(when (get-in @% [:seon.agent/started agent-id]) %)
+        (cons routing (vals (:seon.agent/children @routing)))))
+
+(defn- follow!
+  "Make `agent-id`'s started graph follow the action's op.
+  Pause or resume it in place (recorded on its entry), stop and join it, or
+  stop it and end its open attempt `:cancelled`."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/action] :nil]}
+  [handle routing {op :seon.flow.plan/op agent-id :seon.agent/id key :seon.task/assignment}]
+  (when-let [roster (entry-roster routing agent-id)]
+    (case op
+      :pause (do (flow/pause (:seon.flow/graph (started roster agent-id)))
+                 (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] true))
+      :resume (do (flow/resume (:seon.flow/graph (started roster agent-id)))
+                  (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] false))
+      (:stop :cancel) (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster})))
+  (when (= :cancel op)
+    (write! (:seon.db/connection handle)
+            [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :cancelled]
+             [:db/add [:seon.task/assignment key] :seon.task.attempt/reason "The task's intent is :cancelled."]]))
+  nil)
+
+(defn- write-problem!
+  "Write the problem task a `:problem` action names, by identity, so a repeat writes nothing."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
+  [handle {h :seon.task/assigned class :seon.flow.plan/class}]
+  (let [created (task/create! {:seon.db/connection (:seon.db/connection handle) :seon.agent/id "root"
+                               :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" h) :seon.task/kind :work
+                               :seon.task/intent (str "Task " h " is :running but cannot start: it names no proof. "
+                                                      "Tag a failing deftest with it, or hold it.")})]
+    (when (:seon.error/at created) (throw (ex-info (:seon.error/message created "The problem task was refused.") created)))
+    nil))
+
+(defn apply-plan!
+  "Apply db<->flow's `actions` over `facts` in order.
+  Through `handle` and its `routing`.
+  Each action's failure is recorded as db<->flow's fault and the rest still apply."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/facts
+                       :seon.flow.plan/actions]
+                  :nil]}
+  [handle routing facts actions]
+  (doseq [{op :seon.flow.plan/op :as action} actions]
+    (try (case op
+           :attempt (write-attempt! handle action)
+           :start-flow (start-attempt! handle facts action)
+           :problem (write-problem! handle action)
+           (:pause :resume :stop :cancel) (follow! handle routing action))
+         (catch Exception failure
+           (fault/fault! (env/of handle) failure
+                         {:seon.error/layer :seon.flow/plan :seon.error/operation `apply-plan!
+                          :seon.db.process/id (:seon.db.process/id handle)
+                          :seon.agent/id (:seon.agent/id action "root")}))))
+  nil)
+
 (defn- agents-to-start
   "Unstarted agents with work, or schedules whose timers need a running proc."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.agent/id]]
@@ -1774,4 +2020,14 @@
          (start-flow! {:seon.turn.loop/cluster handle
                 :seon.agent/id agent-id
                 :seon.agent/routing routing}))
+       ;; the attempts: write first, then make Flow follow (R1)
+       (let [facts (plan-facts db)
+             max-running (:seon.config.agent/max-running (config/effective db (:seon.cluster/name handle)))]
+         (if (or (:seon.error/at facts) (not (int? max-running)))
+           (fault/fault! (env/of handle)
+                         (ex-info "db<->flow could not read what to plan."
+                                  (if (:seon.error/at facts) facts {:seon.config.agent/max-running max-running}))
+                         {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
+                          :seon.db.process/id (:seon.db.process/id handle)})
+           (apply-plan! handle routing facts (plan facts (roster-facts routing) max-running))))
        [state nil]))))

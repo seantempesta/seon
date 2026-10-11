@@ -2,8 +2,14 @@
   "db<->flow's decision, `seon.cluster.agent/plan`, as a table: facts read on
   main and the roster's live graphs in, the actions db<->flow applies out."
   (:require [clojure.test :refer [deftest is testing]]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.id :as id]))
+            [seon.cluster.host :as host]
+            [seon.cluster.registry :as registry]
+            [seon.db :as db]
+            [seon.id :as id]
+            [seon.task :as task]
+            [seon.test-support :as test-support]))
 
 (defn- facts
   "Plan facts over `overrides`: nothing startable, nothing open, a running cluster."
@@ -104,3 +110,93 @@
                           (agent/plan (facts {:seon.flow.plan/open [(open intent)] :seon.flow.plan/cluster cluster})
                                       (roster started paused) 4)))
         "each intent and roster state plans exactly its Flow verb")))
+
+;;; The two-step chain through the real db<->flow pass on a fixture branch.
+
+(def ^:private chain-path "resources/seon/tasks/tq.chain.edn")
+
+(defn- chain-handle
+  "The handle of the tq.chain task `task-name`."
+  {:malli/schema [:=> [:cat :string] :seon.task/handle]}
+  [task-name]
+  (task/task-handle 'tq.chain task-name :work))
+
+(defn- attempts
+  "Every attempt row of tq.chain task `task-name` at `connection`'s head: key, branch, agent, end."
+  {:malli/schema [:=> [:cat :seon.db/connection :string] [:set [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :keyword]]]}
+  [connection task-name]
+  (set (db/q '[:find ?k ?b ?id ?e :in $ ?h
+               :where [?a :seon.task/assigned ?h] [?a :seon.task/assignment ?k] [?a :seon.task/branch ?b]
+               [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] [(get-else $ ?a :seon.task.attempt/end :open) ?e]]
+             (db/db connection) (chain-handle task-name))))
+
+(defn- pass!
+  "One db<->flow pass over `handle` and `routing`, as boot invokes it: synchronous."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
+  [handle routing]
+  (agent/db<->flow {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing) :seon.agent/routing routing}
+                   :seon.flow/plan :seon.agent/test-wake)
+  nil)
+
+(defn- release!
+  "Stop every graph `routing` and its branch children started and release their executions."
+  {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
+  [routing]
+  (doseq [child (vals (:seon.agent/children @routing))]
+    (doseq [agent-id (keys (:seon.agent/started @child))]
+      (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing child})))
+  (host/release-children! routing)
+  nil)
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+  a-chain-starts-its-first-step-and-its-end-starts-the-next-from-its-commit
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "tq-chain")
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {chain-path (str "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"}"
+                                                           " #:seon.task{:name \"b\" :kind :work :intent \"Do b.\""
+                                                           " :needs #{[:seon.task/sym tq.chain/a]}}]")}})
+     (test-support/declare-proof! connection 'tq.chain-proofs 'proves-a 'tq.chain/a)
+     (test-support/declare-proof! connection 'tq.chain-proofs 'proves-b 'tq.chain/b)
+     (test-support/transacted! connection [[:db/add [:seon.task/id (chain-handle "a")] :seon.task/execution :running]
+                                           [:db/add [:seon.task/id (chain-handle "b")] :seon.task/execution :running]])
+     (let [handle (test-support/cluster-handle
+                   {:seon.env/environment (test-support/environment "tq-chain" connection)
+                    :seon.db/connection connection :seon.cluster/name "tq-chain"
+                    :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection "tq-chain")
+                    :seon.db.process/id cluster/boot-process-identity})
+           routing (:seon.agent/routing handle)
+           started (fn [routing] (:seon.flow.plan/started (agent/roster-facts routing)))]
+       (try
+         (pass! handle routing)
+         (let [[[key-a branch-a agent-a]] (seq (attempts connection "a"))]
+           (is (= 1 (count (attempts connection "a"))) "setting both :running attempts the first step")
+           (is (empty? (attempts connection "b")) "and not the step that needs it")
+           (is (= #{agent-a} (started routing)) "the attempt's graph runs")
+           (pass! handle routing)
+           (is (= #{[key-a branch-a agent-a :open]} (attempts connection "a")) "a second pass writes nothing")
+           (is (= #{agent-a} (started routing)) "and starts nothing")
+           ;; A's work on its branch, through the connection its execution holds
+           (let [a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
+                                                                  :seon.store/branch branch-a})]
+             (test-support/transacted! a-connection (test-support/agent-tx (db/db a-connection) "tq-chain-marker"))
+             (test-support/transacted! connection
+                                       [[:db/add [:seon.task/assignment key-a] :seon.task.attempt/end :done]
+                                        [:db/add [:seon.task/assignment key-a] :seon.task.attempt/commit
+                                         (db/commit-id (db/db a-connection))]]))
+           (pass! handle routing)
+           (let [[[_ branch-b agent-b]] (seq (attempts connection "b"))
+                 b-database (db/branch-database (db/db connection) branch-b)]
+             (is (some? agent-b) "A's green end starts B")
+             (is (some? (db/q '[:find ?a . :where [?a :seon.agent/id "tq-chain-marker"]] b-database))
+                 "forked from A's end commit")
+             (is (contains? (started routing) agent-b))
+             (release! routing)
+             (is (empty? (started routing)) "a restart drops the roster")
+             (pass! handle routing)
+             (is (= 1 (count (attempts connection "b"))) "the restart writes no attempt")
+             (is (contains? (started routing) agent-b) "and starts the open attempt on its branch")
+             (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                 "with no fault recorded")))
+         (finally (release! routing)))))))
