@@ -267,7 +267,7 @@
                                                    current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
                         current (replacement-tx (stored id) (by-id id) owned)
-                        :else [(by-id id)]))))
+                        :else [(assoc (by-id id) :seon.task/execution :held)]))))
           (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id)))))))
 
 (defn- symbol-tx
@@ -280,6 +280,17 @@
                           (not [?e :seon.task/sym])] database)]
       (when (read-error unnamed) (throw (ex-info (:seon.error/message unnamed) unnamed)))
       (mapv (fn [[e ns task-name]] [:db/add e :seon.task/sym (task-sym ns task-name)]) (sort unnamed)))
+    []))
+
+(defn- held-tx
+  "`[:db/add task :seon.task/execution :held]` for every stored task with no intent: an absent
+  intent is never read as running, so a task is :held until someone sets :running."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
+  [database]
+  (if (contains? (:schema database) :seon.task/execution)
+    (let [unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _])] database)]
+      (when (read-error unset) (throw (ex-info (:seon.error/message unset) unset)))
+      (mapv (fn [e] [:db/add e :seon.task/execution :held]) (sort unset)))
     []))
 
 (defn- admitted
@@ -310,7 +321,7 @@
     (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
       (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
     ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
-    (admitted database (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))))
+    (admitted database (into (into (symbol-tx database) (held-tx database)) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))))
 
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
@@ -348,7 +359,7 @@
   (let [stored (stored-tasks database :seon.task/id handles)]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
     (admitted database
-              (into (symbol-tx database)
+              (into (into (symbol-tx database) (held-tx database))
                     (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))))
 
 (defn- task-handles
@@ -490,7 +501,7 @@
   "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
   [{:seon.task/keys [ns name kind] :as declaration} agent-id]
-  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name)
+  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name) :seon.task/execution :held
          :seon.task/created-by [:seon.agent/id agent-id]))
 
 (defn advance-assignments-tx
@@ -838,17 +849,16 @@
     [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]])
 
 (defn frontier
-  "The handles of every task that should be running now in `database` (main's): the leaves of a tree
-  (some parent's child) or with an attempt, not done, not held, stopped or cancelled, without a terminal
-  end other than :done, minus those a need blocks. An authored task in no tree and never attempted is
-  backlog, never launched by being read here, and the read is proportional to tree members and attempts.
+  "The handles of every task that should be running now in `database` (main's): the leaves whose own
+  intent is :running (no inheritance: ingestion and `create!` write :held on every task, so an absent
+  intent never appears and nothing launches by being read here), not done, without a terminal end other
+  than :done, minus those a need blocks.
   Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
   hundred times more. A leaf with an open attempt stays in it; the roster tells running from launch."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
   [database]
-  (let [eligible (db/q '[:find ?t ?h :in $ % :where (or-join [?t] [_ :seon.task/children ?t] [_ :seon.task/attempt-of ?t])
+  (let [eligible (db/q '[:find ?t ?h :in $ % :where [?t :seon.task/execution :running]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
-                         (not-join [?t] [?t :seon.task/execution ?i] [(contains? #{:held :stopped :cancelled} ?i)])
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
                                    [(contains? #{:given-back :capped :stalled :cancelled} ?e)])]
                        database frontier-rules)

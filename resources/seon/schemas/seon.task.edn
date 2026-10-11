@@ -47,7 +47,7 @@
          :seon.db/ref]
  :instructions [:string {:min 1 :description "The data a task's stage type renders for its worker beyond its intent (a test run's test set and program basis, a problem's class)."}]
  :execution [:enum {:seon.db/index true :seon.wake/arms true
-                    :description "The task's intent (runtime-follows-db §3); absent is :running. :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
+                    :description "The task's intent (runtime-follows-db §3); ingestion and create! write :held on a task with none, and only :running is launched (no inheritance from a parent). :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
              :held :running :paused :stopped :cancelled]
  :cron [:string {:min 1 :description "When a recurring task fires: a cron expression, parsed by the schedule's cron library (runtime-follows-db §6)."}]
  :zone [:string {:min 1 :description "The time zone a task's cron expression is read in."}]

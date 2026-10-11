@@ -151,7 +151,9 @@
    (fn [connection]
      (apply ingest! connection (tree-entries))
      (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-tree-agent"))
-     (test-support/transacted! connection [[:db/add [:seon.task/id (handle "merge")] :seon.task/execution :held]])
+     (test-support/transacted! connection
+                               (into [] (comp (remove #{"merge"}) (map #(vector :db/add [:seon.task/id (handle %)] :seon.task/execution :running)))
+                                     (concat ["design" "prove" "b" "integrate" "schema"] fan-out bodies)))
      (body (db/db connection)))))
 
 (def ^:private done-through-prove [[["design" :done] ["prove" :done]]])
@@ -177,6 +179,17 @@
        (conj all-but-integrate [["integrate" :done] ["merge" :execution :running]] [["merge" :done]]) [])
      (is (task/done? (after database all-but-integrate) (handle "b")) "a parent is done when its leaves are")
      (is (= {:seon.task/closed-by :seon.task/children} (task/resolution (after database all-but-integrate) (handle "b")))))))
+
+(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} an-ingested-task-is-held-and-not-in-the-frontier
+  (test-support/with-database
+   (fn [connection]
+     (ingest! connection (entry "a" "") (entry "b" (needs "a")))
+     (let [intent #(:seon.task/execution (db/pull (db/db connection) [:seon.task/execution] [:seon.task/id (handle %)]))
+           set-running (fn [n] (db/with (db/db connection) [[:db/add [:seon.task/id (handle n)] :seon.task/execution :running]]))]
+       (is (= :held (intent "a")) "ingestion writes the intent")
+       (is (= #{} (task/frontier (db/db connection))) "a held task is no work")
+       (is (= #{(handle "a")} (task/frontier (set-running "a"))) "setting :running puts it in")
+       (is (= #{} (task/frontier (set-running "b"))) "unless a need blocks it")))))
 
 (deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} the-frontier-answers-in-under-10-ms-for-fifty-leaves
   (with-tree
