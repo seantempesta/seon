@@ -1,0 +1,74 @@
+# Patch for lane vocab-cut (owner of these four files), from lane fable-runtime, 2026-10-11.
+# Apply with: git apply docs/research/agent-platform/2026-10-11/patches-for-vocab-cut.patch
+# Content: vocabulary row :seon.task/steps -> :seon.task/children; task cards S1, S2, S4 (seon.task.edn) and S3 (seon.turn.edn) made implementation-ready and P1 retired; R4 (seon.sci.eval.edn) carries P2's commit-id fork. Design: runtime-follows-db.md s10, design-probes.md.
+diff --git a/docs/seon/architecture/vocabulary.md b/docs/seon/architecture/vocabulary.md
+index 0be22870c..849ba4437 100644
+--- a/docs/seon/architecture/vocabulary.md
++++ b/docs/seon/architecture/vocabulary.md
+@@ -79,7 +79,7 @@ Words no library names. Each has one meaning.
+ | write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`my.program/write-back!`) | export, push |
+ | wake | a listened event the agent has not yet answered (a message, a task change) | notification, trigger |
+ | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
+-| subject, step | a subject task owns its step tasks as components (`:seon.task/steps`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
++| subject, step | a subject task owns its step tasks as components (`:seon.task/children`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
+ | needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
+ | frontier | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (`seon.task/frontier`); never stored | ready list, queue, scheduler state |
+ | attempt | one assignment row of a task to an agent on a branch (`seon.id/id [handle agent branch]`), ended once by its end fact | run (of a task), launch |
+diff --git a/resources/seon/tasks/seon.sci.eval.edn b/resources/seon/tasks/seon.sci.eval.edn
+index 68c46a540..57d040dc1 100644
+--- a/resources/seon/tasks/seon.sci.eval.edn
++++ b/resources/seon/tasks/seon.sci.eval.edn
+@@ -373,6 +373,6 @@
+              :must-read #{seon.sci.eval/acquire! seon.sci.eval/acquired-database? seon.sci.eval/copy-base-ctx seon.sci.eval/base-ctx seon.sci.eval/loaded-program seon.sci.eval/acquired-program seon.cluster.agent/acquire-context!}}
+  #:seon.task{:name "a-second-acquisition-of-an-unmoved-branch-interprets-nothing"
+              :kind :function
+-             :intent "Card R4. After 0c3916000 cached the overlay plan, `seon.sci.eval/interpret-overlay!` still re-interprets a branch's changed definitions on every acquisition whose commit differs from the loaded one. Cache the interpreted fork as a seon.cache kind keyed [cluster-base-key, program basis], weighed like the base, copied from (never shared live, contexts hold atoms); a second acquisition of a branch whose program did not move interprets nothing; cost assertion in seon.sci.acquisition-cost-test."
+-             :must-read #{seon.sci.eval/base-ctx seon.sci.eval/program-identity}
+-             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]
++             :intent "Card R4. After 0c3916000 cached the overlay plan, `seon.sci.eval/interpret-overlay!` still re-interprets a branch's changed definitions on every acquisition whose commit differs from the loaded one. Cache the interpreted fork as a seon.cache kind keyed [cluster-base-key, program basis], weighed like the base, copied from (never shared live, contexts hold atoms); a second acquisition of a branch whose program did not move interprets nothing. The resume-to-a-commit path is `seon.cluster.registry/fork!` from the commit id handed datahike.api/commit-as-db (design-probes P2: 64 ms, the fork's t repeats main's, so key by commit id) plus this cache. Proofs: a cost assertion in seon.sci.acquisition-cost-test, and R1's lightness proof (start one agent under a second and 300 MB) under budget on a branch with changed definitions."
++             :must-read #{seon.sci.eval/base-ctx seon.sci.eval/program-identity seon.cluster.registry/fork!}
++             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md" "docs/research/agent-platform/2026-10-11/design-probes.md"}}]
+diff --git a/resources/seon/tasks/seon.task.edn b/resources/seon/tasks/seon.task.edn
+index eb126520b..3d60d0f8a 100644
+--- a/resources/seon/tasks/seon.task.edn
++++ b/resources/seon/tasks/seon.task.edn
+@@ -82,7 +82,7 @@
+  #:seon.task{:name "a-repeated-problem-writes-nothing"
+              :kind :function
+              :intent "Card Q1. A problem task is created by identity `seon.id/id [class subject]` with its instructions as data on the task, assigned to root (or to a fresh agent for error signatures and cost regressions); writing the same problem twice writes nothing; the merge request a green end records becomes one problem class (runtime-follows-db §5)."
+-             :must-read #{seon.id/id seon.task/create! seon.task/propose!}
++             :must-read #{seon.id/id seon.task/create! seon.task/request-merge!}
+              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+  #:seon.task{:name "each-problem-class-is-detected-from-its-facts"
+              :kind :function
+diff --git a/resources/seon/tasks/seon.turn.edn b/resources/seon/tasks/seon.turn.edn
+index 4d49533d5..375ff14d8 100644
+--- a/resources/seon/tasks/seon.turn.edn
++++ b/resources/seon/tasks/seon.turn.edn
+@@ -172,7 +172,7 @@
+              :must-read #{seon.turn/test-step seon.test/changes seon.sci.kernel/memory-pressure}}
+  #:seon.task{:name "a-read-only-request-re-runs-the-branchs-reaching-tests"
+              :kind :function
+-             :intent "After an agent branch redefines `seon.task/candidate-dangling` and its tagged deftest in `seon.task-ingestion-test` (both green), later eval requests that define nothing re-execute the reaching tests: lane merge-path on default a6cbe4fcf, 2026-10-10, `(let [d (seon.db/db)] ...)` and `(my.test/check {...})` replies each carried `:seon.cost/tests` count 2, 755-1,403 ms and 1.7 GB allocated, a test step of 1.4-2.7 s per reply. Another branch's read-only `(my.program/propose-merge! {})` ran no test (test step 29 ms), so reuse holds sometimes; which reuse condition fails is not measured. AGENTS.md: unchanged results are answered from their record. `seon.turn/test-step` selects the branch's whole difference from its base through `seon.test/changes` each request (the root form of this class is `seon.turn/a-root-request-runs-the-clusters-whole-drift-as-reaching-tests`). Done when a request that changes no declaration executes no test and answers its reaching tests from their record (`:seon.test/unchanged`), with a `seon.profile/measure` regression on the step's cost."
++             :intent "After an agent branch redefines `seon.task/candidate-dangling` and its tagged deftest in `seon.task-ingestion-test` (both green), later eval requests that define nothing re-execute the reaching tests: lane merge-path on default a6cbe4fcf, 2026-10-10, `(let [d (seon.db/db)] ...)` and `(my.test/check {...})` replies each carried `:seon.cost/tests` count 2, 755-1,403 ms and 1.7 GB allocated, a test step of 1.4-2.7 s per reply. Another branch's read-only `(my.program/request-merge! {})` ran no test (test step 29 ms), so reuse holds sometimes; which reuse condition fails is not measured. AGENTS.md: unchanged results are answered from their record. `seon.turn/test-step` selects the branch's whole difference from its base through `seon.test/changes` each request (the root form of this class is `seon.turn/a-root-request-runs-the-clusters-whole-drift-as-reaching-tests`). Done when a request that changes no declaration executes no test and answers its reaching tests from their record (`:seon.test/unchanged`), with a `seon.profile/measure` regression on the step's cost."
+              :must-read #{seon.turn/test-step seon.turn/run-reaching seon.test/changes seon.test/select}}
+  #:seon.task{:name "a-wake-reopens-a-finished-task"
+              :kind :function
+@@ -181,13 +181,13 @@
+              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
+  #:seon.task{:name "a-task-end-never-reaches-root"
+              :kind :function
+-             :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so `my.program/propose-merge!` never runs and root's `my.program/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (`my.program/proposal!`) named by `:seon.task/merge`, which `my.program/prepare-merge!` takes."
+-             :must-read #{seon.turn/task-end seon.turn/end-task-call my.program/proposal! my.program/propose-merge! my.program/prepare-merge! seon.cluster.message/send!}
++             :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so `my.program/request-merge!` never runs and root's `seon.cluster.source/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (`my.program/request-merge!`) named by `:seon.task/merge`, which `seon.cluster.source/prepare-merge!` takes."
++             :must-read #{seon.turn/task-end seon.turn/end-task-call my.program/request-merge! seon.cluster.source/prepare-merge! seon.cluster.message/send!}
+              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md" "docs/seon/plan.md"}}
+  #:seon.task{:name "an-end-proposes-at-most-once"
+              :kind :function
+-             :intent "One task end records at most one proposal: `seon.turn/end-task!` reused nothing, so an end observed again after an interruption between `my.program/proposal!` and the end's close ran the proofs and recorded a second proposal on the merge task. Done when `seon.turn/end-task!` reuses the proposal already answering the agent's assignment (`seon.turn/end-proposal`) and proposes only when there is none."
+-             :must-read #{seon.turn/end-task-call my.program/proposal! seon.task/propose!}
++             :intent "One task end records at most one proposal: `seon.turn/end-task!` reused nothing, so an end observed again after an interruption between `my.program/request-merge!` and the end's close ran the proofs and recorded a second proposal on the merge task. Done when `seon.turn/end-task!` reuses the proposal already answering the agent's assignment (`seon.turn/end-merge-request`) and proposes only when there is none."
++             :must-read #{seon.turn/end-task-call my.program/request-merge! seon.task/request-merge!}
+              :evidence #{"docs/research/agent-platform/2026-10-10/astra-day-audit.md"}}
+  #:seon.task{:name "a-green-end-lands-its-merge"
+              :kind :function

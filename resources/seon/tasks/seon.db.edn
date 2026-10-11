@@ -223,4 +223,9 @@
  #:seon.task{:name "a-failed-projection-derivation-stays-cached-under-its-commit"
              :kind :function
              :intent "`seon.db/carried-projection` stores a delay under the commit key before forcing it, and a Clojure delay whose body threw rethrows that exception on every later deref, so one failed derivation (a reclaimed node, an interrupted read) answers the same failure for that commit until the bounded cache evicts it. Done when a failed cell is evicted from `seon.db/projection-cache` under both its revision and commit keys before the failure propagates, as `seon.sci.eval/record-refusals-once!` does for its cache, so the next call derives again."
-             :must-read #{seon.db/carried-projection seon.db/content-projection seon.sci.eval/record-refusals-once!}}]
+             :must-read #{seon.db/carried-projection seon.db/content-projection seon.sci.eval/record-refusals-once!}}
+ #:seon.task{:name "q-lets-a-stack-overflow-error-escape"
+             :kind :function
+             :intent "`seon.db/q` lets a `java.lang.StackOverflowError` escape as a thrown Error instead of answering it as a read refusal: a Datalog rule recursing through negation made Datahike overflow in datahike.query.lower/rename-branch-vars after allocating 150-460 MB (design-probes P1, 2026-10-11), and the caller got the Error, not the refusal every other query failure becomes. The read boundary answers every Throwable of the query engine as the typed refusal (the error family of the reads spec), naming the query and the rules. Proof: seon.db-test/a-stack-overflow-in-a-query-is-answered-as-a-refusal."
+             :must-read #{seon.db/q}
+             :evidence #{"docs/research/agent-platform/2026-10-11/design-probes.md"}}]
