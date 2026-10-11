@@ -45,6 +45,10 @@
                     :next
                     [:multi
                      {:dispatch :seon.turn.work/situation}
+                     [:prove
+                      [:map {:description "A fresh attempt's first pass: its task's proofs run on its branch, no model call."}
+                       [:seon.turn.work/situation [:= :prove]]
+                       [:seon.agent/id :seon.agent/id]]]
                      [:resume
                       [:map
                        [:seon.turn.work/situation [:= :resume]]
@@ -80,4 +84,4 @@
                      [:seon.turn.work/settled?
                       :seon.turn.work/settled?]],
                     :settled? :boolean,
-                    :situation [:enum :resume :call :open :close]}
+                    :situation [:enum :resume :call :open :close :prove]}

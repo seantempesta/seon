@@ -39,8 +39,9 @@
   `:my.task/counterexample` optionally carries the data showing it. Answers
   the completed disposition whose reply is the reason, with the target and
   counterexample beside it; as my reply's last form it ends my turn, my
-  task's end is derived `:given-back` (`seon.turn/task-end`) and root hears
-  it in my end message.
+  task's end is derived `:sent-back` to the target, recorded on my attempt as
+  `:seon.task.attempt/target`, or `:given-back` without one
+  (`seon.turn/task-end`), and root hears it in my end message.
 
   Example:
   (my.task/send-back! {:my.task/reason \"The proof asserts the old shape; the intent asks for the new one.\"

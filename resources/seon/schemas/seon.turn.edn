@@ -31,6 +31,8 @@
             :disposition
             [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag." :seon.wake/context-inert true}
              :my.turn/disposition],
+            :sent-back-to
+            [:qualified-symbol {:description "The task a :completed disposition sends the work back to (my.task/send-back!'s :my.task/target), recorded with settlement beside the disposition; the task's end is then :sent-back to it." :seon.wake/context-inert true}],
             :result
             [:and {:description "The reply text a :completed disposition carried, recorded with settlement beside the disposition. Absent for :wait." :seon.wake/context-inert true}
              :my.turn/result],

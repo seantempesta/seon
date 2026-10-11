@@ -2151,9 +2151,20 @@
                   (not (continuing-reply? database agent-id))
                   (empty? (unanswered-wakes database agent-id {}))))))
 
+(defn sent-back-to
+  "The task the completed turn of `agent-id` on `database` sent its work back to (`:seon.turn/sent-back-to`), or nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/sym]]}
+  [database agent-id]
+  (let [target (db/q '[:find ?target . :in $ ?agent-id
+                       :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                       [?turn :seon.turn/disposition :completed] [?turn :seon.turn/sent-back-to ?target]]
+                     database agent-id)]
+    (when (symbol? target) target)))
+
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
-  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.task/send-back!`), `:capped` with no
+  green (`seon.context/task-done?`), `:sent-back` once a turn completed naming the task that owns the mistake
+  (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
@@ -2161,6 +2172,7 @@
   (let [held (task/agent-task (or (some-> (task/main database) db/db) database) agent-id)]
     (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
       (cond (@context-task-done? database agent-id) :done
+            (sent-back-to database agent-id) :sent-back
             (db/q '[:find ?turn . :in $ ?agent-id
                     :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
                     [?turn :seon.turn/disposition :completed]]
@@ -2171,12 +2183,13 @@
 (defn end-task-call
   "Record the end of the task `agent-id` holds at the writer on main `database`: the end message `candidate`
   to root (`seon.cluster.message/send-call`), the agent's admission closed and, on its open attempt
-  (`seon.task/agent-attempt`), `:seon.task.attempt/end` with the branch `commit` it ended at, as one
-  transaction; nothing when the admission is already closed, so a task's end is recorded once."
+  (`seon.task/agent-attempt`), `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back,
+  `:seon.task.attempt/target` the task `target` names, as one transaction; nothing when the admission is
+  already closed, so a task's end is recorded once."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message
-                       :seon.task.attempt/commit]
+                       :seon.task.attempt/commit [:maybe :seon.task/sym]]
                   :seon.store/transaction-data]}
-  [database agent-id end candidate commit]
+  [database agent-id end candidate commit target]
   (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))]
     (cond (closed-on? database agent-id) []
           ;; a transaction function's throw is its writer's refusal
@@ -2184,7 +2197,9 @@
           :else (cond-> (conj (vec (message/send-call database candidate agent-id))
                               [:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"])
                   attempt (into [[:db/add attempt :seon.task.attempt/end end]
-                                 [:db/add attempt :seon.task.attempt/commit commit]])))))
+                                 [:db/add attempt :seon.task.attempt/commit commit]])
+                  (and attempt (= :sent-back end) target)
+                  (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])))))
 
 (defn- end-message
   "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
@@ -2308,7 +2323,8 @@
             candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge request)))
             ;; the branch commit the attempt ended at: its successor's fork basis
             commit (db/commit-id (db/db connection))
-            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate commit]]
+            target (when (= :sent-back end) (sent-back-to (db/db connection) agent-id))
+            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate commit target]]
                                         :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
             outcome (cond (:seon.error/at candidate) candidate
                           (not (uuid? commit)) commit
@@ -2320,7 +2336,7 @@
           (let [landed (land-end! cluster agent-id request)]
             (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))))
         ;; a task sent back leaves nothing on the branch to merge; a capped or stalled end stays resumable
-        (when (and (:db-after outcome) (= :given-back end))
+        (when (and (:db-after outcome) (#{:given-back :sent-back} end))
           (let [environment (env/of cluster)
                 branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
             (when (and (keyword? branch) (:seon.store/store environment))
@@ -2330,6 +2346,15 @@
                                                      branch)]
                 (fault! `task/delete-branch! refused)))))))
     nil))
+
+(declare proof-run-recorded? prove-turn step-limit-ms)
+
+(defn- attempt-running?
+  "True when the task `handle` an agent holds has intent :running at main, seen from `database`, its branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
+  [database handle]
+  (let [home (or (some-> (task/main database) db/db) database)]
+    (= :running (:seon.task/execution (db/pull home [:seon.task/execution] [:seon.task/id handle])))))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2342,6 +2367,9 @@
   when no such ordinal remains the situation is `:close`. With no open
   turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
   read at main (`seon.task/main`) where assignments are written;
+  a held task whose intent is :running (db<->flow started the attempt) and
+  whose proofs have no run recorded on the agent's branch is `:prove` first
+  (`prove-turn`: proofs only, no model call);
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition and evaluated a form, or is the first
@@ -2389,6 +2417,11 @@
           ;; AN ENDED TASK CLOSED THE AGENT: no wake reopens it
           (admission-closed? db agent-id) nil
           (map? held) held
+          ;; A FRESH ATTEMPT OF A :running TASK PROVES FIRST: its proofs run on its branch
+          ;; before any model call, and proofs already green end it with none (`prove-turn`);
+          ;; a :held task root assigned by hand waits for its wakes as before
+          (and (string? held) (attempt-running? db held) (not (proof-run-recorded? db agent-id)))
+          {:seon.turn.work/situation :prove :seon.agent/id agent-id}
           (and (map? deferred)
                (contains? deferred :seon.error/at)
                (contains? deferred :seon.error/layer)
@@ -2980,6 +3013,9 @@
          (when (= :completed (:my.turn/disposition settled))
            [[:db/add [:seon.turn/id run-id]
              :seon.turn/result (:my.turn/result settled)]])
+         ;; a send-back naming the task that owns the mistake: the end's target, as a fact
+         (when (and (= :completed (:my.turn/disposition settled)) (qualified-symbol? (:my.task/target settled)))
+           [[:db/add [:seon.turn/id run-id] :seon.turn/sent-back-to (:my.task/target settled)]])
          (when closing?
            (close-tx
             {:seon.turn/id run-id :seon.db.process/id process}))
@@ -4929,6 +4965,7 @@
                                      (ai/agent-overlay
                                       (db/db (:seon.db/connection cluster)) agent-id))]
                  (let [result (case (:seon.turn.work/situation work)
+                                :prove (prove-turn request)
                                 :open (open-turn request)
                                 :call (call-turn request)
                                 :resume (resume-turn request)
@@ -5246,6 +5283,32 @@
           :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
                             :seon.test/policy :named :seon.test/identities proofs
                             :seon.test/check-time-limit-ms limit-ms}))))
+
+(defn proof-run-recorded?
+  "True when a run of the task `agent-id` holds has its proofs recorded on `database`, the agent's branch,
+  destined for that branch (red or green), or when the task names no proof: the attempt has proved first."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (let [proofs (task-proofs database agent-id)]
+    (boolean
+     (or (:seon.error/at proofs) (empty? proofs)
+         (some? (db/q '[:find ?run . :in $ ?branch [?proof ...]
+                        :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/identities ?proof]]
+                      database (get-in database [:config :branch]) (vec proofs)))))))
+
+(defn- prove-turn
+  "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no
+  model call and no form. Answers the pass closed, so the step's end (`end-task!`) ends the task `:done` when
+  every proof is green; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
+  bound parks after its repeats."
+  {:malli/schema [:=> [:cat :map] :seon.turn.loop/turn-report]}
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work report :seon.turn.loop/report}]
+  (let [agent-id (:seon.agent/id work)
+        execution (@cluster-agent-acquire-context! cluster agent-id)
+        ran (run-proofs execution agent-id (step-limit-ms cluster agent-id) #{})]
+    (if (:seon.error/at ran)
+      (report :error 0 ran)
+      (report :closed 0))))
 
 (defn- changed-functions
   "The function symbols among the change identities `changed`."

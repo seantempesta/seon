@@ -1,22 +1,17 @@
 (ns seon.task-ingestion-test
   "Task ingestion (spec 7.9-7.16): symbol-valued edges, task EDN with derived handles
   and a revision basis, lookups both ways, and the publication seam's dangling refusal."
-  (:require [clojure.data.json :as json]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.cluster.host :as host]
             [seon.cluster.source]
-            [seon.context :as context]
             [seon.db :as db]
             [seon.fn]
             [seon.id]
-            [seon.mcp :as mcp]
             [seon.profile :as profile]
             [seon.task :as task]
             [seon.program :as program]
-            [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
 (def ^:private handle (task/task-handle 'tq.a "prove-ingestion" :function))
@@ -280,45 +275,6 @@
        (is (= :no-proofs (:seon.task/refused refused)))
        (is (nil? (:seon.task/assignment refused)))))))
 
-(defn- evaluate
-  "Evaluates `code` as the agent through `seon.mcp/call`."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :string]}
-  [running agent-id code]
-  (mcp/call (json/write-str {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}})))
-
-(deftest assignment-requires-a-non-green-proof
-  (test-support/with-running-agent
-   (fn [running agent-id connection]
-     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
-                                            :seon.task/name "prove" :seon.task/kind :function :seon.task/intent "Prove."}))
-           assign #(task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
-                                  :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-           define #(evaluate running agent-id
-                             (str "(ns tq.a (:require [clojure.test :refer [deftest is]])) "
-                                  "(deftest ^{:seon/tasks #{'tq.a/prove}} proves (is (= 1 " % ")))"))]
-       (is (= :no-proofs (:seon.task/refused (assign))))
-       (define 1)
-       (evaluate running agent-id "(my.test/check {})")
-       (is (= :proofs-green (:seon.task/refused (assign))))
-       (define 2)
-       (evaluate running agent-id "(my.test/check {})")
-       (is (:seon.task/assignment (assign)))))))
-
-(deftest ^{:seon/tasks #{'seon.task/assignment-requires-an-observed-failing-proof}} a-proof-run-that-errors-refuses-assignment-by-name
-  (test-support/with-running-agent
-   (fn [running agent-id connection]
-     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
-                                            :seon.task/name "prove" :seon.task/kind :function :seon.task/intent "Prove."}))
-           _ (evaluate running agent-id
-                       (str "(ns tq.a (:require [clojure.test :refer [deftest is]])) "
-                            "(deftest ^{:seon/tasks #{'tq.a/prove}} proves (is (= 1 2)))"))
-           refused (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
-                                  :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
-                                  :seon.task/branch :no-such-branch})]
-       (is (= :proof-run-failed (:seon.task/refused refused)) "an infrastructure failure is refused by its own name")
-       (is (nil? (:seon.task/assignment refused)) "and never assigned as work")
-       (is (nil? (:seon.task/assigned (task/assignment (db/db connection) agent-id :no-such-branch))))))))
-
 (deftest an-assignment-offers-no-merge-request
   (test-support/with-running-agent
    (fn [running agent-id connection]
@@ -345,68 +301,6 @@
        ;; measured 1,193,221,736 bytes in a check JVM (run 60c4370fa87e); the proof run's own cost is
        ;; seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte
        (is (< (:seon.profile/alloc-bytes assigned) (* 2 1024 1024 1024)) "the assignment with its one proof run allocates under 2 GB")))))
-
-(defn- items
-  "The values and errors of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :string] [:sequential :seon.schema/value]]}
-  [running agent-id code]
-  (map #(test-support/reply (get % "text"))
-       (get (json/read-str (evaluate running agent-id code)) "content")))
-
-(defn- own-branch-assignment!
-  "Declare the red proof `tq.apr/area-test` unrun at root's home (this member's branch), give an agent a branch of
-  its own off it, and assign it the task `tq.apr/area`; answers the agent, its branch connection and the assignment."
-  {:malli/schema [:=> [:cat :string :seon.db/connection] :map]}
-  [running connection]
-  (let [member (get-in (db/db connection) [:config :branch])
-        cluster-name (:seon.cluster/name (test-support/execution-handle nil))
-        agent-id (str "assigned-" (seon.id/id))
-        _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-        ;; declared at the home unrun, as a published task file's proof is: nothing has run it before assignment
-        _ (test-support/declare-source! connection 'tq.apr
-                                        (str "(ns tq.apr (:require [clojure.test :refer [deftest is]]))\n"
-                                             "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
-                                             "(deftest ^{:seon/tasks #{'tq.apr/area}} area-test"
-                                             " (is (= 25 (area 5)) \"squares\") (is (= 1 (area 1))))\n"))
-        {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.apr)")
-        id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'tq.apr
-                                         :seon.task/name "area" :seon.task/kind :function :seon.task/intent "Square."}))]
-    {:agent agent-id :target target
-     :assigned (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
-                              :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})}))
-
-(deftest ^{:seon/tasks #{'seon.task/assignment-runs-its-proofs-in-the-agents-world}
-           :seon.test/long "root's proof definition, an own-branch agent's first request and the assignment's proof run in its world"
-           :seon.test/long-ms 30000}
-  right-after-assignment-the-agents-block-shows-each-proof-failing
-  (test-support/with-running-agent
-   (fn [running _ connection]
-     (let [{agent-id :agent target :target assigned :assigned} (own-branch-assignment! running connection)
-           ;; the block's proofs section, read from the agent's branch without any request of the agent's
-           proofs (context/proofs (db/db target) 'tq.apr/area)
-           [proof] (:seon.context/proof-list proofs)]
-       (is (string? (:seon.task/assignment assigned)) "the task is assigned")
-       (is (= {:red 1} (:seon.context/counts proofs)) "the proof shows red before the agent changed anything")
-       (is (= ["squares"] (mapv :message (:seon.context/proof-failures proof))) "with its failing assertion")
-       (is (nil? (:seon.agent/admission-closed-tx (db/pull (db/db target) [:seon.agent/admission-closed-tx]
-                                                          [:seon.agent/id agent-id]))))))))
-
-(deftest ^{:seon/tasks #{'seon.task/assignment-runs-its-proofs-in-the-agents-world}
-           :seon.test/long "root's proof definition, an own-branch agent's first request, the assignment's proof run and the agent's own run of it"
-           :seon.test/long-ms 30000}
-  the-agents-own-run-of-a-proof-matches-the-assignment-run
-  (test-support/with-running-agent
-   (fn [running _ connection]
-     (let [{agent-id :agent target :target} (own-branch-assignment! running connection)
-           [recorded] (runner/latest-results (db/db target) ['tq.apr/area-test])
-           at-repl (last (keep :seon.repl/value
-                               (items running agent-id
-                                      "(select-keys (clojure.test/run-test-var #'tq.apr/area-test) [:pass :fail :error])")))]
-       (is (= {:pass 1 :fail 1 :error 0}
-              {:pass (:seon.test/pass-count recorded) :fail (:seon.test/fail-count recorded)
-               :error (:seon.test/error-count recorded)})
-           "the assignment ran the proof in the agent's world and recorded it")
-       (is (= {:pass 1 :fail 1 :error 0} at-repl) "the agent's own run answers the same counts")))))
 
 (defn- ignored-roots
   "The directories `.gitignore` names at the root, as path prefixes."

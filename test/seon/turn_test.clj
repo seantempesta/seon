@@ -1987,10 +1987,29 @@
            commit (random-uuid)
            candidate (message/candidate {:my.message/to "root" :my.message/about h :seon.task/end :done
                                          :my.message/content "My task ended: done."})
-           ended (db/with database (turn/end-task-call database agent-id :done candidate commit))]
+           ended (db/with database (turn/end-task-call database agent-id :done candidate commit nil))]
        (is (= {:seon.task.attempt/end :done :seon.task.attempt/commit commit}
               (db/pull ended [:seon.task.attempt/end :seon.task.attempt/commit] [:seon.task/assignment (id/id [h 1])]))
            "the end and the branch commit it ended at are on the attempt, in the end's one transaction")
-       (is (= [] (turn/end-task-call ended agent-id :done candidate commit)) "an attempt ends once")
+       (is (= [] (turn/end-task-call ended agent-id :done candidate commit nil)) "an attempt ends once")
        (is (every? (wake/starting-attributes ended) [:seon.task.attempt/end :seon.task/needs])
            "an end and a need wake the cluster process that starts the next attempt")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-send-back-names-its-target-on-the-attempt}} a-send-back-names-its-target-on-the-attempt
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.backs.edn"
+                                           "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"} #:seon.task{:name \"b\" :kind :work :intent \"Do b.\"}]"}})
+     (let [h (task/task-handle 'tq.backs "b" :work)
+           agent-id "tq-back-agent"
+           _ (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+           _ (support/transacted! connection (task/attempt-tx (db/db connection) h agent-id :tq-back))
+           database (db/db connection)
+           candidate (message/candidate {:my.message/to "root" :my.message/about h :seon.task/end :sent-back
+                                         :my.message/content "My task ended: sent-back."})
+           ended (db/with database (turn/end-task-call database agent-id :sent-back candidate (random-uuid) 'tq.backs/a))]
+       (is (= {:seon.task.attempt/end :sent-back :seon.task.attempt/target {:seon.task/sym 'tq.backs/a}}
+              (db/pull ended [:seon.task.attempt/end {:seon.task.attempt/target [:seon.task/sym]}]
+                       [:seon.task/assignment (id/id [h 1])]))
+           "the end names the task the work went back to, as a ref on the attempt")))))
