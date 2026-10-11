@@ -386,8 +386,12 @@ defects consumed four round slots. Options: (a) keep, but its defects are lane w
 diff only to root and at the gate; ordinary agents see their request cost only; (c) keep `cost-diff` as a round task until
 an agent fixes it. **Recommendation: (a)**; (b) if three rounds show no use.
 
+> **Owner answer (2026-10-11):** Concise perf feedback (owner: "I want agents to know when they are writing shitty software … 500 tokens is too much"). One line (≤40 tokens) only when a definition the agent changed got costlier than main, e.g. `slower: seon.foo/bar 3.1× main (alloc 40→124 MB, 12k calls)`; nothing otherwise. Request cost shrinks to `ms / MB` on one line. The teaching goes in the instructions: the Implement template carries "ask what the work is proportional to", and tasks where cost matters carry a cost proof. Facts (research): `seon.batch/cost-diff` ≈500 tokens; no model agent acted on it in 464 model evaluations; three open defects. Defects are lane work, never round tasks.
+
 **Q2. The auto-landing dial while the first landings happen.** Options: (a) on, probe chosen by reach; (b) off, root runs
 `(land! …)` by hand on each green end until three land; (c) on, `problems-prose` stays the probe. **Recommendation: (a)**.
+
+> **Owner answer (2026-10-11):** (a), decided earlier: auto-merge on green, probe chosen by reach.
 
 **Q3. The gate's evaluator.** Context: both real automatic landings were refused because an interpreted red was compared
 with a compiled baseline (round 8: two tests red interpreted on unchanged main, run `21ae1d38003e`, gate labelled
@@ -395,6 +399,8 @@ with a compiled baseline (round 8: two tests red interpreted on unchanged main, 
 evaluator (compiled run of the candidate at the gate), interpreted runs are the agent's feedback only, host-bound tests
 are data, R-class tests deleted or rewritten; (c) stop interpreting tests; agents' reaching tests run only at the gate.
 **Recommendation: (b)**; (c) loses the agent's own fast feedback.
+
+> **Owner answer (2026-10-11):** Interpreted must agree with compiled for every declaration that is not host-bound; **every mismatch is a bug**, not a verdict class (owner: "why would an interpreted not work on the compiled, that sounds like a bug … platform doesn't work in SCI, that's a known issue"). The interpreted census is the bug list: fix interpreter bugs at their owners, rewrite the ~50 law-breaking tests (`with-redefs`, `alter-var-root`, `intern`), declare host-bound cases as data. The gate compares directly with no verdict tiers; host-bound and platform changes are checked by the existing compiled check (`my.test/check-platform`, 32–45 s measured, not "publication 26 s"). The gate's per-request `:compiled` label (`seon.test/run-request`, by agent id) is a bug: label by actual resolution per member. Q10 folds into this: ordinary landings gate in default; platform landings pay the check JVM.
 
 **Q4. What rounds work on until the chain runs.** Options: (a) the loop's own findings, as rounds 2–8; (b) small ordinary
 owner tasks picked by reach; the loop's findings go to Claude lanes with red proofs; (c) mixed. **Recommendation: (b)**
@@ -406,6 +412,8 @@ the rest deferred until a judgment duty has occurred three times; (c) stop the c
 **Q6. The undecided merges and the 56 live agent branches.** Options: (a) root decides and retires by hand with a receipt
 as soon as item 0 lands; (b) build retirement-on-close first; (c) leave them. **Recommendation: (a)**; (b) lands later from
 a lane; (c) is what broke the entrance.
+
+> **Owner answer (2026-10-11):** Clean now plus one close owner. Root declines the three stale merges (fda9b3f7af69, 3ea28f83185c, 25ad5b9045b0) and retires ended agents' branches by hand today with a receipt. One owner, "close merge task" (decide, retire S and the proposing branch), called by `seon.cluster.source/land-held!`, `my.program/accept-merge!` and decline; an ended agent with no open merge task retires its branch at its close. (Research: the hand accept path already retires; live counts 59 branches, 58 agents with a live branch.)
 
 **Q7. DYNAMIC-CONTEXT stages 4–7.** Options: (a) build now; (b) the help line and TASK-CHAIN's stable `current-state`
 order first, measured by the guessed-name signature count over three rounds; working set after if prompts cap agents; (c)
@@ -424,6 +432,8 @@ in the main JVM (compiled Vars already loaded; only the candidate's declarations
 JVM; (b) per-file derivation inputs now (3–5 h); (c) accept and batch host-bound landings to one restart a day.
 **Recommendation: (a) with (c)'s batching**; (b) when the chain table shows it dominating.
 
+> **Owner answer (2026-10-11):** Folded into Q3: no separate publication work now; platform landings use the existing check (32–45 s).
+
 **Q11. The round-8 refusal.** *Answered by lane land-r8 (be337100e):* the two reds are red interpreted on unchanged main
 and the gate run was labelled `:compiled`; the proposal also carries a scratch schema `:seon.problems/qty` the agent
 never used. Remaining decision: (a) land `problems-prose` by hand after dropping the scratch schema, and let fix B make
@@ -431,12 +441,16 @@ the class impossible; (b) wait for fix B and re-gate; (c) decline it. **Recommen
 only the declarations its proofs and reaching tests reach (task `an-agents-scratch-schema-never-rides-its-landing`),
 decided at `compare-branch`, not by a filter at landing.
 
+> **Owner answer (2026-10-11):** Fix the two interpreter bugs and re-land. Both refusing tests are red the same way interpreted on unchanged main, so they are interpreter bugs (a nil connection supplied on the interpreted path; the failure-facts reader mismatch), plus the gate's `:compiled` mislabel. An Opus lane fixes them at their owners with the round-8 tests as red proofs; then `land!` re-runs 57ad6cd33297 without the unused scratch schema `:seon.problems/qty`. That is the first automatic landing.
+
 **Q12. The fences: remove their root causes, or freeze them?** Context: §4; twelve of nineteen guard hypothetical
 failures; three root causes explain fifteen; the owner wants no patches. Options: (a) remove the root causes in the order
 C, B, A and delete each fence in the commit that removes its cause; (b) freeze the fences as they are, add none, revisit
 after ten landings; (c) delete the hypothetical fences now and rely on the writer and the immutable database as the
 safety net until a failure is observed. **Recommendation: (a)**; (c) is tempting but deletes detection before the cause
 is gone, so a lane edit could land unproven in the meantime.
+
+> **Owner answer (2026-10-11):** (a), and stronger: AGENTS.md law NO GUARDS OR FENCES (c722d8d22), no exceptions. Executed as Q15.
 
 **Q13. Where TASK-CHAIN goes, and the first chain experiment.** Options for order: (a) `my.task/refine!` beside the first
 landing, stage entities after it, the first chain run after the first landing (draft §6); (b) the whole card before any
@@ -457,3 +471,16 @@ operations (`add-must-read!`, `set-intent!`); (c) agents edit the EDN file throu
 only `must-read` removal by the agent (the next context reads less because the task names less); (ii) plus the working
 set (DYNAMIC-CONTEXT stage 5) for the agent's own reads; (iii) a budget dial. **Recommendation: (a) and (i)** first; (ii)
 when measured prompt growth asks for it.
+
+**Q15 (added by root). Revert the night's fences?** Audit (read-only Opus, 2026-10-11): of 73 commits since 2026-10-10
+20:30, 16 add fences; reverting them in reverse order is clean except trivial task/schema EDN hunks, one `merge_test`
+hunk and one real conflict (f540268a1 in `seon.turn/end-task!`); about −1,500 lines; ~40 good commits kept (interpreter
+fixes, f51240f34, e71e60a47, `land!`, `land-end!`, the dial, typed refusals, `:seon.test.run/evaluator`). Corrections to
+§2.2: `turn.clj` grew 5,622 → 5,888 overnight, `source.clj` 1,488 → 2,136. Fences outside the night: `bin/lane`'s
+`.git/lane-commit.lock`, archive sealing (9cd874d94, 4027882d4), `:root-refused` (93d9e4ef6), the `"root"` string check
+(e361536a9); each gets a root-cause task.
+
+> **Owner answer (2026-10-11):** One batched revert, generated with `git revert --no-commit` in a throwaway
+> `git clone --shared` under `tmp/` (never the shared index), applied to claimed files; `end-task!` rewritten to send the
+> end message and close the agent in one transaction; observed-failure tests kept as red proofs for the root fixes; one
+> central test round; schema retirement proven on a live-store branch.
