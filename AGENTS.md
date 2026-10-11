@@ -112,7 +112,13 @@ root.
   and new names for changed semantics.
 - **Make failure local and loud.** Each part fails without corrupting its neighbours or blinding diagnosis. Health is
   a positive observation: silence, a missing subject or a stale observation reads as unknown.
-- **Every restriction names the failure it prevents.** A restriction that cannot name one is deleted.
+- **NO GUARDS OR FENCES.** A guard or fence is always the wrong solution, with no exceptions. That covers a check,
+  lock, refusal class, retry, verdict tier, exemption, filter or recovery path added beside a mechanism to catch it
+  doing the wrong thing. The system itself handles everything correctly. When a failure is possible, find the design
+  that makes it impossible, at its owner, and change that: hold a basis instead of a value, one evaluator instead of
+  two compared, a compare-and-swap that git or the writer already provides instead of a lock. Never build protection
+  against a failure that has not been observed; when one is observed, fix its root cause, add its regression and
+  delete any fence standing in for it. A fence found in the code is a defect: file a task naming its root cause.
 
 ## Words and where they come from
 
