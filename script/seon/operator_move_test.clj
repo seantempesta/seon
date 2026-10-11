@@ -178,8 +178,8 @@
   a-move-states-branch-heads-before-its-boot-writes
   (let [with-capture (read-string (#'operator/launch-form
                                    {:seon.boot/cluster-name "default"
-                                    :seon.operator/capture-heads "/root/data/store"} 1 "/root/data/source/c"))
-        without (read-string (#'operator/launch-form {:seon.boot/cluster-name "default"} 1 "/root/data/source/c"))
+                                    :seon.operator/capture-heads "/root/data/store"} 1 "/root/data/source/c" nil))
+        without (read-string (#'operator/launch-form {:seon.boot/cluster-name "default"} 1 "/root/data/source/c" nil))
         symbols (fn [form] (set (filter symbol? (tree-seq coll? seq form))))
         boot-request (fn [form] (some #(when (and (seq? %) (= 'clojure.core/assoc (first %))
                                                   (map? (second (second %))))
