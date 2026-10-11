@@ -45,7 +45,8 @@
     (is (contains? seeded "custody") "a bare (db/db) in a host body reads its seeded member branch")
     (is (= head held) "the handle held for that connection is the prepared one, so fixtures branch with the seeds")))
 
-(deftest a-refused-seed-prevents-body-entry
+(deftest ^{:seon/tasks #{'seon.test/a-member-body-reads-the-world-its-seeds-prepared}}
+  a-refused-seed-prevents-body-entry
   (doseq [[seeds rule] [[[{:seon.maintenance.result/id 42}] "Seed entry 0"]
                         [[{:seon.maintenance.result/id "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
           :let [entered (atom false) result (run-seeded seeds #(reset! entered true))]]

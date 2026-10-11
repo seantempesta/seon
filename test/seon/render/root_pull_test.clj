@@ -269,7 +269,8 @@
                     {::root call} fixed false))
            "an opening as-of database compares through seon.db revisions")))))
 
-(deftest unrelated-entity-change-keeps-root-read-current
+(deftest ^{:seon/tasks #{'seon.db/an-unrelated-entity-write-keeps-a-reads-evidence-current}}
+  unrelated-entity-change-keeps-root-read-current
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]

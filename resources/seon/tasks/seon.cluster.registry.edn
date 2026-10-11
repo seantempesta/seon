@@ -30,4 +30,9 @@
              :kind :function
              :intent "`seon.cluster.registry/fork!` must derive a non-nil base commit when `my.agent/create-branch!` forks from a test member's captured commit. `my.agent-test/retiring-a-branch-this-process-still-connects-is-refused-as-a-value` errors before retirement: `seon.cluster.registry/branch!` receives :seon.store/branch :base/held-lane and :seon.cluster.registry/from nil. The member's overlay must hold the base commit `seon.cluster.registry/base-commit-id` reads."
              :must-read #{seon.cluster.registry/fork! seon.cluster.registry/base-commit-id seon.cluster.registry/branch! my.agent/create-branch!}
-             :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"}}
+ #:seon.task{:name "fork-names-the-source-branch-its-callers-hold"
+             :kind :function
+             :intent "Central round 2026-10-12: three tests green at c53c9306e are red alone at HEAD because a branch name is nil or foreign where a fork needs one: seon.my.agent-test/retiring-a-branch-this-process-still-connects-is-refused-as-a-value (`seon.cluster.registry/fork!` passes `:seon.cluster.registry/from` nil to `seon.cluster.registry/branch!`, registry.clj:403), seon.mcp-entrance-test/an-agent-runs-its-own-test-on-its-own-branch (`seon.db/branch-database` given a nil branch) and seon.registry-isolation-test/two-clusters-own-their-contracts-and-share-stable-host-wrappers (`This write names branch :agent-5e9423b99705, which is not the writing cluster's branch`). Suspects: H5 a7195675a (a fresh agent's environment is two forks), 7267d54fb, c566e0401, 0c3916000. Done when the three are green alone on a fresh JVM."
+             :must-read #{seon.cluster.registry/fork! seon.cluster.registry/branch! seon.db/branch-database seon.registry-isolation-test/two-clusters-own-their-contracts-and-share-stable-host-wrappers}
+             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

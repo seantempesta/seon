@@ -174,7 +174,8 @@
           "a root with no prior program starts empty and says so")
       (finally (fs/delete-tree base)))))
 
-(deftest a-move-states-branch-heads-before-its-boot-writes
+(deftest ^{:seon/tasks #{'seon.operator/the-move-test-calls-launch-form-by-its-current-arity}}
+  a-move-states-branch-heads-before-its-boot-writes
   (let [with-capture (read-string (#'operator/launch-form
                                    {:seon.boot/cluster-name "default"
                                     :seon.operator/capture-heads "/root/data/store"} 1 "/root/data/source/c"))

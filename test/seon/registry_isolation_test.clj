@@ -55,7 +55,8 @@
     {}))
   (schema/projection-from-database @connection))
 
-(deftest two-clusters-own-their-contracts-and-share-stable-host-wrappers
+(deftest ^{:seon/tasks #{'seon.cluster.registry/fork-names-the-source-branch-its-callers-hold}}
+  two-clusters-own-their-contracts-and-share-stable-host-wrappers
   (support/with-database
    (fn [left]
      (support/with-database

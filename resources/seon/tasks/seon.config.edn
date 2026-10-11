@@ -19,4 +19,9 @@
              :kind :schema
              :intent ":seon.config.ai/no-provider is [:= true] and per-agent: an agent overlay can set it but never lift it, so with the cluster's no-provider on (default's standing setting) a branch agent cannot be pointed at a local stub provider without retracting the cluster config row on its branch (what repl-dogfood 2026-09-27 had to do). Make the dial a boolean whose overlay value wins, or document the branch-row route as the entrance."
              :must-read #{seon.config/effective seon.ai/agent-overlay}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-reapplied-manifest-converges-with-zero-operations"
+             :kind :function
+             :intent "Central round 2026-10-12: seven tests green at c53c9306e are red alone at HEAD because `seon.config/apply!` of an already applied manifest answers `:seon.reconcile/converged? false` with operations (6 or 7) and writes a transaction: seon.reconcile-test (first-apply-writes-and-reapply-is-zero-writes, planning-pulls-only-the-provenance-managed-slice), seon.config-test (apply-compiles-once-and-round-trips-through-database-facts, config-writer-submits-only-the-fact-difference, converged-apply-uses-carried-projection-and-remains-exact, initialization-entities-apply-query-and-converge-with-the-config-entity) and seon.index-reconcile-test/indexing-an-existing-population-uses-one-writer. The managed entity is not exact after its own apply (`[:db.fn/retractEntity ...]` planned again). Suspects: da356e6c8 (contract products retained with the projection), 7d7da5865 (cluster partition admitted before publishing), 6989f4407 (tasks and occurrences declared as cluster facts), 241b28434. Done when the seven are green alone on a fresh JVM."
+             :must-read #{seon.config/apply! seon.reconcile-test/first-apply-writes-and-reapply-is-zero-writes seon.config-test/apply-compiles-once-and-round-trips-through-database-facts}
+             :evidence #{"docs/research/agent-platform/2026-10-12/central-round.md"}}]

@@ -79,7 +79,8 @@
                 [?process :seon.db.process/id ?process-id]]
               @connection))))))
 
-(deftest first-apply-writes-and-reapply-is-zero-writes
+(deftest ^{:seon/tasks #{'seon.config/a-reapplied-manifest-converges-with-zero-operations}}
+  first-apply-writes-and-reapply-is-zero-writes
   (with-model-database
     (fn [connection]
       (let [desired [(config-entity "alpha" 10)]
