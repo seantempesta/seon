@@ -117,22 +117,16 @@
     :else :red))
 
 (defn proofs
-  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof.
-  A proof's result is the latest of `evaluators` (`seon.test.runner/accepted-evaluators` of the agent working
-  it), else of either evaluator."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :seon.task/sym]
-                   [:or :nil :seon.context/proofs :seon.error/value]]
-                  [:=> [:cat :seon.db/database-value :seon.task/sym [:set :seon.test.run/evaluator]]
-                   [:or :nil :seon.context/proofs :seon.error/value]]]}
-  ([database sym] (proofs database sym #{:compiled :interpreted}))
-  ([database sym evaluators]
+  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
+                  [:or :nil :seon.context/proofs :seon.error/value]]}
+  [database sym]
   (let [edges (task/task-edges database sym)
         names (when-not (:seon.error/at edges) (vec (sort (:seon.task/proofs edges))))]
     (if (empty? names)
       (when (:seon.error/at edges) edges)
       (let [digests (runner/reach-digests database names)
-            results (runner/latest-results database names evaluators)
+            results (runner/latest-results database names)
             sources (when-not (or (:seon.error/at digests) (:seon.error/at results))
                       (into {} (db/q database '[:find ?s ?src :in $ [?s ...] :where [?t :seon.test/sym ?s] [?t :seon.test/source ?src]]
                                      names)))]
@@ -146,7 +140,7 @@
                                                                     (assoc entry :seon.context/proof-failures f) entry)))))
                                 names)]
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
-               :seon.context/proof-list entries})))))))
+               :seon.context/proof-list entries}))))))
 
 (defn- all-green?
   "True when the proofs section `proven` holds proofs and every one is green."
@@ -168,16 +162,14 @@
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
 (defn task-done?
-  "True when the task `agent-id` holds has proofs, all green on `database`, the agent's branch, by the
-  evaluators that prove its work (`seon.test.runner/accepted-evaluators`), and its turn's
-  test step found no test its change broke (`:seon.agent/reached-red` absent: red there and green on the head, or
-  new); reached tests unverified or already red on the head never block it. The task is done for the agent,
-  pending root's merge, and the turn loop opens no continuation for it."
+  "True when the task `agent-id` holds has proofs, all green on `database`, the agent's branch, and its turn's
+  test step found no test its change reaches red there (`:seon.agent/reached-red` absent): the task is done for
+  the agent, pending root's merge, and the turn loop opens no continuation for it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [held (held-task database agent-id)]
     (boolean (and held (not (:seon.error/at held))
-                  (all-green? (proofs database (:seon.task/sym held) (runner/accepted-evaluators agent-id)))
+                  (all-green? (proofs database (:seon.task/sym held)))
                   (empty? (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))))))
 
 (defn- unshown
@@ -232,35 +224,28 @@
       (some-> (:seon.task/sym held) namespace symbol)))
 
 (defn- branch-outcome
-  "What the agent `agent-id` did on `branch-db` toward task `sym`: its model calls and tokens, its proofs'
-  counts and red proofs, and the reached tests its test step left unverified or found red on the head
-  (`:seon.agent/reached-unverified`, `:seon.agent/reached-red-on-target`); an error when a read refuses."
+  "What the agent `agent-id` did on `branch-db` toward task `sym`: its model calls and tokens and its proofs'
+  counts and red proofs; an error when a read refuses."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe :seon.task/sym]]
                   [:or [:map [:seon.task/calls :seon.task/calls] [:seon.task/prompt-tokens :seon.task/prompt-tokens]
                         [:seon.task/completion-tokens :seon.task/completion-tokens]
                         [:seon.task/proof-counts {:optional true} :seon.task/proof-counts]
-                        [:seon.task/red-proofs {:optional true} :seon.task/red-proofs]
-                        [:seon.task/unverified {:optional true} :seon.task/unverified]
-                        [:seon.task/red-on-target {:optional true} :seon.task/red-on-target]]
+                        [:seon.task/red-proofs {:optional true} :seon.task/red-proofs]]
                    :seon.error/value]]}
   [branch-db agent-id sym]
-  (let [proven (when sym (proofs branch-db sym (runner/accepted-evaluators agent-id)))
+  (let [proven (when sym (proofs branch-db sym))
         attempts (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
                          :in $ ?agent-id
                          :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
                        branch-db agent-id)
-        total #(transduce (keep (comp % second)) + 0 attempts)
-        reached (db/pull branch-db [:seon.agent/reached-unverified :seon.agent/reached-red-on-target] [:seon.agent/id agent-id])]
-    (or (some #(when (:seon.error/at %) %) [proven attempts reached])
+        total #(transduce (keep (comp % second)) + 0 attempts)]
+    (or (some #(when (:seon.error/at %) %) [proven attempts])
         (cond-> {:seon.task/calls (count (into #{} (map first) attempts))
                  :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
                  :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)}
           proven (assoc :seon.task/proof-counts (:seon.context/counts proven)
                         :seon.task/red-proofs (into [] (comp (filter #(= :red (:seon.context/proof-status %))) (map :seon.test/sym))
-                                                    (:seon.context/proof-list proven)))
-          (seq (:seon.agent/reached-unverified reached)) (assoc :seon.task/unverified (vec (sort (:seon.agent/reached-unverified reached))))
-          (seq (:seon.agent/reached-red-on-target reached))
-          (assoc :seon.task/red-on-target (vec (sort (:seon.agent/reached-red-on-target reached))))))))
+                                                    (:seon.context/proof-list proven)))))))
 
 (def ^:private proof-count-attributes
   "The agent attribute recording each proof status's count."
@@ -274,8 +259,6 @@
            :seon.agent/outcome-prompt-tokens (:seon.task/prompt-tokens outcome)
            :seon.agent/outcome-completion-tokens (:seon.task/completion-tokens outcome)}
     (seq (:seon.task/red-proofs outcome)) (assoc :seon.agent/outcome-red-proofs (set (:seon.task/red-proofs outcome)))
-    (seq (:seon.task/unverified outcome)) (assoc :seon.agent/outcome-unverified (set (:seon.task/unverified outcome)))
-    (seq (:seon.task/red-on-target outcome)) (assoc :seon.agent/outcome-red-on-target (set (:seon.task/red-on-target outcome)))
     true (into (keep (fn [[status attribute]] (when-let [n (get-in outcome [:seon.task/proof-counts status])] [attribute n])))
                proof-count-attributes)))
 
@@ -284,7 +267,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
   [database agent-id]
   (let [row (db/pull database (into [:seon.agent/outcome-calls :seon.agent/outcome-prompt-tokens :seon.agent/outcome-completion-tokens
-                                     :seon.agent/outcome-red-proofs :seon.agent/outcome-unverified :seon.agent/outcome-red-on-target]
+                                     :seon.agent/outcome-red-proofs]
                                     (vals proof-count-attributes))
                      [:seon.agent/id agent-id])
         counts (into {} (keep (fn [[status attribute]] (when-let [n (get row attribute)] [status n]))) proof-count-attributes)]
@@ -293,14 +276,11 @@
                :seon.task/prompt-tokens (:seon.agent/outcome-prompt-tokens row)
                :seon.task/completion-tokens (:seon.agent/outcome-completion-tokens row)}
         (seq counts) (assoc :seon.task/proof-counts counts)
-        (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/outcome-red-proofs row))))
-        (seq (:seon.agent/outcome-unverified row)) (assoc :seon.task/unverified (vec (sort (:seon.agent/outcome-unverified row))))
-        (seq (:seon.agent/outcome-red-on-target row))
-        (assoc :seon.task/red-on-target (vec (sort (:seon.agent/outcome-red-on-target row))))))))
+        (seq counts) (assoc :seon.task/red-proofs (vec (sort (:seon.agent/outcome-red-proofs row))))))))
 
 (defn outcome-tx
   "Transaction data recording the outcome of the task `agent-id` holds, derived from its branch in `database`
-  (calls, tokens, proof counts, red proofs and unverified or red-on-target reached tests): what the end summary needs after the branch is retired. Empty
+  (calls, tokens, proof counts and red proofs): what the end summary needs after the branch is retired. Empty
   when the agent has no branch, no task or its evidence is unreadable, so a summary never reads zeros for evidence
   that was not there."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.store/transaction-data]}
@@ -318,8 +298,7 @@
 (defn ended
   "The value a task's end message `entry` (an inbox entry carrying `:seon.task/end`) stands for: the task, how it
   ended, its proofs' counts and red proofs, the agent's errors grouped by signature, its model calls and tokens,
-  the merge task when it ended green with its landing (the commits it made, or the refusal it met with the
-  refusing gate run and each test's verdict in it), and the
+  the merge task when it ended green with its landing (the commits it made, or the refusal it met), and the
   operations root takes next. The outcome is the one recorded when
   the task ended, else derived from the agent's branch, else unknown (`:seon.task/outcome-unknown`), never zeros."
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
@@ -331,14 +310,10 @@
         branch-db (when (keyword? branch) (db/branch-database database branch))
         outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))
         landing (when merge
-                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests
-                                           :seon.task/refusal-reason :seon.task/blocked-by :seon.task/refused-run
-                                           {:seon.task/verdicts [:db/id :seon.task.verdict/test :seon.task.verdict/verdict
-                                                                 :seon.task.verdict/run]}]
+                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
                                      [:seon.task/id merge])]
                     (when (map? row) (cond-> (dissoc row :db/id)
-                                       (:seon.task/refused-tests row) (update :seon.task/refused-tests set)
-                                       (:seon.task/verdicts row) (update :seon.task/verdicts set)))))]
+                                       (:seon.task/refused-tests row) (update :seon.task/refused-tests set)))))]
     (or (when (:seon.error/at outcome) outcome)
         (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
                         :seon.render/operations
@@ -375,7 +350,7 @@
   (let [found (held-task database agent-id)
         held (when-not (:seon.error/at found) found)
         left (turn/turns-left database agent-id)
-        proven (when held (proofs database (:seon.task/sym held) (runner/accepted-evaluators agent-id)))
+        proven (when held (proofs database (:seon.task/sym held)))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items)
                    items

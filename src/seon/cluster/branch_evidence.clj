@@ -102,9 +102,9 @@
 (defn- platform-evidence?
   "Whether `test-symbol`'s latest result on `branch` ran in a platform run
   for its current reach there, green or red: the verdict buckets judge it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym [:set :seon.test.run/evaluator]] :boolean]}
-  [branch test-symbol evaluators]
-  (let [result (test/recorded-result branch test-symbol evaluators)
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
+  [branch test-symbol]
+  (let [result (test/recorded-result branch test-symbol)
         current (runner/reach-digests branch [test-symbol])]
     (boolean (and (:seon.test/pass-count result) (map? current)
                   (= (get current test-symbol) (:seon.test.member/reach-digest result))
@@ -116,9 +116,9 @@
   changed host-bound functions every reaching test of which has its current
   result from a platform run."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:vector :seon.program/declaration-identity]
-                       [:vector :seon.program/declaration-identity] [:vector :seon.fn/sym] [:set :seon.test.run/evaluator]]
+                       [:vector :seon.program/declaration-identity] [:vector :seon.fn/sym]]
                   [:or :map :seon.error/value]]}
-  [branch head changed removed host-bound evaluators]
+  [branch head changed removed host-bound]
   (let [present (remove (set removed) changed)
         reach (fn [database syms] (if (seq syms) (test/reaching {:seon.db/db database :seon.test/changed (vec syms)}) []))
         per-fn (into {} (for [[a s] present :when (= a :seon.fn/sym)] [s (reach branch [s])]))
@@ -129,28 +129,19 @@
               tests (into (sorted-set) cat [(apply concat (vals per-fn))
                                             (filter branch-tests gone)
                                             (for [[a s] present :when (= a :seon.test/sym)] s)])
-              verdicts (into {} (map (fn [t] [t (test/verified-by? branch t evaluators)])) tests)
+              verdicts (into {} (map (fn [t] [t (test/verified? branch t)])) tests)
               refusal (some #(when (map? %) %) (vals verdicts))]
           (or refusal
               (let [{verified true unverified false} (group-by #(true? (verdicts %)) tests)
                     {before true unproven false}
-                    (group-by #(and (runner/red-result? (test/recorded-result branch % evaluators))
-                                   (runner/red-at-current-reach? head % evaluators))
-                              unverified)]
+                    (group-by #(and (runner/red-result? (test/recorded-result branch %)) (runner/red-at-current-reach? head %)) unverified)]
                 {::verified (vec verified)
                  ::red-before (vec before)
                  ::unproven (vec unproven)
                  ::unreached (vec (sort (keep (fn [[s r]] (when (empty? r) s)) per-fn)))
-                 ::platform-proven (filterv (fn [s] (and (seq (per-fn s)) (every? #(platform-evidence? branch % evaluators) (per-fn s))))
+                 ::platform-proven (filterv (fn [s] (and (seq (per-fn s)) (every? #(platform-evidence? branch %) (per-fn s))))
                                             host-bound)
-                 ::run-ids (vec (sort (distinct (keep #(run-id (test/recorded-result branch % evaluators)) verified))))}))))))
-
-(defn- branch-agent
-  "The id of the agent homed on `branch` in `database`, or nil (root's) when none is."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.agent/id]]}
-  [database branch]
-  (db/q '[:find ?id . :in $ ?branch :where [?agent :seon.agent/branch ?branch] [?agent :seon.agent/id ?id]]
-        database branch))
+                 ::run-ids (vec (sort (distinct (keep #(run-id (test/recorded-result branch %)) verified))))}))))))
 
 (defn- commit-value
   "The commit id `branch` names in `store` and its database value, or the registry's error."
@@ -190,10 +181,8 @@
   commit, `seon.test.platform`; in-process evidence exercised the old compiled
   code; green or red, the usual buckets then judge it),
   else it is `:seon.source/host-bound`, and every test
-  reaching a declaration changed from `head` (its cluster's branch) is `seon.test/verified-by?`
-  on the branch head, by the evaluators proving the work of the agent homed there
-  (`seon.test.runner/accepted-evaluators`: its own interpreted runs and compiled ones), which
-  also read a red on the head. A changed function no test reaches is
+  reaching a declaration changed from `head` (its cluster's branch) is `seon.test/verified?`
+  on the branch head. A changed function no test reaches is
   `:seon.source/unreached`; a test red on the branch and recorded red on the
   head for its current reach there is `:seon.source/red-before`, accepted only
   when named in `:seon.source/accepted-red-before`. Answers data; an
@@ -213,8 +202,7 @@
         :else
         (let [files (mapv #(file-evidence root branch-db head-db %) paths)
               merged (apply merge-with into {::differing [] ::unanalyzable [] ::changed [] ::removed [] ::host-bound []} files)
-              tests (test-evidence branch-db head-db (::changed merged) (::removed merged) (::host-bound merged)
-                                   (runner/accepted-evaluators (branch-agent branch-db branch)))]
+              tests (test-evidence branch-db head-db (::changed merged) (::removed merged) (::host-bound merged))]
           (if (:seon.error/at tests)
             tests
             (verdict (merge merged tests {::branch-id branch-id ::head-id head-id}) (or accepted #{})))))

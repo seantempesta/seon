@@ -826,35 +826,8 @@
                         :seon.error/offending (select-keys held moved)}))))
     []))
 
-(defn- target-program-held-tx
-  "Transaction data that refuses, inside the writer, when a program
-  declaration's definition digest on `database` (the target) differs from the
-  one it held at `basis` (the basis-t a merge was prepared and tested on): the
-  tested composition is no longer what would land. Facts that are not program
-  declarations never stale it, nor does a namespace row added since (an agent's
-  creation declares its namespace; no declaration of it existed to be tested);
-  prepare again. The refusal names each moved declaration."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t] [:= []]]}
-  [database basis]
-  (let [entities (db/q '[:find [?e ...] :where [?e :seon.program/definition-digest]] (d/since (d/history database) basis))
-        before (d/as-of database basis)
-        identity-of (fn [e] (some #(program/row-identity (db/pull % (vec program/identity-attributes) e)) [database before]))
-        identities (into #{} (keep identity-of) entities)
-        held (held-digests before identities)
-        moved (remove (fn [[attribute :as identity]] (and (= :seon.ns/name attribute) (= :seon.program/absent (held identity))))
-                      (moved-digests held (held-digests database identities)))]
-    (when (seq moved)
-      (throw (ex-info "The target's program changed after the merge was prepared."
-                      (seon.error.refusal/diagnostic
-                       (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
-                       {:seon.error/message "Program declarations changed on the target after the merge was tested; prepare it again."
-                        :seon.error/member :seon.source/target-basis-t
-                        :seon.error/expected basis
-                        :seon.error/offending (set moved)}))))
-    []))
-
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files root-refusal program-changes)
+(declare proven-files root-refusal)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -887,44 +860,17 @@
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
          :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))))
 
-(defn- run-on-target!
-  "Run on `source`, the merge target whose program `head` is, each test of
-  `red` that failed on the candidate (its gate run's `results`) and that the
-  target holds with no result at its current reach, recording there with the
-  same runner, so a verdict compares red with red. Answers the proposal's
-  `:seon.source/target-run`, that run's id or the error it met, absent when
-  the target holds a current result for each (`seon.test.runner/statuses-at-current-reach`)."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/database-value :seon.test/results [:vector :seon.test/sym]]
-                  [:map [:seon.source/target-run {:optional true} :seon.source/target-run]]]}
-  [source head results red]
-  (let [red? (requiring-resolve 'seon.test.runner/red-result?)
-        failed (into [] (comp (filter red?) (map :seon.test/sym) (filter (set red)) (distinct)) results)
-        statuses (when (seq failed)
-                   ((requiring-resolve 'seon.test.runner/statuses-at-current-reach) head failed #{:compiled :interpreted}))
-        due (when (map? statuses) (into #{} (keep (fn [[test-symbol status]] (when (= :pending status) test-symbol))) statuses))]
-    (cond (:seon.error/at statuses) {:seon.source/target-run statuses}
-          (seq due) (let [run ((requiring-resolve 'seon.test/run)
-                               {:seon.test/policy :named :seon.test/execution source
-                                :seon.test/recording-connection (:seon.db/connection source) :seon.test/identities due})]
-                      {:seon.source/target-run (if (:seon.error/at run) run (:seon.test.run/id run))})
-          :else {})))
-
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
   `proofs` (the test symbols that prove the change: a merge task's proofs),
   and answer the proposal `accept-merge!` takes: the whole run's verdict and
   tally, and its red members by name, which refuse acceptance (AGENTS.md,
-  merge). A member that failed and that the target has no result for at its
-  current reach is run on the target first (`run-on-target!`), so acceptance
-  tells main's reds from the change's. A gate that answers no proposal
-  retires its tested branch. A change is a
+  merge). A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
-  transaction applies all three. A namespace row no file declares and no
-  changed declaration lives in is the agent's REPL scratch and is no change
-  (`program-changes`). A conflict answers the three-way value; an empty delta
-  refuses.
+  transaction applies all three. A conflict answers the three-way value; an
+  empty delta refuses.
 
   A `selection` of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
@@ -954,8 +900,8 @@
     (if (:seon.error/at c-id)
       c-id
       (let [
-            whole (when three (program-changes head (into (:seon.program/changed-on-branch three)
-                                                          (concat (:seon.program/added three) (:seon.program/retracted three)))))
+            whole (when three (into (:seon.program/changed-on-branch three)
+                                    (concat (:seon.program/added three) (:seon.program/retracted three))))
             unchanged (when (and whole selection) (vec (remove whole selection)))
             reach (when (and whole selection (empty? unchanged)) (unselected-reach branch whole selection))
             ;; A selected declaration carries its namespace entity when the candidate changed it (its requires).
@@ -1002,52 +948,37 @@
                                           (:seon.test/sym %))
                                        (:seon.test/results run))))]
               (cond
-                (or (:seon.error/at run) (seq unselected))
-                (do (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})
-                    (if (:seon.error/at run) run (refuse "The gate answered none of these proofs." unselected)))
+                (:seon.error/at run) run
+                (seq unselected) (refuse "The gate answered none of these proofs." unselected)
                 :else (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
                                      :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                                      :seon.task/proofs proofs
                                      :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
-                                     ;; The target program the run tested: accept refuses if it moved.
-                                     :seon.source/target-basis-t (db/basis-t head)
                                      ;; The merge advances the branch's base to the value it merged.
                                      :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
                                                                        :seon.branch/base-t (db/basis-t branch)))
-                        (seq red) (assoc :seon.source/red red)
-                        (seq red) (into (run-on-target! source head (:seon.test/results run) red))))))
+                        (seq red) (assoc :seon.source/red red)))))
           (finally (release! [base branch]))))))))
 
 (defn- red-test-verdicts
   "Each of `not-green` (test symbols of run `run-id` with no green member) with
   the run that recorded its result and its verdict: `:unknown` with no
-  executed failure, or red with no outcome on `head` at its current reach
-  (`run-on-target!` ran it there first); `:red-on-target` when it is red on
-  `head` there; else `:red`, green on `head` or a test `head` does not hold.
-  One batch read of `head` (`seon.test.runner/statuses-at-current-reach`),
-  whatever their count."
+  executed failure, `:red-on-target` when it is red on `head` for its current
+  reach there, else `:red`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :seon.test/results [:sequential :seon.test/sym]]
-                  [:or [:vector :seon.source/red-test] :seon.error/value]]}
+                  [:vector :seon.source/red-test]]}
   [head run-id results not-green]
   (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
         red? (requiring-resolve 'seon.test.runner/red-result?)
-        tests (vec (sort (distinct not-green)))
-        failed (filterv #(some-> (by-symbol %) red?) tests)
-        on-head (if (seq failed)
-                  ((requiring-resolve 'seon.test.runner/statuses-at-current-reach) head failed #{:compiled :interpreted})
-                  {})]
-    (if (:seon.error/at on-head)
-      on-head
-      (into [] (map (fn [test-symbol]
-                      (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
-                        {:seon.test/sym test-symbol
-                         :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
-                         :seon.source/verdict (cond (not (and result (red? result))) :unknown
-                                                    :else (case (get on-head test-symbol ::absent)
-                                                            :red :red-on-target
-                                                            :pending :unknown
-                                                            :red))})))
-            tests))))
+        red-on-target? (requiring-resolve 'seon.test.runner/red-at-current-reach?)]
+    (into [] (map (fn [test-symbol]
+                    (let [{run :seon.test/run :as result} (by-symbol test-symbol)]
+                      {:seon.test/sym test-symbol
+                       :seon.test.run/id (or (if (vector? run) (second run) (:seon.test.run/id run)) run-id)
+                       :seon.source/verdict (cond (not (and result (red? result))) :unknown
+                                                  (red-on-target? head test-symbol) :red-on-target
+                                                  :else :red)})))
+          (sort (distinct not-green)))))
 
 (defn- red-test-refusal
   "The refusal of a merge whose run `run-id` on `s` left `red-tests` not
@@ -1065,15 +996,6 @@
                             "A test of the named run is not green; a merge commits only when every test is.")
       :seon.source/red-tests red-tests :seon.source/refused-test-run run-id :seon.test.run/branch s})))
 
-(defn- merge-task-accepted-tx
-  "Transaction data deciding `merge-task` `:accepted` in the transaction that
-  merges it, naming that transaction and the gate run `run-id`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge :seon.test.run/id] :seon.db/tx-data]}
-  [_ merge-task run-id]
-  [[:db/add [:seon.task/id merge-task] :seon.task/outcome :accepted]
-   [:db/add [:seon.task/id merge-task] :seon.task/accepted-tx :db/current-tx]
-   [:db/add [:seon.task/id merge-task] :seon.task/gate-run run-id]])
-
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into
   `source`: the named run on S complete, each of its `:seon.task/proofs` a
@@ -1081,18 +1003,11 @@
   function reached by a green member, and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the proposal's `:seon.source/expected-digests`; writes to
-  other rows never stale it, and it refuses when any program declaration on
-  the target moved since the proposal's `:seon.source/target-basis-t` (the
-  composition the run tested). The merge commit's parents add the candidate and
+  other rows never stale it. The merge commit's parents add the candidate and
   S's head, and it writes the merged branch's fork entity with its advanced
   base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
-  head refuses, by handle and holder. A proposal naming its `:seon.task/merge`
-  decides that merge task `:accepted` in the merge commit itself, with the
-  accepting transaction (`:seon.task/accepted-tx`) and the gate run
-  (`:seon.task/gate-run`), so a landing that stops after acceptance resumes
-  from the record. Answers the accepted merge `write-back!` takes: its
-  identities, the accepting transaction, the commit before it, its merge
-  commit and the run.
+  head refuses, by handle and holder. Answers the accepted merge `write-back!`
+  takes: its identities, the commit before it, its merge commit and the run.
 
   Example:
   (accept-merge! source store proposal)"
@@ -1100,14 +1015,11 @@
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:seon.task/proofs :seon.task/proofs]
                         [:seon.source/expected-digests :seon.source/expected-digests]
-                        [:seon.source/target-basis-t :seon.source/target-basis-t]
                         [:parents [:set :seon.source/commit-id]]
-                        [:seon.source/advanced-base :seon.source/advanced-base]
-                        [:seon.task/merge {:optional true} :seon.task/merge]]]
+                        [:seon.source/advanced-base :seon.source/advanced-base]]]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
   [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base
-                      basis :seon.source/target-basis-t merge-task :seon.task/merge}]
+                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
@@ -1155,7 +1067,6 @@
               (refuse "Every proof must be a member of the named run." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
-              (:seon.error/at red-tests) red-tests
               (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "
@@ -1169,13 +1080,10 @@
               (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         {:tx-data (cond-> (into [[:db.fn/call declarations-held-tx expected]
-                                                                  [:db.fn/call target-program-held-tx basis] advanced] tx)
-                                                     merge-task (conj [:db.fn/call #'merge-task-accepted-tx merge-task run-id]))
+                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected] advanced] tx)
                                           :parents (conj merged e-id)})]
                 (if (:db-after report)
                   {:seon.program/identities delta :seon.test.run/id run-id
-                   :seon.source/accepted-t (:max-tx (:db-after report))
                    ;; The head this commit merged into is its parent other than
                    ;; the merged ones: Datahike's own lineage. A report's
                    ;; `:db-before` is the writer's uncommitted value and can name
@@ -1268,17 +1176,6 @@
                       :in $ ?name :where [?ns :seon.ns/name ?name] [?ns :seon.fn/file ?file]]
                     database namespace-name)]
     (when (= 1 (count files)) (first files))))
-
-(defn- program-changes
-  "`identities` without each namespace row no file declares on `database`
-  (`namespace-path`) and none of `identities` is declared in: an agent's REPL
-  scratch, such as `user` after a `require`, which no merge writes back."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.program/identity-set]}
-  [database identities]
-  (let [declared-in (into #{} (keep (fn [[_ declared]] (when (qualified-symbol? declared) (symbol (namespace declared))))) identities)]
-    (into #{} (remove (fn [[attribute declared]]
-                        (and (= :seon.ns/name attribute) (not (declared-in declared)) (nil? (namespace-path database declared)))))
-          identities)))
 
 (defn- file-rows
   "The declarations `text`, the file at `path` under `root`, holds by identity,
@@ -1606,58 +1503,16 @@
                         (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
                     [] (sort-by key groups)))))
 
-(defn- blob-digest
-  "The file digest (`sha-256`) of `path` in `root`'s working tree, or with
-  `rev`, of its blob in that commit; nil when absent."
-  {:malli/schema [:function [:=> [:cat :seon.fn/root :seon.source/path] [:maybe :string]]
-                  [:=> [:cat :seon.fn/root :seon.source/path :string] [:maybe :string]]]}
-  ([root path]
-   (let [file (io/file root (str path))]
-     (when (.isFile file) (sha-256 (Files/readAllBytes (.toPath file))))))
-  ([root path rev]
-   (let [{:keys [exit out]} (process/shell {:dir root :out :bytes :err :string :continue true}
-                                           "git" "cat-file" "blob" (str rev ":" path))]
-     (when (zero? exit) (sha-256 out)))))
-
-(defn- installed-tx
-  "Transaction data recording on `merge-task` that the file at `path` holds its proven `candidate-digest`."
-  {:malli/schema [:=> [:cat :seon.task/merge :seon.source/path :seon.source/candidate-digest] :seon.store/transaction-data]}
-  [merge-task path candidate-digest]
-  [[:db/add [:seon.task/id merge-task] :seon.task/installed [path candidate-digest]]])
-
-(defn- uncommitted-paths
-  "Each of `paths` whose bytes in the checkout `root` differ from its blob in
-  the commit `head` (`digests` names a path's bytes when they were read
-  already, else they are read now), in path order."
-  {:malli/schema [:=> [:cat :seon.fn/root :seon.git/head [:map-of :seon.source/path :string] [:set :seon.source/path]]
-                  [:vector :seon.source/path]]}
-  [root head digests paths]
-  (vec (sort (remove #(= (or (digests %) (blob-digest root %)) (blob-digest root % head)) paths))))
-
 (defn- write-back-commits
-  "`write-back!` between the accepted merge's `before` and `after` values: the
-  files of `installed` (path to candidate digest, already written) are skipped,
-  and each file installed is recorded on `merge-task` when one is named. With
-  the commit `head`, every other file must hold exactly its blob there, both
-  before it is proven and as it was proven, so the candidate is that blob plus
-  the merge's declarations and nothing uncommitted rides along."
+  "`write-back!` between the accepted merge's `before` and `after` commits."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
-                       :seon.db/database-value :seon.fn/root [:maybe :seon.task/merge] :seon.source/installed
-                       [:maybe :seon.git/head]]
+                       :seon.db/database-value :seon.fn/root]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [connection accepted before after root merge-task installed head]
+  [connection accepted before after root]
   (let [identities (:seon.program/identities accepted)
         merged (held-digests after identities)
         moved (moved-digests merged (held-digests (db/db connection) identities))
-        remaining (into #{} (remove #(contains? installed (change-path before %))) identities)
-        dirty (when (and head (empty? moved))
-                (uncommitted-paths root head {} (into #{} (keep #(change-path before %)) remaining)))
-        proven (when (and (empty? moved) (empty? dirty)) (if (seq remaining) (proven-files before after remaining root) []))
-        ;; a file edited between that check and its proof read was proven from the edit
-        dirty (if (and head (vector? proven))
-                (uncommitted-paths root head (into {} (map (juxt :seon.source/path :seon.source/base-digest)) proven)
-                                   (into #{} (map :seon.source/path) proven))
-                dirty)
+        proven (when (empty? moved) (proven-files before after identities root))
         disk-digest #(sha-256 (Files/readAllBytes (.toPath (io/file root (str (:seon.source/path %))))))
         changed (when (vector? proven) (first (remove #(= (:seon.source/base-digest %) (disk-digest %)) proven)))
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
@@ -1667,9 +1522,6 @@
                           {:seon.error/member :seon.source/accepted
                            :seon.error/expected (select-keys merged moved)
                            :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})
-      (seq dirty)
-      (write-back-refusal :uncommitted-edits "A file this landing writes holds edits git HEAD does not; nothing was written. It lands once those edits are committed."
-                          {:seon.source/path (first dirty) :seon.error/offending dirty})
       (:seon.error/at proven) proven
       changed
       (write-back-refusal :file-changed "The file changed while the candidate was proven."
@@ -1678,32 +1530,23 @@
       (reduce
        (fn [written {path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
                      entities :seon.source/proof-rows}]
-         (let [digest (sha-256 candidate)
-               failure (try (install! (.getPath (io/file root (str path))) candidate) nil
-                            (catch Exception failure failure))
-               ;; recorded before the next file, so a landing that stops after it resumes past it
-               recorded (when (and merge-task (nil? failure))
-                          (db/transact! connection (installed-tx merge-task path digest)))
-               added (kind entities #(and (not %1) %2))
-               retracted (kind entities #(and %1 (not %2)))]
-           (cond
-             ;; Files installed before this one stay installed and are named.
-             failure (reduced (write-back-refusal :install-failed "The proven candidate could not be installed."
-                                                  {:seon.source/path path :seon.source/changed-paths (:seon.source/changed-paths written)
-                                                   :seon.error/throwable failure}))
-             (and recorded (not (:db-after recorded)))
-             (reduced (write-back-refusal :not-recorded "The file was installed but its installation could not be recorded on the merge task."
-                                          {:seon.source/path path :seon.source/changed-paths (conj (:seon.source/changed-paths written) path)
-                                           :seon.error/offending (:seon.error/message recorded)}))
-             :else
+         (try
+           (install! (.getPath (io/file root (str path))) candidate)
+           (let [added (kind entities #(and (not %1) %2))
+                 retracted (kind entities #(and %1 (not %2)))]
              (-> written
                  (update :seon.source/changed-paths conj path)
                  (update :seon.source/files conj
                          (cond-> {:seon.source/path path :seon.source/base-digest base-digest
-                                  :seon.source/candidate-digest digest
+                                  :seon.source/candidate-digest (sha-256 candidate)
                                   :seon.source/replaced (kind entities #(and %1 %2))}
                            (seq added) (assoc :seon.source/added added)
-                           (seq retracted) (assoc :seon.source/retracted retracted)))))))
+                           (seq retracted) (assoc :seon.source/retracted retracted)))))
+           (catch Exception failure
+             ;; Files installed before this one stay installed and are named.
+             (reduced (write-back-refusal :install-failed "The proven candidate could not be installed."
+                                          {:seon.source/path path :seon.source/changed-paths (:seon.source/changed-paths written)
+                                           :seon.error/throwable failure})))))
        {:seon.source/changed-paths [] :seon.source/files []}
        proven))))
 
@@ -1726,9 +1569,7 @@
   candidate to the file's other declarations unchanged and the merge commit's
   digests for the written ones. Every file's disk bytes are checked again, then each
   candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
-  publication owner. With `:seon.git/head` (a landing's commit), a file to
-  write whose bytes differ from its blob in that commit, before or as it is
-  proven, refuses `:uncommitted-edits` naming the paths, and nothing is written.
+  publication owner.
 
   `:seon.fn/root` is the checkout's absolute path (`seon.fs/checkout-root?`);
   a relative path or one inside a `data/source` archive is refused as
@@ -1738,23 +1579,17 @@
   (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"})"
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root
-    merge-task :seon.task/merge installed :seon.source/installed head :seon.git/head}]
-  ;; An accepting transaction is read through the target's retained history; two
-  ;; commit ids (a branch beside its head, `my.program/write-branch!`) as commits.
-  (let [t (:seon.source/accepted-t accepted)
-        [before after] (if t
-                         (let [database (db/db connection)] [(d/as-of database (dec t)) (d/as-of database t)])
-                         (map #(some->> (% accepted) (d/commit-as-db connection))
-                              [:seon.source/base-commit-id :seon.source/commit-id]))]
+  [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root}]
+  (let [[before after] (map #(d/commit-as-db connection (% accepted))
+                            [:seon.source/base-commit-id :seon.source/commit-id])]
     (try
       (if-let [refused (root-refusal root)]
         refused
       (if (some nil? [before after])
         (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
                             {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
-        (write-back-commits connection accepted before after root merge-task (or installed {}) head)))
-      (finally (when-not t (run! #(some-> % d/release-materialized-db) [before after]))))))
+        (write-back-commits connection accepted before after root)))
+      (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Landing: one green proposal onto main, its files and one git commit
@@ -1769,11 +1604,11 @@
 
 (defn- commit-refusal
   "`commit!`'s refusal: its message and evidence."
-  {:malli/schema [:=> [:cat [:vector :seon.source/path] :seon.git/commit-refused :string :map] :seon.git/commit-error]}
-  [paths reason message members]
+  {:malli/schema [:=> [:cat [:vector :seon.source/path] :string :map] :seon.git/commit-error]}
+  [paths message members]
   (seon.error.refusal/error :seon.git/commit-error
    (merge {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/commit!
-           :seon.error/message message :seon.git/paths paths :seon.git/commit-refused reason}
+           :seon.error/message message :seon.git/paths paths}
           members)))
 
 (defn- commit-message
@@ -1783,10 +1618,10 @@
     commit-id :seon.source/commit-id}
    paths]
   (str "Land " (or task-sym (str "merge task " merge-task)) (when agent-id (str " from agent " agent-id))
-       ": merged on main" (when commit-id (str " as " commit-id)) " by gate run " run-id "\n\n"
+       ": merged on main as " commit-id " by gate run " run-id "\n\n"
        "Written: " (str/join " " paths) "\n\n"
        "Merge-task: " merge-task "\n"
-       (when commit-id (str "Merge-commit: " commit-id "\n"))
+       "Merge-commit: " commit-id "\n"
        "Branch-evidence-runs: " run-id "\n"
        "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
 
@@ -1802,7 +1637,7 @@
   [root paths f]
   (let [git-dir (git root ["rev-parse" "--absolute-git-dir"])]
     (if-not (zero? (:exit git-dir))
-      (commit-refusal paths :no-git-dir "The checkout's git directory could not be read." {:seon.error/offending (:err git-dir)})
+      (commit-refusal paths "The checkout's git directory could not be read." {:seon.error/offending (:err git-dir)})
       (let [holder (process/process {:dir root :err :string}
                                     "perl" "-MFcntl=:flock" "-e"
                                     (str "open(my $lock, '>>', shift) or die \"lane-commit.lock: $!\\n\"; "
@@ -1812,138 +1647,42 @@
         (try
           (if (= "locked" (.readLine (io/reader (:out holder))))
             (f)
-            (commit-refusal paths :lock-not-taken "The lane commit lock could not be taken; nothing was committed."
+            (commit-refusal paths "The lane commit lock could not be taken; nothing was committed."
                             {:seon.error/offending (str/trim (:err @holder))}))
           (finally
             (.close ^java.io.OutputStream (:in holder))
             (deref holder)))))))
 
 (defn- commit-locked
-  "`commit!` under the lane commit lock: the staged-index and proven-bytes
-  checks, the commit of exactly `paths` and its verification: one parent, the
-  previous head, and each written path's blob the proven candidate."
-  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] [:map-of :seon.source/path :string] :seon.source/acceptance]
+  "`commit!` under the lane commit lock: the staged-index check, the commit of
+  exactly `paths` and its verification."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
-  [root paths candidates acceptance]
+  [root paths acceptance]
   (let [staged (git root ["diff" "--cached" "--name-only"])
         other (when (zero? (:exit staged)) (vec (remove (set paths) (remove str/blank? (str/split-lines (:out staged))))))
-        unproven (vec (remove #(and (candidates %) (= (candidates %) (blob-digest root %))) paths))
         before (git root ["rev-parse" "HEAD"])]
     (cond
-      (not (zero? (:exit staged))) (commit-refusal paths :index-unreadable "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
-      (seq other) (commit-refusal paths :other-staged "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
-      (empty? paths) (commit-refusal paths :nothing-written "The landing wrote no path to commit." {:seon.error/offending paths})
-      (seq unproven) (commit-refusal paths :unproven "A written path no longer holds the candidate write-back proved; nothing was committed."
-                                     {:seon.error/offending unproven})
+      (not (zero? (:exit staged))) (commit-refusal paths "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
+      (seq other) (commit-refusal paths "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
+      (empty? paths) (commit-refusal paths "The landing wrote no path to commit." {:seon.error/offending paths})
       :else
       (let [made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
             after (git root ["rev-parse" "HEAD"])
-            parents (rest (str/split (:out (git root ["rev-list" "--parents" "-n" "1" (:out after)])) #" "))
-            carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])
-            differing (vec (remove #(= (candidates %) (blob-digest root % (:out after))) paths))]
+            carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])]
         (cond
-          (not (zero? (:exit made))) (commit-refusal paths :commit-failed "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
-          (not= [(:out before)] parents)
-          (commit-refusal paths :not-on-head "The commit git made is not on the previous head alone; history is not rewritten."
-                          {:seon.error/offending (vec parents) :seon.error/expected [(:out before)] :seon.git/commit (:out after)})
+          (not (zero? (:exit made))) (commit-refusal paths "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
           (not= (set paths) (set (str/split-lines (:out carried))))
-          (commit-refusal paths :not-exact "The commit git made is not exactly the written paths; history is not rewritten."
+          (commit-refusal paths "The commit git made is not exactly the written paths; history is not rewritten."
                           {:seon.error/offending (str/split-lines (:out carried)) :seon.error/expected paths})
-          (seq differing)
-          (commit-refusal paths :not-candidate "The commit git made does not hold the proven candidate bytes; history is not rewritten."
-                          {:seon.error/offending differing :seon.git/commit (:out after)})
           :else {:seon.git/commit (:out after)})))))
-
-(defn- landed-commit
-  "The commit in `root`'s history whose message names merge task `merge-task`
-  (`commit-message`'s trailer), or nil: a landing that stopped after git
-  committed and before the commit was recorded."
-  {:malli/schema [:=> [:cat :seon.fn/root :seon.task/merge] [:maybe :seon.git/commit]]}
-  [root merge-task]
-  (let [{:keys [exit out]} (git root ["log" "-n" "1" "--format=%H" "-F" (str "--grep=Merge-task: " merge-task)])]
-    (when (and (zero? exit) (not (str/blank? out))) out)))
-
-(defn- recorded-landing
-  "What merge task `merge-task` records of its landing on `database`: the
-  accepting transaction, the gate run, the main and git commits and the files
-  installed (path to candidate digest)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :map]}
-  [database merge-task]
-  (let [{accepted :seon.task/accepted-tx :as row}
-        (db/pull database [{:seon.task/accepted-tx [:db/id]} :seon.task/gate-run :seon.task/landed
-                           :seon.task/landed-git :seon.task/installed]
-                 [:seon.task/id merge-task])]
-    (cond-> (select-keys row [:seon.task/gate-run :seon.task/landed :seon.task/landed-git])
-      (:db/id accepted) (assoc :seon.source/accepted-t (:db/id accepted))
-      true (assoc :seon.source/installed (into {} (:seon.task/installed row))))))
-
-(defn write-and-commit!
-  "`write-back!` of `request` and the commit of exactly what it wrote
-  (`commit!`'s checks and verification, its message from `acceptance`), both
-  while this process holds the checkout's `.git/lane-commit.lock`, so no other
-  landing or lane commit reads, replaces or commits those files in between.
-  With `:seon.task/merge`, the merge task's record is read inside that hold:
-  the files it records installed (by an earlier call that stopped) are not
-  written again and are committed with the rest, each installed file and the
-  git commit are recorded on it as they are made, a recorded git commit is
-  answered with nothing written, and a resumed call whose files were all
-  written answers the commit its history already holds for the merge task.
-  Without one, the request's `:seon.source/installed` names the files written.
-  A file to write that holds edits the checkout's HEAD does not (a lane's
-  uncommitted work, a hand edit) refuses `:uncommitted-edits` and nothing is
-  written or committed; a file this landing installed earlier is not one.
-  Answers `{:seon.source/written … :seon.git/commit …}`, the write-back's
-  refusal, or the commit's refusal carrying `:seon.source/written`.
-
-  Example:
-  (write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"} acceptance)"
-  {:malli/schema [:=> [:cat :seon.source/write-back-request :seon.source/acceptance]
-                  [:or [:map [:seon.source/written :seon.source/written] [:seon.git/commit :seon.git/commit]]
-                   :seon.source/write-back-error :seon.git/commit-error :seon.error/value]]}
-  [{root :seon.fn/root connection :seon.db/connection merge-task :seon.task/merge :as request}
-   acceptance]
-  (or (root-refusal root)
-      (call-with-commit-lock
-       root []
-       (fn []
-         ;; the merge task's record is read inside the lock hold: a concurrent resume that committed first is answered
-         (let [recorded (when merge-task (recorded-landing (db/db connection) merge-task))
-               landed-git (:seon.task/landed-git recorded)
-               installed (if merge-task (:seon.source/installed recorded) (or (:seon.source/installed request) {}))
-               head (git root ["rev-parse" "--verify" "HEAD"])
-               written (cond
-                         landed-git {:seon.source/changed-paths [] :seon.source/files []}
-                         (not (zero? (:exit head)))
-                         (commit-refusal [] :no-git-dir "The checkout's HEAD commit could not be read; nothing was written."
-                                         {:seon.error/offending (:err head)})
-                         ;; the files written hold their HEAD blobs, so the commit carries only what the merge proved
-                         :else (write-back! (assoc request :seon.source/installed installed :seon.git/head (:out head))))
-               candidates (into installed (map (juxt :seon.source/path :seon.source/candidate-digest))
-                                (:seon.source/files written))
-               paths (vec (sort (keys candidates)))
-               found (when (and merge-task (not landed-git) (seq installed) (empty? (:seon.source/files written)))
-                       (let [sha (landed-commit root merge-task)]
-                         (when (and sha (every? #(= (candidates %) (blob-digest root % sha)) paths)) sha)))
-               committed (cond (:seon.error/at written) nil
-                               landed-git {:seon.git/commit landed-git}
-                               found {:seon.git/commit found}
-                               :else (commit-locked root paths candidates acceptance))
-               recorded (when (and merge-task (not landed-git) (:seon.git/commit committed))
-                          (db/transact! connection [[:db/add [:seon.task/id merge-task] :seon.task/landed-git
-                                                     (:seon.git/commit committed)]]))]
-           (cond
-             (:seon.error/at written) written
-             (:seon.error/at committed) (assoc committed :seon.source/written written)
-             (and recorded (not (:db-after recorded))) (assoc recorded :seon.source/written written)
-             :else {:seon.source/written written :seon.git/commit (:seon.git/commit committed)}))))))
 
 (defn commit!
   "Commit exactly the paths `written` installed under the checkout `root` as one git commit
   (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
   `:seon.git/commit`. Refuses, committing nothing, when anything else is staged in the
-  index (the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
-  landings) or when a path no longer holds its proven `:seon.source/candidate-digest`.
-  The commit made is verified: the previous head its one parent, each path's blob the candidate. The check and the commit hold `.git/lane-commit.lock` as `bin/lane commit`
+  index: the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
+  landings. The check and the commit hold `.git/lane-commit.lock` as `bin/lane commit`
   does, so neither interleaves with a concurrent lane commit. A commit git made that is not exactly the written paths on the previous head
   is answered as a refusal naming what it carries; history is never rewritten.
 
@@ -1952,9 +1691,8 @@
   {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
   [root written acceptance]
-  (let [paths (vec (:seon.source/changed-paths written))
-        candidates (into {} (map (juxt :seon.source/path :seon.source/candidate-digest)) (:seon.source/files written))]
-    (call-with-commit-lock root paths #(commit-locked root paths candidates acceptance))))
+  (let [paths (vec (:seon.source/changed-paths written))]
+    (call-with-commit-lock root paths #(commit-locked root paths acceptance))))
 
 (defn- acceptance-names
   "The task, agent and merge task an accepted landing names, read on the cluster `database`."
@@ -1969,77 +1707,6 @@
       (symbol? task-sym) (assoc :seon.task/sym task-sym)
       (string? agent-id) (assoc :seon.agent/id agent-id))))
 
-(defn- recorded-accepted
-  "The accepted merge the transaction `t` made on `database`'s branch, read
-  through its retained history: the declarations whose definition digest that
-  transaction wrote, identified as of it or, retracted, as of the one before."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] :seon.source/accepted]}
-  [database t]
-  (let [entities (db/q '[:find [?e ...] :in $ ?t :where [?e :seon.program/definition-digest _ ?t]]
-                       (d/since (d/history database) (dec t)) t)
-        identity-of (fn [e] (some #(program/row-identity (db/pull % (vec program/identity-attributes) e))
-                                  [(d/as-of database t) (d/as-of database (dec t))]))]
-    {:seon.program/identities (into #{} (keep identity-of) entities) :seon.source/accepted-t t}))
-
-(def ^:private transient-refusals
-  "The landing refusal reasons a later attempt clears by itself: a file or fact
-  that could not be written, a file holding edits its owner has not committed
-  yet, the git directory, lock or index held or busy, a failed `git commit`.
-  Retrying any other reason meets it again until root decides."
-  #{:install-failed :not-recorded :uncommitted-edits :no-git-dir :lock-not-taken :index-unreadable :other-staged :commit-failed})
-
-(defn landing-refusal-reason
-  "The reason a landing's `refused` value names: its write-back or commit refusal reason, or nil."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.task/refusal-reason]]}
-  [refused]
-  (or (:seon.source/write-back-refused refused) (:seon.git/commit-refused refused)))
-
-(defn awaits-decision?
-  "Whether merge task `merge-task`'s landing on `database` stopped after
-  acceptance for a reason retrying cannot clear, so it waits for root: its
-  recorded `:seon.task/refusal-reason` is not transient, unless the landing it
-  was blocked behind has since made its git commit."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :boolean]}
-  [database merge-task]
-  (let [landed-git #(:seon.task/landed-git (db/pull database [:seon.task/landed-git] [:seon.task/id %]))
-        {reason :seon.task/refusal-reason blocker :seon.task/blocked-by :as row}
-        (db/pull database [:seon.task/accepted-tx :seon.task/landed-git :seon.task/refusal-reason :seon.task/blocked-by]
-                 [:seon.task/id merge-task])]
-    (boolean (and (:seon.task/accepted-tx row) (nil? (:seon.task/landed-git row)) reason
-                  (not (transient-refusals reason))
-                  (not (and blocker (landed-git blocker)))))))
-
-(defn- stuck-landings
-  "Each landing on `database` that waits for root (`awaits-decision?`), as its
-  merge task and accepting transaction, in the order main accepted them."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :seon.task/merge :int]]]}
-  [database]
-  (let [found (db/q '[:find ?handle ?t :where [?m :seon.task/refusal-reason _] [?m :seon.task/accepted-tx ?t]
-                      (not [?m :seon.task/landed-git]) [?m :seon.task/id ?handle]]
-                    database)]
-    (if (db/read-refusal? found)
-      []
-      (vec (sort-by second (filter #(awaits-decision? database (first %)) found))))))
-
-(defn- landing-paths
-  "The files the merge accepted by transaction `t` on `database` writes, each change's one file (`change-path`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:set :seon.source/path]]}
-  [database t]
-  (let [before (d/as-of database (dec t))]
-    (into #{} (keep #(change-path before %)) (:seon.program/identities (recorded-accepted database t)))))
-
-(defn- blocking-landing
-  "The earliest landing on `database` waiting for root (`stuck-landings`),
-  other than `merge-task` and accepted before it when it is accepted, that
-  writes one of `paths`; nil when none. A file's landings land in main's order."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge [:set :seon.source/path]] [:maybe :seon.task/merge]]}
-  [database merge-task paths]
-  (let [own (:db/id (:seon.task/accepted-tx (db/pull database [{:seon.task/accepted-tx [:db/id]}] [:seon.task/id merge-task])))]
-    (some (fn [[handle t]]
-            (when (and (not= handle merge-task) (or (nil? own) (< t own)) (some (landing-paths database t) paths))
-              handle))
-          (stuck-landings database))))
-
 (defn- land-held!
   "`land!` through `execution`, which carries its `:seon.store/store`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
@@ -2051,78 +1718,41 @@
         timed (fn [step f] (let [start (System/nanoTime) value (f)]
                              (vswap! clock assoc step (quot (- (System/nanoTime) start) 1000000))
                              value))
-        ;; a landing accepted earlier resumes from its record and never prepares or accepts again
-        recorded (recorded-landing (db/db connection) merge-task)
-        resumed? (contains? recorded :seon.source/accepted-t)
-        prepared (when-not resumed?
-                   (timed :prepare #(prepare-merge! execution store branch (into #{} (map first) proved) nil root)))
-        accepted (cond resumed? (merge (recorded-accepted (db/db connection) (:seon.source/accepted-t recorded))
-                                       (when-let [c (:seon.task/landed recorded)] {:seon.source/commit-id c})
-                                       (when-let [r (:seon.task/gate-run recorded)] {:seon.test.run/id r}))
-                       (:seon.source/candidate prepared)
-                       (let [answer (timed :accept #(accept-merge! execution store (assoc prepared :seon.task/merge merge-task)))]
-                         ;; a refused gate's tested branch is retired: its verdicts are recorded on the merge task
-                         (when-not (:seon.source/accepted-t answer)
-                           (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
-                         answer))
-        ;; accept-merge! decided the merge task in its merge commit; the main commit is known only after it
-        decided (when (and (not resumed?) (:seon.source/commit-id accepted))
+        prepared (timed :prepare #(prepare-merge! execution store branch (into #{} (map first) proved) nil root))
+        accepted (when (:seon.source/candidate prepared) (timed :accept #(accept-merge! execution store prepared)))
+        decided (when (:seon.source/commit-id accepted)
                   (timed :decide #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
-                                      (db/transact! connection [[:db/add [:seon.task/id merge-task] :seon.task/landed
-                                                                 (:seon.source/commit-id accepted)]]))))
-        acceptance (when (:seon.source/accepted-t accepted)
+                                      ((requiring-resolve 'seon.task/decide!) connection merge-task :accepted))))
+        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at decided)))
+                  (timed :write-back #(write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})))
+        acceptance (when (:seon.source/changed-paths written)
                      (merge (acceptance-names (db/db connection) merge-task)
                             (select-keys accepted [:seon.test.run/id :seon.source/commit-id])))
-        ;; a landing whose file an earlier stuck landing holds waits behind it, so the file follows main's order
-        blocker (when (and acceptance (not (:seon.task/landed-git recorded)) (or (nil? decided) (:db-after decided)))
-                  (let [database (db/db connection)]
-                    (blocking-landing database merge-task (landing-paths database (:seon.source/accepted-t accepted)))))
-        landed (cond (not acceptance) nil
-                     (and decided (not (:db-after decided))) nil
-                     (:seon.task/landed-git recorded) {:seon.git/commit (:seon.task/landed-git recorded)}
-                     blocker (write-back-refusal :blocked "A landing main accepted earlier stopped holding a file this one writes; this one is written after that landing's git commit."
-                                                 {:seon.task/blocked-by blocker})
-                     :else
-                     (timed :write-and-commit
-                            #(write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root
-                                                 :seon.task/merge merge-task}
-                                                acceptance)))]
+        committed (when acceptance (timed :commit #(commit! root written acceptance)))]
     (cond
       (seq (:seon.program/conflict prepared))
       (seon.error.refusal/error :seon.source/conflict-error
        {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/land!
         :seon.error/message "The candidate and main changed the same declarations since the merge base; resolve on the branch and propose again."
         :seon.task/merge merge-task :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
-      (and (not resumed?) (not (:seon.source/candidate prepared)))
-      ;; a refused file a stuck landing holds names that landing
-      (if-let [held (some->> (:seon.source/path prepared) hash-set (blocking-landing (db/db connection) merge-task))]
-        (assoc prepared :seon.task/blocked-by held)
-        prepared)
-      (not (:seon.source/accepted-t accepted)) accepted
-      (and decided (not (:db-after decided))) (assoc decided :seon.source/accepted accepted)
-      (:seon.error/at landed) (assoc landed :seon.source/accepted accepted)
-      :else (cond-> (assoc landed :seon.source/accepted accepted :seon.source/step-ms @clock)
-              (:seon.source/commit-id accepted) (assoc :seon.source/commit-id (:seon.source/commit-id accepted))))))
+      (not (:seon.source/candidate prepared)) prepared
+      (not (:seon.source/commit-id accepted)) accepted
+      (:seon.error/at decided) (assoc decided :seon.source/accepted accepted)
+      (:seon.error/at written) (assoc written :seon.source/accepted accepted)
+      (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
+      :else {:seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
+             :seon.source/written written :seon.git/commit (:seon.git/commit committed)
+             :seon.source/step-ms @clock})))
 
 (defn land!
   "Land the green `proposal` (an open merge proposal, `my.program/proposals`) in one call:
   `prepare-merge!` on a fresh branch of `execution`'s head, `accept-merge!` through the
-  unchanged gate (deciding the merge task `:accepted`; the tested branch is retired either way),
-  then `write-and-commit!`: `write-back!` into the checkout `root` and the commit of
-  exactly the written bytes, under one hold of the lane commit lock.
+  unchanged gate (deciding the merge task `:accepted` and retiring the tested branch),
+  `write-back!` into the checkout `root` and `commit!` of exactly the written paths.
   Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
   data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
-  undecided and merges nothing (main may record the target run of a red test it had no result for); a write-back or commit refusal after acceptance carries
-  `:seon.source/accepted` (main already holds the merge).
-  Each effect is recorded on the merge task as it is made: the acceptance in the
-  merge commit, each installed file, the git commit. Calling `land!` again with
-  the same proposal resumes from that record: it never prepares or accepts
-  again, writes only the files not yet installed, commits once, and a landed
-  merge task answers its recorded commit.
-  A file holds its landings in main's order: while a landing accepted earlier
-  waits for root (`awaits-decision?`) holding a file this one writes, this one
-  is refused `:blocked` naming it (`:seon.task/blocked-by`) before writing,
-  and a prepare refused over such a file names it too.
+  undecided and writes nothing; a write-back or commit refusal after acceptance carries
+  `:seon.source/accepted` (main already holds the merge) for a retry.
 
   Example:
   (land! execution proposal \"/Users/me/src/project\")"

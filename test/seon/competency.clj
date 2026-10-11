@@ -221,11 +221,13 @@
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
                        database)
-        closed? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+        home (or (some-> (task/home database) db/db) database)
+        ;; a task's end closes the agent at the task home, with its end message
+        closed? (:seon.agent/admission-closed-tx (db/pull home [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
         ended (when closed?
                 (db/q '[:find ?end . :in $ ?agent-id
                         :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
-                      (db/db (task/home database)) agent-id))]
+                      home agent-id))]
     (cond (or (empty? calls) (some #(nil? (:seon.turn/closed-tx %)) calls) testing?) :running
           ended ended
           (not (@#'turn/continuing-reply? database agent-id)) :waiting

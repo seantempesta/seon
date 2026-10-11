@@ -70,20 +70,10 @@
   (delay (requiring-resolve 'seon.context/outcome-tx)))
 (defonce ^:private source-land!
   (delay (requiring-resolve 'seon.cluster.source/land!)))
-(defonce ^:private source-refusal-reason
-  (delay (requiring-resolve 'seon.cluster.source/landing-refusal-reason)))
-(defonce ^:private source-awaits-decision?
-  (delay (requiring-resolve 'seon.cluster.source/awaits-decision?)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
   (delay (requiring-resolve 'seon.test.runner/latest-results)))
-(defonce ^:private registry-fork-of
-  (delay (requiring-resolve 'seon.cluster.registry/fork-of)))
-(defonce ^:private test-statuses
-  (delay (requiring-resolve 'seon.test.runner/statuses-at-current-reach)))
-(defonce ^:private test-accepted-evaluators
-  (delay (requiring-resolve 'seon.test.runner/accepted-evaluators)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-reaching
@@ -2126,11 +2116,19 @@
                                [?evaluation :seon.eval/duration-ms _]]
                              database previous-t)))))
 
-(defn- admission-closed?
-  "True when the agent `agent-id`'s admission is closed on `database`: its task ended or it retired."
+(defn- closed-on?
+  "True when the agent `agent-id`'s row on `database` has its admission closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (some? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))))
+
+(defn- admission-closed?
+  "True when the agent `agent-id`'s admission is closed on `database`, where it retires, or at the task home seen
+  from it (`seon.task/home`), where its task's end is written (`end-task-call`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (or (closed-on? database agent-id)
+      (boolean (some-> (task/home database) db/db (closed-on? agent-id)))))
 
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
@@ -2152,7 +2150,7 @@
 
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
-  green and its change broke no reached test (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
+  green (`seon.context/task-done?`), `:given-back` once a turn completed (`my.turn/complete`), `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
@@ -2168,24 +2166,25 @@
             (stalled? database agent-id) :stalled))))
 
 (defn end-task-call
-  "Close the admission of `agent-id`, whose task ended, at the writer; nothing when it is already closed,
-  so a task's end is recorded once."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end] :seon.store/transaction-data]}
-  [database agent-id _end]
-  (if (admission-closed? database agent-id)
+  "Record the end of the task `agent-id` holds at the writer on the task home `database`: the end message `candidate`
+  to root (`seon.cluster.message/send-call`) and the agent's admission closed, as one transaction; nothing when the
+  admission is already closed, so a task's end is recorded once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message]
+                  :seon.store/transaction-data]}
+  [database agent-id _end candidate]
+  (if (closed-on? database agent-id)
     []
-    [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]))
+    (conj (vec (message/send-call database candidate agent-id))
+          [:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"])))
 
 (defn- end-message
   "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
-  subject and, ended green, the merge task its proposal recorded (`merge`). Its id is the end's occurrence (the
-  agent and the task it holds), so delivering the same end again writes nothing (`seon.cluster.message/send!`)."
+  subject and, ended green, the merge task its proposal recorded (`merge`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
                   :my.message/message]}
   [database agent-id end merge]
   (let [held (task/agent-task (or (some-> (task/home database) db/db) database) agent-id)]
-    (cond-> {:seon.message/id (seon.id/digest 12 [:seon.task/end agent-id held])
-             :my.message/to "root" :my.message/about held :seon.task/end end
+    (cond-> {:my.message/to "root" :my.message/about held :seon.task/end end
              :my.message/content (str "My task ended: " (name end) "."
                                       (when merge " Its merge request is the merge task this message names."))}
       merge (assoc :seon.task/merge merge))))
@@ -2207,125 +2206,59 @@
         proposal (when (and (seq found) (not (db/read-refusal? found)))
                    (update (second (last (sort-by first found))) :seon.task/proved set))]
     (when proposal
-      (merge proposal (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal :seon.task/landed-git]
-                                       [:seon.task/id (:seon.task/merge proposal)])
+      (merge proposal (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge proposal)])
                               :db/id)))))
-
-(defn- unfinished-landings
-  "The landings at the task home `home` that stopped after acceptance: each merge task accepted
-  (`:seon.task/accepted-tx`) with no git commit recorded (`:seon.task/landed-git`), as its latest proposal with its
-  outcome, in the order main accepted them."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
-  [home]
-  (let [found (db/q '[:find ?accepted ?tx (pull ?p [:seon.task/proposal :seon.task/merge :seon.task/branch :seon.task/commit
-                                                    :seon.task/proved :seon.task/run-id :seon.task/program])
-                      :where [?m :seon.task/accepted-tx ?accepted] (not [?m :seon.task/landed-git])
-                      [?m :seon.task/id ?handle] [?p :seon.task/merge ?handle] [?p :seon.task/proposal _ ?tx]]
-                    home)]
-    (if (db/read-refusal? found)
-      []
-      (->> (group-by #(:seon.task/merge (nth % 2)) found)
-           vals
-           (map #(last (sort-by second %)))
-           (sort-by first)
-           (mapv #(-> (nth % 2) (update :seon.task/proved set) (assoc :seon.task/outcome :accepted)))))))
 
 (defn- landing-tx
   "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
-  or the refusal's error type, its reason (`seon.cluster.source/landing-refusal-reason`), the landing it waits
-  behind, the tests whose red verdict refused it and, replacing the previous refusal's, the refusing gate run
-  and each test's verdict there (`:seon.task/verdicts`, references only)."
+  or the refusal's error type and the tests whose red verdict refused it."
   {:malli/schema [:=> [:cat :seon.task/merge :map] :seon.store/transaction-data]}
   [merge-task landed]
   ;; a write-back or commit refusal after acceptance carries the accepted merge: main holds it
   (let [main (or (:seon.source/commit-id landed) (get-in landed [:seon.source/accepted :seon.source/commit-id]))
         git (:seon.git/commit landed)
-        refused (:seon.error/type landed)
-        reason (when refused (@source-refusal-reason landed))
-        blocker (:seon.task/blocked-by landed)
-        red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))
-        run (:seon.source/refused-test-run landed)
-        verdicts (into #{} (keep (fn [{test-symbol :seon.test/sym verdict :seon.source/verdict run-id :seon.test.run/id}]
-                                   (when (and test-symbol verdict run-id)
-                                     {:seon.task.verdict/test test-symbol :seon.task.verdict/verdict verdict
-                                      :seon.task.verdict/run run-id})))
-                       (:seon.source/red-tests landed))
-        retract #(vector :db.fn/retractAttribute [:seon.task/id merge-task] %)]
-    (cond-> (if refused (mapv retract [:seon.task/refused-tests :seon.task/verdicts :seon.task/refused-run]) [])
-      true (conj (cond-> {:seon.task/id merge-task}
-               main (assoc :seon.task/landed main)
-               (string? git) (assoc :seon.task/landed-git git)
-               refused (assoc :seon.task/refusal refused)
-               reason (assoc :seon.task/refusal-reason reason)
-               blocker (assoc :seon.task/blocked-by blocker)
-               (and refused (seq red)) (assoc :seon.task/refused-tests red)
-               (and refused run) (assoc :seon.task/refused-run run)
-               (and refused (seq verdicts)) (assoc :seon.task/verdicts verdicts)))
-      ;; a resumed landing that committed answers the refusal its stopped attempt recorded
-      (and (string? git) (not refused))
-      (into (map retract) [:seon.task/refusal :seon.task/refusal-reason :seon.task/blocked-by])
-      (and refused (not reason)) (conj (retract :seon.task/refusal-reason))
-      (and refused (not blocker)) (conj (retract :seon.task/blocked-by)))))
-
-(defn- landing-exception
-  "The refusal standing for what landing merge task `merge-task` threw (`failure`): a
-  `:seon.source/landing-exception-error` keeping its class and cause chain."
-  {:malli/schema [:=> [:cat :seon.task/merge :seon.error/throwable] :seon.error/base]}
-  [merge-task failure]
-  (seon.error.refusal/error :seon.source/landing-exception-error
-                            {:seon.error/operation `land-end! :seon.error/layer :seon.source/merge
-                             :seon.error/throwable failure :seon.task/merge merge-task}))
+        red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))]
+    [(cond-> {:seon.task/id merge-task}
+       main (assoc :seon.task/landed main)
+       (string? git) (assoc :seon.task/landed-git git)
+       (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
+       (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]))
 
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
-  is open and unrefused, or accepted with no git commit (a landing that stopped after acceptance, which
-  `seon.cluster.source/land!` resumes from its record): `seon.cluster.source/land!` into the checkout
-  `:seon.config.fs/working-root` through root's world, then record its result on the merge task at the task home
-  (`landing-tx`). Whatever the landing path throws is translated once, here, into a
-  `:seon.source/landing-exception-error` (`landing-exception`) recorded on the merge task like any refusal: before
-  acceptance it waits for root, after acceptance it carries no reason, so the next end retries it. Answers the
-  landing, or nil when nothing was landed."
+  is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
+  root's world, then record its result on the merge task at the task home (`landing-tx`). Answers the landing, or
+  nil when nothing was landed."
   {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
   [cluster agent-id proposal]
   (let [database (db/db (:seon.db/connection cluster))
-        land? (agent-dial database cluster agent-id :seon.config.root/land?)
-        merge-task (:seon.task/merge proposal)
-        {outcome :seon.task/outcome refusal :seon.task/refusal git :seon.task/landed-git} proposal
-        record! (fn [home landed] [landed (db/transact! home (landing-tx merge-task landed))])]
-    (when (and (true? land?) merge-task
-               (or (and (nil? outcome) (nil? refusal)) (and (= :accepted outcome) (nil? git))))
-      (let [[landed recorded]
-            (try
-              (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
-                    ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
-                    execution (@cluster-agent-acquire-context!
-                               cluster "root" {:seon.agent/branch (:seon.agent/branch (db/pull database [:seon.agent/branch]
-                                                                                               [:seon.agent/id "root"]))})
-                    home (:seon.db/connection execution)]
-                ;; the landing is root's work on root's branch: its writes run in that branch's custody
-                (db/call-with-custody
-                 {:seon.db/connection home}
-                 #(record! home (@source-land! execution (select-keys proposal [:seon.task/proposal :seon.task/merge :seon.task/branch
-                                                                                :seon.task/commit :seon.task/proved :seon.task/run-id
-                                                                                :seon.task/program])
-                                               root))))
-              ;; THE LANDING'S ONE TRANSLATION: a throw becomes its typed refusal on the merge task
-              (catch Exception failure
-                (let [home (task/home-connection (:seon.db/connection cluster))]
-                  (db/call-with-custody {:seon.db/connection home}
-                                        #(record! home (landing-exception merge-task failure))))))]
+        land? (agent-dial database cluster agent-id :seon.config.root/land?)]
+    (when (and (true? land?) (:seon.task/merge proposal)
+               (not (:seon.task/outcome proposal)) (not (:seon.task/refusal proposal)))
+      (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
+            ;; root's world on its own branch, named as the MCP entrance names it (no isolation, no new branch)
+            execution (@cluster-agent-acquire-context!
+                       cluster "root" {:seon.agent/branch (:seon.agent/branch (db/pull database [:seon.agent/branch]
+                                                                                       [:seon.agent/id "root"]))})
+            home (:seon.db/connection execution)
+            ;; the landing is root's work on root's branch: its writes run in that branch's custody
+            [landed recorded]
+            (db/call-with-custody
+             {:seon.db/connection home}
+             #(let [landed (@source-land! execution (select-keys proposal [:seon.task/proposal :seon.task/merge :seon.task/branch
+                                                                           :seon.task/commit :seon.task/proved :seon.task/run-id
+                                                                           :seon.task/program])
+                                          root)]
+                [landed (db/transact! home (landing-tx (:seon.task/merge proposal) landed))]))]
         (if (:db-after recorded) landed recorded)))))
 
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
   it ended green (`my.program/proposal!`, the agent's own act; a proposal this end already recorded is reused,
-  `end-proposal`), land it with no root when the dial says so (`land-end!`), after resuming every landing that
-  stopped after acceptance (`unfinished-landings`) and is not waiting for root
-  (`seon.cluster.source/awaits-decision?`), record the agent's outcome at the
-  task home (`seon.context/outcome-tx`), send root the one end message (`end-message`), then close the agent
-  (`end-task-call`), last, so whoever sees the agent closed finds its message; nil otherwise. An end whose message
-  is not delivered leaves the agent open, so the next observation delivers it; one already delivered is not sent
-  twice (the message's id is the end's). A refused step is a fault recorded beside the pass."
+  `end-proposal`), land it with no root when the dial says so (`land-end!`), record the agent's outcome at the
+  task home (`seon.context/outcome-tx`), then send root the one end message and close the agent in one
+  transaction at the task home (`end-task-call`), so whoever sees the agent closed finds its message; nil
+  otherwise. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
   (let [connection (:seon.db/connection cluster)
@@ -2346,17 +2279,8 @@
                                                 :seon.db/connection (:seon.db/connection execution)
                                                 :seon.agent/id agent-id})))
             _ (when (:seon.error/at proposal) (fault! 'my.program/proposal! proposal))
-            ;; landings that stopped after acceptance resume first, in main's order, before this end's own;
-            ;; one refused for a reason retrying cannot clear waits for root and is not attempted
-            landed (into [] (comp (remove #(@source-awaits-decision? (db/db home) (:seon.task/merge %)))
-                                  (keep #(land-end! cluster agent-id %)))
-                         (concat (remove #(= (:seon.task/merge proposal) (:seon.task/merge %)) (unfinished-landings (db/db home)))
-                                 (when (:seon.task/merge proposal) [proposal])))
-            ;; a refused record, and a throw the landing translated, are Seon's own failures: faults too
-            _ (doseq [refused landed :when (and (:seon.error/at refused)
-                                                (or (not (:seon.error/message refused))
-                                                    (= :seon.source/landing-exception-error (:seon.error/type refused))))]
-                (fault! `land-end! refused))
+            landed (when (:seon.task/merge proposal) (land-end! cluster agent-id proposal))
+            _ (when (and (:seon.error/at landed) (not (:seon.error/message landed))) (fault! `land-end! landed))
             ;; the outcome is written at the task home before the message, so whoever reads the message finds it
             outcome-tx (@context-outcome-tx (db/db connection) agent-id)
             kept (when (seq outcome-tx)
@@ -2364,14 +2288,13 @@
                      (db/transact! home outcome-tx)
                      (db/call-with-custody {:seon.db/connection home} #(db/transact! home outcome-tx))))
             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/outcome-tx kept))
-            sent (message/send! (end-message (db/db connection) agent-id end (:seon.task/merge proposal))
-                                connection agent-id)
-            ;; a refused write answers the writer's refusal, which carries no message id
-            delivered? (some? (:seon.message/id sent))
-            _ (when-not delivered? (fault! `message/send! sent))
-            ;; the end closes the agent only once root holds its message: undelivered, it stays due
-            outcome (when delivered? (db/transact! connection [[:db.fn/call #'end-task-call agent-id end]]))]
-        (when (and delivered? (not (:db-after outcome))) (fault! `end-task-call outcome))))
+            candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge proposal)))
+            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate]]
+                                        :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
+            outcome (cond (:seon.error/at candidate) candidate
+                          (identical? home connection) (write!)
+                          :else (db/call-with-custody {:seon.db/connection home} write!))]
+        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
     nil))
 
 (defn next-agent-work
@@ -5438,70 +5361,42 @@
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
-(def ^:private reached-attributes
-  "The agent attribute recording each verdict on the tests its change reaches."
-  {:red :seon.agent/reached-red :unverified :seon.agent/reached-unverified :red-on-target :seon.agent/reached-red-on-target})
-
-(defn- reached-verdicts
-  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, by
-  verdict against `head`, the branch's merge target (`merge-target`), each sorted and absent when empty: `:red`,
-  red on the branch at its current reach and green on the head there, a test the head does not hold, or any red
-  with no target (a break its change made); `:red-on-target`, red on both (`seon.test.runner/red-at-current-reach?`, the merge gate's
-  verdict); `:unverified`, with no current result on the branch, or red there with none on the head, left to
-  the merge gate. The branch's results are those of the evaluators proving its work
-  (`seon.test.runner/accepted-evaluators`), the head's either, as the merge gate reads them."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] :seon.agent/id
-                       [:or :seon.test/changed :seon.error/value]]
-                  [:or [:map-of [:enum :red :unverified :red-on-target] [:vector {:min 1} :seon.test/sym]] :seon.error/value]]}
-  [database head agent-id changed]
+(defn- reached-red
+  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, whose
+  latest result there is not green (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [database agent-id changed]
   (if (:seon.error/at changed)
-    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) {} changed)
+    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) [] changed)
     (let [proofs (task-proofs database agent-id)
           reached (when-not (:seon.error/at proofs)
                     (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
           tests (when (sequential? reached) (vec (remove (set proofs) reached)))
-          branch (when (seq tests) (@test-statuses database tests (@test-accepted-evaluators agent-id)))
-          red (when (map? branch) (filterv #(= :red (get branch %)) tests))
-          target (when (and head (seq red)) (@test-statuses head red #{:compiled :interpreted}))]
-      (or (some #(when (:seon.error/at %) %) [proofs reached branch target])
-          (let [verdict (fn [test-symbol]
-                          (if (not= :red (get branch test-symbol))
-                            (when (not= :green (get branch test-symbol)) :unverified)
-                            (case (get target test-symbol ::absent)
-                              :red :red-on-target
-                              (:green ::absent) :red
-                              :unverified)))]
-            (into {} (map (fn [[k syms]] [k (vec (sort syms))]))
-                  (dissoc (group-by verdict tests) nil)))))))
+          results (when (seq tests) (@test-latest-results database tests))]
+      (or (some #(when (:seon.error/at %) %) [proofs reached results])
+          (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0))
+                                                  (zero? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
+                                         (:seon.test/sym %)))
+                            results)]
+            (vec (sort (remove green tests))))))))
 
-(defn- merge-target
-  "The database of the branch `database`'s branch merges into (its fork's `:seon.branch/target`, as the merge gate
-  compares it); nil when it is no fork, as the cluster's own branch."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/database-value]]}
-  [database]
-  (when-let [target (:seon.branch/target (@registry-fork-of database (get-in database [:config :branch])))]
-    (db/branch-database database target)))
-
-(defn- record-reached!
-  "Record on the agent's row on its branch `connection` the verdicts on the tests its whole change `changed`
-  reaches (`reached-verdicts` against its `merge-target`), replacing the previous step's: `seon.context/task-done?`
-  reads `:seon.agent/reached-red`. Answers them."
+(defn- record-reached-red!
+  "Record on the agent's row on its branch `connection` the tests its whole change `changed` reaches that are not
+  green there (`reached-red`), replacing the previous step's: what `seon.context/task-done?` reads. Answers them."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
-                  [:or [:map-of [:enum :red :unverified :red-on-target] [:vector {:min 1} :seon.test/sym]] :seon.error/value]]}
+                  [:or [:vector :seon.test/sym] :seon.error/value]]}
   [connection agent-id changed]
   (let [database (db/db connection)
-        verdicts (reached-verdicts database (merge-target database) agent-id changed)
-        row (db/pull database (vec (vals reached-attributes)) [:seon.agent/id agent-id])
-        tx (when-not (:seon.error/at verdicts)
-             (into [] (mapcat (fn [[verdict attribute]]
-                                (let [now (set (get verdicts verdict)) held (set (get row attribute))]
-                                  (concat (map #(vector :db/retract [:seon.agent/id agent-id] attribute %) (remove now held))
-                                          (map #(vector :db/add [:seon.agent/id agent-id] attribute %) (remove held now))))))
-                   reached-attributes))]
-    (if (or (:seon.error/at verdicts) (empty? tx))
-      verdicts
+        red (reached-red database agent-id changed)
+        held (set (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))
+        tx (when (vector? red)
+             (into (mapv #(vector :db/retract [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove (set red) held))
+                   (map #(vector :db/add [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove held red))))]
+    (if (or (:seon.error/at red) (empty? tx))
+      red
       (let [report (db/transact! connection tx)]
-        (if (:seon.error/at report) report verdicts)))))
+        (if (:seon.error/at report) report red)))))
 
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
@@ -5522,12 +5417,11 @@
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
       (let [reaching (run-reaching execution (max 1 left) changed platform)
             ;; a derivation that fails is shown beside the step's values, never in place of them
-            red (try (let [verdicts (record-reached! connection agent-id changed)]
-                       (if (:seon.error/at verdicts) verdicts (:red verdicts)))
+            red (try (record-reached-red! connection agent-id changed)
                      (catch Throwable failure
                        (or (error/refusal failure)
                            (seon.error.refusal/diagnostic
-                            (Date.) :seon.turn/test-step `record-reached!
+                            (Date.) :seon.turn/test-step `record-reached-red!
                             {:seon.error/message "The reached tests' status could not be recorded."
                              :seon.error/exception-class (.getName (class failure))}))))]
         (some-> (summary (ran-something proofs) (ran-something reaching) platform)

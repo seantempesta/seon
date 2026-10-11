@@ -8,7 +8,6 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [hasch.core :as hasch]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.host :as host]
             [seon.cluster.message :as message]
@@ -77,8 +76,7 @@
               accepted (source/accept-merge! target store green)]
           (is (true? (:seon.test/passed? green)))
           (is (= {:seon.program/identities #{[:seon.fn/sym (sym "merge-callee")]} :seon.test.run/id (:seon.test.run/id green)
-                  :seon.source/base-commit-id h :seon.source/commit-id (db/commit-id (db/db h-conn))
-                  :seon.source/accepted-t (:max-tx (db/db h-conn))}
+                  :seon.source/base-commit-id h :seon.source/commit-id (db/commit-id (db/db h-conn))}
                  accepted)
               "a plain value naming what merged, never a transaction report")
           (is (= tested (digest h-conn "merge-callee")) "the tested replacement, not C's later edit")
@@ -135,42 +133,6 @@
       (finally
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/accept-fences-the-target-program-it-tested}
-           :seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit."
-           :seon.test/long-ms 60000}
-  a-callee-changed-on-the-target-after-prepare-refuses-acceptance
-  ;; f calls g; the candidate changes only f; g changes on the target between prepare and accept
-  (let [target (support/execution-handle nil)
-        store (:seon.store/store target)
-        h-conn (:seon.db/connection target)
-        fn-entity #(entity (db/db %1) :fn %2 %3)
-        proofs #{(sym "fence-check")}
-        c (keyword (str "merge-test-fence-" (id/id)))
-        _ (write! h-conn [(fn-entity h-conn "fence-callee" "(defn fence-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
-                          (fn-entity h-conn "fence-caller" "(defn fence-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/fence-callee))")])
-        _ (write! h-conn [(entity (db/db h-conn) :test "fence-check" "(clojure.test/deftest fence-check (clojure.test/is (= 1 (seon.cluster.merge-test/fence-caller))))")])
-        _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
-        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
-        c-conn (:seon.db/connection candidate)
-        made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target store c proofs)]
-                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)]
-    (try
-      (write! c-conn [(fn-entity c-conn "fence-caller" "(defn fence-caller {:malli/schema [:=> [:cat] :int]} [] (inc (dec (seon.cluster.merge-test/fence-callee))))")])
-      (let [green (prepare)
-            moved (write! h-conn [(fn-entity h-conn "fence-callee" "(defn fence-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
-            refused (source/accept-merge! target store green)]
-        (is (true? (:seon.test/passed? green)) "f-new over g-old is green")
-        (is (= :seon.source/target-basis-t (:seon.error/member refused))
-            "the target's program changed since the tested basis: accept refuses")
-        (is (= #{[:seon.fn/sym (sym "fence-callee")]} (:seon.error/offending refused)) "naming what changed")
-        (is (= moved (db/commit-id (db/db h-conn))) "the refused merge takes zero datoms")
-        (is (false? (:seon.test/passed? (prepare))) "prepared again, the composition that would land is red"))
-      (finally
-        (cluster.agent/release-context! candidate)
-        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
   a-fork-of-a-work-branch-compares-with-the-target-through-its-parents-changes
@@ -267,40 +229,6 @@
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
-           :seon.test/long "One prepare (one nested seon.test/run on the candidate) and the run of its red test on the target (60 s is this namespace's measured bound for one)."
-           :seon.test/long-ms 120000}
-  a-test-never-run-on-the-target-is-not-blamed-on-the-merge
-  ;; Before, a test red on the candidate with no result on the target at its
-  ;; current reach was the change's (:red), though the target fails it too.
-  (let [target (support/execution-handle nil)
-        store (:seon.store/store target)
-        h-conn (:seon.db/connection target)
-        fn-entity #(entity (db/db %1) :fn %2 %3)
-        test-entity #(entity (db/db %1) :test %2 %3)
-        callee #(str "(defn unrun-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
-        c (keyword (str "merge-test-c-" (id/id)))
-        _ (write! h-conn [(fn-entity h-conn "unrun-callee" (callee 1))])
-        _ (write! h-conn [(test-entity h-conn "unrun-proof" "(clojure.test/deftest unrun-proof (clojure.test/is (pos? (seon.cluster.merge-test/unrun-callee))))")
-                          (test-entity h-conn "unrun-broken" "(clojure.test/deftest unrun-broken (clojure.test/is (= 0 (seon.cluster.merge-test/unrun-callee))))")])
-        _ (registry/fork! {:seon.store/store store :seon.store/branch c
-                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
-        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
-        c-conn (:seon.db/connection candidate)
-        made (volatile! [])]
-    (try
-      (write! c-conn [(fn-entity c-conn "unrun-callee" (callee "(* 1 1)"))])
-      (let [proposal (source/prepare-merge! target store c #{(sym "unrun-proof")})
-            _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-            refusal (source/accept-merge! target store proposal)]
-        (is (= [(sym "unrun-broken")] (:seon.source/red proposal)) "the gate ran it red")
-        (is (= :seon.source/red-on-target-error (:seon.error/type refusal)) "it stops for root, not blamed on the change")
-        (is (= #{[(sym "unrun-broken") :red-on-target]}
-               (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refusal))))))
-      (finally
-        (cluster.agent/release-context! candidate)
-        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
-
 (defn- git!
   "Run git with `args` in `root`; its trimmed standard output, throwing on a non-zero exit."
   [root & args]
@@ -319,12 +247,6 @@
     (git! root "add" ".")
     (git! root "commit" "-q" "-m" "fixture")
     root))
-
-(defn- written-file
-  "One write-back entry naming `text` as the candidate installed at `path`, by its digest."
-  [path text]
-  {:seon.source/path path :seon.source/base-digest "x" :seon.source/replaced []
-   :seon.source/candidate-digest (hasch/hash->str (hasch/sha256 (.getBytes ^String text "UTF-8")))})
 
 (defn- agent-eval
   "The last reply item of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
@@ -407,41 +329,15 @@
                  head (git! root "rev-parse" "HEAD")
                  proposal (proposed! running connection "side"
                                      "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-                 main (digest connection 'tq.land/side)
+                 main (db/commit-id (db/db connection))
                  refused (source/land! execution proposal root)]
              (is (= :seon.source/red-test-error (:seon.error/type refused)))
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
              (is (nil? (outcome (:seon.task/merge proposal))) "the merge task stays undecided")
-             ;; main records the target run of the red test it never ran (its own evidence), never the change
-             (is (= main (digest connection 'tq.land/side)) "main's program is unchanged")
+             (is (= main (db/commit-id (db/db connection))) "main is unchanged")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
-         (finally (support/delete-root! root)))))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/an-agents-repl-scratch-namespace-never-blocks-its-landing}
-           :seon.test/long "One own-branch agent's first request, assignment and proposal run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
-           :seon.test/long-ms 120000}
-  a-require-in-the-agents-user-namespace-lands-with-its-change
-  (support/with-running-agent
-   (fn [running _ connection]
-     (let [member (get-in (db/db connection) [:config :branch])
-           cluster-name (:seon.cluster/name (support/execution-handle nil))
-           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-           path "test/tq/land.clj"
-           root (checkout! "scratch-land-test" {path land-source})
-           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-           execution (support/running-cluster running)]
-       (try
-         ;; agent r7-problems-prose required the namespace it fixed from `user`; its landing refused :one-file
-         (let [proposal (proposed! running connection "area"
-                                   (str "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-                                        "\n(in-ns 'user)\n(require 'tq.land)"))
-               landed (source/land! execution proposal root)]
-           (is (nil? (:seon.error/type landed)) "the landing answers no refusal")
-           (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "only the changed file is written")
-           (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD"))
          (finally (support/delete-root! root)))))))
 
 (def ^:private shape-source
@@ -516,149 +412,14 @@
            (is (= before (git! root "rev-parse" "HEAD^"))))
          (finally (support/delete-root! root)))))))
 
-(defn- writable!
-  "Make the directory `dir` under `root` writable or not: a landing's install there fails while it is not."
-  [root dir writable?]
-  (.setWritable (io/file root dir) writable? false))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-resumes-from-its-recorded-evidence}
-           :seon.test/long "One own-branch agent's first request, assignment and proposal run, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and four resumed landings."
-           :seon.test/long-ms 180000}
-  a-landing-stopped-after-acceptance-resumes-to-one-git-commit
-  (support/with-running-agent
-   (fn [running _ connection]
-     (let [member (get-in (db/db connection) [:config :branch])
-           cluster-name (:seon.cluster/name (support/execution-handle nil))
-           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-           path "test/tq/shape.clj"
-           schema-path "resources/seon/schemas/tq.shape.edn"
-           root (checkout! "land-resume-test" {path shape-source schema-path shape-schemas})
-           schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
-           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-           execution (support/running-cluster running)
-           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
-                    "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :int]}\n  [r]\n  (* r r))")
-           merge-row (fn [m] (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed :seon.task/landed-git
-                                                          :seon.task/installed {:seon.task/accepted-tx [:db/id]}]
-                                      [:seon.task/id m]))]
-       (try
-         (let [proposal (proposed! running connection 'tq.shape "area" fix)
-               merge-task (:seon.task/merge proposal)
-               head (git! root "rev-parse" "HEAD")
-               texts #(mapv (fn [p] (slurp (io/file root p))) [schema-path path])
-               original (texts)
-               accepted-tx (volatile! nil)]
-           (testing "a landing whose first file cannot be installed stops after acceptance, recorded and unwritten"
-             (writable! root "resources/seon/schemas" false)
-             (let [refused (source/land! execution proposal root)
-                   row (merge-row merge-task)]
-               (is (= :install-failed (:seon.source/write-back-refused refused)))
-               (is (= :accepted (:seon.task/outcome row)) "the merge task is accepted")
-               (is (:db/id (vreset! accepted-tx (:seon.task/accepted-tx row))) "with the transaction that accepted it")
-               (is (:seon.task/landed row) "and the main commit")
-               (is (nil? (:seon.task/installed row)) "no file is recorded installed")
-               (is (= original (texts)) "nothing is written")
-               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
-           (testing "resumed with the second file uninstallable, it writes and records the first file only"
-             (writable! root "resources/seon/schemas" true)
-             (writable! root "test/tq" false)
-             (let [refused (source/land! execution proposal root)
-                   row (merge-row merge-task)]
-               (is (= :install-failed (:seon.source/write-back-refused refused)))
-               (is (= #{schema-path} (set (map first (:seon.task/installed row)))) "the schema resource is recorded installed")
-               (is (not= (first original) (first (texts))) "the schema resource holds the merged schema")
-               (is (= (second original) (second (texts))) "the function's file is unchanged")
-               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
-           (testing "resumed with another path staged, both files are written and the commit is refused"
-             (writable! root "test/tq" true)
-             (spit (io/file root "notes.txt") "staged\n")
-             (git! root "add" "notes.txt")
-             (let [refused (source/land! execution proposal root)
-                   row (merge-row merge-task)]
-               (is (= :seon.git/commit-error (:seon.error/type refused)))
-               (is (= #{schema-path path} (set (map first (:seon.task/installed row)))) "both files are recorded installed")
-               (is (nil? (:seon.task/landed-git row)))
-               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
-             (git! root "rm" "-q" "--cached" "notes.txt"))
-           (testing "resumed once more, it commits both files in exactly one git commit and records it"
-             (let [landed (source/land! execution proposal root)
-                   sha (git! root "rev-parse" "HEAD")]
-               (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
-               (is (= sha (:seon.git/commit landed)))
-               (is (= sha (:seon.task/landed-git (merge-row merge-task))) "the git commit is recorded on the merge task")
-               (is (= head (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
-               (is (= #{path schema-path} (set (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" sha)))))
-               (is (str/includes? (slurp (io/file root path)) "(* r r)") "the function's file holds the agent's span")
-               (is (= (:seon.task/landed (merge-row merge-task)) (:seon.source/commit-id landed)) "the acceptance is the one recorded")
-               (is (= #{:write-and-commit} (set (keys (:seon.source/step-ms landed)))) "it neither prepares nor accepts again")
-               (is (= @accepted-tx (:seon.task/accepted-tx (merge-row merge-task))) "the acceptance is never repeated")))
-           (testing "a landed merge task answers its recorded commit and makes none"
-             (let [sha (git! root "rev-parse" "HEAD")
-                   again (source/land! execution proposal root)]
-               (is (= sha (:seon.git/commit again)))
-               (is (= sha (git! root "rev-parse" "HEAD"))))))
-         (finally
-           (writable! root "resources/seon/schemas" true)
-           (writable! root "test/tq" true)
-           (support/delete-root! root)))))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-resumed-landing-reads-its-record-under-the-commit-lock}
-           :seon.test/long "One own-branch agent's first request, assignment and proposal run, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and three landings."
-           :seon.test/long-ms 120000}
-  two-concurrent-resumes-of-a-stopped-landing-make-one-commit-and-no-refusal
-  (support/with-running-agent
-   (fn [running _ connection]
-     (let [member (get-in (db/db connection) [:config :branch])
-           cluster-name (:seon.cluster/name (support/execution-handle nil))
-           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-           path "test/tq/shape.clj"
-           schema-path "resources/seon/schemas/tq.shape.edn"
-           root (checkout! "land-race-test" {path shape-source schema-path shape-schemas})
-           schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
-           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-           execution (support/running-cluster running)
-           fix (str "(seon.schema/register! :tq.shape/radius [:int {:min 0}])\n"
-                    "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :int]}\n  [r]\n  (* r r))")
-           holder (volatile! nil)]
-       (try
-         (let [proposal (proposed! running connection 'tq.shape "area" fix)
-               merge-task (:seon.task/merge proposal)
-               head (git! root "rev-parse" "HEAD")]
-           (writable! root "test/tq" false)
-           (is (= :install-failed (:seon.source/write-back-refused (source/land! execution proposal root)))
-               "the landing stops after acceptance")
-           (writable! root "test/tq" true)
-           ;; a lane commit holds the lock while both resumes start, so both read the record before either commits
-           (vreset! holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
-                                            "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
-                                            (str root "/.git/lane-commit.lock")))
-           (is (= "locked" (.readLine (io/reader (:out @holder)))) "a lane commit holds the lock")
-           (let [resumes [(future (source/land! execution proposal root)) (future (source/land! execution proposal root))]]
-             (is (= [::waiting ::waiting] (mapv #(deref % 2000 ::waiting) resumes)) "both resumes wait for the lock")
-             (.close ^java.io.OutputStream (:in @holder))
-             (let [landed (mapv #(deref % 60000 nil) resumes)
-                   sha (git! root "rev-parse" "HEAD")]
-               (is (= [nil nil] (mapv :seon.error/type landed)) "neither resume answers a refusal")
-               (is (= [sha sha] (mapv :seon.git/commit landed)) "both answer the one commit")
-               (is (= head (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
-               (is (= sha (:seon.task/landed-git (db/pull (db/db connection) [:seon.task/landed-git] [:seon.task/id merge-task])))
-                   "the merge task records it"))))
-         (finally
-           (some-> @holder :in (#(.close ^java.io.OutputStream %)))
-           (writable! root "test/tq" true)
-           (support/delete-root! root)))))))
-
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
   a-landed-merge-is-one-git-commit-of-exactly-its-paths
   (let [root (checkout! "land-commit-test" {"src/a.clj" "(ns a)\n" "src/b.clj" "(ns b)\n" "notes.txt" "x\n"})
         acceptance {:seon.task/sym 'tq.land/area :seon.task/merge "0123456789ab" :seon.agent/id "land-agent"
                     :seon.test.run/id "abcdef012345" :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
         written {:seon.source/changed-paths ["src/a.clj"]
-                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}]
+                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
+                                      :seon.source/replaced []}]}]
     (try
       (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
       (spit (io/file root "src/b.clj") "(ns b)\n(def y 2)\n")
@@ -691,7 +452,8 @@
         acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
                     :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
         written {:seon.source/changed-paths ["src/a.clj"]
-                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}
+                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
+                                      :seon.source/replaced []}]}
         holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
                                 "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
                                 (str root "/.git/lane-commit.lock"))]
@@ -709,121 +471,6 @@
       (finally
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-commits-exactly-its-proven-bytes}}
-  a-path-changed-after-write-back-refuses-the-commit
-  ;; commit! commits the bytes write-back proved, never whatever the path holds later
-  (let [root (checkout! "land-bytes-test" {"src/a.clj" "(ns a)\n"})
-        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
-                    :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
-        written {:seon.source/changed-paths ["src/a.clj"]
-                 :seon.source/files [(written-file "src/a.clj" "(ns a)\n(def x 1)\n")]}]
-    (try
-      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n(def edited-later 2)\n")
-      (let [head (git! root "rev-parse" "HEAD")
-            refused (source/commit! root written acceptance)]
-        (is (= :seon.git/commit-error (:seon.error/type refused)))
-        (is (= ["src/a.clj"] (:seon.error/offending refused)) "naming the path whose bytes are not the proven candidate")
-        (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
-      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
-      (let [head (git! root "rev-parse" "HEAD")
-            sha (:seon.git/commit (source/commit! root written acceptance))]
-        (is (= head (git! root "rev-parse" (str sha "^"))) "the proven bytes commit on the previous head")
-        (is (= "(ns a)\n(def x 1)" (git! root "show" (str sha ":src/a.clj")))))
-      (finally (support/delete-root! root)))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/one-owner-holds-the-checkout-from-write-back-through-git}}
-  a-landing-write-back-waits-for-the-lane-commit-lock
-  ;; write-and-commit! holds .git/lane-commit.lock from the file proof through git, so a
-  ;; lane commit or a second landing never interleaves with a landing's files
-  (let [root (checkout! "land-write-lock-test" {"src/a.clj" "(ns a)\n"})
-        accepted {:seon.program/identities #{[:seon.fn/sym 'a/f]} :seon.test.run/id "abcdef012345"
-                  :seon.source/base-commit-id (random-uuid) :seon.source/commit-id (random-uuid)}
-        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
-                    :seon.source/commit-id (:seon.source/commit-id accepted)}
-        connection (:seon.db/connection (support/execution-handle nil))
-        holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
-                                "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
-                                (str root "/.git/lane-commit.lock"))]
-    (try
-      (is (= "locked" (.readLine (io/reader (:out holder)))) "a lane commit holds the lock")
-      (let [landing (future (source/write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted
-                                                       :seon.fn/root root}
-                                                      acceptance))]
-        (is (= ::waiting (deref landing 1000 ::waiting)) "the write-back waits while the lane commit holds the lock")
-        (.close ^java.io.OutputStream (:in holder))
-        (is (= :commit-absent (:seon.source/write-back-refused (deref landing 10000 nil)))
-            "then it runs: these accepted commits are absent from the store"))
-      (finally
-        (.close ^java.io.OutputStream (:in holder))
-        (support/delete-root! root)))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-never-commits-edits-it-did-not-prove}}
-  a-landing-into-a-file-with-uncommitted-edits-waits-for-their-commit
-  ;; a lane's uncommitted edits in a file a landing writes never ride in the landing's commit
-  (let [path "src/tq/clean.clj"
-        head-text "(ns tq.clean)\n\n(defn f\n  \"One.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  1)\n"
-        merged-text (str/replace head-text "  1)" "  2)")
-        foreign "\n(defn h\n  \"A lane's uncommitted edit.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  3)\n"
-        root (checkout! "land-clean-test" {path head-text})
-        file (io/file root path)
-        connection (:seon.db/connection (support/execution-handle nil))
-        declare! (fn [text]
-                   (spit file text)
-                   (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
-                     (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-                     (db/commit-id (db/db connection))))
-        base (declare! head-text)
-        merged (declare! merged-text)
-        accepted {:seon.program/identities #{[:seon.fn/sym 'tq.clean/f]} :seon.source/base-commit-id base :seon.source/commit-id merged}
-        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345" :seon.source/commit-id merged}
-        land #(source/write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root} acceptance)]
-    (try
-      (testing "a file holding edits git HEAD does not is refused, unwritten and uncommitted"
-        (spit file (str head-text foreign))
-        (let [head (git! root "rev-parse" "HEAD")
-              refused (land)]
-          (is (= :uncommitted-edits (:seon.source/write-back-refused refused)))
-          (is (= [path] (:seon.error/offending refused)) "naming the path")
-          (is (= (str head-text foreign) (slurp file)) "the file is unwritten")
-          (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
-      (testing "once the file's owner commits its edits, the landing commits exactly that commit's blob plus the merge"
-        (git! root "commit" "-q" "-m" "the lane's edit" "--" path)
-        (let [owner (git! root "rev-parse" "HEAD")
-              landed (land)
-              sha (git! root "rev-parse" "HEAD")]
-          (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
-          (is (= sha (:seon.git/commit landed)))
-          (is (= owner (git! root "rev-parse" "HEAD^")) "one commit on the owner's")
-          (is (= (str merged-text foreign) (str (git! root "show" (str sha ":" path)) "\n")) "the owner's edit beside the merged declaration")))
-      (finally (support/delete-root! root)))))
-
-(deftest ^{:seon/tasks #{'seon.task/one-open-proposal-per-assignment}
-           :seon.test/long "One own-branch agent's first request, assignment and two proposal runs."
-           :seon.test/long-ms 120000}
-  a-second-open-proposal-for-one-assignment-is-refused-at-the-writer
-  (support/with-running-agent
-   (fn [running _ connection]
-     (let [member (get-in (db/db connection) [:config :branch])
-           cluster-name (:seon.cluster/name (support/execution-handle nil))
-           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-           path "test/tq/land.clj"
-           root (checkout! "propose-once-test" {path land-source})
-           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
-           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-           first-proposal (proposed! running connection "area"
-                                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-           agent-id (get-in (db/pull (db/db connection) [{:seon.task/created-by [:seon.agent/id]}]
-                                     [:seon.task/id (:seon.task/merge first-proposal)])
-                            [:seon.task/created-by :seon.agent/id])
-           _ (agent-eval running agent-id "(in-ns 'tq.land)\n(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r (+ r 0)))")
-           second-proposal (agent-eval running agent-id "(:seon.task/refused (my.program/propose-merge! {}))")
-           open (db/q '[:find [?id ...] :in $ ?m :where [?p :seon.task/merge ?m] [?p :seon.task/proposal ?id]]
-                      (db/db connection) (:seon.task/merge first-proposal))]
-       (try
-         (is (some #{:proposal-open} (tree-seq coll? seq second-proposal)) "the writer refuses a second open proposal")
-         (is (= [(:seon.task/proposal first-proposal)] open) "the first proposal stays the only one")
-         (finally (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'my.program/proposals-refuses-its-own-result-on-main}
            :seon.test/long "One own-branch agent's first request, assignment and proposal run."
@@ -854,4 +501,61 @@
            (is (= [(:seon.task/proposal proposal)]
                   (keep #(when (= (:seon.task/merge proposal) (:seon.task/merge %)) (:seon.task/proposal %)) open))
                "the merge task's one proposal, not its end message"))
+         (finally (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
+           :seon.test/long "One prepare (one nested seon.test/run on the candidate) and the gate's judgment of its red test against the target (60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 120000}
+  a-test-never-run-on-the-target-is-not-blamed-on-the-merge
+  ;; A test red on the candidate that fails on the target too is not the change's,
+  ;; though the target never ran it at its current reach.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        fn-entity #(entity (db/db %1) :fn %2 %3)
+        test-entity #(entity (db/db %1) :test %2 %3)
+        callee #(str "(defn unrun-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
+        c (keyword (str "merge-test-c-" (id/id)))
+        _ (write! h-conn [(fn-entity h-conn "unrun-callee" (callee 1))])
+        _ (write! h-conn [(test-entity h-conn "unrun-proof" "(clojure.test/deftest unrun-proof (clojure.test/is (pos? (seon.cluster.merge-test/unrun-callee))))")
+                          (test-entity h-conn "unrun-broken" "(clojure.test/deftest unrun-broken (clojure.test/is (= 0 (seon.cluster.merge-test/unrun-callee))))")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])]
+    (try
+      (write! c-conn [(fn-entity c-conn "unrun-callee" (callee "(* 1 1)"))])
+      (let [proposal (source/prepare-merge! target store c #{(sym "unrun-proof")})
+            _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+            refusal (source/accept-merge! target store proposal)]
+        (is (= [(sym "unrun-broken")] (:seon.source/red proposal)) "the gate ran it red")
+        (is (= :seon.source/red-on-target-error (:seon.error/type refusal)) "it stops for root, not blamed on the change"))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/an-agents-repl-scratch-namespace-never-blocks-its-landing}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 120000}
+  a-require-in-the-agents-user-namespace-lands-with-its-change
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/land.clj"
+           root (checkout! "scratch-land-test" {path land-source})
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)]
+       (try
+         ;; agent r7-problems-prose required the namespace it fixed from `user`; its landing refused :one-file
+         (let [proposal (proposed! running connection "area"
+                                   (str "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+                                        "\n(in-ns 'user)\n(require 'tq.land)"))
+               landed (source/land! execution proposal root)]
+           (is (nil? (:seon.error/type landed)) "the landing answers no refusal")
+           (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "only the changed file is written")
+           (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD"))
          (finally (support/delete-root! root)))))))

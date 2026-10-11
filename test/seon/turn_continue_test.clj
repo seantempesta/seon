@@ -10,7 +10,6 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
-            [seon.cluster.message :as message]
             [seon.context]
             [seon.eval.drive :as drive]
             [seon.id]
@@ -324,7 +323,7 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
        (let [home (db/db connection)
              ended (db/q '[:find [(pull ?m [:seon.message/about :seon.task/end :seon.task/merge]) ...] :in $ ?agent-id
@@ -362,13 +361,7 @@
                                       (str "(ns tq.endr (:require [clojure.test :refer [deftest is]]))\n"
                                            "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                            "(deftest ^{:seon/tasks #{'tq.endr/area}} area-test (is (= 25 (area 5))))\n"
-                                           "(deftest identity-test (is (= 3 (area 3))))\n")
-                                      "test")
-           ;; identity-test is green on main before the change: its red on the branch is the change's break
-           main-run (seon.test/run {:seon.test/policy :named :seon.test/execution (support/execution-handle nil)
-                                    :seon.test/recording-connection connection :seon.test/identities #{'tq.endr/identity-test}})
-           _ (is (= [[1 0]] (mapv (juxt :seon.test/pass-count :seon.test/fail-count) (:seon.test/results main-run)))
-                 "identity-test is green on main before the change")
+                                           "(deftest identity-test (is (= 3 (area 3))))\n"))
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
                                             :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/kind :function
@@ -388,7 +381,7 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
        (let [ends (db/q '[:find [?end ...] :in $ ?agent-id
                           :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
@@ -429,17 +422,16 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  400)))
        (is (= [:stalled] (db/q '[:find [?end ...] :in $ ?agent-id
                                  :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
                                (db/db connection) agent-id))
            "the stopped loop ended the task, and root heard it once")))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-task-end-is-delivered-once}
-           :seon.test/long "Three setup evaluations with their test steps, then the end's proposal run."
+(deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's proposal run."
            :seon.test/long-ms 30000}
-  an-end-delivered-before-a-crash-is-not-sent-again
+  a-task-end-is-its-message-and-the-agents-close-in-one-transaction
   (support/with-running-agent
    (fn [running agent-id connection]
      ;; root's home is this member's branch, so the end message stays inside the fixture
@@ -455,17 +447,16 @@
                             :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
                             :seon.task/branch (get-in (db/db connection) [:config :branch])})
            _ (agent-eval running agent-id "(in-ns 'tq.endo)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
-           ends #(db/q '[:find [?m ...] :in $ ?agent-id
-                         :where [?a :seon.agent/id ?agent-id] [?m :seon.message/from ?a] [?m :seon.task/end _]]
+           ends #(db/q '[:find [?tx ...] :in $ ?agent-id
+                         :where [?a :seon.agent/id ?agent-id] [?m :seon.message/from ?a] [?m :seon.task/end _ ?tx]]
                        (db/db connection) agent-id)]
        (is (= :done (turn/task-end (db/db connection) agent-id)) "the fix turned the proof green")
-       ;; an end that crashed after delivering its message and before closing the agent
-       (message/send! (#'turn/end-message (db/db connection) agent-id :done nil) connection agent-id)
        (#'turn/end-task! (support/running-cluster running) agent-id)
-       (is (= 1 (count (ends))) "root holds the end's message once")
-       (is (some? (:seon.agent/admission-closed-tx
-                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))
-           "the end closed the agent")))))
+       (#'turn/end-task! (support/running-cluster running) agent-id)
+       (is (= [(:db/id (:seon.agent/admission-closed-tx
+                        (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))]
+              (ends))
+           "root holds the end's message once, written by the transaction that closed the agent")))))
 
 ;;; A green end observed without a model call: the agent's fix arrives through its own MCP entrance, then the
 ;;; end is observed on the agent's own execution handle as its loop observes it.
@@ -583,7 +574,7 @@
        "(deftest ^{:seon/tasks #{'tq.endl/area}} area-test (is (= 25 (area 5))))\n\n"
        "(deftest ^{:seon/tasks #{'tq.endl/side}} side-test (is (= 4 (side 2))))\n"))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge 'seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge}
+(deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge}
            :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two proposal runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
            :seon.test/long-ms 240000}
   a-green-end-lands-its-merge-without-root
@@ -632,151 +623,15 @@
                  head (git! root "rev-parse" "HEAD")
                  execution (fixed-end! running agent-id 'tq.endl
                                        "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-                 merge-branches #(set (filter (fn [b] (str/starts-with? (name b) "merge-")) (d/branches connection)))
-                 branches-before (merge-branches)
                  _ (end! running execution agent-id)
                  [message] (end-messages (db/db connection) agent-id)
-                 refused (merge-row (:seon.task/merge message))
-                 recorded (db/pull (db/db connection) [:seon.task/refused-run
-                                                       {:seon.task/verdicts [:seon.task.verdict/test :seon.task.verdict/verdict
-                                                                             :seon.task.verdict/run]}]
-                                   [:seon.task/id (:seon.task/merge message)])
-                 shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) (:seon.task/ended %))
-                             (get-in (seon.context/current-state (db/db connection) "root") [:seon.context/unread :seon.context/items]))]
-         (is (= :done (:seon.task/end message)) "the task ended green on its branch")
+                 refused (merge-row (:seon.task/merge message))]
+             (is (= :done (:seon.task/end message)) "the task ended green on its branch")
              (is (= {:seon.task/refusal :seon.source/red-test-error :seon.task/refused-tests #{'tq.endl/side-identity-test}}
                     (update refused :seon.task/refused-tests set))
                  "the merge task carries the refusal and stays undecided")
-             (is (string? (:seon.task/refused-run recorded)) "it names the refusing gate run")
-             (is (= #{['tq.endl/side-identity-test :red (:seon.task/refused-run recorded)]}
-                    (set (map (juxt :seon.task.verdict/test :seon.task.verdict/verdict :seon.task.verdict/run)
-                              (:seon.task/verdicts recorded))))
-                 "and each test's verdict in that run")
-             (is (= #{['tq.endl/side-identity-test :red]}
-                    (set (map (juxt :seon.task.verdict/test :seon.task.verdict/verdict) (:seon.task/verdicts shown))))
-                 "root's block shows the verdicts")
-             (is (empty? (remove branches-before (merge-branches))) "the refused gate's tested branch is retired")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
-
-(deftest ^{:seon/tasks #{'seon.turn/an-accepted-landing-that-stopped-is-resumed}
-           :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two proposal runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit), then one resumed write-back."
-           :seon.test/long-ms 240000}
-  a-landing-stopped-after-acceptance-is-resumed-by-the-next-end
-  (support/with-running-agent
-   (fn [running _ connection]
-     (root-home! connection)
-     (let [path "test/tq/endu.clj"
-           root (support/temp-root "end-resume")
-           merge-row #(dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed :seon.task/landed-git
-                                                          :seon.task/refusal]
-                                       [:seon.task/id %]) :db/id)
-           area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-           side "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-           ;; the commits in the checkout's history naming merge task `m` (seon.cluster.source/commit-message's trailer)
-           commits-for #(remove str/blank? (str/split-lines (git! root "log" "--format=%H" "-F" (str "--grep=Merge-task: " %))))]
-       (try
-         (git! root "init" "-q")
-         (git! root "config" "user.email" "end@test.invalid")
-         (git! root "config" "user.name" "end-test")
-         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endu"))
-         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
-                                {:seon.config.root/land? true :seon.config.fs/working-root root})
-         (let [head (git! root "rev-parse" "HEAD")
-               {first-agent :seon.agent/id} (branch-agent! running connection 'tq.endu "area")
-               first-execution (fixed-end! running first-agent 'tq.endu area)
-               ;; the file's directory refuses the install, so the landing stops after acceptance
-               _ (.setWritable (io/file root "test/tq") false false)
-               _ (end! running first-execution first-agent)
-               _ (.setWritable (io/file root "test/tq") true false)
-               [{stopped :seon.task/merge}] (end-messages (db/db connection) first-agent)]
-           (testing "the first end's landing stops after acceptance, uncommitted"
-             (is (= :accepted (:seon.task/outcome (merge-row stopped))) "main holds the merge")
-             (is (nil? (:seon.task/landed-git (merge-row stopped))) "no git commit is recorded")
-             (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
-           (testing "the next end resumes the stopped landing to one git commit, with no root call"
-             (let [{second-agent :seon.agent/id} (branch-agent! running connection 'tq.endu "side")
-                   second-execution (fixed-end! running second-agent 'tq.endu side)
-                   _ (end! running second-execution second-agent)
-                   [{landed :seon.task/merge}] (end-messages (db/db connection) second-agent)
-                   resumed (merge-row stopped)]
-               (is (= [(:seon.task/landed-git resumed)] (commits-for stopped)) "exactly one git commit names the stopped merge task")
-               (is (= head (git! root "rev-parse" (str (:seon.task/landed-git resumed) "^"))) "on the previous head")
-               (is (nil? (:seon.task/refusal resumed)) "the landed merge task carries no refusal")
-               (is (= (git! root "rev-parse" "HEAD") (:seon.task/landed-git (merge-row landed))) "the second end lands after it")
-               (is (every? #(str/includes? (slurp (io/file root path)) %) [area side]) "the file holds both definitions"))))
-         (finally
-           (.setWritable (io/file root "test/tq") true false)
-           (support/delete-root! root)))))))
-
-(deftest ^{:seon/tasks #{'seon.turn/a-permanently-refused-landing-waits-for-root}
-           :seon.test/long "Three own-branch agents' first requests, assignment proof runs and fixes with their test steps, three proposal runs and three lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit) and one resumed write-back."
-           :seon.test/long-ms 360000}
-  a-permanently-refused-landing-is-not-retried-and-blocks-its-file-by-name
-  (support/with-running-agent
-   (fn [running _ connection]
-     (root-home! connection)
-     (let [path "test/tq/endh.clj"
-           other "test/tqo/endo.clj"
-           root (support/temp-root "end-stuck")
-           merge-row #(dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed-git :seon.task/refusal
-                                                          :seon.task/refusal-reason :seon.task/blocked-by]
-                                       [:seon.task/id %]) :db/id)
-           area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-           side "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-           hand-area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (+ r r))"
-           base-area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)"
-           commits-for #(remove str/blank? (str/split-lines (git! root "log" "--format=%H" "-F" (str "--grep=Merge-task: " %))))]
-       (try
-         (git! root "init" "-q")
-         (git! root "config" "user.email" "end@test.invalid")
-         (git! root "config" "user.name" "end-test")
-         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endh"))
-         (declare-file! connection root other (str/replace landing-source "tq.endl" "tqo.endo"))
-         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
-                                {:seon.config.root/land? true :seon.config.fs/working-root root})
-         (let [first-agent (:seon.agent/id (branch-agent! running connection 'tq.endh "area"))
-               first-execution (fixed-end! running first-agent 'tq.endh area)
-               ;; the file's directory refuses the install, so the landing stops after acceptance (a transient refusal)
-               _ (.setWritable (io/file root "test/tq") false false)
-               _ (end! running first-execution first-agent)
-               _ (.setWritable (io/file root "test/tq") true false)
-               [{stuck :seon.task/merge}] (end-messages (db/db connection) first-agent)
-               original (slurp (io/file root path))
-               ;; a committed hand edit of the declaration the stopped landing writes: resuming it is a conflict
-               ;; (an uncommitted one only waits for its commit, seon.cluster.source/a-landing-never-commits-edits-it-did-not-prove)
-               _ (spit (io/file root path) (str/replace original base-area hand-area))
-               _ (git! root "commit" "-q" "-m" "hand edit" "--" path)]
-           (testing "the next end retries the transient refusal; met by the hand edit, it records a refusal awaiting root"
-             (let [second-agent (:seon.agent/id (branch-agent! running connection 'tqo.endo "area"))
-                   second-execution (fixed-end! running second-agent 'tqo.endo area)
-                   _ (end! running second-execution second-agent)
-                   [{landed :seon.task/merge}] (end-messages (db/db connection) second-agent)]
-               (is (= {:seon.task/outcome :accepted :seon.task/refusal :seon.source/write-back-error
-                       :seon.task/refusal-reason :conflict}
-                      (merge-row stuck))
-                   "the stopped landing records the conflict and no git commit")
-               (is (= [(:seon.task/landed-git (merge-row landed))] (commits-for landed)) "a landing in another file still lands")
-               (is (= [other] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" "HEAD")))
-                   "its commit is exactly its own file")))
-           (testing "a later landing in the same file is refused naming the stuck one, which is not retried"
-             ;; the file is restored and committed, so a retry of the stuck landing would now land
-             (spit (io/file root path) original)
-             (git! root "commit" "-q" "-m" "restore" "--" path)
-             (let [head (git! root "rev-parse" "HEAD")
-                   third-agent (:seon.agent/id (branch-agent! running connection 'tq.endh "side"))
-                   third-execution (fixed-end! running third-agent 'tq.endh side)
-                   _ (end! running third-execution third-agent)
-                   [{blocked :seon.task/merge}] (end-messages (db/db connection) third-agent)]
-               (is (= stuck (:seon.task/blocked-by (merge-row blocked))) "the blocked landing names the stuck one")
-               (is (nil? (:seon.task/landed-git (merge-row stuck))) "the stuck landing was not retried")
-               (is (= :conflict (:seon.task/refusal-reason (merge-row stuck))) "and keeps the refusal root decides")
-               (is (= [] (commits-for stuck) (commits-for blocked)) "neither is committed")
-               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")
-               (is (= original (slurp (io/file root path))) "the file is untouched"))))
-         (finally
-           (.setWritable (io/file root "test/tq") true false)
-           (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done}
            :seon.test/long "An own-branch agent's setup and settings with their test steps, one run on main and one fixture-model pass with its test step."
@@ -788,14 +643,13 @@
            cluster-name (:seon.cluster/name (support/execution-handle nil))
            agent-id (str "reached-unverified-" (seon.id/id))
            _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
-           ;; besides the proof, `area` is reached by a test red on main (and still red after the change), a test
-           ;; main never ran that the change turns red, and a declared-long test the step never runs
+           ;; besides the proof, `area` is reached by a test red on main (and still red after the change) and a
+           ;; declared-long test the step never runs: neither is the change's
            _ (support/declare-source! connection 'tq.endu
                                       (str "(ns tq.endu (:require [clojure.test :refer [deftest is]]))\n"
                                            "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                            "(deftest ^{:seon/tasks #{'tq.endu/area}} area-test (is (= 25 (area 5))))\n"
                                            "(deftest legacy-test (is (= 0 (area 1))))\n"
-                                           "(deftest unproven-test (is (= 2 (area 2))))\n"
                                            "(deftest ^{:seon.test/long \"never run by a step\" :seon.test/long-ms 6000}"
                                            " slow-test (is (pos? (area 2))))\n")
                                       "test")
@@ -822,49 +676,10 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
-       (let [home (db/db connection)
-             message (db/q '[:find (pull ?m [:seon.task/end]) . :in $ ?agent-id
+       (let [message (db/q '[:find (pull ?m [:seon.task/end]) . :in $ ?agent-id
                              :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end _]]
-                           home agent-id)
-             shown (some #(when (and (:seon.task/end %) (= agent-id (:my.message/from %))) %)
-                         (get-in (seon.context/current-state home "root") [:seon.context/unread :seon.context/items]))]
+                           (db/db connection) agent-id)]
          (is (= :done (:seon.task/end message))
-             "the proof is green and the change broke no test: unverified and red-on-main reached tests do not block")
-         (is (= {:seon.task/unverified '[tq.endu/slow-test tq.endu/unproven-test]
-                 :seon.task/red-on-target '[tq.endu/legacy-test]}
-                (select-keys (:seon.task/ended shown) [:seon.task/unverified :seon.task/red-on-target]))
-             "root's end summary lists them: the never-run and no-baseline tests unverified, the one red on main red-on-target"))))))
-
-(deftest ^{:seon/tasks #{'seon.turn/a-landing-that-throws-records-its-refusal-on-the-merge-task}
-           :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, one proposal run, then an end whose landing throws."
-           :seon.test/long-ms 120000}
-  a-landing-that-throws-records-a-typed-refusal-on-its-merge-task
-  (support/with-running-agent
-   (fn [running _ connection]
-     (root-home! connection)
-     (let [path "test/tq/endx.clj"
-           root (support/temp-root "end-throw")]
-       (try
-         (git! root "init" "-q")
-         (git! root "config" "user.email" "end@test.invalid")
-         (git! root "config" "user.name" "end-test")
-         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endx"))
-         ;; a checkout path no file system accepts: resolving it throws inside the landing path
-         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
-                                {:seon.config.root/land? true :seon.config.fs/working-root (str root "\u0000")})
-         (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endx "area")
-               execution (fixed-end! running agent-id 'tq.endx
-                                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-               head (git! root "rev-parse" "HEAD")
-               _ (end! running execution agent-id)
-               [message] (end-messages (db/db connection) agent-id)
-               row (dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/refusal :seon.task/landed-git]
-                                    [:seon.task/id (:seon.task/merge message)])
-                           :db/id)]
-           (is (= :done (:seon.task/end message)) "the task ended green and root holds its end message")
-           (is (= {:seon.task/refusal :seon.source/landing-exception-error} row)
-               "the merge task records the throw as its typed refusal and stays undecided")
-           (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed"))
-         (finally (support/delete-root! root)))))))
+             "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))

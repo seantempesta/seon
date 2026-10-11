@@ -34,11 +34,7 @@
         [:seon.task/steps {:optional true} :seon.task/steps]
         [:seon.task/subject {:optional true} :seon.task/subject] [:seon.task/signal {:optional true} :seon.task/signal]
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
-        [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
-        [:seon.task/refused-run {:optional true} :seon.task/refused-run] [:seon.task/verdicts {:optional true} :seon.task/verdicts]
-        [:seon.task/accepted-tx {:optional true} :seon.task/accepted-tx] [:seon.task/gate-run {:optional true} :seon.task/gate-run]
-        [:seon.task/installed {:optional true} :seon.task/installed]
-        [:seon.task/refusal-reason {:optional true} :seon.task/refusal-reason] [:seon.task/blocked-by {:optional true} :seon.task/blocked-by]]
+        [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]]
  :steps [:set {:seon.db/component true :seon.db/component-schema :seon.step/step
          :description "A task's ordered steps: owned by the task and outside its declaration, so a step write never revises the task an assignment reviewed."} :seon.db/ref]
  :step-op [:or {:description "One step write, decided inside the transaction: replace every step, append one, or complete the current step and advance."}
@@ -71,26 +67,14 @@
  :outcome [:enum {:description "Root's decision on a merge task; absence means open."} :accepted :declined]
  :landed [:uuid {:description "The main commit a merge task's landing made (seon.cluster.source/land! on a green end, seon.turn/end-task!)."}]
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
- :accepted-tx [:and {:description "The transaction on the target that accepted a merge task's landing (seon.cluster.source/accept-merge!, written in that transaction): the target as of it is the merged value, as of the one before it the value merged into, read through retained history rather than commit ids."} :seon.db/ref]
- :gate-run [:and {:description "The gate run whose green verdict accepted a merge task's landing."} :seon.test.run/id]
- :installed [:set {:description "Each file a merge task's landing installed in the checkout, as [path candidate digest], recorded as it was installed: a resumed landing writes only the others."}
-             [:tuple [:string {:min 1}] [:string {:min 1}]]]
  :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing met (a red gate, a write-back or commit refusal); the task stays undecided for root."}]
- :refusal-reason [:or {:description "Why a merge task's landing was refused, by its write-back or commit reason (seon.cluster.source/landing-refusal-reason): seon.cluster.source/awaits-decision? reads it to retry a transient one and leave any other to root."}
-                  :seon.source/write-back-refused :seon.git/commit-refused]
- :blocked-by [:and {:description "The merge task whose stopped landing holds a file this landing writes: written after it lands, in main's order (seon.cluster.source/land!)."} :seon.task/handle]
  :refused-tests [:set {:description "The tests whose red verdict refused a merge task's landing."} :seon.test/sym]
- :refused-run [:and {:description "The gate run whose verdict refused a merge task's landing; its tested branch is retired, so the verdicts stay on the task (:seon.task/verdicts)."} :seon.test.run/id]
- :verdicts [:set {:seon.db/component true :seon.db/component-schema :seon.task.verdict/test-verdict
-                  :description "Each test's verdict in the gate run that refused a merge task's landing (seon.cluster.source/red-test-verdicts), replaced by the next refusal."} :seon.db/ref]
  :end [:enum {:description "How an agent's task ended: its proofs green, given back with my.turn/complete, its turns spent, or stalled (the loop stopped calling it before its proofs passed). The end closes the agent's admission (seon.turn/end-task-call). Producer: seon.turn/task-end."} :done :given-back :capped :stalled]
  :calls [:int {:min 0 :description "The model calls an ended task's agent took."}]
  :prompt-tokens [:int {:min 0 :description "The prompt tokens an ended task's model calls sent."}]
  :completion-tokens [:int {:min 0 :description "The completion tokens an ended task's model calls received."}]
  :proof-counts [:map-of {:description "An ended task's proofs by status on its agent's branch."} :seon.context/proof-status [:int {:min 1}]]
  :red-proofs [:vector {:description "An ended task's red proofs."} :seon.test/sym]
- :unverified [:vector {:min 1 :description "The tests an ended task's change reaches whose verdict was unknown on its branch (:seon.agent/reached-unverified): never run there at their current reach, or red there with no result on the head. The merge gate runs them."} :seon.test/sym]
- :red-on-target [:vector {:min 1 :description "The tests an ended task's change reaches that were red on its branch and already red on the head (:seon.agent/reached-red-on-target)."} :seon.test/sym]
  :outcome-unknown [:= {:description "Present (true) when neither the ending agent's branch nor the outcome recorded when its task ended remains: calls, tokens and proofs are unknown, never zero."} true]
  :errors [:vector {:description "The errors an ended task's agent evaluated on its branch, grouped by signature (seon.problems/agent-errors-by-signature)."} :seon.problems/agent-error]
  :ended [:map {:description "What a task's end message stands for, derived when root reads it from the outcome recorded on the ending agent when its task ended (seon.context/outcome-tx), else from its branch, else unknown; the message holds references only. Producer: seon.context/ended."}
@@ -99,10 +83,7 @@
          [:seon.task/merge {:optional true} :seon.task/merge]
          [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
          [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
-         [:seon.task/refused-run {:optional true} :seon.task/refused-run] [:seon.task/verdicts {:optional true} :seon.task/verdicts]
-         [:seon.task/refusal-reason {:optional true} :seon.task/refusal-reason] [:seon.task/blocked-by {:optional true} :seon.task/blocked-by]
          [:seon.task/proof-counts {:optional true} :seon.task/proof-counts] [:seon.task/red-proofs {:optional true} :seon.task/red-proofs]
-         [:seon.task/unverified {:optional true} :seon.task/unverified] [:seon.task/red-on-target {:optional true} :seon.task/red-on-target]
          [:seon.task/errors {:optional true} :seon.task/errors]
          [:seon.task/calls {:optional true} :seon.task/calls] [:seon.task/prompt-tokens {:optional true} :seon.task/prompt-tokens]
          [:seon.task/completion-tokens {:optional true} :seon.task/completion-tokens]
@@ -192,7 +173,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :invalid-name :duplicate-name :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven :claimed :no-current-step :proposal-open]
+           :unknown-task :unassigned :revised-since-assignment :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven :claimed :no-current-step]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base
