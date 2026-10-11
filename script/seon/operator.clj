@@ -402,7 +402,33 @@
   "Class directories kept besides the one a launch uses (most recently used)."
   3)
 
-(defn- launch-form [request port program]
+(defn launcher-pid
+  "The pid whose exit must end the JVM `request` launches, or nil when it outlives
+  its launcher. A JVM under an isolated operator root (a test or check drill's
+  `bin/seon --root`) is bound to the process that ran this operator; a throwaway
+  check JVM is bound to this operator process itself, which lives while it checks."
+  {:malli/schema [:=> [:cat :map :boolean] [:maybe :int]]}
+  [request throwaway?]
+  (let [current (java.lang.ProcessHandle/current)]
+    (cond
+      throwaway? (.pid current)
+      (not= (str (fs/real-path (:seon.operator/managed-root request)))
+            (str (fs/real-path (repository-root))))
+      (some-> (.parent current) (.orElse nil) .pid))))
+
+(defn exit-with-launcher-form
+  "The form that binds the evaluating JVM's lifetime to `launcher`'s pid: the
+  launcher's exit ends it, and a launcher already gone ends it at once. Nil
+  `launcher` binds nothing."
+  {:malli/schema [:=> [:cat [:maybe :int]] :any]}
+  [launcher]
+  (when launcher
+    `(let [parent# (.orElse (java.lang.ProcessHandle/of ~launcher) nil)]
+       (if parent#
+         (.thenRun (.onExit parent#) (reify Runnable (run [_] (System/exit 0))))
+         (System/exit 0)))))
+
+(defn- launch-form [request port program launcher]
   ;; Only Clojure core loads before opening and reporting the diagnostic REPL.
   ;; The second callback value is terminal boot evidence, never a file poll;
   ;; a move reads the branch heads first, as the value between them.
@@ -412,6 +438,7 @@
   (pr-str
    `(do
       (require '~'clojure.core.server '~'clojure.java.io)
+      ~(exit-with-launcher-form launcher)
       (let [listener# (~'clojure.core.server/start-server
                        {:name ~(str "seon.cluster/" (:seon.boot/cluster-name request))
                         :accept '~'seon.operator.prepl/io-prepl :address "127.0.0.1" :port 0
@@ -761,7 +788,8 @@
   heap dump lands in the managed root's `data/heap`, never in the program
   directory, which the next move prunes (`prune-archives!`)."
   [request source reuse-classes?]
-  (let [request (boot-request request (repository-root))
+  (let [throwaway? (boolean (:seon.operator/throwaway? request))
+        request (boot-request (dissoc request :seon.operator/throwaway?) (repository-root))
         root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
@@ -779,7 +807,7 @@
             program-classes? (boolean (and program (.isDirectory (io/file program))))
             _ (when program (prune-program-classes! (repository-root) program))
             argv (launch-argv request source (start-classpath source classes program) (.getCanonicalPath heap)
-                              (launch-form request (.getLocalPort callback) program))
+                              (launch-form request (.getLocalPort callback) program (launcher-pid request throwaway?)))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
@@ -1815,6 +1843,7 @@
           prepared-ms (elapsed-ms began)
           ;; A candidate's agents work in its own archive, never the checkout.
           outcome (try (launch-child! {:seon.operator/managed-root disposable
+                                       :seon.operator/throwaway? true
                                        :seon.operator/command :start
                                        :seon.boot/cluster-name "default"
                                        :seon.config/environment
