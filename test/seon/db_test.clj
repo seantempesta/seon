@@ -18,6 +18,7 @@
             [seon.batch]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.turn :as turn]
@@ -42,6 +43,37 @@
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
+
+(deftest ^{:seon/tasks #{'seon.db/a-reopened-commit-carries-its-content-revisions}}
+  a-reopened-commit-carries-its-content-revisions
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           store (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "revisions-reopen-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}
+           attributes (vec (program/program-attributes (schema/projection-from-database database)))
+           written [:seon.branch/fork-id :seon.branch/name :seon.branch/target :seon.branch/base-t]
+           ;; each opening is a fresh Datahike connection reading the stored head
+           opened (fn []
+                    (let [fork (store/open-branch! store branch)]
+                      (try
+                        (let [value (db/db fork)]
+                          {:head (db/commit-id value)
+                           :program (db/content-revisions value attributes)
+                           :written (db/content-revisions value written)})
+                        (finally (store/release-branch! fork)))))]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [{:keys [head program] :as first-opening} (opened)]
+           (is (seq attributes))
+           (is (= (db/content-revisions database attributes) program)
+               "a fork that changed no program attribute names main's commits")
+           (is (= #{head} (set (vals (:written first-opening))))
+               "the fork's own write names the fork head")
+           (is (= first-opening (opened)) "a second opening reads the same revisions"))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
 (deftest ^{:seon/tasks #{'seon.db/a-failed-projection-derivation-stays-cached-under-its-commit}}
   a-failed-projection-cell-does-not-poison-its-next-read
