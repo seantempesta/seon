@@ -3393,6 +3393,18 @@
                                  :seon.eval/unstored-note "lived only in the context that evaluated it; values are not stored"}
                           class-name (assoc :seon.eval/value-class class-name))))))))
 
+(defn- agent-ran?
+  "Whether `agent-id` has any run in `db`: one lookup, so a fresh agent's
+  context reads none of its history."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.agent/id]] :boolean]}
+  [db agent-id]
+  (boolean (and agent-id
+                (db/q '[:find ?run .
+                        :in $ ?agent-id
+                        :where [?agent :seon.agent/id ?agent-id]
+                               [?run :seon.turn/agent ?agent]]
+                      db agent-id))))
+
 (defn fork-for-turn
   "Fork the current base and reapply the agent's in-memory private layer.
   A fresh fork (no carried agent context: a restart) binds each of the agent's
@@ -3404,6 +3416,9 @@
     db :seon.db/db
     agent-id :seon.agent/id}]
   (let [carried? (some? agent-ctx)
+        ;; A fresh context reads the agent's session and handles from its
+        ;; evaluations; an agent that never ran has none to read.
+        history? (and (not carried?) (agent-ran? db agent-id))
         ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
@@ -3416,7 +3431,7 @@
                              ::kernel/program-snapshot
                              (atom @(::kernel/program-snapshot base-ctx))
                              ::print-session
-                             (atom (or (session-print-options db agent-id) {})))
+                             (atom (or (when history? (session-print-options db agent-id)) {})))
                (if (env/environment? (env/of base-ctx))
                  (env/environment-state (env/of base-ctx))
                  (projection-state db (context-projection base-ctx)))))
@@ -3431,7 +3446,7 @@
     ;; It rides the result as data; the entrant records it as a fault
     ;; delivered to the agent (seon.turn/resume-turn,
     ;; seon.cluster.agent/acquire-context!).
-    (let [unbound (when-not agent-ctx
+    (let [unbound (when history?
                     (try (bind-settled-results! ctx db agent-id)
                          (catch Throwable failure
                            (seon.error.refusal/diagnostic
@@ -3834,6 +3849,28 @@
          ctx (assoc ctx :my.program/base-ctx ctx)]
      ctx))
 
+(defn- receiving-state
+  "The environment state of a context receiving `connection`'s branch: the
+  supplied or `source`'s environment with that connection, basis and
+  `projection`, carried by the connection too."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/connection
+                       [:maybe :seon.sci.eval/projection-state] :map :seon.schema/projection]
+                  :seon.sci.eval/projection-state]}
+  [source db connection supplied-projection-state arm-request projection]
+  (let [state (env/environment-state
+               (env/refuse-incomplete-environment!
+                (env/environment
+                 (assoc (dissoc (or (:seon.env/environment arm-request)
+                                    (some-> supplied-projection-state deref)
+                                    (env/of source))
+                                :seon.db/db :seon.agent/id :seon.turn/id
+                                :my.program/executing-ctx :seon.sci.kernel/arm)
+                        :seon.db/connection connection
+                        :seon.db/basis-t (db/basis-t db)
+                        :seon.schema/projection projection))))]
+    (db/carry-connection-projection-state! connection state)
+    state))
+
 (defn fork-cluster-ctx
   "Fork an acquired program ctx for one sovereign database connection.
 
@@ -3873,19 +3910,8 @@
    (let [projection (or (:seon.schema/projection
                          (some-> supplied-projection-state deref))
                         (schema/projection-from-database db))
-         receiving-environment
-         (env/refuse-incomplete-environment!
-          (env/environment
-           (assoc (dissoc (or (:seon.env/environment arm-request)
-                             (some-> supplied-projection-state deref)
-                             (env/of base-ctx))
-                          :seon.db/db :seon.agent/id :seon.turn/id
-                          :my.program/executing-ctx :seon.sci.kernel/arm)
-                  :seon.db/connection connection
-                  :seon.db/basis-t (db/basis-t db)
-                  :seon.schema/projection projection)))
-         projection-state (env/environment-state receiving-environment)
-         _ (db/carry-connection-projection-state! connection projection-state)
+         projection-state (receiving-state base-ctx db connection supplied-projection-state
+                                           arm-request projection)
          ctx (env/carry-state
                (assoc (inherit-var-bindings! (sci/fork base-ctx))
                       ::kernel/installed-functions
@@ -3926,6 +3952,35 @@
          (throw (ex-info "Program acquisition could not record its refusals."
                          {::acquisition-recording-error failure}))))
      ctx)))
+
+(defn branch-ctx
+  "The program context of a fresh branch, from one fork: `source` itself when
+  it already acquired the program `db` holds (`fork-cluster-ctx`), else
+  `base-ctx`'s own copy of that program. Either has `connection`'s custody and
+  the receiving environment, follows the loaded program `source` follows, and
+  carries its acquisition."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/connection
+                       :seon.sci.eval/projection-state
+                       [:map [:seon.env/environment {:optional true} :seon.env/environment]]]
+                  :seon.sci.eval/ctx]}
+  [source db connection supplied-projection-state arm-request]
+  (if (acquired-database? source db)
+    (let [ctx (fork-cluster-ctx source db connection supplied-projection-state arm-request)]
+      (assoc ctx ::acquisition (::acquisition @(::kernel/program-snapshot ctx))))
+    (let [projection (or (:seon.schema/projection (some-> supplied-projection-state deref))
+                         (schema/projection-from-database db))
+          projection-state (receiving-state source db connection supplied-projection-state
+                                            arm-request projection)
+          held @(::kernel/program-snapshot source)
+          ctx (env/carry-state
+               (assoc (base-ctx db {::loaded-database (loaded-program (loaded-source held db))})
+                      ::custody {:seon.db/connection connection}
+                      :seon.schema/projection projection)
+               projection-state)]
+      ;; The JVM's loaded program is followed through the source's connection.
+      (when-let [loaded-connection (::loaded-connection held)]
+        (swap! (::kernel/program-snapshot ctx) assoc ::loaded-connection loaded-connection))
+      (assoc ctx :my.program/base-ctx ctx))))
 
 (defn- failure-text
   "The declared string an evaluation names its failure with.

@@ -1159,10 +1159,13 @@
                          (throw (ex-info "Branch assignment refused." result)))))
                  _ (adopt-cluster-declarations! connection (db/carried-projection database))
                  selected (db/db connection)
-                 base (or (when-not isolated? source-ctx)
-                          (:seon.sci.eval/base-ctx previous)
-                          (:seon.sci.eval/base-ctx branch-owner)
-                          (sci.eval/fork-cluster-ctx
+                 held-base (or (when-not isolated? source-ctx)
+                               (:seon.sci.eval/base-ctx previous)
+                               (:seon.sci.eval/base-ctx branch-owner))
+                 ;; A branch no execution holds yet gets its program as one
+                 ;; copy, acquired for `selected` (`sci.eval/branch-ctx`).
+                 base (or held-base
+                          (sci.eval/branch-ctx
                            source-ctx selected connection
                            (sci.eval/projection-state selected
                             (db/carried-projection selected) (:seon.cluster/name handle))
@@ -1172,7 +1175,9 @@
                  ;; core fault) and the rest of the program arms. Only a
                  ;; database that cannot store that record refuses here. The
                  ;; recorder binds the acquired branch's custody itself.
-                 acquired (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db selected})
+                 acquired (if held-base
+                            (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db selected})
+                            (:seon.sci.eval/acquisition base))
                  _ (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
                      (throw (ex-info "Program acquisition could not record its refusals."
                                      {:seon.sci.eval/acquisition-recording-error failure})))

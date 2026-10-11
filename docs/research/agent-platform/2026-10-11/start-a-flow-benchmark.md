@@ -689,3 +689,41 @@ the difference lies in `fork-cluster-ctx` over the base source. H5 removes that
 second fork from the start path; it is not attributed further here. One run
 (`b7a088a0f559`) failed only the unchanged warm context bound (31.28 ms > 30),
 which three other runs of the same candidate passed.
+
+### H5 (option A): two forks per fresh agent
+
+`seon.cluster.agent/acquire-context!` gives a branch no execution holds yet its
+program through `seon.sci.eval/branch-ctx`: `base-ctx`'s acquired copy, or
+`fork-cluster-ctx` of a source that already holds the program (a test request's
+members), and no `acquire!`. `fork-for-turn` reads an agent's print session and
+result handles only when it has a run. Option B (one fork) is held for the
+owner (`hybrid-start-a-flow.md` §H5).
+
+Proof `seon.cluster.agent-test/a-fresh-agents-environment-costs-two-forks`: a
+fresh agent's whole `acquire-context!` (branch and its first transaction
+included) after its commit's program was acquired once. Red at H4 (four forks,
+`fork-cluster-ctx` and two `acquire!`): **25.6 ms / 16.6 MB**. After (two forks,
+no history read): **14.5 ms / 9.1 MB**. The bound, 25 ms / 15 MB, sits below
+the four-fork allocation and leaves 1.7x for timing variance.
+
+Benchmark run `a1400faed5fd` (the benchmark's SCI leg calls `base-ctx` and
+`fork-cluster-ctx` directly, so H5 does not change it):
+
+| Part | Cold ms / MB | Warm ms / MB |
+|---|---:|---:|
+| Branch | 7.11 / 1.946 | 9.94 / 0.737 |
+| World | 0.10 / 0.015 | 0.13 / 0.015 |
+| SCI | 937.99 / 1,785.832 | 11.73 / 5.059 |
+| First context | 40.99 / 39.535 | 16.84 / 10.010 |
+| Paused Flow | 1.75 / 0.631 | 1.79 / 0.614 |
+
+The H4 warm-SCI difference traces to the fresh value's configuration read,
+not to H4's code. `armed-dials` reads `seon.config/effective`, and its
+`seon.config/declared-projection` derivation costs about 3 MB when its cache
+is cold. Running the H3 proof after an agent test reproduced
+3.2 MB / 4.3 ms at H4's HEAD, with no overlay derivation and only that config
+read beyond the warm path. The proof now reads the value's configuration
+before it measures, as it already read the projection
+(`seon.config/a-config-read-rebuilds-the-packaged-projection`). Warm SCI is
+back to 11.7 ms / 5.1 MB here. The cold SCI leg still varies between about
+550 and 940 ms across runs of the same code; it is not attributed here.

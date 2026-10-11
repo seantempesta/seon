@@ -157,6 +157,15 @@ after H3/H4, environment under 5 ms / 5 MB (measured ≈50–60 ms / ~60 MB), `s
 branch connection. Files: `src/seon/sci/eval.clj` (`fork-for-turn`), `src/seon/cluster/agent.clj` (acquisition),
 `test/seon/cluster/agent_test.clj`.
 
+H5 landed as **option A** (root, 2026-10-11): two forks, the branch's program copy (`seon.sci.eval/branch-ctx`)
+and the agent's fork (`fork-for-turn`), with `fork-cluster-ctx`'s re-acquisition and `acquire!` off the fresh path and
+no history reads for an agent that never ran; proof `seon.cluster.agent-test/a-fresh-agents-environment-costs-two-forks`.
+One fork is not reachable without a REPL-path design change: the per-branch base is a mutable context that `acquire!`
+re-acquires in place and that each turn forks to rebuild the agent's private layer, so the agent's context cannot be the
+base itself. **Option B, held for the owner:** the base becomes the shared content-keyed source (never written), and a
+re-acquisition builds a new base with `base-ctx` and regenerates the agent from it instead of `acquire!` in place
+(touches `acquire!`, `acquire-context!`, `fork-for-turn` and `seon.test`'s request world; several hours).
+
 **H6 — the intent decides resume (R2's `:paused` row).** `start-graph!` takes `:seon.task/execution`; `:paused` leaves
 Flow paused. Red proof `seon.cluster.agent-test/a-paused-intent-starts-a-pingable-graph-that-runs-nothing`: every proc
 pings `:paused`, an offered wake runs no turn, `flow/resume` runs it; graph start under 15 ms / 5 MB with three procs

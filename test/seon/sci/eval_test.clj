@@ -2729,8 +2729,11 @@
         connection
         (fn [fork]
           (let [forked (db/db fork)
-                ;; The value's own projection is `seon.db`'s derivation, not this acquisition's.
+                ;; The value's own projection and configuration are `seon.db`'s and
+                ;; `seon.config`'s derivations, not this acquisition's (a fresh value's
+                ;; configuration read: `seon.config/a-config-read-rebuilds-the-packaged-projection`).
                 _ (db/carried-projection forked)
+                _ (#'eval/database-effective-config forked)
                 measured (profile/measure #(eval/base-ctx forked))
                 called (:seon.profile/called measured)]
             (is (eval/acquired-database? acquired forked)

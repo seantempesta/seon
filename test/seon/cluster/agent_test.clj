@@ -31,6 +31,7 @@
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
+            [seon.profile :as profile]
             [seon.render :as render]
             [sci.core :as sci]
             [seon.id :as id]
@@ -2127,3 +2128,31 @@
             (doseq [channel [faults (:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-fresh-agents-environment-costs-one-fork}}
+  a-fresh-agents-environment-costs-two-forks
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agent-tx (db/db connection) "two-forks"))
+     (let [parent (test-support/execution-handle connection)
+           from {:seon.agent/isolate? true :seon.cluster.registry/from (db/commit-id @connection)}
+           ;; The commit's program is acquired once, by an earlier branch of it.
+           _ (agent/release-context! (agent/acquire-context! parent nil from))
+           measured (profile/measure #(agent/acquire-context! parent "two-forks" from))
+           handle (:seon.profile/value measured)
+           called (:seon.profile/called measured)]
+       (try
+         ;; The whole acquisition, branch and its first transaction included:
+         ;; 4 forks cost 25.6 ms / 16.6 MB, the copy and the agent's fork 14.5 ms / 9.1 MB.
+         (is (< (:seon.profile/ms measured) 25))
+         (is (< (:seon.profile/alloc-bytes measured) 15000000))
+         (is (= 2 (get called 'seon.sci.eval/inherit-var-bindings! 0))
+             "the branch's program copy and the agent's fork: every SCI fork inherits its bindings once")
+         (is (zero? (get called 'seon.sci.eval/fork-cluster-ctx 0)))
+         (is (zero? (get called 'seon.sci.eval/acquire! 0)))
+         (is (zero? (get called 'seon.sci.eval/settled-results 0))
+             "an agent that never ran reads no history")
+         (is (identical? (:seon.db/connection handle)
+                         (:seon.db/connection (:seon.sci.eval/custody (:seon.sci.eval/ctx handle))))
+             "the context's custody is the branch connection")
+         (finally (agent/release-context! handle)))))))
