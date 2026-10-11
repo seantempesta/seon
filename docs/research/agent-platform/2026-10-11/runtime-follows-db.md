@@ -1,207 +1,223 @@
 ---
-title: "The runtime follows the database: task FSM, one reconciler, Flow pause/resume, boot and t-basis resume"
+title: "The runtime follows the database: task tree, five intents, one reconciler, heartbeat, root as scheduler, t-resume"
 type: research
-status: Fable pass for owner discussion; not agreed
-created: 2026-10-11
-basis: HEAD a8c2c170a, read by symbol; one read-only JVM probe on default (11 ms, 2.8 MB) for the roster and ping
+status: round 2 of an owner iteration (2026-10-11); not agreed
+basis: HEAD be72c64c1, read by symbol; old plan model at cea904e92^; one read-only JVM probe on default (11 ms, 2.8 MB)
 ---
 
 # Runtime follows DB
 
-The owner's brief (2026-10-11): one task per step, linked by ref; a database listener that detects state changes and
-allocates or deallocates Flow graphs (start, pause, resume, stop); after a crash, see what is running, start what is
-not, and let every other state follow the database as the source of truth; a resume option at restart; scheduling
-elsewhere so tasks run independently; paused by default so a debugging session can query everything without firing
-missiles; resume to any `t`. This note states that model precisely, checks it against the Opus proposal
-([task-graph-design](task-graph-design.md)), [TASK-CHAIN](../../../seon/schedule/cards/TASK-CHAIN.md), plan §0 and the
-code, and proposes the smallest composition that keeps process control in Flow.
+**Thesis (owner, 2026-10-11): there is ONE path, an agent wakes and runs a task, and everything uses it**: step tasks,
+root's scheduling task, root's merge requests, maintenance, the heartbeat where it can. Governing principle: Flow
+manages the literal process and computation; channels carry only ephemeral data; everything of consequence is a
+database fact, so a crash loses nothing and a restore to any `t` is a derivation. One path means one thing to make
+fast and stable, measured at its five seams (§0), and one reconciler that hosts it.
 
-What the probe showed (default, 2026-10-11): one cluster graph (`seon.agent/armer` and `seon.render.web/render`, both
-`:running` under `flow/ping`), one armed agent graph (`root`), one child roster for the hosted branch agent
-`item3-interp` on `:agent-9027404abfc7` (its graph lives in the child roster, not the cluster's `:seon.agent/armed`),
-0 assignments, 705 tasks; listened attributes `:seon.message/to`, `:seon.effect/to`, `:seon.schedule.fire/agent`;
-arming attributes `:seon.agent/id`, `:seon.schedule.task/owner`.
+Probe (default): one cluster graph (`seon.agent/armer`, `seon.render.web/render`, both `:running`), one armed agent
+graph (`root`), one child roster for the hosted branch agent `item3-interp`, 0 assignments, 705 tasks; listened
+`:seon.message/to`, `:seon.effect/to`, `:seon.schedule.fire/agent`; arming `:seon.agent/id`, `:seon.schedule.task/owner`.
 
-## A. The owner's model, stated precisely
+## 0. The one path, and everything not on it
 
-Two different things are called "state", and the design hinges on keeping them apart:
+The path: a listened datom wakes the agent (`seon.cluster.wake/route!`) → its turn proc pins one database value and
+derives the work (`seon.turn/next-agent-work`: a held assignment, an unanswered wake) → the task is loaded and
+validated and its context rendered (`seon.context/current-state`) → its proofs run on its branch (`test-step`) → green
+ends it (`end-task-call`, one transaction) or red opens one model call → the recording transaction → the next wake.
 
-| | Progress of a task | Execution of the runtime |
+| Today or proposed | On the path? | Disposition |
 |---|---|---|
-| What it answers | where this work is: ready, assigned, ended how | whether anything may run right now |
-| Nature | a consequence of facts written once by their producers | an **intent** nobody can derive (the owner wants it paused) |
-| Stored? | **derived**, never a field (AGENTS.md "Derive work and completion"; `seon.plan/derived-frontier` reused) | **stored**, one fact per scope, written by whoever controls execution |
-| Actual counterpart | none: the facts are the truth | the roster of live graphs and `flow/ping` (`:paused`/`:running`) |
+| step tasks (Design, Prove, Implement) | yes, once launched | the path |
+| root's merge request (plan §0 item 8) | yes: a task assigned to root; `my.root/merge!` is a form in its pass | the path |
+| root's scheduling (§D) | yes: root's `:work` task; nominal wakes answered with no call | the path |
+| maintenance `:seon.schedule.task/*` + per-agent `seon.schedule/schedule-step` (own timer, own `d/listen`, calls a Var directly) | **no**: a second "task" with a second proc and listener | becomes a task: a schedule entity's firing **creates a task** (template, position, intent `:running`) whose proof is the Var's postcondition; a cheap firing with no model is a task whose first pass goes green; one timer proc stays in the cluster graph to write the fire fact (a clock is not a task) |
+| `seon.test-support/start-run!`, `own-branch-agent!`, `outside-wake-on-branch!` ("Work your task.") | no: hand launch plus a manufactured wake | deleted; the bench writes tasks; a held unanswered assignment is work |
+| `seon.task/assign!`'s proof run before the row, on the caller's thread | no: proofs outside the agent's pass | the first pass runs them |
+| `eval_clj` hosting an ad-hoc agent | half: it hosts, then runs the form as that agent's run | root's act at the entrant boundary through the same `host!`; the run is on the path (E6) |
+| the armer / reconciler (§A3) | **no, by design**: it hosts the path; it writes no task facts | stays: the one thing that is not a task, because a task cannot start itself |
+| the heartbeat (§A4) | partly: a timer that pings and writes facts | a proc, not a task: its work is a clock and a `ping` and its only writes are observations; making it a task would wake an agent every 30 s for nothing. Its *consequences* (stale → anomaly) reach root's task on the path |
+| the render proc, the fault committer | no | views and the entrant boundary; they run no agent work |
+| `seon.turn/end-task!`'s proposal and landing (`land-end!`, dial off) | half: inside the pass, but a separate landing path | the landing is root's merge-request task; `end-task!` only records the end |
 
-### A1. The task FSM (derived from facts written once)
+What to measure on the path, per task and per round, recorded as profile evidence (never a target invented; 10× over
+the work's proportion is wrong work): **wake → work derived** (`route!` to `next-agent-work`, ms; today sub-ms routing);
+**work → task loaded and validated** (assignment read, task pull, reference resolution; proportional to must-read
+count); **task → context rendered** (`current-state`, ms and MB; today hundreds of MB, item 12); **context → proofs
+run** (`test-step`, ms per proof, reuse by reach digest); **proofs → first call or end** (zero calls on green);
+**end recorded → successor's graph resumed** (the reconciler's pass: fork, host, assignment; today host is
+240–409 ms warm plus acquisition); **recording transaction** (under 100 ms, AGENTS.md); and per pass `:seon.repl/ms`,
+`:seon.repl/alloc-mb`, calls. Stability: count passes that ended in a fault, an interrupted turn, a stale heartbeat,
+a repeated effect after a crash; each is a Seon defect with a task.
 
-| State | Derivation over main (all comparable by `t`) | Who writes the fact that moves it | Observed or stored |
+## A. The model
+
+Two kinds of state, kept apart: a task's **progress** is derived from facts written once by their producers (never a
+field that moves); the **execution intent** is a stored decision nobody can derive. The runtime's **actual** state is
+the roster and `flow/ping`, written back only by the heartbeat as an audit (A4), never read as truth by the reconciler.
+
+### A1. Links: the `seon.plan` tree with plan items replaced by tasks
+
+What `my.plan` stored (cea904e92^) and what each becomes:
+
+| `my.plan` (deleted) | Meaning then | On tasks now | Verdict |
 |---|---|---|---|
-| created | the task exists; `:seon.task/after` (card-many ref, asserted at creation) names its predecessors; `:seon.task/of` its subject | the creator: root, an agent's `my.task/refine!`/`create!`, a mined query, a schedule firing's template | stored facts, immutable |
-| blocked | some task in `after` is not done | nobody: follows from the predecessor | derived |
-| ready | not done, no assignment with open admission, every `after` done (no `after` = ready at creation) | nobody | derived |
-| assigned | an assignment row exists (`seon.task/assign!`, identity `seon.id/id [handle agent branch]`) and its agent's `:seon.agent/admission-closed-tx` is absent | the reconciler's launch (C) | stored once |
-| running / paused | assigned **and** the execution intent of its scope (A2) | the operator or root | intent stored; actual observed |
-| ended `:done` `:given-back` `:capped` `:stalled` `:sent-back` | `seon.turn/task-end` derived by the agent's own pass, recorded by `end-task-call` (end message + admission closed, one transaction); `:sent-back` carries `:seon.task/target` | the agent's pass | stored once per assignment |
-| done(T) | some assignment of T ended `:done` and no later `:sent-back` targets T | nobody | derived |
-| closed | the subject's last step done, or a merge request closed by `seon.task/close!` | root | derived / stored once |
+| `:my.plan/steps`, `:my.plan.item/steps` (component sets) | ownership: a step owns its sub-steps; retracting the parent retracts them; the parent is the reverse component edge | `:seon.task/steps` component ref set; a child's parent is `:seon.task/_steps`; **the parent task is the handoff medium** (`refine!` edits it; children read it in context) | reuse; replaces round 1's `:seon.task/of` |
+| `:my.plan.item/position` (int among siblings) | authored sibling order, a stored fact because card-many is a set | `:seon.task/position`; **equal positions run concurrently, lower positions run first** (A1 readiness) | reuse, with the sequencing rule the old frontier lacked (it ran siblings concurrently and sequenced only through the current-step pointer) |
+| `:my.plan.item/needs` (set of step ids, cross-plan, missing = open) | explicit prerequisite, dependency is not ownership | `:seon.task/needs` ref set to any task, any tree; a missing or retracted target stays open until the author removes the need | reuse; replaces round 1's `:seon.task/after` for joins and cross-links; sequence inside a tree is position, not needs |
+| `:my.plan.item/completed-tx` | completion as a fact naming its transaction | the assignment's end fact (`seon.turn/end-task-call`), `:done` or `:sent-back` with target; a parent completes when its children do | reuse the shape; written by the end, not by hand |
+| `:my.plan/current-step` | a mutable "where am I" | none: ready is derived | drop (the state machine to avoid) |
+| `:my.plan.item/done-query`, `:done-when`, `:subject` | arbitrary completion queries settled every turn | none: a task completes by its proofs (AGENTS.md "Derive work and completion") | drop |
+| `:my.plan.item/about` (symbol tokens) | what the step concerns | `:seon.task/must-read` and the typed intent | drop (already exists) |
+| `:my.plan.item/agent`, `:my.plan/agent`, `:my.plan/objective` | an agent's private plan | the assignment row is the agent edge; the root task's intent is the objective | drop: trees are shared, not per agent |
+| `derived-frontier` (ready/blocked in one pull) | blocked while any need is open; ready when incomplete, unblocked, leaf or all children complete | the same derivation plus position order, over main | reuse |
 
-No field moves. A send-back makes a done task not-done by a later fact, so its successors stop being ready and it
-becomes ready again for a fresh attempt. There is no `:seon.task/stage` that changes, no "launched" flag, no running
-flag written by the runtime.
+**Readiness** (derived, one pull of the tree plus the foreign needs, as `derived-frontier` did): a task is ready when
+it is not done, has no assignment with open admission, every `:seon.task/needs` target is done, every sibling with a
+lower `:seon.task/position` is done, and it is a leaf or all its children are done. **Done**: an attempt ended
+`:done` and no later `:sent-back` targets it; a parent with children is done when they all are (and its own proofs,
+if any, are green). A send-back makes a done task not-done by a later fact, so its successors stop being ready and it
+is ready again for a fresh attempt. The chain Design(0) → Prove(1) → Implement(2) → merge request(3) → retrospective(4)
+is five children of one subject task; a fan-out is children sharing a position; a join is a task that `needs` several.
 
-### A2. The execution intent, the reconciler, the roster
+### A2. The five intents, each with one reconciler action
 
-- **Intent**: `:seon.cluster/execution` ∈ `#{:running :paused}` on the cluster entity, and an optional per-agent
-  override `:seon.agent/execution`. Paused wins. Both are `:seon.wake/arms true`, so a change wakes the reconciler.
-- **Actual**: the roster. Process scope `seon.operator.runtime/running-instances`; execution scope the one atom
-  `seon.cluster.agent/routing` (`:seon.agent/armed`, `:seon.agent/channels`, `:seon.agent/contexts`,
-  `:seon.agent/children` per hosted branch, `:seon.flow/graph`). Each armed entry holds its graph and executor, so
-  `flow/ping` answers `::flow/status` and the proc's `ping-map-fn` state per agent. Today status must walk children to
-  see branch agents; the graph view (C) is one function over the roster that does.
-- **Reconciler** (the owner's React): one derivation `desired(db) = {agent → :running | :paused}` over assignments
-  with open admission and the intents, one observation `actual = roster + ping`, and the diff applied with Flow's own
-  verbs: absent → `arm!` (`flow/start`, which leaves every proc `:paused` by construction, then `flow/resume` only when
-  desired is `:running`); `:running` desired, `:paused` actual → `flow/resume`; the reverse → `flow/pause`;
-  admission closed → `disarm!` (`flow/stop`, interrupt, join). Idempotent by identity: running it twice changes
-  nothing. It is woken by the datom router on arming attributes and primes itself at its own `::flow/resume`, which is
-  exactly what `seon.cluster.agent/armer-step` already does for "unarmed agents with work".
+Intent lives on the **task** (`:seon.task/execution`), since what runs is an attempt at a task; absent means
+`:running`. The cluster carries `:seon.cluster/execution` ∈ `#{:running :paused}`; paused anywhere wins. Both are
+`:seon.wake/arms true`. The reconciler's precondition is readiness; the intent is permission and shape.
 
-### A3. Boot modes and t-basis resume
-
-| Mode | What happens | Guarantee | Limit |
+| Intent | Reconciler action (Flow verbs) | Facts | Entered by |
 |---|---|---|---|
-| `start` (resume) | `recover-runs!` closes interrupted turns (facts only), then the reconciler's prime arms every agent with an open assignment and resumes those whose intent is `:running`; a hosted branch agent is re-hosted from its assignment's branch | the work stays due; nothing is replayed | an effect a crashed pass began but did not record repeats unless its owner is idempotent (AGENTS.md "Recover facts, not execution") |
-| `start --paused` (debug) | the same prime, but the cluster intent is set `:paused` first: graphs exist and are pingable, no transform runs, no proof runs, no model call | every fact queryable, nothing fires | the schedule procs pause too (whole graph), so maintenance waits |
-| resume to `t` | fork a branch from the commit at `t` (`seon.cluster.registry/fork!` from a commit id; `d/as-of` alone is read-only), set its intent `:paused`, point a cluster handle at it and let the reconciler arm against it | the facts at `t`: tasks, assignments, messages, program entities on that branch | live results (`seon.cache`), SCI private state, provider replies, git commits, written files are gone or not undone; the JVM's compiled Vars are HEAD's, so only what the branch interprets from source is at `t` |
+| `:held` | nothing, even when ready; no agent, no branch | the intent | root (scheduler) or the creator |
+| `:running` | if no graph: fork from the predecessor's recorded commit, `host!`, write the assignment, `flow/start` then `flow/resume`; if paused: `flow/resume`; if hosted elsewhere after a restart: re-host from the assignment row | assignment row (once), branch | root; the default |
+| `:paused` | if no graph: launch as above but **no** `flow/resume` (Flow starts paused; context acquired, inspectable, no transform, no proof, no call); if running: `flow/pause` (takes effect after the current transform) | the intent | root, `start --paused`, t-resume |
+| `:stopped` | `flow/pause`, join the pass, `flow/stop`, join the executor (`disarm!` without the interrupt), release the SCI context; agent, branch and assignment stay; `:running` re-hosts from the row | the intent | root (memory, long waits) |
+| `:cancelled` | interrupt (`disarm!` as today), close the assignment with the reason, delete the branch; terminal | end fact `:cancelled` + reason, `:seon.agent/admission-closed-tx` | root |
 
-"If it says running and it is not running, switch it to paused" is unnecessary once nothing writes actual state to the
-database: after a crash desired still says `:running`, actual is empty, and the diff arms and resumes (or arms and
-leaves paused under `--paused`). A stored "running" would be a mirror that drifts (AGENTS.md "Decide at the authority").
+Complete and minimal, checked against what the roster can be in: no graph and not launchable (`:held`), no graph
+but launchable (`:running` before launch), graph paused (`:paused`), graph running (`:running`), graph gone but
+resumable (`:stopped`), gone for good (`:cancelled`); done is derived, not an intent. `:stopped` is distinct from
+`:paused` because a hosted context costs hundreds of MB (`seon.context/one-agents-current-state-costs-hundreds-of-megabytes`),
+and from `:cancelled` because its facts stay due. "Finish the current turn then stop" is Flow's own semantics: the
+control channel is read with priority **between** transforms (`flow/impl.clj` `proc`), so `pause` + join ends after
+the current pass; only `:cancelled` interrupts.
 
-## B. Where the design and the code differ from this model; ambiguities
+### A3. The reconciler: the armer, generalized
 
-| Where | Says | Differs from A | Needs |
-|---|---|---|---|
-| TASK-CHAIN §2, plan §0 item 6 | one evolving task; `:seon.task/stage` moved by the transition; `:seon.task/basis-commit` on the task | the owner chose one task per step; a mutable stage is the state field A1 avoids; `refine!` of the held task breaks its own assignment (`:revised-since-assignment`) | revise §2, §6 items 2–5 and plan item 6 in place to `:seon.task/after`, `:seon.task/of`, stage type set once |
-| task-graph-design §3c | the armer launches: fork, host, write the assignment | agrees with A2; but "launch calls `assign!`" runs the proofs on the armer's thread for up to the step dial, blocking every other arm | owner answer E3; recommendation: first pass |
-| `seon.task/assign!` | runs the proofs in the agent's world **before** writing the row; refuses `:proofs-green` | the owner wants proofs to run "in the agent's SCI env on the branch they were given … if valid and not paused"; under `--paused` nothing may run, so assignment cannot depend on a run | split: the row is written by the launch; the red-first run is the agent's first pass (`seon.turn/step`'s `test-step`), green → `:done` with zero calls |
-| `seon.turn/next-agent-work` | an `:open` turn needs a held assignment **and** an unanswered wake; a fresh assignment has none, so `seon.test-support/start-run!` sends "Work your task." | a never-answered assignment is work | one clause: a held assignment with no answering turn since its `t` is work |
-| `seon.cluster.agent/armer-step` | arms agents whose `:seon.agent/branch` is its own execution's branch; branch agents are hosted on demand by `seon.cluster.host/host!` from `eval_clj` | after a restart, an assigned branch agent is not re-hosted until someone evaluates as it; boot is not "resume" for them | the reconciler hosts from assignments (branch on the row), not from who last evaluated |
-| `seon.cluster/arm-agents!`, boot | always `flow/resume`; no paused boot | A3 needs a cluster intent read before the prime and a `start --paused` | one dial/flag and one `when` around `flow/resume` in `seon.flow/start-graph!` |
-| `seon.turn/end-task!` | proposal → land (dial) → `outcome-tx` → `end-task-call`: four writes, two connections | Astra §8.2 already noted it is not one transaction; A1 needs only that the **end fact** is one write (it is) | leave; record `:sent-back` and its target in `end-task-call`'s transaction |
-| `seon.task/resolution` | closed-by faults, signal, merge outcome | no done(T) clause for work tasks | the fourth clause from task-graph-design §3b |
-| vocabulary | "running/paused/stopped" words undeclared; `:seon.schedule.task/*` is a second "task" | Flow's words are `:paused`, `:running`, `:exit` | record execution intent words; rename schedule tasks (decision 4 of the Opus note) |
+`seon.cluster.agent/armer-step` already is "make the roster match the facts": woken by the router on arming
+attributes, primed at its own `::flow/resume`, deriving unarmed agents with work. It becomes the one reconciler: for
+every ready task and every assignment with open admission, desired = its intent; actual = roster + `flow/ping`; apply
+the table above, under one admission dial `:seon.config.agent/max-running` (ready tasks in creation order). Idempotent
+by identity: branch names are derived, `fork!` answers `created? false`, the assignment upserts by
+`seon.id/id [handle agent branch]`, `arm!` leaves an armed agent alone. Boot, crash recovery, a live change and
+`--paused` are the same pass.
 
-Ambiguities only the owner can settle: the scope of pause (cluster, agent, task); the default boot mode; whether a
-stored "actual" is wanted anyway as an audit (recommended no); whether t-resume means a read-only view or a forked
-branch one can resume (recommended fork); whether maintenance schedules pause with the cluster.
+**Only the reconciler starts graphs.** An agent that wants work done writes a task (`my.task/create!` with its
+position, needs, intent); it never calls `host!`, `arm!` or `assign!`. The owner's worry is right: a graph started
+from inside another agent's transform would run on that agent's executor and die with it, and two starters of one
+roster is the dual-writer problem. Today's one exception is the MCP entrance (`eval_clj` hosts an ad-hoc agent on
+demand through `acquire-context!`/`host!`); it is root's own act at the entrant boundary and goes through the same
+`host!` the reconciler calls (owner question E6).
 
-## C. The simplest design that keeps process control in Flow
+### A4. Heartbeat: observed state written only when it changes
 
-What Flow gives for free, verified in `clojure.core.async.flow.impl`: procs start `:paused`; `pause`/`resume` and
-`pause-proc`/`resume-proc` are control-channel commands with priority over inputs; `ping` returns `::flow/status`,
-`::flow/count` and the step's `ping-map-fn` state; `inject` puts on any `[pid cid]`; the transition arity receives
-`::flow/resume`, `::flow/pause`, `::flow/stop` (there is no `::flow/start` call despite the guide); `create-flow` is
-pure data; `stop` is a command, not a join (Seon joins the executor, `seon.flow/join-graph!`); report and error
-channels are `sliding-buffer 100`, so nothing durable may ride them; a graph's proc set is fixed at creation, so
-adding an agent to a shared graph means stopping and rebuilding it.
+A proc in the cluster graph (`:seon.cluster/heartbeat`, `:io`, its own timer) pings every graph in the roster and its
+child rosters every `:seon.config.cluster/heartbeat-ms`, and writes `:seon.agent/observed` (`:running`, `:paused`,
+`:absent`, with the last transform count) **only when it differs from the stored value**, plus one
+`:seon.cluster/heartbeat-t` on the cluster entity per period. Health reads: observed state older than two periods, or a
+heartbeat older than two periods, is **unknown** (AGENTS.md "Health is a positive observation"); the reconciler never
+reads it. History is the audit. Cost: one ping per agent per period (about 1 ms each); one datom per period for the
+heartbeat (at 30 s, 2,880 datoms a day, reclaimed by retention GC) and one per actual state change. The heartbeat is
+the only periodic writer in the system; its period is a dial, never under 10 s.
 
-| Option | Shape | Cost | Guarantee | Sacrifice |
-|---|---|---|---|---|
-| **1. The armer becomes the reconciler** (recommended) | the cluster graph's armer proc, woken by the router on arming attributes (`:seon.agent/id`, `:seon.schedule.task/owner`, plus `:seon.task/after`, the assignment's `:seon.task/end`, the two intents) and primed at `::flow/resume`; one transform: desired − actual → `arm!`/`host!`/`flow/pause`/`flow/resume`/`disarm!`, then launch ready tasks (fork, host, assignment row) | one query per wake proportional to the ended task's successors and the open assignments; launch = one fork (a pointer) + one host (today's acquisition) + one row | boot, crash recovery and a live change are the same pass; idempotent by identity; paused means no transform runs anywhere | the armer transform does hosting (seconds today) on the cluster graph's io thread; keep proofs out of it |
-| 2. One graph per cluster, one proc per agent | every agent a proc in the cluster graph; `pause-proc`/`resume-proc` per agent | rebuild the whole graph on every launch and end (fixed proc set): stop and join every agent to add one | one `ping` shows everything | an in-flight turn interrupted by a neighbour's launch; no per-agent executor to join; contradicts "topology changes rebuild graphs" cheaply |
-| 3. A separate reconciler proc or namespace beside the armer | a new proc that pauses/resumes, the armer still arms | a second derivation of the same facts | none beyond 1 | two procs deciding one roster: the dual-writer problem the roster was built to avoid |
+### A5. Boot modes and t-resume
 
-Recommended: **option 1**, per-agent graphs as today (`seon.cluster.agent/graph-definition`: mailbox → turn, schedule),
-the cluster graph (armer, render) as the reconciler's host, the datom router as its sensor. Pause and resume are
-`flow/pause`/`flow/resume` on each agent's graph, so a paused agent's schedule proc pauses too and its `d/listen` is
-removed by its own `::flow/pause` transition (`seon.schedule/schedule-step` already does this).
-
-How agents communicate, and what is durable:
-
-| Channel | Durable | Use |
+| Mode | Pass | Guarantee |
 |---|---|---|
-| database messages (`seon.cluster.message/send!` on the recipient's branch) + listened attributes + `route!` wakes | yes: the message is a fact; the wake is "look"; answeredness is derived from `t` (`seon.turn/unanswered-wakes`) | all agent-to-agent and root communication, the task handoff (`:seon.task/of`), the end message |
-| Flow connections (`mailbox → turn` sliding-1), `inject`, `::flow/cast` | no: sliding buffers, lost at stop | inside one agent's graph only; an operator's poke is `inject` of a payload-free wake |
-| Flow `report`/`error` chans | no (sliding 100) | observation; Seon's fault committer tags and records errors |
+| `start` | `recover-runs!` closes interrupted turns, then the reconciler's prime applies every intent: re-hosts assigned branch agents from their rows, resumes `:running`, leaves `:paused` paused, rebuilds nothing for `:stopped`/`:held` | the flows just continue; work stays due, nothing replays |
+| `start --paused` | writes `:seon.cluster/execution :paused` before the prime | every graph exists and answers `ping`; no transform, proof or call runs; schedules pause too |
+| resume to `t` | fork a branch from the commit at `t` (`seon.cluster.registry/fork!` from a commit id), intent `:paused`, point a cluster handle at it, prime | the facts at `t` and the agents as they were, inspectable, resumable one at a time |
 
-What disappears or collapses into the reconciler:
+The owner's claim holds: a branch commit id plus a reconstructible SCI context is enough, because context is rendered
+live from facts (`seon.context/current-state`) and the SCI context is acquired from the branch's program entities
+(`acquire-context!`; `seon.cache` may still hold it). **Unrecoverable, exactly:** live result values (`seon.cache`
+LRU; a handle answers "gone"); the contents of SCI atoms and other places that are not program entities; an in-flight
+provider call or evaluation at the crash (the work is due again and repeats unless its owner is idempotent); effects
+already made outside the store (provider spend, git commits, written files, messages read by outsiders); and the
+compiled JVM program, which is HEAD's, not `t`'s (only what the branch interprets from source is at `t`).
 
-| Today | Becomes |
-|---|---|
-| `seon.test-support/start-run!`, `own-branch-agent!`'s setup eval, `outside-wake-on-branch!`'s "Work your task." | the bench writes tasks with `after`; the reconciler launches; a held unanswered assignment is work |
-| `my.root/launch!` (planned, plan §0 item 5) | `my.task/create!` with `after`; nothing launches by hand |
-| hosting on demand from `eval_clj` as the only path to a branch agent after boot | the reconciler hosts from assignments; `eval_clj` keeps hosting for ad-hoc agents |
-| `seon.task/assign!`'s proof run before the row | the first pass's `test-step`; `assign!` shrinks to the row |
-| TASK-CHAIN's `advance-end!`, `:seon.config.chain/advance?`, mutable stage, `my.root/launch!` basis handling | not built: readiness derived; the basis is the predecessor assignment's recorded commit |
-| boot's "arm and resume" | the same prime under the intent; `--paused` is one fact written before it |
+## B. Differences from the written designs and the code
 
-Stays: the per-agent graph and executor (needed to interrupt and join one agent), the wake router, the schedule proc,
-`end-task!` (adds `:sent-back`), the turn-completion bound (a bound, not a fence: "Bound admission and await actual
-exit"). Cost of a pass: successors of the ended task × their `after` count (reverse `:avet`), plus open assignments,
-never all 705 tasks.
+| Where | Says | Change |
+|---|---|---|
+| TASK-CHAIN §2, §6 items 2–5; plan §0 item 6 | one evolving task, mutable `:seon.task/stage`, `:seon.task/basis-commit` on the task, `advance-end!`, advance dial | one task per step as a child; stage type set once; basis on the predecessor's assignment; readiness derived; no advance code |
+| task-graph-design §3b | `:seon.task/after`, `:seon.task/of` | `:seon.task/needs`, `:seon.task/steps` + `:seon.task/position` (A1); launch stays the armer's (§3c option A) |
+| `seon.task/assign!` | runs proofs before writing the row | the row is the launch's write; the red-first run is the agent's first pass (`seon.turn/step`'s `test-step`), so `:paused` holds it and a green task ends with zero calls |
+| `seon.turn/next-agent-work` | needs a held assignment **and** an unanswered wake ("Work your task." is sent by `seon.test-support/start-run!`) | a held assignment never answered is work |
+| `seon.cluster.agent/armer-step` | arms only its own branch's agents; branch agents are hosted on demand from `eval_clj` | hosts from assignment rows, so a restart re-hosts (verified gap: today an assigned branch agent is not re-hosted) |
+| `seon.cluster/arm-agents!`, `seon.flow/start-graph!` | always `flow/resume` | resume only under the intent |
+| `seon.cluster.agent/disarm!` | always interrupts | `:stopped` pauses and joins first; only `:cancelled` interrupts |
+| `seon.task/resolution` | closed-by faults, signal, merge outcome | adds the derived done clause (children done, proofs green); work tasks (root's) never close (catalogue §2.4) |
+| vocabulary | no execution words | record `:held :running :paused :stopped :cancelled` (Flow's `:paused`/`:running` kept) and rename `:seon.schedule.task/*` |
 
-### C1. The governing principle, applied to every channel in the code
+## C. Process control in Flow, and every channel classified
 
-Owner (2026-10-11, during this pass): Flow manages the literal process and computation; channels carry only
-ephemeral data we do not care about; anything of consequence is a database fact, so nothing is lost and restore is a
-derivation. Every channel use today, classified:
+Flow gives for free (`clojure.core.async.flow.impl`): procs start `:paused`; `pause`/`resume`/`pause-proc`/
+`resume-proc` are control commands with priority between transforms; `ping` returns status, count and `ping-map-fn`
+state; `inject` puts on any `[pid cid]`; the transition arity sees `::flow/resume`/`::flow/pause`/`::flow/stop`;
+`create-flow` is pure data; `stop` is a command, not a join (Seon joins the executor); report/error channels are
+`sliding-buffer 100`; a graph's proc set is fixed at creation. Hence one graph per agent (interrupt and join one agent;
+a shared graph would stop everyone to add one proc), the cluster graph for armer/reconciler, render and heartbeat.
 
-| Channel (creator) | Carries | Buffer | Verdict |
+| Channel (creator) | Carries | Buffer | Verdict under the principle |
 |---|---|---|---|
-| armer wake `:seon.cluster.wake/channel` (`seon.cluster/arm-agents!`, `host/start!`) | payload-free "look" | sliding 1 | conforms: rederived from facts at the next pass or prime |
-| mailbox in-port + `mailbox → turn` episode (`graph-definition`) | payload-free wake | sliding 1 | conforms: the message is the fact (`:seon.message/to`); answeredness derived from `t` |
-| schedule kick `:seon.schedule/channel` (`arm-graph!`) | payload-free | sliding 1 | conforms: due work derived from `:seon.schedule.fire/*` facts and the clock |
-| render wake, runtime-eval, pages, per-tab taps (`arm-agents!`, `seon.render.web`) | "re-render", page deltas | sliding 1 | conforms: a page is derived from the database; a lost delta is the next one |
-| agent request port `:seon.agent/requests` + reply promise (`submit-source!`) | **a source submission's text** and its reply | 1 / promise | borderline: the text is the caller's value, awaited under a bound; a stop closes the reply (`:seon.await/closed-error`) and the caller retries. Conforms as long as the run is recorded by the pass's one transaction before the reply; the channel is transport, not the record |
-| completion permit `:seon.turn.loop/completion`, stream channel, quiesce, `graph-ref`, `feeds-exited` | synchronization tokens | 1 / promise | conforms: process control, no data |
-| Flow `::flow/error` → `seon.flow/fault-port` | a proc's Throwable report | **synchronous**: `>!!` runs the recorder on the reporting thread, no buffer | conforms by replacement: Seon already refused Flow's sliding error channel for consequential data; the fault becomes a stored fact before the put returns |
-| Flow `::flow/report`, `ping` replies | pass reports, status | sliding 100 / per call | conforms: observation only; nothing reads reports as truth |
-| work launcher `::completion` (`start-work-launcher!`) | io work completions | `io-parallelism` | conforms: the work's result is recorded by its owner; the channel sequences threads |
+| armer wake (`arm-agents!`, `host/start!`) | payload-free "look" | sliding 1 | conforms: rederived at the next pass or prime |
+| mailbox in-port, `mailbox → turn` episode | payload-free | sliding 1 | conforms: the message is the fact; answeredness derived from `t` |
+| schedule kick | payload-free | sliding 1 | conforms: due work derived from facts and the clock |
+| render wake, runtime-eval, pages, per-tab taps | "re-render", page deltas | sliding 1 | conforms: pages derive from the database |
+| request port + reply promise (`submit-source!`) | a submission's text, its reply | 1 / promise | transport for an awaited request; the run is recorded by the pass's transaction before the reply; a stop closes the reply and the caller retries |
+| completion permit, stream, quiesce, `graph-ref`, `feeds-exited` | synchronization | 1 / promise | conforms: process control |
+| `::flow/error` → `seon.flow/fault-port` | a proc's Throwable | synchronous | conforms by replacement: the fault is a fact before the put returns |
+| `::flow/report`, `ping` replies | observation | sliding 100 | conforms; the heartbeat turns ping into facts on change |
+| work launcher completion | io completions | n | conforms: results recorded by their owners |
 
-Nothing consequential rides a channel today except the submission text, and that is a request awaiting its recorded
-answer, not state. The additions in A and C keep the rule: intent, assignment, `after`, end and `:sent-back` are
-facts; the reconciler's wake is payload-free; a pause or resume is a control command whose truth is the intent fact,
-re-derived at the next prime.
+Additions keep the rule: intents, steps, position, needs, assignments, ends, observed state and heartbeat are facts;
+every wake is payload-free; a Flow command's truth is the intent fact it was derived from.
 
-## D. Where scheduling lives
+## D. Who schedules: root's standing task
 
-Scheduling is writing facts the reconciler reads: a task with `after` (when), an assignment (who, where), an intent
-(whether). Nobody calls start.
+The deterministic part needs no scheduler: the reconciler launches ready tasks under the dial. What remains is
+judgment: holding, ordering, cancelling, repairing. That is **root's `:work` task** (the self task an agent without a
+task has, R2; work tasks never close), with intent `:running`, as the owner wants: mostly automatic, root already
+there when something breaks.
 
-| Option | Who writes | Cost | Guarantee | Sacrifice |
-|---|---|---|---|---|
-| **1. Creators write `after`; the reconciler launches every ready task under one admission dial** (recommended) | root and agents (`my.task/create!`, `refine!`), mined queries, a schedule firing that instantiates a template | one dial `:seon.config.agent/max-running` read at each pass; ready tasks sorted by creation `t` | tasks run independently; the only policy is a bound every execution surface declares anyway | no priorities beyond order of creation |
-| 2. A scheduler agent | a root-side agent writes assignments (or a `:seon.task/priority`) from its own task | a model call or query per decision | arbitrary policy as data | a model in the loop of every launch; a second owner of assignments |
-| 3. Flow topology as the schedule | successors wired as procs/conns | rebuilds per chain | none beyond 1 | not durable; contradicts C |
+| Part | Mechanism | Model call? |
+|---|---|---|
+| sensing | root's wakes are what already reaches it: end messages (`:seon.message/to "root"`), recorded errors, plus the heartbeat's `:seon.agent/observed` changes and a stale `:seon.cluster/heartbeat-t` | no |
+| nominal pass | an end `:done` whose successor is ready, or an observed change matching intent: the wake is answered by a pass that derives "nothing to do" (`:seon.wake/opens-turn? false` on those attributes, as a schedule firing today) | no |
+| anomaly pass | an end `:given-back`/`:capped`/`:stalled`/`:cancelled`, a `:sent-back` loop (the same target twice), a recorded error, a stale heartbeat, an attempt past its budget: the wake opens root's turn with the anomaly in its context | yes, only then |
+| acting | root writes facts: `my.task/create!` (steps, position, needs), an intent (`:held`, `:paused`, `:stopped`, `:cancelled`, back to `:running`), `my.task/refine!` on the subject, `my.root/merge!`/`close!`; the reconciler does the rest | — |
+| proofs | the task's proofs are the invariants ("no assignment stalled longer than the dial", "every non-done end has a successor or a close", "heartbeat fresh"); red exactly when something is wrong, which is when root works | — |
 
-Later, a `:seon.task/priority` or `:seon.task/not-before` fact extends option 1 without a new owner. Pause is the
-owner's hand on the whole thing: `:seon.cluster/execution :paused` stops every launch and transform without touching a
-task.
+Root never starts a graph itself; it changes intents and the reconciler acts. The anomaly predicate is one derivation
+over facts, so "model only when something is wrong" is a declaration (`opens-turn?` plus the predicate), not code in
+the loop.
 
-## E. Owner questions (recommended option first)
+## E. Owner questions for round 3 (recommended first)
 
-1. **Progress derived, intent stored?** Recommended: yes, as A1/A2: no `:seon.task/stage` or running flag; one
-   `:seon.cluster/execution` intent plus an optional `:seon.agent/execution`. Alternative: a stored task run-state the
-   runtime writes, accepting drift and a reconcile rule.
-2. **Scope of pause.** Recommended: cluster and agent (Flow pauses a whole agent graph). Alternative: per task (would
-   mean pausing the agent anyway).
-3. **Where the red-first proofs run.** Recommended: the agent's first pass on its branch, inside its graph, so pause
-   holds them and a green task ends with zero calls; `assign!` only writes the row. Alternative: keep `assign!`'s
-   pre-run on the reconciler's thread.
-4. **Default boot mode.** Recommended: `start` resumes (ordinary operation, "the flows just continue");
-   `start --paused` and every t-resume boot paused. Alternative: paused by default always, resume by hand.
-5. **t-basis resume.** Recommended: fork a branch from the commit at `t`, paused, and reconcile it (facts recoverable;
-   live values and external effects stated unrecoverable). Alternative: `d/as-of` read-only, no runtime.
-6. **Store actual state at all?** Recommended: no; actual is the roster and `flow/ping`, shown by one status function
-   that walks child rosters. Alternative: a heartbeat fact per agent for audit.
-7. **Do maintenance schedules pause with the cluster?** Recommended: yes (whole-graph pause); a maintenance firing is
-   not agent work (Opus decision 4) but it still fires missiles.
-8. **Admission bound.** Recommended: one dial `:seon.config.agent/max-running`, ready tasks by creation order.
-   Alternative: launch everything ready.
-9. **Revise TASK-CHAIN §2/§6 and plan §0 item 6 in place now** to `after`/`of`/stage-type-set-once, and record the
-   execution words in the vocabulary? Recommended: yes, before item 6's lane starts.
+1. **Position sequences siblings; equal positions run concurrently; `needs` only crosses trees.** Alternative:
+   siblings always concurrent (the old frontier) and every sequence an explicit `needs`.
+2. **Intent on the task (`:seon.task/execution`), cluster `:seon.cluster/execution` only `:running`/`:paused`.**
+   Alternative: intent on the agent as well.
+3. **`:stopped` releases the SCI context and keeps agent, branch, assignment**; `:running` re-hosts from the row.
+   Alternative: fold `:stopped` into `:paused` and accept the heap.
+4. **The scheduler is root's `:work` task with invariant proofs; model turns only on the anomaly predicate.**
+   Alternative: a separate long-lived scheduler agent.
+5. **Heartbeat at 30 s, one datom per period plus changes, unknown after two periods.** Alternative: in-memory
+   heartbeat, only changes written.
+6. **`eval_clj` keeps hosting ad-hoc agents as root's act through the same `host!`** (recorded as an agent with a
+   `:running` work task). Alternative: `eval_clj` writes the task and awaits the reconciler's hosting.
+7. **Maintenance firings become tasks on the one path (a timer proc only writes the fire fact); the heartbeat stays a
+   proc.** Alternative: keep `seon.schedule/schedule-step` per agent as the second path.
 
-Not verified (probes before building): `host!` from the armer's proc thread for a new branch; the cost of the ready
-query on the live store; `fork!` from an arbitrary historical commit id for t-resume.
+Not verified (probes before building): `host!` from the armer's proc thread; the ready derivation's cost on the live
+store with 705 tasks; `fork!` from an arbitrary historical commit for t-resume; `flow/pause` then join as "finish the
+current pass" against the turn-completion bound.
