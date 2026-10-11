@@ -618,10 +618,46 @@
                   :seon.task.attempt/number number :seon.task/revision revision
                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}])))
 
+(def ^:private task-ref-attributes
+  "The task attributes naming other entities, left out when a task is written onto a branch that lacks it."
+  #{:seon.task/children :seon.task/needs :seon.task/faults :seon.task/created-by :seon.task/function})
+
+(defn attempt-rows-tx
+  "The transaction data writing onto `branch-db` attempt `key`'s row as main `database` holds it, under
+  main's entity id, with its task (scalar facts, main's id) when `branch-db` lacks it, so the branch's
+  agent reads its assignment in its own world and the end copy lands on the same entities; [] when
+  `branch-db` holds the row. The row names its agent by id: the branch holds the agent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/assignment]
+                  [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
+  [database branch-db key]
+  (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
+                               :seon.task.attempt/number {:seon.task/agent [:seon.agent/id]}
+                               {:seon.task/attempt-of [:db/id]}]
+                     [:seon.task/assignment key])
+        handle (:seon.task/assigned row)
+        task (when (string? handle) (db/pull database '[*] [:seon.task/id handle]))
+        present? (fn [lookup] (:db/id (db/pull branch-db [:db/id] lookup)))]
+    (cond (some read-error [row task]) (some read-error [row task])
+          (not (string? handle)) (refused 'seon.task/attempt-rows-tx :unassigned 'seon.task key)
+          (present? [:seon.task/assignment key]) []
+          :else
+          (let [task-present? (present? [:seon.task/id handle])
+                attempt-of (get-in row [:seon.task/attempt-of :db/id])]
+            (cond-> []
+              (and (not task-present?) attempt-of) (conj (apply dissoc task task-ref-attributes))
+              true (conj (cond-> (-> row
+                                     (dissoc :seon.task/attempt-of)
+                                     (assoc :seon.task/agent [:seon.agent/id (get-in row [:seon.task/agent :seon.agent/id])]))
+                           attempt-of (assoc :seon.task/attempt-of (if task-present? [:seon.task/id handle] attempt-of)))))))))
+
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
   working on `:seon.task/branch`, binding the revision it reviews now: the
-  attempt row, written at main. A task with no proof refuses `:no-proofs`.
+  attempt row, written on `connection` (main, root's world) and, when the agent
+  works on a branch of its own, on that branch too under main's ids
+  (`attempt-rows-tx`), so the agent reads its assignment in its own world; a
+  branch this process holds no connection to refuses `:no-world`. A task with no
+  proof refuses `:no-proofs`.
   Nothing runs here: the agent's first pass proves first (`seon.turn/prove-turn`),
   in its own world, and proofs already green end the attempt with no model call.
   Answers the assignment; it offers no operation, since nothing is yet worked.
@@ -634,18 +670,24 @@
                              [:seon.agent/context-source {:optional true} :seon.agent/context-source]]]
                   [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
   [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch}]
-  (let [home (main-connection connection)
-        read (assignment-read (db/db home) handle agent)
+  (let [read (assignment-read (db/db connection) handle agent)
         agent-id (:seon.agent/id read)]
     (if (:seon.error/at read)
       read
-      (let [tx (attempt-tx (db/db home) handle agent-id branch)
+      (let [tx (attempt-tx (db/db connection) handle agent-id branch)
             report (if (and (vector? tx) (seq tx)) (written connection tx) tx)
-            [_ attempt] (next-attempt (db/db home) handle)
-            row (when-not (:seon.error/at report)
-                  (db/pull (db/db home) [:seon.task/branch {:seon.task/agent [:seon.agent/id]}]
+            [_ attempt] (next-attempt (db/db connection) handle)
+            own (when (and (not (:seon.error/at report)) (not= branch (get-in (db/db connection) [:config :branch])))
+                  (if-let [target (db/branch-connection (db/db connection) branch)]
+                    (let [rows (attempt-rows-tx (db/db connection) (db/db target) attempt)]
+                      (if (and (vector? rows) (seq rows))
+                        (db/call-with-custody {:seon.db/connection target} #(db/transact! target rows))
+                        rows))
+                    (refused 'seon.task/assign! :no-world 'seon.task branch)))
+            row (when-not (some :seon.error/at [report own])
+                  (db/pull (db/db connection) [:seon.task/branch {:seon.task/agent [:seon.agent/id]}]
                            [:seon.task/assignment attempt]))]
-        (or (some #(when (:seon.error/at %) %) [report row])
+        (or (some #(when (:seon.error/at %) %) [report own row])
             {:seon.task/assignment attempt :seon.task/assigned handle
              :seon.agent/id (get-in row [:seon.task/agent :seon.agent/id]) :seon.task/branch (:seon.task/branch row)
              :seon.render/operations []})))))
@@ -676,7 +718,7 @@
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
 (defn agent-task
-  "The handle of the task `agent-id` holds in `database` (main's): its latest assignment's
+  "The handle of the task `agent-id` holds in `database`, its world (an attempt's branch holds its row): its latest assignment's
   task; nil when it holds none. One indexed query.
 
   ## Costs
@@ -690,7 +732,7 @@
     (or (read-error held) (first (apply max-key second [nil 0] (seq held))))))
 
 (defn agent-attempt
-  "The open attempt `agent-id` holds in `database` (main's): the entity of its latest assignment row
+  "The open attempt `agent-id` holds in `database`, its world: the entity of its latest assignment row
   with no end; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.db/invalid-read-error]]}
   [database agent-id]

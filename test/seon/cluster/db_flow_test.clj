@@ -524,3 +524,75 @@
                   (is (= "Refined on the branch." (intent)))
                   (is (zero? (:seon.squash/datoms (squash/squash-merge! {:seon.db/connection connection} branch nil)))
                       "and a second copy writes nothing new")))))))))))
+
+;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
+
+(defn- row-ids
+  "The entity ids of attempt `key`'s row and its agent on `database`, or nil where absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment :seon.agent/id] [:tuple [:maybe :int] [:maybe :int]]]}
+  [database key agent-id]
+  [(:db/id (db/pull database [:db/id] [:seon.task/assignment key]))
+   (:db/id (db/pull database [:db/id] [:seon.agent/id agent-id]))])
+
+(deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
+  an-attempts-branch-holds-its-attempt-and-agent-under-mains-ids
+  (binding [*space* "tq.seedrows"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)]
+            (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                            :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}})
+            (pass! handle routing)
+            (let [[[key-a branch-a agent-a]] (seq (attempts connection "a"))
+                  a-db #(db/branch-database (db/db connection) branch-a)]
+              (is (= (row-ids (db/db connection) key-a agent-a) (row-ids (a-db) key-a agent-a))
+                  "a fork of main after the attempt write inherits its row and agent")
+              (test-support/transacted! connection
+                                        [[:db/add [:seon.task/assignment key-a] :seon.task.attempt/end :done]
+                                         [:db/add [:seon.task/assignment key-a] :seon.task.attempt/commit
+                                          (db/commit-id (a-db))]])
+              (pass! handle routing)
+              (let [[[key-b branch-b agent-b]] (seq (attempts connection "b"))
+                    b-db (db/branch-database (db/db connection) branch-b)
+                    [row agent :as ids] (row-ids b-db key-b agent-b)]
+                (is (and (int? row) (int? agent)) "a fork of its need's end commit is given its row and agent")
+                (is (= (row-ids (db/db connection) key-b agent-b) ids) "under main's entity ids")
+                (is (= (chain-handle "b") (when (int? row)
+                                                    (get-in (db/pull b-db [{:seon.task/attempt-of [:seon.task/id]}] row)
+                                                            [:seon.task/attempt-of :seon.task/id])))
+                    "naming its task")
+                (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                    "with no fault recorded"))))))))))
+
+(deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
+  a-hand-assignment-writes-the-attempt-on-the-agents-own-branch
+  (binding [*space* "tq.handrows"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"h" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [agent-id "tq-hand-agent"
+                branch :tq-hand-branch]
+            (test-support/transacted! connection (agent/creation-tx {:seon.agent/id agent-id :seon.ns/name 'user
+                                                                     :seon.cluster/name "tq-chain"
+                                                                     :seon.agent/branch branch}))
+            (registry/fork! {:seon.store/store (agent/handle-store handle) :seon.store/branch branch
+                             :seon.cluster.registry/from (get-in (db/db connection) [:config :branch])
+                             :seon.db/db (db/db connection)})
+            (let [execution (agent/acquire-context! handle nil {:seon.agent/branch branch})
+                  assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (chain-handle "h")
+                                          :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+                  key (:seon.task/assignment assigned)]
+              (try
+                (is (string? key) "root assigns the task on main")
+                (is (= (row-ids (db/db connection) key agent-id) (row-ids (db/db (:seon.db/connection execution)) key agent-id))
+                    "and the agent's branch holds the same attempt and agent")
+                (is (= (chain-handle "h") (task/agent-task (db/db (:seon.db/connection execution)) agent-id))
+                    "so the agent reads its task in its own world")
+                (finally (agent/release-context! execution)
+                         (registry/retire-branch! {:seon.store/store (agent/handle-store handle)
+                                                   :seon.store/branch branch})))))))))))

@@ -1828,19 +1828,35 @@
     (when (:seon.error/at result) (throw (ex-info (:seon.error/message result "The attempt's fork was refused.") result)))
     nil))
 
+(defn- seed-attempt!
+  "Write attempt `key`'s agent and row onto the branch `connection` holds when its fork point predates them
+  (a need's end commit): the agent under main's entity id (its identity first, then its creation upserts onto
+  it) and the row with its task (`seon.task/attempt-rows-tx`), so the agent reads its assignment in its own
+  world and the end copy names main's entities."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :seon.flow.plan/action] :nil]}
+  [handle connection {key :seon.task/assignment agent-id :seon.agent/id :as action}]
+  (let [main (db/db (:seon.db/connection handle))]
+    (when-not (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (db/db connection) agent-id)
+      (let [eid (:db/id (db/pull main [:db/id] [:seon.agent/id agent-id]))]
+        (write! connection (into (if (int? eid) [[:db/add eid :seon.agent/id agent-id]] [])
+                                 (creation-tx (attempt-agent action (:seon.cluster/name handle)))))))
+    (when key
+      (let [rows (task/attempt-rows-tx main (db/db connection) key)]
+        (when (map? rows) (throw (ex-info (:seon.error/message rows "The attempt's rows could not be derived.") rows)))
+        (when (seq rows) (write! connection rows))))
+    nil))
+
 (defn- start-attempt!
   "Start a `:start-flow` action's graph under its intent.
-  Fork its branch, acquire the branch execution, create its agent there when the
-  fork point predates it, and start its flow. A repeat finds the branch and the
-  started graph and does nothing new."
+  Fork its branch, acquire the branch execution, write its agent and attempt
+  there when the fork point predates them (`seed-attempt!`), and start its flow.
+  A repeat finds the branch, its rows and the started graph and does nothing new."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/facts :seon.flow.plan/action] :nil]}
   [handle facts {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch
                  intent :seon.task/execution :as action}]
   (fork-attempt! handle branch (or (not-empty (get-in facts [:seon.flow.plan/basis h])) :main))
-  (let [execution (acquire-context! handle nil {:seon.agent/branch branch})
-        connection (:seon.db/connection execution)]
-    (when-not (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (db/db connection) agent-id)
-      (write! connection (creation-tx (attempt-agent action (:seon.cluster/name handle)))))
+  (let [execution (acquire-context! handle nil {:seon.agent/branch branch})]
+    (seed-attempt! handle (:seon.db/connection execution) action)
     (start-branch-flow! handle execution agent-id (or intent :running))
     nil))
 
