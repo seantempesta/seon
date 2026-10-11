@@ -139,6 +139,10 @@
             (assoc entry :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
           entries)))
 
+(def ^:private tree-attributes
+  "The task attributes whose values are other tasks: authored and compared as lookup refs `[:seon.task/sym ns/name]`."
+  [:seon.task/children :seon.task/needs])
+
 (defn- stored-tasks
   "The stored tasks whose `attribute` (`:seon.task/ns` or `:seon.task/id`) is one of `values`, indexed once by handle."
   {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
@@ -147,8 +151,10 @@
   (let [entities (if (contains? (:schema database) attribute)
                    (db/q database '[:find [?e ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
                    [])
-        rows (or (read-error entities) (db/pull-many database '[*] entities))]
-    (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
+        held (filter #(contains? (:schema database) %) tree-attributes)
+        rows (or (read-error entities) (db/pull-many database (into '[*] (map (fn [a] {a [:seon.task/sym]})) held) entities))
+        as-lookup (fn [row a] (if-let [targets (get row a)] (assoc row a (into #{} (map #(vector :seon.task/sym (:seon.task/sym %))) targets)) row))]
+    (or (read-error rows) (into {} (map (juxt :seon.task/id #(reduce as-lookup % held))) rows))))
 
 (defn- task-content
   "The task attributes the declaration readers observe, as immutable index values."
@@ -175,6 +181,72 @@
                      (or (read-error stored) (update-vals stored (partial declared projection))))
                   #(not (read-error %)))))
 
+(defn- refs-last
+  "`tx` with every task-valued member of an entity map moved to a trailing `:db/add`, so a lookup ref
+  `[:seon.task/sym ns/name]` resolves to a task the same transaction asserts earlier."
+  {:malli/schema [:=> [:cat [:vector :seon.schema/value]] [:vector :seon.schema/value]]}
+  [tx]
+  (let [entity (fn [op] (or (:db/id op) [:seon.task/id (:seon.task/id op)]))
+        adds (for [op tx :when (map? op) a tree-attributes target (sort-by str (get op a))] [:db/add (entity op) a target])]
+    (into (into [] (keep #(cond (not (map? %)) %
+                                (= #{:db/id} (set (keys (apply dissoc % tree-attributes)))) nil
+                                :else (apply dissoc % tree-attributes)))
+                tx)
+          adds)))
+
+(defn- refused
+  "The task refusal value naming `rule`, the `holder` namespace and the offending value."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.task/refused :seon.task/holder :seon.schema/value]
+                  :seon.task/refused-error]}
+  [operation rule holder offending]
+  (refusal/diagnostic (java.util.Date.) :seon.task/ingestion operation
+                      {:seon.error/message (str holder " is refused: " (name rule) ".")
+                       :seon.task/refused rule :seon.task/holder holder :seon.error/offending offending}))
+
+(defn- waits-for
+  "Each task's wait edges in `database`: its needs, its children (a parent is done when they are) and the
+  needs of every ancestor, which it inherits."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:map-of :int [:set :int]] :seon.db/invalid-read-error]]}
+  [database]
+  (let [needs (db/q '[:find ?t ?n :where [?t :seon.task/needs ?n]] database)
+        children (db/q '[:find ?p ?c :where [?p :seon.task/children ?c]] database)]
+    (or (some read-error [needs children])
+        (let [by (fn [pairs] (update-vals (group-by first pairs) #(set (map second %))))
+              needs-of (by needs) children-of (by children) parent (into {} (map (fn [[p c]] [c p])) children)
+              inherited (fn [t] (into #{} (mapcat needs-of) (take-while some? (iterate parent (parent t)))))]
+          (into {} (map (fn [t] [t (into (into (get needs-of t #{}) (get children-of t)) (inherited t))]))
+                (into (set (keys needs-of)) (mapcat identity) children))))))
+
+(defn- cycle-in
+  "One cycle of `graph` as the nodes along it, or nil when it has none."
+  {:malli/schema [:=> [:cat [:map-of :int [:set :int]]] [:maybe [:vector :int]]]}
+  [graph]
+  (let [visit (fn visit [node trail done]
+                (cond (some #{node} trail) {::cycle (conj (vec (drop-while #(not= node %) trail)) node)}
+                      (done node) done
+                      :else (let [trail (conj trail node)
+                                  result (reduce (fn [done next] (let [r (visit next trail done)] (if (::cycle r) (reduced r) r)))
+                                                 done (sort (graph node)))]
+                              (if (::cycle result) result (conj result node)))))]
+    (::cycle (reduce (fn [done node] (let [r (visit node [] done)] (if (::cycle r) (reduced r) r))) #{} (sort (keys graph))))))
+
+(defn refuse-needs-cycle
+  "The `:needs-cycle` refusal when `tx` would leave a task waiting on itself in `database` (a need, a
+  child, or a need inherited from an ancestor, followed around), else nil. A transaction touching no
+  `:seon.task/needs` or `:seon.task/children` answers nil unread; one the writer itself refuses is left
+  to the writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction-data] [:maybe :seon.task/refused-error]]}
+  [database tx]
+  (when (some #(or (and (map? %) (some (partial contains? %) tree-attributes))
+                   (and (vector? %) (some #{(get % 2)} tree-attributes)))
+              tx)
+    (let [after (db/with database tx)
+          graph (when-not (read-error after) (waits-for after))
+          found (when (and graph (not (read-error graph))) (cycle-in graph))
+          syms (when found (mapv #(:seon.task/sym (db/pull after [:seon.task/sym] %)) found))]
+      (when found
+        (refused 'seon.task/refuse-needs-cycle :needs-cycle (symbol (namespace (first syms))) syms)))))
+
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
   whose handle changed frees its unique symbol before its new row claims it; a handle whose
@@ -183,7 +255,8 @@
                        :seon.task/basis] [:vector :seon.schema/value]]}
   [projection stored by-id basis]
   (let [owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
-    (into []
+    (refs-last
+     (into []
           (mapcat (fn [id]
                     (let [current (declared projection (stored id)) wanted (declared projection (by-id id))]
                       (cond
@@ -195,7 +268,7 @@
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
                         current (replacement-tx (stored id) (by-id id) owned)
                         :else [(by-id id)]))))
-          (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id))))))
+          (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id)))))))
 
 (defn- symbol-tx
   "`[:db/add task :seon.task/sym ns/name]` for every stored task, file or runtime, that carries
@@ -208,6 +281,15 @@
       (when (read-error unnamed) (throw (ex-info (:seon.error/message unnamed) unnamed)))
       (mapv (fn [[e ns task-name]] [:db/add e :seon.task/sym (task-sym ns task-name)]) (sort unnamed)))
     []))
+
+(defn- admitted
+  "`tx`, the writer's task delta, unless it would leave a task waiting on itself: then the
+  `:needs-cycle` refusal is thrown, as every task writer refusal is."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.schema/value]] [:vector :seon.schema/value]]}
+  [database tx]
+  (if-let [refusal (refuse-needs-cycle database tx)]
+    (throw (ex-info (:seon.error/message refusal) refusal))
+    tx))
 
 (defn- tasks-tx-in
   "The task declaration delta under the writer's current database and supplied basis."
@@ -228,7 +310,7 @@
     (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
       (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
     ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
-    (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis))))
+    (admitted database (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))))
 
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
@@ -265,8 +347,9 @@
   [database entities handles basis]
   (let [stored (stored-tasks database :seon.task/id handles)]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (into (symbol-tx database)
-          (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis))))
+    (admitted database
+              (into (symbol-tx database)
+                    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))))
 
 (defn- task-handles
   "Every stored task handle, or with `retracted?` every handle `database`'s history
@@ -395,15 +478,6 @@
   [connection]
   (or (main (db/db connection)) connection))
 
-(defn- refused
-  "The task refusal value naming `rule`, the `holder` namespace and the offending value."
-  {:malli/schema [:=> [:cat :qualified-symbol :seon.task/refused :seon.task/holder :seon.schema/value]
-                  :seon.task/refused-error]}
-  [operation rule holder offending]
-  (refusal/diagnostic (java.util.Date.) :seon.task/ingestion operation
-                      {:seon.error/message (str holder " is refused: " (name rule) ".")
-                       :seon.task/refused rule :seon.task/holder holder :seon.error/offending offending}))
-
 (defn- written
   "Write `tx` on main of `connection` under that home's custody."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/tx-data]
@@ -456,7 +530,9 @@
   the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
   changes nothing; a different one refuses with base, current and proposed unless
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
-  name refuses `:invalid-name`.
+  name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
+  tasks as lookup refs `[:seon.task/sym ns/name]`, and needs that would leave a task
+  waiting on itself refuse `:needs-cycle`.
 
   Example:
   (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\"
@@ -465,6 +541,7 @@
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
                              [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
                              [:seon.task/evidence {:optional true} :seon.task/evidence]
+                             [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
                    :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
@@ -472,7 +549,8 @@
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
     (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
-                                                    :seon.task/must-read :seon.task/evidence]) agent-id)
+                                                    :seon.task/must-read :seon.task/evidence
+                                                    :seon.task/children :seon.task/needs]) agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
           report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
       (if (:seon.error/at report)

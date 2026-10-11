@@ -1,0 +1,11 @@
+#:seon.task.fire
+{:id [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task.fire/fire
+               :description "seon.id/id over [task nominal-at]: one firing per task and nominal instant, so a repeat writes nothing."}]
+ :at [:and {:description "The nominal instant a recurring task fired."} :inst]
+ :of [:and {:seon.db/index true :description "The task this firing is of."} :seon.db/ref]
+ :to [:and {:seon.db/index true :seon.wake/listen true
+            :description "The live agent a firing is delivered to as its wake (runtime-follows-db §6)."}
+      :seon.db/ref]
+ :fire [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+        [:seon.task.fire/id :seon.task.fire/id] [:seon.task.fire/at :seon.task.fire/at] [:seon.task.fire/of :seon.task.fire/of]
+        [:seon.task.fire/to {:optional true} :seon.task.fire/to]]}

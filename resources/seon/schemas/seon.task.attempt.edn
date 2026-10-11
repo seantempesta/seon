@@ -1,0 +1,7 @@
+#:seon.task.attempt
+{:end [:enum {:seon.db/index true
+              :description "How an attempt ended, asserted once on its assignment row by seon.turn/end-task-call: proofs green, given back, turns spent, stalled, sent back to :seon.task.attempt/target, or cancelled (runtime-follows-db §2)."}
+       :done :given-back :capped :stalled :sent-back :cancelled]
+ :target [:and {:description "The task a :sent-back end sends the work back to."} :seon.db/ref]
+ :reason [:string {:min 1 :description "Why an attempt ended other than :done."}]
+ :commit [:uuid {:description "The attempt's branch commit at its end: its successor's fork basis, keyed by commit id, never t."}]}

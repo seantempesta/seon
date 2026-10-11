@@ -14,13 +14,15 @@
  :entry [:map {:closed true :description "Stage 1: one authored entry of resources/seon/tasks/<ns>.edn; empty optional sets are absent. Its handle and symbol are derived, never written."}
          [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
          [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-         [:seon.task/evidence {:optional true} :seon.task/evidence]]
+         [:seon.task/evidence {:optional true} :seon.task/evidence]
+         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
  :file [:vector :seon.task/entry]
  :files [:map-of {:description "Task file path to its exact text; a deleted file is \"[]\", an empty declaration."} [:string {:min 1}] :string]
  :declaration [:map {:description "Stage 3: a task's declared content, compared as its revision (7.16). Its handle and symbol derive from it."}
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
                [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-               [:seon.task/evidence {:optional true} :seon.task/evidence]]
+               [:seon.task/evidence {:optional true} :seon.task/evidence]
+               [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.data
               :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
@@ -32,7 +34,27 @@
         [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
         [:seon.task/faults {:optional true} :seon.task/faults]
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
-        [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]]
+        [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
+        [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
+        [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/execution {:optional true} :seon.task/execution]
+        [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
+        [:seon.task/function {:optional true} :seon.task/function]]
+ :children [:set {:seon.db/component true :seon.db/component-schema :seon.task/task
+                  :description "The child tasks a parent owns (runtime-follows-db §2): a parent never runs and is done when no leaf under it is open (seon.task/done?); its intent, must-read and evidence are what its children read. Authored in task EDN as lookup refs [:seon.task/sym ns/name]."}
+            :seon.db/ref]
+ :needs [:set {:seon.db/index true
+               :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
+         :seon.db/ref]
+ :instructions [:string {:min 1 :description "The data a task's stage type renders for its worker beyond its intent (a test run's test set and program basis, a problem's class)."}]
+ :execution [:enum {:seon.db/index true :seon.wake/arms true
+                    :description "The task's intent (runtime-follows-db §3); absent is :running. :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
+             :held :running :paused :stopped :cancelled]
+ :cron [:string {:min 1 :description "When a recurring task fires: a cron expression, parsed by the schedule's cron library (runtime-follows-db §6)."}]
+ :zone [:string {:min 1 :description "The time zone a task's cron expression is read in."}]
+ :function [:and {:seon.fn/reference-to :seon.fn/sym
+                  :description "The function a firing of this task calls in the clock proc instead of creating an attempt (runtime-follows-db §6)."}
+            :seon.db/ref]
+ :attempt-of [:and {:seon.db/index true :description "The task an assignment row is an attempt of, as a ref, written beside the handle value :seon.task/assigned (runtime-follows-db §2)."} :seon.db/ref]
  :held-view [:map {:description "The task an agent holds as its opening shows it: name and intent, with the read of its proofs offered."}
              [:seon.task/id :seon.task/id] [:seon.task/name {:optional true} :seon.task/name]
              [:seon.task/intent {:optional true} :seon.task/intent]
@@ -78,7 +100,10 @@
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
-                  [:seon.task/revision :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]]
+                  [:seon.task/revision :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
+                  [:seon.task/attempt-of {:optional true} :seon.task/attempt-of]
+                  [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
+                  [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]]
  :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row
                           :description "seon.id/id over [assignment commit], the recurrence key: one merge request per assignment and requested commit."}]
  :merge [:and {:seon.db/index true :description "The generated merge task a merge request records."} :seon.task/handle]
@@ -90,7 +115,7 @@
            [:tuple :symbol [:string {:min 64 :max 64}]]]
  :run-id [:and {:description "The test run on C that proved them."} :seon.test.run/id]
  :program [:and {:description "The run's tested program identity."} :seon.test.run/program-digest]
- :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome."} :seon.task/outcome]
+ :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome, or for a parent its children all done."} :seon.task/outcome :seon.task/children]
  :resolution [:map {:description "Why a task is closed: derived, never stored."}
               [:seon.task/closed-by :seon.task/closed-by]]
  :closed [:map {:description "A merge request root closed (seon.task/close!), with its outcome and reason."}
@@ -142,7 +167,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :invalid-name :duplicate-name :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
+           :unknown-task :unassigned :revised-since-assignment :needs-cycle :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base
