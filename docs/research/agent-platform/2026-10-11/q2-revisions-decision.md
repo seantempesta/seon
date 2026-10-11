@@ -249,4 +249,10 @@ Reaching check: `seon.task-ingestion-test/the-checkouts-records-ingest-by-symbol
 reads all shipped task files and checks repeat ingestion. The implementation's H2 proof
 does not exist yet. No runtime declaration changes; net source/test lines zero. Full-tree clj-kondo with
 --cache false: 6,689 ms, zero errors, 1,513 existing warnings. Named candidate check
-results are recorded below before landing.
+passed through bin/lane commit (first landing b7fdd1685): run 2beb6f1c0574, one
+executed test, three assertions, zero failures or errors, body 2,799 ms. Total check
+40,764 ms; throwaway boot 26,979 ms, publication 3,233 ms and adoption 553 ms.
+The check published and adopted HEAD plus only these two paths; default stayed at
+pid 8540 and its original start instant. These platform-check costs are separate
+from the Q2 reconstruction measurements. No pre-existing red was encountered in
+the named test; the two entry-status failed tests were not run in this narrow check.
