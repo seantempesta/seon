@@ -1079,8 +1079,13 @@
                 (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
             ;; A named change's reaching test the eligibility rule drops is
             ;; missing coverage: it refuses by name, never an empty verdict.
+            ;; Only the caller's own named changes judge it: a change observed since
+            ;; the previous run widens the run as incremental widening does.
+            caller-reached (if (and narrow? (= :named policy))
+                             (reaching (selection-read! (selection-seeds database (vec (distinct (:seon.test/changed request))))))
+                             requested-reached)
             _ (when-let [dropped (seq (sort (keep (fn [[test-symbol entity :as entry]]
-                                                    (when (and (requested-reached test-symbol)
+                                                    (when (and (caller-reached test-symbol)
                                                                (not (get eligible test-symbol))
                                                                (not (excluded? entry))
                                                                (not (one entity :seon.test/long)))

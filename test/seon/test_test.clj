@@ -428,3 +428,36 @@
                            :seon.test/identities #{'seon.error-test/attribution-is-a-lookup-ref-or-nothing}}))]
     (is (true? (:seon.test/passed? result))
         "the member's omitted agent id is its own world's, never the requester's")))
+
+(deftest an-observed-change-a-script-test-reaches-does-not-refuse-the-step
+  ;; Before, a definition changed since the previous run, reached by a test this
+  ;; request cannot run, refused the whole request and the eligible tests never ran.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'my.agents.observed)])
+     (let [define! (fn [source-kind & identity-sources]
+                     (test-support/transacted!
+                      connection
+                      (mapv (fn [[declaration source]]
+                              (test-support/program-entity (db/db connection) declaration source
+                                                           {:seon.schema.admission/source source-kind}))
+                            (partition 2 identity-sources))))
+           request (fn [changed]
+                     (test-support/transacted!
+                      connection
+                      [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+                        :seon.source/test-input-digest (id/digest 64 [::observed-inputs])}])
+                     (sut/run {:seon.test/execution (test-support/execution-handle connection)
+                               :seon.test/recording-connection connection
+                               :seon.test/policy :named :seon.test/since-previous-run? true
+                               :seon.test/changed changed}))
+           executed (fn [run] (set (keep #(when-not (:seon.test/unchanged %) (:seon.test/sym %)) (:seon.test/results run))))]
+       (define! :agent '[:seon.fn/sym my.agents.observed/other] "(defn other {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                '[:seon.fn/sym my.agents.observed/callee] "(defn callee {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+       (define! :agent '[:seon.test/sym my.agents.observed/ok-test] "(deftest ok-test (is (= 1 (callee 1))))")
+       (define! :core '[:seon.test/sym my.agents.observed/ineligible-test] "(deftest ineligible-test (is (= 1 (callee 1))))")
+       (request '[my.agents.observed/ok-test])
+       (define! :agent '[:seon.fn/sym my.agents.observed/callee] "(defn callee {:malli/schema [:=> [:cat :int] :int]} [x] (identity x))")
+       (let [run (request '[my.agents.observed/other])]
+         (is (nil? (:seon.test/selection-refusal run)) "the observed change does not refuse the step")
+         (is (= '#{my.agents.observed/ok-test} (executed run)) "the eligible reaching test runs"))))))
