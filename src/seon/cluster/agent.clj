@@ -896,7 +896,7 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
-(declare stop-flow! start-claimed-flow! stop-graph! interrupt-turn!)
+(declare stop-flow! start-claimed-flow! stop-graph! interrupt-turn! branch-route-key)
 
 (defn- throw-causes!
   "Rethrow the first of `causes` whole, carrying every later one as suppressed."
@@ -949,6 +949,8 @@
         attempt (fn [step] (try (step) nil (catch Throwable cause cause)))
         _ (when (or owns-connection? owns-branch?)
             (let [roster (:seon.agent/routing handle)]
+              (wake/unlisten! {:seon.cluster.wake/connection (:seon.db/connection handle)
+                               :seon.cluster.wake/key (branch-route-key (:seon.agent/branch handle))})
               (stop-owned-graphs! roster)
               (throw-causes!
                (into [] (keep (fn [execution] (attempt #(release-context! execution))))

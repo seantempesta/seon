@@ -2,7 +2,9 @@
   "Read and update my record through request maps."
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.branch :as cluster.branch]
+            [seon.cluster.host :as host]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error.refusal :as refusal]))
@@ -165,16 +167,17 @@
       {:seon.store/branch lane :my.agent/retired? false :my.agent/retiring? true})))
 
 (defn retire-branch!
-  "Retire a lane branch: its hosted agent first (admission closed, its graphs
-  joined, its execution released), then any execution still held on it, then
-  its roster entry. A branch an agent still holds refuses. My cluster's shared
+  "Retire a lane branch after closing admission and joining its graphs.
+  its executions and owned connection, then delete its roster entry.
+  Works through the branch's own roster or its parent's. My cluster's shared
   branch refuses. My own branch records its retirement now and unlinks once my
   run exits (`:my.agent/retiring?`). Its data goes when retention collects. My
   context is supplied.
 
   Example:
   (my.agent/retire-branch! {:seon.store/branch :my-lane})"
-  {:malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
+  {:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}
+   :malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/retired-branch :seon.error/value]]}
   [{lane :seon.store/branch} {store :seon.store/store routing :seon.agent/routing :as context}]
   (cond
@@ -183,30 +186,24 @@
     (branch-refusal `retire-branch! "The cluster's shared branch is never retired; name a lane branch or my own." {:seon.store/branch lane})
     (= lane (own-branch context)) (retire-own-branch! lane context)
     :else
-    (let [child #(some-> routing deref (get-in [:seon.agent/children lane]) deref)
-          retired (some-> (:seon.cluster.host/host (child)) deref ((requiring-resolve 'seon.cluster.host/retire!)))
-          held (vec (:seon.agent/contexts (child)))
-          agents (vec (keep (comp :seon.agent/id second) held))]
+    (let [roster (if (some #(= lane (:seon.agent/branch %))
+                          (vals (:seon.agent/contexts (some-> routing deref))))
+                   routing
+                   (some-> routing deref (get-in [:seon.agent/children lane])))
+          retired (some-> (:seon.cluster.host/host (some-> roster deref)) deref host/retire!)
+          held (vec (:seon.agent/contexts (some-> roster deref)))
+          closed (when-not (:seon.error/at retired)
+                   (host/close-admissions! (:seon.db/connection context) lane))]
       (cond
-        ;; the host's refusal (a refused read or admission close) is the answer
         (:seon.error/at retired) retired
-        (seq agents)
-        (branch-refusal `retire-branch! "Agents hold this branch; disarm them first."
-                        {:seon.store/branch lane :seon.agent/id agents})
+        (:seon.error/at closed) closed
         :else
         (do (doseq [[_ execution] (sort-by (comp :seon.agent/owns-connection? second) held)]
-              ((requiring-resolve 'seon.cluster.agent/release-context!) execution))
-            ;; an agent homed here that no host retired (none runs after a
-            ;; restart) is closed before its home goes; the writer's refusal is the answer
-            (let [closed ((requiring-resolve 'seon.cluster.host/close-admissions!) (:seon.db/connection context) lane)]
-              (if (:seon.error/at closed)
-                closed
-                ;; the roster owner's refusal (a connection this process still
-                ;; holds on the branch) is the answer, never an escape
-                (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
-                     {:seon.store/branch lane :my.agent/retired? true}
-                     (catch clojure.lang.ExceptionInfo refused
-                       (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
-                         (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
-                                         {:seon.store/branch lane :seon.error/expected rule})
-                         (throw refused)))))))))))
+              (cluster.agent/release-context! execution))
+            (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
+                 {:seon.store/branch lane :my.agent/retired? true}
+                 (catch clojure.lang.ExceptionInfo refused
+                   (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
+                     (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
+                                     {:seon.store/branch lane :seon.error/expected rule})
+                     (throw refused)))))))))

@@ -11,6 +11,7 @@
             [seon.batch]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.flow :as flow]
             [seon.id :as id]
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
@@ -233,16 +234,23 @@
                                           proof ")\n"))))
   (test-support/transacted! connection (mapv #(vector :db/add [:seon.task/id (chain-handle %)] :seon.task/execution :running)
                                              (keys tasks)))
+  (let [environment (test-support/environment "tq-chain" connection)]
+    (with-open [launcher (test-support/closeable
+                         (flow/start-work-launcher!
+                          {:seon.env/environment environment
+                           :seon.flow/configuration (select-keys (config/effective (db/db connection) "tq-chain")
+                                                                 flow/flow-workload-attributes)})
+                         flow/stop-work-launcher!)]
   (let [ctx (test-support/fork-cluster-ctx connection "tq-chain")
         handle (test-support/cluster-handle
-                {:seon.env/environment (test-support/environment "tq-chain" connection)
+                {:seon.env/environment (assoc environment :seon.flow/work-launcher @launcher)
                  :seon.db/connection connection :seon.cluster/name "tq-chain"
                  :seon.sci.eval/ctx ctx
                  ;; the executor each agent's turn bound runs on, as boot's handle carries it
                  :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                  :seon.db.process/id cluster/boot-process-identity})]
     (try (body handle)
-         (finally (release! (:seon.agent/routing handle))))))
+         (finally (release! (:seon.agent/routing handle))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-fresh-attempt-proves-first-and-green-proofs-end-it-with-no-model-call
@@ -260,6 +268,41 @@
           (is (= :done end) "its first pass ran its green proofs and ended it")
           (is (seq (proof-runs branch-db (proof "g"))) "on its own branch")
           (is (zero? (model-turns branch-db agent-id)) "with no model call"))))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}}
+  an-ended-attempts-closed-merge-releases-its-connection-and-branch
+  (doseq [from-attempt? [false true]]
+    (binding [*space* (if from-attempt? "tq.retirelocal" "tq.retireroot")]
+      (test-support/with-database
+       (fn [connection]
+         (chain-world
+          connection {"g" [#{} "(clojure.test/is (= 1 1))"]}
+          (fn [handle]
+            (let [routing (:seon.agent/routing handle)
+                  store (agent/handle-store handle)]
+              (pass! handle routing)
+              (is (= :done (await-on! connection #(some (fn [[_ _ _ end]] (when (not= :open end) end))
+                                                        (attempts connection "g")) ::retire-ended)))
+              (let [[[_ branch agent-id]] (seq (attempts connection "g"))
+                    merge-task (await-on! connection
+                                         #(first (db/q '[:find [?merge ...] :in $ ?id
+                                                   :where [?agent :seon.agent/id ?id] [?work :seon.task/agent ?agent]
+                                                   [?request :seon.task/of-assignment ?work] [?request :seon.task/merge ?merge]]
+                                                (db/db connection) agent-id)) ::retire-merge)
+                    child (get-in @routing [:seon.agent/children branch])
+                    branch-connection (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})
+                    graph (get-in @child [:seon.agent/started agent-id :seon.flow/executor])
+                    closed (task/close! {:seon.db/connection connection :seon.store/store store
+                                         :seon.agent/routing (if from-attempt? child routing)}
+                                        merge-task :closed "The lifecycle proof closes this request.")]
+                (is (some? branch-connection) "the attempt owned an open connection before closing")
+                (is (= :closed (:seon.task/outcome closed)))
+                (is (nil? (:seon.task/delete-refusals closed)))
+                (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "the actual graph exited")
+                (is (= :released @(:wrapped-atom branch-connection)))
+                (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
+                (is (not (contains? (registry/roster store) branch)))
+                (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-chain-starts-its-first-step-and-its-end-starts-the-next-from-its-commit

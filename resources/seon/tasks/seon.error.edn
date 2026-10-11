@@ -93,4 +93,9 @@
              :kind :function
              :intent "A schema key an agent guesses (`(malli.core/validate :inst x)`, `:seon.render.transcript/instant`) fails with Malli's `:malli.core/invalid-schema` and `seon.error/reply-value` answers only that bare message, so agent parity-duration-1 (default c53c9306e) spent its fifteen calls hunting a schema for an instant and never wrote a contract; the registry's instant schema is the predicate `inst?`, a symbol key, which its `(filter keyword?)` listings also missed. Like `seon.error/nearest-names` for a guessed symbol, the reply names the registered schemas nearest the guessed key under `:seon.error/nearest`. Asserted by `seon.error-test/a-guessed-schema-key-is-answered-with-the-nearest-registered-schemas`."
              :must-read #{seon.error/reply-value seon.error/nearest-names malli.core/validate}
-             :evidence #{"docs/research/agent-platform/2026-10-11/parity-probe.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-11/parity-probe.md"}}
+ #:seon.task{:name "prepare-preserves-the-installed-instrumentation-arm-variant"
+             :kind :function
+             :intent "`seon.error/prepare` must return a value admitted by `:seon.error/prepared` when an instrumentation observation carries `:seon.instrument/arm :guard`. Lane sol-retire-connection's edit-hook SCI entrance on default 2b49056a8 repeatedly refuses the recording itself: expected :input or :output, got :guard, called by `seon.error/recording`. Make the producer and its installed error schema agree so the original error is recorded and delivered."
+             :must-read #{seon.error/prepare seon.error/recording}
+             :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"}}]

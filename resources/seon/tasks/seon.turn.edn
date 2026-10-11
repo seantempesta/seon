@@ -218,8 +218,8 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/revert-verification.md"}}
  #:seon.task{:name "a-fresh-attempt-is-work-without-a-message"
              :kind :function
-             :intent "Card S3. The attempt row is the launch's write: `seon.task/assign!` writes it without running proofs; `seon.turn/next-agent-work` treats a held attempt no answering turn has covered since its t as work (replacing the \"Work your task.\" message of seon.test-support/outside-wake-on-branch!); the red-first proofs run in the agent's first pass (test-step), so a :paused intent holds them and an already-green attempt ends :done with no model call."
-             :must-read #{seon.turn/next-agent-work seon.task/assign! seon.turn/unanswered-wakes}
+             :intent "The attempt row is the launch's write: `seon.task/assign!` writes it without running proofs. After every answering turn, the first proof run on a :running attempt's branch is its work (`seon.turn/first-proof-run-t`, `seon.turn/proved-unanswered?`); when those proofs are red, `seon.turn/next-agent-work` opens the model turn that answers it without a wake message. A :paused intent holds the proofs, and an already-green attempt ends :done with no model call."
+             :must-read #{seon.turn/next-agent-work seon.turn/first-proof-run-t seon.turn/proved-unanswered? seon.task/assign!}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "an-end-is-written-on-the-attempt"
              :kind :function
@@ -228,5 +228,10 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/r1-db-flow-design.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "a-send-back-names-its-target-on-the-attempt"
              :kind :function
-             :intent "Card S3 slice 2 (folded into R1): `my.task/send-back!` with `:my.task/target` ends the task `:sent-back` to that task, as a fact. The settlement writes `:seon.turn/sent-back-to` beside the completed disposition; `seon.turn/task-end` derives `:sent-back` from it (`seon.turn/sent-back-to`), and `seon.turn/end-task-call` writes `:seon.task.attempt/end :sent-back` and `:seon.task.attempt/target` on the attempt, so `seon.task/frontier` reopens the target. Open: a proof of the settlement write itself (a completed `my.task/send-back!` with a target through one eval request records `:seon.turn/sent-back-to`); an MCP-entrance attempt in `seon.test-support/with-running-agent` recorded no disposition on the fixture connection."
-             :must-read #{my.task/send-back! seon.turn/task-end seon.turn/end-task-call seon.turn/sent-back-to seon.task/frontier}}]
+             :intent "Card S3 slice 2 (folded into R1): `my.task/send-back!` with `:my.task/target` ends the task `:sent-back` to that task, as a fact. The settlement writes `:seon.turn/sent-back-to` beside the completed disposition; `seon.turn/task-end` derives `:sent-back` from it (`seon.turn/sent-back-to`), and `seon.turn/end-task-call` writes `:seon.task.attempt/end :sent-back` and `:seon.task.attempt/target` on the attempt, so `seon.task/frontier` reopens the target. Proven by `seon.cluster.db-flow-test/a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target`: the model turn's completed `my.task/send-back!` records `:seon.turn/sent-back-to` through the one eval request and ends the attempt :sent-back with its target (57388f28b)."
+             :must-read #{my.task/send-back! seon.turn/task-end seon.turn/end-task-call seon.turn/sent-back-to seon.task/frontier}}
+ #:seon.task{:name "a-closed-attempt-releases-its-connection-before-branch-deletion"
+             :kind :function
+             :intent "`seon.task/close!` closes an attempt's merge request through `seon.task/delete-branch!` and `my.agent/retire-branch!`: stop its graph, await actual exit through `seon.cluster.agent/stop-flow!`, release its owned connection through `seon.cluster.agent/release-context!`, then `seon.cluster.registry/retire-branch!` deletes its branch. R1 attempts run without a host; retirement finds the branch's own roster as well as a child roster. No branch, open connection or recorded error remains after closure."
+             :must-read #{seon.task/close! seon.task/delete-branch! my.agent/retire-branch! seon.cluster.agent/stop-flow! seon.cluster.agent/release-context! seon.cluster.registry/retire-branch!}
+             :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-agent-world.md"}}]
