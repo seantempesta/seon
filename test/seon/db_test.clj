@@ -45,7 +45,8 @@
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
-(deftest ^{:seon/tasks #{'seon.db/a-reopened-commit-carries-its-content-revisions}}
+(deftest ^{:seon/tasks #{'seon.db/a-reopened-commit-carries-its-content-revisions
+                         'seon.db/a-write-keeps-its-cost-after-the-projection-hand-off}}
   a-reopened-commit-carries-its-content-revisions
   (test-support/with-database
    (fn [connection]
@@ -60,7 +61,12 @@
            opened (fn []
                     (let [fork (store/open-branch! store branch)]
                       (try
-                        (let [value (db/db fork)]
+                        (let [value (db/db fork)
+                              [_ calls] (test-support/armed-calls
+                                         '#{seon.db/declaration-content-key seon.schema/load-projection}
+                                         #(db/carried-projection value))]
+                          (is (every? zero? (vals calls))
+                              "reopening an unchanged declaration population reuses its projection")
                           {:head (db/commit-id value)
                            :program (db/content-revisions value attributes)
                            :written (db/content-revisions value written)})

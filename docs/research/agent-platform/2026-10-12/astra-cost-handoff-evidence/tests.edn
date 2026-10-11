@@ -1,0 +1,19 @@
+{:seon.operator/tests
+ [seon.cluster.store-test/open-write-release-reopen-preserves-data
+  seon.cluster.store-test/transact-normalizes-only-jdk-integers
+  seon.cluster.store-test/a-small-commit-reports-its-milliseconds-files-and-head
+  seon.db-test/a-store-without-program-schema-admits-its-writes
+  seon.blob-test/binary-content-round-trips-on-both-sides-of-the-inline-threshold
+  seon.blob-test/published-blob-is-compressed-and-deferred
+  seon.cluster.registry-test/two-clusters-write-independently
+  seon.cluster.registry-test/ensure-cluster-branches-from-the-source-commit-and-is-idempotent
+  seon.cluster.registry-test/refusals-name-their-rule
+  seon.shell.jvm-test/argv-stdin-and-nonzero-exit-remain-process-evidence
+  seon.schema.admission-test/source-publication-records-core-on-every-entity
+  seon.cluster.source-nochange-test/unchanged-digest-keeps-the-published-commit-without-a-transaction
+  seon.db-test/a-transaction-report-carries-its-processing-cost
+  seon.db-test/a-stored-cost-is-rechecked-outside-the-top-set
+  seon.db-test/a-reopened-commit-carries-its-content-revisions
+  seon.db-test/a-definition-write-keys-its-projection-by-its-own-datoms
+  seon.db-test/speculative-declarations-never-enter-the-committed-projection-cache
+  seon.start-flow-benchmark-test/commit-to-paused-flow-costs]}

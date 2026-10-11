@@ -1,0 +1,13 @@
+SEON check FAILED (exit 1): The candidate e1c424db5ae15ceb188520a844bedfeab634a052 is red: run bf524671816c / executed 2 / reused 0 / pass 43 / fail 3 / error 0 / 7680 ms / passed? false (2 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T023758.799.edn
+run bf524671816c / executed 2 / reused 0 / pass 43 / fail 3 / error 0 / 7680 ms / passed? false (2 red)
+red seon.cluster.squash-test/one-attempts-copy-stays-within-its-cost-bound: fail test/seon/cluster/squash_test.clj:173
+expected: (<= (:seon.profile/alloc-bytes measured) 5000000)
+actual: (not (<= 40150624 5000000))
+
+fail test/seon/cluster/squash_test.clj:171
+expected: (<= (:seon.profile/ms measured) 10)
+actual: (not (<= 30.05 10))
+red seon.start-flow-benchmark-test/commit-to-paused-flow-costs: fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/branch :seon.profile/alloc-bytes
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 4487640 4000000))

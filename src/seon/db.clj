@@ -1840,23 +1840,23 @@
             @cell))))))
 
 (defn- hold-committed-projection!
-  "Hold a committed report's projection, derived from its speculative value
-  (`speculative-report-projection`), under its `:db-after`'s revision key and
-  commit when that value is exactly its basis plus the report's datoms: no
-  later transaction committed in its batch (`:max-tx` names this report's
-  transaction). Derives nothing. Returns the report."
+  "Hold the committed value's already derived projection under its commit.
+  Unchanged declaration revisions reuse their held cell; changed declarations
+  use the speculative report's cell when it names the final transaction of
+  the committed batch. Derives nothing. Returns the report."
   {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.db/transaction-report]}
   [{before :db-before after :db-after tx-data :tx-data :as report}]
-  (when-let [written (written-declarations report)]
-    (when-let [committed (datahike.db/committed-value-identity after)]
-      (when (= (:max-tx after) (:tx (first tx-data)))
-        (let [builder (projection-builder after)]
-          (when-let [cell (cache/lookup value-projection-cache (advanced-key builder before written))]
-            (when (and (realized? cell) @cell)
-              (cache/lookup-or-miss projection-cache (assoc (projection-cache-key after) ::builder builder)
-                                    (fn [_] cell))
-              (cache/lookup-or-miss projection-cache [::commit (:datahike.value/commit-id committed) builder]
-                                    (fn [_] cell))))))))
+  (when-let [committed (datahike.db/committed-value-identity after)]
+    (let [builder (projection-builder after)
+          revision-key (assoc (projection-cache-key after) ::builder builder)
+          cell (or (cache/lookup projection-cache revision-key)
+                   (when (= (:max-tx after) (:tx (first tx-data)))
+                     (when-let [written (written-declarations report)]
+                       (cache/lookup value-projection-cache (advanced-key builder before written)))))]
+      (when (and cell (realized? cell) @cell)
+        (cache/lookup-or-miss projection-cache revision-key (fn [_] cell))
+        (cache/lookup-or-miss projection-cache [::commit (:datahike.value/commit-id committed) builder]
+                              (fn [_] cell)))))
   report)
 
 (defn carried-projection

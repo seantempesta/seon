@@ -1,0 +1,6 @@
+SEON check FAILED (exit 1): The candidate 202abc2641ef634c78cc130ca33c8a8bca7ca7f5 is red: run 9a956ecf41c9 / executed 1 / reused 0 / pass 6 / fail 1 / error 0 / 4737 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T023843.639.edn
+run 9a956ecf41c9 / executed 1 / reused 0 / pass 6 / fail 1 / error 0 / 4737 ms / passed? false (1 red)
+red seon.db-test/a-reopened-commit-carries-its-content-revisions: fail test/seon/db_test.clj:68
+reopening an unchanged declaration population reuses its projection
+expected: (every? zero? (vals calls))
+actual: (not (every? #object[clojure.core/zero? 0xca8ef3a] (0 1)))

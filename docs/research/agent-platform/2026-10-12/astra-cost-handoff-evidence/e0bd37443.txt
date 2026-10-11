@@ -1,0 +1,23 @@
+SEON check FAILED (exit 1): The candidate e0bd37443414666c62bd7b9f33eeaed2863f0cf9 is red: run d453ca0de982 / executed 2 / reused 0 / pass 41 / fail 5 / error 0 / 8586 ms / passed? false (2 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T023605.005.edn
+run d453ca0de982 / executed 2 / reused 0 / pass 41 / fail 5 / error 0 / 8586 ms / passed? false (2 red)
+red seon.cluster.squash-test/one-attempts-copy-stays-within-its-cost-bound: fail test/seon/cluster/squash_test.clj:171
+expected: (<= (:seon.profile/ms measured) 10)
+actual: (not (<= 42.17 10))
+
+fail test/seon/cluster/squash_test.clj:173
+expected: (<= (:seon.profile/alloc-bytes measured) 5000000)
+actual: (not (<= 38941584 5000000))
+red seon.start-flow-benchmark-test/commit-to-paused-flow-costs: fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/sci :seon.profile/ms
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 1386.25 1300))
+
+fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/branch :seon.profile/alloc-bytes
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 8438968 4000000))
+
+fail test/seon/start_flow_benchmark_test.clj:62
+:cold :start-flow-benchmark/sci :seon.profile/alloc-bytes
+expected: (<= (get-in sample [part metric]) limit)
+actual: (not (<= 3078782736 2100000000))
