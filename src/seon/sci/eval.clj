@@ -2354,17 +2354,23 @@
         (assoc state ::acquisition-refusals-recorded? false))))))
 
 (defn- function-rows
-  "Every program function of `db` as `[sym source namespace admission private?]`."
+  "Function declarations as `[sym source namespace admission private?]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:vector [:tuple :qualified-symbol :string :symbol :keyword :boolean]]]}
   [db]
-  (mapv (fn [[sym source admission private?]]
-          [sym source (symbol (namespace (symbol sym))) admission private?])
-        (db/q '[:find ?sym ?source ?admission ?private
-                :where
-                [?function :seon.fn/sym ?sym]
-                [(get-else $ ?function :seon.fn/source "") ?source]
-                [?function :seon.schema.admission/source ?admission]
-                [(get-else $ ?function :seon.fn/private? false) ?private]]
-              db)))
+  (let [[symbols & ranges :as reads]
+        (mapv #(db/datoms db :aevt %)
+              [:seon.fn/sym :seon.fn/source :seon.schema.admission/source :seon.fn/private?])]
+    (doseq [result reads]
+      (when (db/read-refusal? result)
+        (throw (ex-info (:seon.error/message result) result))))
+    (let [[sources admissions privates] (mapv #(into {} (map (juxt :e :v)) %) ranges)]
+      (into []
+            (keep (fn [{entity :e sym :v}]
+                    (when-let [admission (get admissions entity)]
+                      [sym (get sources entity "") (symbol (namespace sym))
+                       admission (get privates entity false)])))
+            symbols))))
 
 (defn- loaded-function-rows
   "`function-rows` of a loaded program, once per store and commit, as

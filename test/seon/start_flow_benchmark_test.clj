@@ -42,7 +42,9 @@
              (is (= #{:paused} (set (vals (get-in sample [::benchmark/graph ::benchmark/states])))))
              (when (= :warm temperature)
                (is (zero? (get-in sample [::benchmark/context ::benchmark/owners
-                                         'seon.test.runner/reached-graph] 0))))
+                                         'seon.test.runner/reached-graph] 0)))
+               (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-h9-cold-base-queries.edn")
+                     (value/core-text (benchmark/base-query-costs (db/db connection) false))))
              (doseq [[part limits] (get bounds temperature)
                      [metric limit] (map vector [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/calls] limits)]
                (is (<= (get-in sample [part metric]) limit) (str temperature " " part " " metric)))

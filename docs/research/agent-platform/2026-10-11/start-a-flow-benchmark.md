@@ -1,7 +1,7 @@
 ---
 title: From a commit to a paused agent Flow
 type: research
-status: baseline and fork-revision fix measured; further implementation awaits hybrid
+status: baseline, fork-revision fix and H9 cold-base attribution measured
 ---
 
 # From a commit to a paused agent Flow
@@ -9,8 +9,8 @@ status: baseline and fork-revision fix measured; further implementation awaits h
 The existing path composes Datahike's branch, Seon's world map, the cached SCI
 fork, the held task's current-state data, and the production agent graph.
 The benchmark measures these owners separately with `seon.profile/measure`.
-There is no model call. The baseline precedes the fork-revision fix below; further
-flow implementation and CACHE-1/CACHE-2 changes await the design hybrid.
+There is no model call. The baseline precedes the fork-revision fix below;
+the H9 measurements follow the agreed start-a-flow hybrid.
 
 ## Measurement protocol
 
@@ -250,8 +250,9 @@ the loaded database and its carried projection in hand. Candidate
 pull **39 ms**, acquisition **20 ms**, and the 7,711 Var copies **4 ms**.
 `function-digests` ran once. Both `contract-references` and
 `install-function-contract!` ran **zero times**. The proof's 300 ms / 300 MB
-bounds fail; its specified once-per-contract assertion also fails (**3,442 ≠ 0**).
-The context-value and zero-reference-walk assertions pass. Whole test execution
+bounds fail; its initial once-per-contract assertion also failed (**3,442 ≠ 0**).
+The proof now requires zero installations: the loaded roots already hold their
+wrappers. The context-value and zero-reference-walk assertions pass. Whole test execution
 including fixture setup was 4,535 ms. These are separate cache histories: the
 whole SCI leg follows a measured branch and world, while the base-only sample
 starts immediately after central eviction; their allocations are not additive.
@@ -263,7 +264,7 @@ The call path explaining the reference walks is
 their reference graph after eviction. There is no `contract-product` or
 `instrumented` call in the sample. Thus H10's retained-function-contract change
 cannot remove these particular 3,604 walks. H9's base already reuses compiled
-wrappers; its requested re-arming count contradicts the installed path.
+wrappers; the corrected H9 proof preserves that behavior.
 
 Dependency seams checked: SCI pin `f455b3b4a6a4fe92cd2adde2e19821ab1fe5bece`,
 `sci.core/copy-var*` copies the existing root and `sci.core/fork` shares it through
@@ -278,3 +279,83 @@ emptied. The older archive's edit hook cannot resolve `start-flow-benchmark`;
 that acquisition error is not benchmark evidence. All measurements above use
 the committed candidate check path. H10's files and all unrelated working-tree
 changes are excluded from H9 candidates.
+
+### Six-query attribution and the first-read cost
+
+`start-flow-benchmark/base-queries` retains the six original forms. The first
+query-only check reads the loaded program before any benchmark SCI acquisition,
+then empties the central cache. Datahike's own query-result cache remains enabled,
+as in the original cold-base sample. Candidate
+`fbc13b861fb7f66a308260174348603b959cafb3`, run `4ada2f8608ef`:
+
+| Query at its SCI owner | Results | ms | Allocated MB |
+|---|---:|---:|---:|
+| `seon.sci.eval/load-core-namespaces!` | 123 | 0.33 | 0.139 |
+| `seon.sci.eval/acquire-program!`: namespace declarations | 533 | 0.25 | 0.089 |
+| `seon.sci.eval/acquire-program!`: namespace names | 533 | 0.21 | 0.063 |
+| `seon.sci.eval/function-rows` | 6,399 | 731.64 | 2,071.788 |
+| `seon.sci.eval/test-namespaces` | 410 | 0.38 | 0.088 |
+| `seon.sci.eval/acquire-program!`: test declarations | 2,807 | 17.58 | 33.160 |
+
+These are first entrances in this test, not claims that boot left every library
+cache empty. Repeating them after the SCI benchmark hits Datahike's result cache.
+Binding `datahike.query/*query-result-cache?*` to false (the dependency's documented
+benchmark seam) after that acquisition gives 76.23 ms / 106.118 MB for the six
+raw queries; function rows alone are 23.53 ms / 42.629 MB. Thus a warm query
+cannot explain the first-read cost. Datahike pin remains
+`cb3bce514507ecc96d36b6957ad10f6e892f51cf`.
+
+The first trial replaced `function-rows` with one identity range and one
+`seon.db/pull-many`. Its result matched the original query, but the cold base
+still cost 1,165.64 ms / 2,332.372 MB (candidate
+`cbed700fe2a44b5cb8f00a7f151da06abc846f15`, run `818e4832bd6b`); a subsequent
+function pull cost only 58.29 ms / 122.156 MB. This trial was not landed.
+Allocation sampling of the same cold trial in the check JVM showed index-node
+restoration through `datahike.index.persistent-set/CachedStorage` and konserve's
+Fressian/LZ4 decoding. The stacks reach `datahike.pull-api/resolve-pull-eid` and
+the EAVT slices used by pull. Pulling each entity and Datalog's `get-else` both
+touch entity-ordered leaves holding much more than the four requested attributes.
+
+The chosen `seon.sci.eval/function-rows` reads four AEVT ranges through
+`seon.db/datoms`, indexes their scalar values by entity id and joins in memory.
+This replaces per-entity reads with O(function symbols + source values +
+admissions + privacy values) work, preserving missing-source and missing-privacy
+defaults. The existing `function-digests` uses the same attribute-range approach.
+No cache, schema or dependency change is added. The equality proof compares
+every returned declaration against the original query on the real loaded program.
+
+Range trial candidate `1aefa290eb2a3faa2efeda2a8080f855fd7a367d`, run
+`1163581609a5`: the equality and four-range/no-query/no-pull assertions pass.
+The repeated function-row acquisition costs **6.65 ms / 11.633 MB**. The cold
+base falls to **517.79 ms / 1,242.088 MB**, so its end-of-H9 budget remains red
+and is not claimed green for this first removal. Five queries and one namespace
+pull remain; the largest unnecessary query still fetches every test's source
+before discarding all core tests. The complete cold SCI leg is **580.51 ms /
+787.920 MB**, versus the attributed baseline **891.92 ms / 1,795.448 MB**.
+The comparison retains each sample's existing cache history, not a sum of legs
+from different tests. Full-tree lint: 0 errors, 1,513 warnings, 6,694 ms.
+
+The first landing check (`4624942324a6306d219d89bb42dff6596804d6ad`, run
+`dad0a83991f0`) passed 81 assertions and failed one existing assertion in
+`seon.sci.eval-test/acquisition-binds-loaded-first-party-compiled-vars`: the test
+expects a loaded Datahike dependency to be unavailable. Its compiled-root identity
+and custody assertions pass. The remaining selected acquisition and binding Vars,
+including the complete benchmark, passed. The check took 52,612 ms overall,
+23,580 ms to readiness and 10,399 ms for tests. This is not an ordinary operation.
+Unchanged HEAD `610add01d0c3b899983bf9daa733c6e2adc927be`, run `0bb5c447ae31`,
+reproduces that same assertion (3 pass, 1 fail, 3,277 ms). That Var is excluded
+from the passing slice gate; the cold-base and config cost proofs remain the
+two deliberately red H9 follow-ups described above and below.
+
+### Configuration owner task
+
+`seon.config/a-config-read-rebuilds-the-packaged-projection` names
+`seon.config/effective`, `seon.config/effective-in` and
+`seon.config/declared-projection`. Its red proof is
+`seon.sci.acquisition-cost-test/a-config-read-reuses-its-carried-projection`.
+Run `4ada2f8608ef` returns a valid config but measures **366.96 ms / 432.855 MB**,
+with **3,604 reference walks and 217 schema-resource reads**, failing both
+zero-work assertions. It requires preserving branch-local and newer JVM dials
+and their shipped defaults. This is separate from H10's contract arming work;
+the config owner is outside the H9 source slice. The task and red proof remain
+pending deliberately, not a claimed green result.

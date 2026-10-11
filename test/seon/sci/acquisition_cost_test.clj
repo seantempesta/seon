@@ -2,11 +2,13 @@
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.profile :as profile]
             [seon.render.value :as value]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [start-flow-benchmark :as benchmark]))
 
 (defn- measured
   "Measure one operation and optionally write its cost to the supplied evidence path."
@@ -20,12 +22,58 @@
                          ::operation operation
                          :seon.profile/called
                          (select-keys (:seon.profile/called measurement)
-                                      '[seon.sci.eval/copy-host-var seon.sci.eval/authored-rows
-                                        seon.sci.eval/loaded-database seon.sci.eval/overlay-plan
-                                        seon.sci.eval/install-row! seon.sci.eval/base-ctx
-                                        seon.sci.eval/interpret-overlay!]))) "\n")
+                                      '[seon.sci.eval/copy-host-var seon.sci.eval/function-rows
+                                        seon.sci.eval/function-digests seon.sci.eval/loaded-digests
+                                        seon.sci.eval/behavior-changed? seon.sci.eval/loaded-database
+                                        seon.sci.eval/install-function-contract!
+                                        seon.sci.eval/interpret-overlay! seon.sci.eval/base-ctx
+                                        seon.db/q seon.db/pull seon.db/pull-many seon.db/datoms
+                                        seon.schema/contract-references seon.schema.edn/read-schema-resource])
+                         :seon.profile/ranked-by-self (vec (take 8 (:seon.profile/ranked-by-self measurement))))) "\n")
             :append true))
     measurement))
+
+(deftest function-acquisition-preserves-the-loaded-declarations
+  (support/with-database
+   (fn [connection]
+     (let [loaded (#'evaluation/loaded-program (db/db connection))
+           expected (db/q (::benchmark/function-rows benchmark/base-queries) loaded)
+           acquired (measured ::function-rows #(#'evaluation/function-rows loaded))]
+       (is (= (set expected)
+              (into #{} (map (fn [[sym source _ admission private?]]
+                              [sym source admission private?]))
+                    (:seon.profile/value acquired))))
+       (is (zero? (profile/calls-of acquired 'seon.db/q)))
+       (is (zero? (profile/calls-of acquired 'seon.db/pull-many)))
+       (is (= 4 (profile/calls-of acquired 'seon.db/datoms)))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-cold-base-derivation-is-proportional-to-declarations}
+           :seon.test/platform "Empties the central cache in the disposable check JVM."}
+  a-cold-base-derivation-is-proportional-to-declarations
+  (support/with-database
+   (fn [connection]
+     (let [loaded (#'evaluation/loaded-program (db/db connection))]
+       (benchmark/empty-cache!)
+       (let [cold (measured ::cold-base #(#'evaluation/derive-base-ctx loaded))]
+         (is (evaluation/ctx? (:seon.profile/value cold)))
+         (is (< (:seon.profile/ms cold) 300))
+         (is (< (:seon.profile/alloc-bytes cold) 300000000))
+         (is (zero? (profile/calls-of cold 'seon.sci.eval/install-function-contract!)))
+         (is (zero? (profile/calls-of cold 'seon.schema/contract-references))))))))
+
+(deftest ^{:seon/tasks #{'seon.config/a-config-read-rebuilds-the-packaged-projection}
+           :seon.test/platform "Empties the central cache in the disposable check JVM."}
+  a-config-read-reuses-its-carried-projection
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           cluster (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)]
+       (benchmark/empty-cache!)
+       (let [cold (measured ::cold-config #(config/effective database cluster))]
+         (is (map? (:seon.profile/value cold)))
+         (is (not (:seon.error/type (:seon.profile/value cold))))
+         (is (zero? (profile/calls-of cold 'seon.schema/contract-references)))
+         (is (zero? (profile/calls-of cold 'seon.schema.edn/read-schema-resource))))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-second-acquisition-of-an-unmoved-branch-interprets-nothing}}
   a-second-acquisition-of-an-unmoved-branch-interprets-nothing

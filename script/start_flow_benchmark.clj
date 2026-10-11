@@ -2,6 +2,7 @@
   "Commit-to-paused-agent measurements over a prepared task's commit."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [datahike.query :as query]
             [seon.batch :as batch]
             [seon.cache :as cache]
             [seon.cluster :as cluster]
@@ -39,6 +40,59 @@
                                 seon.db/declaration-content-key seon.sci.eval/derive-base-ctx
                                 seon.sci.eval/derive-overlay-ctx])
          ::hot (vec (take 3 (:seon.profile/ranked-by-self measured)))))
+
+(def base-queries
+  "The six queries of the original cold base, retained as attribution inputs."
+  {::load-core-namespaces
+   '[:find [?name ...]
+     :where [?file :seon.fn.file/relative-root ?root]
+     [(not= ?root "test")]
+     [?namespace :seon.fn/file ?file]
+     [?namespace :seon.ns/name ?name]
+     (or-join [?namespace]
+       (and [?namespace :seon.schema.admission/source :core]
+            [?namespace :seon.ns/source _])
+       (and [?function :seon.fn/ns ?namespace]
+            [?function :seon.fn/source _]
+            [?function :seon.schema.admission/source :core]))]
+   ::namespace-assertions
+   '[:find ?namespace-name ?source ?admission
+     :where [?namespace :seon.ns/name ?namespace-name]
+     [?namespace :seon.ns/source ?source]
+     [?namespace :seon.schema.admission/source ?admission]]
+   ::namespace-names
+   '[:find [?namespace-name ...] :where [_ :seon.ns/name ?namespace-name]]
+   ::function-rows
+   '[:find ?sym ?source ?admission ?private
+     :where [?function :seon.fn/sym ?sym]
+     [(get-else $ ?function :seon.fn/source "") ?source]
+     [?function :seon.schema.admission/source ?admission]
+     [(get-else $ ?function :seon.fn/private? false) ?private]]
+   ::test-namespaces
+   '[:find [?name ...]
+     :where [?file :seon.fn.file/relative-root "test"]
+     [?namespace :seon.fn/file ?file]
+     [?namespace :seon.ns/name ?name]]
+   ::test-rows
+   '[:find ?sym ?source ?namespace-name ?admission
+     :where [?test :seon.test/sym ?sym] [?test :seon.test/source ?source]
+     [?test :seon.schema.admission/source ?admission]
+     [?test :seon.test/ns ?namespace] [?namespace :seon.ns/name ?namespace-name]]})
+
+(defn base-query-costs
+  "Measure the original base queries, with or without Datahike result reuse."
+  {:malli/schema [:=> [:cat :seon.db/database-value :boolean] :map]}
+  [database reuse-results?]
+  (let [loaded (#'sci.eval/loaded-program database)]
+    (empty-cache!)
+    (binding [query/*query-result-cache?* reuse-results?]
+     (update-vals base-queries
+                 (fn [query]
+                   (let [measured (profile/measure #(db/q query loaded))]
+                     (when (db/read-refusal? (:seon.profile/value measured))
+                       (throw (ex-info "The attribution query failed." (:seon.profile/value measured))))
+                     (assoc (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes])
+                            ::count (count (:seon.profile/value measured)))))))))
 
 (defn- paused-graph!
   "Create and start the production agent blueprint, leaving Flow paused."
