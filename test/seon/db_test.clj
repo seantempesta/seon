@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
+            [datahike.constants :as constants]
             [datahike.core :as datahike]
             [datahike.db]
             [datahike.db.utils :as db.utils]
@@ -3235,3 +3236,53 @@
     (is (clojure.string/includes? (str (:seon.error/fix refusal)) "seon.cluster.boot/connection"))
     (is (not (clojure.string/includes? (:seon.error/message refusal) "seon.cluster.boot/connection"))
         "the message says what was refused; the fix is its own key")))
+
+(deftest ^{:seon/tasks #{'seon.db/an-explicit-eid-outside-the-allocators-range-is-refused}}
+  an-explicit-eid-outside-the-allocators-range-is-refused
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           options {:registry (:seon.schema.projection/registry projection)}
+           max-eid (:max-eid (db/db connection))
+           ident (fn [row] (keyword "seon.db-test" (str "explicit-eid-" (name row))))
+           explicit (fn [row eid] (db/transact! connection [[:db/add eid :db/ident (ident row)]]))
+           ;; an eid in the transaction range and one above emax can never be entities
+           refused [[:transaction-range (+ constants/tx0 7)]
+                    [:above-emax (bit-or (bit-shift-left 7 32) 1)]]
+           unissued (+ max-eid 100000)]
+       (doseq [[row eid] refused]
+         (testing (name row)
+           (is (m/validate :seon.error/value (explicit row eid) options))))
+       (is (= max-eid (:max-eid (db/db connection))) "a refused eid moves no allocator")
+       ;; an eid below tx0 the allocator never issued is observed: the next fresh entity allocates above it
+       (testing "unissued"
+         (is (m/validate :seon.db/transaction-report (explicit :unissued unissued) options))
+         (db/transact! connection [{:db/ident (ident :fresh)}])
+         (is (< unissued (d/q '[:find ?e . :in $ ?k :where [?e :db/ident ?k]] (db/db connection) (ident :fresh)))))))))
+
+(deftest ^{:seon/tasks #{'seon.db/entities-born-on-two-branches-of-one-commit-have-different-ids}}
+  entities-born-on-two-branches-of-one-commit-have-different-ids
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           store (:seon.store/store (test-support/execution-handle connection))
+           request (fn [branch] {:seon.store/store store :seon.store/branch branch
+                                 :seon.cluster.registry/from (db/commit-id database) :seon.db/db database})
+           requests (mapv #(request (keyword (str "eid-birth-" % "-" (id/id)))) [:a :b])
+           ;; one fresh entity per fork, found by its ident
+           born (fn [{:seon.store/keys [branch]}]
+                  (let [k (keyword "seon.db-test" (str "born-on-" (name branch)))
+                        fork (store/open-branch! store branch)]
+                    (try
+                      (db/transact! fork [{:db/ident k}])
+                      (d/q '[:find ?e . :in $ ?k :where [?e :db/ident ?k]] (db/db fork) k)
+                      (finally (store/release-branch! fork)))))]
+       (try
+         (doseq [request requests] (is (:seon.cluster/created? (registry/fork! request))))
+         (let [[a b] (mapv born requests)]
+           (is (every? int? [a b]))
+           (is (< a constants/tx0))
+           (is (< b constants/tx0))
+           (is (not= a b) "two forks of one commit allocate distinct entity ids"))
+         (finally (doseq [request requests]
+                    (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))))))
