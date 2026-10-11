@@ -29,7 +29,7 @@
  (defn mailbox-step
    "The mailbox transform, in Flow's four arities.
    Total and instant: one payload-free `:seon.agent/episode` signal downstream per
-@@ -489,13 +504,20 @@
+@@ -489,10 +504,17 @@
      :ping-map-fn (fn [state] (select-keys state [:seon.agent/deliveries]))})
    ([args]
     (assoc args
