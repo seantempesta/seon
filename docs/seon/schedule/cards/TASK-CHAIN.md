@@ -88,6 +88,32 @@ Each has a template, a done-check expressed as data, and what it typically adds,
 **Send-back** is a stage transition like any other: the sending agent writes the reason in `:seon.task/notes`, the
 pipeline sets the earlier stage, a fresh agent picks it up with the notes in context.
 
+## 3b. Stages advance by proofs: one system end to end (owner, 2026-10-11)
+
+A stage is done when its **stage proofs** are green, exactly as a task is done when its proofs are green: no separate
+done-check machinery. Stage proofs are ordinary deftests owned by the pipeline, one per stage type, parameterized by the
+task and evaluated against the task entity. The agent's context shows which stage proof is red and its failing data,
+so it knows exactly what is left before it can advance. A variation may swap a stage's proof; the comparison stays fair.
+
+**Every stage records a decision; "nothing to do" is explicit, never an absence.** A component on the task:
+
+```clojure
+{:seon.task.stage/name     :model
+ :seon.task.stage/decision :unchanged          ; per stage type, e.g. :added :changed :removed :unchanged
+ :seon.task.stage/reason   "the flow's keys already exist; the change is in the producer only"
+ :seon.task.stage/keys     #{}}                ; what the stage added, changed or removed
+```
+
+| Stage | Its stage proof asserts |
+|---|---|
+| Survey | every reference resolves; the intent names an owner by typed symbols that exist; the reproduction form is recorded |
+| Model | decision `:added`/`:changed`/`:removed` with each key compiling and validating real samples within its cost budget, **or** `:unchanged` with a reason |
+| Prove | proofs tagged and red on main; failure matches the stated reason; they read the program, never files; run cost within budget; tests asserting the old behavior updated, or a decision that none exist |
+| Check | decision `:pass` with notes, or `:send-back` with reason and target stage |
+| Implement | the task's proofs green, no known reached break (today's rule) |
+| Land | landed (git sha recorded) or a typed refusal routed to a stage |
+| Review | retired (proofs green on main), follow-ups filed or decision `:none` |
+
 ## 4. Proofs: the weak point, and a catalogue
 
 This weekend most failures traced to the proof or the task, not the implementer: a census that read files (unprovable
