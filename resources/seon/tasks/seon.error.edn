@@ -97,5 +97,6 @@
  #:seon.task{:name "prepare-preserves-the-installed-instrumentation-arm-variant"
              :kind :function
              :intent "`seon.error/prepare` must return a value admitted by `:seon.error/prepared` when an instrumentation observation carries `:seon.instrument/arm :guard`. Lane sol-retire-connection's edit-hook SCI entrance on default 2b49056a8 repeatedly refuses the recording itself: expected :input or :output, got :guard, called by `seon.error/recording`. Make the producer and its installed error schema agree so the original error is recorded and delivered."
-             :must-read #{seon.error/prepare seon.error/recording}
-             :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"}}]
+             :must-read #{seon.error/prepare seon.error/recording seon.instrument/violation malli.core/-instrument}
+             :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"
+                         "docs/research/agent-platform/2026-10-11/sol-loose-ends.md"}}]

@@ -720,6 +720,26 @@
   (let [fact (fact)]
     (is (not (contains? fact :seon.render/ai)))))
 
+(deftest ^{:seon/tasks #{'seon.error/prepare-preserves-the-installed-instrumentation-arm-variant}}
+  preparation-and-recording-preserve-every-instrumentation-arm
+  (test-support/with-database
+   (fn [connection]
+     (doseq [arm [:input :output :guard]]
+       (let [source (ex-info "The call violated its contract."
+                             {:seon.instrument/fn 'seon.error/value
+                              :seon.instrument/schema ":seon.error/fact"
+                              :seon.instrument/args "[]"
+                              :seon.instrument/arm arm})
+             prepared (error/prepare (request source))
+             recording (error/recording (db/db connection) (commit-request source {}))
+             report (test-support/transacted! connection (:seon.db/tx-data recording))
+             stored (error/latest-fact
+                     (db/pull (:db-after report)
+                              (error/observation-selector (schema/handed-projection))
+                              (:seon.error/ref recording)))]
+         (is (= arm (get-in prepared [:seon.error/fact :seon.instrument/arm])))
+         (is (= arm (:seon.instrument/arm stored))))))))
+
 (deftest instrumentation-evidence-survives-normalization
   (let [violation {:seon.error/message "bad call", :seon.instrument/schema ":seon.error/fact", :seon.instrument/fn (quote seon.error/value), :seon.instrument/args "[\"not a fact\"]", :seon.instrument/arm :input}
         fact (error/normalize
