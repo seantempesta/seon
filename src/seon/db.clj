@@ -4,6 +4,7 @@
   elided, the current connection of the calling agent's cluster (`*conn*`,
   bound per evaluation). Failures return flat `:seon.error` values."
   (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.core.cache :as cache.impl]
             [clojure.set :as set]
             [clojure.walk :as walk]
             [editscript.core :as editscript]
@@ -1476,6 +1477,22 @@
 (defonce ^:private value-projection-cache
   (cache/lru-cache-factory {} :threshold (::value-cache-size projection-cache-policy)))
 
+(defn- projection-value
+  "The cell's projection; a failed derivation leaves no aliases in either cache."
+  {:malli/schema [:=> [:cat [:fn clojure.core/delay?]] :seon.schema/projection]}
+  [cell]
+  (try @cell
+       (catch Throwable failure
+         (doseq [held [projection-cache value-projection-cache]]
+           (swap! held
+                  (fn [entries]
+                    (reduce (fn [remaining [k candidate]]
+                              (if (identical? cell candidate)
+                                (cache.impl/evict remaining k)
+                                remaining))
+                            entries entries))))
+         (throw failure))))
+
 (defn- projection-cache-key
   "The part of Datahike's cache-context a projection derivation depends on.
 
@@ -1566,9 +1583,9 @@
   {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]}
   [builder database]
   (let [content-key [::declaration-content builder (declaration-content-key database)]]
-    @(cache/lookup-or-miss projection-cache content-key
+    (projection-value (cache/lookup-or-miss projection-cache content-key
                            (fn [_] (or (cache/lookup value-projection-cache content-key)
-                                       (delay (schema/load-projection database (nearest-base builder database))))))))
+                                       (delay (schema/load-projection database (nearest-base builder database)))))))))
 
 (defn- value-projection
   "The projection of a value whose `value-key` names its declaration content
@@ -1580,8 +1597,8 @@
                             :seon.db/database-value]
                   :seon.schema/projection]}
   [builder value-key database]
-  @(cache/lookup-or-miss value-projection-cache [builder value-key]
-                         (fn [_] (delay (content-projection builder database)))))
+  (projection-value (cache/lookup-or-miss value-projection-cache [builder value-key]
+                         (fn [_] (delay (content-projection builder database))))))
 
 (defn- speculative-projection
   "The projection of a speculative value (a `with` result, a report's
@@ -1602,13 +1619,13 @@
   ;; The content key (~5 ms, one pass over the declaration datoms) is read only
   ;; on a revision miss: a transaction function reads this value's projection
   ;; once per stored collection it compares.
-  @(cache/lookup-or-miss value-projection-cache [builder value-key]
+  (projection-value (cache/lookup-or-miss value-projection-cache [builder value-key]
                          (fn [_] (cache/lookup-or-miss
                                   value-projection-cache
                                   [::declaration-content builder (declaration-content-key database)]
                                   (fn [content-key]
                                     (or (cache/lookup projection-cache content-key)
-                                        (delay (schema/load-projection database (nearest-base builder database)))))))))
+                                        (delay (schema/load-projection database (nearest-base builder database))))))))))
 
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
@@ -1891,7 +1908,7 @@
         cached (fn [cache-atom k]
                  (when-let [cell (cache/lookup cache-atom k)]
                    (cache/hit cache-atom k)
-                   @cell))]
+                   (projection-value cell)))]
     (or
      (when view-key (cached value-projection-cache [@builder view-key]))
      (when committed
@@ -1905,7 +1922,7 @@
          (when (:datahike.cache/connection-id (:cache-context source))
            (cache/lookup-or-miss projection-cache (assoc (projection-cache-key source) ::builder @builder)
                                  (fn [_] cell)))
-         @cell))
+         (projection-value cell)))
      (cond
       (not (declares-program? source))
       (construction-projection database)
@@ -1930,7 +1947,7 @@
                   (fn [_] (cache/lookup-or-miss
                            projection-cache commit-key
                            (fn [_] (delay (content-projection @builder source))))))]
-        @(cache/lookup-or-miss projection-cache commit-key (fn [_] cell)))
+        (projection-value (cache/lookup-or-miss projection-cache commit-key (fn [_] cell))))
 
       ;; A speculative value (a report's db-after, a `:db.fn/call` argument,
       ;; a `with` result) carries Datahike's revision context derived from its
@@ -1944,8 +1961,8 @@
       (:datahike.cache/connection-id (:cache-context source))
       (let [revision-key (assoc (projection-cache-key source) ::builder @builder)]
         (if (cache/has? projection-cache revision-key)
-          @(cache/lookup-or-miss projection-cache revision-key
-                                 (fn [_] (delay (content-projection @builder source))))
+          (projection-value (cache/lookup-or-miss projection-cache revision-key
+                                 (fn [_] (delay (content-projection @builder source)))))
           (speculative-projection @builder revision-key source)))
 
       ;; A detached value (Datahike gives it no context: an `empty-db` or

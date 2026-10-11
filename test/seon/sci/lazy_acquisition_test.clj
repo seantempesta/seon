@@ -23,13 +23,13 @@
                     :seon.cluster.eval/source "(+ 1 2)"}]
        (is (empty? @(::kernel/installed-functions ctx)))
        (is (empty? @(::kernel/installed-functions fork)))
-       (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
+       (is (nil? (:seon.source/commit-id (evaluation/acquired-program ctx))))
        (is (= 3 (:seon.sci.admit/value (support/evaluate request))))
        (is (seq @(::kernel/installed-functions ctx)))
        (let [acquired @(::kernel/program-snapshot ctx)
              environment @(:env ctx)]
-         (is (= (db/committed-value-identity database)
-                (db/committed-value-identity (:seon.db/db acquired))))
+         (is (= (db/commit-id database)
+                (get-in acquired [:seon.sci.eval/acquired-basis :seon.source/commit-id])))
          (evaluation/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
          ;; the same program advances to the supplied database value; nothing is derived again
          (is (identical? (:seon.sci.eval/acquisition acquired)
@@ -40,9 +40,8 @@
              previous @(::kernel/program-snapshot ctx)]
          (is (= 3 (:seon.sci.admit/value (support/evaluate request))))
          (is (not (identical? previous @(::kernel/program-snapshot ctx))))
-         (is (= (db/committed-value-identity changed)
-                (db/committed-value-identity
-                 (:seon.db/db (evaluation/acquired-program ctx))))))))))
+         (is (= (db/commit-id changed)
+                (:seon.source/commit-id (evaluation/acquired-program ctx)))))))))
 
 (deftest ^{:seon.test/long "First named invocation acquires the canonical published SCI program."
            :seon.test/long-ms 30000}
@@ -58,15 +57,15 @@
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 10000}]
        (is (empty? @(::kernel/installed-functions ctx)))
-       (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
+       (is (nil? (:seon.source/commit-id (evaluation/acquired-program ctx))))
        (let [result (kernel/invoke request)]
          (is (true? (:seon.sci.admit/value result)))
          (is (= :ok (get-in result [:seon.sci.admit/record :seon.eval/outcome]))))
        (is (contains? @(::kernel/installed-functions ctx) 'seon.id/valid?))
        (let [acquired @(::kernel/program-snapshot ctx)
              environment @(:env ctx)]
-         (is (= (db/committed-value-identity database)
-                (db/committed-value-identity (:seon.db/db acquired))))
+         (is (= (db/commit-id database)
+                (get-in acquired [:seon.sci.eval/acquired-basis :seon.source/commit-id])))
          (is (true? (:seon.sci.admit/value (kernel/invoke request))))
          (is (identical? acquired @(::kernel/program-snapshot ctx)))
          (is (identical? environment @(:env ctx))))))))

@@ -195,7 +195,7 @@
 
 (schema.edn/load! {})
 
-(declare carried-cluster-name agent-require)
+(declare carried-cluster-name agent-require acquired-basis context-database loaded-database)
 
 (defn projection-state
   "Create `cluster-name`'s context environment replacement reference; the
@@ -965,7 +965,8 @@
   (let [{source ::function-source
          namespace-name ::function-namespace}
         (kernel/program-function ctx function-symbol)
-        {interpreted ::interpreted loaded ::loaded-database} @(::kernel/program-snapshot ctx)]
+        {interpreted ::interpreted} @(::kernel/program-snapshot ctx)
+        loaded (loaded-database ctx db)]
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
@@ -1216,6 +1217,15 @@
   [holder database]
   (if-let [connection (::loaded-connection holder)] (db/db connection) database))
 
+(defn- context-database
+  "Read the context's connection at use, including an explicitly bound evaluation."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] [:maybe :seon.db/database-value]]}
+  [ctx]
+  (when-let [connection (or (:seon.db/connection (::custody ctx))
+                            (:seon.db/connection (env/of ctx))
+                            db/*conn*)]
+    (db/db connection)))
+
 (defn- loaded-commit-id
   "The source commit the JVM loaded, as the cluster's adoption record in
   `database` names it: the commit on the entity carrying `:seon.cluster/name`.
@@ -1252,6 +1262,19 @@
                   (vary-meta assoc :seon.schema/projection (db/carried-projection database)))
           (throw (ex-info "The JVM's recorded source commit is unavailable."
                           {:seon.source/commit-id commit}))))))
+
+(defn loaded-database
+  "Open the acquired loaded commit from the context's current connection."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :seon.db/database-value]}
+  [ctx database]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        source (loaded-source snapshot database)
+        commit (::loaded-commit-id snapshot)]
+    (if commit
+      (if (= commit (db/commit-id source))
+        source
+        (d/commit-as-db source commit {:secondary-indices? false}))
+      (loaded-program source))))
 
 (defn- row-definition-digest
   {:malli/schema [:=> [:cat :map] :seon.program/definition-digest]}
@@ -1418,12 +1441,13 @@
           ::function-admission admission
           ::agent-authored? (= :agent admission)})
         (let [snapshot @(::kernel/program-snapshot ctx)
+              loaded (loaded-database ctx db)
               interpreted? (or (get (::interpreted snapshot) function-symbol)
-                               (overridden-row? (::loaded-database snapshot) db committed))
+                               (overridden-row? loaded db committed))
               host-row (when interpreted?
                          (if (host-bound-row? committed)
                            committed
-                           (when-let [loaded (::loaded-database snapshot)]
+                           (when loaded
                              (let [previous (db/pull loaded '[*] [:seon.fn/sym function-symbol])]
                                (when (and previous (host-bound-row? previous)) previous)))))
               ;; A BRANCH NEVER CHANGES THE PLATFORM (owner, AGENTS ddd3cf9a2):
@@ -1441,7 +1465,7 @@
               unloaded? (source-namespace? ctx namespace-name)
               interpreted? (or interpreted? unloaded?)
               evaluated-row? (boolean (or evaluated? (::evaluated? row)))
-              changed? (overridden-row? (::loaded-database snapshot) db committed)
+              changed? (overridden-row? loaded db committed)
               compiled? (and host-row (not changed?) (not unloaded?))
               refusal (when (and host-row (not compiled?) (not unloaded?))
                         (interpretation-error function-symbol
@@ -1615,14 +1639,15 @@
          namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
 (defn acquired-program
-  "Return the database and refusal report actually acquired by this context.
+  "Return the basis and refusal report actually acquired by this context.
 
   Evidence, including :seon.sci.eval/interpreted-count, follows the existing
   program snapshot through reacquisition and forks. A resolvable Var alone is not evidence of an acquired program."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.test/acquisition]}
   [ctx]
   (let [snapshot (some-> (::kernel/program-snapshot ctx) deref)]
-    (assoc (select-keys snapshot [:seon.db/db :seon.test/class-loader])
+    (assoc (merge (::acquired-basis snapshot)
+                  (select-keys snapshot [:seon.test/class-loader]))
            :seon.sci.eval/interpreted-count
            (get-in snapshot [::acquisition :seon.sci.eval/interpreted-count] 0)
            :seon.test/acquisition-refusals
@@ -1775,7 +1800,7 @@
                    (installation-covers-program-change?
                     ctx written-on report installations (context-projection ctx)))
           (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
-            (swap! (::kernel/program-snapshot target) assoc :seon.db/db db)))
+            (swap! (::kernel/program-snapshot target) assoc ::acquired-basis (acquired-basis db))))
         ;; A definition that landed in a new Var of `ctx` leaves the callers and
         ;; tests analyzed against its previous Var calling that one: they are
         ;; analyzed again here, as one Clojure Var would be seen.
@@ -2100,7 +2125,7 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:set :symbol]] :map]}
   [ctx namespace-names]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        database (:seon.db/db snapshot)
+        database (context-database ctx)
         names (vec (sort-by str namespace-names))
         function-rows (into []
                             (map (fn [[sym source namespace-name admission private?]]
@@ -2626,8 +2651,7 @@
                     [_ :seon.ns/name ?namespace-name]]
                   db)
             all-function-rows (function-rows db)
-            loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
-                       (loaded-program db))
+            loaded (loaded-database ctx db)
             branch-digests (function-digests db)
             ;; A loaded value identical to the acquired one may be uncommitted
             ;; (`d/with`); only a distinct, committed loaded value is retained.
@@ -2686,7 +2710,7 @@
          (into {} (map (fn [row] [(symbol (first row)) (function-entry row)])) all-function-rows)
          all-namespace-row-by-name)
         (swap! (::kernel/program-snapshot ctx) assoc
-               ::loaded-database loaded ::interpreted interpreted
+               ::loaded-commit-id (db/commit-id loaded) ::interpreted interpreted
                ::test-namespaces test-namespaces)
         (when-let [recorder recording-operation]
           (swap! (::kernel/program-snapshot ctx) assoc
@@ -3110,7 +3134,7 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :map]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        loaded (::loaded-database snapshot)
+        loaded (loaded-database ctx database)
         commit (commit-id-of database)
         plan (when-not (or (identical? loaded database)
                            (and commit (= commit (commit-id-of loaded))))
@@ -3483,6 +3507,21 @@
   (when-let [commit-id (commit-id-of database)]
     (remember-program-identity! commit-id (inherited-basis (revision-basis database)))))
 
+(defn- acquired-basis
+  "The commit, revision basis and program identity acquired from `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map [:seon.db/basis-t :seon.db/basis-t]
+                   [::revision-basis :map]
+                   [::program-identity {:optional true} :map]
+                   [:seon.source/commit-id {:optional true} :seon.source/commit-id]]]}
+  [database]
+  (let [identity (program-identity database)
+        commit (db/commit-id database)]
+    (cond-> {:seon.db/basis-t (db/basis-t database)
+             ::revision-basis (revision-basis database)}
+      identity (assoc ::program-identity identity)
+      (uuid? commit) (assoc :seon.source/commit-id commit))))
+
 (defn- watch-program-identity!
   "Record each committed value's revision basis as its commit lands.
 
@@ -3512,15 +3551,14 @@
                         ::bind-result! #'bind-result!
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
-             _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-database loaded)
+             _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-commit-id (db/commit-id loaded))
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                          :seon.db/db loaded
                                          :seon.schema/projection projection})]
-         ;; The base is shared by every branch and holds no database value: one
-         ;; would pin its connection's node cache. `copy-base-ctx` supplies each
-         ;; caller's database and loaded program.
+         ;; The shared base holds program data only. Each fork carries its own
+         ;; acquired basis and loaded commit.
          (swap! (::kernel/program-snapshot ctx)
-                #(-> (dissoc % ::loaded-database)
+                #(-> (dissoc % ::loaded-commit-id)
                      (assoc ::acquisition acquired
                             ::program-namespaces
                             {::generation (:sci/generation @(:env ctx))
@@ -3538,19 +3576,20 @@
     [(store-identity loaded) commit]))
 
 (defn- copy-base-ctx
-  "A fresh context over the cluster base: an SCI fork (its own Var bindings) plus owned
-  copies of the kernel atoms, holding the caller's database, loaded program and
-  fault recorder."
+  "Fork the cluster base with the caller's basis, connection and fault recorder."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
                        [:or :nil :seon.flow/commit-fault!]]
                   :seon.sci.eval/ctx]}
   [cached database loaded recorder]
   (assoc (inherit-var-bindings! (sci/fork cached))
+         ::custody (if-let [connection (db/branch-connection database (get-in database [:config :branch]))]
+                     {:seon.db/connection connection}
+                     {})
          ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
          ::kernel/program-snapshot
          (atom (cond-> (assoc @(::kernel/program-snapshot cached)
-                              :seon.db/db database
-                              ::loaded-database loaded)
+                              ::acquired-basis (acquired-basis database)
+                              ::loaded-commit-id (db/commit-id loaded))
                  recorder (assoc :seon.flow/commit-fault! recorder)))))
 
 (defn base-ctx
@@ -3602,7 +3641,7 @@
         source (loaded-source snapshot database)
         basis (loaded-basis source)]
     (or (= (::loaded-basis snapshot) basis)
-        (when (= (some-> (::loaded-database snapshot) db/commit-id)
+        (when (= (::loaded-commit-id snapshot)
                  (loaded-commit-id source))
           (swap! (::kernel/program-snapshot ctx) assoc ::loaded-basis basis)
           true)
@@ -3622,7 +3661,7 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        previous (:seon.db/db snapshot)
+        previous (::acquired-basis snapshot)
         commit-id (commit-id-of database)]
     (boolean
      (and (::acquisition snapshot)
@@ -3633,21 +3672,22 @@
           ;; A settings write re-arms only when it moved a value the
           ;; context's interpreted wrappers armed with.
           (= (::armed-dials snapshot) (armed-dials database))
-          (or (identical? previous database)
-              (when (and commit-id (commit-id-of previous))
+          (or (and commit-id (::program-identity previous)
+                   (= commit-id (:seon.source/commit-id previous)))
+              (when (and commit-id (::program-identity previous))
                 ;; Only `previous`'s identity and cache-context are read, never
                 ;; its index: a collection reclaims the nodes of a value no
                 ;; branch head reaches, and the attributes come from the
                 ;; supplied value, read from its connection. A different set
                 ;; names a declaration change, so the bases differ either way.
                 (let [attributes (acquisition-attributes (db/carried-projection database))
-                      acquired (program-identity previous)]
+                      acquired (::program-identity previous)]
                   (or (= (program-basis acquired attributes)
                          (program-basis (program-identity database) attributes))
                       ;; Equal effective revisions name commits with equal
                       ;; datoms of every acquisition attribute.
                       (when (= (program-basis (revision-basis database) attributes)
-                               (program-basis (revision-basis previous) attributes))
+                               (program-basis (::revision-basis previous) attributes))
                         ;; A branch opened at this commit reads the acquired
                         ;; program by commit id from here on.
                         (cache/evict program-identity-cache commit-id)
@@ -3729,8 +3769,8 @@
         (do
           ;; Same program: the acquired value advances to the supplied one, so
           ;; a branch opened at it holds the acquired program by commit id.
-          (when-not (identical? database (:seon.db/db snapshot))
-            (swap! (::kernel/program-snapshot ctx) assoc :seon.db/db database)
+          (when-not (= (acquired-basis database) (::acquired-basis snapshot))
+            (swap! (::kernel/program-snapshot ctx) assoc ::acquired-basis (acquired-basis database))
             (advance-context-projection! ctx database (context-projection ctx)))
           (::acquisition snapshot))
         (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
@@ -3830,13 +3870,14 @@
          ctx (assoc (build-base-ctx projection)
                     ::bind-result! #'bind-result!
                     ::kernel/install-function! acquire-function-from-database!
-                    ::custody (cond-> {}
-                                connection (assoc :seon.db/connection connection)
-                                (nil? connection) (assoc :seon.db/db db)))
+                    ::custody (if-let [connection (or connection (db/branch-connection db (get-in db [:config :branch])))]
+                                {:seon.db/connection connection}
+                                {}))
          _ (swap! (::kernel/program-snapshot ctx) merge
-                  {::loaded-database (loaded-program (loaded-source arm-request db))}
+                  {::loaded-commit-id (db/commit-id (or (::loaded-database arm-request)
+                                                   (loaded-program (loaded-source arm-request db))))}
                   (select-keys arm-request
-                               [:seon.flow/commit-fault! ::loaded-database ::loaded-connection]))
+                               [:seon.flow/commit-fault! ::loaded-connection]))
          projection-state (or supplied-projection-state
                               (projection-state db projection (carried-cluster-name connection db)))
          ctx (env/carry-state
@@ -3908,8 +3949,7 @@
                       (atom (merge (dissoc @(::kernel/program-snapshot base-ctx)
                                            :seon.flow/commit-fault!)
                                    (select-keys arm-request
-                                                [:seon.flow/commit-fault! ::loaded-database
-                                                 ::loaded-connection])))
+                                                [:seon.flow/commit-fault! ::loaded-connection])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state)
@@ -3936,7 +3976,7 @@
      ;; refuses the fork; the refusals themselves are recorded values.
      (when (let [snapshot @(::kernel/program-snapshot ctx)]
              (and (::acquisition snapshot)
-                  (not= (db/commit-id db) (db/commit-id (:seon.db/db snapshot)))))
+                  (not= (db/commit-id db) (get-in snapshot [::acquired-basis :seon.source/commit-id]))))
        (when-let [failure (::acquisition-recording-error
                            (acquire! {:seon.sci.eval/ctx ctx :seon.db/db db}))]
          (throw (ex-info "Program acquisition could not record its refusals."
@@ -4421,10 +4461,7 @@
                               (some-> (get-in base-evaluation-ctx
                                                [::custody :seon.db/connection])
                                       db/db)
-                              (get-in base-evaluation-ctx [::custody :seon.db/db])
-                              ;; A context derived from a database (`base-ctx`)
-                              ;; holds it as its acquired value.
-                              (some-> (::kernel/program-snapshot base-evaluation-ctx) deref :seon.db/db))]
+                              (context-database base-evaluation-ctx))]
           (if-let [projection (or (db/carried-projection database)
                                   (context-projection base-evaluation-ctx))]
             (assoc request :seon.db/db

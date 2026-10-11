@@ -6,6 +6,7 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [seon.cache]
+            [seon.profile :as profile]
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as functions]
@@ -91,8 +92,14 @@
 (defn- measured
   {:malli/schema [:=> [:cat [:fn ifn?]] :map]}
   [f]
-  (let [start (System/nanoTime) value (f)]
-    {:value value :ms (/ (- (System/nanoTime) start) 1e6)}))
+  (let [measurement (profile/measure f)]
+    (when-let [path (System/getenv "SEON_ACQUISITION_MEASUREMENTS")]
+      (spit path (str (seon.render.value/core-text
+                       (select-keys measurement [:seon.profile/ms :seon.profile/alloc-bytes
+                                                 :seon.profile/called])) "\n") :append true))
+    {:value (:seon.profile/value measurement)
+     :ms (:seon.profile/ms measurement)
+     :alloc-bytes (:seon.profile/alloc-bytes measurement)}))
 
 (deftest ^{:seon.test/long "Measured 14,651 ms: canonical fixture, three complete SCI acquisitions, two analyzed declarations and branch cleanup; individual acquisition 1,681 ms."
            :seon.test/long-ms 20000}
@@ -208,7 +215,7 @@
              "a commit writing no program entity returns the acquired program")
          (is (identical? environment @(:env live))
              "and installs nothing into the context")
-         (is (identical? data (:seon.db/db (eval/acquired-program live)))
+         (is (= (db/commit-id data) (:seon.source/commit-id (eval/acquired-program live)))
              "the acquired value advances to the program-equal commit")
          (let [_ (declared! connection 'seon.sci.eval-test/program-revision-probe
                    "(defn ^{:malli/schema [:=> [:cat] :int]} program-revision-probe [] 1)")
@@ -218,11 +225,12 @@
            (let [reacquired (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db changed}))]
              (is (not (identical? acquisition (:value reacquired))))
              (is (not (identical? environment @(:env live))))
-             (is (identical? changed (:seon.db/db (eval/acquired-program live))))
+             (is (= (db/commit-id changed) (:seon.source/commit-id (eval/acquired-program live))))
              (is (= 1 (sci/eval-string* live "(seon.sci.eval-test/program-revision-probe)")))
              (println "PROGRAM-REVISION-PROOF"
-                      (pr-str {:reused-acquire-ms (:ms reused)
-                               :program-reacquire-ms (:ms reacquired)}))))))))))
+                      (seon.render.value/core-text
+                       {:reused-acquire-ms (:ms reused) :reused-alloc-bytes (:alloc-bytes reused)
+                        :program-reacquire-ms (:ms reacquired) :reacquire-alloc-bytes (:alloc-bytes reacquired)}))))))))))
 
 (defn- cluster-bases
   "The retained cluster bases of the program `database`'s JVM loaded, by cache key."
@@ -255,7 +263,9 @@
        (is (nil? (sci/resolve b 'user/base-memo-probe))
            "a definition in one caller's context is invisible to another")
        (println "BASE-CTX-MEMO-PROOF"
-                (pr-str {:derive-ms (:ms first-call) :memoized-ms (:ms second-call)}))))))
+                (seon.render.value/core-text
+                 {:derive-ms (:ms first-call) :derive-alloc-bytes (:alloc-bytes first-call)
+                  :memoized-ms (:ms second-call) :memoized-alloc-bytes (:alloc-bytes second-call)}))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program plus one analyzed declaration."
            :seon.test/long-ms 8000}
@@ -347,8 +357,7 @@
                                                        {:seon.db/db database :seon.fn/seeds seeds}))))
              overridden (fn [database]
                           (:seon.sci.eval/overridden
-                           (#'eval/overlay-plan database (:seon.sci.eval/loaded-database
-                                                          @(:seon.sci.kernel/program-snapshot live)))))]
+                           (#'eval/overlay-plan database (eval/loaded-database live database))))]
          (is (seq bases) "the cluster base exists once the cluster context acquired")
          (on-branch connection captured cluster-name :pb01-a
           (fn [a]
@@ -379,7 +388,7 @@
   [ctx]
   (let [acquired (eval/acquired-program ctx)
         snapshot @(:seon.sci.kernel/program-snapshot ctx)]
-    {:loaded (db/commit-id (:seon.sci.eval/loaded-database snapshot))
+    {:loaded (:seon.sci.eval/loaded-commit-id snapshot)
      :interpreted (set (:seon.sci.eval/interpreted snapshot))
      :interpreted-count (:seon.sci.eval/interpreted-count acquired)
      :refused (into #{} (map :seon.sci.eval/refused-function)

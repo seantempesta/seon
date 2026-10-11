@@ -2670,3 +2670,21 @@
      (let [ctx (test-support/fork-cluster-ctx connection)]
        (eval/enter-namespace! ctx (quote seon.dev.publication-launch-test))
        (is (ifn? (:test (meta (sci/resolve ctx 'seon.dev.publication-launch-test/launch-loads-the-cluster-without-an-inlined-input-inventory)))))))))
+
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-context-holds-the-basis-it-acquired-not-the-database-value}}
+  an-acquired-context-retains-bases-and-reads-its-connection
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           database (db/db connection)
+           acquisition (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
+           snapshot @(::kernel/program-snapshot ctx)]
+       (is (not (contains? snapshot :seon.db/db)))
+       (is (not (contains? snapshot :seon.sci.eval/loaded-database)))
+       (is (= (db/commit-id database) (:seon.source/commit-id (eval/acquired-program ctx))))
+       (test-support/transacted! connection [(test-support/task-row "basiscontext" "Advance only data.")])
+       (let [current (db/db connection)]
+         (is (eval/acquired-database? ctx current))
+         (is (identical? acquisition (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db current})))
+         (is (= (db/commit-id current) (:seon.source/commit-id (eval/acquired-program ctx)))))))))
