@@ -486,3 +486,25 @@
                 (:seon.task/status (:seon.context/turns (block running agent-id))))
              "the step is not done, and the block's status says so")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
+
+(deftest
+  a-prove-steps-start-offers-the-owner-and-the-test-namespace-its-instructions-name
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/implement)
+     (let [base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
+           id (:seon.task/id (task/create! (assoc base :seon.task/name "prove" :seon.task/step :prove
+                                                  :seon.task/instructions "Add a row to `tq.cs-test/shape`.")))
+           _ (task/create! (assoc base :seon.task/name "implement" :seon.task/needs #{[:seon.task/sym 'tq.cs/prove]}
+                                  :seon.task/instructions "Make the rows green."))
+           _ (task/create! (assoc base :seon.task/name "subject" :seon.task/intent "Goal."
+                                  :seon.task/children #{[:seon.task/sym 'tq.cs/prove] [:seon.task/sym 'tq.cs/implement]}))
+           start #(#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions %} :prove)]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                      :seon.task/branch (get-in (db/db connection) [:config :branch])})
+       (is (= {:seon.render/operations ['(in-ns 'tq.cs) '(in-ns 'tq.cs-test)]}
+              (:seon.context/start (:seon.context/step (block running agent-id))))
+           "the block's Prove step offers the owner's namespace, then the test namespace its instructions name")
+       (is (= {:seon.render/operations ['(in-ns 'tq.cs)]} (start "Add a row for the empty input."))
+           "instructions naming no test offer only the owner's namespace")))))

@@ -543,11 +543,22 @@
           branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
 (defn- step-start
-  "Where an :implement step on the task `sym` begins: the form that enters the namespace owning it; each
-  must-read carries the form that reads its source."
-  {:malli/schema [:=> [:cat :seon.task/sym] :seon.context/start]}
-  [sym]
-  {:seon.render/operations [(list 'in-ns (list 'quote (symbol (namespace sym))))]})
+  "Where the step of `held` begins: the form that enters the namespace owning it and, for a :prove step, the form
+  that enters the namespace of each test its instructions cite (`seon.ref/names`); each must-read carries the form
+  that reads its source."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.task/sym :seon.task/sym] [:seon.task/instructions {:optional true} :seon.task/instructions]]
+                       :seon.task/step]
+                  :seon.context/start]}
+  [database {:seon.task/keys [sym instructions]} step]
+  (let [owner (symbol (namespace sym))
+        tests (when (and (= :prove step) instructions)
+                (->> (ref/names instructions)
+                     (filter #(map? (db/pull database [:db/id] [:seon.test/sym %])))
+                     (into (sorted-set) (map (comp symbol namespace)))))]
+    {:seon.render/operations (into [(list 'in-ns (list 'quote owner))]
+                                   (map #(list 'in-ns (list 'quote %)))
+                                   (disj tests owner))}))
 
 (defn task-sections
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
@@ -580,9 +591,8 @@
                             (update proven :seon.context/proof-list
                                     (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
               verdict (assoc :seon.context/step
-                             (cond-> (step-section verdict)
-                               (= :implement (:seon.task/step verdict))
-                               (assoc :seon.context/start (step-start (:seon.task/sym held)))))
+                             (assoc (step-section verdict)
+                                    :seon.context/start (step-start database held (:seon.task/step verdict))))
               (seq sent-back) (assoc :seon.context/send-backs sent-back)
               (seq others) (assoc :seon.context/must-reads others)))))))
 

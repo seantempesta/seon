@@ -77,11 +77,11 @@
                :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
                             [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]
                             [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
-               :start [:map {:description "Where an Implement step begins: the form that enters the held task's namespace. Producer: seon.context/step-start."}
+               :start [:map {:description "Where a step begins: the form that enters the held task's namespace and, for a Prove step, the namespace of each test its instructions cite. Producer: seon.context/step-start."}
                        [:seon.render/operations [:vector :seon.render/read-form]]]
                :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :satisfied :working]]
-                      [:seon.context/start {:optional true :description "An Implement step's first form to run: the (in-ns) of the held task's namespace. Producer: seon.context/step-start."} :seon.context/start]
+                      [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and, for a Prove step, of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
                       [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions or unimplemented stubs when done."} [:vector :seon.context/test-entry]]
                       [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]]

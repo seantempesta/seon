@@ -262,3 +262,12 @@
        (is (seq symbols) "help names qualified symbols")
        (is (empty? (remove #(requiring-resolve (symbol %)) symbols))
            "every qualified symbol help names resolves")))))
+
+(deftest
+  help-teaches-the-chain-block
+  (with-help-agent
+   (fn [connection]
+     (let [line (first (filter #(str/includes? % ":seon.context/chain") (lines-of @connection)))]
+       (is (some? line) "a help line explains :seon.context/chain")
+       (is (every? #(str/includes? (str line) %) [":seon.context/before" ":seon.context/after" ":seon.context/merged" "already on your branch"])
+           "it names the steps before with what each merged, the steps after, and that the merged work is on the branch")))))
