@@ -1311,6 +1311,21 @@
                                (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))]))
             symbols))))
 
+(defn- function-symbols
+  "The symbols of the functions `database` holds, from one attribute range."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-symbol]]}
+  [database]
+  (let [symbols (db/datoms database :aevt :seon.fn/sym)]
+    (when (db/read-refusal? symbols)
+      (throw (ex-info "Function symbols could not be read." symbols)))
+    (into #{} (map :v) symbols)))
+
+(defn- definition-digest-of
+  "The definition identity of function `sym` in `database`, as `function-digests` holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :seon.program/definition-digest]}
+  [database sym]
+  (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))
+
 (defn- loaded-digests
   "`function-digests` of a loaded program, once per store and commit: every
   acquisition compares against the same few loaded commits. `loaded` is a
@@ -2890,10 +2905,9 @@
   (let [rows (authored-rows database)
         previous (authored-rows loaded)
         digests (loaded-digests loaded)
-        ;; `loaded-digests` memoizes any committed value's digests by commit
-        held (if (commit-id-of database) (loaded-digests database) (function-digests database))
+        present (function-symbols database)
         overridden (into #{} (keep (fn [{sym :seon.fn/sym :as row}]
-                                     (when (and sym (not= (row-definition-digest row) (get digests sym))
+                                     (when (and (contains? present sym) (not= (row-definition-digest row) (get digests sym))
                                                 (behavior-changed? database loaded sym))
                                        sym)))
                          rows)
@@ -2902,7 +2916,8 @@
                             (get-in row [:seon.test/ns :seon.ns/name]) (:seon.schema.admission/source row)])
         held-namespaces (into #{} (comp (filter :seon.ns/name) (map namespace-key)) previous)
         held-tests (into #{} (comp (filter :seon.test/sym) (map test-row)) previous)
-        added (into #{} (remove #(or (contains? digests %) (overridden %))) (keys held))
+        added (into #{} (remove #(or (contains? digests %) (overridden %))) present)
+        held (into {} (map (juxt identity #(definition-digest-of database %))) (concat overridden added))
         namespaces (into [] (filter #(and (:seon.ns/name %) (:seon.ns/source %)
                                           (not (held-namespaces (namespace-key %)))))
                          rows)
@@ -2914,7 +2929,7 @@
      ;; What the plan's interpretation is a function of, by content only: its
      ;; definitions by digest, its namespaces by name, source and bindings, its
      ;; tests by row content. Entity ids differ per branch for equal programs.
-     ::digest (id/digest 32 [(select-keys held (concat overridden added))
+     ::digest (id/digest 32 [held
                              (mapv (juxt :seon.ns/name namespace-key) namespaces)
                              tests])}))
 

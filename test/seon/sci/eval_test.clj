@@ -2744,6 +2744,24 @@
             (is (< (:seon.profile/ms measured) 3))
             (is (< (:seon.profile/alloc-bytes measured) 3000000)))))))))
 
+(deftest an-overlay-plan-digests-only-the-authored-rows
+  (test-support/with-database
+   (fn [connection]
+     (let [loaded (#'eval/loaded-program (db/db connection))
+           _ (#'eval/loaded-digests loaded)
+           _ (test-support/transacted!
+              connection [(test-support/program-fn-entity (db/db connection) (symbol "my.program" "planned")
+                                                          "(defn planned [] 1)")])
+           branch (db/db connection)
+           measured (profile/measure #(#'eval/derive-overlay-plan branch loaded))
+           called (:seon.profile/called measured)
+           plan (:seon.profile/value measured)]
+       (is (contains? (into (::eval/overridden plan) (::eval/added plan)) 'my.program/planned))
+       (is (zero? (get called 'seon.sci.eval/function-digests 0))
+           "the branch's whole program is not digested")
+       (is (< (get called 'seon.sci.eval/definition-digest-of 0) 10)
+           "only the authored and absent functions are digested")))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/branches-without-program-changes-add-no-overlay-entry}}
   branches-without-program-changes-add-no-overlay-entry
   (test-support/with-database
