@@ -914,7 +914,7 @@
                 (is (contains? (registry/branches (agent/handle-store handle)) branch) "the branch stays"))))))))))
 
 (deftest a-failed-start-ends-its-attempt-and-the-next-plans
-  ;; x forks its need a's end commit, whose branch is gone (chain experiment 3's G7): its start fails, and the
+  ;; x forks its need a's end commit (a merged on main), whose branch is gone (chain experiment 3's G7): its start fails, and the
   ;; failure is x's assignment's end, so no pass starts it again while y, ready beside it, starts
   (binding [*space* "tq.failstart"]
     (test-support/with-database
@@ -932,6 +932,7 @@
               (test-support/transacted! connection [row])
               (test-support/transacted! connection
                                         [[:db/add [:seon.task/assignment (:seon.task/assignment row)] :seon.task.attempt/end :done]
+                                         [:db/add [:seon.task/assignment (:seon.task/assignment row)] :seon.task/outcome :merged]
                                          [:db/add [:seon.task/assignment (:seon.task/assignment row)] :seon.task.attempt/commit
                                           (db/commit-id (db/db connection))]]))
             (pass! handle routing)
