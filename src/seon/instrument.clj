@@ -634,24 +634,24 @@
 (declare compiled-wrapper registration-error ^:dynamic *compiling-contract*)
 
 (defn wrap-interpreted
-  "Apply one committed agent function contract.
+  "Apply one agent function contract, `contract` its form.
 
   It uses the host boundary's per-arity enforcement: every refusal throws,
   and the evaluation boundary decides what it records."
   {:malli/schema
    [:function
-    [:=> [:cat :qualified-symbol :string :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
+    [:=> [:cat :qualified-symbol :seon.schema/value :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
      :seon.instrument/callable]
-    [:=> [:cat :qualified-symbol :string :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
+    [:=> [:cat :qualified-symbol :seon.schema/value :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
           [:map [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]
            [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
            [:seon.profile/context {:optional true} :seon.profile/context]
            [:seon.call-preparation/snapshot {:optional true} :seon.call-preparation/snapshot]]]
      :seon.instrument/callable]]}
-  ([function-symbol spec-edn projection caps f]
-   (wrap-interpreted function-symbol spec-edn projection caps f {}))
-  ([function-symbol spec-edn projection caps f arm-request]
+  ([function-symbol contract projection caps f]
+   (wrap-interpreted function-symbol contract projection caps f {}))
+  ([function-symbol contract projection caps f arm-request]
   (let [original (original-interpreted f)
         callable-identity (merge {:seon.profile/sym function-symbol
                                   :seon.profile/scope :seon.profile/context
@@ -685,7 +685,7 @@
                         (assoc failure :seon.error/type :seon.instrument/registration-error)))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
-                                        (edn/read-string spec-edn) original caps
+                                        contract original caps
                                         (assoc arm-request
                                                :seon.sci.admit/caps caps
                                                :seon.config.error/max-evidence-bytes

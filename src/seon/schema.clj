@@ -857,7 +857,7 @@
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
-   artifact-exports pure-predicate-symbols]
+   artifact-exports]
   (letfn [(map-fingerprint [section values]
             (reduce-kv
              (fn [fingerprint identity value]
@@ -879,8 +879,7 @@
       (map-fingerprint :function-contracts function-contracts)
       (map-fingerprint :schema-admissions schema-admissions)
       (map-fingerprint :function-admissions function-admissions)
-      (set-fingerprint :artifact-exports artifact-exports)
-      (set-fingerprint :pure-predicate-symbols pure-predicate-symbols)])))
+      (set-fingerprint :artifact-exports artifact-exports)])))
 
 (def ^:private projection-fingerprint-version 4)
 
@@ -1344,9 +1343,11 @@
 (defn malli-form?
   "True when `value` is readable EDN and Malli can parse its STRUCTURE.
 
-   References are opaque here: this predicate never asks whether a declaration
-   population defines them, because the authority extending the projection
-   re-decides that against the projection it holds. Validation, reference
+   References and named predicates are opaque here: this predicate never asks
+   whether a declaration population defines a reference or which callable a
+   predicate symbol names (one defined on an agent's branch resolves only in
+   its SCI context), because the authority compiling the declaration
+   re-decides that against what it holds. Validation, reference and predicate
    resolution, and acyclicity remain separate operations at that authority."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
@@ -1362,18 +1363,14 @@
      (and readable?
           (= value decoded)
           (try
-            (some? (m/schema (compilable-form decoded {})
+            (some? (m/schema (compilable-form decoded (zipmap (predicate-symbols-in decoded)
+                                                              (repeat any?)))
                              {:registry structural-registry}))
             (catch clojure.lang.ExceptionInfo failure
               (let [data (ex-data failure)
                     malli-type (:type data)]
-                ;; and this owner's own declared refusal for a predicate
-                ;; with no admitted callable (`compilable-form`, above), which
-                ;; fails closed without loading its namespace.
-                (if (or (and (qualified-keyword? malli-type)
-                             (= "malli.core" (namespace malli-type)))
-                        (= :seon.schema/unresolved-predicate
-                           (:seon.schema/error data)))
+                (if (and (qualified-keyword? malli-type)
+                         (= "malli.core" (namespace malli-type)))
                   false
                   (throw failure)))))))))
 
@@ -1443,14 +1440,12 @@
    admission source. Returns non-terminal advisories."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{:seon.schema/keys [identity definition forms admission admissions
-                       pure-predicate-symbols predicate-functions
-                       direct-predicate-symbols
+                       predicate-functions direct-predicate-symbols
                        compiled compiled-definition compiled-forms
                        compiled-schemas schema-dependencies registry
                        compile-options canonical-keys reference-advisories]
     :or {forms {}
          admissions {}
-         pure-predicate-symbols #{}
          predicate-functions {}}}]
   (let [prepared? (and (or compiled-forms compiled-schemas)
                        registry compile-options canonical-keys)
@@ -1490,26 +1485,6 @@
         compiled-definition
         (or compiled-definition compiled
             (compilable-form definition predicate-functions))
-        _ (when (= :agent (:seon.schema.admission/source
-                           (or admission
-                               {:seon.schema.admission/source :agent})))
-            (when-let [predicate
-                       (first (remove pure-predicate-symbols
-                                      (sort direct-predicate-symbols)))]
-              (throw
-               (ex-info
-                (str identity " references predicate " predicate
-                     ", but its existing program-graph call edges do not yet "
-                     "prove a pure, capability-free transitive call graph. "
-                     "Keep the predicate as a separately schema'd corpus "
-                     "function, then re-register this contract after the "
-                     "execution planner admits that graph.")
-                {:seon.schema/error
-                 :seon.schema/unproved-predicate-purity
-                 :seon.schema/unproved-predicate-purity predicate
-                 :seon.schema/identity identity
-                 :seon.schema/predicate predicate
-                 }))))
         ;; Every consumer reads a registry entry as a compiled schema, as a
         ;; projection's registry holds them; a registry of FORMS made each
         ;; read resolve against Malli's defaults and refuse declared keys
@@ -1564,7 +1539,6 @@
                       :seon.schema/admission entity-admission
                       :seon.schema/predicate-symbols
                       (predicate-symbols-in entity-definition)
-                      :seon.schema/pure-predicate-symbols pure-predicate-symbols
                       :seon.schema/canonical-keys canonical-keys}))
                     references
                     (if (and (keyword? entity-identity)
@@ -2112,7 +2086,6 @@
                [:seon.schema/canonical-keys [:set :keyword]]
                [:seon.schema/schema-admissions :map]
                [:seon.schema/function-admissions :map]
-               [:seon.schema/pure-predicate-symbols [:set :symbol]]
                [:seon.schema/predicate-functions :map]
                [:seon.schema/schema-keys [:sequential [:or :keyword :symbol]]]
                [:seon.schema/function-symbols [:sequential :symbol]]]]
@@ -2120,8 +2093,7 @@
   [{:seon.schema/keys [forms function-contracts compiled-schemas
                        schema-dependencies registry canonical-keys
                        schema-admissions function-admissions
-                       pure-predicate-symbols predicate-functions
-                       schema-keys function-symbols]}]
+                       predicate-functions schema-keys function-symbols]}]
   (let [core-admission {:seon.schema.admission/source :core}
         options {:registry registry}
         ;; One operation's memo (core.cache wrapped): a reference walk runs
@@ -2156,7 +2128,6 @@
          :seon.schema/canonical-keys canonical-keys
          :seon.schema/reference-advisories reference-advisories
          :seon.schema/admissions schema-admissions
-         :seon.schema/pure-predicate-symbols pure-predicate-symbols
          :seon.schema/predicate-functions predicate-functions}
         validation-requests
         (into
@@ -2236,14 +2207,12 @@
     :map]}
   [forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
-                        artifact-exports
-                        pure-predicate-symbols predicate-functions
+                        artifact-exports predicate-functions
                         validate-render-contracts? admission?]
      :or {admission? true
           schema-admissions {}
           function-admissions {}
           artifact-exports #{}
-          pure-predicate-symbols #{}
           predicate-functions {}}
      :as options}]
    (cond
@@ -2302,7 +2271,6 @@
              :seon.schema/canonical-keys canonical-keys
              :seon.schema/schema-admissions schema-admissions
              :seon.schema/function-admissions function-admissions
-             :seon.schema/pure-predicate-symbols pure-predicate-symbols
              :seon.schema/predicate-functions predicate-functions
              :seon.schema/schema-keys (vec (keys forms))
              :seon.schema/function-symbols (vec (keys function-contracts))}))
@@ -2378,7 +2346,7 @@
         fingerprint
         (projection-fingerprint
          forms function-contracts schema-admissions function-admissions
-         artifact-exports pure-predicate-symbols)
+         artifact-exports)
         projection
         (with-predicate-functions
          {:seon.schema.projection/forms forms
@@ -2387,7 +2355,6 @@
           :seon.schema.projection/schema-admissions schema-admissions
           :seon.schema.projection/function-admissions function-admissions
           :seon.schema.projection/artifact-exports artifact-exports
-          :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
           :seon.schema.projection/schema-dependencies schema-dependencies
           :seon.schema.projection/canonical-keys canonical-keys
           :seon.schema.projection/reverse-schema-dependencies
@@ -2466,8 +2433,7 @@
    (:seon.schema.projection/function-contracts projection)
    (:seon.schema.projection/schema-admissions projection)
    (:seon.schema.projection/function-admissions projection)
-   (:seon.schema.projection/artifact-exports projection)
-   (:seon.schema.projection/pure-predicate-symbols projection)))
+   (:seon.schema.projection/artifact-exports projection)))
 
 (defn- reusable-projection-fingerprint
   [projection]
@@ -2662,8 +2628,6 @@
    (get projection :seon.schema.projection/function-admissions {})
    :seon.schema/artifact-exports
    (get projection :seon.schema.projection/artifact-exports #{})
-   :seon.schema/pure-predicate-symbols
-   (get projection :seon.schema.projection/pure-predicate-symbols #{})
    :seon.schema/predicate-functions (predicate-functions-in projection)
    :seon.schema/validate-render-contracts? true})
 
@@ -2703,14 +2667,12 @@
    [:=> [:cat :seon.error/operation :map :map :map :map] :map]}
   [operation projection forms function-contracts
    {:seon.schema/keys [schema-admissions function-admissions
-                       artifact-exports
-                       pure-predicate-symbols predicate-functions
+                       artifact-exports predicate-functions
                        validate-render-contracts? admission?]
     :or {admission? true
          schema-admissions {}
          function-admissions {}
          artifact-exports #{}
-         pure-predicate-symbols #{}
          predicate-functions {}}}]
   (let [projection (replacement-base projection)
         old-forms (:seon.schema.projection/forms projection)
@@ -2721,13 +2683,11 @@
         old-schema-admissions (:seon.schema.projection/schema-admissions projection {})
         old-function-admissions (:seon.schema.projection/function-admissions projection {})
         old-exports (:seon.schema.projection/artifact-exports projection #{})
-        old-pure (:seon.schema.projection/pure-predicate-symbols projection #{})
         schema-admission-changes
         (apply set/union (declaration-changes old-schema-admissions schema-admissions))
         function-admission-changes
         (apply set/union (declaration-changes old-function-admissions function-admissions))
         export-changes (set-changes old-exports artifact-exports)
-        pure-changes (set-changes old-pure pure-predicate-symbols)
         old-predicates (predicate-functions-in projection)
         replaced-definitions
         (concat (keep #(get old-forms %) (into changed-keys removed-keys))
@@ -2761,8 +2721,7 @@
       (and (empty? changed-keys) (empty? removed-keys)
            (empty? changed-fns) (empty? removed-fns)
            (empty? schema-admission-changes) (empty? function-admission-changes)
-           (empty? export-changes)
-           (empty? pure-changes) (= predicate-functions old-predicates))
+           (empty? export-changes) (= predicate-functions old-predicates))
       projection
 
       (some #(not (qualified-keyword? %)) (into changed-keys removed-keys))
@@ -2770,7 +2729,6 @@
                         {:seon.schema/schema-admissions schema-admissions
                          :seon.schema/function-admissions function-admissions
                          :seon.schema/artifact-exports artifact-exports
-                         :seon.schema/pure-predicate-symbols pure-predicate-symbols
                          :seon.schema/predicate-functions predicate-functions
                          :seon.schema/validate-render-contracts? validate-render-contracts?
                          :seon.schema/admission? admission?})
@@ -2871,9 +2829,7 @@
                 (fingerprint-with :function-admissions old-function-admissions
                                   function-admissions function-admission-changes)
                 (fingerprint-with :artifact-exports (zipmap old-exports (repeat true))
-                                  (zipmap artifact-exports (repeat true)) export-changes)
-                (fingerprint-with :pure-predicate-symbols (zipmap old-pure (repeat true))
-                                  (zipmap pure-predicate-symbols (repeat true)) pure-changes))
+                                  (zipmap artifact-exports (repeat true)) export-changes))
             candidate
             (with-predicate-functions
              (merge (dissoc projection :seon.schema.projection/compiled
@@ -2884,7 +2840,6 @@
                      :seon.schema.projection/schema-admissions schema-admissions
                      :seon.schema.projection/function-admissions function-admissions
                      :seon.schema.projection/artifact-exports artifact-exports
-                     :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
                      :seon.schema.projection/schema-dependencies schema-dependencies
                      :seon.schema.projection/canonical-keys canonical-keys
                      :seon.schema.projection/reverse-schema-dependencies
@@ -2910,7 +2865,6 @@
                 :seon.schema/canonical-keys canonical-keys
                 :seon.schema/schema-admissions schema-admissions
                 :seon.schema/function-admissions function-admissions
-                :seon.schema/pure-predicate-symbols pure-predicate-symbols
                 :seon.schema/predicate-functions predicate-functions
                 :seon.schema/schema-keys (vec affected-keys)
                 :seon.schema/function-symbols (vec affected-fns)}))]
@@ -3100,7 +3054,7 @@
   by replacement; records the entity text each form was read from."
   {:malli/schema [:=> [:cat :map ::projection] ::projection]}
   [{:seon.schema/keys [forms function-contracts schema-admissions function-admissions
-                       definition-strings artifact-exports pure-predicate-symbols]}
+                       definition-strings artifact-exports]}
    reusable]
   (let [;; A complete reusable projection answers by replacement (it is
         ;; returned itself when nothing differs), so the population-wide
@@ -3108,8 +3062,7 @@
         fingerprint (when (and (:seon.schema.projection/fingerprint reusable)
                                (not (incremental-base? reusable)))
                       (projection-fingerprint forms function-contracts schema-admissions
-                                              function-admissions artifact-exports
-                                              pure-predicate-symbols))
+                                              function-admissions artifact-exports))
         projection
         (if (and fingerprint (= fingerprint (:seon.schema.projection/fingerprint reusable)))
           reusable
@@ -3119,7 +3072,6 @@
             :seon.schema/projection reusable
             :seon.schema/function-admissions function-admissions
             :seon.schema/artifact-exports artifact-exports
-            :seon.schema/pure-predicate-symbols pure-predicate-symbols
             :seon.schema/predicate-functions
             (deleted-predicate-functions forms function-contracts reusable)
             ;; Reading committed entities re-admits nothing: completeness and
@@ -3159,9 +3111,8 @@
   ([projection-input]
    (projection-from-entities projection-input {}))
   ([{:seon.schema/keys [database-value schema-rows function-contract-rows
-                        artifact-exports pure-predicate-symbols]
-     :or {artifact-exports #{}
-          pure-predicate-symbols #{}}}
+                        artifact-exports]
+     :or {artifact-exports #{}}}
     reusable-projection]
    (let [recorded (if (contains? (dbi/-schema database-value) :seon.schema.admission/source)
                     (projection-admissions database-value)
@@ -3201,8 +3152,7 @@
        :seon.schema/definition-strings
        (parsed-member (parsed-member {} schemas :seon.schema.parsed/string)
                       contracts :seon.schema.parsed/string)
-       :seon.schema/artifact-exports artifact-exports
-       :seon.schema/pure-predicate-symbols pure-predicate-symbols}
+       :seon.schema/artifact-exports artifact-exports}
       reusable-projection))))
 
 (defn- range-differences
@@ -3285,8 +3235,7 @@
       (parsed-member (advanced :seon.schema.projection/definition-strings schemas
                                :seon.schema.parsed/string)
                      contracts :seon.schema.parsed/string)
-      :seon.schema/artifact-exports #{}
-      :seon.schema/pure-predicate-symbols #{}}
+      :seon.schema/artifact-exports #{}}
      base)))
 
 (defn- advanceable-base?
@@ -3434,8 +3383,7 @@
         (reduce-kv (fn [input member [identity value identity-tx?]]
                      (assoc input member (projection-entities db identity value identity-tx?)))
                    {:seon.schema/database-value db
-                    :seon.schema/artifact-exports #{}
-                    :seon.schema/pure-predicate-symbols #{}}
+                    :seon.schema/artifact-exports #{}}
                    projection-ranges)
         base))))
 
@@ -4384,7 +4332,6 @@
       :seon.schema/compile-options {:registry registry}
       :seon.schema/canonical-keys (set (keys forms))
       :seon.schema/admissions (:seon.schema.projection/schema-admissions projection {})
-      :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
       :seon.schema/predicate-functions (predicate-functions-in projection)})
     product))
 
@@ -4417,7 +4364,6 @@
       :seon.schema/canonical-keys (or (:seon.schema.projection/canonical-keys projection) (set (keys forms)))
       :seon.schema/schema-admissions (:seon.schema.projection/schema-admissions projection {})
       :seon.schema/function-admissions (:seon.schema.projection/function-admissions projection {})
-      :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
       :seon.schema/predicate-functions (predicate-functions-in projection)
       :seon.schema/schema-keys (vec affected-keys)
       :seon.schema/function-symbols (vec affected-fns)})

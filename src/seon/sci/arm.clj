@@ -59,9 +59,10 @@
       (cond-> (if-not (and sym contract function?)
                 write
                 (try
-                  (#'eval/install-function-contract!
-                   ctx {:seon.fn/sym sym :seon.fn/spec (pr-str contract) :seon.sci.eval/sci-var v}
-                   (arming-projection request working) working)
+                  ;; the evaluated contract as the Var holds it, its
+                  ;; predicates the callables its symbols named
+                  (#'eval/arm-contract! ctx sym contract nil
+                                        (arming-projection request working) working)
                   (assoc write :seon.batch/armed true)
                   (catch Throwable t
                     (assoc write :seon.batch/arm-error (ex-message t)))))

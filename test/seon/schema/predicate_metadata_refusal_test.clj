@@ -61,7 +61,7 @@
      (let [projection (schema/handed-projection)
            wrapped (instrument/wrap-interpreted
                     'seon.schema.predicate-metadata-refusal-test/interpreted
-                    "[:=> [:cat [:fn clojure.core/ifn?] :int] :any]"
+                    '[:=> [:cat [:fn clojure.core/ifn?] :int] :any]
                     projection (config/result-caps config/defaults)
                     (fn [f x] (f x)))
            thrown (try (wrapped 1 2) nil (catch clojure.lang.ExceptionInfo failure failure))

@@ -239,19 +239,15 @@ positions once then binary search, exponent 1.01 (0.26 → 2.10 MB). Red on the 
 
 ## 8. What must land first (owners and order)
 
-1. **Agents cannot admit any `[:fn pred]` contract** (guard or not): `seon.schema` refuses it as
-   `:seon.schema/unproved-predicate-purity` because no production code fills `pure-predicate-symbols`; observed for
-   `'seon.db/database-value?` and `'clojure.core/map?`. Owner: `seon.schema` (Opus, platform). Without it no designed
-   guard can merge. Smallest fix to evaluate: derive purity from the predicate's stored call graph, or admit predicates
-   that are themselves admitted, contracted Seon functions.
-2. **A predicate defined on the branch cannot be named**: `seon.schema/compilable-form` resolves only loaded host Vars.
-   Same owner; the designer otherwise must merge the predicate before the contract that names it.
-3. **An unquoted predicate in REPL metadata** fails as "No reader function for tag object" (`seon.program/read-edn`);
-   the reply should say to quote it. Owner: `seon.program` / the REPL fix text.
-4. **Malli fork: seed and max size in `function-checker`** (§3). Owner: root's batched fork bump.
-5. **A growth helper in `seon.test-support`** returning the §5 data, built on `seon.profile/measure` (test code, after
+1. Done: an agent's `[:fn pred]` contract is admitted (the predicate-purity rule, which nothing could satisfy, is
+   deleted), and a predicate defined on the branch resolves through the agent's SCI context
+   (`seon.sci.eval/context-predicates`). An agent's `[:fn]` still declares `:error/message` and a bounded generator.
+   An unquoted predicate in REPL metadata is the ordinary form: the stored contract is the analysis's authored
+   form and arming uses the evaluated one, so nothing prints and re-reads it.
+2. **Malli fork: seed and max size in `function-checker`** (§3). Owner: root's batched fork bump.
+3. **A growth helper in `seon.test-support`** returning the §5 data, built on `seon.profile/measure` (test code, after
    the freeze); `seon.sci.forgive-test`'s hand-read `ThreadMXBean` converts to it.
-6. **A structural schema index** for shape search (§6.3). Owner: `seon.schema` writer.
+4. **A structural schema index** for shape search (§6.3). Owner: `seon.schema` writer.
 
 ## 9. Proposed AGENTS.md wording (root edits AGENTS.md after review)
 

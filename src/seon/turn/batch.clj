@@ -19,6 +19,7 @@
   Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`)
   are `seon.batch/evaluate-batch` requests that differ only in these values."
   (:require [clj-kondo.core :as kondo]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [sci.impl.vars]
             [datahike.db.utils :as dbu]
@@ -258,9 +259,10 @@
 
 (defn- write-entity
   "The program row of one joined definition write, or the reason it has none.
-  Its contract facts read `projection`, the one the write was armed under."
-  {:malli/schema [:=> [:cat [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
-  [namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
+  Its contract facts read `projection`, the one the write was armed under,
+  with the predicates its contract names as `ctx` resolves them."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
+  [ctx namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
   (let [coords (entry-coords analysis entry)
         first-row (:first-row coords)
         source (:seon.batch/source entry)
@@ -273,8 +275,7 @@
         row (when (and d (empty? captured))
               (if (:seon.batch/other-namespace j)
                 (first (vals (:entities (analyze-form namespace-row db (symbol (namespace sym)) (definition-source analysis d) declared []))))
-                (get entities [0 (local-offset source first-row [r c]) (name sym)])))
-        contract (:malli/schema (meta v))]
+                (get entities [0 (local-offset source first-row [r c]) (name sym)])))]
     (cond
       ;; A program declaration is a function or a test; a def of any other
       ;; value (an atom, a map, a result) is the agent's private state, kept
@@ -287,10 +288,15 @@
       ;; a contracted function's row carries its parsed contract facts
       ;; (:seon.fn/arities, their input/output refs), as the index's rows do:
       ;; the schema usage guard and arity checks read them
-      row {:seon.batch/row (if (and contract (fn? @v))
-                             (sfn/contract-facts-row projection
-                                                     (namespace-row (symbol (namespace sym)))
-                                                     (assoc row :seon.fn/spec (pr-str contract)))
+      ;; the analysis row holds the authored contract (`:seon.fn/spec`, its
+      ;; predicates symbols); they resolve as this context resolves them
+      row {:seon.batch/row (if-let [spec (:seon.fn/spec row)]
+                             (sfn/contract-facts-row
+                              (schema/with-predicate-functions
+                               projection (merge (schema/predicate-functions-in projection)
+                                                 (eval/context-predicates ctx (edn/read-string spec))))
+                              (namespace-row (symbol (namespace sym)))
+                              row)
                              row)}
       :else {:seon.batch/private (-> j (dissoc :seon.batch/definition) (assoc :seon.batch/sym sym))})))
 
@@ -354,7 +360,7 @@
         by-var (sci.ctx-store/with-ctx ctx
                  (into {} (map (fn [w] [(:seon.batch/var w)
                                         (if analyzed
-                                          (write-entity namespace-row working projection entry analyzed w declared)
+                                          (write-entity ctx namespace-row working projection entry analyzed w declared)
                                           {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
                                                                 :seon.batch/join :unanalyzed
                                                                 :seon.batch/reason :no-source}})]))

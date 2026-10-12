@@ -329,7 +329,7 @@
            carrier (assoc worlds :seon.probe/member 1)
            caps (config/result-caps (test-support/effective-config))
            contracted (instrument/wrap-interpreted
-                       'seon.probe/f "[:=> [:cat :map :int] :int]" projection caps (fn [_ n] n))
+                       'seon.probe/f '[:=> [:cat :map :int] :int] projection caps (fn [_ n] n))
            failure (doto (ex-info "outer" {:seon.probe/request carrier}
                                   (ex-info "inner" {:seon.db/db database}))
                      (.addSuppressed (ex-info "cleanup" {:seon.db/connection connection})))
@@ -387,7 +387,7 @@
         caps (config/result-caps (test-support/effective-config))
         forms (:seon.schema.projection/forms projection)
         contracted (instrument/wrap-interpreted
-                    'seon.probe/f "[:=> [:cat :qualified-symbol :map] :int]" projection caps (fn [_ _] 1))
+                    'seon.probe/f '[:=> [:cat :qualified-symbol :map] :int] projection caps (fn [_ _] 1))
         failure (try (contracted 'unqualified forms) (catch clojure.lang.ExceptionInfo e e))
         error (error.refusal/diagnostic (assoc base :seon.error/throwable failure))
         link-data (get-in error [:seon.error/chain 0 :seon.error/data])]
@@ -421,13 +421,13 @@
                   :seon.error/operation 'a/b :x/member 1}
            diagnostic (instrument/wrap-interpreted
                        'seon.error.refusal/diagnostic
-                       (pr-str (:malli/schema (meta #'error.refusal/diagnostic)))
+                       (:malli/schema (meta #'error.refusal/diagnostic))
                        projection caps error.refusal/diagnostic)
            accepted (instrument/wrap-interpreted
-                     'x/accepted "[:function [:=> [:cat :map] :x/y-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/y-error]]"
+                     'x/accepted '[:function [:=> [:cat :map] :x/y-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/y-error]]
                      projection caps diagnostic)
            refused (instrument/wrap-interpreted
-                    'x/refused "[:function [:=> [:cat :map] :x/z-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/z-error]]"
+                    'x/refused '[:function [:=> [:cat :map] :x/z-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/z-error]]
                     projection caps diagnostic)]
        (doseq [args [[value] [(:seon.error/at value) :x/y 'a/b {:x/member 1}]]]
         (is (= value (apply accepted args)))

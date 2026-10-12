@@ -372,7 +372,7 @@
         (schema/build-projection
          (schema/registered-schemas)
          {}
-         {:seon.schema/pure-predicate-symbols #{predicate}})]
+         {})]
       (testing "the agent producer meets the same honesty bar — one gate,
                 two producers"
         (let [delta (schema/begin-registration-delta projection)]

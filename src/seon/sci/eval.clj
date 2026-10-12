@@ -552,7 +552,7 @@
                                        @sci-var
                                        absent-intern)}])))))
 
-(declare install-function-contract! interpretation-error)
+(declare arm-contract! install-function-contract! interpretation-error)
 
 (defn- deleted-schema-key
   [row]
@@ -902,37 +902,66 @@
     (merge (select-keys effective [:seon.config.error/max-evidence-bytes])
            {:seon.sci.admit/caps (config/result-caps effective)})))
 
+(defn context-predicates
+  "The callable of each qualified `[:fn sym]` predicate `contract` names, as
+  `ctx` resolves it: a predicate defined on the context's branch is its own
+  interpreted function, a compiled one the Var's value."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value]
+                  [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+  [ctx contract]
+  (sci.ctx-store/with-ctx ctx
+    (into {}
+          (keep (fn [predicate]
+                  (when-let [found (sci/resolve ctx predicate)]
+                    (when (ifn? @found) [predicate @found]))))
+          (#'schema/predicate-symbols-in contract))))
+
+(defn- arm-contract!
+  "Arm `contract`, a function contract form, on `function-symbol`'s Var in
+  `ctx`, its named predicates resolved as `ctx` resolves them."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :seon.schema/value
+                       [:or :nil :seon.program/definition-digest] :map
+                       :seon.db/database-value]
+                  :nil]}
+  [ctx function-symbol contract definition-digest projection db]
+  (let [sci-var (sci/resolve ctx function-symbol)
+        ;; Arming wraps the Var's root: a context without the Var refuses
+        ;; by name, never dereferences nil.
+        _ (when-not sci-var
+            (let [refusal (interpretation-error
+                           function-symbol "this context holds no Var to arm its contract on.")]
+              (throw (ex-info (:seon.error/message refusal) refusal))))
+        {:keys [:seon.sci.admit/caps
+                :seon.config.error/max-evidence-bytes]}
+        (instrumentation-config db)
+        ;; The supplied-default rows this arming decides the plan from.
+        current (call-preparation/snapshot db (or (db/carried-projection db) projection))
+        _ (when (db/read-refusal? current)
+            (throw (ex-info (:seon.error/message current) current)))
+        projection (schema/with-predicate-functions
+                    projection (merge (schema/predicate-functions-in projection)
+                                      (context-predicates ctx contract)))]
+    (sci/bind-root!
+     ctx sci-var
+     (instrument/wrap-interpreted
+      function-symbol contract projection caps (sci.ctx-store/with-ctx ctx @sci-var)
+      (cond-> (assoc (select-keys @(::kernel/program-snapshot ctx)
+                                  [:seon.flow/commit-fault!])
+                     :seon.call-preparation/snapshot current)
+        max-evidence-bytes
+        (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes)
+        ;; The profiling cell's identity is the row it installs.
+        definition-digest
+        (assoc :seon.program/definition-digest definition-digest)))))
+  nil)
+
 (defn- install-function-contract!
+  "Arm the stored contract of `committed`, a program row, on its Var in `ctx`."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map :map :seon.db/database-value] :nil]}
   [ctx committed projection db]
   (when-let [spec-edn (:seon.fn/spec committed)]
-    (let [function-symbol (:seon.fn/sym committed)
-          sci-var (sci/resolve ctx function-symbol)
-          ;; Arming wraps the Var's root: a context without the Var refuses
-          ;; by name, never dereferences nil.
-          _ (when-not sci-var
-              (let [refusal (interpretation-error
-                             function-symbol "this context holds no Var to arm its contract on.")]
-                (throw (ex-info (:seon.error/message refusal) refusal))))
-          {:keys [:seon.sci.admit/caps
-                  :seon.config.error/max-evidence-bytes]}
-          (instrumentation-config db)
-          ;; The supplied-default rows this arming decides the plan from.
-          current (call-preparation/snapshot db (or (db/carried-projection db) projection))
-          _ (when (db/read-refusal? current)
-              (throw (ex-info (:seon.error/message current) current)))]
-      (sci/bind-root!
-       ctx sci-var
-       (instrument/wrap-interpreted
-        function-symbol spec-edn projection caps (sci.ctx-store/with-ctx ctx @sci-var)
-        (cond-> (assoc (select-keys @(::kernel/program-snapshot ctx)
-                                    [:seon.flow/commit-fault!])
-                       :seon.call-preparation/snapshot current)
-          max-evidence-bytes
-          (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes)
-          ;; The profiling cell's identity is the row it installs.
-          (:seon.program/definition-digest committed)
-          (assoc :seon.program/definition-digest
-                 (:seon.program/definition-digest committed)))))))
+    (arm-contract! ctx (:seon.fn/sym committed) (edn/read-string spec-edn)
+                   (:seon.program/definition-digest committed) projection db))
   nil)
 
 (defn- refusing

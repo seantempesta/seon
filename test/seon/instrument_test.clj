@@ -362,7 +362,7 @@
         wrapped
         (instrument/wrap-interpreted
          'my.agents.contract/value
-         "[:=> [:cat [:fn clojure.core/int?]] :int]"
+         '[:=> [:cat [:fn clojure.core/int?]] :int]
          projection caps original)
         failure (try (wrapped "wrong")
                      (catch Exception thrown thrown))]
@@ -372,7 +372,7 @@
                    [:seon.error/operation])))
     (let [recorded (instrument/wrap-interpreted
                     'my.agents.contract/value
-                    "[:=> [:cat [:fn clojure.core/int?]] :int]"
+                    '[:=> [:cat [:fn clojure.core/int?]] :int]
                     projection caps original)]
       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error)
            (test-support/refusal-data #(recorded "wrong")))
@@ -482,7 +482,7 @@
         caps (config/result-caps (test-support/effective-config))
         interpreted (instrument/wrap-interpreted
                      'my.agents.guarded/result
-                     "[:=> [:cat :int] :int [:fn {:error/message \"The guard was evaluated.\"} clojure.core/map?]]"
+                     '[:=> [:cat :int] :int [:fn {:error/message "The guard was evaluated."} clojure.core/map?]]
                      projection caps identity)]
     (arm-suite! '[seon.instrument-test/guarded-result] {:seon.schema/projection projection})
     (doseq [call [#(guarded-result 1) #(interpreted 1)]]
@@ -577,7 +577,7 @@
            projection (schema/build-projection (schema/snapshot))
            wrapped (instrument/wrap-interpreted
                     function-symbol
-                    "[:=> [:cat [:vector :map]] :map]"
+                    '[:=> [:cat [:vector :map]] :map]
                     projection ;; the declared admission caps, like every production
                     ;; caller hands
                     (config/result-caps (test-support/effective-config))
@@ -751,7 +751,7 @@
   (let [member (vec (range 100 140))
         raw (concat (range 8) [member])
         wrapped (instrument/wrap-interpreted
-                 'my.agents.audit/vector-input "[:=> [:cat [:vector :int]] :int]"
+                 'my.agents.audit/vector-input '[:=> [:cat [:vector :int]] :int]
                  (schema/handed-projection) (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
         offending (get-in refusal [:seon.error/problems 0 :seon.error/offending])
@@ -871,12 +871,12 @@
                  arm-request (select-keys effective [:seon.config.error/max-evidence-bytes])]
              (doseq [function-symbol ['my.agents.policy/first 'my.agents.policy/second]]
                (let [wrapped (instrument/wrap-interpreted
-                              function-symbol "[:=> [:cat :int] :int]"
+                              function-symbol '[:=> [:cat :int] :int]
                               projection caps identity arm-request)]
                  (is (= 9 (wrapped 9)))
                  (is (thrown? Exception (wrapped "not an integer")))))
              (let [wrapped (instrument/wrap-interpreted
-                            'my.agents.policy/standalone "[:=> [:cat :int] :int]"
+                            'my.agents.policy/standalone '[:=> [:cat :int] :int]
                             projection caps identity)]
                (is (= 9 (wrapped 9)))
                (is (thrown? Exception (wrapped "not an integer")))))
@@ -1676,7 +1676,7 @@
         wrap (fn [output]
                (instrument/wrap-interpreted
                 'seon.instrument-test/precise-error-output
-                (pr-str [:=> [:cat :map] output])
+                [:=> [:cat :map] output]
                 projection caps identity))
         data (wrap :map)
         declared (wrap [:or [:map [::success :boolean]] :seon.agent/error])
@@ -1708,7 +1708,7 @@
         caps (config/result-caps (test-support/effective-config))
         wrapped (instrument/wrap-interpreted
                  'seon.instrument-test/refusal-drift
-                 "[:=> [:cat :int] :int]" projection caps identity)
+                 '[:=> [:cat :int] :int] projection caps identity)
         thrown (try (wrapped "wrong") (catch Throwable failure failure))
         options (kernel/context-options)
         ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
@@ -1749,7 +1749,7 @@
                            'seon.instrument-test/reporting-failure #'reporting-failure))
         wrapped (instrument/wrap-interpreted
                  'seon.instrument-test/reporting-boundary
-                 "[:=> [:cat [:fn {:error/fn seon.instrument-test/reporting-failure} clojure.core/int?]] :int]"
+                 '[:=> [:cat [:fn {:error/fn seon.instrument-test/reporting-failure} clojure.core/int?]] :int]
                  projection (config/result-caps (test-support/effective-config)) identity)
         failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
     ;; The humanizer's failure is the root of the minimal base's chain, with

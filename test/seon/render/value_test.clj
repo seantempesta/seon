@@ -874,7 +874,7 @@
      (let [projection (schema/handed-projection)
            refusal (try ((instrument/wrap-interpreted
                           'my.agents.audit/vector-input
-                          "[:=> [:cat [:vector :int]] :int]"
+                          '[:=> [:cat [:vector :int]] :int]
                           projection caps (constantly 1))
                          "not-a-vector")
                         (catch Exception failure (ex-data failure)))]

@@ -2,6 +2,7 @@
   "What a pass writes for the namespace a definition or a `require` touches,
   read back from the agent's branch after the real MCP entrance (`seon.mcp/call`)."
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [seon.cluster.host :as host]
@@ -270,3 +271,37 @@
                (is (= [path] (:seon.source/changed-paths written)) "write-back writes the namespace's file"))))
          (finally
            ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
+
+(defn- named-predicate-contract-is-armed
+  "Each row: the definitions, the stored contract form of the last one, a call
+  its contract accepts with the value it answers, and a call it refuses."
+  {:malli/schema [:=> [:cat [:vector [:vector :seon.schema/value]]] :seon.schema/value]}
+  [rows]
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(in-ns 'f40.named-predicate)" agent-id running)
+     (doseq [[definitions sym spec accepted value refused] rows]
+       (let [defined (eval! definitions agent-id running)
+             reply (fn [code] ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent-id running)))]
+         (is (false? (get defined "isError")) "the definitions are admitted")
+         (is (= spec (some-> (db/pull (db/db connection) [:seon.fn/spec] [:seon.fn/sym sym])
+                             :seon.fn/spec edn/read-string))
+             "the stored contract is the authored form, its predicate a symbol")
+         (is (= value (:seon.repl/value (reply accepted))) "a call the contract accepts answers its value")
+         (is (= {:seon.error/type :seon.instrument/contract-error :seon.instrument/check :input}
+                (select-keys (:seon.repl/error (reply refused)) [:seon.error/type :seon.instrument/check]))
+             "a call with a bad input is refused by the armed contract"))))))
+
+(deftest a-named-predicate-contract-is-admitted-and-armed-on-a-branch
+  (named-predicate-contract-is-armed
+   [["(defn takes-ifn {:malli/schema [:=> [:cat [:fn {:error/message \"must be callable\" :gen/elements [:k]} clojure.core/ifn?]] :int]} [f] (f 1))"
+     'f40.named-predicate/takes-ifn '[:=> [:cat [:fn {:error/message "must be callable" :gen/elements [:k]} clojure.core/ifn?]] :int]
+     "(takes-ifn inc)" 2 "(takes-ifn 1)"]]))
+
+(deftest ^{:seon/tasks #{'seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer}}
+  a-contract-naming-a-predicate-defined-on-the-branch-is-admitted-and-armed
+  (named-predicate-contract-is-armed
+   [["(defn even-int? {:malli/schema [:=> [:cat :int] :boolean]} [x] (even? x))
+      (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be an even integer\" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]} [x] (quot x 2))"
+     'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
+     "(halve 4)" 2 "(halve 3)"]]))

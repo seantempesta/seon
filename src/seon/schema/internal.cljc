@@ -341,8 +341,7 @@
    Returns advisory findings that remain non-terminal."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{:seon.schema/keys [identity definition compiled role admission
-                       predicate-symbols pure-predicate-symbols
-                       canonical-keys] :as request}]
+                       predicate-symbols canonical-keys] :as request}]
   (assert-error-declaration! request)
   (let [authored?
         (= :agent (:seon.schema.admission/source admission))
@@ -369,23 +368,7 @@
                      " uses a predicate schema without a qualified predicate, "
                      "a nonblank `:error/message`/`:error/fn`, and a bounded "
                      "`:gen/schema`, `:gen/elements`, or `:gen/return`.")
-                {:seon.schema/predicate predicate}))
-             (when-let [unproved
-                        (if prebound?
-                          (first (remove pure-predicate-symbols
-                                         (sort predicate-symbols)))
-                          (when-not (contains? pure-predicate-symbols predicate)
-                            predicate))]
-               (contract-error!
-                identity definition path
-                :seon.schema/unproved-predicate-purity
-                (str identity " references predicate " unproved
-                     ", but its existing program-graph call edges do not yet "
-                     "prove a pure, capability-free transitive call graph. "
-                     "Keep the predicate as a separately schema'd corpus "
-                     "function, then re-register this contract after the "
-                     "execution planner admits that graph.")
-                {:seon.schema/predicate unproved}))))
+                {:seon.schema/predicate predicate}))))
          (into
           ;; An undefined slot is advice, never a refusal (owner ruling
           ;; 2026-09-24); its recorded justification silences it. A stored

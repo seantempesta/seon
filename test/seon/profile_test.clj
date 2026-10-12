@@ -112,7 +112,7 @@
   (let [projection (schema/handed-projection)
         caps (config/result-caps (test-support/effective-config))
         install #(instrument/wrap-interpreted
-                  'my.agents.profiled/value "[:=> [:cat :int] :int]"
+                  'my.agents.profiled/value '[:=> [:cat :int] :int]
                   projection caps inc
                   {:seon.program/definition-digest digest-a})
         one (install)
@@ -136,7 +136,7 @@
         failure (ex-info "bottom" {::probe true})
         armed (instrument/wrap-interpreted
                'my.agents.profiled/arities
-               "[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]"
+               '[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]
                projection caps
                (fn ([n] (@self n 0))
                  ([n acc] (cond (neg? n) (throw failure)
@@ -161,7 +161,7 @@
         prefix (str "my.agents.counted-" (random-uuid))
         installed (mapv (fn [i]
                           (instrument/wrap-interpreted
-                           (symbol prefix (str "f" i)) "[:=> [:cat :int] :int]"
+                           (symbol prefix (str "f" i)) '[:=> [:cat :int] :int]
                            projection caps inc {:seon.program/definition-digest digest-a}))
                         (range (+ profile/hot-limit 5)))
         measured (profile/measure #(do (run! (fn [f] (f 1)) installed) ((first installed) 2)))]

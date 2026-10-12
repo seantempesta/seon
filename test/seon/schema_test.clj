@@ -474,10 +474,10 @@
        ;; throw FileNotFound and surface here as an error.
        (is (nil? (find-ns 'seon.schema-test.no-such-probe))
            "the arbitrary predicate namespace is unloaded by construction")
-       (is (false?
+       (is (true?
             (schema/malli-form?
              [:fn 'seon.schema-test.no-such-probe/probe-predicate?]))
-           "schema validation never loads an arbitrary predicate namespace")
+           "a named predicate is structure: its callable is resolved where the declaration is compiled")
        (is (nil? (find-ns 'seon.schema-test.no-such-probe))
            "and asking the question did not load it either")))))
 

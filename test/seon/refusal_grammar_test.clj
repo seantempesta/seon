@@ -125,7 +125,7 @@
           (is (not-any? fn? (tree-seq coll? seq text)) "the rendered refusal holds no function object"))
         (let [wrapped (instrument/wrap-interpreted
                        'example/guard
-                       "[:=> [:cat :int] :int [:fn {:error/message \"arguments and result must agree\"} clojure.core/map?]]"
+                       '[:=> [:cat :int] :int [:fn {:error/message "arguments and result must agree"} clojure.core/map?]]
                        (schema/handed-projection) (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]

@@ -134,7 +134,7 @@
            source-text (apply str (repeat 400000 "x"))
            carrier {:error-result-test/source source-text}
            contracted (instrument/wrap-interpreted
-                       'error-result-test/f "[:=> [:cat :map :int] :int]" projection caps (fn [_ n] n))
+                       'error-result-test/f '[:=> [:cat :map :int] :int] projection caps (fn [_ n] n))
            refusal (support/refusal-data #(contracted carrier "not an int"))
            {:keys [recording stored]} (recorded connection (request connection refusal))]
        (is (identical? carrier (first (:seon.error/offending refusal)))

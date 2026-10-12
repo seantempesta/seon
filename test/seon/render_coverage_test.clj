@@ -413,7 +413,7 @@
       (sci/bind-root!
        ctx contracted
        (instrument/wrap-interpreted 'my.render-probe/contracted
-                                    "[:=> [:cat :string] :string]"
+                                    '[:=> [:cat :string] :string]
                                     (kernel/context-projection ctx)
                                     caps @contracted)))
     ctx))
