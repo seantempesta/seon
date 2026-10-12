@@ -40,16 +40,17 @@ Three documents number their phases. To end the collision, `hybrid-agent-world` 
 |---|---|---|---|---|
 | P1 | [step-semantics](../research/agent-platform/2026-10-12/hybrid-step-semantics.md) | done | b09c02b29: `seon.test.runner/latest-results` has no branch filter; `first-proof-run-t` is keyed by the attempt | |
 | P2 | step-semantics | done | 9d25711e7: `:seon.task/step`, the `:error` end value, `:seon.task.attempt/relaunch`, `:seon.error/unimplemented`, `seon.task/obligations` | |
-| P3 | step-semantics | partial | 7ddbb2c1e: `seon.context/step-status`, `seon.turn/record-broken!` judged at `fork-commit`. `seon.test/change-reds` still has a caller in the merge gate (`seon.cluster.source`); `test-step` still folds a throw into its pass values | convert the merge gate; delete `change-reds` |
+| P3 | step-semantics | absorbed into done-and-merge | 7ddbb2c1e: `seon.context/step-status`, `seon.turn/record-broken!` judged at `fork-commit`. `seon.test/change-reds` still has a caller in the merge gate (`seon.cluster.source`); `test-step` still folds a throw into its pass values | see M5, M7, M12, M13 |
 | P4 | step-semantics | done | 031125438, be32e7501: `seon.context-test/broken-tests-show-with-their-failures` | |
 | P5 | step-semantics | done | 015673f47: validity through `seon.task/obligations` at the fork point | |
 | P6 | step-semantics | done | 015673f47: `seon.turn/end-task!` records a merge request only when `(nil? needed?)` | |
-| P7 | step-semantics | not started | `seon.cluster.agent/apply-plan!` still has its per-action `(catch Exception failure`; no test `a-failed-start-ends-its-attempt-and-the-next-plans` | |
-| P8 | step-semantics | not started | `follow!` still writes the `:cancelled` end on main; no derived lifecycle | |
-| P9 | step-semantics | not started | no `my.root/relaunch!`; the filed task is `seon.cluster.agent/a-capped-attempt-has-no-relaunch` | |
-| P10 | step-semantics | not started | three starters remain: `plan`, `agents-to-start`, `seon.cluster.host/start!`; no ROOT/AGENT declaration in `seon.mcp` | |
+| P7 | step-semantics | absorbed into done-and-merge | `seon.cluster.agent/apply-plan!` still has its per-action `(catch Exception failure`; no test `a-failed-start-ends-its-attempt-and-the-next-plans` | see M5, M7, M12, M13 |
+| P8 | step-semantics | absorbed into done-and-merge | `follow!` still writes the `:cancelled` end on main; no derived lifecycle | see M5, M7, M12, M13 |
+| P9 | step-semantics | absorbed into done-and-merge | no `my.root/relaunch!`; the filed task is `seon.cluster.agent/a-capped-attempt-has-no-relaunch` | see M5, M7, M12, M13 |
+| P10 | step-semantics | absorbed into done-and-merge | three starters remain: `plan`, `agents-to-start`, `seon.cluster.host/start!`; no ROOT/AGENT declaration in `seon.mcp` | see M5, M7, M12, M13 |
 | P-final | step-semantics | not started | depends on P7–P10 and the merge-request redesign | |
-| U0–U7 | [push](../research/agent-platform/2026-10-12/hybrid-push.md) | not started; being redesigned | The owner's redesign: done is derived from green proofs and root merges. U0/U1 as written delete `:seon.squash/*`, `copy!`, `squash-merge!` and `conflict-task!` before U2/U3 convert their callers (`land-ends!`, `record-error-end!`, `unlanded-ends`, `settle-kept-branches!`, `seon.cluster.registry-test`), which breaks HEAD; each deletion is committed with its last caller's conversion | redesign first |
+| U0–U7 | [push](../research/agent-platform/2026-10-12/hybrid-push.md) | superseded | replaced by M1–M18 of hybrid-done-and-merge; U0 and U2 tasks retired, U1/U3/U4/U5/U7 tasks reused there | |
+| M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | filed, not started | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md` | M1 first |
 | E1 | [immutable-env](../research/agent-platform/2026-10-12/hybrid-immutable-env.md) | done | f424382cd: `reference-code/sci` bump, `sci.core/freeze` | |
 | E2 | immutable-env | done | f424382cd: `seon.sci.eval/program-context`, `seon.sci.eval-test/no-agent-work-writes-a-program-context` | |
 | E3 | immutable-env | not started | needs E5 first: settlement and `my.program` still write into the base, so a fresh branch forks it (`program-context-notes.md`) | |
