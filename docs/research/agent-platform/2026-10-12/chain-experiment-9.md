@@ -105,7 +105,7 @@ The proofs on the probe after the `defn`, rerun in a separate request with the p
 Repairing the record with `(nth @repairs …)` in place of `peek` would probably have fixed the space rows. The model
 never saw its result, because the cap fell in the same eval request.
 
-The model also **dropped every `;;` comment** of `scan` (13 comment lines, which main's `:seon.fn/source` keeps). A
+The model also **dropped every `;;` comment** of `scan` (15 comment lines, which main's `:seon.fn/source` keeps). A
 write-back of this definition would delete them.
 
 ## Hand acts
