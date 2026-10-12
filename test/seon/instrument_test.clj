@@ -292,18 +292,18 @@
        (.toPath link)
        (.toAbsolutePath (.toPath outside))
        (make-array java.nio.file.attribute.FileAttribute 0))
-      ;; the two-arity re-enters through the Var boot armed
-      (is (contains? (instrument/instrumented) #'fs/delete-recursively!))
-         (is (nil? (fs/delete-recursively! (.getPath root) (.getPath root))))
-         (is (not (Files/exists (.toPath root) no-follow)))
-         (is (Files/exists (.toPath sentinel) no-follow)
-             "the instrumented two-arity still preserves symlink targets")
-         (let [failure
-               (try
-                 (fs/delete-recursively! base (.getPath outside) nil)
-                 (catch Exception thrown thrown))]
-           (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))
-               "the direct three-arity still requires its options map"))
+      ;; the two-arity re-enters through the Var its owner armed: boot arms
+      ;; the compiled Var, the interpreter the branch's SCI Var
+      (is (nil? (fs/delete-recursively! (.getPath root) (.getPath root))))
+      (is (not (Files/exists (.toPath root) no-follow)))
+      (is (Files/exists (.toPath sentinel) no-follow)
+          "the instrumented two-arity still preserves symlink targets")
+      (let [failure
+            (try
+              (fs/delete-recursively! base (.getPath outside) nil)
+              (catch Exception thrown thrown))]
+        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))
+            "the direct three-arity still requires its options map, so the Var is armed"))
       (finally
         (fs/delete-recursively! base base)))))
 
