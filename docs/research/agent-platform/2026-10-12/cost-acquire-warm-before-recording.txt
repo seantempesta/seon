@@ -1,0 +1,375 @@
+#:seon.repl{:result result/e229f6f33b397, :ms 196, :value {:seon.profile/ms 192.55,
+ :calls
+   {seon.schema.datahike/compiled-storage 74,
+    seon.db/write-owned-values-error 4},
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 182.70336,
+    :cpu-ms 391.01},
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.db/transact-call, :calls 4, :self-ms 93}
+    #:seon.profile{:sym seon.schema/call-with-projection-state,
+     :calls 5,
+     :self-ms 70}
+    #:seon.profile{:sym seon.await/await-port-operations,
+     :calls 1,
+     :self-ms 69}
+    #:seon.profile{:sym seon.cluster.registry/branch!,
+     :calls 2,
+     :self-ms 32}
+    #:seon.profile{:sym seon.db/vector-query-call,
+     :calls 67,
+     :self-ms 31}
+    #:seon.profile{:sym seon.sci.eval/fork-cluster-ctx,
+     :calls 1,
+     :self-ms 5}
+    #:seon.profile{:sym seon.test/digest-differences,
+     :calls 1,
+     :self-ms 4}
+    #:seon.profile{:sym seon.db/write-owned-values-error,
+     :calls 4,
+     :self-ms 3}
+    #:seon.profile{:sym seon.db/call-with-root-bindings,
+     :calls 3,
+     :self-ms 3}
+    #:seon.profile{:sym seon.db/carried-projection,
+     :calls 182,
+     :self-ms 2}
+    #:seon.profile{:sym seon.db/pull-logical, :calls 72, :self-ms 2}
+    #:seon.profile{:sym seon.db/hold-committed-projection!,
+     :calls 4,
+     :self-ms 2}
+    #:seon.profile{:sym seon.cluster.source/commit-database,
+     :calls 4,
+     :self-ms 2}
+    #:seon.profile{:sym seon.print/emit-both, :calls 4, :self-ms 1}
+    #:seon.profile{:sym seon.db/database-value?,
+     :calls 3350,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.datahike/query-variable?,
+     :calls 1896,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/transaction-report-datom?,
+     :calls 1138,
+     :self-ms 0}
+    #:seon.profile{:sym seon.render.value/more?,
+     :calls 1127,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/connection-object?,
+     :calls 1120,
+     :self-ms 0}
+    #:seon.profile{:sym seon.profile/cost-scope, :calls 980, :self-ms 0}],
+ :request
+   {:seon.repl/request
+      #:seon.cost{:alloc-mb 1.3,
+       :calls 6699,
+       :cpu-ms 1.1,
+       :entrance #:seon.cost{:alloc-mb 22.3, :cpu-ms 26.7},
+       :ms 187.1,
+       :reads 47,
+       :step #:seon.cost{:alloc-mb 70.7, :cpu-ms 36.0},
+       :transactions 1,
+       :commit
+         #:seon.cost{:alloc-mb 15.1804, :cpu-ms 12.93, :batch-size 1},
+       :jvm-window
+         #:seon.cost{:scope :jvm-window,
+          :attribution :includes-unrelated-work,
+          :alloc-accuracy :approximate-counter,
+          :cpu-accuracy :os-counter,
+          :alloc-mb 170.957856,
+          :cpu-ms 370.824},
+       :shared
+         #:seon.cost{:attribution :shared-never-apportioned,
+          :alloc-mb 54.8,
+          :cpu-ms 288.2,
+          :gc-ms 94.5,
+          :jit-ms 178.0},
+       :stages
+         {:custody 114.4,
+          :derive 0.0,
+          :evaluate 2.3,
+          :fork 0.3,
+          :print 1.0,
+          :read 0.1,
+          :settle 36.7,
+          :test-step 23.4,
+          :unattributed 8.9},
+       :writer
+         #:seon.cost{:alloc-mb 7.9366, :cpu-ms 7.03, :transactions 1}}}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 28.9,
+    :calls 22070,
+    :cpu-ms 34.7,
+    :entrance #:seon.cost{:alloc-mb 50.0, :cpu-ms 53.7},
+    :ms 245.0,
+    :reads 22,
+    :transactions 4,
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 232.673976,
+       :cpu-ms 590.935},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 182.7,
+       :cpu-ms 537.2,
+       :gc-ms 94.6,
+       :jit-ms 258.0},
+    :stages
+      {:custody 0.4,
+       :read 0.1,
+       :evaluate 208.2,
+       :settle 31.1,
+       :print 0.9,
+       :unattributed 4.3}}}
+#:seon.repl{:result result/e2a9a84701d71, :ms 69, :value {:seon.profile/ms 62.63,
+ :calls
+   {seon.schema.datahike/compiled-storage 45,
+    seon.db/write-owned-values-error 1},
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 59.987352,
+    :cpu-ms 254.038},
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.schema/call-with-projection-state,
+     :calls 4,
+     :self-ms 53}
+    #:seon.profile{:sym seon.await/await-port-operations,
+     :calls 1,
+     :self-ms 53}
+    #:seon.profile{:sym seon.db/transact-call, :calls 1, :self-ms 32}
+    #:seon.profile{:sym seon.db/vector-query-call,
+     :calls 38,
+     :self-ms 8}
+    #:seon.profile{:sym seon.db/projection-builder,
+     :calls 122,
+     :self-ms 4}
+    #:seon.profile{:sym seon.db/call-reach, :calls 1, :self-ms 3}
+    #:seon.profile{:sym seon.db/pull-logical, :calls 61, :self-ms 2}
+    #:seon.profile{:sym seon.print/emit-both, :calls 4, :self-ms 1}
+    #:seon.profile{:sym seon.db/write-owned-values-error,
+     :calls 1,
+     :self-ms 1}
+    #:seon.profile{:sym seon.db/database-value?,
+     :calls 2266,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.datahike/query-variable?,
+     :calls 1341,
+     :self-ms 0}
+    #:seon.profile{:sym seon.render.value/more?,
+     :calls 1127,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/connection-object?,
+     :calls 759,
+     :self-ms 0}
+    #:seon.profile{:sym seon.profile/cost-scope, :calls 681, :self-ms 0}
+    #:seon.profile{:sym seon.db/transaction-report-datom?,
+     :calls 644,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema/projection-cache-value,
+     :calls 600,
+     :self-ms 0}
+    #:seon.profile{:sym seon.render.value/extras,
+     :calls 441,
+     :self-ms 0}
+    #:seon.profile{:sym seon.print/node-child?, :calls 440, :self-ms 0}
+    #:seon.profile{:sym seon.env/environment?, :calls 436, :self-ms 0}
+    #:seon.profile{:sym seon.db/schema-database, :calls 358, :self-ms 0}],
+ :request
+   {:seon.repl/request
+      #:seon.cost{:alloc-mb 0.0,
+       :calls 6503,
+       :cpu-ms 0.2,
+       :entrance #:seon.cost{:alloc-mb 3.5, :cpu-ms 4.6},
+       :ms 57.3,
+       :reads 43,
+       :step #:seon.cost{:alloc-mb 20.3, :cpu-ms 19.8},
+       :transactions 1,
+       :commit
+         #:seon.cost{:alloc-mb 14.8786, :cpu-ms 13.05, :batch-size 1},
+       :jvm-window
+         #:seon.cost{:scope :jvm-window,
+          :attribution :includes-unrelated-work,
+          :alloc-accuracy :approximate-counter,
+          :cpu-accuracy :os-counter,
+          :alloc-mb 53.105296,
+          :cpu-ms 228.454},
+       :shared
+         #:seon.cost{:attribution :shared-never-apportioned,
+          :alloc-mb 6.8,
+          :cpu-ms 183.0,
+          :gc-ms 0.0,
+          :jit-ms 166.0},
+       :stages
+         {:custody 0.4,
+          :derive 0.0,
+          :evaluate 1.3,
+          :fork 0.4,
+          :print 1.2,
+          :read 0.2,
+          :settle 42.3,
+          :test-step 2.4,
+          :unattributed 9.1},
+       :writer
+         #:seon.cost{:alloc-mb 7.5901, :cpu-ms 7.96, :transactions 1}}}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 10.0,
+    :calls 19164,
+    :cpu-ms 12.5,
+    :entrance #:seon.cost{:alloc-mb 30.5, :cpu-ms 29.3},
+    :ms 110.4,
+    :reads 12,
+    :transactions 1,
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 100.413568,
+       :cpu-ms 392.018},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 69.9,
+       :cpu-ms 362.7,
+       :gc-ms 0.0,
+       :jit-ms 231.0},
+    :stages
+      {:custody 0.4,
+       :read 0.1,
+       :evaluate 78.7,
+       :settle 26.2,
+       :print 0.7,
+       :unattributed 4.3}}}
+#:seon.repl{:result result/ea56a94e28429, :ms 56, :value {:seon.profile/ms 52.05,
+ :calls
+   {seon.schema.datahike/compiled-storage 45,
+    seon.db/write-owned-values-error 1},
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 49.259296,
+    :cpu-ms 120.907},
+ :seon.profile/ranked-by-self
+   [#:seon.profile{:sym seon.schema/call-with-projection-state,
+     :calls 4,
+     :self-ms 44}
+    #:seon.profile{:sym seon.await/await-port-operations,
+     :calls 1,
+     :self-ms 44}
+    #:seon.profile{:sym seon.db/transact-call, :calls 1, :self-ms 29}
+    #:seon.profile{:sym seon.db/vector-query-call,
+     :calls 38,
+     :self-ms 9}
+    #:seon.profile{:sym seon.db/pull-logical, :calls 61, :self-ms 2}
+    #:seon.profile{:sym seon.db/database-value?,
+     :calls 2263,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.datahike/query-variable?,
+     :calls 1341,
+     :self-ms 0}
+    #:seon.profile{:sym seon.render.value/more?,
+     :calls 1127,
+     :self-ms 0}
+    #:seon.profile{:sym seon.db/connection-object?,
+     :calls 759,
+     :self-ms 0}
+    #:seon.profile{:sym seon.profile/cost-scope, :calls 677, :self-ms 0}
+    #:seon.profile{:sym seon.db/transaction-report-datom?,
+     :calls 644,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema/projection-cache-value,
+     :calls 599,
+     :self-ms 0}
+    #:seon.profile{:sym seon.render.value/extras,
+     :calls 441,
+     :self-ms 0}
+    #:seon.profile{:sym seon.print/node-child?, :calls 440, :self-ms 0}
+    #:seon.profile{:sym seon.env/environment?, :calls 436, :self-ms 0}
+    #:seon.profile{:sym seon.db/schema-database, :calls 358, :self-ms 0}
+    #:seon.profile{:sym seon.render.value/flat-width,
+     :calls 334,
+     :self-ms 0}
+    #:seon.profile{:sym seon.schema.datahike/vector-shaped-attr-in?,
+     :calls 252,
+     :self-ms 0}
+    #:seon.profile{:sym seon.cluster.store/file-lock-object?,
+     :calls 239,
+     :self-ms 0}
+    #:seon.profile{:sym seon.cluster.store/connection-object?,
+     :calls 239,
+     :self-ms 0}],
+ :request
+   {:seon.repl/request
+      #:seon.cost{:alloc-mb 0.0,
+       :calls 6492,
+       :cpu-ms 0.2,
+       :entrance #:seon.cost{:alloc-mb 3.4, :cpu-ms 4.3},
+       :ms 47.7,
+       :reads 43,
+       :step #:seon.cost{:alloc-mb 9.6, :cpu-ms 13.4},
+       :transactions 1,
+       :commit
+         #:seon.cost{:alloc-mb 14.8564, :cpu-ms 12.61, :batch-size 1},
+       :jvm-window
+         #:seon.cost{:scope :jvm-window,
+          :attribution :includes-unrelated-work,
+          :alloc-accuracy :approximate-counter,
+          :cpu-accuracy :os-counter,
+          :alloc-mb 42.68364,
+          :cpu-ms 113.472},
+       :shared
+         #:seon.cost{:attribution :shared-never-apportioned,
+          :alloc-mb 7.2,
+          :cpu-ms 76.2,
+          :gc-ms 0.0,
+          :jit-ms 284.0},
+       :stages
+         {:custody 0.2,
+          :derive 0.0,
+          :evaluate 1.2,
+          :fork 0.3,
+          :print 0.9,
+          :read 0.1,
+          :settle 34.4,
+          :test-step 2.2,
+          :unattributed 8.4},
+       :writer
+         #:seon.cost{:alloc-mb 7.6018, :cpu-ms 6.95, :transactions 1}}}}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 9.9,
+    :calls 19290,
+    :cpu-ms 11.0,
+    :entrance #:seon.cost{:alloc-mb 30.3, :cpu-ms 25.5},
+    :ms 94.1,
+    :reads 12,
+    :transactions 1,
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 89.238456,
+       :cpu-ms 175.527},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 58.9,
+       :cpu-ms 150.0,
+       :gc-ms 0.0,
+       :jit-ms 302.0},
+    :stages
+      {:custody 0.2,
+       :read 0.0,
+       :evaluate 64.6,
+       :settle 25.4,
+       :print 0.7,
+       :unattributed 3.2}}}

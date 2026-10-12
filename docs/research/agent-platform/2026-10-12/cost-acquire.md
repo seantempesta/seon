@@ -84,7 +84,81 @@ unchanged calls retrieve the held value. Malli's `malli.core/-cached`
 already retains each compiled schema's storage facts; it does not retain
 this population selection. No new cache or invalidation is introduced.
 
+On default, the proposed composition using that existing cache returns the
+same value with zero storable checks, 760 calling-thread bytes and a
+reported 0.00 ms (below the measurement's 0.01 ms resolution). This is a
+composition probe, not a measurement of newly loaded source. The subject of
+commit `17ec81f0b` incorrectly says 0.02 ms; 0.00 ms is the observed value.
+Installed
+before/after request timing still awaits root's restart.
+
+Full working-tree lint during the schema slice finds two foreign errors in
+`test/seon/cluster/db_flow_test.clj`: references to the renamed
+`seon.cluster.registry/roster` and `seon.cluster.agent/roster-facts`.
+The file belongs to the rename lane. The candidate check uses HEAD plus
+this lane's paths; this lane does not edit that file.
+
 ## Verification
+
+Schema commit `17ec81f0b`: candidate `193ee429` passed four tests,
+37 assertions, run `a0d8ec3507cb`, 4.314 seconds in test bodies and
+41.891 seconds for the check. Its candidate lint had zero errors.
+
+## Recording transaction
+
+Root independently restarted default at `0a8e85e1a`, with the branch-pointer
+change installed. The same concurrent fresh pair costs 299.09 ms and
+374.47 MB JVM-wide; the individual acquisition stages take 169.5 and
+181.4 ms. This does not establish the requested few-millisecond acquisition
+cost. Raw replies are in
+docs/research/agent-platform/2026-10-12/cost-acquire-fresh-after.txt.
+
+Three successive requests on one agent cost 192.55, 62.63 and 52.05 ms;
+their recording stages cost 36.7, 42.3 and 34.4 ms. The third request's
+writer allocates 7.6018 MB and takes 6.95 ms CPU; its commit allocates
+14.8564 MB and takes 12.61 ms CPU. Raw replies are in
+docs/research/agent-platform/2026-10-12/cost-acquire-warm-before-recording.txt.
+
+The live measured call-count proof is red: a warm request calls
+`seon.turn/system-run-call` twice. It costs 54.47 ms overall, 50.0 ms inside
+the request, 36.0 ms recording. A later repetition during edit-hook work
+still calls it twice, at 90.96 ms overall and 59.2 ms recording; that slower
+sample is not attributed to this change. This confirms the open item in
+cost-record.md on the newly restarted default.
+
+`seon.turn/system-run-plan` emits the run's namespace reference before the
+namespace identity declaration. Datahike's tempid upsert consequently
+repeats the transaction. The owner now places its existing source data,
+which begins with namespace declarations, before the run. There is no
+additional state or transaction. The existing request-count test now
+measures the MCP request and asserts one `seon.turn/system-run-call` entry.
+
+An immutable `datahike.api/with` comparison on the same held default
+database uses a transaction-function counter and the same materialized
+transaction data. Before: two calls, 0.33 ms, 577,752 calling-thread bytes;
+namespace declarations first: one call, 0.25 ms, 379,232 bytes. Both produce
+13 datoms. These numbers exclude the repeated producer, writer validation
+and durable commit; they are not an end-to-end recording improvement.
+
+Full working-tree lint for this slice: zero errors, 1,580 warnings,
+6.224 seconds. The earlier foreign rename errors have been corrected by
+their owner. The source edit hook exceeded its PREPL bound and reported
+an unknown outcome; candidate verification remains necessary.
+
+Candidate `5f4be93f` ran five selected tests: 36 assertions passed, one
+failed, no errors, 5.191 seconds in test bodies. The new one-call proof and
+namespace/source recording checks passed. The failing
+`seon.request-cost-test/a-jvm-reply-carries-its-request-cost` expects positive
+calling-thread allocation but receives 0.0 MB. Checking committed baseline
+`50f51c94f` alone reproduces the same failure: run `0ee50b8e9c22`, five
+assertions passed, one failed, no errors. This is a pre-existing allocation
+reporting defect, not changed by namespace ordering. The assertion remains
+unchanged; the commit names the four other relevant tests individually.
+
+The LZ4 frame allocation and `seon.db/write-owned-values-error` remain open.
+The installed LZ4 frame stream has a 64 KB minimum block and no public
+reset/reuse operation. Changing encoding needs its own compatibility proof.
+The database owner remains claimed by the rename lane.
 
 The edit hook cannot install the changed dependency acceptance namespace in
 the lane's SCI context: acquisition reports errors, as the preceding cost

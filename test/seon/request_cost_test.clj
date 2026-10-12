@@ -4,6 +4,7 @@
             [seon.batch :as batch]
             [seon.db :as db]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.test-support :as support]))
 
 (defn- answer
@@ -83,11 +84,13 @@
     (is (= :counter-unavailable (get-in window [:seon.cost/unmeasured :seon.cost/alloc-mb])))
     (is (neg? (get-in cost [:seon.cost/stages :unattributed])))))
 
-(deftest a-request-counts-its-own-calls-reads-and-transactions
+(deftest ^{:seon/tasks #{'seon.db/the-checked-writer-is-slow-on-a-fresh-branch}}
+  a-request-counts-its-own-calls-reads-and-transactions
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [_warm (answer running agent-id "sci" ":ping")
-           ping (support/mcp-request (answer running agent-id "sci" ":ping"))
+           measured (profile/measure #(answer running agent-id "sci" ":ping"))
+           ping (support/mcp-request (:seon.profile/value measured))
            pulls (support/mcp-request
                   (answer running agent-id "sci"
                           "(seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident])"))
@@ -102,7 +105,9 @@
            _ (.set stop true)
            _ (.join ^Thread noise (java.time.Duration/ofSeconds 1))]
        (is (pos? (:seon.cost/calls ping)))
-       (is (pos? (:seon.cost/transactions ping)) "the request's settlement commits")
+       (is (= 1 (profile/calls-of measured 'seon.turn/system-run-call))
+           "the recording transaction evaluates its function once")
+       (is (pos? (:seon.cost/transactions ping)) "the request's recording commits")
        (is (<= 3 (- (:seon.cost/reads pulls) (:seon.cost/reads ping))))
        (is (pos? (.get made)))
        (is (= (:seon.cost/reads ping) (:seon.cost/reads noisy))

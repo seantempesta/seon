@@ -692,11 +692,8 @@
 (declare receipt-start-tx)
 
 (defn- system-run-plan
-  "The writer's decision on one system-authored run: its open and frozen
-  source rows and the namespace it starts in, or the refusal thrown as
-  `system-run-call` throws it. The agent's pass asks it once, on its value,
-  before evaluating a submission; the writer asks again inside the
-  transaction that opens the run."
+  "Transaction data for one system-authored run, declaring namespace
+  identities before references, and its starting namespace."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/system-run-request]
                   [:map [::rows :seon.store/transaction-data] [:seon.ns/name :seon.ns/name]]]}
   [database request]
@@ -720,12 +717,13 @@
       (refuse! `system-run-call ::starting-namespace-missing request))
     {:seon.ns/name namespace-name
      ::rows
-     (into [(merge opened
-                   (select-keys request [::reply ::reply-blob ::reply-size])
-                   {::starting-ns (str "namespace:" namespace-name)
-                    ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})]
-           (concat (rest open-rows) (source-rows database id (:db/id opened) 0 namespace-name
-                        :outside (current-transaction-instant database) sources)))}))
+     (into (source-rows database id (:db/id opened) 0 namespace-name
+                        :outside (current-transaction-instant database) sources)
+           (cons (merge opened
+                        (select-keys request [::reply ::reply-blob ::reply-size])
+                        {::starting-ns (str "namespace:" namespace-name)
+                         ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})
+                 (rest open-rows)))}))
 
 (defn system-run-call
   "Open a system-authored turn and freeze its sources at the writer."
