@@ -284,8 +284,9 @@
 (defn- load-host-namespace
   "SCI's `:load-fn` (`reference-code/sci/src/sci/impl/load.cljc:204-243`): a
   namespace the JVM already loaded, required and not yet in the context, is
-  exposed as itself, each public Var copied at its root, so an agent requires
-  `malli.core` or `datahike.api` as a Clojure REPL does. Program namespaces are
+  exposed as itself, each Var it interns copied at its root, so an agent requires
+  `malli.core` or `datahike.api` as a Clojure REPL does, and `var` reaches a
+  private one as Clojure's does. Program namespaces are
   acquired into the context before any form runs, so none reaches here, and
   acquisition exposes the libraries they require the same way
   (`install-required-libraries!`); an unloaded namespace answers nil and SCI
@@ -304,7 +305,7 @@
        (into {:obj sci-namespace}
              (map (fn [[intern-name host-var]]
                     [intern-name (copy-host-var host-var sci-namespace)]))
-             (ns-publics host)))
+             (ns-interns host)))
       {})))
 
 
@@ -2060,7 +2061,7 @@
   An interpreted declaration's namespace receives its loaded JVM namespace's
   remaining interns (private helpers, `def`/`defonce` Vars); each alias and
   refer target its namespace row declares receives that loaded namespace's
-  public Vars. Existing SCI bindings win: first-party copies, interpreted
+  interns, so `var` reaches a private one as Clojure's does. Existing SCI bindings win: first-party copies, interpreted
   definitions and SCI's own `clojure.*` namespaces are never replaced, and
   `clojure.core` is left to SCI: the core names SCI lacks (`ref`, `agent`)
   bind in each caller's own namespace, a source namespace's included. A
@@ -2096,7 +2097,7 @@
                                                    (map (comp symbol namespace) (vals refers))))
                           :when (and (not= 'clojure.core target)
                                      (not (contains? (::test-namespaces @(::kernel/program-snapshot ctx)) target)))]
-                      [target (some-> (find-ns target) ns-publics)]))
+                      [target (some-> (find-ns target) ns-interns)]))
               :when (seq interns)]
           [target interns])]
     (doseq [[target interns] installs

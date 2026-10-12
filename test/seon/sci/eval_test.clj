@@ -2203,6 +2203,16 @@
     (is (= "A" (value "(parity-str/upper-case \"a\")")))
     (is (= #{1 2} (value "(do (require '[clojure.set :as parity-set]) (parity-set/union #{1} #{2}))")))))
 
+(deftest a-required-librarys-private-var-resolves-by-var-quote
+  ;; REPL parity: Clojure's `var` reaches a private Var of a loaded namespace,
+  ;; required plainly or through an alias. A source namespace's tests use it
+  ;; (`seon.datahike-fork-test`), and acquisition refused them while a library
+  ;; was exposed by its public Vars alone.
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
+        value (fn [source] (:seon.sci.admit/value (run-in ctx source 2000)))]
+    (is (true? (value "(do (require 'datahike.writer) (var? #'datahike.writer/write-error-log))")))
+    (is (true? (value "(do (require '[datahike.index.persistent-set :as private-probe]) (var? #'private-probe/datom-read-handler))")))))
+
 (deftest letfn-and-an-inline-protocol-record-evaluate-in-an-agent-fork
   ;; A var born in a fork (letfn's anonymous vars, a def predeclared at
   ;; analysis) belongs to the fork's generation; unstamped, SCI's copy on write
