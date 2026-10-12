@@ -9,7 +9,7 @@ tags: [spec, agent-loop, repl, one-path]
 # The agent loop: one path for every entrant
 
 What exists: every entrant (a model agent's reply, MCP code, a test body, a page) supplies a read stage; SCI reads
-and evaluates each form serially in the agent's world; each eval request records what ran in one transaction; the value
+and evaluates each form serially in the agent's SCI context; each eval request records what ran in one transaction; the value
 printer shows each result. A model agent's context is a static prefix, its own history and one current-state block.
 Clojure approach: values through one pipeline of plain functions, Datahike facts as the record, one Flow graph per
 agent, one `seon.cache`.
@@ -29,9 +29,9 @@ and its recording (`pass-and-recording.md`, approved on condition of the transac
 `b48082ca9`) into §3.1, §3.3 and §3.4 delivery; the entrants (`entrants.md`) into §3.2.
 
 **Words.** This spec uses the approved Clojure names (ledger §3.18): one submission of forms is an **eval request**
-(nREPL's word; code still says "pass" and `seon.batch` until CN-20 lands), its one transaction is the **recording
-transaction** (code: settlement, CN-7), what returns is the **reply** (code: envelope, CN-8) and the stored text is
-the **printed value** (code: shown text, CN-9). Code converts as each rename row lands.
+(nREPL's word; code still says `pass` and `seon.batch` until CN-20 is committed), its one transaction is the **recording
+transaction** (code: `settlement`, CN-7), what returns is the **reply** (code: `envelope`, CN-8) and the stored text is
+the **printed value** (code: `shown text`, CN-9). Code converts as each rename entry is committed.
 
 ## 1. Laws
 
@@ -59,9 +59,9 @@ the **printed value** (code: shown text, CN-9). Code converts as each rename row
 7. **Work ends by proofs; every relevant test runs by itself.** A task needs proofs (deftests naming it in
    `:seon/tasks`) before it is assigned: assignment refuses a task with no proofs or whose proofs are all green
    (tests give their tasks proofs in their setup). A proof is preferably an existing test: an existing failing test
-   tagged with the task, or a new row in an existing table test; a new deftest only for a behavior no test covers. A
+   tagged with the task, or a new case in an existing table test; a new deftest only for a behavior no test covers. A
    cost or refactor task, whose value does not change, is proven by measured cost: its proof asserts one test-visible
-   measure (`seon.profile/measure`: reads, armed calls, allocated bytes, ms, as data from JVM counters, so it sees
+   measure (`seon.profile/measure`: reads, instrumented calls, allocated bytes, ms, as data from JVM counters, so it sees
    compiled code), red before the fix. At merge root keeps a new deftest only if it guards a behavior class no test
    covers (merge.md §4). After every eval request that evaluated a form, the task's proofs and then every test reaching the change run automatically on the agent's branch,
    as a serial step inside the eval request, recorded with that eval request (§3.5); the agent never has to call `my.test/check`. A
@@ -98,7 +98,7 @@ reply; CLAUDE.md's 1 s and 10 s. Measured each slice by `seon.pass-probe` (`test
 allocated bytes, checked calls, transactions attempted and durable, store bytes, tokens. Seon's work only: the
 provider call and the agent's own forms are excluded.
 
-| Pass kind | Expected from the work | Machinery txs |
+| Eval request kind | Expected from the work | Machinery txs |
 |---|---|---|
 | ordinary (no definitions), model eval requests included | read, evaluate and print the forms, then one recording transaction of the datoms they produced: follows the forms, not the program or the history; a model eval request within the owner's 20-40 MB, never GB | 1 |
 | definition (one-line `defn`) | as ordinary, plus one analysis of the form and a few program datoms (the expectation table of ledger RP-0) | 1 |
@@ -133,9 +133,9 @@ hundred tokens. The
 static prefix and the history are cache hits on every call after their first (`:seon.ai.usage/cached-tokens`).
 
 **Model eval request owners and their end state.** Base-context construction: zero in any eval request (one shared incremental base,
-an overlay per agent branch advanced by changed definitions, one fork advanced in place). Context projection,
+the branch definitions of each agent branch, advanced by changed definitions, one fork advanced in place). Context derivation,
 prompt, capture and refresh: deleted (`55ede54a9`, `94df1f74a`); the history is read per model call from the agent's call
-rows and the block rendered per call (§3.4).
+entities and the block rendered per call (§3.4).
 Seven machinery commits: one. The surviving writer's floor (13-14 MB) and db<->flow, provider and query residual
 (3-7 MB) are accepted as measured. Work derivation: once per eval request. No competency model run starts until
 `seon.pass-probe/run-model` reports a model eval request within the owner's 20-40 MB with no owner 10× over its expectation.
@@ -170,7 +170,7 @@ once per eval request:
 The record is the agent's evidence, not a second execution: nothing in RECORD re-reads a mutable Var, re-runs a form
 or recomputes a value. Effect provenance is the eval request id plus form position as values, never a ref to an evaluation not
 yet recorded. Deleted with their last consumers: stored refresh evidence, the run-open intent and its recovery, the
-model path's intent commit, the fault-window query, problem-assignment routing, the run-observation re-read, stamps
+model path's intent commit, the error-window query, problem-assignment routing, the run-observation re-read, stamps
 on transactions, stored profile measurements.
 
 ### 3.2 Entrants
@@ -178,10 +178,10 @@ on transactions, stored profile measurements.
 | Entrant | Read stage | Eval | Serialized by | Machinery transactions |
 |---|---|---|---|---|
 | model, REPL entrance | reply: forgiveness, then SCI read | SCI | the agent's proc | 1 per eval request |
-| model, DATA entrance | data: one EDN map `{:ns sym :forms [form …]}`; `:ns` is the eval request's start namespace; replies are envelope maps (read-time semantics: `redo/pass-and-recording.md`) | SCI | the agent's proc | 1 per eval request |
+| model, DATA entrance | data: one EDN map `{:ns sym :forms [form …]}`; `:ns` is the eval request's start namespace; replies are maps (read-time semantics: `redo/pass-and-recording.md`) | SCI | the agent's proc | 1 per eval request |
 | MCP SCI | code: text as is | SCI | the agent's proc (request port) | 1 |
 | MCP JVM | code: host read | host | not serialized: each host invocation is owned until its exit; its result is bound into the agent's SCI result owner only when that context is already held, otherwise its handle answers gone-value data with the class; it never changes the agent's namespace or answeredness | 1 |
-| test member | its resolved body stage (SCI or host) | as the body | its execution ownership | 1 member eval request |
+| test var | its resolved body stage (SCI or host) | as the body | its execution ownership | 1 member eval request |
 | test request | the runner | — | — | 1 request aggregate on the recording connection; task-home completion its own write |
 
 The read stage is the value `:seon.batch/read-stage` with a mode (`:reply`, `:code`, `:data`); the dial
@@ -216,8 +216,8 @@ and delimiter state across lines.
   are inserted before the next column-zero form or prose line. Each change is data beside the value of the form whose
   lines it repaired, `:seon.repl/repairs [[line :dropped ")"]]`.
 - **Imitations.** `;; =>` and `ns=>` lines outside fences are prose; the reader's imitation note, with its
-  `:seon.error/type`, is a diagnostic of the exchange.
-- **No form.** A prose-only reply records one exchange (its call row) with the "no form" diagnostic and no
+  `:seon.error/type`, is a finding of the exchange.
+- **No form.** A prose-only reply records one exchange (its call entity) with the "no form" finding and no
   evaluation, which tells the model to act.
 
 **Code (MCP, tests, generated, page-authored).** Every line is code, so `result/e…`, `:k` and literals evaluate; the
@@ -226,7 +226,7 @@ one balancing pass runs as in reply mode, its repairs beside the value. A line t
 
 **Evaluation.**
 - The namespace is kept after a throw: an `in-ns` before the throw stands, as in `clojure.main`.
-- A malformed contract keeps the function callable, its diagnostic beside the value; merge refuses it. A valid armed
+- A malformed contract keeps the function callable, its error beside the value; merge refuses it. A valid instrumented
   contract refuses a violating input or result.
 - `remove-ns`, `ns-unmap`, `ns-unalias`, `intern` and `alter-var-root` run as SCI runs them, and the record stores the
   final state they leave.
@@ -248,7 +248,7 @@ Behavior against plain SCI is the table test `seon.repl-differential-test` and i
 | Part | What | Changes when | Stored |
 |---|---|---|---|
 | **Static prefix** | `(help)`'s value and the fixed instructions | the loaded commit changes | no; derived per loaded commit, cached in `seon.cache` by commit |
-| **History** | only what the agent did: its own forms and their envelopes, in agent order | an eval request appends | yes: each eval request's call row and evaluations |
+| **History** | only what the agent did: its own forms and their replies, in agent order | an eval request appends | yes: each eval request's call entity and evaluations |
 | **Current-state block** | each current item once, in its current version | any fact it reads changes | **never**; rendered at every model call |
 
 Provider prefix caching covers the prefix and the history, which are byte-identical from one call to the next up to
@@ -300,45 +300,45 @@ printer continuations, and the printer never ranks sections. A printer cut leave
 block's result symbol.
 
 **Delivery.** Proof status needs none: it is recomputed from results. Each unread item the block SHOWED is delivered
-by the model eval request whose context presented it: its identity is recorded on that eval request's call row inside the eval request's one
+by the model eval request whose context presented it: its identity is recorded on that eval request's call entity inside the eval request's one
 transaction, after the writer checks it still exists and is not already delivered to this agent. A crash before
 RECORD or a failed provider call delivers nothing, so the item shows again. An item cut by the budget stays unread
 until it is shown. A change in what the assigner wants is a task revision, not a message.
 
-**History.** An exchange is an eval request's call row and its evaluations with source and shown text.
-`seon.context/model-context` reads the agent's exchanges from its call rows at each model call (CX-1); the text of
+**History.** An exchange is an eval request's call entity and its evaluations with source and printed value.
+`seon.context/model-context` reads the agent's exchanges from its call entities at each model call (CX-1); the text of
 an unchanged exchange is never re-derived: whether the proc holds the exchanges or their text is cached by content is
 the ledger's RESPEC R-7 (today each call re-renders every exchange, about 0.7 ms per evaluation). The history starts at
-the current assignment (ledger CX-13). Only exchanges whose call row carries a model attempt reach the model; there is no origin tag
+the current assignment (ledger CX-13). Only exchanges whose call entity carries a model attempt reach the model; there is no origin tag
 (ledger §3.15). Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
 Live results are held in `seon.cache` as a kind (`:seon.repl/result`, keyed by evaluation id) under its configured
-byte budget, with no count limit, evicted by Caffeine's own policy (W-TinyLFU, which approximates LRU); an evicted result's handle answers gone-value data with its saved shown
-text. Values the agent keeps in its own Vars are unaffected.
+byte budget, with no count limit, evicted by Caffeine's own policy (W-TinyLFU, which approximates LRU); an evicted result's handle answers gone-value data with its saved printed
+value. Values the agent keeps in its own Vars are unaffected.
 
 **Storage roles** (`docs/research/agent-platform/2026-10-08/storage-roles/storage-roles.md`): the cache holds the full
-live value; a database fact holds small facts plus shown text up to 4096 bytes
+live value; a database fact holds small facts plus printed values up to 4096 bytes
 (`:seon.config.eval.result/blob-threshold`, UTF-8 bytes); a blob holds anything larger, the fact keeping its digest
 and size, staged and published with that fact's transaction; no second printed copy of a value is ever stored.
-Seon's own diagnostics follow the same rule: the full error maps under a result handle, their shown text stored. When prefix + history + block
+Seon's own errors follow the same rule: the full error maps under a result handle, their printed value stored. When prefix + history + block
 exceed the provider's window, the call refuses with an error the owner sees; nothing is clipped.
 
 **Wire formats.** One pure adapter, `seon.ai/messages [wrapping prefix exchanges block] → messages`, one branch per
 format; the block is always the last content before the model's turn.
 - **A `:transcript`**: the prefix as the system message; one user message holding the transcript, the block at its
   end.
-- **B `:chat`**: the prefix as the system message; each form text an assistant message and its envelope the next user
+- **B `:chat`**: the prefix as the system message; each form text an assistant message and its reply the next user
   message; the block is a second content part of the last user message (or the only user message before the first
   form), never a separate consecutive user message.
 - **C `:prefix`**: B plus a final assistant message the model continues from (`ns=> ` for REPL, `{:forms [` for
   DATA), after the block, only where the provider declares prefix continuation; the continuation prefix is not echoed
   into the history.
 
-The dial `:seon.config.ai/wrapping` (`:transcript :chat :prefix`) lives on the model row with an agent overlay; the
+The dial `:seon.config.ai/wrapping` (`:transcript :chat :prefix`) lives on the model entity with an agent override; the
 default is `:transcript` until the competency table is read; a format that loses everywhere is deleted with its
-branch. Every model call records the provider-reported prompt, completion and cached tokens on its attempt row
-(`seon.ai/normalize-usage`); a provider that reports none records a typed unknown, never zero. The attempt row also
+branch. Every model call records the provider-reported prompt, completion and cached tokens on its attempt entity
+(`seon.ai/normalize-usage`); a provider that reports none records a typed unknown, never zero. The attempt entity also
 carries the call's latency and the block's estimated tokens. Presentations: REPL is the form as sent, then its
-envelope; DATA is the envelope map including `:form`.
+reply; DATA is the reply map including `:form`.
 
 **Debug view.** Exactly one: a call's context exactly as sent, produced by `seon.ai/messages` over the static prefix,
 the history and the block at that call's stored basis, printed by the value printer's HTML face. No second assembler;
@@ -350,7 +350,7 @@ the web never reads the proc's memory.
 |---|---|
 | ≥ 1 form evaluated, no session end, calls left, the task not done | call the model again |
 | a form's value is `(my.turn/wait {:my.turn/note …})` | disposition `:wait`; no model call until a new outside wake. A reply to someone is `(my.message/send …)` followed by `(my.turn/wait …)`; `my.turn/complete`, `my.agent/done` and `seon.run/complete` are deleted |
-| no form (prose only), or only read errors | one more call, whose history shows the reply with its no-form or read diagnostic; a second such reply in a row waits (disposition `:wait`); the original wake is answered |
+| no form (prose only), or only read errors | one more call, whose history shows the reply with its no-form or read error; a second such reply in a row waits (disposition `:wait`); the original wake is answered |
 | provider failure or context refusal | counted call, no evaluations, answeredness unchanged, terminal reply |
 | call cap reached | disposition `:capped`; the assignment moves to the assigner in one transaction, agent and branch kept; the assigner's re-assignment to the same agent resumes it (ledger RT-13) |
 | the task's proofs all green | the task is `:done` for the agent (`seon.context/task-done?`, derived from the recorded proof results, never stored): the block shows it and no further model call opens on it; only a newer outside wake does. Its branch keeps the change for root's review. Target (F5, after RESPEC R-2), with no broken test: a code task requests a merge (merge.md §1) and the agent waits; a code task with no change against main is done after checking main still holds the tested program, with no merge request; a task whose proofs read an answer is done at the task home; nothing merges |
@@ -368,9 +368,9 @@ definitions an earlier form of the same eval request made answers `:my.test/afte
 step, right after the one recording transaction, and their results are in the same reply; nothing tests uncommitted
 values and the recording stays one transaction. A change no test reaches answers `:seon.test/unreached` with no
 `:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (the cluster dial `:seon.config.test/step-time-limit-ms`, default 10 s): proofs always
-first, reaching tests after; when the bound fires, a started member runs to its actual exit and records, and the
+first, reaching tests after; when the bound fires, a started test var runs to its actual exit and records, and the
 tests not yet run continue at the next eval request's step and show as pending. A newer eval request's change supersedes the queued
-tests of the older program (the last version wins). A member whose recorded green still holds for the program it now
+tests of the older program (the last version wins). A test var whose recorded green still holds for the program it now
 reaches is answered from the record. At proc start, tests left unfinished are
 derived from stored evidence; how a waiting agent's pending tests run (no next eval request follows a wait) is the
 ledger's RESPEC R-6. The test requests' own writes and merge-request bookkeeping never trigger the step.
@@ -378,28 +378,28 @@ There is no proof proc and no running or dirty state.
 
 - A committed model reply advances answered to the basis its context presented and records the delivery of the unread
   items its block showed. Outside and test eval requests never answer.
-- The cap counts model call rows carrying the held assignment's grant (§3.11): calls left are the agent's cap setting
+- The cap counts model call entities carrying the held assignment's grant (§3.11): calls left are the agent's cap setting
   minus that count. Only a new assignment (a new grant) refills it; a message, a task revision, a self-wake or an MCP
   retry never does.
-- With no provider configured, no model eval request is admitted. A schedule-only firing arms but opens no call.
+- With no provider configured, no model eval request is admitted. A schedule-only firing sets its wake but opens no call.
 
 ### 3.6 Failure
 
 - A crash before RECORD loses the eval request's record, never an agent write that already committed. The next wake
   re-derives the work, so the model may repeat an action.
 - On an agent's own branch any writer refusal of the record is Seon's own failure. A definite refusal retries once
-  without the refused program facts, recording the evaluations, the call row under its original id and the refusal as
-  a diagnostic. If that retry is refused, it records the call row and the error alone. If that fails, it is the
+  without the refused program facts, recording the evaluations, the call entity under its original id and the refusal as
+  an error. If that retry is refused, it records the call entity and the error alone. If that fails, it is the
   storage-failure path.
 - An unknown outcome gets no retry and no extra write: the eval request keeps ownership of the pending transaction and its
-  blob permit, and the agent stays unavailable until the outcome is known; then the diagnostic is delivered.
-- Storage failure stops the graph; it never spins. Post-commit installation failure is a separate diagnostic on a
+  blob permit, and the agent stays unavailable until the outcome is known; then the error is delivered.
+- Storage failure stops the graph; it never spins. Post-commit installation failure is a separate error on a
   durable record. Attempted and durable transactions are counted separately.
 
 ### 3.7 Lookups and help
 
 `doc`, `dir`, `source`, `apropos` and `find-doc` return data on SCI's `clojure.repl`, installed once in the SCI
-init; each declares the SCI context as a world input supplied from the evaluation. A name the agent's context does not
+init; each declares the SCI context as an input filled from the evaluation's bindings. A name the agent's context does not
 define falls back to the host's loaded Var, so library code is readable at an agent's REPL: `source` of a library Var
 is its text in the pinned `reference-code/` checkout, as at the JVM REPL. `(help)` is literal data teaching
 only the forms its commit installs, each once, and says plainly how to end a session (`my.message/send` then
@@ -420,13 +420,13 @@ keeps one detector that names the missing terminal event. The caller's lifecycle
 
 ### 3.9 Kept normative
 
-Immutable handles; writer-assigned agent ordinals; task-home custody of tasks and completion; unknown-outcome
-ownership; actual-exit joins; a terminal reply on every path; failed-call accounting; reload/adoption overlap checks;
+Immutable handles; writer-assigned agent ordinals; task-home ownership of tasks and completion; unknown-outcome
+ownership; actual-exit joins; a terminal reply on every path; failed-call accounting; reload overlap checks;
 completion's cross-branch crash window with idempotent recovery. Capture-before-call and the intent commit are gone.
 
 ### 3.10 Experiments, merging, scoring
 
-- **Variant.** A run's variant is its agent's settings overlay (model, wrapping, entrance, cap). No run entity: the run
+- **Variant.** A run's variant is its agent's settings override (model, wrapping, entrance, cap). No run entity: the run
   is the agent, its task is its assignment.
 - **Environment.** Each run is a fresh agent on its own branch and SCI fork of the target cluster. Setup runs as an
   outside eval request before assignment; the branch is deleted after scoring.
@@ -435,7 +435,7 @@ completion's cross-branch crash window with idempotent recovery. Capture-before-
   integrity there: dangling references, contracts, schema against the target's data, and the task's proofs, the tests
   reaching the change and root's chosen tests on the merged program. `merge!` commits when every test is green;
   automatic merging is root's choice, configured on the target. Mechanics: merge.md.
-- **Scoring** reads stored facts only: proof member counts, eval requests, tokens, read-error types, imitation notes,
+- **Scoring** reads stored facts only: proof test counts, eval requests, tokens, read-error types, imitation notes,
   latency, merge outcome, bail reason. Tests and scoring cost no provider call. The suite runs the competency spec's
   task × wrapping × entrance × model matrix, DeepSeek flash first, every run ending in the real merge flow.
 
@@ -445,16 +445,16 @@ Everything about an agent lives on its entity, `[:seon.agent/id …]` (owner 202
 and the task should be ref'ed there"). One rule says where each fact is written: **addressed to the agent → the task
 home; done by the agent → its branch.** The record (identity, branch, namespace, settings, held assignments) and what
 is sent to it (assignments, messages) are written at the home, so root changes an agent without touching its branch;
-its evaluations, call rows and answered basis are written on its branch in its eval request's one transaction. Each
+its evaluations, call entities and answered basis are written on its branch in its eval request's one transaction. Each
 agent attribute declares its side (`:seon.agent/written-at`), and the writer refuses the wrong one.
 
 - **Held tasks.** The agent's assignments are components of it (`:seon.agent/assignments`); each refs its task and
   carries the revision it reviewed, its branch, its grant and its answer. Holding is the component's presence.
 - **One read.** `seon.agent/record [database agent-id]` answers the record from the home seen from `database`, plus the
-  branch-side facts (answered basis, calls left on the grant). An eval request reads it once, when its world is built,
+  branch-side facts (answered basis, calls left on the grant). An eval request reads it once, when its evaluation context is built,
   and passes the value to the block, the proofs, the cap and the provider settings; nothing else looks up the home.
-- **Cap.** Each assignment carries a grant minted when it is written; call rows record it; calls left is the cap
-  setting minus the call rows on the grant (§3.5).
+- **Cap.** Each assignment carries a grant minted when it is written; call entities record it; calls left is the cap
+  setting minus the call entities on the grant (§3.5).
 - **Answered basis.** `:seon.agent/answered-t` is the home basis the last committed model eval request presented.
 
 Cards: [README-agent-entity](../schedule/cards/README-agent-entity.md) (AE-1 … AE-7).
@@ -473,8 +473,8 @@ references round-trip from the committed archive.
 Restored after the reset (checked): task files ingest with identities and references intact. Archive-only (root
 re-applies by documented forms if still needed): assignments and their revisions, agent settings, schedules, open
 error signatures. Discarded: runtime-only definitions, messages, live handles (gone-value markers), evaluation history,
-error occurrences. Retire only owned or unclaimed branches. Each schema retirement is adopted on a branch of the live
-store before its slice lands.
+error occurrences. Retire only owned or unclaimed branches. Each schema retirement is transacted on a branch of the live
+store before its slice is committed.
 
 ## 6. Owner decisions
 
