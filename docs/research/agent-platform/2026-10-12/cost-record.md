@@ -130,3 +130,30 @@ After the dependency commit, ordinary checks refuse against default's old
 loaded dependency. Archived candidate checks preserve default and test the
 committed dependency. **RESET NEEDED** means root's batched restart here;
 no store reset is requested.
+
+## Configuration proposal for the protected owner
+
+A fresh warm default probe returned 83.73 ms, 12 effective-configuration
+reads and six `seon.turn/agent-dial` calls. The assertion that one acquisition
+suffices is red on the installed path. The configuration hunks in
+`cost-record-turn.patch` acquire the overlay and effective cluster config
+once at the step entrance and pass that immutable value to completion,
+automatic tests and reply-cost selection. Independent callers keep their
+existing dial resolution, including explicit handle overrides and false.
+The next step acquires again. No additional cache or process state is added.
+
+The patch also carries the separately measured namespace-order change.
+It is based on committed `2eafd5a28`; program-context's uncommitted source
+was not used or edited. The configuration proposal passes standalone lint
+(zero errors), but has **not** been loaded or run. Before/after request time
+is therefore **83.73 ms / unavailable**; no configuration improvement is
+claimed yet. Root must integrate it with the owning lane, run
+`seon.turn-test/an-agent-dial-read-that-refuses-is-not-an-absent-dial`,
+`seon.turn-test/the-test-step-writes-nothing-on-main`, the request-cost tests,
+and a measured acquisition-count regression before accepting the code.
+Other configuration reads can have different database bases; this patch
+does not collapse those values into one cluster-wide value.
+
+Query commit `2eafd5a28`: candidate run `f41fa4abeafe`, 21 tests and 169
+assertions, all green; check 42.025 s, test bodies 10.339 s total. No individual
+red remains in the selected read tests. Full lint again reported zero errors.

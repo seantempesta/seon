@@ -20,3 +20,158 @@
  
  (defn system-run-call
    "Open a system-authored turn and freeze its sources at the writer."
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -5035,24 +5035,37 @@
+   (let [diagnostic (turn-completion-error agent-id run-id timeout-ms operation expected events)]
+     (ex-info (:seon.error/message diagnostic) diagnostic)))
+ 
++(defn- agent-configuration
++  "The request's cluster dials with handle overrides and agent settings."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source :seon.agent/id]
++                  [:or :seon.config/effective :seon.error/value]]}
++  [database cluster agent-id]
++  (let [overlay (ai/agent-overlay database agent-id)]
++    (if (:seon.error/at overlay)
++      overlay
++      (let [effective (config/effective database (:seon.cluster/name cluster))]
++        (if (:seon.error/at effective)
++          effective
++          (merge effective (select-keys cluster (keys effective)) overlay))))))
++
+ (defn- agent-dial
+-  "One agent dial: the agent's overlay, else the value the cluster handle `cluster` carries, else
+-  the effective config of the cluster it names; nil only when none of them declares it. A
+-  declared false is a value.
+-
+-  A refused overlay or config read is RETURNED, the declared error it is; it
+-  never falls through to the next source as if it were absent."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source
+-                       :seon.agent/id :qualified-keyword]
+-                  [:or [:maybe :seon.schema/value] :seon.error/value]]}
+-  [database cluster agent-id dial]
+-  (let [overlay (ai/agent-overlay database agent-id)]
++  "A dial from the supplied configuration, or its configuration error."
++  {:malli/schema
++   [:function
++    [:=> [:cat [:or :seon.config/effective :seon.error/value] :qualified-keyword]
++     [:or [:maybe :seon.schema/value] :seon.error/value]]
++    [:=> [:cat :seon.db/database-value :seon.agent/context-source :seon.agent/id :qualified-keyword]
++     [:or [:maybe :seon.schema/value] :seon.error/value]]]}
++  ([configuration dial]
++   (if (:seon.error/at configuration) configuration (get configuration dial)))
++  ([database cluster agent-id dial]
++   (let [overlay (ai/agent-overlay database agent-id)]
+     (if (:seon.error/at overlay)
+       overlay
+       (if-let [[_ value] (or (find overlay dial) (find cluster dial))]
+         value
+         (let [effective (config/effective database (:seon.cluster/name cluster))]
+-          (if (:seon.error/at effective) effective (get effective dial)))))))
++          (if (:seon.error/at effective) effective (get effective dial))))))))
+ 
+ (defn- dial-absent
+   "The declared refusal of a turn dial no source declares: the cluster names
+@@ -5069,7 +5082,9 @@
+ 
+ 
+ (defn- await-turn-permit!
+-  [state]
++  "Acquire this step's completion permit under its held configuration."
++  {:malli/schema [:=> [:cat :map [:or :seon.config/effective :seon.error/value]] :map]}
++  [state configuration]
+   (let [{connection :seon.db/connection
+          cluster-name :seon.cluster/name
+          process :seon.db.process/id
+@@ -5081,8 +5096,7 @@
+         agent-id (:seon.agent/id state)
+         database (db/db connection)
+         run-id (open-for-agent database [:seon.agent/id agent-id])
+-        timeout-ms (or (agent-dial database (:seon.turn.loop/cluster state) agent-id
+-                                   :seon.config.agent/turn-completion-backstop-ms)
++        timeout-ms (or (agent-dial configuration :seon.config.agent/turn-completion-backstop-ms)
+                        (dial-absent cluster-name agent-id :seon.config.agent/turn-completion-backstop-ms))
+         [value selected]
+         (when (int? timeout-ms)
+@@ -5451,16 +5465,21 @@
+ (defn step-limit-ms
+   "The agent's dial `:seon.config.test/step-time-limit-ms` read through the cluster handle `cluster`: the bound
+   its automatic test step and its assignment's proof run take; throws the declared error when no source gives it."
+-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/id] pos-int?]}
+-  [cluster agent-id]
+-  (let [dial :seon.config.test/step-time-limit-ms
+-        limit (agent-dial (db/db (:seon.db/connection cluster)) cluster agent-id dial)]
++  {:malli/schema [:function
++                  [:=> [:cat :seon.agent/context-source :seon.agent/id] pos-int?]
++                  [:=> [:cat :seon.agent/context-source :seon.agent/id [:maybe :seon.schema/value]] pos-int?]]}
++  ([cluster agent-id]
++   (step-limit-ms cluster agent-id
++                  (agent-dial (db/db (:seon.db/connection cluster)) cluster agent-id
++                              :seon.config.test/step-time-limit-ms)))
++  ([cluster agent-id limit]
++  (let [dial :seon.config.test/step-time-limit-ms]
+     (cond (:seon.error/at limit) (throw (ex-info (:seon.error/message limit) limit))
+           (pos-int? limit) limit
+           ;; an optional dial a row written before it existed lacks: its declared default
+           (pos-int? (get config/defaults dial)) (get config/defaults dial)
+           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
+-                  (throw (ex-info (:seon.error/message absent) absent))))))
++                  (throw (ex-info (:seon.error/message absent) absent)))))))
+ 
+ (defn- fork-commit
+   "The commit the agent's step is judged against, read on `database`, its branch: its open attempt's fork point
+@@ -5519,11 +5538,11 @@
+   take the bound first; the reaching request gets what they left, at least 1 ms, so it selects its tests
+   and reports those it did not start as pending. A throw from either becomes the error beside the pass's
+   values, never a replacement for them; nil when no request ran."
+-  {:malli/schema [:=> [:cat :map :seon.agent/id] [:maybe :seon.turn.loop/test-summary]]}
+-  [cluster agent-id]
++  {:malli/schema [:=> [:cat :map :seon.agent/id [:or :seon.config/effective :seon.error/value]] [:maybe :seon.turn.loop/test-summary]]}
++  [cluster agent-id configuration]
+   (try
+     (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
+-          limit (step-limit-ms cluster agent-id)
++          limit (step-limit-ms cluster agent-id (agent-dial configuration :seon.config.test/step-time-limit-ms))
+           execution (@cluster-agent-acquire-context! cluster agent-id)
+           connection (:seon.db/connection execution)
+           changed (@test-changes execution connection)
+@@ -5632,6 +5651,8 @@
+    state)
+   ([state input message]
+    (let [cluster (:seon.turn.loop/cluster state)
++         configuration (agent-configuration (db/db (:seon.db/connection cluster))
++                                            cluster (:seon.agent/id state))
+          completion (:seon.turn.loop/completion cluster)
+          submission (when (= :seon.agent/request input) message)
+          reply (:seon.agent/reply submission)]
+@@ -5643,7 +5664,7 @@
+        ;; write clears the park (a transient cause such as memory pressure
+        ;; must not park the agent until restart, sweep 2026-09-27 item 2).
+        [state nil]
+-       (if-some [turn-bound (await-turn-permit! state)]
++       (if-some [turn-bound (await-turn-permit! state configuration)]
+        (if (:seon.error/at turn-bound)
+          ;; A turn dial refused or absent: the pass cannot run. The proc parks
+          ;; with its one recorded fault, answering a caller's reply with it;
+@@ -5778,8 +5799,8 @@
+                           ;; pass; their failure rides beside the values (test-step).
+                           test-start (System/nanoTime)
+                           stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
+-                                        (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
+-                          tests (when stepped? (test-step cluster agent-id))
++                                        (not (false? (agent-dial configuration :seon.config.test/step?))))
++                          tests (when stepped? (test-step cluster agent-id configuration))
+                           report (cond-> report
+                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
+                                                       (/ (- (System/nanoTime) test-start) 1e6)))
+@@ -5796,8 +5817,8 @@
+                           ;; THE STEP'S OWN COST: its proc thread's counters since the step began
+                           step-cost (some-> (:seon.flow/step-start seon.batch/*world*) seon.flow/step-cost)
+                           ;; how many definitions the reply compares with main; a refused read compares none
+-                          top (agent-dial (db/db connection) cluster agent-id :seon.config.test.cost/top)
+-                          floor (agent-dial (db/db connection) cluster agent-id :seon.config.fn.cost/min-total-us)
++                          top (agent-dial configuration :seon.config.test.cost/top)
++                          floor (agent-dial configuration :seon.config.fn.cost/min-total-us)
+                           ;; The step's cost is read last, just before this offer: only two wake offers and the next state follow it.
+                           _ (when reply
+                               (async/offer! reply (cond-> (merge report pending-commit)
