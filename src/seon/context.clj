@@ -114,7 +114,7 @@
     (or (nil? result) (:seon.error/at result) (nil? current)
         (not= current (:seon.test.member/reach-digest result))) :pending
     (and (pos? (:seon.test/pass-count result))
-         (zero? (+ (:seon.test/fail-count result) (:seon.test/error-count result)))) :green
+         (= 0 (:seon.test/fail-count result) (:seon.test/error-count result))) :green
     :else :red))
 
 (defn- head-entries
