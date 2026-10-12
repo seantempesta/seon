@@ -240,4 +240,19 @@
              :kind :function
              :intent "(hybrid-test-results R5) A base run is kept where the next step reads it. `seon.test/admit-run` admits a run whose tested commit is the destination branch's base (`:seon.test.run/tested-branch` the child, member digests on the tested database, which `seon.test.runner/record-latest-tx` already takes as `tested-database`), and `seon.test/fork-point-red` records on the execution's connection instead of the released child. Red proof: new `seon.test-test/a-base-run-is-read-at-the-next-step-without-running`: two `fork-point-red` calls for one red; the second executes no body and answers red (HEAD: the child's run is released with the child, main's runs 5 to 5). Writer slice: `bin/lane commit` with `--test seon.test-test`. Cost: second call under 10 ms; the first is one test run (about 300 ms for a fast test). Files: `src/seon/test.clj`, `src/seon/test/runner.clj`, `test/seon/test_test.clj`"
              :must-read #{seon.test/admit-run seon.test/fork-point-red seon.test.runner/record-latest-tx seon.turn/fork-commit}
-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-test-results.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-test-results.md"}}
+ #:seon.task{:name "a-contract-predicates-body-is-in-its-schemas-reach"
+             :kind :function
+             :intent "A schema's `[:fn sym]` predicate is named only by form text in `seon.test.runner/reach-schema-node`, so a changed predicate body (`seon.cache/cache?`, `seon.print/print-number?`) changes no test's key; `seon.test.runner/executed-roots` excludes the projection's predicates (`seon.schema/predicate-functions-in`) from `:seon.test.member/dynamic-calls` for that reason (lane r1r2, R2). Done when a schema node's edges name its predicate symbols' declarations, so the predicate's definition digest is in every closure reaching the schema, and the exclusion is deleted."
+             :must-read #{seon.test.runner/reach-schema-node seon.test.runner/reach-index seon.test.runner/executed-roots seon.schema/predicate-functions-in}
+             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-test-results.md"}}
+ #:seon.task{:name "an-interpreted-callable-holds-its-definition-digest"
+             :kind :function
+             :intent "An agent's interpreted definition counts into the call sink with a nil digest (lane r1r2 on default, 2026-10-12: `r1r2.probe/f` executed as `[r1r2.probe/f nil]` while its entity holds a definition digest), so `seon.test.runner/executed-roots`' stale-body check sees compiled callables only. Done when `seon.instrument/wrap-interpreted` receives `:seon.program/definition-digest` on every arm of a branch definition and a sink key names it."
+             :must-read #{seon.instrument/wrap-interpreted seon.batch/executed seon.test.runner/executed-roots}
+             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-test-results.md"}}
+ #:seon.task{:name "the-selection-test-observes-reach-digests-without-redefining-it"
+             :kind :function
+             :intent "`seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content` uses `with-redefs` over `seon.test.runner/reach-digests` to observe which tests `seon.test/select` derives a key for (AGENTS.md: never redefine a Var). Done when the assertion reads an observable value instead (the call sink's `seon.batch/executed` through `seon.profile/measure`, or a selection fact) and the redefinition is gone."
+             :must-read #{seon.test/select seon.test.runner/reach-digests seon.profile/measure}
+             :evidence #{"test/seon/test/selection_test.clj"}}]
