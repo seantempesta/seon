@@ -1,0 +1,537 @@
+{:default-commit "b14dc2b3f",
+ :branches
+ (":agent-06b26d0c02b5"
+  ":agent-1190ba4e59f9"
+  ":agent-1b73216e68ed"
+  ":agent-1bf498cde6a5"
+  ":agent-1d9d7d6cf599"
+  ":agent-2559040ff3c5"
+  ":agent-2e4b1496c714"
+  ":agent-346ef57b0624"
+  ":agent-4d378e2db1f3"
+  ":agent-4f3a2f06f913"
+  ":agent-54841da64965"
+  ":agent-558092244b5e"
+  ":agent-60fba194fc2e"
+  ":agent-68f59baeaed6"
+  ":agent-6970c94d8fbd"
+  ":agent-6d3c00865391"
+  ":agent-7e62c99d159b"
+  ":agent-827416b1e7c0"
+  ":agent-9711dd66a0fe"
+  ":agent-987483bbadcf"
+  ":agent-a6b431a443a0"
+  ":agent-a72a5542a218"
+  ":agent-ad5c174d6a19"
+  ":agent-b8ea7743e0d9"
+  ":agent-d2a746ebf7dd"
+  ":agent-d58178698180"
+  ":agent-e88e4f0d9834"
+  ":agent-eafffccaf9c0"
+  ":agent-eff0ce1b997a"
+  ":agent-f1be4ad49017"
+  ":agent-f40607766740"
+  ":attempt-4438ded31ef2"
+  ":attempt-64abda4eb8aa"
+  ":attempt-69691a73d375"
+  ":base/agent-06b26d0c02b5"
+  ":base/agent-1190ba4e59f9"
+  ":base/agent-1b73216e68ed"
+  ":base/agent-1bf498cde6a5"
+  ":base/agent-1d9d7d6cf599"
+  ":base/agent-2559040ff3c5"
+  ":base/agent-2e4b1496c714"
+  ":base/agent-346ef57b0624"
+  ":base/agent-4d378e2db1f3"
+  ":base/agent-4f3a2f06f913"
+  ":base/agent-54841da64965"
+  ":base/agent-558092244b5e"
+  ":base/agent-60fba194fc2e"
+  ":base/agent-68f59baeaed6"
+  ":base/agent-6970c94d8fbd"
+  ":base/agent-6d3c00865391"
+  ":base/agent-7e62c99d159b"
+  ":base/agent-827416b1e7c0"
+  ":base/agent-9711dd66a0fe"
+  ":base/agent-987483bbadcf"
+  ":base/agent-a6b431a443a0"
+  ":base/agent-a72a5542a218"
+  ":base/agent-ad5c174d6a19"
+  ":base/agent-b8ea7743e0d9"
+  ":base/agent-d2a746ebf7dd"
+  ":base/agent-d58178698180"
+  ":base/agent-e88e4f0d9834"
+  ":base/agent-eafffccaf9c0"
+  ":base/agent-eff0ce1b997a"
+  ":base/agent-f1be4ad49017"
+  ":base/agent-f40607766740"
+  ":base/attempt-4438ded31ef2"
+  ":base/attempt-64abda4eb8aa"
+  ":base/attempt-69691a73d375"
+  ":cluster-default"
+  ":current-src"
+  ":db"),
+ :faults
+ [{:seon.error/signature
+   "500ddeeeca094b0ccd26f74c3bd90c64c2775fa762f11344b7f8b9de5ec9aec1",
+   :seon.error/at #inst "2026-10-12T10:10:32.037-00:00",
+   :seon.error/layer :seon.sci.eval/acquisition,
+   :seon.error/operation seon.sci.eval/acquisition-refusal,
+   :seon.problems/occurrences 20,
+   :seon.error/fact
+   {:seon.error.occurrence/id "1eeda7d443ed",
+    :seon.error/occurrence-count 20,
+    :seon.error.occurrence/count 18,
+    :seon.error.occurrence/message
+    "Program row could not be installed; correct the reported acquisition evidence.",
+    :seon.error/operation seon.sci.eval/acquisition-refusal,
+    :seon.error.occurrence/process #:db{:id 357214},
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :cluster-default,
+    :seon.error/data-edn
+    "{:seon.error/expected :seon.sci.eval/installed, :seon.error/operation seon.sci.eval/acquisition-refusal, :seon.error/message \"Program row could not be installed; correct the reported acquisition evidence.\", :seon.error/layer :seon.sci.eval/acquisition, :seon.error/data #:seon.sci.eval{:acquisition-row [:seon.fn/sym seon.cluster.squash/attribute-tx], :acquisition-cause-message \"seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none.\", :acquisition-failure {:seon.error/layer :seon.config/read, :seon.error/operation seon.sci.eval/database-effective-config, :seon.config/error-key :seon.boot/cluster-name, :seon.error/expected-key :seon.boot/cluster-name}, :acquisition-throwable-class \"clojure.lang.ExceptionInfo\"}, :seon.sci.eval/acquisition-observation #:seon.error.evidence{:attribute :seon.error/message, :value \"seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none.\"}, :seon.sci.eval/row-symbol seon.cluster.squash/attribute-tx, :seon.error/at #inst \"2026-10-12T10:10:32.037-00:00\"}",
+    :seon.error/id
+    "500ddeeeca094b0ccd26f74c3bd90c64c2775fa762f11344b7f8b9de5ec9aec1",
+    :seon.error/message
+    "Program row could not be installed; correct the reported acquisition evidence.",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T10:10:35.686-00:00",
+    :seon.error/producer seon.sci.eval/acquisition-refusal,
+    :seon.error/declared-schema :seon.sci.eval/row-acquisition-error,
+    :seon.error/layer :seon.sci.eval/acquisition,
+    :seon.error/notified [#:db{:id 357217}],
+    :seon.error/producer-digest
+    "960f25b589e165cb9fdb1d9b19c9669a02eb8aa799157120d716b1b3c644211c",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T10:10:32.116-00:00",
+    :seon.sci.eval/acquisition-observation
+    {:db/id 357221,
+     :seon.error.evidence/attribute :seon.error/message,
+     :seon.error.evidence/value
+     "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."},
+    :seon.error/data-size 1094,
+    :seon.sci.eval/row-symbol seon.cluster.squash/attribute-tx,
+    :seon.error/at #inst "2026-10-12T10:10:32.037-00:00",
+    :seon.error/signature
+    "500ddeeeca094b0ccd26f74c3bd90c64c2775fa762f11344b7f8b9de5ec9aec1",
+    :seon.error/process "seon.sci.eval/acquire"},
+   :seon.error/producer seon.sci.eval/acquisition-refusal}
+  {:seon.error/signature
+   "db142341dca227f1a3970c3921870571d9a832f8133c83d8377e42457772b8dc",
+   :seon.error/at #inst "2026-10-12T08:28:26.466-00:00",
+   :seon.error/layer :seon.error/normalization,
+   :seon.error/operation seon.cluster.agent/fork-attempt!,
+   :seon.problems/occurrences 6,
+   :seon.error/fact
+   {:seon.error.occurrence/id "c2dff7b3ec06",
+    :seon.error/occurrence-count 6,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/agent #:db{:id 237063},
+    :seon.error.occurrence/message
+    "The attempt's predecessor branch is gone, so its fork point cannot be read.",
+    :seon.error/operation seon.cluster.agent/fork-attempt!,
+    :seon.error.occurrence/process #:db{:id 210490},
+    :seon.error.occurrence/evaluation "967e3191fc0b",
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :attempt-64abda4eb8aa,
+    :seon.error/data-edn
+    "{:seon.agent/id \"attempt/64abda4eb8aa\", :seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"The attempt's predecessor branch is gone, so its fork point cannot be read.\", :data {:seon.error/message \"The attempt's predecessor branch is gone, so its fork point cannot be read.\", :seon.task/assignment \"64abda4eb8aa\", :seon.task.attempt/fork #uuid \"6acc9606-ca27-5ea6-a9cc-981e1ca4d43d\", :seon.store/branch :attempt-02110a533e26}, :frames [[seon.cluster.agent$fork_attempt_BANG_ invokeStatic \"agent.clj\" 1883] [seon.cluster.agent$fork_attempt_BANG_ invoke \"agent.clj\" 1869] [seon.cluster.agent$start_attempt_BANG_ invokeStatic \"agent.clj\" 1921] [seon.cluster.agent$start_attempt_BANG_ invoke \"agent.clj\" 1914] [seon.cluster.agent$apply_plan_BANG_$fn__24140 invoke \"agent.clj\" 1976] [seon.cluster.agent$apply_plan_BANG_ invokeStatic \"agent.clj\" 1974] [seon.cluster.agent$apply_plan_BANG_ invoke \"agent.clj\" 1965] [seon.cluster.agent$db_LT___GT_flow invokeStatic \"agent.clj\" 2329] [seon.cluster.agent$db_LT___GT_flow invoke \"agent.clj\" 2204] [user$chain3_pass_BANG_ invokeStatic \"NO_SOURCE_FILE\" 4] [user$chain3_pass_BANG_ invoke \"NO_SOURCE_FILE\" 1] [user$eval828711 invokeStatic \"NO_SOURCE_FILE\" 1] [user$eval828711 invoke \"NO_SOURCE_FILE\" 1] [seon.turn.batch$jvm_evaluate$fn__21983 invoke \"batch.clj\" 1090] [seon.turn.batch$jvm_evaluate invokeStatic \"batch.clj\" 1090] [seon.turn.batch$jvm_evaluate invoke \"batch.clj\" 1069] [seon.batch$evaluate_step$run__3061$fn__3063$fn__3064 invoke \"batch.clj\" 615] [seon.batch$evaluate_step$run__3061$fn__3063 invoke \"batch.clj\" 615] [seon.turn.world$with_world$fn__10401$fn__10403 invoke \"world.clj\" 84] [seon.turn.world$with_world$fn__10401 invoke \"world.clj\" 79] [seon.db$with_branch invokeStatic \"db.clj\" 479] [seon.db$with_branch invoke \"db.clj\" 450] [seon.turn.world$with_world invokeStatic \"world.clj\" 78] [seon.turn.world$with_world invoke \"world.clj\" 69] [seon.batch$within invokeStatic \"batch.clj\" 561] [seon.batch$within invoke \"batch.clj\" 555] [seon.batch$evaluate_step$run__3061 invoke \"batch.clj\" 613] [seon.batch$evaluate_step$run__3061 invoke \"batch.clj\" 610] [seon.batch$evaluate_step$fn__3068 invoke \"batch.clj\" 634] [seon.batch$evaluate_step invokeStatic \"batch.clj\" 628] [seon.batch$evaluate_step invoke \"batch.clj\" 571] [seon.batch$form_step invokeStatic \"batch.clj\" 832] [seon.batch$form_step invoke \"batch.clj\" 814] [seon.batch$evaluate_batch$body__3215$fn__3216 invoke \"batch.clj\" 944] [seon.batch$guard invokeStatic \"batch.clj\" 387] [seon.batch$guard invoke \"batch.clj\" 382] [seon.batch$evaluate_batch$body__3215 invoke \"batch.clj\" 944] [seon.turn.batch$jvm_request$fn__21996 invoke \"batch.clj\" 1115] [seon.batch$evaluate_batch$fn__3220 invoke \"batch.clj\" 952] [seon.batch$evaluate_batch invokeStatic \"batch.clj\" 952] [seon.batch$evaluate_batch invoke \"batch.clj\" 914] [seon.mcp$jvm_run invokeStatic \"mcp.clj\" 349] [seon.mcp$jvm_run invoke \"mcp.clj\" 331] [seon.mcp$eval_clj invokeStatic \"mcp.clj\" 433] [seon.mcp$eval_clj invoke \"mcp.clj\" 410] [seon.mcp$call invokeStatic \"mcp.clj\" 515] [seon.mcp$call invoke \"mcp.clj\" 487] [user$eval828707 invokeStatic \"NO_SOURCE_FILE\" 1] [user$eval828707 invoke \"NO_SOURCE_FILE\" 1]]}]}",
+    :seon.error/id
+    "db142341dca227f1a3970c3921870571d9a832f8133c83d8377e42457772b8dc",
+    :seon.error/message
+    "The attempt's predecessor branch is gone, so its fork point cannot be read.",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T08:28:26.466-00:00",
+    :seon.error/producer seon.cluster.agent/fork-attempt!,
+    :seon.error/declared-schema :seon.flow/exception-error,
+    :seon.error/layer :seon.error/normalization,
+    :seon.error/notified [#:db{:id 191519}],
+    :seon.error/producer-digest
+    "420e358536f2cf229dd29e5097d9cec988d33b5cb0174142e188c2b6fd89502d",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T08:28:26.466-00:00",
+    :seon.error/agent 237063,
+    :seon.error/data-size 3214,
+    :seon.error/at #inst "2026-10-12T08:28:26.466-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.cluster.agent$fork_attempt_BANG_
+     invokeStatic
+     "agent.clj"
+     1883],
+    :seon.error/signature
+    "db142341dca227f1a3970c3921870571d9a832f8133c83d8377e42457772b8dc",
+    :seon.error/process "53385-1791792048601"},
+   :seon.error/producer seon.cluster.agent/fork-attempt!}
+  {:seon.error/signature
+   "759d40be224b919f6fa4f856cc6fde854292594f7bdccafc95ca63a0b1bf1134",
+   :seon.error/at #inst "2026-10-12T08:59:40.797-00:00",
+   :seon.error/layer :seon.error/normalization,
+   :seon.error/operation seon.cluster.registry/retire-branch!,
+   :seon.problems/occurrences 3,
+   :seon.error/fact
+   {:seon.error.occurrence/id "521625786557",
+    :seon.error/occurrence-count 3,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/message "Connection has been released.",
+    :seon.error/operation seon.cluster.registry/retire-branch!,
+    :seon.error.occurrence/process #:db{:id 244920},
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :cluster-default,
+    :seon.error/data-edn
+    "#:seon.error{:chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"Connection has been released.\", :data {:type :connection-has-been-released}, :frames [[seon.cluster.registry$retire_branch_BANG_$fn__12886 invoke \"registry.clj\" 503] [seon.cluster.registry$retire_branch_BANG_ invokeStatic \"registry.clj\" 502] [seon.cluster.registry$retire_branch_BANG_ invoke \"registry.clj\" 486] [seon.cluster.agent$release_context_BANG_$fn__23859 invoke \"agent.clj\" 996] [seon.cluster.agent$release_context_BANG_$attempt__23826 invoke \"agent.clj\" 977] [seon.cluster.agent$release_context_BANG_ invokeStatic \"agent.clj\" 991] [seon.cluster.agent$release_context_BANG_ invoke \"agent.clj\" 960] [seon.test$member_result$release_BANG___20686$fn__20687 invoke \"test.clj\" 2340] [seon.test$member_result$release_BANG___20686 invoke \"test.clj\" 2340] [seon.test$member_result$fn__20696$fn__20697 invoke \"test.clj\" 2387] [seon.test$bounded_result$watch_exit_BANG___19841$fn__19842 invoke \"test.clj\" 369]]}]}",
+    :seon.error/id
+    "759d40be224b919f6fa4f856cc6fde854292594f7bdccafc95ca63a0b1bf1134",
+    :seon.error/message "Connection has been released.",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T08:59:40.797-00:00",
+    :seon.error/producer seon.cluster.registry/retire-branch!,
+    :seon.error/declared-schema :seon.flow/exception-error,
+    :seon.error/layer :seon.error/normalization,
+    :seon.error/notified [#:db{:id 198694}],
+    :seon.error/producer-digest
+    "167ddf89d76dcc4c48422196afdb070b0d89bc94e4c3bbf601d7937a62b70c4d",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T08:59:40.797-00:00",
+    :seon.error/data-size 1003,
+    :seon.error/at #inst "2026-10-12T08:59:40.797-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.cluster.registry$retire_branch_BANG_$fn__12886
+     invoke
+     "registry.clj"
+     503],
+    :seon.error/signature
+    "759d40be224b919f6fa4f856cc6fde854292594f7bdccafc95ca63a0b1bf1134",
+    :seon.error/process "81140-1791794380625"},
+   :seon.error/producer seon.cluster.registry/retire-branch!}
+  {:seon.error/signature
+   "75d68dbb2330d28d439d0def95eebbe8126e8feb5673bedc408288f1f0af8f49",
+   :seon.error/at #inst "2026-10-12T10:10:29.652-00:00",
+   :seon.error/layer :seon.db/database-write,
+   :seon.error/operation seon.db/transact!,
+   :seon.problems/occurrences 2,
+   :seon.error/fact
+   {:seon.error.occurrence/id "5583c6661a10",
+    :seon.error/occurrence-count 2,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/message
+    "Complete component validation refused: unowned-entity; bound :seon.config.db/validation-node-limit=250000; the refused data is :seon.error/data.",
+    :seon.error/operation seon.db/transact!,
+    :seon.error.occurrence/process #:db{:id 356552},
+    :seon.error/capped? false,
+    :seon.error/type :seon.db.write/validation-refusal,
+    :seon.error.occurrence/branch :cluster-default,
+    :seon.error/data-edn
+    "#:seon.error{:chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"Complete component validation refused: unowned-entity; bound :seon.config.db/validation-node-limit=250000; the refused data is :seon.error/data.\", :data {:seon.error/expected :seon.db/component-schema, :seon.error/operation seon.db/transact!, :seon.error/type :seon.db.write/validation-refusal, :seon.error/message \"Complete component validation refused: unowned-entity; bound :seon.config.db/validation-node-limit=250000; the refused data is :seon.error/data.\", :seon.error/layer :seon.db/database-write, :seon.error/data {:seon.db/validation-bound :seon.config.db/validation-node-limit, :seon.db/validation-limit 250000, :seon.db/entity 292095, :seon.db/entity-value {:seon.error/capped? false, :seon.instrument/actual \"{:tx-data [[:db.fn/call #:seon.sci.admit{:reference \\\"sci.lang.Var\\\", :name \\\"#'seon.turn.batch/program-facts-call\\\"}] #:seon.ns{:name seon.render.web} [:db.fn/call #:seon.sci.admit{:reference \\\"sci.lang.Var\\\", :name \\\"#'seon.turn/receipt-settle-batch-call\\\"}] [:db.fn/call #:seon.sci.admit{:reference \\\"sci.lang.Var\\\", :name \\\"#'seon.turn/close-folded-call\\\"}]]}\"}, :seon.db.write.attempt/transaction {:tx-data [[:db.fn/call #:seon.sci.admit{:opaque \"clojure.lang.AFunction/1\"}]], :tx-meta #:seon.squash{:source-branch :attempt-4438ded31ef2, :source-commit #uuid \"6accadae-85fb-5c83-b29b-faed2bb6180c\"}}}, :seon.error/basis #:seon.error.basis{:store #uuid \"224560ae-b0ba-3d5c-b6db-6d7415ad66e7\", :branch :cluster-default, :commit #uuid \"6accb214-9553-59a5-8343-20b33bfa2cae\", :t 536872133}, :seon.db/owned-value-refusal :seon.db/unowned-entity, :seon.db.write.attempt/request-id \"cb5d2ae40b33\", :seon.db/transaction-refused true, :seon.error/at #inst \"2026-10-12T10:10:29.652-00:00\"}, :frames [[seon.merge$merge_BANG_ invokeStatic \"merge.clj\" 191] [seon.merge$merge_BANG_ invoke \"merge.clj\" 171] [seon.cluster.agent$apply_lifecycle_BANG_$fn__24301 invoke \"agent.clj\" 2180] [seon.db$with_branch invokeStatic \"db.clj\" 479] [seon.db$with_branch invoke \"db.clj\" 450] [seon.cluster.agent$apply_lifecycle_BANG_ invokeStatic \"agent.clj\" 2180] [seon.cluster.agent$apply_lifecycle_BANG_ invoke \"agent.clj\" 2169] [seon.cluster.agent$apply_plan_BANG_$fn__24211 invoke \"agent.clj\" 1995] [seon.cluster.agent$apply_plan_BANG_ invokeStatic \"agent.clj\" 1988] [seon.cluster.agent$apply_plan_BANG_ invoke \"agent.clj\" 1981] [seon.cluster.agent$run_pass_BANG_ invokeStatic \"agent.clj\" 2215] [seon.cluster.agent$run_pass_BANG_ invoke \"agent.clj\" 2208] [seon.cluster.agent$db_LT___GT_flow$fn__24333 invoke \"agent.clj\" 2323] [seon.cluster.agent$db_LT___GT_flow invokeStatic \"agent.clj\" 2323] [seon.cluster.agent$db_LT___GT_flow invoke \"agent.clj\" 2238] [seon.flow$var_process$step__10533$fn__10536$fn__10540$fn__10541 invoke \"flow.clj\" 434] [seon.flow$with_step_start invokeStatic \"flow.clj\" 316] [seon.flow$with_step_start invoke \"flow.clj\" 308] [seon.flow$var_process$step__10533$fn__10536$fn__10540 invoke \"flow.clj\" 432] [seon.flow$in_world invokeStatic \"flow.clj\" 285] [seon.flow$in_world invoke \"flow.clj\" 267] [seon.flow$var_process$step__10533$fn__10536 invoke \"flow.clj\" 431] [seon.flow$graph_executor$reify__10456$fn__10457$fn__10458 invoke \"flow.clj\" 113] [seon.flow$graph_executor$reify__10456$fn__10457 invoke \"flow.clj\" 113]]}]}",
+    :seon.error/id
+    "75d68dbb2330d28d439d0def95eebbe8126e8feb5673bedc408288f1f0af8f49",
+    :seon.error/message
+    "Complete component validation refused: unowned-entity; bound :seon.config.db/validation-node-limit=250000; the refused data is :seon.error/data.",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T10:10:29.746-00:00",
+    :seon.error/producer seon.merge/merge!,
+    :seon.error/declared-schema :seon.db.write/error,
+    :seon.db.write/attempt
+    {:seon.db.write.attempt/operations
+     {:db/id 356556,
+      :seon.error/capped? false,
+      :seon.error.projection/bound-bytes 8388608,
+      :seon.instrument/actual
+      "{:tx-data [[:db.fn/call #:seon.sci.admit{:opaque \"clojure.lang.AFunction/1\"}]], :tx-meta #:seon.squash{:source-branch :attempt-4438ded31ef2, :source-commit #uuid \"6accadae-85fb-5c83-b29b-faed2bb6180c\"}}"},
+     :db/id 356555,
+     :seon.db.write.attempt/observed-at
+     #inst "2026-10-12T10:10:29.652-00:00",
+     :seon.db.write.attempt/request-id "cb5d2ae40b33"},
+    :seon.error/layer :seon.db/database-write,
+    :seon.error/notified [#:db{:id 356563}],
+    :seon.error/producer-digest
+    "a7e8a28549a2ac9fb7caf6890aec97bd48722ed02b31195d8052b711f7499351",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T10:10:29.746-00:00",
+    :seon.error/basis
+    {:db/id 356557,
+     :seon.error.basis/branch :cluster-default,
+     :seon.error.basis/commit
+     #uuid "6accb214-9553-59a5-8343-20b33bfa2cae",
+     :seon.error.basis/store
+     #uuid "224560ae-b0ba-3d5c-b6db-6d7415ad66e7",
+     :seon.error.basis/t 536872133},
+    :seon.error/data-size 3333,
+    :seon.error/at #inst "2026-10-12T10:10:29.652-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.merge$merge_BANG_ invokeStatic "merge.clj" 191],
+    :seon.error/signature
+    "75d68dbb2330d28d439d0def95eebbe8126e8feb5673bedc408288f1f0af8f49",
+    :seon.error/process "62950-1791799808117"},
+   :seon.error/producer seon.merge/merge!}
+  {:seon.error/signature
+   "0c04f8196985a79d3c1c787ddd76e4431dc9c9c72a1575e8b45bc52950c991d4",
+   :seon.error/at #inst "2026-10-12T09:59:29.059-00:00",
+   :seon.error/layer :seon.test/execution,
+   :seon.error/operation seon.test/run,
+   :seon.problems/occurrences 1,
+   :seon.error/fact
+   {:seon.error.occurrence/id "2648292346d6",
+    :seon.error/occurrence-count 1,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/agent #:db{:id 324574},
+    :seon.error.occurrence/message
+    "The test world's program overlay (114 entries) was refused: clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}",
+    :seon.error/operation seon.test/run,
+    :seon.error.occurrence/process #:db{:id 274758},
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :attempt-69691a73d375,
+    :seon.error/data-edn
+    "{:seon.agent/id \"attempt/69691a73d375\", :seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"The test world's program overlay (114 entries) was refused: clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}\", :data {:seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"The test world's program overlay (114 entries) was refused: clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}\", :data #:seon.error{:message \"clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}\", :operation seon.db/transact!, :offending nil}, :frames [[seon.test$world_refusal invokeStatic \"test.clj\" 1950] [seon.test$world_refusal invoke \"test.clj\" 1944] [seon.test$clean_request_handle invokeStatic \"test.clj\" 2232] [seon.test$clean_request_handle invoke \"test.clj\" 2159] [seon.test$run_request$request_handle_BANG___20854 invoke \"test.clj\" 2782] [seon.test$run_request$run_batch__20858$fn__20884 invoke \"test.clj\" 2824] [seon.test$run_request$run_batch__20858 invoke \"test.clj\" 2820] [seon.test$run_request$fn__20902 invoke \"test.clj\" 2899] [seon.test$run_request invokeStatic \"test.clj\" 2884] [seon.test$run_request invoke \"test.clj\" 2597] [seon.test$run invokeStatic \"test.clj\" 3003] [seon.test$run invoke \"test.clj\" 2962] [seon.turn$continue_queue invokeStatic \"turn.clj\" 5624] [seon.turn$continue_queue invoke \"turn.clj\" 5617] [seon.turn$step invokeStatic \"turn.clj\" 5763] [seon.turn$step invoke \"turn.clj\" 5640] [seon.cluster.agent$turn_step$fn__23770 invoke \"agent.clj\" 571] [seon.cluster.agent$turn_step invokeStatic \"agent.clj\" 565] [seon.cluster.agent$turn_step invoke \"agent.clj\" 535] [seon.flow$var_process$step__10510$fn__10513$fn__10517$fn__10518 invoke \"flow.clj\" 434] [seon.flow$with_step_start invokeStatic \"flow.clj\" 316] [seon.flow$with_step_start invoke \"flow.clj\" 308] [seon.flow$var_process$step__10510$fn__10513$fn__10517 invoke \"flow.clj\" 432] [seon.flow$in_world invokeStatic \"flow.clj\" 285] [seon.flow$in_world invoke \"flow.clj\" 267] [seon.flow$var_process$step__10510$fn__10513 invoke \"flow.clj\" 431] [seon.flow$graph_executor$reify__10433$fn__10434$fn__10435 invoke \"flow.clj\" 113] [seon.flow$graph_executor$reify__10433$fn__10434 invoke \"flow.clj\" 113]]}], :seon.error/operation seon.test/run, :seon.error/message \"The test world's program overlay (114 entries) was refused: clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}\", :seon.error/producer seon.test/world-refusal, :seon.error/layer :seon.test/execution, :seon.test/next-tier :none, :seon.error/producer-digest \"d08fe4b0e81cb3a8cf4fb60b7e677b550c7e1d8bac31f851aee1d50147826c41\", :seon.test/unknown \"The request ended in an exception.\", :seon.error/at #inst \"2026-10-12T09:59:29.059-00:00\", :seon.error/exception-class clojure.lang.ExceptionInfo, :seon.error/world #:seon.agent{:id \"attempt/69691a73d375\"}, :seon.error/frame [seon.test$world_refusal invokeStatic \"test.clj\" 1950]}, :frames [[seon.turn$continue_queue invokeStatic \"turn.clj\" 5630] [seon.turn$continue_queue invoke \"turn.clj\" 5617] [seon.turn$step invokeStatic \"turn.clj\" 5763] [seon.turn$step invoke \"turn.clj\" 5640] [seon.cluster.agent$turn_step$fn__23770 invoke \"agent.clj\" 571] [seon.cluster.agent$turn_step invokeStatic \"agent.clj\" 565] [seon.cluster.agent$turn_step invoke \"agent.clj\" 535] [seon.flow$var_process$step__10510$fn__10513$fn__10517$fn__10518 invoke \"flow.clj\" 434] [seon.flow$with_step_start invokeStatic \"flow.clj\" 316] [seon.flow$with_step_start invoke \"flow.clj\" 308] [seon.flow$var_process$step__10510$fn__10513$fn__10517 invoke \"flow.clj\" 432] [seon.flow$in_world invokeStatic \"flow.clj\" 285] [seon.flow$in_world invoke \"flow.clj\" 267] [seon.flow$var_process$step__10510$fn__10513 invoke \"flow.clj\" 431] [seon.flow$graph_executor$reify__10433$fn__10434$fn__10435 invoke \"flow.clj\" 113] [seon.flow$graph_executor$reify__10433$fn__10434 invoke \"flow.clj\" 113]]}]}",
+    :seon.error/id
+    "0c04f8196985a79d3c1c787ddd76e4431dc9c9c72a1575e8b45bc52950c991d4",
+    :seon.error/message
+    "The test world's program overlay (114 entries) was refused: clojure.lang.ExceptionInfo: seon.render.web/stop! has a bare nilable return. Return an explicit result/error envelope, an empty collection, or an explicit named sum. {:seon.schema/error :seon.schema/nilable-return, :seon.schema/nilable-return seon.render.web/stop!, :seon.schema/identity seon.render.web/stop!, :seon.schema/definition [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]], :seon.schema/path []}",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T09:59:29.061-00:00",
+    :seon.error/producer seon.test/world-refusal,
+    :seon.error/declared-schema :seon.flow/exception-error,
+    :seon.error/layer :seon.test/execution,
+    :seon.error/notified [#:db{:id 337927}],
+    :seon.error/producer-digest
+    "d08fe4b0e81cb3a8cf4fb60b7e677b550c7e1d8bac31f851aee1d50147826c41",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T09:59:29.061-00:00",
+    :seon.error/agent 324574,
+    :seon.error/data-size 5424,
+    :seon.error/at #inst "2026-10-12T09:59:29.059-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.turn$continue_queue invokeStatic "turn.clj" 5630],
+    :seon.error/signature
+    "0c04f8196985a79d3c1c787ddd76e4431dc9c9c72a1575e8b45bc52950c991d4",
+    :seon.error/process "34792-1791797675151"},
+   :seon.error/producer seon.test/world-refusal}
+  {:seon.error/signature
+   "117f391d785b41df14b0ebd1d4b1d50d351c7205df3e935cb1c83eebbc121d48",
+   :seon.error/at #inst "2026-10-12T06:50:21.476-00:00",
+   :seon.error/layer :seon.instrument/invocation,
+   :seon.error/operation my.agent/retire-branch!,
+   :seon.problems/occurrences 1,
+   :seon.error/fact
+   {:seon.error.occurrence/id "e13a0ba43c9c",
+    :seon.error/occurrence-count 1,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/agent #:db{:id 193189},
+    :seon.error.occurrence/message
+    "my.agent/retire-branch! refused argument 0: expected :my.agent/branch-request (a map), got a keyword :agent-8f004cfa2806. Fix: Supply a map. Called from seon.sci.eval/lazy-root (eval.clj:3026).",
+    :seon.instrument/check :input,
+    :seon.error/operation my.agent/retire-branch!,
+    :seon.error.occurrence/process #:db{:id 185162},
+    :seon.error.occurrence/evaluation "ab9379184d58",
+    :seon.error/capped? true,
+    :seon.instrument/actual-size 19,
+    :seon.error/caller-digest
+    "3d2f2e3033887e6ecf7c41cf9f63748a60e6a537f8588b05186f3559e919f77a",
+    :seon.error/type :seon.instrument/contract-error,
+    :seon.error/location
+    {:db/id 196764, :seon.error.location/length 0},
+    :seon.error.occurrence/branch :agent-8f004cfa2806,
+    :seon.error/data-edn
+    "{:seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"my.agent/retire-branch! refused argument 0: expected :my.agent/branch-request (a map), got a keyword :agent-8f004cfa2806. Fix: Supply a map. Called from seon.sci.eval/lazy-root (eval.clj:3026).\", :frames [[seon.batch$produced_failures$fn__3180 invoke \"batch.clj\" 875]]}], :seon.error/operation my.agent/retire-branch!, :seon.error/location #:seon.error.location{:length 0}, :seon.error/expected-key :my.agent/branch-request, :seon.error/message \"my.agent/retire-branch! refused argument 0: expected :my.agent/branch-request (a map), got a keyword :agent-8f004cfa2806. Fix: Supply a map. Called from seon.sci.eval/lazy-root (eval.clj:3026).\", :seon.error/layer :seon.instrument/invocation, :seon.error/member :seon.fn.arity/input, :seon.sci.admit/remainder #:seon.sci.admit{:reason :over-bound, :bytes 3096}, :seon.error/expected-shape \"3089ccd231eee9d4fd01d8e29c365756940f5efc8b9a8ca97b4d0633cd22342e\", :seon.error/at #inst \"2026-10-12T06:50:21.476-00:00\"}",
+    :seon.error/expected-key :my.agent/branch-request,
+    :seon.instrument/fn my.agent/retire-branch!,
+    :seon.error/id
+    "117f391d785b41df14b0ebd1d4b1d50d351c7205df3e935cb1c83eebbc121d48",
+    :seon.instrument/expected
+    "[:cat :my.agent/branch-request :my.agent/branch-context]",
+    :seon.error/message
+    "my.agent/retire-branch! refused argument 0: expected :my.agent/branch-request (a map), got a keyword :agent-8f004cfa2806. Fix: Supply a map. Called from seon.sci.eval/lazy-root (eval.clj:3026).",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T06:50:21.481-00:00",
+    :seon.error/producer seon.sci.eval/lazy-root,
+    :seon.error/declared-schema :seon.instrument/contract-error,
+    :seon.error/layer :seon.instrument/invocation,
+    :seon.error/notified [#:db{:id 196765}],
+    :seon.error/member :seon.fn.arity/input,
+    :seon.error/producer-digest
+    "3d2f2e3033887e6ecf7c41cf9f63748a60e6a537f8588b05186f3559e919f77a",
+    :seon.instrument/args
+    "[:agent-8f004cfa2806 {:seon.store/store #:seon.store{:dir \"/Users/sean/src/seon/data/store\", :lock-file \"/Users/sean/src/seon/data/store.lock\", :connection-object #:datahike{:connection-id [#uuid \"224560ae-b0ba-3d5c-b6db-6d7415ad66e7\" :db]}, :lock #:seon.sci.admit{:opaque \"sun.nio.ch.FileLockImpl\"}, :created? false}, :seon.db/connection #:datahike{:connection-id [#uuid \"224560ae-b0ba-3d5c-b6db-6d7415ad66e7\" :agent-8f004cfa2806]}, :seon.agent/routing \"#object[clojure.lang.Atom 0x707235d6]\"}]",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T06:50:21.481-00:00",
+    :seon.error/expected-shape
+    "3089ccd231eee9d4fd01d8e29c365756940f5efc8b9a8ca97b4d0633cd22342e",
+    :seon.error/agent 193189,
+    :seon.error/data-size 10800,
+    :seon.error/caller seon.sci.eval/lazy-root,
+    :seon.error/at #inst "2026-10-12T06:50:21.476-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.instrument/arity 2,
+    :seon.error/frame
+    [seon.batch$produced_failures$fn__3180 invoke "batch.clj" 875],
+    :seon.instrument/arm :input,
+    :seon.instrument/actual ":agent-8f004cfa2806",
+    :seon.error/signature
+    "117f391d785b41df14b0ebd1d4b1d50d351c7205df3e935cb1c83eebbc121d48",
+    :seon.error/process "96331-1791786137144"},
+   :seon.error/producer seon.sci.eval/lazy-root}
+  {:seon.error/signature
+   "7c40461fc9f65ac760c65edf0ed2c1d3058d20b111a4cbbc7ea31efc918b4b0f",
+   :seon.error/at #inst "2026-10-12T10:10:06.326-00:00",
+   :seon.error/layer :seon.db/database-read,
+   :seon.error/operation seon.db/pull,
+   :seon.problems/occurrences 1,
+   :seon.error/fact
+   {:seon.error.occurrence/id "b9e60bc43d67",
+    :seon.error/occurrence-count 1,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/message
+    "Stop could not read the agent's open turn.",
+    :seon.error/operation seon.db/pull,
+    :seon.error.occurrence/process #:db{:id 274758},
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :cluster-default,
+    :seon.error/data-edn
+    "#:seon.error{:chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"Stop could not read the agent's open turn.\", :data {:seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \":malli.core/invalid-schema\", :data {:type :malli.core/invalid-schema, :message :malli.core/invalid-schema, :data {:schema seon.render.web/executor?, :form seon.render.web/executor?}}, :frames [[seon.schema$direct_reference_keys_in invokeStatic \"schema.clj\" 830] [seon.schema$direct_reference_keys_in invoke \"schema.clj\" 816] [seon.schema$projection_with_declarations$fn__1837 invoke \"schema.clj\" 2731] [seon.schema$projection_with_declarations invokeStatic \"schema.clj\" 2729] [seon.schema$projection_with_declarations invoke \"schema.clj\" 2626] [seon.schema$projection_build invokeStatic \"schema.clj\" 2195] [seon.schema$projection_build invoke \"schema.clj\" 2173] [seon.schema$build_projection invokeStatic \"schema.clj\" 2392] [seon.schema$build_projection invoke \"schema.clj\" 2355] [seon.schema$projection_of_population invokeStatic \"schema.clj\" 3058] [seon.schema$projection_of_population invoke \"schema.clj\" 3040] [seon.schema$projection_advanced_by invokeStatic \"schema.clj\" 3218] [seon.schema$projection_advanced_by invoke \"schema.clj\" 3202] [seon.schema$advanced_projection invokeStatic \"schema.clj\" 3253] [seon.schema$advanced_projection invoke \"schema.clj\" 3242] [seon.schema$load_projection invokeStatic \"schema.clj\" 3374] [seon.schema$load_projection invoke \"schema.clj\" 3358] [seon.db$content_projection$fn__4634$fn__4635 invoke \"db.clj\" 1595] [seon.db$projection_value invokeStatic \"db.clj\" 1491] [seon.db$projection_value invoke \"db.clj\" 1487] [seon.db$content_projection invokeStatic \"db.clj\" 1593] [seon.db$content_projection invoke \"db.clj\" 1585] [seon.db$carried_projection$fn__4760$fn__4761$fn__4762 invoke \"db.clj\" 1956] [seon.db$projection_value invokeStatic \"db.clj\" 1491] [seon.db$projection_value invoke \"db.clj\" 1487] [seon.db$carried_projection invokeStatic \"db.clj\" 1957] [seon.db$carried_projection invoke \"db.clj\" 1873] [seon.db$read_declarations$fn__4777 invoke \"db.clj\" 1995] [seon.db$pull_call$fn__5166 invoke \"db.clj\" 3113] [seon.db$with_declarations invokeStatic \"db.clj\" 2039] [seon.db$with_declarations invoke \"db.clj\" 2014] [seon.db$with_declarations invokeStatic \"db.clj\" 2032] [seon.db$with_declarations invoke \"db.clj\" 2014] [seon.db$pull_call invokeStatic \"db.clj\" 3111] [seon.db$pull_call invoke \"db.clj\" 3080] [seon.db$pull invokeStatic \"db.clj\" 3186] [seon.db$pull invoke \"db.clj\" 3145] [seon.turn$open_for_agent invokeStatic \"turn.clj\" 358] [seon.turn$open_for_agent invoke \"turn.clj\" 353] [seon.cluster.agent$open_turn_BANG_ invokeStatic \"agent.clj\" 1471] [seon.cluster.agent$open_turn_BANG_ invoke \"agent.clj\" 1466] [seon.cluster.agent$record_interruption_BANG_ invokeStatic \"agent.clj\" 1521] [seon.cluster.agent$record_interruption_BANG_ invoke \"agent.clj\" 1510] [seon.cluster.agent$stop_graph_BANG_$fn__24022 invoke \"agent.clj\" 1614] [seon.cluster.agent$stop_graph_BANG_ invokeStatic \"agent.clj\" 1593] [seon.cluster.agent$stop_graph_BANG_ invoke \"agent.clj\" 1584] [seon.cluster.agent$stop_flow_BANG_$reserve__24009$fn__24010 invoke \"agent.clj\" 1574] [seon.cluster.agent$stop_flow_BANG_ invokeStatic \"agent.clj\" 1581] [seon.cluster.agent$stop_flow_BANG_ invoke \"agent.clj\" 1540] [seon.cluster.agent$stop_owned_graphs_BANG_$fn__23844 invoke \"agent.clj\" 954] [seon.cluster.agent$stop_owned_graphs_BANG_ invokeStatic \"agent.clj\" 953] [seon.cluster.agent$stop_owned_graphs_BANG_ invoke \"agent.clj\" 937] [seon.cluster.agent$release_context_BANG_ invokeStatic \"agent.clj\" 982] [seon.cluster.agent$release_context_BANG_ invoke \"agent.clj\" 960] [seon.cluster.host$release_children_BANG_ invokeStatic \"host.clj\" 173] [seon.cluster.host$release_children_BANG_ invoke \"host.clj\" 164] [seon.cluster.boot$stop_BANG_ invokeStatic \"boot.clj\" 586] [seon.cluster.boot$stop_BANG_ invoke \"boot.clj\" 561] [seon.cluster.boot$request_BANG_ invokeStatic \"boot.clj\" 755] [seon.cluster.boot$request_BANG_ invoke \"boot.clj\" 658] [user$eval11716937 invokeStatic \"NO_SOURCE_FILE\" 1] [user$eval11716937 invoke \"NO_SOURCE_FILE\" 1]]}], :seon.error/operation seon.db/pull, :seon.db/refused-read-operation seon.db/pull, :seon.db/invalid-read true, :seon.error/message \":malli.core/invalid-schema\", :seon.agent/id \"attempt/ee6cfaeb5c0b\", :seon.error/producer seon.schema/direct-reference-keys-in, :seon.error/layer :seon.db/database-read, :seon.error/producer-digest \"9ed5985dccee3a3e8a31f6775283bdc366b8e7f9429d1abc0e3f83777ae67613\", :seon.error/data #:seon.db{:operation seon.db/pull, :exception-class \"clojure.lang.ExceptionInfo\", :dependency-data {:type :malli.core/invalid-schema, :message :malli.core/invalid-schema, :data {:schema seon.render.web/executor?, :form seon.render.web/executor?}}}, :seon.error/at #inst \"2026-10-12T10:10:06.326-00:00\", :seon.error/exception-class clojure.lang.ExceptionInfo, :seon.error/frame [seon.schema$direct_reference_keys_in invokeStatic \"schema.clj\" 830]}, :frames [[seon.cluster.agent$open_turn_BANG_ invokeStatic \"agent.clj\" 1473] [seon.cluster.agent$open_turn_BANG_ invoke \"agent.clj\" 1466] [seon.cluster.agent$record_interruption_BANG_ invokeStatic \"agent.clj\" 1521] [seon.cluster.agent$record_interruption_BANG_ invoke \"agent.clj\" 1510] [seon.cluster.agent$stop_graph_BANG_$fn__24022 invoke \"agent.clj\" 1614] [seon.cluster.agent$stop_graph_BANG_ invokeStatic \"agent.clj\" 1593] [seon.cluster.agent$stop_graph_BANG_ invoke \"agent.clj\" 1584] [seon.cluster.agent$stop_flow_BANG_$reserve__24009$fn__24010 invoke \"agent.clj\" 1574] [seon.cluster.agent$stop_flow_BANG_ invokeStatic \"agent.clj\" 1581] [seon.cluster.agent$stop_flow_BANG_ invoke \"agent.clj\" 1540] [seon.cluster.agent$stop_owned_graphs_BANG_$fn__23844 invoke \"agent.clj\" 954] [seon.cluster.agent$stop_owned_graphs_BANG_ invokeStatic \"agent.clj\" 953] [seon.cluster.agent$stop_owned_graphs_BANG_ invoke \"agent.clj\" 937] [seon.cluster.agent$release_context_BANG_ invokeStatic \"agent.clj\" 982] [seon.cluster.agent$release_context_BANG_ invoke \"agent.clj\" 960] [seon.cluster.host$release_children_BANG_ invokeStatic \"host.clj\" 173] [seon.cluster.host$release_children_BANG_ invoke \"host.clj\" 164] [seon.cluster.boot$stop_BANG_ invokeStatic \"boot.clj\" 586] [seon.cluster.boot$stop_BANG_ invoke \"boot.clj\" 561] [seon.cluster.boot$request_BANG_ invokeStatic \"boot.clj\" 755] [seon.cluster.boot$request_BANG_ invoke \"boot.clj\" 658] [user$eval11716937 invokeStatic \"NO_SOURCE_FILE\" 1] [user$eval11716937 invoke \"NO_SOURCE_FILE\" 1]]}]}",
+    :seon.error/id
+    "7c40461fc9f65ac760c65edf0ed2c1d3058d20b111a4cbbc7ea31efc918b4b0f",
+    :seon.error/message ":malli.core/invalid-schema",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T10:10:06.349-00:00",
+    :seon.error/producer seon.schema/direct-reference-keys-in,
+    :seon.error/declared-schema :seon.flow/exception-error,
+    :seon.error/layer :seon.db/database-read,
+    :seon.error/notified [#:db{:id 355904}],
+    :seon.error/producer-digest
+    "9ed5985dccee3a3e8a31f6775283bdc366b8e7f9429d1abc0e3f83777ae67613",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T10:10:06.349-00:00",
+    :seon.error/data-size 6568,
+    :seon.error/at #inst "2026-10-12T10:10:06.326-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.cluster.agent$open_turn_BANG_ invokeStatic "agent.clj" 1473],
+    :seon.error/signature
+    "7c40461fc9f65ac760c65edf0ed2c1d3058d20b111a4cbbc7ea31efc918b4b0f",
+    :seon.error/process "34792-1791797675151"},
+   :seon.error/producer seon.schema/direct-reference-keys-in}
+  {:seon.error/signature
+   "7ea039b9635f47fbd0b33a5a2bf632eb70a440865846026061db25af778bd86d",
+   :seon.error/at #inst "2026-10-12T09:54:13.499-00:00",
+   :seon.error/layer :seon.instrument/invocation,
+   :seon.error/operation seon.error.refusal/diagnostic,
+   :seon.problems/occurrences 1,
+   :seon.error/fact
+   {:seon.error.occurrence/id "cd86f904f2d2",
+    :seon.error/occurrence-count 1,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/agent #:db{:id 276238},
+    :seon.error.occurrence/message
+    "seon.error.refusal/diagnostic refused argument 0 at [:seon.error/message]: expected :seon.error/message (a string of length at least 1), got nil. Fix: Supply a string of length at least 1 at [:seon.error/message]. Called from seon.test/run (test.clj:3007).",
+    :seon.instrument/check :input,
+    :seon.error/operation seon.error.refusal/diagnostic,
+    :seon.error.occurrence/process #:db{:id 274758},
+    :seon.error/capped? true,
+    :seon.instrument/actual-size 3,
+    :seon.error/caller-digest
+    "05e2b1926120a35f98d4d27a55c9d065e5736b2bfcae2fc571fb4be485a63491",
+    :seon.error/type :seon.instrument/contract-error,
+    :seon.error/location
+    {:db/id 315797,
+     :seon.error.location/length 1,
+     :seon.error.location/segments
+     [{:db/id 315798,
+       :seon.error.location.segment/ordinal 0,
+       :seon.error.location.segment/key
+       {:db/id 315799,
+        :seon.error.key/bound-bytes 256,
+        :seon.error.key/capped? false,
+        :seon.error.key/projection ":seon.error/message",
+        :seon.error.key/scalar :seon.error/message}}]},
+    :seon.error.occurrence/branch :agent-175e7196ca5b,
+    :seon.error/data-edn
+    "#:seon.sci.admit{:reason :over-bound, :bytes 3132}",
+    :seon.error/expected-key :seon.error/message,
+    :seon.instrument/fn seon.error.refusal/diagnostic,
+    :seon.error/id
+    "7ea039b9635f47fbd0b33a5a2bf632eb70a440865846026061db25af778bd86d",
+    :seon.instrument/expected
+    "[:map [:seon.error/at :seon.error/at] [:seon.error/layer :seon.error/layer] [:seon.error/operation :seon.error/operation] [:seon.error/message {:optional true} :seon.error/message] [:seon.error/throwable {:optional true} :seon.error/throwable]]",
+    :seon.error/message
+    "seon.error.refusal/diagnostic refused argument 0 at [:seon.error/message]: expected :seon.error/message (a string of length at least 1), got nil. Fix: Supply a string of length at least 1 at [:seon.error/message]. Called from seon.test/run (test.clj:3007).",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T09:54:13.503-00:00",
+    :seon.error/producer seon.test/run,
+    :seon.error/declared-schema :seon.instrument/contract-error,
+    :seon.error/layer :seon.instrument/invocation,
+    :seon.error/notified [#:db{:id 315800}],
+    :seon.error/member :seon.fn.arity/input,
+    :seon.error/producer-digest
+    "05e2b1926120a35f98d4d27a55c9d065e5736b2bfcae2fc571fb4be485a63491",
+    :seon.instrument/args
+    "#:seon.sci.admit{:reason :over-bound, :bytes 3131}",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T09:54:13.503-00:00",
+    :seon.error/expected-shape
+    "5e58cda1d4eec24940a7da22019e5432f476ae85b020714b6586070c6c49aa8b",
+    :seon.error/agent 276238,
+    :seon.error/data-size 7065,
+    :seon.error/caller seon.test/run,
+    :seon.error/at #inst "2026-10-12T09:54:13.499-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.instrument/arity 1,
+    :seon.error/frame [seon.test$run invokeStatic "test.clj" 3007],
+    :seon.instrument/arm :input,
+    :seon.instrument/actual "nil",
+    :seon.error/signature
+    "7ea039b9635f47fbd0b33a5a2bf632eb70a440865846026061db25af778bd86d",
+    :seon.error/process "34792-1791797675151"},
+   :seon.error/producer seon.test/run}
+  {:seon.error/signature
+   "bd510b99623dbc1feab4bd1a14d2470b761da1362051955ae1262a9c8fcebb89",
+   :seon.error/at #inst "2026-10-12T04:32:55.979-00:00",
+   :seon.error/layer :seon.error/normalization,
+   :seon.error/operation seon.sci.eval/install-row!,
+   :seon.problems/occurrences 1,
+   :seon.error/fact
+   {:seon.error.occurrence/id "3410c6de69bb",
+    :seon.error/occurrence-count 1,
+    :seon.error.occurrence/count 1,
+    :seon.error.occurrence/agent #:db{:id 174981},
+    :seon.error.occurrence/message
+    "Unable to resolve symbol: profile/measure",
+    :seon.error/operation seon.sci.eval/install-row!,
+    :seon.error.occurrence/process #:db{:id 175970},
+    :seon.error/capped? false,
+    :seon.error.occurrence/branch :agent-95bbf985bb25,
+    :seon.error/data-edn
+    "{:seon.agent/id \"cost-acquire\", :seon.error/chain [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\", :message \"Unable to resolve symbol: profile/measure\", :data {:type :sci/error, :line 1, :column 1, :file nil, :phase \"analysis\", :sci.impl/symbol profile/measure}, :frames [[seon.sci.eval$install_row_BANG_$fn__16956 invoke \"eval.clj\" 1553] [seon.sci.eval$install_row_BANG_ invokeStatic \"eval.clj\" 1552] [seon.sci.eval$install_row_BANG_ invoke \"eval.clj\" 1393] [seon.sci.eval$reinterpret_reach_BANG_$fn__17598 invoke \"eval.clj\" 2843] [seon.sci.eval$reinterpret_reach_BANG_ invokeStatic \"eval.clj\" 2831] [seon.sci.eval$reinterpret_reach_BANG_ invoke \"eval.clj\" 2822] [seon.sci.eval$install_evaluated_rows_BANG_ invokeStatic \"eval.clj\" 1826] [seon.sci.eval$install_evaluated_rows_BANG_ invoke \"eval.clj\" 1750] [seon.turn$resume_turn$fn__22908 invoke \"turn.clj\" 4811] [seon.turn$resume_turn invokeStatic \"turn.clj\" 4810] [seon.turn$resume_turn invoke \"turn.clj\" 4628] [seon.turn$turn$pass__22936 invoke \"turn.clj\" 4977] [seon.schema$call_with_projection_state$fn__1385 invoke \"schema.clj\" 1162] [seon.schema$call_with_projection_state invokeStatic \"schema.clj\" 1161] [seon.schema$call_with_projection_state invoke \"schema.clj\" 1157] [seon.turn$turn invokeStatic \"turn.clj\" 4987] [seon.turn$turn invoke \"turn.clj\" 4920] [seon.turn$step invokeStatic \"turn.clj\" 5724] [seon.turn$step invoke \"turn.clj\" 5592] [seon.cluster.agent$turn_step$fn__23632 invoke \"agent.clj\" 571] [seon.cluster.agent$turn_step invokeStatic \"agent.clj\" 565] [seon.cluster.agent$turn_step invoke \"agent.clj\" 535] [seon.flow$var_process$step__10506$fn__10509$fn__10513$fn__10514 invoke \"flow.clj\" 434] [seon.flow$with_step_start invokeStatic \"flow.clj\" 316] [seon.flow$with_step_start invoke \"flow.clj\" 308] [seon.flow$var_process$step__10506$fn__10509$fn__10513 invoke \"flow.clj\" 432] [seon.flow$in_world invokeStatic \"flow.clj\" 285] [seon.flow$in_world invoke \"flow.clj\" 267] [seon.flow$var_process$step__10506$fn__10509 invoke \"flow.clj\" 431] [seon.flow$graph_executor$reify__10429$fn__10430$fn__10431 invoke \"flow.clj\" 113] [seon.flow$graph_executor$reify__10429$fn__10430 invoke \"flow.clj\" 113]]}]}",
+    :seon.error/id
+    "bd510b99623dbc1feab4bd1a14d2470b761da1362051955ae1262a9c8fcebb89",
+    :seon.error/message "Unable to resolve symbol: profile/measure",
+    :seon.error.occurrence/last-at
+    #inst "2026-10-12T04:32:55.979-00:00",
+    :seon.error/producer seon.sci.eval/install-row!,
+    :seon.error/declared-schema :seon.flow/exception-error,
+    :seon.error/layer :seon.error/normalization,
+    :seon.error/notified [#:db{:id 176611}],
+    :seon.error/producer-digest
+    "999b8490c4f5272e9a54ffb64bfb33b0f33e62ec1e3d54878403a150f90f02b9",
+    :seon.error.occurrence/first-at
+    #inst "2026-10-12T04:32:55.979-00:00",
+    :seon.error/agent 174981,
+    :seon.error/data-size 2179,
+    :seon.error/at #inst "2026-10-12T04:32:55.979-00:00",
+    :seon.error/throwable-class "clojure.lang.ExceptionInfo",
+    :seon.error/exception-class clojure.lang.ExceptionInfo,
+    :seon.error/frame
+    [seon.sci.eval$install_row_BANG_$fn__16956 invoke "eval.clj" 1553],
+    :seon.error/signature
+    "bd510b99623dbc1feab4bd1a14d2470b761da1362051955ae1262a9c8fcebb89",
+    :seon.error/process "73149-1791779235873"},
+   :seon.error/producer seon.sci.eval/install-row!}]}
