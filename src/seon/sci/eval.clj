@@ -4888,13 +4888,19 @@
                (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))
                 arity-message (interpreted-arity-message throwable)
-                value (cond->
-                          (kernel/failure-value
-                           {::kernel/time-limit-kind ::time-limit
-                            ::kernel/failure-kind ::evaluation-failed}
-                           throwable record)
-                        arity-message
-                        (assoc :seon.error/message arity-message))
+                failure (kernel/failure-value
+                         {::kernel/time-limit-kind ::time-limit
+                          ::kernel/failure-kind ::evaluation-failed}
+                         throwable record)
+                {:keys [line column]} (ex-data throwable)
+                ;; a guessed name: the locals in scope where SCI failed to
+                ;; resolve it, for the reply's nearest names (absent when none)
+                locals (when (and (get-in failure [:seon.error/data :seon.sci.eval/symbol])
+                                  (pos-int? line) (pos-int? column))
+                         (not-empty (error/locals-at (::form request) line column)))
+                value (cond-> failure
+                        arity-message (assoc :seon.error/message arity-message)
+                        locals (assoc-in [:seon.error/data :seon.sci.eval/locals] locals))
                 ;; The agent's failure is its whole flat error, AS DATA (owner
                 ;; 2026-09-27: "return data, not comments"); the fold's show
                 ;; stage prints it.

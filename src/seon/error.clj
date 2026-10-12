@@ -1853,6 +1853,57 @@
                   (:seon.program/not-found error))]
     (when (symbol? found) found)))
 
+(def ^:private binding-vector-heads
+  "The forms whose first argument is a binding vector: its even positions are
+  patterns whose symbols are locals in the body."
+  '#{let let* loop loop* for doseq dotimes if-let when-let if-some when-some with-open})
+
+(defn- pattern-symbols
+  "The symbols a binding or parameter pattern introduces: every simple symbol
+  in it except `&`, destructuring keys and `:as` names included."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:vector :symbol]]}
+  [pattern]
+  (into [] (comp (filter simple-symbol?) (remove #{'&})) (tree-seq coll? seq pattern)))
+
+(defn- bound-locals
+  "The locals the list `node` binds around its body: a binding form's pattern
+  symbols, a `fn`'s name and parameters (each arity's), a `letfn`'s functions
+  and a `catch`'s exception name. Nothing for any other call."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:vector :symbol]]}
+  [node]
+  (let [[head & more] node
+        head (when (symbol? head) (symbol (name head)))
+        params (fn [arities] (into [] (comp (map #(if (seq? %) (first %) %)) (filter vector?) (mapcat pattern-symbols))
+                                   arities))]
+    (cond
+      (binding-vector-heads head)
+      (let [bindings (first more)]
+        (if (vector? bindings) (into [] (mapcat (comp pattern-symbols first)) (partition-all 2 bindings)) []))
+      (#{'fn 'fn* 'defn 'defn- 'defmacro} head) (into (if (and (#{'fn 'fn*} head) (simple-symbol? (first more))) [(first more)] [])
+                                                      (params more))
+      (= 'letfn head) (let [specs (first more)]
+                        (if (vector? specs) (into (mapv first specs) (mapcat #(params (rest %))) specs) []))
+      (= 'catch head) (if (simple-symbol? (nth more 1 nil)) [(nth more 1)] [])
+      :else [])))
+
+(defn locals-at
+  "The locals in scope where SCI reported its analysis failure: every local
+  bound by the lists enclosing the list `form` holds at `line` and `column`
+  (SCI's own position for the failing list), that list's own bindings
+  included. Nothing when no list there is found."
+  {:malli/schema [:=> [:cat :seon.schema/value pos-int? pos-int?] [:vector :symbol]]}
+  [form line column]
+  (letfn [(walk [node scope]
+            (cond
+              (seq? node)
+              (let [scope (into scope (bound-locals node))]
+                (if (and (= line (:line (meta node))) (= column (:column (meta node))))
+                  scope
+                  (some #(walk % scope) node)))
+              (map? node) (some #(walk % scope) (mapcat identity node))
+              (coll? node) (some #(walk % scope) node)))]
+    (vec (distinct (walk form [])))))
+
 (def ^:private names-shown
   "Declared names shown beside a name not found: the nearest by spelling."
   8)
@@ -1863,6 +1914,20 @@
   {:malli/schema [:=> [:cat :string :symbol] [:tuple :int :string]]}
   [wanted sym]
   [(me/levenshtein wanted (name sym)) (name sym)])
+
+(defn- nearest-locals
+  "The `locals` nearest `missing` by spelling (`malli.error/levenshtein`),
+  nearest first, at most `names-shown`: only those within half the name's
+  length, so a guess nothing resembles has none."
+  {:malli/schema [:=> [:cat :symbol [:maybe [:sequential :symbol]]] [:vector :symbol]]}
+  [missing locals]
+  (let [wanted (name missing)
+        limit (quot (count wanted) 2)]
+    (->> locals
+         (keep (fn [local] (let [[distance text :as key] (name-distance wanted local)]
+                             (when (<= distance limit) [key local]))))
+         (sort-by first)
+         (into [] (comp (map second) (take names-shown))))))
 
 (defn- names-in
   "The names `namespace-name` declares nearest to `missing` by spelling, at
@@ -2075,7 +2140,9 @@
   - `:seon.error/in-namespace`: when a name was not found, the names its
     namespace declares nearest to it by spelling, at most eight; absent
     when it declares none.
-  - `:seon.error/nearest`: when a name was not found, the calling forms
+  - `:seon.error/nearest`: when a name was not found, first the locals in
+    scope at the failing form nearest to it by spelling
+    (`:seon.sci.eval/locals` of the error's data), then the calling forms
     of the public declarations nearest to it across every namespace, by the
     words of their names (`nearest-names`), at most eight.
   - `:seon.error/sources`: where each function the refusal names (a
@@ -2157,7 +2224,10 @@
          arity? (contains? error :seon.instrument/declared-arities)
          ;; an empty name list is no key; a refused read is shown as it is
          in-namespace (when (and database namespace-name) (names-in database namespace-name missing))
-         nearest (when (and database missing) (nearest-calls database missing namespace-name))]
+         locals (when (and missing (simple-symbol? missing))
+                  (nearest-locals missing (get-in error [:seon.error/data :seon.sci.eval/locals])))
+         calls (when (and database missing) (nearest-calls database missing namespace-name))
+         nearest (into (vec locals) calls)]
      (cond-> (if options (variant-members options error) {})
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)

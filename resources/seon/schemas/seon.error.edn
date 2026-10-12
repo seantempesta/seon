@@ -431,7 +431,7 @@
  [:map-of {:description "When a name was not found: its namespace and the names declared there nearest to it by spelling, at most eight (seon.error/reply-value). Shown, never stored."}
   :symbol [:or [:vector :symbol] :seon.db/error-result]]
  :seon.error/nearest
- [:vector {:description "When a name was not found: the calling form (symbol and shortest arglist) of each public declaration nearest to it across every namespace, by the words of the names, at most eight (seon.error/reply-value). Shown, never stored."}
+ [:vector {:description "When a name was not found: the locals in scope at the failing form nearest to it by spelling, then the calling form (symbol and shortest arglist) of each public declaration nearest to it across every namespace, by the words of the names, at most eight (seon.error/reply-value). Shown, never stored."}
   :seon.schema/value]
  :seon.error/sources
  [:map-of {:description "For each function a refusal names (at most three), the lines of its source that mention the blocked subject, numbered within the definition (seon.error/reply-value). Shown, never stored."}

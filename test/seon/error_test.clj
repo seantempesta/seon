@@ -1888,3 +1888,19 @@
                                                     :seon.sci.eval/stacktrace [['seon.sci.forgive 1 5]]})]
     (is (some #{'seon.sci.forgive/scan} (tree-seq coll? seq (:seon.error/nearest reply)))
         "the forms offered name the definition whose local the agent evaluated alone")))
+
+(deftest a-guessed-local-is-answered-with-the-nearest-locals
+  ;; Run 10 (33bf94ee6) F2: a DeepSeek agent resent a 200-line defn nine times, five with `balanced?`
+  ;; where the local is `balanced`; the error named only `balanced?` and a line number.
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "nearest-local"})
+     (let [ctx (test-support/fork-cluster-ctx connection "nearest-local")
+           failure (test-support/agent-value
+                    ctx "(defn local-guess [items]\n  (let [balanced (count items) other 2]\n    (if balanced? balanced other)))")
+           reply (error/reply-value (db/db connection) failure)]
+       (is (= 'balanced? (:seon.error/offending failure)))
+       (is (some #{'balanced} (:seon.error/nearest reply))
+           "the local in scope at the failing form is named beside the guess")
+       (is (not-any? #{'other 'items} (take 1 (:seon.error/nearest reply)))
+           "the nearest local by spelling ranks first")))))
