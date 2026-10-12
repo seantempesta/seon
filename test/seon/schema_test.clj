@@ -1981,6 +1981,19 @@
              (select-keys (register :seon.schema-test/admitted :int)
                           [:seon.schema/key :seon.schema/definition]))))))
 
+(deftest a-form-malli-cannot-parse-is-refused-with-malli-s-reason
+  ;; Malli reads a nil second element as the properties slot, so `[:= nil]`
+  ;; has no child: the refusal names that reason and the fix, not "got a vector".
+  (let [delta (registration-delta)
+        refused (schema/call-with-registration-delta
+                 delta #(schema/register! :seon.schema-test/nil-literal '[:or :inst [:= nil]]))]
+    (is (= :seon.schema/malformed-form (:seon.error/member refused)))
+    (is (= :malli.core/child-error (:seon.schema/malli-error refused)))
+    (is (= '[:or :inst [:= nil]] (:seon.error/offending refused)))
+    (is (re-find #"\[:= \{\} nil\]" (:seon.error/fix refused)))
+    (is (re-find #"change the caller" (:seon.error/fix refused)))
+    (is (nil? (schema/registration-delta-form delta :seon.schema-test/nil-literal)))))
+
 (deftest schema-changes-outside-an-evaluation-answer-their-refusal
   ;; Registration and unregistration stage into an evaluation's delta; outside
   ;; one, each answers its declared refusal instead of throwing.

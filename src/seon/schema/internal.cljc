@@ -539,8 +539,9 @@
                     "nilable/[:maybe …]. Register the non-nil base shape "
                     "(:seon.schema/base-definition) instead. Where a map "
                     "field may be absent, mark its entry {:optional true}. "
-                    "Where a function slot may return nil, "
-                    "put [:maybe " k "] directly in that function schema.")
+                    "Where a function takes or returns nil, change the caller so it "
+                    "does not pass nil, or take a map with the key optional "
+                    "(absent, never nil).")
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
                 :seon.schema/definition v

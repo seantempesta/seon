@@ -1708,7 +1708,7 @@
                                   :seon.render/ai 'foo}
                             [:seon.eval/id ...] ...])"
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
-                         [::definition ::definition]]
+                         [::definition [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The authored form can be any value; the refusal for one Malli cannot parse is returned with Malli's own reason.", :gen/elements [nil 0 :k [] {}]}]]]
                   [:or ::registration ::registration-refused-error]]}
   [k v]
   (try
@@ -1742,12 +1742,38 @@
     (m/schema predicates-as-any {:registry registry})
     @named))
 
+;; `[:= nil]` is the gotcha: Malli reads a nil second element as the
+;; properties slot, so the form has no child (:malli.core/child-error).
+(defn- parsed-form
+  "The structural schema of `v`, or the declared refusal carrying Malli's own reason."
+  {:malli/schema [:=> [:cat ::registry-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The authored form can be any value; the refusal for one Malli cannot parse is returned with Malli's own reason.", :gen/elements [nil 0 :k [] {}]}]] [:fn malli.core/schema?]]}
+  [k v]
+  (try
+    (structural-schema v)
+    (catch clojure.lang.ExceptionInfo failure
+      (let [malli-type (:type (ex-data failure))]
+        (if (and (qualified-keyword? malli-type) (= "malli.core" (namespace malli-type)))
+          (throw
+           (ex-info
+            (str "schema/register! " k ": Malli cannot parse this form (" malli-type "). "
+                 "A nil in the second position is read as the properties map, so "
+                 "[:= nil] and [:enum nil] have no child.")
+            (cond-> {:seon.schema/error :seon.schema/malformed-form
+                     :seon.schema/key k
+                     :seon.schema/definition v
+                     :seon.schema/malli-error malli-type}
+              (= :malli.core/child-error malli-type)
+              (assoc :seon.error/fix
+                     "Write [:= {} nil] (an empty properties map first) or prefer :nil; but a registered value is never nil: change the caller so it does not pass nil, or take a map with the key optional."))
+            failure))
+          (throw failure))))))
+
 (defn- register-candidate!
   "The body of [[register!]]: admit `v` as `k`, or throw the population's
   refusal, which [[register!]] returns as its error value."
-  {:malli/schema [:=> [:cat ::registry-key ::definition] ::registration]}
+  {:malli/schema [:=> [:cat ::registry-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The authored form can be any value; the refusal for one Malli cannot parse is returned with Malli's own reason.", :gen/elements [nil 0 :k [] {}]}]] ::registration]}
   [k v]
-  (internal/assert-non-nilable-value-schema! (candidate-forms) k (structural-schema v))
+  (internal/assert-non-nilable-value-schema! (candidate-forms) k (parsed-form k v))
   (let [encoded (id/printed v)
         decoded (try
                   (edn/read-string encoded)
