@@ -2004,13 +2004,15 @@
                 {} (distinct function-symbols))))))
 
 (defn- closure-walk
-  "The tests reaching `seeds` at `depth` (`::tests`) and at two levels
-  (`::selected`). Nil depth walks the complete closure and returns its
-  function names (`::affected`). A test reaches by calling a walked function,
-  naming one as `:seon.test/subject` or being a seed. Declared invocation edges
-  count; symbol mentions do not. Throws a read refusal."
+  "The tests reaching `seeds` (`::tests`). Nil depth walks the complete closure
+  and returns its function names (`::affected`). A depth walks at least that
+  many caller levels, then on until some walked level holds a test, so a
+  function reached only through callers is selected by the nearest tests above
+  it. A test reaches by calling a walked function, naming one as
+  `:seon.test/subject` or being a seed. Declared invocation edges count; symbol
+  mentions do not. Throws a read refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
-                  [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests] [::selected :seon.fn/tests]]]}
+                  [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
   [database seeds depth]
   (let [read! read-or-throw!
         seeds (vec seeds)
@@ -2028,20 +2030,6 @@
                   (into #{} (keep :seon.fn/sym)
                         (read! (db/pull-many database [:seon.fn/sym]
                                             (mapv #(vector :seon.fn/sym %) seeds)))))
-        ;; a caller entity named once is never resolved again; test entities
-        ;; are leaves the walk keeps but never extends. `levels` holds each
-        ;; level's [frontier caller-entities], seeds' callers first.
-        [affected levels]
-        (loop [frontier seeds seen (set seeds) entities #{} affected present levels []]
-          (if (or (empty? frontier) (= depth (count levels)))
-            [affected levels]
-            (let [callers (into #{} (remove entities)
-                                (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
-                                        (mapcat (or declared (declared-callers read! database frontier)) frontier)))
-                  fresh (when (or (nil? depth) (< (inc (count levels)) depth))
-                          (vec (remove seen (named :seon.fn/sym callers))))]
-              (recur fresh (into seen fresh) (into entities callers) (when-not depth (into affected fresh))
-                     (conj levels [frontier callers])))))
         subject-datoms (read! (db/datoms database :aevt :seon.test/subject))
         subjects (fn [targets] (into #{} (keep #(when (targets (:v %)) (:e %))) subject-datoms))
         seed-tests (into #{} (keep :seon.test/sym)
@@ -2051,12 +2039,23 @@
                    (let [walked (into (set seeds) (mapcat first) levels)]
                      (vec (sort (into seed-tests
                                       (named :seon.test/sym
-                                             (into (subjects walked) (mapcat second) levels)))))))]
-    (let [tests (tests-of levels)]
-      ;; The owner's selection depth: seeds and their direct callers.
-      (cond-> {::tests tests
-               ::selected (if (<= (count levels) 2) tests (tests-of (take 2 levels)))}
-        (nil? depth) (assoc ::affected affected)))))
+                                             (into (subjects walked) (mapcat second) levels)))))))
+        ;; a caller entity named once is never resolved again; test entities
+        ;; are leaves the walk keeps but never extends. `levels` holds each
+        ;; level's [frontier caller-entities], seeds' callers first.
+        [affected levels]
+        (loop [frontier seeds seen (set seeds) entities #{} affected present levels []]
+          (if (or (empty? frontier)
+                  (and depth (<= depth (count levels)) (seq (tests-of levels))))
+            [affected levels]
+            (let [callers (into #{} (remove entities)
+                                (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
+                                        (mapcat (or declared (declared-callers read! database frontier)) frontier)))
+                  fresh (vec (remove seen (named :seon.fn/sym callers)))]
+              (recur fresh (into seen fresh) (into entities callers) (when-not depth (into affected fresh))
+                     (conj levels [frontier callers])))))]
+    (cond-> {::tests (tests-of levels)}
+      (nil? depth) (assoc ::affected affected))))
 
 (defn reverse-closure
   "The transitive callers of `seeds` and the tests reaching them at any depth,
@@ -2073,13 +2072,13 @@
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
 (defn- reaching-tests
-  "The tests the walk of `seeds` selects: those calling a seed or a direct
-  caller (`seon.fn/closure-walk`)."
+  "The tests the walk of `seeds` selects: those calling a seed or a caller within
+  the nearest level holding a test (`seon.fn/closure-walk`)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database seeds]
   (try
-    (::selected (closure-walk database seeds 2))
+    (::tests (closure-walk database seeds 2))
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
