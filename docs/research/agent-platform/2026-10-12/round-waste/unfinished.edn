@@ -1,0 +1,391 @@
+{:terminal
+ #:seon.profile{:ms 20450.98,
+                :alloc-bytes 189469672,
+                :value
+                #:seon.test{:results
+                            [{:seon.test.member/completed-tx
+                              #:db{:id 536870954},
+                              :seon.test.member/top
+                              #{[seon.db/database-value? 1080 0]
+                                [seon.render.value/nest 524 0]
+                                [seon.schema/projection-cache-value
+                                 320
+                                 0]
+                                [seon.print/leaf-ops 567 0]
+                                [seon.render.value/extras 828 1]
+                                [seon.render.value/classify 414 1]
+                                [seon.print/node-child? 1420 0]
+                                [seon.render.value/more? 1772 0]
+                                [seon.render.value/flat-width 594 1]
+                                [seon.db/transaction-report-datom?
+                                 532
+                                 0]},
+                              :seon.test.run/program-digest
+                              "f6a41edad11e4f76b56055fbfd296bb0443222f7824418d851b65f751b56d038",
+                              :seon.test.run/terminated? true,
+                              :seon.test/failing-assertions
+                              ["0966cd5c50acafab5103f971f5e79e2455425baf658b072034d108b61451060a"
+                               "28d3dad6619c2e160c6083073d80a8c003236ff2e628a837e807accad18e0646"
+                               "817eb32a4c1d50a5602faf8cd29baee12f87b670ee62c4fcb89606bbc1466472"
+                               "f5bd09a431826b0c5d372cac248dd50ef688462c79aac2256ff5a037911dd2eb"],
+                              :seon.test/fail-count 4,
+                              :seon.test/pass-count 4,
+                              :seon.test/run-at
+                              #inst "2026-10-12T11:50:17.977-00:00",
+                              :seon.test.run/input-digest
+                              "339493213c251966c7f1554877e8c7c699fffb80a2096e0464630c2f4a80cd82",
+                              :seon.test.member/calls 15780,
+                              :seon.test.failure/reports
+                              [{:seon.test/failure-identity
+                                "28d3dad6619c2e160c6083073d80a8c003236ff2e628a837e807accad18e0646",
+                                :seon.test.report/id "dce844a699cc",
+                                :seon.test.failure/expected
+                                "(test-support/await-event!\n (get-in entry [:seon.flow/started :report-chan])\n :seon.cluster.agent-test/closed-turn\n (fn* [p1__4687#] (= :closed (:seon.turn.loop/outcome p1__4687#))))",
+                                :seon.test.failure/expected-size 182,
+                                :seon.test.failure/type :error,
+                                :seon.test.failure/throwable
+                                clojure.lang.ExceptionInfo,
+                                :seon.test.failure/actual-blob
+                                "7110d8b3f09e519e7a3ebcade39d5f0f8fe850aaf3ae3eaf7fb2b907ea5b5874",
+                                :seon.test.failure/testing-contexts
+                                ["one committed trigger → exactly one run, one\n                provider call"],
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test,
+                                :seon.test.failure/actual
+                                "[#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n  :data\n    #:seon.test-support{:event :seon.cluster.agent-test/closed-turn,\n     :timeout-ms 20000},\n  :message \"The test channel did not publish its required event.\",\n  :frames\n    [[seon.test_support$await_event_BANG_ invokeStatic\n      \"test_support.clj\" 616]\n     [seon.test_support$await_event_BANG_ invoke \"test_support.clj\" 558]\n     [seon.test_support$await_event_BANG_ invokeStatic\n      \"test_support.clj\" 564]\n     [seon.test_support$await_event_BANG_ invoke \"test_support.clj\" 558]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690$fn__4703$fn__4704\n      invoke \"agent_test.clj\" 1320]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690$fn__4703 invoke\n      \"agent_test.clj\" 1320]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690 invoke\n      \"agent_test.clj\" 1315]\n     [seon.test_support$with_provider invokeStatic \"test_support.clj\"\n      1446]\n     [seon.test_support$with_provider invoke \"test_support.clj\" 1437]\n     [seon.test_support$with_provider invokeStatic \"test_support.clj\"\n      1443]\n     [seon.test_support$with_provider invoke \"test_support.clj\" 1437]\n     [seon.cluster.agent_test$fn__4688$fn__4689 invoke \"agent_test.clj\"\n      1300]\n     [seon.cluster.agent_test$with_connection$fn__3810 invoke\n      \"agent_test.clj\" 140]\n     [seon.test_support$run_database_body$fn__3548$fn__3549 invoke\n      \"test_support.clj\" 968]\n     [seon.schema$call_with_projection_state$fn__1390 invoke\n      \"schema.clj\" 1162]\n     [seon.schema$call_with_projection_state invokeStatic \"schema.clj\"\n      1161]\n     [seon.schema$call_with_projection_state invoke \"schema.clj\" 1157]\n     [seon.test_support$run_database_body$fn__3548 invoke\n      \"test_support.clj\" 963]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test_support$run_database_body invokeStatic\n      \"test_support.clj\" 961]\n     [seon.test_support$run_database_body invoke \"test_support.clj\" 954]\n     [seon.test_support$with_branched_database invokeStatic\n      \"test_support.clj\" 1019]\n     [seon.test_support$with_branched_database invoke \"test_support.clj\"\n      1006]\n     [seon.test_support$with_database invokeStatic \"test_support.clj\"\n      1047]\n     [seon.test_support$with_database invoke \"test_support.clj\" 1022]\n     [seon.test_support$with_database invokeStatic \"test_support.clj\"\n      1043]\n     [seon.test_support$with_database invoke \"test_support.clj\" 1022]\n     [seon.cluster.agent_test$with_connection invokeStatic\n      \"agent_test.clj\" 76]\n     [seon.cluster.agent_test$with_connection invoke \"agent_test.clj\" 68]\n     [seon.cluster.agent_test$fn__4688 invokeStatic \"agent_test.clj\"\n      1296]\n     [seon.cluster.agent_test$fn__4688 invoke \"agent_test.clj\" 1295]\n     [seon.test.runner$run_selected_tests invokeStatic \"runner.clj\" 504]\n     [seon.test.runner$run_selected_tests invoke \"runner.clj\" 473]\n     [seon.test.runner$run_vars_BANG_$fn__15903$fn__15908$fn__15909\n      invoke \"runner.clj\" 423]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test.runner$run_vars_BANG_$fn__15903$fn__15908 invoke\n      \"runner.clj\" 422]\n     [seon.test.runner$run_vars_BANG_$fn__15903 invoke \"runner.clj\" 414]\n     [seon.test.runner$run_vars_BANG_ invokeStatic \"runner.clj\" 397]\n     [seon.test.runner$run_vars_BANG_ invoke \"runner.clj\" 387]\n     [seon.test.runner$run_var_BANG_ invokeStatic \"runner.clj\" 470]\n     [seon.test.runner$run_var_BANG_ invoke \"runner.clj\" 435]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880$fn__19882$fn__19883\n      invoke \"test.clj\" 342]\n     [seon.test$with_test_loader$fn__19838 invoke \"test.clj\" 120]\n     [seon.test$with_test_loader invokeStatic \"test.clj\" 120]\n     [seon.test$with_test_loader invoke \"test.clj\" 113]\n     [seon.test$with_test_loader invokeStatic \"test.clj\" 114]\n     [seon.test$with_test_loader invoke \"test.clj\" 113]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880$fn__19882\n      invoke \"test.clj\" 330]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880\n      invoke \"test.clj\" 327]\n     [seon.test$measured_body$fn__19868 invoke \"test.clj\" 240]\n     [seon.test$measured_body invokeStatic \"test.clj\" 240]\n     [seon.test$measured_body invoke \"test.clj\" 227]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879 invoke\n      \"test.clj\" 321]\n     [seon.sci.eval$call_detecting_program_change$fn__17061 invoke\n      \"eval.clj\" 1216]\n     [seon.sci.eval$call_detecting_program_change invokeStatic\n      \"eval.clj\" 1215]\n     [seon.sci.eval$call_detecting_program_change invoke \"eval.clj\" 1178]\n     [seon.test$bounded_result$fn__19876$fn__19878 invoke \"test.clj\" 305]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test$bounded_result$fn__19876 invoke \"test.clj\" 303]]}]"}
+                               {:seon.test/failure-identity
+                                "f5bd09a431826b0c5d372cac248dd50ef688462c79aac2256ff5a037911dd2eb",
+                                :seon.test.failure/reported-file
+                                "test/seon/cluster/agent_test.clj",
+                                :seon.test.report/id "11550dbabf57",
+                                :seon.test.failure/expected
+                                "(= 1 (count (clojure.core/deref ledger)))",
+                                :seon.test.failure/expected-size 41,
+                                :seon.test.failure/type :fail,
+                                :seon.test.failure/actual-size 13,
+                                :seon.test.failure/line 1330,
+                                :seon.test.failure/testing-contexts
+                                ["a probe wake reports an idle pass and calls nothing"],
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test,
+                                :seon.test.failure/actual
+                                "(not (= 1 0))"}
+                               {:seon.test/failure-identity
+                                "0966cd5c50acafab5103f971f5e79e2455425baf658b072034d108b61451060a",
+                                :seon.test.failure/reported-file
+                                "test/seon/cluster/agent_test.clj",
+                                :seon.test.report/id "3424095decb4",
+                                :seon.test.failure/expected
+                                "(=\n {\"m-2026072812\" 1}\n (answers-by-trigger (clojure.core/deref connection)))",
+                                :seon.test.failure/expected-size 77,
+                                :seon.test.failure/type :fail,
+                                :seon.test.failure/actual-size 31,
+                                :seon.test.failure/line 1325,
+                                :seon.test.failure/testing-contexts
+                                ["one committed trigger → exactly one run, one\n                provider call"],
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test,
+                                :seon.test.failure/actual
+                                "(not (= {\"m-2026072812\" 1} {}))"}
+                               {:seon.test/failure-identity
+                                "817eb32a4c1d50a5602faf8cd29baee12f87b670ee62c4fcb89606bbc1466472",
+                                :seon.test.report/id "b5aca920b5e1",
+                                :seon.test.failure/expected
+                                "{:seon.test/time-limit-ms 5000}",
+                                :seon.test.failure/expected-size 31,
+                                :seon.test.failure/type :fail,
+                                :seon.test.failure/message
+                                "Test seon.cluster.agent-test/park-wake-test exceeded its declared duration: 20161.7635 ms; bound 5000 ms.",
+                                :seon.test.failure/message-size 105,
+                                :seon.test.failure/actual-size 34,
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test,
+                                :seon.test.failure/actual
+                                "{:seon.test/elapsed-ms 20161.7635}"}
+                               {:seon.test/failure-identity
+                                "f5bd09a431826b0c5d372cac248dd50ef688462c79aac2256ff5a037911dd2eb",
+                                :seon.test.failure/reported-file
+                                "test/seon/cluster/agent_test.clj",
+                                :seon.test.report/id "fbbe1e89de7f",
+                                :seon.test.failure/expected
+                                "(= 1 (count (clojure.core/deref ledger)))",
+                                :seon.test.failure/expected-size 41,
+                                :seon.test.failure/type :fail,
+                                :seon.test.failure/actual-size 13,
+                                :seon.test.failure/line 1324,
+                                :seon.test.failure/testing-contexts
+                                ["one committed trigger → exactly one run, one\n                provider call"],
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test,
+                                :seon.test.failure/actual
+                                "(not (= 1 0))"}],
+                              :seon.test.member/alloc-bytes 145503280,
+                              :seon.test/failure-message
+                              "one committed trigger → exactly one run, one\n                provider call\nexpected: (test-support/await-event!\n (get-in entry [:seon.flow/started :report-chan])\n :seon.cluster.agent-test/closed-turn\n (fn* [p1__4687#] (= :closed (:seon.turn.loop/outcome p1__4687#))))\nactual: [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n  :data\n    #:seon.test-support{:event :seon.cluster.agent-test/closed-turn,\n     :timeout-ms 20000},\n  :message \"The test channel did not publish its required event.\",\n  :frames\n    [[seon.test_support$await_event_BANG_ invokeStatic\n      \"test_support.clj\" 616]\n     [seon.test_support$await_event_BANG_ invoke \"test_support.clj\" 558]\n     [seon.test_support$await_event_BANG_ invokeStatic\n      \"test_support.clj\" 564]\n     [seon.test_support$await_event_BANG_ invoke \"test_support.clj\" 558]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690$fn__4703$fn__4704\n      invoke \"agent_test.clj\" 1320]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690$fn__4703 invoke\n      \"agent_test.clj\" 1320]\n     [seon.cluster.agent_test$fn__4688$fn__4689$fn__4690 invoke\n      \"agent_test.clj\" 1315]\n     [seon.test_support$with_provider invokeStatic \"test_support.clj\"\n      1446]\n     [seon.test_support$with_provider invoke \"test_support.clj\" 1437]\n     [seon.test_support$with_provider invokeStatic \"test_support.clj\"\n      1443]\n     [seon.test_support$with_provider invoke \"test_support.clj\" 1437]\n     [seon.cluster.agent_test$fn__4688$fn__4689 invoke \"agent_test.clj\"\n      1300]\n     [seon.cluster.agent_test$with_connection$fn__3810 invoke\n      \"agent_test.clj\" 140]\n     [seon.test_support$run_database_body$fn__3548$fn__3549 invoke\n      \"test_support.clj\" 968]\n     [seon.schema$call_with_projection_state$fn__1390 invoke\n      \"schema.clj\" 1162]\n     [seon.schema$call_with_projection_state invokeStatic \"schema.clj\"\n      1161]\n     [seon.schema$call_with_projection_state invoke \"schema.clj\" 1157]\n     [seon.test_support$run_database_body$fn__3548 invoke\n      \"test_support.clj\" 963]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test_support$run_database_body invokeStatic\n      \"test_support.clj\" 961]\n     [seon.test_support$run_database_body invoke \"test_support.clj\" 954]\n     [seon.test_support$with_branched_database invokeStatic\n      \"test_support.clj\" 1019]\n     [seon.test_support$with_branched_database invoke \"test_support.clj\"\n      1006]\n     [seon.test_support$with_database invokeStatic \"test_support.clj\"\n      1047]\n     [seon.test_support$with_database invoke \"test_support.clj\" 1022]\n     [seon.test_support$with_database invokeStatic \"test_support.clj\"\n      1043]\n     [seon.test_support$with_database invoke \"test_support.clj\" 1022]\n     [seon.cluster.agent_test$with_connection invokeStatic\n      \"agent_test.clj\" 76]\n     [seon.cluster.agent_test$with_connection invoke \"agent_test.clj\" 68]\n     [seon.cluster.agent_test$fn__4688 invokeStatic \"agent_test.clj\"\n      1296]\n     [seon.cluster.agent_test$fn__4688 invoke \"agent_test.clj\" 1295]\n     [seon.test.runner$run_selected_tests invokeStatic \"runner.clj\" 504]\n     [seon.test.runner$run_selected_tests invoke \"runner.clj\" 473]\n     [seon.test.runner$run_vars_BANG_$fn__15903$fn__15908$fn__15909\n      invoke \"runner.clj\" 423]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test.runner$run_vars_BANG_$fn__15903$fn__15908 invoke\n      \"runner.clj\" 422]\n     [seon.test.runner$run_vars_BANG_$fn__15903 invoke \"runner.clj\" 414]\n     [seon.test.runner$run_vars_BANG_ invokeStatic \"runner.clj\" 397]\n     [seon.test.runner$run_vars_BANG_ invoke \"runner.clj\" 387]\n     [seon.test.runner$run_var_BANG_ invokeStatic \"runner.clj\" 470]\n     [seon.test.runner$run_var_BANG_ invoke \"runner.clj\" 435]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880$fn__19882$fn__19883\n      invoke \"test.clj\" 342]\n     [seon.test$with_test_loader$fn__19838 invoke \"test.clj\" 120]\n     [seon.test$with_test_loader invokeStatic \"test.clj\" 120]\n     [seon.test$with_test_loader invoke \"test.clj\" 113]\n     [seon.test$with_test_loader invokeStatic \"test.clj\" 114]\n     [seon.test$with_test_loader invoke \"test.clj\" 113]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880$fn__19882\n      invoke \"test.clj\" 330]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879$fn__19880\n      invoke \"test.clj\" 327]\n     [seon.test$measured_body$fn__19868 invoke \"test.clj\" 240]\n     [seon.test$measured_body invokeStatic \"test.clj\" 240]\n     [seon.test$measured_body invoke \"test.clj\" 227]\n     [seon.test$bounded_result$fn__19876$fn__19878$fn__19879 invoke\n      \"test.clj\" 321]\n     [seon.sci.eval$call_detecting_program_change$fn__17061 invoke\n      \"eval.clj\" 1216]\n     [seon.sci.eval$call_detecting_program_change invokeStatic\n      \"eval.clj\" 1215]\n     [seon.sci.eval$call_detecting_program_change invoke \"eval.clj\" 1178]\n     [seon.test$bounded_result$fn__19876$fn__19878 invoke \"test.clj\" 305]\n     [seon.db$with_branch invokeStatic \"db.clj\" 479]\n     [seon.db$with_branch invoke \"db.clj\" 450]\n     [seon.test$bounded_result$fn__19876 invoke \"test.clj\" 303]]}]\n\none committed trigger → exactly one run, one\n                provider call\nexpected: (= 1 (count (clojure.core/deref ledger)))\nactual: (not (= 1 0))\n\none committed trigger → exactly one run, one\n                provider call\nexpected: (=\n {\"m-2026072812\" 1}\n (answers-by-trigger (clojure.core/deref connection)))\nactual: (not (= {\"m-2026072812\" 1} {}))\n\nTest seon.cluster.agent-test/park-wake-test exceeded its declared duration: 20161.7635 ms; bound 5000 ms.\nexpected: {:seon.test/time-limit-ms 5000}\nactual: {:seon.test/elapsed-ms 20161.7635}",
+                              :seon.test/run
+                              [:seon.test.run/id "cbe55962a01a"],
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/run-basis-t 536870952,
+                              :seon.test.run/basis-t 536870952,
+                              :seon.test.member/run-ms 20184.281583,
+                              :seon.test/error-count 1,
+                              :seon.test.member/began? true,
+                              :seon.test.member/ended? true,
+                              :seon.test.member/reach-digest
+                              "89833ca463bcf22e661237e1b892790d00d7fd85b9877029e470ddcd9759ea10",
+                              :seon.test/sym
+                              seon.cluster.agent-test/park-wake-test}],
+                            :passed? false}},
+ :late
+ {:events 144,
+  :requests 134,
+  :results 2807,
+  :request-ms 4620372,
+  :body-ms 2982197.317744003,
+  :nukes 9,
+  :unknown
+  [{:first
+    seon.cluster.agent-namespace-test/source-bearing-namespaces-without-a-steward-derive-one-problem-line,
+    :ms 300008}
+   {:first
+    seon.cluster.publication-inputs-test/file-entity-selection-follows-declaration-and-finding-refs,
+    :ms 300006}
+   {:first
+    seon.cluster.reload-per-declaration-test/ordinary-defn-reloads-only-its-namespace,
+    :ms 300004}
+   {:first
+    seon.cluster.wake-test/a-live-but-non-accepting-route-still-faults-loudly,
+    :ms 300005}
+   {:first
+    seon.cluster.armed-test/an-escaped-throwable-becomes-a-fact-and-a-message,
+    :ms 150004}],
+  :unfinished
+  [{:first
+    seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings,
+    :ms 25090,
+    :unfinished
+    [seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings]}
+   {:first
+    seon.cluster.agent-test/every-run-reaches-one-terminal-and-the-next-run-works,
+    :ms 40136,
+    :unfinished
+    [seon.cluster.agent-test/n-agent-parallel-turns-property]}
+   {:first seon.cluster.agent-test/park-wake-test,
+    :ms 5164,
+    :unfinished [seon.cluster.agent-test/park-wake-test]}
+   {:first seon.cluster.agent-test/pause-during-in-flight-call-test,
+    :ms 35086,
+    :unfinished
+    [seon.cluster.agent-test/pause-during-in-flight-call-test]}
+   {:first
+    seon.cluster.agent-test/release-joins-every-owned-graph-before-it-closes-the-branch,
+    :ms 15166,
+    :unfinished
+    [seon.cluster.agent-test/release-joins-every-owned-graph-before-it-closes-the-branch]}
+   {:first seon.cluster.agent-test/restamp-recovery-test,
+    :ms 5092,
+    :unfinished [seon.cluster.agent-test/restamp-recovery-test]}
+   {:first
+    seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence,
+    :ms 5095,
+    :unfinished
+    [seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence]}
+   {:first
+    seon.cluster.agent-test/routing-proof-rejects-an-empty-production-subject,
+    :ms 39153,
+    :unfinished
+    [seon.cluster.agent-test/stop-flow-interrupts-an-in-flight-turn-and-records-it-interrupted]}
+   {:first
+    seon.cluster.agent-test/turn-start-has-the-same-declared-loud-completion-backstop,
+    :ms 25183,
+    :unfinished
+    [seon.cluster.agent-test/wake-routing-conservation-property]}
+   {:first
+    seon.cluster.armed-test/a-message-committed-during-boot-start-is-conserved,
+    :ms 5133,
+    :unfinished
+    [seon.cluster.armed-test/a-message-committed-during-boot-start-is-conserved]}]},
+ :discarded-candidate
+ {:sha "4a3b4c82f77eef93b525fb1b2d7bb984a06f0c31",
+  :run "27c5a6b8337b",
+  :body-ms 61602.869958,
+  :request-ms 66588,
+  :fail 4,
+  :error 3,
+  :pass 2},
+ :process
+ {:seon.boot/pid 38218,
+  :seon.boot/start-instant #inst "2026-10-12T11:48:35.090-00:00",
+  :seon.boot/cluster-name "default",
+  :seon.boot/prepl-host "127.0.0.1",
+  :seon.boot/prepl-port 59192,
+  :seon.render.web/url "http://127.0.0.1:59199",
+  :seon.render.web/port 59199},
+ :basis "61b9534d7ec0e879a20f9de1b941be48e5b6fb55",
+ :original
+ #:seon.profile{:ms 5140.37,
+                :alloc-bytes 6633101656,
+                :value
+                #:seon.test{:results
+                            [{:seon.test.member/completed-tx
+                              #:db{:id 536870944},
+                              :seon.test.run/program-digest
+                              "7c8f124cd5540f35b241c6fdf938dc1f1cf12caa519ea22beb9d4f99f7b58278",
+                              :seon.test.run/terminated? false,
+                              :seon.test/fail-count 0,
+                              :seon.test/pass-count 0,
+                              :seon.test/run-at
+                              #inst "2026-10-12T11:49:10.465-00:00",
+                              :seon.test.run/input-digest
+                              "339493213c251966c7f1554877e8c7c699fffb80a2096e0464630c2f4a80cd82",
+                              :seon.test.failure/reports
+                              [{:seon.test/failure-identity
+                                "bfdebfc22715add48a74831cb63195167e5c677f3ee99090fe8dde7f653ed524",
+                                :seon.test.failure/message
+                                "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 761 ms; thread 86 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                                :seon.test.failure/message-size 260,
+                                :seon.test.failure/type :error,
+                                :seon.test.report/id "482dcf802b12",
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test}],
+                              :seon.test/failure-message
+                              "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 761 ms; thread 86 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                              :seon.agent/branch :agent-0b565d3ee577,
+                              :seon.test/run
+                              [:seon.test.run/id "0d73cea908b8"],
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/run-basis-t 536870942,
+                              :seon.test.run/basis-t 536870942,
+                              :seon.test/error-count 1,
+                              :seon.test.member/began? false,
+                              :seon.test.member/ended? false,
+                              :seon.test.member/reach-digest
+                              "279e06c3eea3f33cda6d36553bae48008d6193c492424cfc541b1ffc17ecaba7",
+                              :seon.test/sym
+                              seon.cluster.agent-test/park-wake-test}],
+                            :unfinished
+                            [{:seon.test.run/terminated? false,
+                              :seon.test/fail-count 0,
+                              :seon.test/pass-count 0,
+                              :seon.test/failure-message
+                              "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 761 ms; thread 86 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                              :seon.agent/branch :agent-0b565d3ee577,
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/error-count 1,
+                              :seon.test.member/began? false,
+                              :seon.test.member/ended? false,
+                              :seon.test/sym
+                              seon.cluster.agent-test/park-wake-test}],
+                            :passed? false}},
+ :tagged-proof
+ {:candidate "988d689be7e36f93f8e494b989a01936f9be5ddb",
+  :run "1aac362520e6",
+  :measured-ms 20454.65,
+  :assertion (< (:seon.profile/ms measured) 5000),
+  :central-round-tests :green,
+  :park-wake-test :red},
+ :warm
+ #:seon.profile{:ms 5099.11,
+                :alloc-bytes 162060704,
+                :value
+                #:seon.test{:results
+                            [{:seon.test.member/completed-tx
+                              #:db{:id 536870949},
+                              :seon.test.run/program-digest
+                              "1c1ae7296c9efef60a4da0f469d0380d0ab219c075f87790e0ef214a5d71369a",
+                              :seon.test.run/terminated? false,
+                              :seon.test/fail-count 0,
+                              :seon.test/pass-count 0,
+                              :seon.test/run-at
+                              #inst "2026-10-12T11:49:43.804-00:00",
+                              :seon.test.run/input-digest
+                              "339493213c251966c7f1554877e8c7c699fffb80a2096e0464630c2f4a80cd82",
+                              :seon.test.failure/reports
+                              [{:seon.test/failure-identity
+                                "e7676ba700a73ac19fffcf896d5fbbbf23a6f085b8918143e1221508c401c5a8",
+                                :seon.test.failure/message
+                                "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 4884 ms; thread 103 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                                :seon.test.failure/message-size 262,
+                                :seon.test.failure/type :error,
+                                :seon.test.report/id "c5a6479699cd",
+                                :seon.test.report/symbol
+                                seon.cluster.agent-test/park-wake-test}],
+                              :seon.test/failure-message
+                              "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 4884 ms; thread 103 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                              :seon.agent/branch :agent-86711e6e9c27,
+                              :seon.test/run
+                              [:seon.test.run/id "d7a47829023d"],
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/run-basis-t 536870947,
+                              :seon.test.run/basis-t 536870947,
+                              :seon.test/error-count 1,
+                              :seon.test.member/began? false,
+                              :seon.test.member/ended? false,
+                              :seon.test.member/reach-digest
+                              "279e06c3eea3f33cda6d36553bae48008d6193c492424cfc541b1ffc17ecaba7",
+                              :seon.test/sym
+                              seon.cluster.agent-test/park-wake-test}],
+                            :unfinished
+                            [{:seon.test.run/terminated? false,
+                              :seon.test/fail-count 0,
+                              :seon.test/pass-count 0,
+                              :seon.test/failure-message
+                              "Test seon.cluster.agent-test/park-wake-test did not exit within :seon.test/check-time-limit-ms remainder 4884 ms; thread 103 remains live and keeps its branch until it exits. This request starts no further body; later requests hold only this test until it exits.",
+                              :seon.agent/branch :agent-86711e6e9c27,
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/error-count 1,
+                              :seon.test.member/began? false,
+                              :seon.test.member/ended? false,
+                              :seon.test/sym
+                              seon.cluster.agent-test/park-wake-test}],
+                            :passed? false}},
+ :thread-observation
+ {:elapsed-seconds 12.98,
+  :cpu-ms 89.77,
+  :stack
+  [seon.test-support/await-event!
+   seon.cluster.agent-test/park-wake-test],
+  :event :seon.cluster.agent-test/closed-turn},
+ :following-request
+ #:seon.profile{:ms 349.24,
+                :alloc-bytes 150409080,
+                :value
+                #:seon.test{:results
+                            [{:seon.test.member/completed-tx
+                              #:db{:id 536870956},
+                              :seon.test.member/top
+                              #{[seon.test.runner/run-vars! 1 8]
+                                [seon.instrument/instrumented 2 13]
+                                [seon.db/connection-object? 5 0]
+                                [seon.env/environment? 3 0]
+                                [seon.id/id 1 0]
+                                [seon.db/with-branch 1 0]
+                                [seon.id/structural-digest 1 0]
+                                [seon.test.runner/var-reference? 3 0]
+                                [seon.render/agent-render-profile 1 0]
+                                [seon.db/database-value? 3 0]},
+                              :seon.test.run/program-digest
+                              "948034c7c5d5340c10b0fbf5f32fa22b9eac7b9ce9b43e8e8270546ab258554a",
+                              :seon.test.run/terminated? true,
+                              :seon.test/fail-count 0,
+                              :seon.test/pass-count 1,
+                              :seon.test/run-at
+                              #inst "2026-10-12T11:54:42.883-00:00",
+                              :seon.test.run/input-digest
+                              "339493213c251966c7f1554877e8c7c699fffb80a2096e0464630c2f4a80cd82",
+                              :seon.test.member/calls 43,
+                              :seon.test.member/alloc-bytes 6960656,
+                              :seon.test/run
+                              [:seon.test.run/id "7bac25993e87"],
+                              :seon.test.member/evaluator :compiled,
+                              :seon.test/run-basis-t 536870954,
+                              :seon.test.run/basis-t 536870954,
+                              :seon.test.member/run-ms 22.175833,
+                              :seon.test/error-count 0,
+                              :seon.test.member/began? true,
+                              :seon.test.member/ended? true,
+                              :seon.test.member/reach-digest
+                              "520836f7233b9a087438ae119c14ff5cabb4e972db313beb5097e0770fdac3fc",
+                              :seon.test/sym
+                              seon.id-test/a-host-object-has-no-identity}],
+                            :passed? true}}}

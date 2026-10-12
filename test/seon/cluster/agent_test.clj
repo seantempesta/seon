@@ -1292,44 +1292,49 @@
                             (get-in entry [:seon.flow/started :report-chan]))))
           (finally (stop-all-flows! routing)))))))
 
-(deftest park-wake-test
-  (with-connection
-    (fn [connection ctx]
-      (let [routing (armory connection)
-            ledger (atom [])]
-        (test-support/with-provider ledger (constantly "(seon.run/complete \"done\")")
-          (fn [provider]
-            (test-support/transacted! connection
-                                    [(agent-entity connection "parked")
-                                     (config-entity "park-2026072812"
-                                                 (merge {:seon.config.run/max-episode-runs 100}
-                                                        (provider-config provider)))])
-            (try
-              (let [entry (start-one! connection ctx routing "park-2026072812" "parked")]
-                (testing "the start prime reports its completed idle pass"
-                  (is (await-idle! (:seon.flow/started entry)))
-                  (is (zero? (count @ledger)))
-                  (is (empty? (db/q '[:find ?run :where
-                                     [?run :seon.turn/id _]]
-                                   @connection))))
-                (testing "one committed trigger → exactly one run, one
-                provider call"
-                  (outside-trigger! connection "parked"
-                                    "m-2026072812" "one unit of work")
-                  (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-                  (is (test-support/await-event!
-                       (get-in entry [:seon.flow/started :report-chan])
-                       ::closed-turn
-                       #(= :closed (:seon.turn.loop/outcome %))))
-                  (is (= 1 (count @ledger)))
-                  (is (= {"m-2026072812" 1} (answers-by-trigger @connection))))
-                (testing "a probe wake reports an idle pass and calls nothing"
-                  (async/offer! (:seon.cluster.wake/channel entry)
-                                ::probe)
-                  (is (await-idle! (:seon.flow/started entry)))
-                  (is (= 1 (count @ledger)))))
-              (finally
-                (stop-all-flows! routing)))))))))
+(deftest ^{:seon/tasks #{'seon.cluster.agent-test/wake-fixtures-observe-real-terminal-events}}
+  park-wake-test
+  (let [measured
+        (profile/measure
+         (fn []
+            (with-connection
+              (fn [connection ctx]
+                (let [routing (armory connection)
+                      ledger (atom [])]
+                  (test-support/with-provider ledger (constantly "(seon.run/complete \"done\")")
+                    (fn [provider]
+                      (test-support/transacted! connection
+                                              [(agent-entity connection "parked")
+                                               (config-entity "park-2026072812"
+                                                           (merge {:seon.config.run/max-episode-runs 100}
+                                                                  (provider-config provider)))])
+                      (try
+                        (let [entry (start-one! connection ctx routing "park-2026072812" "parked")]
+                          (testing "the start prime reports its completed idle pass"
+                            (is (await-idle! (:seon.flow/started entry)))
+                            (is (zero? (count @ledger)))
+                            (is (empty? (db/q '[:find ?run :where
+                                               [?run :seon.turn/id _]]
+                                             @connection))))
+                          (testing "one committed trigger → exactly one run, one
+                          provider call"
+                            (outside-trigger! connection "parked"
+                                              "m-2026072812" "one unit of work")
+                            (async/offer! (:seon.cluster.wake/channel entry) ::wake)
+                            (is (test-support/await-event!
+                                 (get-in entry [:seon.flow/started :report-chan])
+                                 ::closed-turn
+                                 #(= :closed (:seon.turn.loop/outcome %))))
+                            (is (= 1 (count @ledger)))
+                            (is (= {"m-2026072812" 1} (answers-by-trigger @connection))))
+                          (testing "a probe wake reports an idle pass and calls nothing"
+                            (async/offer! (:seon.cluster.wake/channel entry)
+                                          ::probe)
+                            (is (await-idle! (:seon.flow/started entry)))
+                            (is (= 1 (count @ledger)))))
+                        (finally
+                          (stop-all-flows! routing))))))))))]
+    (is (< (:seon.profile/ms measured) 5000))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 3. pause-during-in-flight-call-test — seed 2026072813

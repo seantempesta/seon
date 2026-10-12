@@ -12,6 +12,7 @@
             [seon.cluster.process :as process]
             [seon.config :as config]
             [seon.instrument :as instrument]
+            [seon.profile :as profile]
             [malli.core :as m]
             [malli.instrument :as mi]
             [seon.schema :as schema]
@@ -22,6 +23,21 @@
             [seon.test-support :as test-support]
             [seon.test.runner :as runner]
             [seon.turn.world :as world]))
+
+(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}}
+  a-file-backed-fixture-costs-a-branch
+  (let [root (io/file "tmp" "round-waste-fixture" (str (random-uuid)))]
+    (try
+      (let [measured (profile/measure
+                      #(test-support/with-published-file-database
+                         root :round-waste-fixture
+                         (fn [connection]
+                           (some? (db/pull (db/db connection) [:seon.fn/sym]
+                                          [:seon.fn/sym 'seon.id/id])))))]
+        (is (true? (:seon.profile/value measured)))
+        (is (< (:seon.profile/ms measured) 1000))
+        (is (< (:seon.profile/alloc-bytes measured) 128000000)))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest environment-retains-the-database-projection
   (test-support/with-database

@@ -1,0 +1,518 @@
+{
+  "sample_count": 180,
+  "threads": {
+    "Clojure Connection seon.cluster/default 15": 128876624,
+    "async-mixed-39": 33400384,
+    "async-mixed-41": 18242472
+  },
+  "async_worker_classes": {
+    "clojure/lang/Cons": 781544,
+    "clojure/lang/PersistentHashMap$TransientHashMap": 461504,
+    "clojure/lang/MapEntry": 6450744,
+    "clojure/lang/ArraySeq": 781504,
+    "java/lang/Long": 1381992,
+    "clojure/lang/APersistentMap$4": 781512,
+    "[B": 4637280,
+    "clojure/lang/PersistentArrayMap$Iter": 1825816,
+    "[I": 874832,
+    "clojure/lang/PersistentHashMap$NodeSeq": 1957160,
+    "clojure/lang/LazySeq": 1476048,
+    "clojure/lang/ChunkedCons": 2750088,
+    "java/lang/reflect/Field": 915336,
+    "clojure/lang/ArrayChunk": 2241096,
+    "[Ljava/lang/Object;": 12200552,
+    "java/util/concurrent/locks/ReentrantLock$NonfairSync": 982072,
+    "clojure/lang/PersistentHashMap$ArrayNode$Seq": 2763920,
+    "java/util/concurrent/locks/ReentrantLock": 1095984,
+    "java/util/concurrent/atomic/AtomicReference": 850984,
+    "clojure/lang/PersistentHashMap$BitmapIndexedNode": 781624,
+    "org/replikativ/persistent_sorted_set/Seq": 2093888,
+    "clojure/lang/PersistentHashMap$NodeIter": 781536,
+    "java/util/HashMap$EntryIterator": 365816,
+    "clojure/lang/ArraySeq$ArraySeq_byte": 781496,
+    "java/util/concurrent/ConcurrentHashMap$Node": 781512,
+    "clojure/lang/PersistentArrayMap$Seq": 847016
+  },
+  "async_worker_stacks": [
+    {
+      "frames": [
+        "clojure/lang/PersistentVector$TransientVector.conj",
+        "clojure/lang/PersistentVector$TransientVector.conj",
+        "clojure/lang/PersistentVector$1.invoke",
+        "org/replikativ/persistent_sorted_set/Seq.reduce",
+        "clojure/lang/PersistentVector.create"
+      ],
+      "sampled_bytes": 6265448
+    },
+    {
+      "frames": [
+        "clojure/lang/RT$4.invoke",
+        "clojure/lang/LazySeq.force",
+        "clojure/lang/LazySeq.realize",
+        "clojure/lang/LazySeq.seq",
+        "clojure/lang/LazySeq.next"
+      ],
+      "sampled_bytes": 3214784
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/APersistentMap$1.invoke",
+        "clojure/lang/PersistentArrayMap$Iter.next",
+        "org/fressian/impl/Fns.soloEntry",
+        "org/fressian/handlers/WriteHandlerLookup.getWriteHandler"
+      ],
+      "sampled_bytes": 2230904
+    },
+    {
+      "frames": [
+        "clojure/lang/ArrayChunk.dropFirst",
+        "clojure/lang/ChunkedCons.next",
+        "clojure/lang/RT.boundedLength",
+        "clojure/lang/AFn.applyToHelper",
+        "clojure/lang/AFn.applyTo"
+      ],
+      "sampled_bytes": 1914648
+    },
+    {
+      "frames": [
+        "clojure/lang/ChunkedCons.next",
+        "clojure/lang/AFn.applyToHelper",
+        "clojure/lang/AFn.applyTo",
+        "clojure/core$apply.invokeStatic",
+        "clojure/core$apply.invoke"
+      ],
+      "sampled_bytes": 1833448
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentArrayMap.iterator",
+        "clojure/lang/APersistentMap$4.iterator",
+        "org/fressian/impl/Fns.soloEntry",
+        "org/fressian/handlers/WriteHandlerLookup.getWriteHandler",
+        "org/fressian/handlers/WriteHandlerLookup.requireWriteHandler"
+      ],
+      "sampled_bytes": 1825816
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$BitmapIndexedNode.ensureEditable",
+        "clojure/lang/PersistentHashMap$BitmapIndexedNode.assoc",
+        "clojure/lang/PersistentHashMap.createNode",
+        "clojure/lang/PersistentHashMap.access$700",
+        "clojure/lang/PersistentHashMap$BitmapIndexedNode.assoc"
+      ],
+      "sampled_bytes": 1563128
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.create",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next",
+        "clojure/lang/ASeq.more",
+        "clojure/lang/RT.more"
+      ],
+      "sampled_bytes": 1381976
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.create",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next",
+        "clojure/lang/APersistentMap.equiv",
+        "clojure/lang/Util.pcequiv",
+        "clojure/lang/Util.equiv"
+      ],
+      "sampled_bytes": 1381944
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/APersistentMap$1.invoke",
+        "clojure/lang/PersistentArrayMap$Iter.next",
+        "org/fressian/impl/Handlers$32.write",
+        "org/fressian/FressianWriter.doWrite"
+      ],
+      "sampled_bytes": 1344288
+    },
+    {
+      "frames": [
+        "org/replikativ/persistent_sorted_set/Seq.clone",
+        "org/replikativ/persistent_sorted_set/Seq.next",
+        "org/replikativ/persistent_sorted_set/Seq.next",
+        "clojure/lang/RT.next",
+        "clojure/core$next__5472.invokeStatic"
+      ],
+      "sampled_bytes": 1312392
+    },
+    {
+      "frames": [
+        "clojure/core$keep.invokeStatic",
+        "clojure/core$keep$fn__8695.invoke",
+        "clojure/lang/LazySeq.force",
+        "clojure/lang/LazySeq.sval",
+        "clojure/lang/LazySeq.unwrap"
+      ],
+      "sampled_bytes": 1215152
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$NodeSeq.create",
+        "clojure/lang/PersistentHashMap$NodeSeq.next",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next",
+        "clojure/lang/APersistentMap.equiv"
+      ],
+      "sampled_bytes": 1173624
+    },
+    {
+      "frames": [
+        "clojure/lang/LazySeq.<init>",
+        "clojure/core$keep.invokeStatic",
+        "clojure/core$keep$fn__8695.invoke",
+        "clojure/lang/LazySeq.force",
+        "clojure/lang/LazySeq.sval"
+      ],
+      "sampled_bytes": 1095984
+    },
+    {
+      "frames": [
+        "java/util/Arrays.copyOf",
+        "java/io/ByteArrayOutputStream.toByteArray",
+        "konserve/impl/defaults$update_blob$to_array__26468.invoke",
+        "konserve/impl/defaults$update_blob.invokeStatic",
+        "konserve/impl/defaults$update_blob.invoke"
+      ],
+      "sampled_bytes": 1044040
+    },
+    {
+      "frames": [
+        "java/util/concurrent/locks/ReentrantLock.<init>",
+        "clojure/lang/LazySeq.<init>",
+        "clojure/lang/RT.chunkIteratorSeq",
+        "clojure/lang/RT.seqFrom",
+        "clojure/lang/RT.seq"
+      ],
+      "sampled_bytes": 982072
+    },
+    {
+      "frames": [
+        "clojure/lang/ChunkedCons.next",
+        "clojure/lang/RT.boundedLength",
+        "clojure/lang/AFn.applyToHelper",
+        "clojure/lang/AFn.applyTo",
+        "clojure/core$apply.invokeStatic"
+      ],
+      "sampled_bytes": 916640
+    },
+    {
+      "frames": [
+        "java/util/Arrays.copyOfRange",
+        "java/lang/String.<init>",
+        "java/lang/StringBuffer.toString",
+        "org/fressian/FressianReader.read",
+        "org/fressian/FressianReader.readObject"
+      ],
+      "sampled_bytes": 916528
+    },
+    {
+      "frames": [
+        "java/lang/reflect/Field.copy",
+        "java/lang/reflect/ReflectAccess.copyField",
+        "jdk/internal/reflect/ReflectionFactory.copyField",
+        "java/lang/Class.copyFields",
+        "java/lang/Class.getFields"
+      ],
+      "sampled_bytes": 915336
+    },
+    {
+      "frames": [
+        "org/fressian/impl/InterleavedIndexHopMap.resize",
+        "org/fressian/impl/InterleavedIndexHopMap.intern",
+        "org/fressian/impl/InterleavedIndexHopMap.oldIndex",
+        "org/fressian/FressianWriter.doWrite",
+        "org/fressian/FressianWriter.writeAs"
+      ],
+      "sampled_bytes": 874832
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$TransientHashMap.<init>",
+        "clojure/lang/PersistentHashMap.asTransient",
+        "clojure/lang/PersistentHashSet.asTransient",
+        "clojure/core$transient.invokeStatic",
+        "clojure/core$into1.invokeStatic"
+      ],
+      "sampled_bytes": 850984
+    },
+    {
+      "frames": [
+        "java/lang/Long.valueOf",
+        "org/fressian/FressianReader.read",
+        "org/fressian/FressianReader.readClosedList",
+        "org/fressian/FressianReader.read",
+        "org/fressian/FressianReader.readObject"
+      ],
+      "sampled_bytes": 850968
+    },
+    {
+      "frames": [
+        "java/io/BufferedInputStream.getBufIfOpen",
+        "java/io/BufferedInputStream.getBufIfOpen",
+        "java/io/BufferedInputStream.fill",
+        "java/io/BufferedInputStream.read",
+        "org/fressian/impl/RawInput.readRawByte"
+      ],
+      "sampled_bytes": 848856
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentArrayMap.seq",
+        "clojure/lang/APersistentMap$KeySeq.createFromMap",
+        "clojure/lang/RT.keys",
+        "clojure/core$keys.invokeStatic",
+        "clojure/core$keys.invoke"
+      ],
+      "sampled_bytes": 847016
+    },
+    {
+      "frames": [
+        "net/jpountz/lz4/LZ4FrameInputStream.readHeader",
+        "net/jpountz/lz4/LZ4FrameInputStream.nextFrameInfo",
+        "net/jpountz/lz4/LZ4FrameInputStream.read",
+        "java/io/BufferedInputStream.fill",
+        "java/io/BufferedInputStream.read"
+      ],
+      "sampled_bytes": 845024
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$NodeSeq.create",
+        "clojure/lang/PersistentHashMap$NodeSeq.create",
+        "clojure/lang/PersistentHashMap$BitmapIndexedNode.nodeSeq",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.create",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.next"
+      ],
+      "sampled_bytes": 783536
+    },
+    {
+      "frames": [
+        "clojure/lang/RT.cons",
+        "clojure/core$cons__5462.invokeStatic",
+        "clojure/core$concat$cat__5581$fn__5582.invoke",
+        "clojure/lang/LazySeq.force",
+        "clojure/lang/LazySeq.realize"
+      ],
+      "sampled_bytes": 781544
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap$BitmapIndexedNode.iterator",
+        "clojure/lang/PersistentHashMap$NodeIter.advance",
+        "clojure/lang/PersistentHashMap$NodeIter.hasNext",
+        "clojure/lang/PersistentHashMap$ArrayNode$Iter.hasNext",
+        "clojure/lang/PersistentHashMap$ArrayNode$Iter.hasNext"
+      ],
+      "sampled_bytes": 781536
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/PersistentHashMap$NodeSeq.first",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.first",
+        "clojure/lang/APersistentMap$KeySeq.first",
+        "clojure/lang/RT.first"
+      ],
+      "sampled_bytes": 781528
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/PersistentHashMap$NodeSeq.first",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.first",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.first",
+        "clojure/lang/RT.first"
+      ],
+      "sampled_bytes": 781520
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentArrayMap.assoc",
+        "clojure/lang/APersistentMap.cons",
+        "clojure/lang/RT.conj",
+        "clojure/core$conj__5476.invokeStatic",
+        "clojure/core$select_keys.invokeStatic"
+      ],
+      "sampled_bytes": 781520
+    },
+    {
+      "frames": [
+        "clojure/lang/APersistentMap.entrySet",
+        "org/fressian/impl/Fns.soloEntry",
+        "org/fressian/handlers/WriteHandlerLookup.getWriteHandler",
+        "org/fressian/handlers/WriteHandlerLookup.requireWriteHandler",
+        "org/fressian/FressianWriter.writeAs"
+      ],
+      "sampled_bytes": 781512
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/APersistentMap$1.invoke",
+        "clojure/lang/PersistentHashMap$NodeIter.advance",
+        "clojure/lang/PersistentHashMap$NodeIter.hasNext",
+        "clojure/lang/PersistentHashMap$ArrayNode$Iter.hasNext"
+      ],
+      "sampled_bytes": 781512
+    },
+    {
+      "frames": [
+        "java/util/concurrent/ConcurrentHashMap.putVal",
+        "java/util/concurrent/ConcurrentHashMap.putIfAbsent",
+        "org/fressian/impl/CachingLookup.valAt",
+        "org/fressian/impl/Fns.lookup",
+        "org/fressian/handlers/WriteHandlerLookup.getWriteHandler"
+      ],
+      "sampled_bytes": 781512
+    },
+    {
+      "frames": [
+        "clojure/lang/ArraySeq.create",
+        "clojure/lang/RestFn.invoke",
+        "clojure/lang/MultiFn.invoke",
+        "seon/db$write_owned_values_error$fn__5616$fn__5617.invoke",
+        "clojure/core$keep$fn__8691$fn__8692.invoke"
+      ],
+      "sampled_bytes": 781504
+    },
+    {
+      "frames": [
+        "org/replikativ/persistent_sorted_set/PersistentSortedSet.slice",
+        "org/replikativ/persistent_sorted_set$slice.invokeStatic",
+        "org/replikativ/persistent_sorted_set$slice.invoke",
+        "datahike/index/persistent_set$fn__37699.invokeStatic",
+        "datahike/index/persistent_set$fn__37699.invoke"
+      ],
+      "sampled_bytes": 781496
+    },
+    {
+      "frames": [
+        "clojure/lang/ArraySeq$ArraySeq_byte.next",
+        "clojure/lang/ASeq.more",
+        "clojure/lang/RT.more",
+        "clojure/core$rest__5474.invokeStatic",
+        "clojure/core$map$fn__5956.invoke"
+      ],
+      "sampled_bytes": 781496
+    },
+    {
+      "frames": [
+        "java/util/Arrays.copyOf",
+        "org/replikativ/persistent_sorted_set/Branch.depositKV",
+        "org/replikativ/persistent_sorted_set/Branch.depositInto",
+        "org/replikativ/persistent_sorted_set/Branch.add",
+        "org/replikativ/persistent_sorted_set/Branch.add"
+      ],
+      "sampled_bytes": 781472
+    },
+    {
+      "frames": [
+        "java/lang/Long.valueOf",
+        "clojure/lang/Numbers.num",
+        "clojure/lang/Numbers$LongOps.add",
+        "clojure/lang/Numbers.add",
+        "datahike/index/node_cache$value_bytes.invokeStatic"
+      ],
+      "sampled_bytes": 531024
+    },
+    {
+      "frames": [
+        "clojure/lang/MapEntry.create",
+        "clojure/lang/PersistentHashMap$NodeSeq.first",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.first",
+        "clojure/lang/PersistentHashMap$ArrayNode$Seq.first",
+        "clojure/lang/APersistentMap.cons"
+      ],
+      "sampled_bytes": 530992
+    },
+    {
+      "frames": [
+        "java/nio/HeapByteBuffer.<init>",
+        "java/nio/ByteBuffer.allocate",
+        "net/jpountz/lz4/LZ4FrameOutputStream.<init>",
+        "net/jpountz/lz4/LZ4FrameOutputStream.<init>",
+        "net/jpountz/lz4/LZ4FrameOutputStream.<init>"
+      ],
+      "sampled_bytes": 524416
+    },
+    {
+      "frames": [
+        "clojure/lang/PersistentHashMap.asTransient",
+        "clojure/lang/PersistentHashMap.create",
+        "clojure/core$hash_map.invokeStatic",
+        "clojure/core$hash_map.doInvoke",
+        "clojure/lang/RestFn.invoke"
+      ],
+      "sampled_bytes": 461504
+    },
+    {
+      "frames": [
+        "java/util/Arrays.copyOf",
+        "java/io/ByteArrayOutputStream.ensureCapacity",
+        "java/io/ByteArrayOutputStream.write",
+        "net/jpountz/lz4/LZ4FrameOutputStream.writeBlock",
+        "net/jpountz/lz4/LZ4FrameOutputStream.write"
+      ],
+      "sampled_bytes": 458416
+    },
+    {
+      "frames": [
+        "java/util/HashMap$EntrySet.iterator",
+        "org/fressian/impl/Fns.soloEntry",
+        "org/fressian/handlers/WriteHandlerLookup.getWriteHandler",
+        "org/fressian/handlers/WriteHandlerLookup.requireWriteHandler",
+        "org/fressian/FressianWriter.writeAs"
+      ],
+      "sampled_bytes": 365816
+    },
+    {
+      "frames": [
+        "clojure/lang/ArrayChunk.dropFirst",
+        "clojure/lang/ChunkedCons.next",
+        "clojure/lang/LazySeq.next",
+        "clojure/lang/AFn.applyToHelper",
+        "clojure/lang/AFn.applyTo"
+      ],
+      "sampled_bytes": 326448
+    },
+    {
+      "frames": [
+        "clojure/lang/RT.chunkIteratorSeq",
+        "clojure/lang/RT.seqFrom",
+        "clojure/lang/RT.seq",
+        "clojure/core$seq__5488.invokeStatic",
+        "clojure/core$apply.invokeStatic"
+      ],
+      "sampled_bytes": 260896
+    },
+    {
+      "frames": [
+        "org/replikativ/persistent_sorted_set/Leaf.add",
+        "org/replikativ/persistent_sorted_set/Branch.add",
+        "org/replikativ/persistent_sorted_set/Branch.add",
+        "org/replikativ/persistent_sorted_set/PersistentSortedSet.cons",
+        "org/replikativ/persistent_sorted_set$conj.invokeStatic"
+      ],
+      "sampled_bytes": 260760
+    },
+    {
+      "frames": [
+        "java/util/ArrayList.<init>",
+        "datahike/query/execute$make_result_list.invokeStatic",
+        "datahike/query/execute$make_result_list.invoke",
+        "datahike/query/execute$execute_plan_direct_rel.invokeStatic",
+        "datahike/query/execute$execute_plan_direct_rel.invoke"
+      ],
+      "sampled_bytes": 115064
+    }
+  ]
+}

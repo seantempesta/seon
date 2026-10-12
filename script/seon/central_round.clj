@@ -1,9 +1,9 @@
 (ns seon.central-round
   "Run the compiled tier on an isolated running root.
   clojure -Sdeps '{:paths [\"script\" \"src\" \"resources\"]}' -M -m seon.central-round ROOT OUT [BATCH] [SYMBOLS-EDN]
-  Each request awaits the runner's actual body exit under the members' declared
-  bound. Unfinished execution and unknown transport outcomes are recorded and
-  end the round. Output is shown text from the value printer."
+  Each request uses the process selected at round start and awaits actual body
+  exit under the tests' declared bound. Unfinished execution and unknown transport
+  outcomes are recorded and end the round. Output is shown text from the value printer."
   (:require [clojure.edn :as edn]
             [seon.operator :as operator]
             [seon.error.refusal :as refusal]
@@ -23,21 +23,26 @@
      (if (vector? symbols#) (vec (sort symbols#)) symbols#)))
 
 (defn batch-form
-  "One runner request; the runner joins actual body exit within the declared bound."
-  {:malli/schema [:=> [:cat [:sequential :symbol]] [:sequential :seon.schema/value]]}
-  [symbols]
-  `(let [handle# (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))
-         connection# (:seon.db/connection handle#)
-         bound# (seon.test/declared-bound-ms (seon.db/db connection#) '~(set symbols))]
-     (seon.db/with-branch
-      {:seon.db/connection connection#}
-      #(seon.test/run {:seon.test/execution handle# :seon.test/recording-connection connection#
-                       :seon.test/policy :named :seon.test/identities '~(set symbols)
-                       :seon.test/rerun? true :seon.test/include-long? true
-                       :seon.test/check-time-limit-ms bound#}))))
+  "A request reusing stored results and awaiting new bodies' actual exit."
+  {:malli/schema [:function
+                  [:=> [:cat [:sequential :symbol]] [:sequential :seon.schema/value]]
+                  [:=> [:cat [:sequential :symbol] [:sequential :seon.schema/value]]
+                   [:sequential :seon.schema/value]]]}
+  ([symbols]
+   (batch-form symbols '(:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))))
+  ([symbols execution-form]
+   `(let [handle# ~execution-form
+          connection# (:seon.db/connection handle#)
+          bound# (seon.test/declared-bound-ms (seon.db/db connection#) '~(set symbols))]
+      (seon.db/with-branch
+       {:seon.db/connection connection#}
+       #(seon.test/run {:seon.test/execution handle# :seon.test/recording-connection connection#
+                        :seon.test/policy :named :seon.test/identities '~(set symbols)
+                        :seon.test/include-long? true
+                        :seon.test/check-time-limit-ms bound#})))))
 
 (defn run-round!
-  "Submit each part once, recording its complete answer; end on unknown execution."
+  "Save each complete answer; end the round on unknown execution."
   {:malli/schema [:=> [:cat [:=> [:cat [:sequential :symbol]] :map]
                        [:=> [:cat :map] :seon.schema/value] [:sequential [:sequential :symbol]]] :nil]}
   [submit! record! parts]
@@ -53,12 +58,14 @@
   nil)
 
 (defn -main
-  "Run the selected declarations once and save their answers through the value printer."
+  "Run the selected declarations and save their answers through the value printer."
   {:malli/schema [:=> [:cat :string :string [:* :string]] :nil]}
   [root out & [batch symbols-file]]
-  (let [record! #(spit out (str (value/core-text %) "\n") :append true)
+  (let [advertisement (operator/advertisement root nil)
+        record! #(spit out (str (value/core-text
+                                (assoc % :seon.central-round/process advertisement)) "\n") :append true)
         bound (operator/operation-bound-ms {:seon.operator/command :check})
-        live-value! #(operator/prepl-value! (operator/advertisement root nil)
+        live-value! #(operator/prepl-value! advertisement
                                             (print/form-text %) bound nil bound)]
     (try
       (let [symbols (if symbols-file (edn/read-string (slurp symbols-file))

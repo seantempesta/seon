@@ -3,7 +3,23 @@
             [seon.central-round :as round]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
+            [seon.profile :as profile]
             [seon.test-support :as support]))
+
+(deftest an-unchanged-round-reuses-its-results
+  (let [form (round/batch-form
+              ['seon.id-test/a-host-object-has-no-identity]
+              '(assoc (seon.test-support/execution-handle nil) :seon.agent/id "root"))
+        first-run (eval form)
+        measured (profile/measure #(eval form))
+        again (:seon.profile/value measured)]
+    (is (= {:seon.test/executed-count 1 :seon.test/passed? true}
+           (select-keys first-run [:seon.test/executed-count :seon.test/passed?
+                                  :seon.error/type :seon.error/message])))
+    (is (= 0 (:seon.test/executed-count again)))
+    (is (= 1 (:seon.test/reused-count again)))
+    (is (true? (:seon.test/passed? again)))
+    (is (< (:seon.profile/ms measured) 1000))))
 
 (deftest an-unknown-batch-is-recorded-once-and-never-resubmitted
   (let [unknown (refusal/error :seon.operator/operation-error
