@@ -2200,8 +2200,8 @@
   branch): the agent's admission closed and, on its open attempt (`seon.task/agent-attempt`),
   `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back, `:seon.task.attempt/target`
   the task `target` names and `:seon.task.attempt/reason` the sending turn's reply, as one transaction; nothing when the admission is already closed, so a task's
-  end is recorded once. No message: root learns of the end when db<->flow copies it to main
-  (`seon.cluster.agent/land-ends!`)."
+  end is recorded once. No message: root learns of the end when db<->flow squash-merges it to main
+  (`seon.cluster.agent/next-actions`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
                        :seon.task.attempt/commit [:maybe :seon.task/sym]]
                   :seon.store/transaction-data]}
@@ -2311,9 +2311,9 @@
   (`my.program/request-merge!`, the agent's own act; a merge request this end already recorded is reused,
   `end-merge-request`), record the agent's outcome (`seon.context/end-summary-tx`), then close the agent and
   write the end on its attempt in one transaction (`end-task-call`). Nothing reaches main here: the end
-  datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which copies the end, refinements,
-  children and merge request to main in one transaction, stops the graph and settles the branch
-  (`seon.cluster.agent/land-ends!`); root learns of the end from that landed end on main.
+  datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which stops the graph, squash-merges the end, refinements,
+  children and merge request to main in one transaction and deletes the branch once merged
+  (`seon.cluster.agent/next-actions`); root learns of the end from that merge on main.
   nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
