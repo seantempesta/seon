@@ -5240,11 +5240,12 @@
                             :seon.test/check-time-limit-ms limit-ms}))))
 
 (defn- first-proof-run-t
-  "The transaction of the first run of the proofs of the task `agent-id` holds recorded on `database`, the agent's
-  branch, after its attempt's row: the attempt's own proving, never a run its value inherited from a predecessor;
-  for a task naming no proof, the transaction of the attempt's row itself (nothing is left to prove, so the
-  attempt has proved first); nil when none ran, the proofs' read refusal when they cannot be read. The proofs are
-  the tests its step is judged by (`step-tests`), a Prove step's held product included."
+  "The transaction of the first run recorded on `database`, the agent's branch, after its attempt's row whose
+  members include a proof of the task `agent-id` holds, whatever selected it (named, or reaching a change): the
+  attempt's own proving, never a run its value inherited from a predecessor; for a task naming no proof, the
+  transaction of the attempt's row itself (nothing is left to prove, so the attempt has proved first); nil when
+  none ran, the proofs' read refusal when they cannot be read. The proofs are the tests its step is judged by
+  (`step-tests`), a Prove step's held product included."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.error/value]]}
   [database agent-id]
   (let [proofs (step-tests database agent-id)]
@@ -5258,7 +5259,7 @@
       (db/q '[:find (min ?t) . :in $ ?id [?proof ...]
               :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?attempt]
               (not-join [?g ?attempt] [?b :seon.task/agent ?g] [?b :seon.task/assigned _ ?later] [(> ?later ?attempt)])
-              [?run :seon.test.run/identities ?proof] [?run :seon.test.run/identities _ ?t] [(> ?t ?attempt)]]
+              [?member :seon.test.member/symbol ?proof] [?run :seon.test.run/members ?member ?t] [(> ?t ?attempt)]]
             database agent-id (vec proofs)))))
 
 (defn proof-run-recorded?

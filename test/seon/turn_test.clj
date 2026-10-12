@@ -2087,6 +2087,41 @@
        (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
            "the attempt's own run of its proofs is its proving first")))))
 
+(deftest a-prove-attempts-first-product-test-run-after-its-eval-is-its-proof-run
+  ;; Run 18 (F53): the attempt defined the first of its two declared product tests, and the run after that
+  ;; eval request (selected by what it changed, so it lists no identities) ran it red. That run is the
+  ;; attempt's proving: the next pass is the model turn, never `:prove` again
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.prodloop.edn"
+                                           (str "[#:seon.task{:name \"s\" :intent \"Prove then do.\""
+                                                " :children #{[:seon.task/sym tq.prodloop/prove] [:seon.task/sym tq.prodloop/body]}}"
+                                                " #:seon.task{:name \"prove\" :step :prove :instructions \"Write both.\""
+                                                " :product #{tq.prodloop-test/table tq.prodloop-test/law}}"
+                                                " #:seon.task{:name \"body\" :instructions \"Do it.\""
+                                                " :needs #{[:seon.task/sym tq.prodloop/prove]}}]")}})
+     (let [agent-id "tq-prodloop-agent"
+           handle (task/task-handle 'tq.prodloop "prove")]
+       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+       (support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
+       (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-prodloop))
+       ;; the agent's eval request defines the table, and its test step runs what that change reaches
+       (support/declare-proof! connection 'tq.prodloop-test 'table 'tq.prodloop/body)
+       (let [database (db/db connection)]
+         (support/transacted!
+          connection [[:db.fn/call seon.test/admit-run
+                       {:seon.test.run/provenance (runner/provenance database)
+                        :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name (support/execution-handle connection))]
+                        :seon.test.run/input-digest (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
+                        :seon.test.run/policy :named :seon.test.run/include-long? false
+                        :seon.test.run/members [{:seon.test.member/symbol 'tq.prodloop-test/table
+                                                 :seon.test.member/reasons #{:reaches-changed}}]}]]))
+       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
+           "the run after the eval request ran the product test the step is judged by")
+       (is (= :open (:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})))
+           "its red run is the attempt's work, answered by a model turn")))))
+
 (deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run."
            :seon.test/long-ms 30000}
