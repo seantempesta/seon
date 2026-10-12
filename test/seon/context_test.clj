@@ -81,14 +81,28 @@
 
 (defn- proof-task
   "Creates and assigns the task `tq.cs/shape` for `agent-id`."
-  {:malli/schema [:=> [:cat :string :seon.db/connection :seon.agent/id] :nil]}
-  [running connection agent-id]
+  {:malli/schema [:function [:=> [:cat :string :seon.db/connection :seon.agent/id] :nil]
+                  [:=> [:cat :string :seon.db/connection :seon.agent/id :string] :nil]]}
+  ([running connection agent-id] (proof-task running connection agent-id "First."))
+  ([running connection agent-id intent]
   (let [_ (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
-                                         :seon.task/name "shape" :seon.task/kind :function :seon.task/intent "First."}))]
+                                         :seon.task/name "shape" :seon.task/kind :function :seon.task/intent intent}))]
     (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-    nil))
+    nil)))
+
+(deftest ^{:seon/tasks #{'seon.context/the-implement-step-names-its-owner-and-shows-the-whole-intent}}
+  an-implement-step-names-its-owner-and-shows-the-whole-intent
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [intent (apply str "Whole: " (repeat 250 "word-"))]
+       (proof-task running connection agent-id intent)
+       (let [state (block running agent-id)]
+         (is (> (count intent) 1024))
+         (is (= intent (:seon.task/intent (:seon.context/task state))) "the intent is shown whole")
+         (is (= 'tq.cs (:in-ns (:seon.context/start (:seon.context/step state)))) "the step names the owner namespace")
+         (is (= '(my.program/source 'tq.cs/shape) (:source (:seon.context/start (:seon.context/step state)))) "and the first form to read"))))))
 
 (def ^:private proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\"))")

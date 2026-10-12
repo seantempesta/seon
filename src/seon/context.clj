@@ -475,6 +475,15 @@
           (seq landing) (into landing)
           branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
+(defn- step-start
+  "Where an :implement step begins: the namespace that owns the held task's subject and the form that reads
+  the subject's source. Nil for another step."
+  {:malli/schema [:=> [:cat :seon.task/step :seon.task/sym] [:maybe :seon.context/start]]}
+  [step sym]
+  (when (= :implement step)
+    {:in-ns (symbol (namespace sym))
+     :source (list 'my.program/source (list 'quote sym))}))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   main reads it now, and its turns left with the task's status (`:done` once its step is done,
@@ -519,7 +528,10 @@
                                        namespace (assoc :seon.context/namespace namespace))}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
-          verdict (assoc :seon.context/step (step-section verdict))
+          verdict (assoc :seon.context/step
+                         (cond-> (step-section verdict)
+                           (step-start (:seon.task/step verdict) (:seon.task/sym held))
+                           (assoc :seon.context/start (step-start (:seon.task/step verdict) (:seon.task/sym held)))))
           (seq sent-back) (assoc :seon.context/send-backs sent-back)
           (seq reads) (assoc :seon.context/must-reads reads)
           cost (assoc :seon.context/cost cost)
@@ -532,7 +544,10 @@
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
   (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
-    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
+    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
+    ;; A task's instructions are shown whole: the block widens its own budget (up to the profile's ceiling)
+    ;; rather than let the printer cut the intent to fit the profile's.
+    (:seon.context/task block) (vary-meta assoc :seon.print/budget Integer/MAX_VALUE)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; What a model pass sends

@@ -103,6 +103,13 @@
        (is (not (re-find #"in-ns '(my|user)[. ]" text)) "no placeholder or real namespace prefix is taught")
        (is (str/includes? text "the namespace that owns it") "the owner's namespace is the lesson")))))
 
+(deftest help-teaches-the-repl-not-files-as-the-change-medium
+  (with-help-agent
+   (fn [connection]
+     (let [text (str/join "\n" (:seon.help/lines (bootstrap/help-value @connection "help")))]
+       (is (str/includes? text "never in files") "code changes at the REPL, never in files")
+       (is (str/includes? text "slurp") "the file calls are named as wrong")))))
+
 (deftest help-teaches-no-placeholder-value
   (with-help-agent
    (fn [connection]
