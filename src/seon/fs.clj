@@ -276,13 +276,17 @@
   (.normalize (.toAbsolutePath (.toPath (io/file path)))))
 
 (defn- intermediate-paths
+  {:malli/schema [:=> [:cat :any :any] [:sequential :any]]}
   [^Path root ^Path target]
-  (butlast
-   (reductions
-    (fn [^Path parent segment]
-      (.resolve parent ^Path segment))
-    root
-    (iterator-seq (.iterator (.relativize root target))))))
+  (let [rel (.relativize root target)]
+    (if (zero? (count (str rel)))
+      []
+      (butlast
+       (reductions
+        (fn [^Path parent segment]
+          (.resolve parent ^Path segment))
+        root
+        (iterator-seq (.iterator rel)))))))
 
 (defn- attributes
   ^BasicFileAttributes [^Path path]
