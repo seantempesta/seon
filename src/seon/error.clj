@@ -15,6 +15,7 @@
             [clojure.edn :as edn]
             [clojure.stacktrace :as stacktrace]
             [clojure.string :as str]
+            [clj-kondo.core :as kondo]
             [clojure.test.check.generators :as gen]
             [edamame.core :as edamame]
             [malli.core :as m]
@@ -1937,20 +1938,62 @@
         shortest (some->> arglists read-arglists (sort-by count) first)]
     (apply list sym shortest)))
 
+(defn- calling-forms
+  "The calling forms of `syms` (in order), each from its stored arglists."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]] [:vector :seon.schema/value]]}
+  [database syms]
+  (into []
+        (keep (fn [sym]
+                (let [arglists (db/q '[:find ?arglists . :in $ ?sym
+                                       :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]]
+                                     database sym)]
+                  (when-not (db/read-refusal? arglists)
+                    (calling-form sym arglists)))))
+        syms))
+
+(defn- binds-local?
+  "Whether clj-kondo's local analysis of `source` finds a local named `local`."
+  {:malli/schema [:=> [:cat :string :symbol] :boolean]}
+  [source local]
+  (let [{{:keys [locals]} :analysis}
+        (with-in-str source
+          (kondo/run! {:lint ["-"] :cache false :config {:output {:format :none} :analysis {:locals true}}}))]
+    (boolean (some #(= local (:name %)) locals))))
+
+(defn- local-owners
+  "The definitions of `namespace-name` whose source binds a local named
+  `local`: clj-kondo's locals, over only the sources that name it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol :symbol] [:vector :qualified-symbol]]}
+  [database namespace-name local]
+  (let [found (db/q '[:find ?sym ?source :in $ ?ns
+                      :where [?n :seon.ns/name ?ns] [?f :seon.fn/ns ?n] [?f :seon.fn/sym ?sym] [?f :seon.fn/source ?source]]
+                    database namespace-name)]
+    (if (db/read-refusal? found)
+      []
+      (->> found
+           (filter (fn [[_ source]] (str/includes? source (name local))))
+           (filter (fn [[_ source]] (binds-local? source local)))
+           (map first)
+           sort
+           (into [] (take names-shown))))))
+
 (defn- nearest-calls
-  "The calling forms of the public program declarations nearest to `missing`
-  (`nearest-names`), at most eight. Nothing when the read is refused:
-  `names-in` shows that refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:vector :seon.schema/value]]}
-  [database missing]
-  (let [found (db/q '[:find ?sym ?arglists :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
+  "The calling forms of the program declarations `missing` may mean, at most
+  eight: first the definitions of `namespace-name` that bind it as a local
+  (when it is a simple name), then the public declarations nearest to it
+  (`nearest-names`). Nothing when the read is refused: `names-in` shows that
+  refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol [:maybe :symbol]] [:vector :seon.schema/value]]}
+  [database missing namespace-name]
+  (let [found (db/q '[:find ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
                       [(get-else $ ?f :seon.fn/private? false) ?private] [(not ?private)]]
                     database)]
     (if (db/read-refusal? found)
       []
-      (let [arglists (into {} found)]
-        (into [] (map #(calling-form % (get arglists %)))
-              (nearest-names missing (remove declared-by-test? (keys arglists)) names-shown))))))
+      (let [owners (if (and namespace-name (simple-symbol? missing)) (local-owners database namespace-name missing) [])
+            near (nearest-names missing (remove declared-by-test? (map first found)) names-shown)]
+        (->> (calling-forms database (distinct (concat owners near)))
+             (into [] (take names-shown)))))))
 
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored
@@ -2112,7 +2155,7 @@
          arity? (contains? error :seon.instrument/declared-arities)
          ;; an empty name list is no key; a refused read is shown as it is
          in-namespace (when (and database namespace-name) (names-in database namespace-name missing))
-         nearest (when (and database missing) (nearest-calls database missing))]
+         nearest (when (and database missing) (nearest-calls database missing namespace-name))]
      (cond-> (if options (variant-members options error) {})
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
