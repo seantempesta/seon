@@ -3,7 +3,10 @@ title: "M3 notes: the merge in main's writer, and the Datahike join it exposed"
 type: research
 status: lane m3, 2026-10-12. M3's slice is written and green on its own tests; it is NOT committed, because the
   schema half of it turns `seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged`
-  red through a Datahike query defect the slice does not touch. Options at the end.
+  red through a Datahike query defect the slice does not touch. Root's decision (2026-10-12): parked. The whole
+  slice is `m3-slice.patch` beside this file (`git apply --check` clean against HEAD 483b3e9b6); an Opus lane fixes
+  the Datahike side, then M3 resumes by applying the patch, re-running its proofs and the host test, and committing
+  with the message in "Resuming" below.
 basis: HEAD 5640aef92 plus the slice (claimed by lane m3); every run below is `bin/seon check` on a throwaway JVM
   booted from HEAD plus the named paths.
 ---
@@ -75,6 +78,55 @@ answers nil the same way. Every reader joining a datom's transaction to transact
 (receipts, `:seon.db.transaction/*`, `:seon.squash/*` provenance), on any landing that installs an attribute an
 entity schema names, not only this one.
 
+### Smallest reproduction so far (inside Seon; reduce it outside Seon from here)
+
+1. **The schema change.** HEAD 5640aef92's `resources/seon/schemas/seon.task.edn` plus exactly two lines
+   (both in `m3-slice.patch`): the attribute, before `:assignment-row`,
+
+   ```clojure
+   :merge-base [:uuid {:description "…"}]
+   ```
+
+   and its member in `:seon.task/assignment-row`, after `[:seon.task.attempt/fork {:optional true} :seon.task.attempt/fork]`:
+
+   ```clojure
+   [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+   ```
+
+   With the first line alone the test stays green; with both it is red. No datom of `:seon.task/merge-base` is
+   ever written in the failing test: only the installed schema differs.
+2. **The transaction.** The test's hosted agent (`mcp/solo`, on its own branch from `with-host-world`) evaluates,
+   through the one REPL path,
+
+   ```clojure
+   (seon.db/transact! (quote {:tx-data [#:seon.task{:id "b7dc73864a1b" :sym fixture.tasks/b7dc73864a1b
+                                                   :ns fixture.tasks :name "b7dc73864a1b"
+                                                   :kind :function :intent "written by a hosted form"}]}))
+   ```
+
+   which commits ONE transaction `536870939` holding the evaluation entity, the turn entity, the task entity
+   `58573` and, on the transaction entity itself, `:db/txInstant`, `:seon.db.transaction/operation`
+   `seon.db/transact!`, `:seon.db.transaction/agent "mcp/solo"` and `:seon.db/receipt 58571` (a ref to the
+   evaluation's receipt entity). Observed on the branch value after it:
+   `(d/datoms db :eavt 536870939)` → `[536870939 :db/txInstant …] [536870939 :seon.db/receipt 58571]
+   [536870939 :seon.db.transaction/agent …] [536870939 :seon.db.transaction/operation …]`;
+   `(d/datoms db :aevt :seon.db/receipt)` → `[[536870939 :seon.db/receipt 58571 536870939]]`;
+   the task's intent datom is `[58573 :seon.task/intent "written by a hosted form" 536870939]`.
+3. **The query.** On that value (`@` of the hosted branch's connection):
+
+   ```clojure
+   (d/q '[:find ?tx :where [?n :seon.task/intent _ ?tx]] db)                      ;=> #{[536870939] …}
+   (d/q '[:find ?tx ?r :where [?tx :seon.db/receipt ?r]] db)                     ;=> #{[536870939 58571]}
+   (d/q '[:find ?r :where [?n :seon.task/intent _ ?tx] [?tx :seon.db/receipt ?r]] db) ;=> #{}  (expected #{[58571]})
+   (binding [datahike.query/*disable-planner* true] <the same join>)            ;=> #{}
+   ```
+
+   On HEAD's schema the join answers `#{[58571]}` (the test is green there).
+
+To run it: apply `m3-slice.patch`'s `seon.task.edn` hunks alone and
+`bin/seon check resources/seon/schemas/seon.task.edn --test seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged`
+(about 30 s). The three probe forms above were added temporarily inside that deftest after line 158 and removed.
+
 Not yet known: whether any new installed attribute triggers it or only this one (the third row may not install
 the attribute at all: an attribute no entity schema names may not reach Datahike), and where in
 `datahike.query` the binding is lost. The next probe is the same query on a fresh store with one extra
@@ -114,3 +166,14 @@ two commit opens, and the moved base's datom.
    fix time.
 3. **This lane digs into `datahike.query` first**: likely the fastest path to a fix if the cause is shallow;
    it holds every file M3 claims (agent.clj among them) while it runs.
+
+## Resuming
+
+`git apply docs/research/agent-platform/2026-10-12/m3-slice.patch` (files: `src/seon/cluster/{squash,agent}.clj`,
+`src/seon/task.clj`, `resources/seon/schemas/seon.task.edn`, `resources/seon/tasks/{seon.cluster.squash,seon.fault,seon.context}.edn`,
+`script/astra_cost_handoff.clj`, `test/seon/cluster/{squash,registry,db_flow}_test.clj`), then commit through
+`bin/lane commit LANE -m MSG --test seon.cluster.squash-test --test seon.cluster.registry-test` plus the green vars
+of `db-flow`, `host`, `message`, `agent`, `wake` and `turn-continue` (exclude the 23 reds shared with HEAD and
+`seon.cluster.host-test/an-existing-agent-rehosts-without-a-transaction`, which lives only in another lane's
+uncommitted edit), the host test above included once Datahike is fixed. Then update M3's status line in
+`hybrid-done-and-merge.md` §6 and `docs/seon/plan.md`.

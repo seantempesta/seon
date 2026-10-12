@@ -1,0 +1,651 @@
+diff --git a/resources/seon/schemas/seon.task.edn b/resources/seon/schemas/seon.task.edn
+index 0a118dbaf..76dcca24a 100644
+--- a/resources/seon/schemas/seon.task.edn
++++ b/resources/seon/schemas/seon.task.edn
+@@ -99,6 +99,7 @@
+  :assigned [:and {:seon.db/index true :description "The assigned task's handle, a value, never a ref (7.2)."} :seon.task/handle]
+  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
+  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
++ :merge-base [:uuid {:description "The main commit an assignment's branch merges from: the commit its branch forked at, written by root on main once the branch exists (seon.cluster.agent/start-attempt!), then the source commit each merge took, moved inside that merge's transaction (seon.cluster.squash/merge-tx), so a repeated merge adds nothing."}]
+  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
+                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
+                   [:seon.task/revision {:seon.cluster/conflict :ours :description "Derived from the task's declaration by the writer that revises it (seon.task/advance-assignments-tx), so main's own advance wins a concurrent one: the conflict that matters is the task's, reported once."} :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
+@@ -106,6 +107,7 @@
+                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
+                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]
+                   [:seon.task.attempt/fork {:optional true} :seon.task.attempt/fork]
++                  [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+                   [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
+                   [:seon.task.attempt/relaunch-fork {:optional true} :seon.task.attempt/relaunch-fork]]
+  :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row
+diff --git a/resources/seon/tasks/seon.cluster.squash.edn b/resources/seon/tasks/seon.cluster.squash.edn
+index 5e32a948e..86317f9fb 100644
+--- a/resources/seon/tasks/seon.cluster.squash.edn
++++ b/resources/seon/tasks/seon.cluster.squash.edn
+@@ -1,16 +1,10 @@
+ [#:seon.task{:name "an-attempts-cluster-facts-copy-onto-main-by-identity"
+              :kind :function
+-             :intent "Phase AW1 of hybrid-agent-world.md (after AW0 and AW1a, `seon.db/entities-born-on-two-branches-of-one-commit-have-different-ids`: one eid counter per store, so a branch-born entity keeps its eid on main). The copy-back is git's squash merge over data (`merge --squash`: a three-way from the merge base, one commit on main, no parent link to the branch), never a cherry-pick and never datahike merge!/:parents. The pure `seon.cluster.squash/squash-merge` [source-db base-db target-db projection selection] -> {:tx-data :conflicts}: the branch's datoms since its merge base for `seon.program/cluster-attributes` (d/since on the branch; base = the immutable fork-point commit read with `datahike.api/commit-as-db` from `seon.cluster.registry/base-commit-id`; `seon.cluster.registry/fork!` creates its registry ref with `datahike.api/branch!`, and `seon.cluster.registry/retire-branch!` deletes both refs. At Datahike revision 61bca1edd6bcef079f5c47e4f5f75df30549934d, `datahike.gc/reachable-in-branch` seeds each registry head and marks its indexes regardless of remove-before; only parent traversal is time limited. No attribute history retention change), restricted by selection to given identities (root's by-hand `seon.cluster.squash/squash-merge!`), grouped by entity, replayed with eids unchanged (every eid was issued by this store; `seon.db/an-explicit-eid-outside-the-allocators-range-is-refused` guards the rest) except the collision remap: a new entity whose :db.unique/identity value (`seon.db/identity-attributes`, looked up on main's AVET) already exists on main takes main's eid in its own datoms and in every ref to it, because Datahike refuses an explicit eid carrying another entity's unique value (:transact/unique) instead of upserting it; classified per [e a] as `seon.program/three-way` classifies digests: unchanged -> nothing, only theirs -> assert or retract, only ours -> keep, both and different -> the entity schema's :seon.cluster/conflict rule: :theirs asserts, :ours keeps, :add is one :db.fn/call that sums (the occurrence count), :root keeps ours plus a conflict row {entity attribute base ours theirs}. It reuses the merge-request machinery instead of a second comparison: the base comes from `seon.cluster.source/merge-base` and `seon.cluster.source/branch-base-t` (made public), and `seon.program/changed-identities` and `seon.program/digest-map` take a projection argument (program attributes for merge requests, cluster attributes here) so both are one three-way with two projections. Proofs, a table on values with d/with targets: this test (main pulls the end, the refined intent and a child task by eid); a-value-changed-on-both-sides-resolves-by-the-declared-rule (table over :root, :theirs, :add; under :root the entity's other attribute still copies); program-and-runtime-facts-never-copy (a defn, an evaluation, a turn and a received message yield empty tx-data); a-copy-of-an-unchanged-branch-is-empty; a-retraction-on-the-branch-retracts-on-an-unchanged-main-only; a-branch-born-entity-keeps-its-eid-on-main (the child task's eid on main equals its eid on the branch, refs included; main's next allocation is unmoved); a-natural-identity-born-on-both-sides-maps-to-mains-eid (two branches each mint an occurrence with one signature: main holds one entity under its own eid, count summed by :add, every ref remapped); the-merge-base-is-the-merge-requests (the squash's base commit equals `seon.cluster.source/merge-base` for the same branch); the-merge-base-retains-the-count-needed-by-add (base occurrence count 1, source 2, unchanged target 1 yields 2); a-base-ref-keeps-the-fork-commit-only-until-retirement (cutoff after fork retains the commit while the work branch exists; retirement removes both refs and collection removes the commit); cost row: a ten-evaluation attempt under 10 ms / 5 MB through seon.profile/measure. Files: src/seon/cluster/squash.clj, test/seon/cluster/squash_test.clj, src/seon/cluster/source.clj (merge-base public), src/seon/program.cljc (projection argument)."
++             :intent "Phase AW1 of hybrid-agent-world.md (after AW0 and AW1a, `seon.db/entities-born-on-two-branches-of-one-commit-have-different-ids`: one eid counter per store, so a branch-born entity keeps its eid on main). The copy-back is git's squash merge over data (`merge --squash`: a three-way from the merge base, one commit on main, no parent link to the branch), never a cherry-pick and never datahike merge!/:parents. The pure `seon.cluster.squash/squash-merge` [source-db base-db target-db projection] -> {:tx-data :conflicts}: the branch's datoms since its merge base for `seon.program/cluster-attributes` (d/since on the branch; base = the immutable fork-point commit read with `datahike.api/commit-as-db` from `seon.cluster.registry/base-commit-id`; `seon.cluster.registry/fork!` creates its registry ref with `datahike.api/branch!`, and `seon.cluster.registry/retire-branch!` deletes both refs. At Datahike revision 61bca1edd6bcef079f5c47e4f5f75df30549934d, `datahike.gc/reachable-in-branch` seeds each registry head and marks its indexes regardless of remove-before; only parent traversal is time limited. No attribute history retention change), grouped by entity, replayed with eids unchanged (every eid was issued by this store; `seon.db/an-explicit-eid-outside-the-allocators-range-is-refused` guards the rest) except the collision remap: a new entity whose :db.unique/identity value (`seon.db/identity-attributes`, looked up on main's AVET) already exists on main takes main's eid in its own datoms and in every ref to it, because Datahike refuses an explicit eid carrying another entity's unique value (:transact/unique) instead of upserting it; classified per [e a] as `seon.program/three-way` classifies digests: unchanged -> nothing, only theirs -> assert or retract, only ours -> keep, both and different -> the entity schema's :seon.cluster/conflict rule: :theirs asserts, :ours keeps, :add is one :db.fn/call that sums (the occurrence count), :root keeps ours plus a conflict row {entity attribute base ours theirs}. It reuses the merge-request machinery instead of a second comparison: the base comes from `seon.cluster.source/merge-base` and `seon.cluster.source/branch-base-t` (made public), and `seon.program/changed-identities` and `seon.program/digest-map` take a projection argument (program attributes for merge requests, cluster attributes here) so both are one three-way with two projections. Proofs, a table on values with d/with targets: this test (main pulls the end, the refined intent and a child task by eid); a-value-changed-on-both-sides-resolves-by-the-declared-rule (table over :root, :theirs, :add; under :root the entity's other attribute still copies); program-and-runtime-facts-never-copy (a defn, an evaluation, a turn and a received message yield empty tx-data); a-copy-of-an-unchanged-branch-is-empty; a-retraction-on-the-branch-retracts-on-an-unchanged-main-only; a-branch-born-entity-keeps-its-eid-on-main (the child task's eid on main equals its eid on the branch, refs included; main's next allocation is unmoved); a-natural-identity-born-on-both-sides-maps-to-mains-eid (two branches each mint an occurrence with one signature: main holds one entity under its own eid, count summed by :add, every ref remapped); the-merge-base-is-the-merge-requests (the squash's base commit equals `seon.cluster.source/merge-base` for the same branch); the-merge-base-retains-the-count-needed-by-add (base occurrence count 1, source 2, unchanged target 1 yields 2); a-base-ref-keeps-the-fork-commit-only-until-retirement (cutoff after fork retains the commit while the work branch exists; retirement removes both refs and collection removes the commit); cost row: a ten-evaluation attempt under 10 ms / 5 MB through seon.profile/measure. Files: src/seon/cluster/squash.clj, test/seon/cluster/squash_test.clj, src/seon/cluster/source.clj (merge-base public), src/seon/program.cljc (projection argument)."
+              :must-read #{seon.program/three-way seon.program/changed-identities seon.program/digest-map seon.program/program-attributes seon.program/cluster-attributes seon.cluster.source/merge-base seon.cluster.registry/fork! seon.cluster.registry/retire-branch! seon.cluster.registry/base-commit-id datahike.api/commit-as-db datahike.gc/gc-storage! seon.db/identity-attributes seon.db/with seon.profile/measure}
+              :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-agent-world.md"
+                          "docs/research/agent-platform/2026-10-11/eid-ranges-opus.md"
+                          "docs/research/agent-platform/2026-10-11/eid-ranges-sol.md"}}
+- #:seon.task{:name "a-repeated-auto-merge-adds-nothing"
+-             :kind :function
+-             :intent "(hybrid-done-and-merge M3, reused U1) New attribute `:seon.task/merge-base` `:uuid` on the assignment (replaces `:seon.task.attempt/fork` as authority and the `:seon.squash/attempt` marker), written by root alone: `seon.cluster.agent/write-attempt!` and `seon.task/assign!` store the main commit the branch forks from. New `merge-tx` (`seon.cluster.squash/merge-tx` until M6 renames the namespace to `seon.merge`) runs in main's writer: three-way(base, source commit C, the writer's db), moves `:seon.task/merge-base` to C in the same transaction and returns conflicts in its report, so a repeat has delta nothing. It replaces `seon.cluster.squash/copy!` in `seon.cluster.agent/land-ends!`; delete `copy!`, `squash-merge!` and `selected-coordinates`; convert `test/seon/cluster/registry_test.clj` (820) and `db_flow_test` (551-554) and the docstrings naming `copy!` in `seon.task/delete-branch!` and `land-ends!`. Red proofs in `seon.cluster.squash-test`: `a-repeated-merge-adds-nothing` (second tx-data [], base = C), `a-root-edit-after-capture-keeps-roots-value` (main keeps \"root edited\"; the report's `:conflicts` holds the coordinate with base, ours, theirs), `a-reverted-branch-value-reverts-on-main`, `an-occurrence-counted-on-the-branch-adds-once-on-main` (base 1, branch 2, main 2 gives 3; repeat gives 3). Cost: merge-tx writer time under 20 ms. Platform slice (`--test`); schema `resources/seon/schemas/seon.task.edn`."
+-             :must-read #{seon.cluster.squash/squash-merge seon.cluster.squash/copy! seon.cluster.squash/squash-merge! seon.cluster.squash/selected-coordinates seon.cluster.squash/add-count seon.cluster.agent/land-ends! seon.cluster.agent/write-attempt! seon.task/assign! seon.task/delete-branch! seon.program/three-way seon.db/transact-call}
+-             :needs #{[:seon.task/sym seon.cluster.squash/disjoint-set-additions-merge-as-their-union]}
+-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
+  #:seon.task{:name "disjoint-set-additions-merge-as-their-union"
+              :kind :function
+              :intent "(hybrid-done-and-merge M2) `seon.cluster.squash/squash-merge` merges cardinality-many attributes member by member, (ours - (base - theirs)) union (theirs - base), as git merges lines; `:seon.cluster/conflict` `:add` and `seon.cluster.squash/add-count` stay. Red proof: `seon.cluster.squash-test/disjoint-set-additions-merge-as-their-union` (base, ours adds y, theirs adds z on `:seon.task/evidence`: `:conflicts` is [] and main's value is base union {y} union {z}; today the two additions conflict). Cost: three-way on one changed task under 5 ms through `seon.profile/measure` (0.11-0.24 ms today). Files: `src/seon/cluster/squash.clj`, `test/seon/cluster/squash_test.clj`."
+@@ -21,7 +15,6 @@
+              :kind :function
+              :intent "(hybrid-done-and-merge M4) A both-sides-changed coordinate with no declared `:seon.cluster/conflict` rule becomes a `:seon.merge/unmerged` entity on the merge branch only (new schema `resources/seon/schemas/seon.merge.edn`; `seon.id/id [assignment attribute entity-identity]`; members `attribute`, `entity`, `base`, `ours`, `theirs`, `source-commit`; any write to the coordinate on the merge branch retracts it). Delete `seon.cluster.squash/conflict-task!`; convert `db_flow_test` (680) and `squash_test` (101). Red proof: `seon.cluster.squash-test/a-conflict-keeps-its-three-values-on-the-merge-branch` (pulled base, ours, theirs and source-commit equal the values merged). Cost: under 50 ms. Platform slice (`--test`)."
+              :must-read #{seon.cluster.squash/conflict-task! seon.cluster.squash/squash-merge seon.program/three-way seon.id/id}
+-             :needs #{[:seon.task/sym seon.cluster.squash/a-repeated-auto-merge-adds-nothing]}
+              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
+  #:seon.task{:name "a-merge-whose-reached-definition-moved-writes-nothing"
+              :kind :function
+diff --git a/resources/seon/tasks/seon.context.edn b/resources/seon/tasks/seon.context.edn
+index d496cbc3f..5aa836c26 100644
+--- a/resources/seon/tasks/seon.context.edn
++++ b/resources/seon/tasks/seon.context.edn
+@@ -55,7 +55,6 @@
+              :kind :function
+              :intent "(hybrid-done-and-merge M14) The branch is the proposal. `seon.context/current-state` carries a derived `:seon.context/changes` (new key in `resources/seon/schemas/seon.context.edn`, never stored): the entities the branch added, changed and removed between its `:seon.task/merge-base` and its head, from `seon.cluster.source/changed-identities` (the hybrid's `seon.program/changed-identities` is the same operation; it is `seon.program/three-way`'s sibling) over program and cluster attributes, grouped by family (functions, tests, schemas, namespaces, task facts, other cluster facts), each entry with the form that digs into it (`my.program/diff`, a pull); `my.program/diff` reads the same base. Red proof: `seon.context-test/the-current-state-shows-the-branch-diff-since-its-merge-base` (after one defn, one deftest and one `my.task/refine!` the block holds `:seon.context/changes` with one entry each under :functions, :tests, :task-facts, each with a readable `:seon.render/form`; an unchanged branch holds no `:seon.context/changes`). Cost: at most 5 ms per eval request on a ten-change branch (0.8 ms warm for the diff). After M3."
+              :must-read #{seon.context/current-state seon.cluster.source/changed-identities seon.program/three-way my.program/diff seon.profile/measure}
+-             :needs #{[:seon.task/sym seon.cluster.squash/a-repeated-auto-merge-adds-nothing]}
+              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
+  #:seon.task{:name "a-red-with-no-base-result-is-unknown"
+              :kind :function
+diff --git a/resources/seon/tasks/seon.fault.edn b/resources/seon/tasks/seon.fault.edn
+index f4caa9e40..56de609bc 100644
+--- a/resources/seon/tasks/seon.fault.edn
++++ b/resources/seon/tasks/seon.fault.edn
+@@ -26,5 +26,4 @@
+              :kind :function
+              :intent "(hybrid-done-and-merge M3, reused U7 as M3's count proof) `seon.fault/record!` writes one transaction on the agent's own connection (the cluster-branch copy naming the origin is deleted). `:seon.error.occurrence/count` merges by its declared `:add` rule: with `:seon.task/merge-base` advanced inside `merge-tx` the delta is exact, so main holds the signature with count 1 after the first merge, a second occurrence of the same signature makes 2, a repeat merge adds nothing. The `:seon.error.occurrence/attempts` clause of the first draft is dropped (no attribute of that name exists in this design). `:seon.error.occurrence/last-at` merges by `:max`; `:seon.error.occurrence/evaluation` stays a `:seon.cluster.eval/id` value. Red proof: this task's deftest in `test/seon/fault_test.clj` tagged `seon.fault/a-fault-on-a-branch-is-recorded-once-there-and-counted-on-main-at-the-next-auto-merge` (one transaction on the branch; after the merge main holds count 1; base 1, source 2, main 2 gives 3; repeat gives 3). Files: `src/seon/fault.clj`, `test/seon/fault_test.clj`."
+              :must-read #{seon.fault/record! seon.fault/fault! seon.turn.world/record-fault seon.cluster.squash/add-count}
+-             :needs #{[:seon.task/sym seon.cluster.squash/a-repeated-auto-merge-adds-nothing]}
+              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}]
+diff --git a/script/astra_cost_handoff.clj b/script/astra_cost_handoff.clj
+index 6871d2de1..367e6233a 100644
+--- a/script/astra_cost_handoff.clj
++++ b/script/astra_cost_handoff.clj
+@@ -30,7 +30,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+                   [:map-of :qualified-keyword :map]]}
+   [source base projection]
+-  (let [whole (costs (profile/measure #(squash/squash-merge source base base projection nil)))
++  (let [whole (costs (profile/measure #(squash/squash-merge source base base projection)))
+         changed (db/since (db/history source) (db/basis-t base))]
+     {::squash whole
+      ::attributes (into {}
+diff --git a/src/seon/cluster/agent.clj b/src/seon/cluster/agent.clj
+index d340e3244..f8433eb76 100644
+--- a/src/seon/cluster/agent.clj
++++ b/src/seon/cluster/agent.clj
+@@ -1911,14 +1911,28 @@
+         (when (seq rows) (write! connection rows))))
+     nil))
+ 
++(defn- write-merge-base!
++  "Write on main attempt `key`'s merge base, the commit its `branch` forked at (`seon.cluster.registry/base-commit-id`),
++  unless main already holds one: `seon.cluster.squash/merge-tx` moves it from there."
++  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch [:maybe :seon.task/assignment]] :nil]}
++  [handle branch key]
++  (when key
++    (let [connection (:seon.db/connection handle)
++          database (db/db connection)
++          row (db/pull database [:db/id :seon.task/merge-base] [:seon.task/assignment key])]
++      (when-not (:seon.task/merge-base row)
++        (write! connection [[:db/add (:db/id row) :seon.task/merge-base (registry/base-commit-id database branch)]]))))
++  nil)
++
+ (defn- start-attempt!
+   "Start a `:start-flow` action's graph under its intent.
+-  Fork its branch, acquire the branch execution, write its agent and attempt
+-  there when the fork point predates them (`seed-attempt!`), and start its flow.
++  Fork its branch, record its merge base on main (`write-merge-base!`), acquire the branch execution, write its
++  agent and attempt there when the fork point predates them (`seed-attempt!`), and start its flow.
+   A repeat finds the branch, its rows and the started graph and does nothing new."
+   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/facts :seon.flow.plan/action] :nil]}
+   [handle _facts {agent-id :seon.agent/id branch :seon.task/branch intent :seon.task/execution :as action}]
+   (fork-attempt! handle branch (:seon.task/assignment action))
++  (write-merge-base! handle branch (:seon.task/assignment action))
+   (let [execution (acquire-context! handle nil {:seon.agent/branch branch})]
+     (seed-attempt! handle (:seon.db/connection execution) action)
+     (start-branch-flow! handle execution agent-id (or intent :running))
+@@ -2023,8 +2037,8 @@
+                                :seon.task/name (str "attempt-ended-" key) :seon.task/kind :work
+                                :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
+                                                       (when reason (str ": " reason)) ". Nothing was copied to main;"
+-                                                      " its branch " (name branch) " is kept. Copy it by hand with"
+-                                                      " seon.cluster.squash/squash-merge!, or destroy it with"
++                                                      " its branch " (name branch) " is kept. Merge it by hand with"
++                                                      " seon.cluster.squash/merge!, or destroy it with"
+                                                       " my.agent/retire-branch!.")})]
+     (when (:seon.error/at created)
+       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
+@@ -2146,8 +2160,8 @@
+ 
+ (defn land-ends!
+   "Land each of `ends` on main, then stop its graph and settle its branch (P2).
+-  A :done or :sent-back end is copied by `seon.cluster.squash/copy!` (ONE main
+-  transaction); an error end copies nothing and becomes root's problem task.
++  A :done or :sent-back end is squash-merged by `seon.cluster.squash/merge!` (ONE main
++  transaction, its merge base advanced in it); an error end copies nothing and becomes root's problem task.
+   The graph stops without interrupting the pass that wrote the end, and is joined.
+   A merge request still open keeps the branch until it closes (`seon.task/close!`),
+   landing it with no root when `:seon.config.root/land?` says so; else a successful
+@@ -2162,7 +2176,7 @@
+         (let [copied? (#{:done :sent-back} end)]
+           (if copied?
+             (db/with-branch {:seon.db/connection connection}
+-                                  #(squash/copy! connection branch nil {:seon.squash/attempt a}))
++                            #(squash/merge! connection a branch {:seon.squash/attempt a}))
+             (record-error-end! connection ended))
+           (when-let [registry (entry-registry routing agent-id)]
+             (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))
+diff --git a/src/seon/cluster/squash.clj b/src/seon/cluster/squash.clj
+index 04adac04d..f65be5761 100644
+--- a/src/seon/cluster/squash.clj
++++ b/src/seon/cluster/squash.clj
+@@ -1,5 +1,5 @@
+ (ns seon.cluster.squash
+-  "Pure three-way squash merge of declared cluster facts."
++  "Three-way squash merge of declared cluster facts onto main, computed inside main's writer."
+   (:require [clojure.set :as set]
+             [datahike.api :as d]
+             [seon.cluster.source :as source]
+@@ -26,19 +26,6 @@
+                           (d/datoms source :eavt entity)))))
+           entities)))
+ 
+-(defn- selected-coordinates
+-  "Changed coordinates whose entity carries one of the selected identities."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.program/identity]
+-                       [:maybe [:set :seon.program/identity]]]
+-                  [:set :seon.program/identity]]}
+-  [source coordinates selection]
+-  (if (nil? selection)
+-    coordinates
+-    (let [past (d/history source)
+-          entities (into #{} (mapcat (fn [[attribute value]]
+-                                      (map :e (d/datoms past :avet attribute value)))) selection)]
+-      (into #{} (filter #(entities (second %))) coordinates))))
+-
+ (defn add-count
+   "Transaction data adding the source delta to the writer's current count."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id
+@@ -81,18 +68,17 @@
+   "Transaction data and conflicts for source relative to its merge base and target."
+   {:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}
+    :malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+-                       :seon.db/database-value :seon.schema/projection
+-                       [:maybe [:set :seon.program/identity]]]
++                       :seon.db/database-value :seon.schema/projection]
+                   [:map [:tx-data :seon.store/transaction-data]
+                    [:conflicts [:vector [:map [:entity :seon.db/entity-id]
+                                          [:attribute :qualified-keyword]
+                                          [:base :seon.schema/value]
+                                          [:ours :seon.schema/value]
+                                          [:theirs :seon.schema/value]]]]]]}
+-  [source base target projection selection]
++  [source base target projection]
+   (let [rules (program/cluster-attributes projection)
+         attributes (set (keys rules))
+-        coordinates (selected-coordinates source (program/changed-identities base source {} attributes) selection)
++        coordinates (program/changed-identities base source {} attributes)
+         remap (collision-remap source base target (into #{} (map second) coordinates))
+         mapped (into #{} (map (fn [[attribute entity]] [attribute (get remap entity entity)])) coordinates)
+         before (program/projected-values base coordinates {})
+@@ -105,7 +91,12 @@
+         collisions (into #{} (keep (fn [[attribute entity]]
+                                      (when (and (= :add (rules attribute)) (contains? remap entity))
+                                        [attribute (get remap entity)]))) coordinates)
+-        changes (set/union collisions (:seon.program/added comparison) (:seon.program/retracted comparison)
++        ;; a count the branch moved adds its delta to main's, even when main moved it to the same value
++        counted (into #{} (filter (fn [[attribute :as coordinate]]
++                                    (and (= :add (rules attribute)) (not (contains? remap (second coordinate)))
++                                         (not= (get before coordinate) (get theirs coordinate)))))
++                      coordinates)
++        changes (set/union collisions counted (:seon.program/added comparison) (:seon.program/retracted comparison)
+                            (:seon.program/changed-on-branch comparison) (:seon.program/conflict comparison))]
+     (reduce
+      (fn [result [attribute entity :as coordinate]]
+@@ -114,6 +105,7 @@
+              o (get ours coordinate)
+              conflict? ((:seon.program/conflict comparison) coordinate)
+              rule (cond
++                    (counted coordinate) :add
+                     (and conflict? (= :db.cardinality/many (get-in source [:schema attribute :db/cardinality]))) :members
+                     (or conflict? (collisions coordinate)) (rules attribute)
+                     :else :theirs)]
+@@ -145,45 +137,62 @@
+       (throw (ex-info (:seon.error/message created "The conflict's problem task was refused.") created)))
+     nil))
+ 
+-(defn copy!
+-  "Squash `branch` onto main through `connection` as ONE transaction carrying `meta`
+-  and the provenance (source branch and commit) as transaction metadata.
+-  Each `:root` conflict is first written as root's problem task. Never a Datahike
+-  merge: a parented commit would pin the branch's lineage to main for collection.
+-  Answers what it copied."
+-  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch [:maybe [:set :seon.program/identity]] :map]
+-                  :seon.squash/copy]}
+-  [connection branch selection meta]
+-  (let [target (db/db connection)
+-        main-branch (get-in target [:config :branch])
+-        source (db/branch-database target branch)
+-        _ (when-not source
+-            (throw (ex-info "The branch to squash has no head." {:seon.store/branch branch})))
+-        base (source/merge-base source target main-branch branch)]
+-    (when (:seon.error/at base) (throw (ex-info (:seon.error/message base "The branch has no merge base.") base)))
+-    (try
+-      (let [commit (db/commit-id source)
+-            {:keys [tx-data conflicts]} (squash-merge source base target
+-                                                      (or (db/carried-projection target) (schema/handed-projection))
+-                                                      selection)
+-            _ (run! #(conflict-task! connection branch %) conflicts)
+-            report (db/transact! connection {:tx-data tx-data
+-                                             :tx-meta (assoc meta :seon.squash/source-branch branch
+-                                                             :seon.squash/source-commit commit)})]
+-        (when-not (:db-after report)
+-          (throw (ex-info (:seon.error/message report "The end copy was refused.") report)))
+-        {:seon.squash/source-branch branch :seon.squash/source-commit commit
+-         :seon.squash/datoms (count tx-data) :seon.squash/conflicts conflicts})
+-      (finally (source/release! [base source])))))
++(defn- merged
++  "Assignment `a`'s three-way on main `database` from its merge base (`:seon.task/merge-base`) to the source
++  commit `commit`, under `projection`'s rules: nothing when the base already is `commit`."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
++                  [:map [:tx-data :seon.store/transaction-data] [:conflicts :seon.squash/conflicts]]]}
++  [database a commit projection]
++  ;; read from the datoms: inside the writer the value carries no projection of its own
++  (let [base-commit (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
++    (when-not (uuid? base-commit)
++      (throw (ex-info "The assignment has no merge base." {:seon.error/message "The assignment has no merge base."
++                                                          :db/id a :seon.squash/source-commit commit})))
++    (if (= base-commit commit)
++      {:tx-data [] :conflicts []}
++      (let [base (db/commit-database database base-commit)
++            source (db/commit-database database commit)]
++        (try (squash-merge source base database projection)
++             (finally (source/release! [base source])))))))
+ 
+-(defn squash-merge!
+-  "Copy `branch`'s cluster facts onto main by hand, as an attempt's successful end
+-  does (`copy!`), restricted to the identities `selection` names (nil: all).
+-  Root's way to land an error end's branch; a second copy writes nothing new.
++(defn merge-tx
++  "Assignment `a`'s squash merge of the source commit `commit` onto main, computed inside main's writer on its own
++  `database` under main's `projection`: the three-way from its merge base (`:seon.task/merge-base`) to `commit`
++  against `database`, with the base moved to `commit` in the same transaction, so a repeat adds nothing; []
++  when the base already is `commit`. A `:root` conflict keeps main's value (`merge!` answers it)."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
++                  :seon.store/transaction-data]}
++  [database a commit projection]
++  (let [base-commit (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
++    (if (= base-commit commit)
++      []
++      (conj (:tx-data (merged database a commit projection)) [:db/add a :seon.task/merge-base commit]))))
+ 
+-  Example:
+-  (seon.cluster.squash/squash-merge! {} :attempt-0123456789ab nil)"
+-  {:malli/schema [:=> [:cat :seon.squash/context :seon.store/branch [:maybe [:set :seon.program/identity]]]
++(defn merge!
++  "Squash-merge `branch`'s head onto main through `connection` for assignment `a`: ONE transaction of
++  `merge-tx`, which runs the three-way inside the writer and advances the merge base, carrying `meta` and the
++  provenance (source branch and commit) as transaction metadata. Each `:root` conflict, kept as main's value,
++  is written as root's problem task. Never a Datahike merge: a parented commit would pin the branch's lineage
++  to main for collection. Answers what it merged and the conflicts the writer met."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/entity-id :seon.store/branch :map]
+                   :seon.squash/copy]}
+-  [{connection :seon.db/connection} branch selection]
+-  (db/with-branch {:seon.db/connection connection} #(copy! connection branch selection {})))
++  [connection a branch meta]
++  (let [target (db/db connection)
++        head (db/branch-database target branch)
++        _ (when-not head
++            (throw (ex-info "The branch to merge has no head." {:seon.error/message "The branch to merge has no head."
++                                                               :seon.store/branch branch})))
++        commit (try (db/commit-id head) (finally (source/release! [head])))
++        projection (or (db/carried-projection target) (schema/handed-projection))
++        report (db/transact! connection {:tx-data [[:db.fn/call merge-tx a commit projection]]
++                                         :tx-meta (assoc meta :seon.squash/source-branch branch
++                                                         :seon.squash/source-commit commit)})
++        _ (when-not (:db-after report)
++            (throw (ex-info (:seon.error/message report "The merge was refused.") report)))
++        ;; the conflicts merge-tx met, derived again from the value it read
++        conflicts (:conflicts (merged (:db-before report) a commit projection))]
++    (run! #(conflict-task! connection branch %) conflicts)
++    {:seon.squash/source-branch branch :seon.squash/source-commit commit
++     ;; the merged facts: neither the transaction's own metadata nor the moved merge base
++     :seon.squash/datoms (count (remove #(or (= (:tx %) (:e %)) (= :seon.task/merge-base (:a %))) (:tx-data report)))
++     :seon.squash/conflicts conflicts}))
+diff --git a/src/seon/task.clj b/src/seon/task.clj
+index c0d3c7d64..9c9c1717a 100644
+--- a/src/seon/task.clj
++++ b/src/seon/task.clj
+@@ -543,7 +543,7 @@
+ 
+ (defn create!
+   "Create a runtime task in my world (`connection`: my branch, main for root; an agent's tasks
+-  reach main with its successful end, `seon.cluster.squash/copy!`) from its declaration (7.8). Its handle is
++  reach main with its successful end, `seon.cluster.squash/merge!`) from its declaration (7.8). Its handle is
+   the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
+   changes nothing; a different one refuses with base, current and proposed unless
+   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
+diff --git a/test/seon/cluster/db_flow_test.clj b/test/seon/cluster/db_flow_test.clj
+index 462a746d2..9ed5e03b5 100644
+--- a/test/seon/cluster/db_flow_test.clj
++++ b/test/seon/cluster/db_flow_test.clj
+@@ -573,12 +573,13 @@
+                   "and the reason")
+               (pass! handle routing)
+               (is (= 1 (count (copies (db/db connection) a))) "a second pass writes nothing")
+-              (testing "root's by-hand copy lands what the success path would"
+-                (let [copied (squash/squash-merge! {:seon.db/connection connection} branch nil)]
+-                  (is (pos? (:seon.squash/datoms copied)))
++              (testing "root's by-hand merge lands what the success path would"
++                (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (squash/merge! connection a branch {})))
++                      merged (merge!)]
++                  (is (pos? (:seon.squash/datoms merged)))
+                   (is (= "Refined on the branch." (intent)))
+-                  (is (zero? (:seon.squash/datoms (squash/squash-merge! {:seon.db/connection connection} branch nil)))
+-                      "and a second copy writes nothing new")))))))))))
++                  (is (zero? (:seon.squash/datoms (merge!)))
++                      "and a second merge writes nothing new")))))))))))
+ 
+ ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
+ 
+diff --git a/test/seon/cluster/registry_test.clj b/test/seon/cluster/registry_test.clj
+index 386d94592..5acbff2ca 100644
+--- a/test/seon/cluster/registry_test.clj
++++ b/test/seon/cluster/registry_test.clj
+@@ -797,14 +797,23 @@
+ (deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+   a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
+   ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every head; an end copy is a plain
+-  ;; transaction with no parent link, so a deleted attempt's commits and nodes reach nothing and are swept.
++  ;; transaction with no parent link (`seon.cluster.squash/merge!`), so a deleted attempt's commits and nodes reach
++  ;; nothing and are swept.
+   (with-program-store
+    (fn [store connection]
+      (let [handle (task/task-handle 'fixture.tasks "reclaimed" :function)
+            branch :attempt-reclaimed
++           ;; this store holds the program's attributes and no cluster, so the assignment's agent is its
++           ;; identity alone: the merge validates the assignment it moves, never the agent it names
++           _ (d/transact connection [{:seon.agent/id "reclaimed"}])
+            _ (test-support/transacted! connection [(test-support/task-row handle "Original")])
+-           baseline (clean-key-count store)
+-           base (db/db connection)]
++           [row] (task/attempt-tx (db/db connection) handle "reclaimed" branch)
++           _ (test-support/transacted! connection [row])
++           base (db/db connection)
++           a (:db/id (db/pull base [:db/id] [:seon.task/assignment (:seon.task/assignment row)]))
++           ;; the fork below is taken at `base`, so `base` is the assignment's merge base
++           _ (test-support/transacted! connection [[:db/add a :seon.task/merge-base (db/commit-id base)]])
++           baseline (clean-key-count store)]
+        (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch branch
+                                                      :seon.cluster.registry/from (db/commit-id base) :seon.db/db base})))
+        (let [fork (db/carry-connection-projection-state! (store/open-branch! store branch)
+@@ -817,7 +826,7 @@
+                                          (db/commit-id (db/db fork))))))
+                           (finally (store/release-branch! fork)))
+              before-copy (clean-key-count store)
+-             copied (db/with-branch {:seon.db/connection connection} #(squash/copy! connection branch nil {}))
++             copied (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
+              with-copy (clean-key-count store)]
+          (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
+          (is (pos? (:seon.squash/datoms copied)))
+diff --git a/test/seon/cluster/squash_test.clj b/test/seon/cluster/squash_test.clj
+index 6c93d3bdd..98ad9da44 100644
+--- a/test/seon/cluster/squash_test.clj
++++ b/test/seon/cluster/squash_test.clj
+@@ -85,7 +85,7 @@
+            squash-merge (ns-resolve 'seon.cluster.squash 'squash-merge)]
+        (is (some? squash-merge))
+        (when squash-merge
+-         (let [picked (squash-merge source base target (schema/handed-projection) nil)
++         (let [picked (squash-merge source base target (schema/handed-projection))
+                copied (db/with target {:tx-data (:tx-data picked)})]
+            (is (empty? (:conflicts picked)))
+            (is (= :done (:seon.task.attempt/end (db/pull copied [:seon.task.attempt/end] assignment))))
+@@ -106,7 +106,7 @@
+            target (checked-value base [{:db/id entity :seon.error.occurrence/count 4}])]
+        (doseq [[rule expected conflicts] [[:root 4 1] [:ours 4 0] [:theirs 3 0] [:add 6 0]]]
+          (let [projection (rule-projection (schema/handed-projection) rule)
+-               result (squash/squash-merge source base target projection nil)
++               result (squash/squash-merge source base target projection)
+                copied (checked-value target {:tx-data (:tx-data result)})]
+            (is (= expected (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
+            (is (= conflicts (count (:conflicts result))))
+@@ -120,7 +120,7 @@
+    (fn [connection]
+      (let [base (db/db connection)
+            projection (schema/handed-projection)]
+-       (is (empty? (:tx-data (squash/squash-merge base base base projection nil))))))))
++       (is (empty? (:tx-data (squash/squash-merge base base base projection))))))))
+ 
+ (deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} program-and-runtime-facts-never-copy
+   (support/with-database
+@@ -136,7 +136,7 @@
+                                                           (message/candidate {:my.message/to "squash-runtime"
+                                                                               :my.message/content "Hello"})
+                                                           "squash-runtime")))
+-           result (squash/squash-merge source base base (schema/handed-projection) nil)]
++           result (squash/squash-merge source base base (schema/handed-projection))]
+        (is (empty? (:tx-data result)))
+        (is (empty? (:conflicts result)))))))
+ 
+@@ -151,8 +151,8 @@
+            projection (schema/handed-projection)
+            target (checked-value base [{:db/id entity :seon.task/evidence #{"docs/b"}}
+                                        [:db/retract entity :seon.task/evidence "docs/a"]])
+-           unchanged (squash/squash-merge source base base projection nil)
+-           concurrent (squash/squash-merge source base target projection nil)]
++           unchanged (squash/squash-merge source base base projection)
++           concurrent (squash/squash-merge source base target projection)]
+        (doseq [[from to] [[base source]
+                          [(db/basis-t base) source]
+                          [(db/as-of base (db/basis-t base)) source]
+@@ -186,7 +186,7 @@
+                  [[] ["docs/a"] [] ["docs/b"] #{}]]]
+        (doseq [[oa orr ta tr merged] rows]
+          (let [target (change oa orr)
+-               result (squash/squash-merge (change ta tr) base target projection nil)
++               result (squash/squash-merge (change ta tr) base target projection)
+                copied (checked-value target {:tx-data (:tx-data result)})]
+            (is (= [] (:conflicts result)))
+            (is (= merged (set (:seon.task/evidence (db/pull copied [:seon.task/evidence] entity)))))))))))
+@@ -202,7 +202,7 @@
+            source (checked-value (ten-evaluation-attempt base "squash-cost")
+                                  [{:db/id entity :seon.task/intent "Refined"}])
+            projection (schema/handed-projection)
+-           measured (profile/measure #(squash/squash-merge source base base projection nil))]
++           measured (profile/measure #(squash/squash-merge source base base projection))]
+        (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff-squash.edn")
+              (value/core-text (dissoc measured :seon.profile/value)))
+        (is (<= (:seon.profile/ms measured) 10))
+@@ -221,7 +221,7 @@
+            source (checked-value base [[:db/add entity :seon.task/evidence "docs/z"]])
+            target (checked-value base [[:db/add entity :seon.task/evidence "docs/y"]])
+            projection (schema/handed-projection)
+-           run #(squash/squash-merge source base target projection nil)
++           run #(squash/squash-merge source base target projection)
+            _ (run)
+            measured (profile/measure run)]
+        (is (<= (:seon.profile/ms measured) 5))))))
+@@ -256,7 +256,7 @@
+        (let [branch (db/db connection)
+              allocator (writing/eid-allocator branch)
+              issued (.get ^java.util.concurrent.atomic.AtomicLong allocator)
+-             result (squash/squash-merge branch base base (schema/handed-projection) nil)
++             result (squash/squash-merge branch base base (schema/handed-projection))
+              copied (checked-value base (:tx-data result))]
+          (is (= (:db/id (db/pull branch [:db/id] [:seon.task/id child]))
+                 (:db/id (db/pull copied [:db/id] [:seon.task/id child]))))
+@@ -276,7 +276,7 @@
+                                       {:db/id parent-ref :seon.task/children #{child-ref}}])
+             (let [branch (db/db fork)
+                   eid (:db/id (db/pull branch [:db/id] child-ref))
+-                  squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection) nil)
++                  squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection))
+                   copied (checked-value (db/db connection) (:tx-data squash))
+                   next-before (:db/id (db/pull (checked-value (db/db connection) [{:db/ident :fixture.squash/next}]) [:db/id] :fixture.squash/next))
+                   replayed (checked-value copied (:tx-data squash))
+@@ -344,7 +344,7 @@
+               (is (not= (:e theirs) (:e ours)))
+               (support/transacted! fork [{:db/id (:e theirs) :seon.error.occurrence/related (:e theirs)}])
+               (let [branch (db/db fork)
+-                    squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection) nil)
++                    squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection))
+                     copied (checked-value (db/db connection) (:tx-data squash))
+                     entity (db/pull copied [:db/id :seon.error.occurrence/count :seon.error.occurrence/related]
+                                     [:seon.error.occurrence/id (:v theirs)])]
+@@ -367,7 +367,7 @@
+                 head (db/db connection)
+                 base (source/merge-base candidate head target branch)
+                 entity (:e (first (d/datoms candidate :aevt :seon.error.occurrence/id)))
+-                result (squash/squash-merge candidate base head (schema/handed-projection) nil)
++                result (squash/squash-merge candidate base head (schema/handed-projection))
+                 copied (checked-value head (:tx-data result))]
+             (is (= 1 (:seon.error.occurrence/count (db/pull base [:seon.error.occurrence/count] entity))))
+             (try
+@@ -413,3 +413,132 @@
+         (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch})
+         (store/release-store! opened)
+         (support/delete-recursively! root)))))
++
++;;; M3: the merge runs in main's writer and advances the assignment's merge base in the same transaction.
++
++(defn- with-assigned-fork
++  "Run `proof` on a fork of main whose assignment main holds with the fork commit as its merge base:
++  task `handle` (intent \"a\") and its agent on main, then the fork, then the assignment written on main.
++  Calls (proof fork branch a) with `a` the assignment's entity id on main."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle [:fn clojure.core/ifn?]] :nil]}
++  [connection handle proof]
++  (let [agent-id (str "merge-" handle)]
++    (support/transacted! connection (into [(support/task-row handle "a")]
++                                          (support/agent-tx (db/db connection) agent-id)))
++    ;; a conflict is written as root's problem task (`seon.cluster.squash/conflict-task!`)
++    (when-not (:db/id (db/pull (db/db connection) [:db/id] [:seon.agent/id "root"]))
++      (support/transacted! connection (support/agent-tx (db/db connection) "root")))
++    (with-fork
++     connection
++     (fn [fork branch]
++       (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)
++             based (assoc row :seon.task/merge-base (registry/base-commit-id (db/db fork) branch))]
++         (db/with-branch {:seon.db/connection connection} #(support/transacted! connection [based]))
++         (proof fork branch (:db/id (db/pull (db/db connection) [:db/id]
++                                             [:seon.task/assignment (:seon.task/assignment row)]))))))))
++
++(defn- merged!
++  "Merge `branch` onto main for assignment `a` through `seon.cluster.squash/merge!`, under main's custody."
++  {:malli/schema [:=> [:cat :seon.db/connection :int :seon.store/branch] [:maybe :seon.squash/copy]]}
++  [connection a branch]
++  (when-let [merge! (ns-resolve 'seon.cluster.squash 'merge!)]
++    (db/with-branch {:seon.db/connection connection} #(merge! connection a branch {}))))
++
++(defn- intent-on
++  "The intent of task `handle` on `connection`'s head."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle] [:maybe :seon.task/intent]]}
++  [connection handle]
++  (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle])))
++
++(defn- merge-base-on
++  "The merge base main holds on assignment `a`."
++  {:malli/schema [:=> [:cat :seon.db/connection :int] [:maybe :uuid]]}
++  [connection a]
++  (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base] a)))
++
++(deftest a-repeated-merge-adds-nothing
++  (support/with-database
++   (fn [connection]
++     (let [handle (task/task-handle 'fixture.tasks "merge-repeat" :function)]
++       (with-assigned-fork
++        connection handle
++        (fn [fork branch a]
++          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
++          (let [commit (db/commit-id (db/db fork))
++                first-merge (merged! connection a branch)]
++            (is (some? first-merge) "seon.cluster.squash/merge! exists")
++            (is (= "b" (intent-on connection handle)))
++            (is (= commit (merge-base-on connection a)) "the merge base moved to the merged source commit")
++            (is (= [] ((or (ns-resolve 'seon.cluster.squash 'merge-tx) (constantly nil))
++                          (db/db connection) a commit (db/carried-projection (db/db connection))))
++                "the writer's transaction data for a repeat is empty")
++            (let [second-merge (merged! connection a branch)]
++              (is (= 0 (:seon.squash/datoms second-merge)))
++              (is (= commit (merge-base-on connection a)))))))))))
++
++(deftest a-root-edit-after-capture-keeps-roots-value
++  (support/with-database
++   (fn [connection]
++     (let [handle (task/task-handle 'fixture.tasks "merge-root-edit" :function)]
++       (with-assigned-fork
++        connection handle
++        (fn [fork branch a]
++          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
++          (db/with-branch {:seon.db/connection connection}
++                          #(support/transacted! connection [{:db/id [:seon.task/id handle] :seon.task/intent "root edited"}]))
++          (let [merged (merged! connection a branch)]
++            (is (= "root edited" (intent-on connection handle)) "main keeps root's value")
++            (is (= [{:entity (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/id handle]))
++                     :attribute :seon.task/intent :base "a" :ours "root edited" :theirs "b"}]
++                   (:seon.squash/conflicts merged))
++                "the writer's conflict is answered with its three values"))))))))
++
++(deftest a-reverted-branch-value-reverts-on-main
++  (support/with-database
++   (fn [connection]
++     (let [handle (task/task-handle 'fixture.tasks "merge-revert" :function)]
++       (with-assigned-fork
++        connection handle
++        (fn [fork branch a]
++          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
++          (merged! connection a branch)
++          (is (= "b" (intent-on connection handle)))
++          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "a"}])
++          (merged! connection a branch)
++          (is (= "a" (intent-on connection handle)) "the revert since the last merge reaches main")))))))
++
++(deftest an-occurrence-counted-on-the-branch-adds-once-on-main
++  (support/with-database
++   (fn [connection]
++     (let [handle (task/task-handle 'fixture.tasks "merge-count" :function)]
++       (support/transacted! connection (occurrence-tx (db/db connection)))
++       (with-assigned-fork
++        connection handle
++        (fn [fork branch a]
++          (support/transacted! fork (occurrence-tx (db/db fork)))
++          (db/with-branch {:seon.db/connection connection}
++                          #(support/transacted! connection (occurrence-tx (db/db connection))))
++          (let [occurrence (:v (first (d/datoms (db/db fork) :aevt :seon.error.occurrence/id)))
++                count-on #(:seon.error.occurrence/count
++                           (db/pull (db/db %) [:seon.error.occurrence/count] [:seon.error.occurrence/id occurrence]))]
++            (is (= [2 2] [(count-on fork) (count-on connection)]) "base 1, branch 2, main 2")
++            (merged! connection a branch)
++            (is (= 3 (count-on connection)) "the branch's one occurrence adds once")
++            (merged! connection a branch)
++            (is (= 3 (count-on connection)) "a repeated merge adds nothing"))))))))
++
++(deftest a-merge-stays-within-its-cost-bound
++  ;; the writer's work, merge-tx, is bounded at 20 ms (hybrid-done-and-merge M3); the transaction's own write
++  ;; validation is the writer's and is the same for any write of these facts
++  (support/with-database
++   (fn [connection]
++     (let [handle (task/task-handle 'fixture.tasks "merge-cost" :function)]
++       (with-assigned-fork
++        connection handle
++        (fn [fork _ a]
++          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
++          (let [main (db/db connection)
++                measured (profile/measure #(squash/merge-tx main a (db/commit-id (db/db fork))
++                                                            (db/carried-projection main)))]
++            (is (= 3 (count (:seon.profile/value measured))) "the intent's retraction and assertion and the moved base")
++            (is (<= (:seon.profile/ms measured) 20)))))))))
