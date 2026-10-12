@@ -1,6 +1,7 @@
 (ns seon.datahike-fork-test
   "Seon-owned acceptance checks for behavior maintained in its Datahike fork."
   (:require
+   [clojure.data.fressian :as fressian]
    [clojure.test :refer [deftest is]]
    [clojure.test.check :as tc]
    [clojure.test.check.generators :as gen]
@@ -57,18 +58,27 @@
 (deftest ^{:seon/tasks #{'seon.cluster.store/each-commit-serializes-hundreds-of-times-the-bytes-it-writes}}
   datom-serialization-writes-fields-without-sequence-copies
   (let [values (mapv #(datom/datom % :cost/value % (+ 536870912 %) (even? %)) (range 1000))
+        encoded (java.util.concurrent.atomic.LongAdder.)
+        keyword-writer (get-in fressian/clojure-write-handlers [clojure.lang.Keyword "key"])
+        attribute-writer (reify org.fressian.handlers.WriteHandler
+                           (write [_ writer value]
+                             (.increment encoded)
+                             (.write ^org.fressian.handlers.WriteHandler keyword-writer writer value)))
         serializer (serializers/fressian-serializer
                     @#'datahike.index.persistent-set/datom-read-handler
-                    @#'datahike.index.persistent-set/datom-write-handler)
+                    (assoc @#'datahike.index.persistent-set/datom-write-handler
+                           clojure.lang.Keyword {"key" attribute-writer}))
         handlers (atom {})
         encode #(let [out (java.io.ByteArrayOutputStream.)]
                   (store/-serialize serializer out handlers values)
                   (.toByteArray out))
         _ (encode)
+        _ (.reset encoded)
         measured (profile/measure encode)
         decoded (store/-deserialize serializer handlers
                                     (java.io.ByteArrayInputStream. (:seon.profile/value measured)))]
     (is (= (mapv #(vec (seq %)) values) (mapv #(vec (seq %)) decoded)))
+    (is (= 1 (.sum encoded)) "a repeated attribute is encoded once per stream")
     (is (< (:seon.profile/alloc-bytes measured) 1000000))))
 
 (def ^:private planner-database
