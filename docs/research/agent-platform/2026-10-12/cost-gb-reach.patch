@@ -1,0 +1,107 @@
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index 3c8723234..3159c9303 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -889,18 +889,16 @@
+      ::digests (read :seon.program/definition-digest :by-entity)}))
+ 
+ (defn- reach-fixed-point
+-  "Every name reachable from `start` through each node's `edges`, by name:
+-  its node, or nil for a name `node-of` does not find."
++  "Every name reachable from `start` through `edges`, read one frontier at a time by `nodes-of`."
+   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :keyword [:set :seon.schema/value]]
+                   [:map-of :seon.schema/value [:maybe :map]]]}
+-  [node-of edges start]
+-  (loop [pending (vec start) resolved (transient {})]
+-    (if-let [item (peek pending)]
+-      (if (contains? resolved item)
+-        (recur (pop pending) resolved)
+-        (let [node (node-of item)]
+-          (recur (into (pop pending) (edges node)) (assoc! resolved item node))))
+-      (persistent! resolved))))
++  [nodes-of edges start]
++  (loop [pending start resolved {}]
++    (if (seq pending)
++      (let [found (nodes-of (vec pending))
++            resolved (into resolved found)]
++        (recur (into #{} (comp (mapcat edges) (remove #(contains? resolved %))) (vals found)) resolved))
++      resolved)))
+ 
+ (defn- reached-graph
+   "The nodes and schema nodes the requested tests reach. A node's leaf is its
+@@ -916,10 +914,12 @@
+   [database test-symbols]
+   (let [{::keys [rows digests]} (reach-declarations database)
+         selector (into [:seon.fn/doc] (map first) reach-fact-attributes)
+-        node-of (fn [s]
+-                  (when-let [e (get rows s)]
+-                    (let [declaration (reach-read!
+-                                       (db/pull database selector e))
++        nodes-of (fn [names]
++                   (let [stored (filterv rows names)
++                         declarations (reach-read! (db/pull-many database selector (mapv rows stored)))]
++                     (into (zipmap names (repeat nil))
++                       (map (fn [s declaration]
++                         (let [e (rows s)
+                           leaf (when-let [digest (get digests e)]
+                                  (if (:seon.fn/doc declaration) (db/behavior-digest database e) digest))
+                           row (cond-> (into {}
+@@ -928,15 +928,19 @@
+                                                       [attribute (if many? (set v) v)])))
+                                             reach-fact-attributes)
+                                 leaf (assoc ::leaf leaf))]
+-                      (cache/lookup ::reach-node row reach-weight #(reach-node row)))))
+-        schema-node-of (fn [k]
+-                         (when-let [form (:seon.schema/form
+-                                          (reach-read! (db/pull database [:seon.schema/form]
+-                                                               [:seon.schema/key k])))]
+-                           (cache/lookup ::reach-schema-node [k form] reach-weight #(reach-schema-node k form))))
+-        nodes (reach-fixed-point node-of ::out (set test-symbols))]
++                           [s (cache/lookup ::reach-node row reach-weight #(reach-node row))]))
++                         stored declarations))))
++        schema-nodes-of (fn [keys]
++                          (into {}
++                            (map (fn [k declaration]
++                                   [k (when-let [form (:seon.schema/form declaration)]
++                                        (cache/lookup ::reach-schema-node [k form] reach-weight #(reach-schema-node k form)))])
++                                 keys
++                                 (reach-read! (db/pull-many database [:seon.schema/form]
++                                                           (mapv #(vector :seon.schema/key %) keys))))))
++        nodes (reach-fixed-point nodes-of ::out (set test-symbols))]
+     {::nodes nodes
+-     ::schemas (reach-fixed-point schema-node-of ::keys (into #{} (mapcat ::keys) (keep val nodes)))}))
++     ::schemas (reach-fixed-point schema-nodes-of ::keys (into #{} (mapcat ::keys) (keep val nodes)))}))
+ 
+ (defn- reach-graph
+   "`reached-graph` of the requested tests; a committed value's graph is cached
+diff --git a/test/seon/test/reach_test.clj b/test/seon/test/reach_test.clj
+index 841620335..10b402b08 100644
+--- a/test/seon/test/reach_test.clj
++++ b/test/seon/test/reach_test.clj
+@@ -2,9 +2,26 @@
+   (:require [clojure.test :refer [deftest is]]
+             [seon.db :as db]
+             [seon.program :as program]
++            [seon.profile :as profile]
+             [seon.test.runner :as runner]
+             [seon.test-support :as support]))
+ 
++(deftest ^{:seon/tasks #{'seon.test.runner/verified-recomputes-reach-digests-for-the-whole-program}}
++  a-changed-programs-first-reach-digest-is-subsecond
++  (support/with-database
++   (fn [connection]
++     (support/transacted!
++      connection
++      [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id]
++                         {:seon.fn/doc "Reach cost fixture documentation."})])
++     (let [database (db/db connection)
++           names ['seon.request-cost-test/a-request-counts-its-own-calls-reads-and-transactions]
++           measured (profile/measure #(runner/reach-digests database names))]
++       (is (every? string? (map (:seon.profile/value measured) names)))
++       (is (every? #(< (:seon.profile/ms %) 100.0)
++                   [(select-keys measured [:seon.profile/ms :seon.profile/ranked-by-self])]))
++       (is (< (get-in measured [:seon.cost/jvm-window :seon.cost/alloc-mb]) 128.0))))))
++
+ (deftest program-digest-uses-the-databases-program-shapes
+   (support/with-database
+    (fn [connection]

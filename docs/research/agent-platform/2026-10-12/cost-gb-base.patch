@@ -1,0 +1,77 @@
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index ab5129597..f64c591e9 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -5,6 +5,7 @@
+   agent's own model exchanges, then the block. Nothing of it is stored; an
+   attempt records the basis it was assembled at."
+   (:require [seon.batch :as batch]
++            [seon.cache :as cache]
+             [seon.bootstrap :as bootstrap]
+             [seon.cluster.message :as message]
+             [seon.config :as config]
+@@ -214,9 +215,14 @@
+                   [:or :seon.context/fork-point :seon.error/value]]}
+   [database agent-id proofs]
+   (let [commit (when (seq proofs) (turn/fork-commit database agent-id))
+-        base (when commit (db/commit-database database commit))
+-        names (when base (into [] (filter #(seq (db/datoms base :avet :seon.test/sym %))) (sort proofs)))
+-        digests (when (seq names) (runner/reach-digests base names))
++        digests (when commit
++                  (cache/lookup
++                   ::base-proof-digests [commit proofs]
++                   #(+ 128 (* 256 (count %)))
++                   #(when-let [base (db/commit-database database commit)]
++                      (let [names (into [] (filter (fn [s] (seq (db/datoms base :avet :seon.test/sym s)))) (sort proofs))]
++                        (runner/reach-digests base names)))
++                   #(and (some? %) (not (:seon.error/at %)))))
+         results (when (and (seq digests) (not (:seon.error/at digests))) (runner/result-at-reach database digests))]
+     (or (some #(when (:seon.error/at %) %) [digests results])
+         (into {} (keep (fn [[s result]] (case (proof-status result (get digests s)) :green [s false] :red [s true] nil)))
+diff --git a/test/seon/context_test.clj b/test/seon/context_test.clj
+index 2e1ef31fb..218c716f2 100644
+--- a/test/seon/context_test.clj
++++ b/test/seon/context_test.clj
+@@ -10,6 +10,7 @@
+             [seon.id]
+             [seon.instrument :as instrument]
+             [seon.mcp :as mcp]
++            [seon.profile :as profile]
+             [seon.task :as task]
+             [seon.turn :as turn]
+             [seon.test-support :as test-support]))
+@@ -93,6 +94,34 @@
+ (def ^:private proof-test
+   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\"))")
+ 
++(deftest ^{:seon/tasks #{'seon.context/a-proof-green-before-the-work-is-not-done}}
++  repeated-step-verdicts-reuse-the-base-proof-digests
++  (test-support/with-running-agent
++   (fn [running creator connection]
++     (test-support/declare-source!
++      connection 'tq.base-cost
++      "(ns tq.base-cost (:require [clojure.test :refer [deftest is]]))
++       (deftest ^{:seon/tasks #{'tq.base-cost/work}} one (is true))
++       (deftest ^{:seon/tasks #{'tq.base-cost/work}} two (is true))
++       (deftest ^{:seon/tasks #{'tq.base-cost/work}} three (is true))" "test")
++     (let [agent-id (str "base-cost-" (seon.id/id))
++           {branch :seon.store/branch target :seon.db/connection}
++           (test-support/own-branch-agent! running agent-id "(ns tq.base-cost)")
++           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id creator
++                                          :seon.task/ns 'tq.base-cost :seon.task/name "work"
++                                          :seon.task/kind :function :seon.task/intent "Prove the work."}))
++           _ (task/assign! {:seon.agent/context-source (test-support/running-cluster running)
++                            :seon.db/connection connection :seon.task/assigned id
++                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
++           database (db/db target)
++           expected (context/step-verdict database agent-id)
++           measured (profile/measure #(mapv (fn [_] (context/step-verdict database agent-id)) (range 3)))]
++       (is (= 3 (count (:seon.task/proofs expected))))
++       (is (= (vec (repeat 3 expected)) (:seon.profile/value measured)))
++       (is (every? #(< (:seon.profile/ms %) 2.0)
++                   [(select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes :seon.profile/ranked-by-self])]))
++       (is (zero? (get-in measured [:seon.profile/called 'seon.db/commit-database] 0)))))))
++
+ (def ^:private two-failure-proof-test
+   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\")\n (is (= 9 (tq.cs/f 3)) \"triples\"))")
+ 
