@@ -162,7 +162,34 @@
        (is (nil? (:seon.task/evidence (db/pull (checked-value base {:tx-data (:tx-data unchanged)})
                                              [:seon.task/evidence] entity))))
        (is (empty? (:tx-data concurrent)))
-       (is (= 1 (count (:conflicts concurrent))))))))
+       (is (empty? (:conflicts concurrent)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.squash/disjoint-set-additions-merge-as-their-union}}
+  disjoint-set-additions-merge-as-their-union
+  (support/with-database
+   (fn [connection]
+     (let [handle (task/task-handle 'fixture.tasks "squash-members" :function)
+           entity [:seon.task/id handle]
+           _ (support/transacted! connection [(assoc (support/task-row handle "Original")
+                                                     :seon.task/evidence #{"docs/a" "docs/b"})])
+           base (db/db connection)
+           projection (schema/handed-projection)
+           change (fn [adds removes]
+                    (checked-value base (into (mapv #(vector :db/add entity :seon.task/evidence %) adds)
+                                              (map #(vector :db/retract entity :seon.task/evidence %)) removes)))
+           ;; [ours-adds ours-removes theirs-adds theirs-removes merged]
+           rows [[["docs/y"] [] ["docs/z"] [] #{"docs/a" "docs/b" "docs/y" "docs/z"}]
+                 [[] ["docs/a"] ["docs/z"] [] #{"docs/b" "docs/z"}]
+                 [[] [] [] ["docs/a"] #{"docs/b"}]
+                 [["docs/y"] [] [] [] #{"docs/a" "docs/b" "docs/y"}]
+                 [[] ["docs/a"] [] ["docs/a"] #{"docs/b"}]
+                 [[] ["docs/a"] [] ["docs/b"] #{}]]]
+       (doseq [[oa orr ta tr merged] rows]
+         (let [target (change oa orr)
+               result (squash/squash-merge (change ta tr) base target projection nil)
+               copied (checked-value target {:tx-data (:tx-data result)})]
+           (is (= [] (:conflicts result)))
+           (is (= merged (set (:seon.task/evidence (db/pull copied [:seon.task/evidence] entity)))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
   (support/with-database
@@ -181,6 +208,23 @@
        (is (<= (:seon.profile/ms measured) 10))
        (is (number? (:seon.profile/alloc-bytes measured)))
        (is (<= (:seon.profile/alloc-bytes measured) 5000000))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.squash/disjoint-set-additions-merge-as-their-union}}
+  the-three-way-on-one-changed-set-stays-within-its-cost-bound
+  (support/with-database
+   (fn [connection]
+     (let [handle (task/task-handle 'fixture.tasks "squash-set-cost" :function)
+           entity [:seon.task/id handle]
+           _ (support/transacted! connection [(assoc (support/task-row handle "Original")
+                                                     :seon.task/evidence #{"docs/a" "docs/b"})])
+           base (db/db connection)
+           source (checked-value base [[:db/add entity :seon.task/evidence "docs/z"]])
+           target (checked-value base [[:db/add entity :seon.task/evidence "docs/y"]])
+           projection (schema/handed-projection)
+           run #(squash/squash-merge source base target projection nil)
+           _ (run)
+           measured (profile/measure run)]
+       (is (<= (:seon.profile/ms measured) 5))))))
 
 (defn- with-fork
   "Run a proof on a store fork, releasing its connection and branch afterwards."

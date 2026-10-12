@@ -55,6 +55,18 @@
   (into (mapv #(vector :db/retract entity attribute %) (set/difference ours theirs))
         (map #(vector :db/add entity attribute %)) (set/difference theirs ours)))
 
+(defn- member-merge
+  "The value set of a cardinality-many coordinate merged member by member, as git merges
+  lines: (ours - (base - theirs)) union (theirs - base). A member either side removed is
+  removed and a member either side added is added, so two sets never conflict."
+  {:malli/schema [:=> [:cat [:maybe [:set :seon.schema/value]] [:maybe [:set :seon.schema/value]]
+                       [:maybe [:set :seon.schema/value]]]
+                  [:set :seon.schema/value]]}
+  [base ours theirs]
+  (let [base (or base #{}) theirs (or theirs #{})]
+    (set/union (set/difference (or ours #{}) (set/difference base theirs))
+               (set/difference theirs base))))
+
 (defn- shown-state
   "A conflict's scalar or cardinality-many value, with named absence."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword
@@ -101,9 +113,13 @@
              t (get theirs coordinate)
              o (get ours coordinate)
              conflict? ((:seon.program/conflict comparison) coordinate)
-             rule (if (or conflict? (collisions coordinate)) (rules attribute) :theirs)]
+             rule (cond
+                    (and conflict? (= :db.cardinality/many (get-in source [:schema attribute :db/cardinality]))) :members
+                    (or conflict? (collisions coordinate)) (rules attribute)
+                    :else :theirs)]
          (case rule
            :ours result
+           :members (update result :tx-data into (attribute-tx entity attribute (or o #{}) (member-merge b o t)))
            :theirs (update result :tx-data into (attribute-tx entity attribute (or o #{}) (or t #{})))
            :add (update result :tx-data conj
                         [:db.fn/call add-count entity attribute (- (or (first t) 0) (or (first b) 0))])
