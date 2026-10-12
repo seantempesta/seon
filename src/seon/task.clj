@@ -2,7 +2,6 @@
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge request. Tasks live on the cluster, so every write goes to
   main through the one task writer (`seon.task/adopt-tasks-tx`)."
-  {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
   (:require [seon.cache :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
