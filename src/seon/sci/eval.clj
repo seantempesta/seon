@@ -2060,27 +2060,36 @@
   refer target its namespace row declares receives that loaded namespace's
   public Vars. Existing SCI bindings win: first-party copies, interpreted
   definitions and SCI's own `clojure.*` namespaces are never replaced, and
-  `clojure.core` is left to SCI. A target this JVM has not loaded stays
-  absent, so its caller refuses by name."
+  `clojure.core` is left to SCI: the core names SCI lacks (`ref`, `agent`)
+  bind in each caller's own namespace, a source namespace's included. A
+  target this JVM has not loaded stays absent, so its caller refuses by
+  name."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:sequential :map]] :nil]}
   [ctx namespace-rows]
   (let [sci-core (get-in @(:env ctx) [:namespaces 'clojure.core])
-        ;; clojure.core names SCI does not carry (spit) bind in the caller's
-        ;; own namespace; SCI's interrupt-aware core is never replaced.
+        ;; clojure.core names SCI does not carry (spit, ref) bind in the
+        ;; caller's own namespace; SCI's interrupt-aware core is never
+        ;; replaced. A source namespace interprets its interns from its rows,
+        ;; so it receives only these, all of them when this JVM has not
+        ;; loaded it (a test namespace).
+        core-gap
+        (fn [referred]
+          (into {} (filter (fn [[local-name host-var]]
+                             (and (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
+                                  (not (contains? sci-core local-name)))))
+                referred))
         own-bindings
-        (fn [host]
-          (merge (into {} (filter (fn [[local-name host-var]]
-                                    (and (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
-                                         (not (contains? sci-core local-name)))))
-                       (ns-refers host))
-                 (ns-interns host)))
+        (fn [namespace-name]
+          (let [host (find-ns namespace-name)]
+            (if (source-namespace? ctx namespace-name)
+              (core-gap (if host (ns-refers host) (ns-publics 'clojure.core)))
+              (when host (merge (core-gap (ns-refers host)) (ns-interns host))))))
         installs
         (for [row namespace-rows
               :let [namespace-name (:seon.ns/name row)
                     {:keys [aliases refers]} (row-bindings row)]
               [target interns]
-              (cons [namespace-name (when-not (source-namespace? ctx namespace-name)
-                                      (some-> (find-ns namespace-name) own-bindings))]
+              (cons [namespace-name (own-bindings namespace-name)]
                     (for [target (distinct (concat (vals aliases)
                                                    (map (comp symbol namespace) (vals refers))))
                           :when (and (not= 'clojure.core target)
@@ -3599,10 +3608,20 @@
                  recorder (assoc :seon.flow/commit-fault! recorder)))))
 
 (defn- context-weight
-  "Estimated retained bytes of a program context, including interpreted bindings."
+  "Estimated retained bytes of a loaded program context, including interpreted bindings."
   {:malli/schema [:=> [:cat :seon.sci.eval/program-context] nat-int?]}
   [value]
   (* 12288 (count (:functions (::kernel/program-snapshot value)))))
+
+(defn- overlay-weight
+  "Estimated retained bytes an overlay adds to the loaded context it forks:
+  the rows its acquisition interpreted and installed. The fork shares the
+  loaded context's environment, so the loaded program is weighed once, under
+  its own key."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context] nat-int?]}
+  [value]
+  (let [{::keys [interpreted-count installed]} (::acquisition value)]
+    (* 12288 (+ 1 (or interpreted-count 0) (or installed 0)))))
 
 (defn- derive-overlay-ctx
   "Interpret one program's `plan` on a builder forked from the loaded program
@@ -3619,11 +3638,11 @@
   "The key a program context is kept under: the loaded program's [store
   loaded-commit], a changed program's with its plan's digest, projection
   revisions and armed dials. Nil when `loaded` is uncommitted."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:or :nil :map]]
                   [:or :nil [:vector :seon.schema/value]]]}
-  [database loaded projection]
+  [database loaded plan]
   (when-let [base-key (cluster-base-key loaded)]
-    (if-let [plan (program-changes database loaded projection)]
+    (if plan
       (conj base-key (::digest plan)
             ;; the declarations its wrappers arm under
             (db/content-revisions database schema/projection-attributes)
@@ -3631,19 +3650,21 @@
       base-key)))
 
 (defn- derive-program-context
-  "Derive `database`'s program context: the loaded program's, and for a changed
-  program its plan interpreted on a builder forked from the loaded one."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+  "Derive `database`'s program context: the loaded program's for no `plan`,
+  else the `plan` interpreted on a builder forked from the loaded one, which
+  is kept under its own key. The loaded program's derivation never looks up
+  its own key: a cache derivation that joins itself never completes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
+                       [:or :nil :map]]
                   :seon.sci.eval/program-context]}
-  [database loaded projection]
-  (let [base-key (cluster-base-key loaded)
-        derive-base #(derive-base-ctx loaded)
-        cluster (if base-key
-                  (seon.cache/lookup ::program-context base-key context-weight derive-base)
-                  (derive-base))]
-    (if-let [plan (program-changes database loaded projection)]
-      (derive-overlay-ctx cluster database loaded projection plan)
-      cluster)))
+  [database loaded projection plan]
+  (if plan
+    (let [derive-base #(derive-base-ctx loaded)
+          cluster (if-let [base-key (cluster-base-key loaded)]
+                    (seon.cache/lookup ::program-context base-key context-weight derive-base)
+                    (derive-base))]
+      (derive-overlay-ctx cluster database loaded projection plan))
+    (derive-base-ctx loaded)))
 
 (defn program-context
   "The program context of `database`'s program: a frozen SCI context holding
@@ -3664,7 +3685,8 @@
    (let [projection (or (db/carried-projection database) (schema/projection-from-database database))
          loaded #(or supplied-loaded (loaded-program database))
          revisions (program-revisions database projection)
-         content-key #(program-content-key database (loaded) projection)
+         plan (delay (program-changes database (loaded) projection))
+         content-key #(program-content-key database (loaded) @plan)
          ;; program revisions cover the adoption record and the projection;
          ;; dial revisions cover what the wrappers arm with
          program-key (if revisions
@@ -3674,9 +3696,10 @@
                                    (some-> supplied-loaded db/commit-id)]
                                   (constantly 1024) content-key)
                (content-key))
-         derive-value #(derive-program-context database (loaded) projection)
+         derive-value #(derive-program-context database (loaded) projection @plan)
+         weigh #(if @plan (overlay-weight %) (context-weight %))
          value (if program-key
-                 (seon.cache/lookup ::program-context program-key context-weight derive-value)
+                 (seon.cache/lookup ::program-context program-key weigh derive-value)
                  (derive-value))]
      (if (identical? projection (:seon.schema/projection value))
        value

@@ -2765,6 +2765,48 @@
        (is (<= (:seon.cache/bytes (overlay) 0) (:seon.cache/bytes before 0)))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/the-program-context-is-a-value}}
+  an-unchanged-program-context-is-derived-once-and-reused
+  (test-support/with-database
+   (fn [connection]
+     (let [;; the loaded program itself: a database that changes nothing of it
+           database (#'eval/loaded-program (db/db connection))
+           kind #(select-keys (get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/program-context])
+                              [:seon.cache/hits :seon.cache/misses])
+           base (eval/program-context database)
+           base-key (#'eval/cluster-base-key database)]
+       (is (identical? base (get (seon.cache/retained :seon.sci.eval/program-context) base-key))
+           "an unchanged program answers the loaded program's context")
+       ;; the loaded program's own key evicted: its derivation must not join itself
+       (seon.cache/evict! :seon.sci.eval/program-context base-key)
+       (let [rederived (eval/program-context database)
+             before (kind)
+             again (eval/program-context database)
+             after (kind)]
+         (is (eval/program-context? rederived) "an evicted loaded context derives again")
+         (is (identical? rederived again) "the second acquisition answers the cached value")
+         (is (= (:seon.cache/misses before) (:seon.cache/misses after)) "the second acquisition derives nothing")
+         (is (< (:seon.cache/hits before) (:seon.cache/hits after)) "the second acquisition is a cache hit"))
+       (test-support/transacted!
+        connection [(test-support/program-fn-entity (db/db connection) (symbol "my.program" "overlaid")
+                                                    "(defn overlaid [] 1)")])
+       (let [overlay (eval/program-context (db/db connection))]
+         (is (not (identical? base overlay)))
+         (is (< (* 10 (#'eval/overlay-weight overlay)) (#'eval/context-weight base))
+             "an overlay weighs what it adds, not the loaded context it shares"))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-an-agent-requires-is-interpreted-not-host-loaded}}
+  an-interpreted-test-namespace-resolves-the-core-names-sci-lacks
+  ;; seon.test.runner-test calls `ref`; SCI's clojure.core carries no STM
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (eval/base-ctx (db/db connection))]
+       (is (= [true true]
+              (sci/eval-string* ctx (str "(require 'seon.id-test)"
+                                         " [(some? (ns-resolve 'seon.id-test 'ref))"
+                                         "  (some? (ns-resolve 'seon.id-test 'agent))]"))))
+       (is (instance? clojure.lang.Ref (sci/eval-string* ctx "(in-ns 'seon.id-test) (ref 1)")))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/the-program-context-is-a-value}}
   no-agent-work-writes-a-program-context
   (test-support/with-database
    (fn [connection]
