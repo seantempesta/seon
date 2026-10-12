@@ -1,5 +1,4 @@
 [#:seon.task{:name "a-pin-lint-reads-the-live-checkout"
-  :kind :function
   :intent "`seon.dev.markdown-test/repository-dependency-pins-are-current-test` (977384d08) reads `SEON_CHECKOUT`, falling back to `user.dir`, so inside `bin/seon check`'s archive it validates the live working tree, including other lanes' uncommitted edits: its result depends on what else is dirty, against AGENTS.md's \"Tests are deterministic\". Correct: the test validates the input it was given (the candidate archive's living documents and the pins it records in `dependency-pins.txt`), never a path outside its world."
   :must-read #{seon.dev.markdown/validate-repository-pins}
   :evidence #{"docs/seon/plan.md"}}]

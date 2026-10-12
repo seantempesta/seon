@@ -1,5 +1,4 @@
 [#:seon.task{:name "fetch-catch-all-hides-host-defects"
-             :kind :function
              :intent "fetch's last catch turns every Throwable into :my.web/transport-failed or passes a foreign error map through classified-error: an ArityException from bounded-input's proxy (no 1-arity read, which seon.blob/stage-binary! calls) read as a transport failure, and a seon.blob/stage-file! storage refusal came back as fetch's result and failed fetch's own output contract [:or :my.web/fetch-result :my.web/error] (SP-3 web half, 2026-10-08). Correct: catch only the transport exceptions java.net.http declares as transport failure; a storage refusal or a host defect is thrown to the entrant boundary, which records it. Proof: a seon.web.jvm-test deftest (to be written) asserting a storage refusal during capture reaches the caller as its own :seon.error/type."
              :must-read #{seon.web.jvm/fetch seon.web.jvm/classified-error seon.web.jvm/capture-body!}
              :evidence #{"docs/research/agent-platform/2026-10-08/storage-point/sp3-web-handover.md"}}]

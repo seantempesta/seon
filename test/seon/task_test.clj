@@ -16,7 +16,7 @@
   "One task EDN entry of tq.tree named `task-name` with the authored `members`."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [task-name members]
-  (str "#:seon.task{:name \"" task-name "\" :kind :work :intent \"Do " task-name ".\" " members "}"))
+  (str "#:seon.task{:name \"" task-name "\" :intent \"Do " task-name ".\" " members "}"))
 
 (defn- needs
   "The `:seon.task/needs` member naming the tq.tree tasks `names`."
@@ -55,7 +55,7 @@
        (is (= {:seon.task/step kind :seon.task/proofs proofs :seon.task/product product}
               (task/obligations (db/db connection) (symbol "tq.tree" name))))
        (is (= proofs (:seon.task/proofs
-                      (task/assignment-read (db/db connection) (task/task-handle 'tq.tree name :work)
+                      (task/assignment-read (db/db connection) (task/task-handle 'tq.tree name)
                                             [:seon.agent/id "tq-obligations-agent"])))))
      (is (= {:seon.task/step :implement :seon.task/proofs #{} :seon.task/product #{}}
             (task/obligations (db/db connection) 'tq.tree/missing))))))
@@ -84,7 +84,7 @@
                                             {:seon.error/unimplemented-function 'tq.tree/stub :seon.error/operation 'tq.tree/stub :seon.error/message "Not implemented."}))))
      (ingest! connection (entry "p" ":children #{[:seon.task/sym tq.tree/a]}") (entry "a" "") (entry "b" (needs "p")))
      (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-tree-agent"))
-     (let [handle (task/task-handle 'tq.tree "a" :work)
+     (let [handle (task/task-handle 'tq.tree "a")
            assignment (id/id [handle "tq-tree-agent" :tq-tree])
            firing (id/id [handle #inst "2026-10-11T00:00:00Z"])
            commit (random-uuid)]
@@ -147,7 +147,7 @@
 (defn- handle
   {:malli/schema [:=> [:cat :string] :seon.task/handle]}
   [task-name]
-  (task/task-handle 'tq.tree task-name :work))
+  (task/task-handle 'tq.tree task-name))
 
 (defn- ended
   "An attempt row of tq.tree/`task-name` by the fixture agent, ended `end` (open when nil), sent

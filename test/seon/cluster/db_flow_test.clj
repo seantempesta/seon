@@ -172,7 +172,7 @@
   "The handle of the chain world's task `task-name`."
   {:malli/schema [:=> [:cat :string] :seon.task/handle]}
   [task-name]
-  (task/task-handle (symbol *space*) task-name :work))
+  (task/task-handle (symbol *space*) task-name))
 
 (defn- attempts
   "Every attempt row of the chain world's task `task-name` at `connection`'s head: key, branch, agent, end."
@@ -266,7 +266,7 @@
   (test-support/seed-cluster! connection "tq-chain")
   (task/index-tasks! {:seon.db/connection connection
                       :seon.task/files {(str "resources/seon/tasks/" *space* ".edn") (str "[" (apply str (for [[task-name [needs _ step]] (sort tasks)]
-                                                                       (str "#:seon.task{:name \"" task-name "\" :kind :work :intent \"Do " task-name ".\""
+                                                                       (str "#:seon.task{:name \"" task-name "\" :intent \"Do " task-name ".\""
                                                                             (when step (str " :step " step))
                                                                             (when (seq needs)
                                                                               (str " :needs #{" (apply str (map #(str "[:seon.task/sym " *space* "/" % "] ") needs)) "}"))
@@ -763,7 +763,7 @@
                 declaration (fn [database] (#'task/declared (db/carried-projection database) (db/pull database '[*] [:seon.task/id h])))
                 refine! (fn [conn agent-id intent]
                           (task/create! {:seon.db/connection conn :seon.agent/id agent-id :seon.task/ns (symbol *space*)
-                                         :seon.task/name "r" :seon.task/kind :work :seon.task/intent intent
+                                         :seon.task/name "r" :seon.task/intent intent
                                          :seon.task/basis {h (declaration (db/db conn))}}))
                 intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id h]))
                 child #(db/pull (db/db connection) [:seon.task/intent] [:seon.task/sym (symbol *space* "rc")])
@@ -778,7 +778,7 @@
               (is (true? (:seon.task/changed? (refine! on-branch agent-id "Refined by the agent."))) "the agent refines its task")
               (is (true? (:seon.task/changed? (task/create! {:seon.db/connection on-branch :seon.agent/id agent-id
                                                              :seon.task/ns (symbol *space*) :seon.task/name "rc"
-                                                             :seon.task/kind :work :seon.task/intent "A child of mine."}))))
+                                                             :seon.task/intent "A child of mine."}))))
               (is (= "Do r." (intent)) "main's intent is unchanged while the attempt runs")
               (is (nil? (:seon.task/intent (child))) "and main holds no child task yet")
               (is (true? (:seon.task/changed? (refine! connection "root" "Refined by root."))) "root edits the same intent on main")

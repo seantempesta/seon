@@ -259,8 +259,7 @@
   (agent-eval running agent-id "(ns tq.end) (defn area [r] r)")
   (agent-eval running agent-id "(in-ns 'tq.end) (clojure.test/deftest ^{:seon/tasks #{'tq.end/area}} area-test (clojure.test/is (= 25 (tq.end/area 5))))")
   (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                         :seon.task/ns 'tq.end :seon.task/name "area" :seon.task/kind :function
-                                         :seon.task/intent "Square."}))
+                                         :seon.task/ns 'tq.end :seon.task/name "area" :seon.task/intent "Square."}))
         ledger (atom [])]
     (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
@@ -312,8 +311,7 @@
                                              "(clojure.test/deftest ^{:seon/tasks #{'tq.endm/area}} area-test (clojure.test/is (= 25 (area 5))))"))
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endm)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.endm :seon.task/name "area" :seon.task/kind :function
-                                            :seon.task/intent "Square."}))
+                                            :seon.task/ns 'tq.endm :seon.task/name "area" :seon.task/intent "Square."}))
            ledger (atom [])]
        (is (keyword? branch) "the agent has a branch of its own")
        (is (nil? (:seon.error/at (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
@@ -356,8 +354,7 @@
                                       "test")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endr)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/kind :function
-                                            :seon.task/intent "Square."}))]
+                                            :seon.task/ns 'tq.endr :seon.task/name "area" :seon.task/intent "Square."}))]
        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                                           :seon.db/connection connection :seon.task/assigned id
                                                           :seon.task/agent [:seon.agent/id agent-id]
@@ -394,8 +391,7 @@
                                            "(deftest ^{:seon/tasks #{'tq.ends/area}} area-test (is (= 25 (area 5))))\n"))
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.ends)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.ends :seon.task/name "area" :seon.task/kind :function
-                                            :seon.task/intent "Square."}))]
+                                            :seon.task/ns 'tq.ends :seon.task/name "area" :seon.task/intent "Square."}))]
        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                                           :seon.db/connection connection :seon.task/assigned id
                                                           :seon.task/agent [:seon.agent/id agent-id]
@@ -429,8 +425,7 @@
                                        "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                        "(deftest ^{:seon/tasks #{'tq.endo/area}} area-test (is (= 25 (area 5))))"))
      (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                            :seon.task/ns 'tq.endo :seon.task/name "area" :seon.task/kind :function
-                                            :seon.task/intent "Square."}))
+                                            :seon.task/ns 'tq.endo :seon.task/name "area" :seon.task/intent "Square."}))
            _ (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                             :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
                             :seon.task/branch (get-in (db/db connection) [:config :branch])})
@@ -472,8 +467,7 @@
                  "legacy-test is red on main before the change")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.endu)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.endu :seon.task/name "area" :seon.task/kind :function
-                                            :seon.task/intent "Square."}))]
+                                            :seon.task/ns 'tq.endu :seon.task/name "area" :seon.task/intent "Square."}))]
        (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                                           :seon.db/connection connection :seon.task/assigned id
                                                           :seon.task/agent [:seon.agent/id agent-id]

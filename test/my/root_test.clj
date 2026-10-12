@@ -61,7 +61,7 @@
   ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 MB; the same merge as a fresh JVM's first was 417 ms and 1.0 GB
   (test-support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "first-merge" :function)
+     (let [handle (task/task-handle 'fixture.tasks "first-merge")
            agent-id "first-merge-agent"
            held (:seon.store/store (test-support/execution-handle connection))
            branch (keyword (str "first-merge-" (random-uuid)))]
@@ -91,7 +91,7 @@
   ;; an agent's branch ended :done with its task refined; root merges it by its assignment
   (test-support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-keyed" :function)
+     (let [handle (task/task-handle 'fixture.tasks "merge-keyed")
            agent-id "merge-keyed-agent"
            held (:seon.store/store (test-support/execution-handle connection))
            branch (keyword (str "merge-keyed-" (random-uuid)))]

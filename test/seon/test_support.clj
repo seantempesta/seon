@@ -746,7 +746,7 @@
         task-name (str "work-" slug)]
     (declare-proof! connection 'tq.assigned (symbol (str "proves-" slug)) (symbol "tq.assigned" task-name))
     (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
-                                 :seon.task/name task-name :seon.task/kind :work :seon.task/intent "Work."})]
+                                 :seon.task/name task-name :seon.task/intent "Work."})]
       (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
                                     :seon.task/agent [:seon.agent/id agent-id]
                                     :seon.task/branch (get-in (db/db connection) [:config :branch])
@@ -1275,7 +1275,7 @@
   [handle intent]
   (let [task-name (str "task-" handle)]
     {:seon.task/id handle :seon.task/sym (symbol "fixture.tasks" task-name) :seon.task/ns 'fixture.tasks
-     :seon.task/name task-name :seon.task/kind :function :seon.task/intent intent}))
+     :seon.task/name task-name :seon.task/intent intent}))
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents.

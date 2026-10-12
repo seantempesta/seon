@@ -16,8 +16,7 @@
                         'seon.task/agent-attempt 'seon.task/agent-task 'seon.db/pull 'seon.db/q}
            id (:seon.task/id
                (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/kind :function
-                              :seon.task/intent "Read the named attachments." :seon.task/must-read references}))]
+                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/intent "Read the named attachments." :seon.task/must-read references}))]
        (is (not (:seon.error/type
                  (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                 :seon.db/connection connection :seon.task/assigned id

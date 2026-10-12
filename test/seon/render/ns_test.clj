@@ -160,8 +160,8 @@
   ;; Distance 0 names the node; distance 1 shows its content with neighbours as names.
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'tn.a "render-node" :function)
-           entry (str "[#:seon.task{:name \"render-node\" :kind :function"
+     (let [handle (task/task-handle 'tn.a "render-node")
+           entry (str "[#:seon.task{:name \"render-node\""
                       " :intent \"Render one node.\\nThen stop.\" :must-read #{tn.a/f}}]")
            indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
@@ -170,7 +170,7 @@
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
        (is (:seon.task/changed? indexed))
        (testing "a task at distance 0 is its name"
-         (is (= {:seon.task/id handle :seon.task/sym 'tn.a/render-node :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
+         (is (= {:seon.task/id handle :seon.task/sym 'tn.a/render-node :seon.task/name "render-node" :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
        (testing "a task at distance 1 shows its intent and must-reads; its proofs and subjects are related data"
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]

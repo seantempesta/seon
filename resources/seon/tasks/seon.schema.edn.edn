@@ -1,10 +1,8 @@
 [#:seon.task{:name "declaration-stamp-has-no-caller"
-             :kind :function
              :intent "Every JVM runs a committed archive, so its schema resources never change while it runs: the packaged population is keyed by its resource URL, and derivations over it by the population value (cache-central 2026-09-26). declaration-stamp (210 file stats, 1.3 ms armed per call) has no source caller left; test/seon/program_test.clj a-declaration-added-after-the-first-call-is-a-cache-miss still with-redefs it (held file). Delete the redef line (the test passes without it: a different population is a miss by construction) and then this function."
              :must-read #{seon.schema.edn/declaration-stamp}
              :evidence #{"docs/research/agent-platform/landing/cache-central-opus-2026-09-26.md"}}
  #:seon.task{:name "contract-resource-population"
-             :kind :function
              :intent "Give `seon.schema.edn/resource-population` a complete Malli contract that checks what its boundary is for, with the cheapest schema that checks it: registered names, every input and output, the error variants it returns. A contract that refuses a real value (a reaching test, a live call, your probe) is a finding, not friction: if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer emits a bad value, keep the contract, send root the finding with `my.message/send`, naming `seon.schema.edn/resource-population` with the exact form, the refused value's essence and the Malli explain, and say so in your reply. Never widen to :any, [:maybe ...] or :map to go green. Done when `seon.contracts/gaps` answers [] for it and its reaching tests stay green and no slower."
              :must-read #{seon.schema.edn/resource-population seon.contracts/gaps}
              :evidence #{"docs/seon/architecture/contracts-guide.md"}}]

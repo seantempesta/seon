@@ -291,7 +291,7 @@
   (let [agent-id (str "land-" task-name "-" (id/id))
         {branch :seon.store/branch on-branch :seon.db/connection} (support/own-branch-agent! running agent-id (str "(ns " ns-sym ")"))
         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns ns-sym
-                                         :seon.task/name task-name :seon.task/kind :function :seon.task/intent "Fix."}))
+                                         :seon.task/name task-name :seon.task/intent "Fix."}))
         assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                 :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
     (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))

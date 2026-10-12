@@ -1,9 +1,7 @@
 [#:seon.task{:name "documentation-test-reads-a-retired-doc-and-dir-shape"
-             :kind :namespace
              :intent "documentation-test is red since 7fc4a5d96 changed the doc/dir data shape, and its is/deftest referral at :198-199. Done when the test follows the current shape and is green."
              :must-read #{seon.bootstrap/help-value}}
  #:seon.task{:name "the-chain-documents-say-one-task-per-step"
-             :kind :namespace
              :intent "Card D4. TASK-CHAIN §1–§7, task-graph-design (superseded) and plan §0 item 6 say one task per step, steps and needs, instructions on the task, intents and the reconciler; the vocabulary holds subject, step, needs, frontier, attempt, intent, reconciler, problem task, clock, firing, heartbeat; no document still describes a mutable stage, a stage type or a hand launch."
              :must-read #{seon.task/create!}
              :evidence #{"docs/seon/schedule/cards/TASK-CHAIN.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

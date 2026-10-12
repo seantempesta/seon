@@ -801,7 +801,7 @@
   ;; nothing and are swept.
   (with-program-store
    (fn [store connection]
-     (let [handle (task/task-handle 'fixture.tasks "reclaimed" :function)
+     (let [handle (task/task-handle 'fixture.tasks "reclaimed")
            branch :attempt-reclaimed
            ;; this store holds the program's attributes and no cluster, so the assignment's agent is its
            ;; identity alone: the merge validates the assignment it moves, never the agent it names

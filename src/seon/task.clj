@@ -45,10 +45,10 @@
       (seq asserted) (conj (assoc asserted :db/id eid)))))
 
 (defn task-handle
-  "The task handle of an identifying aspect: seon.id/id over [ns name kind] (3b.6)."
-  {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name :seon.task/kind] :seon.task/handle]}
-  [ns name kind]
-  (id/id [ns name kind]))
+  "The task handle of an identifying aspect: seon.id/id over [ns name] (3b.6)."
+  {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/handle]}
+  [ns name]
+  (id/id [ns name]))
 
 (defn symbol-name?
   "Whether `task-name` reads back as one symbol's name: no whitespace, delimiter, `/` or `:`,
@@ -134,9 +134,9 @@
         entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
     (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
-    (mapv (fn [{:seon.task/keys [name kind] :as entry}]
+    (mapv (fn [{:seon.task/keys [name] :as entry}]
             (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
-            (assoc entry :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
+            (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
           entries)))
 
 (def ^:private tree-attributes
@@ -256,8 +256,9 @@
 
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
-  whose handle changed frees its unique symbol before its new row claims it; a handle whose
-  stored declaration differs from the caller's `basis` refuses with base, current and proposed."
+  whose handle changed frees its unique symbol before its new entity claims it; a handle whose
+  stored declaration differs from the caller's `basis`, both under the writer's projection,
+  refuses with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
                        :seon.task/basis] [:vector :seon.schema/value]]}
   [projection stored by-id basis]
@@ -268,7 +269,9 @@
                     (let [current (declared projection (stored id)) wanted (declared projection (by-id id))]
                       (cond
                         (= current wanted) []
-                        (not= (get basis id) current)
+                        ;; the basis was declared under the reader's projection; compare it under the writer's,
+                        ;; so a member a schema change retired is no revision
+                        (not= (declared projection (get basis id)) current)
                         (functions/task-refused! 'seon.task/tasks-tx :revision-conflict (:seon.task/ns (or (by-id id) (stored id))) id
                                                  (cond-> {} (get basis id) (assoc :seon.task/base (get basis id))
                                                    current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
@@ -505,8 +508,8 @@
 (defn- task-entity
   "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
-  [{:seon.task/keys [ns name kind] :as declaration} agent-id]
-  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name) :seon.task/execution :held
+  [{:seon.task/keys [ns name] :as declaration} agent-id]
+  (assoc declaration :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/execution :held
          :seon.task/created-by [:seon.agent/id agent-id]))
 
 (defn advance-assignments-tx
@@ -544,7 +547,7 @@
 (defn create!
   "Create a runtime task in my world (`connection`: my branch, main for root; an agent's tasks
   reach main with its successful end, `seon.merge/merge!`) from its declaration (7.8). Its handle is
-  the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
+  the aspect `[ns name]` and its symbol `ns/name`: the same declaration again
   changes nothing; a different one refuses with base, current and proposed unless
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
   name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
@@ -552,10 +555,9 @@
   waiting on itself refuse `:needs-cycle`.
 
   Example:
-  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\"
-                      :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})"
+  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind] [:seon.task/step {:optional true} :seon.task/step]
+                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
                              [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
                              [:seon.task/evidence {:optional true} :seon.task/evidence]
                              [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
@@ -565,7 +567,7 @@
   [{connection :seon.db/connection agent-id :seon.agent/id task-name :seon.task/name :as request}]
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
-    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/step :seon.task/intent
+    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/step :seon.task/intent
                                                     :seon.task/must-read :seon.task/evidence
                                                     :seon.task/children :seon.task/needs]) agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))

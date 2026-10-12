@@ -77,8 +77,7 @@
   [connection signature producer]
   (let [{handle :seon.task/id} (task/create! {:seon.db/connection connection :seon.agent/id "root"
                                               :seon.task/ns (symbol (namespace producer))
-                                              :seon.task/name (str "fix-" (name producer)) :seon.task/kind :function
-                                              :seon.task/intent "Make the producer stop failing."
+                                              :seon.task/name (str "fix-" (name producer)) :seon.task/intent "Make the producer stop failing."
                                               :seon.task/must-read #{producer}})]
     (test-support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/faults [:seon.error/signature signature]]])
     [handle (:seon.task/sym (db/pull (db/db connection) [:seon.task/sym] [:seon.task/id handle]))]))

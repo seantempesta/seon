@@ -12,7 +12,7 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(def ^:private handle (task/task-handle 'tg.a "walk-graph" :function))
+(def ^:private handle (task/task-handle 'tg.a "walk-graph"))
 
 (def ^:private source
   (str "(ns tg.a {:seon/tasks #{'tg.a/walk-graph}} (:require [clojure.test :refer [deftest is]]))\n"
@@ -25,7 +25,7 @@
        "(deftest ^{:seon/tasks #{'tg.a/walk-graph}} proves (is (= 1 (a 1))))\n"))
 
 (def ^:private task
-  (str "[#:seon.task{:name \"walk-graph\" :kind :function"
+  (str "[#:seon.task{:name \"walk-graph\""
        " :intent \"Prove the graph walk.\" :must-read #{tg.a/c}}]"))
 
 (defn- world!

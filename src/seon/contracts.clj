@@ -59,7 +59,6 @@
       host-bound?
       {:seon.task/ns (symbol (namespace function-symbol))
        :seon.task/name (str "contract-" (name function-symbol))
-       :seon.task/kind :function
        :seon.task/intent (intent function-symbol (true? host-bound?))
        :seon.task/must-read #{function-symbol 'seon.contracts/gaps}
        :seon.task/evidence #{guide}})))

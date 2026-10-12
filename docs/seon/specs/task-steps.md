@@ -40,10 +40,10 @@ the current-step reads above. Root should run `(seon.db/q '[:find (count ?s) :wh
 default before deleting; a count near zero confirms.
 
 What tasks do today (`src/seon/task.clj` 266, `src/my/task.clj` 79, `seon.task.edn`): a task is a cluster entity
-`{id ns name kind intent must-read evidence}` from `resources/seon/tasks/<ns>.edn` (56 files) or written by an agent
+`{id ns name intent must-read evidence}` from `resources/seon/tasks/<ns>.edn` (56 files) or written by an agent
 (`seon.task/create!`, `created-by`); `assign!`/`my.task/claim!` write an assignment row (task handle, agent, branch,
 revision); `my.task/open` is the queue; proofs and merge tasks hang off it. `task-ai` (render/ns.clj:92) shows name,
-kind, ns, intent, must-read. The revision an assignment binds is `seon.id/digest` over `:seon.task/declaration`'s owned
+ns, intent, must-read. The revision an assignment binds is `seon.id/digest` over `:seon.task/declaration`'s owned
 keys only (`issue.clj:548-554,605,637-644`), so an added attribute outside that schema never revises a task.
 
 ## 2. The gap
@@ -125,7 +125,7 @@ Open questions for root:
 1. Custody: steps live on the task at the task home (root's branch); should a worker's step write go home, or should steps be an agent-branch component of the assignment row and merge as data? Home is simplest and matches `written`; it puts N writes/turn on the cluster head (UNVERIFIED cost; measure).
 2. Are there live plans with data worth keeping? DB data is disposable (memory ruling), so default: none migrated.
 3. An agent with no task (root, an outside MCP agent): does it `create!` + `claim!` a self task first, or is `my.task/plan!` allowed to create an anonymous task under a derived handle? Recommend the first (no invented entity kind).
-4. `create!` needs ns/name/kind/intent and `kind :function|:namespace|:schema|:merge`; a general "work" task has no fitting kind. Add `:work` to `:seon.task/kind`? That adds a value to the handle aspect (`seon.issue/task-handle`).
+4. `create!` needs ns/name/intent; a task has no kind, so a general "work" task needs nothing more (its handle is `seon.id/id` over `[ns name]`, `seon.task/task-handle`).
 5. Probe before build (UNVERIFIED): component-set position ordering and cell-vector alternative; that `render/ns/task-ai` is reached from the agent's opening; cost of the assignment query under 50 ms on the live store; that no stored `:my.plan.item/id` reference exists elsewhere (`:my.note/about` rows).
 6. Order: moving issue code and renaming the shared error/request schemas is a separate landing, first, and independently green.
 
@@ -134,7 +134,7 @@ Open questions for root:
 - R1 Custody: steps live on the task at the task home. Tasks are shared coordination data, not program; a step
   advance is one small durable write that root and the health view can see. Measure the write in the implementing
   lane; if it exceeds 50 ms, bring numbers back before changing the model.
-- R2 Agents with no task: yes, create and claim a self task (add `:work` to the task kind if needed).
+- R2 Agents with no task: yes, create and claim a self task.
 - R3 Live plan data: stored data is disposable; no migration. Count it only for the report.
 - R4 Probes first: the implementing lane proves component-set ordering, task-ai reachability from the opening, and
   the assignment query time at the REPL before writing code.

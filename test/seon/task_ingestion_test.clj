@@ -14,7 +14,7 @@
             [seon.program :as program]
             [seon.test-support :as test-support]))
 
-(def ^:private handle (task/task-handle 'tq.a "prove-ingestion" :function))
+(def ^:private handle (task/task-handle 'tq.a "prove-ingestion"))
 
 (def ^:private tag 'tq.a/prove-ingestion)
 
@@ -34,7 +34,7 @@
 (defn- task-text
   {:malli/schema [:=> [:cat :string :string] :string]}
   [intent members]
-  (str "[#:seon.task{:name \"prove-ingestion\" :kind :function :intent \"" intent "\" " members "}]"))
+  (str "[#:seon.task{:name \"prove-ingestion\" :intent \"" intent "\" " members "}]"))
 
 (defn- with-root
   "Call `body` with a fresh fixture directory holding `files` (relative path to text); delete it after."
@@ -112,15 +112,15 @@
   (test-support/with-database
    (fn [connection]
      (let [before (db/basis-t @connection)]
-       (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :kind :function :intent \"i\"}]"
+       (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :intent \"i\"}]"
                             :unreadable-file "[{"
-                            :invalid-entry "[#:seon.task{:name \"x\" :kind :function :intnet \"i\"}]"
-                            :invalid-name "[#:seon.task{:name \"x y\" :kind :function :intent \"i\"}]"
-                            :duplicate-name "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :namespace :intent \"j\"}]"}]
+                            :invalid-entry "[#:seon.task{:name \"x\" :intnet \"i\"}]"
+                            :invalid-name "[#:seon.task{:name \"x y\" :intent \"i\"}]"
+                            :duplicate-name "[#:seon.task{:name \"x\" :intent \"i\"} #:seon.task{:name \"x\" :intent \"j\"}]"}]
          (is (= rule (refusal #(ingest! connection text)))))
        (testing "only #{} at an optional set member is absence; other empty values meet the closed entry"
          (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id \"000000000000\"" ":id []"]]
-           (let [text (str "[#:seon.task{:name \"x\" :kind :function :intent \"i\" " members "}]")
+           (let [text (str "[#:seon.task{:name \"x\" :intent \"i\" " members "}]")
                  refused (ingest! connection text)]
              (is (= :invalid-entry (:seon.task/refused refused)))
              (is (= (edn/read-string text) (:seon.error/offending refused)) "the diagnostic keeps the authored entry"))))
@@ -129,15 +129,17 @@
        (is (= :misplaced-file (refusal #(task/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
        (is (= before (db/basis-t @connection)) "no refusal writes")))))
 
-(deftest a-task-whose-handle-changes-keeps-its-symbol
-  ;; A changed kind (or hash) gives the same ns/name a new handle: the old row
-  ;; must leave before the new one claims the unique symbol, in one transaction.
+(deftest a-task-is-identified-by-its-namespace-and-name
+  ;; A task stored under the handle of an older aspect ([ns name kind]) leaves
+  ;; before the handle its namespace and name derive claims the unique symbol,
+  ;; in one transaction; the entry declares no kind.
   (test-support/with-database
    (fn [connection]
-     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :kind :function :intent \"i\"}]")))
-     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :kind :namespace :intent \"i\"}]")))
-     (is (= {:seon.task/kind :namespace :seon.task/id (task/task-handle 'tq.a "prove-ingestion" :namespace)}
-            (db/pull @connection [:seon.task/kind :seon.task/id] [:seon.task/sym tag]))))))
+     (test-support/transacted! connection [{:seon.task/id (seon.id/id ['tq.a "prove-ingestion" :function]) :seon.task/sym tag
+                                            :seon.task/ns 'tq.a :seon.task/name "prove-ingestion" :seon.task/intent "i"}])
+     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :intent \"i\"}]")))
+     (is (= {:seon.task/id (seon.id/id ['tq.a "prove-ingestion"])}
+            (db/pull @connection [:seon.task/id] [:seon.task/sym tag]))))))
 
 (deftest annotation-placement-is-positional-and-body-usage-stays-legal
   (let [head "(ns tq.a (:require [clojure.test :refer [deftest is]] [tq.b :as-alias b]))\n"]
@@ -193,10 +195,10 @@
                             "the source admits the edit")
               adopt! #(test-support/transacted! destination (task/adopt-tasks-call @source @destination))
               intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))
-              own (task/task-handle 'tq.b "own" :function)]
+              own (task/task-handle 'tq.b "own")]
           (is (= [] (task/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
           (task/index-tasks! {:seon.db/connection destination :seon.task/basis {}
-                               :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :kind :function :intent \"Mine.\"}]"}})
+                               :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :intent \"Mine.\"}]"}})
           (publish! (task-text "Prove ingestion." ""))
           (adopt!)
           (is (= ["Prove ingestion." "Mine."] (map intent [handle own])) "published arrives; a task the source never held stays")
@@ -236,11 +238,11 @@
      (let [files (task/task-files "." nil)
            basis (task/task-basis @connection files)]
        (task/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
-       (doseq [[sym aspect] {'seon.sci.eval/acquisition-rebuilds-the-whole-program '[seon.sci.eval "acquisition-rebuilds-the-whole-program" :function]
-                             'seon.schema/agents-can-validate '[seon.schema "agents-can-validate" :namespace]}]
+       (doseq [[sym aspect] {'seon.sci.eval/acquisition-rebuilds-the-whole-program '[seon.sci.eval "acquisition-rebuilds-the-whole-program"]
+                             'seon.schema/agents-can-validate '[seon.schema "agents-can-validate"]}]
          (is (= (conj aspect (apply task/task-handle aspect))
-                ((juxt :seon.task/ns :seon.task/name :seon.task/kind :seon.task/id)
-                 (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/id] [:seon.task/sym sym])))))
+                ((juxt :seon.task/ns :seon.task/name :seon.task/id)
+                 (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/id] [:seon.task/sym sym])))))
        (is (= {:seon.task/changed? false} (task/index-tasks! {:seon.db/connection connection :seon.task/files files})))))))
 
 (deftest a-revised-task-shows-on-the-next-call-without-reassignment
@@ -249,7 +251,7 @@
      (admit! connection (entities-of subject-source))
      (ingest! connection (task-text "First." ""))
      (let [declaration {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
-                        :seon.task/name "prove-ingestion" :seon.task/kind :function}
+                        :seon.task/name "prove-ingestion"}
            id handle
            intent #(:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id id]))
            assigned (fn [] (select-keys (task/assignment @connection agent-id (get-in (db/db connection) [:config :branch])) [:seon.task/assigned :seon.task/proofs :seon.error/type]))]
@@ -269,7 +271,7 @@
    (fn [connection]
      (test-support/transacted! connection (test-support/agent-tx @connection "revisor"))
      (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.r
-                                            :seon.task/name "bare" :seon.task/kind :function :seon.task/intent "No proof."}))
+                                            :seon.task/name "bare" :seon.task/intent "No proof."}))
            refused (task/assign! {:seon.db/connection connection :seon.task/assigned id
                                   :seon.task/agent [:seon.agent/id "revisor"] :seon.task/branch (get-in (db/db connection) [:config :branch])})]
        (is (= :no-proofs (:seon.task/refused refused)))

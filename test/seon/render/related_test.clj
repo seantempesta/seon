@@ -13,7 +13,7 @@
             [seon.render.walk :as walk]
             [seon.test-support :as support]))
 
-(def ^:private handle (task/task-handle 'rd.a "related" :function))
+(def ^:private handle (task/task-handle 'rd.a "related"))
 
 (def ^:private source
   (str "(ns rd.a (:require [clojure.test :refer [deftest is]]))\n"
@@ -23,7 +23,7 @@
        "(deftest ^{:seon/tasks #{'rd.a/related}} proves (is (= 1 (a 1))))\n"))
 
 (def ^:private task
-  (str "[#:seon.task{:name \"related\" :kind :function"
+  (str "[#:seon.task{:name \"related\""
        " :intent \"Prove related data.\" :must-read #{rd.a/c}}]"))
 
 (defn- world!

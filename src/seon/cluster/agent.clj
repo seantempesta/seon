@@ -1967,7 +1967,7 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
   [handle {h :seon.task/assigned class :seon.flow.plan/class intent :seon.task/intent}]
   (let [created (task/create! {:seon.db/connection (:seon.db/connection handle) :seon.agent/id "root"
-                               :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" h) :seon.task/kind :work
+                               :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" h)
                                :seon.task/intent intent})]
     (when (:seon.error/at created) (throw (ex-info (:seon.error/message created "The problem task was refused.") created)))
     nil))
@@ -2197,7 +2197,7 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action :seon.task.attempt/end [:maybe :seon.task.attempt/reason] :seon.flow.plan/unmerged] :nil]}
   [connection {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} end reason unmerged]
   (let [created (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'seon.task
-                               :seon.task/name (str "attempt-ended-" key) :seon.task/kind :work
+                               :seon.task/name (str "attempt-ended-" key)
                                :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
                                                       (when reason (str ": " reason)) ". Nothing was merged to main;"
                                                       " its branch " (name branch) " is kept. "

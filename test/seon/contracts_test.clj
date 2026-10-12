@@ -7,7 +7,7 @@
 (deftest a-generated-task-is-the-declaration-its-task-file-holds
   (let [database (db/db)
         generated (contracts/task database 'seon.fs/attributes)
-        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/intent
                                   :seon.task/must-read :seon.task/evidence]
                         [:seon.task/sym 'seon.fs/contract-attributes])]
     (is (= generated (-> stored (update :seon.task/must-read set) (update :seon.task/evidence set))))))

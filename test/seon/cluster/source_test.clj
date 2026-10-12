@@ -374,7 +374,7 @@
         sym #(symbol "scratch.merge-tasks" %)
         entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
-        handle (task/task-handle 'scratch.merge-tasks "merge-task" :function)
+        handle (task/task-handle 'scratch.merge-tasks "merge-task")
         tag 'scratch.merge-tasks/merge-task
         proofs #{(sym "merge-tasked-check")}
         c (keyword (str "merge-task-test-c-" (id/id)))
@@ -403,7 +403,7 @@
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
-                                                                           "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
+                                                                           "[#:seon.task{:name \"merge-task\" :intent \"Merge.\"}]"}})))
           ;; The task write touches no merged entity, so the same prepared now merges.
           (is (:seon.source/commit-id (source/accept-merge! target held-store prepared)))
           (is (= #{tag} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))

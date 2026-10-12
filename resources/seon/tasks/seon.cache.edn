@@ -1,5 +1,4 @@
 [#:seon.task{:name "one-weighted-cache-under-a-memory-cap"
-             :kind :namespace
              :intent "About fifteen defonce caches each carry a code-constant entry bound and no byte cap (seon.db arity-commit 92.6 MB, projection 12.8 MB, arity-base 9.0 MB; seon.sci.eval base-context 27.4 MB, program-identity, refusal-recording; seon.test.runner reach-holders 16.7 MB; the build-projection memos). Owner rulings: every cache configurable, a library not a hand-rolled cache, one fixed memory cap. Recommended: one Caffeine cache keyed [cache-id key] with maximumWeight from one byte dial and a weigher recorded at insert (~60 lines, roughly net neutral)."
              :must-read #{seon.db/carried-projection seon.sci.eval/base-ctx seon.test.runner/reach-memberships}
              :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"

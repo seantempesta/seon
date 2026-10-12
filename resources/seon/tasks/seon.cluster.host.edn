@@ -1,25 +1,20 @@
 [#:seon.task{:name "a-refused-deletion-reaches-the-deleting-forms-receipt"
-  :kind :function
   :intent "At HEAD 65cf8c26d the program-deletion refusal no longer lands on the form that proposes it. In a hosted run, after defn refused-helper and defn refused-caller (calling it), the run (+ 1 2) (ns-unmap 'my.agents.host-probe 'refused-helper) (+ 3 4) settles with no `:seon.cluster.eval/error` on any receipt, no diagnostics, and no error occurrence; the helper stays in the database and the Var in SCI. The run of (ns-unmap ... 'lonely) on a function nobody calls IS refused: error \"Program deletion leaves 1 surviving referrers (:seon.error/offending)\" with no referrer named. The refusal is either misattributed or missing the proposals (`seon.turn/deletion-proposals`, turn.clj:3770) the test expects: the deleting form's error should name the helper and its diagnostics the caller. Proof: host-test/a-refused-deletion-is-its-forms-refusal-and-the-run-closes lines 505-506."
   :must-read #{seon.turn/deletion-proposals seon.turn/settle-batch-refusal!}
   :evidence #{"docs/research/agent-platform/2026-10-08/red/red-1.md"}}
  #:seon.task{:name "a-message-resumes-a-stopped-agent"
-  :kind :function
   :intent "A message to an admitted agent whose home branch is listed but not hosted (every agent after a restart) hosts it on the cluster registry through `seon.cluster.host/host!` and then writes, so its db<->flow takes the message. `my.message/send` receives the cluster handle under `:seon.agent/context-source`, supplied from the world by schema name; today `seon.cluster.message/send!` answers `:seon.message/unknown-recipient` because `seon.db/branch-connection` only borrows."
   :must-read #{my.message/send seon.cluster.message/send! seon.cluster.host/host! seon.db/branch-connection seon.batch/world-members}
   :evidence #{"docs/seon/issues/an-agent-homed-on-a-branch-is-not-resumable-after-a-restart.md"}}
  #:seon.task{:name "retiring-a-branch-closes-its-agents-admission"
-  :kind :function
   :intent "`my.agent/retire-branch!` on a branch whose agent is not hosted (after a restart) deletes the branch and leaves the agent's admission open, so the agent reads as admitted with no home. Retirement closes the admission of every agent homed on the branch (`seon.cluster.host/close-admissions!`) before the roster deletion."
   :must-read #{my.agent/retire-branch! seon.cluster.host/retire! seon.cluster.registry/retire-branch!}
   :evidence #{"docs/seon/issues/an-agent-homed-on-a-branch-is-not-resumable-after-a-restart.md"}}
  #:seon.task{:name "a-message-to-an-agent-whose-branch-is-gone-refuses-by-name"
-  :kind :function
   :intent "A message to an admitted agent whose home branch is no longer in the store's branches answers `:seon.cluster.store/branch-absent` naming that branch from `seon.cluster.message/send!`, not the generic unknown-recipient."
   :must-read #{seon.cluster.message/send! seon.db/branch-database seon.cluster.store/open-branch!}
   :evidence #{"docs/seon/issues/an-agent-homed-on-a-branch-is-not-resumable-after-a-restart.md"}}
  #:seon.task{:name "a-concurrent-hosted-turn-keeps-a-forms-elided-write-receipt"
-  :kind :function
   :intent "`seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged` is green alone and red (\"a form's own elided write lands on the branch, naming its evaluation\": no `:seon.db/receipt` on the transaction) when run in one `seon.test/run` with tests whose hosted agents take model turns concurrently (`an-ordinary-message-wakes-the-idle-hosted-agent`, `a-message-to-a-stopped-admitted-agent-hosts-it-and-its-db<->flow-takes-it`). Reproduced with HEAD 18919b663 source plus only the test file's assignment fix (check run 01a956c05caa); green alone (run 451a51827903). The receipt is kept only when the write's connection is identical to the custody `seon.db/*conn*` (`seon.db/with-branch`), bound per evaluation by `seon.sci.eval/evaluate`; find which concurrent turn's binding or supplied connection displaces it."
   :must-read #{seon.db/with-branch seon.db/transact! seon.sci.eval/evaluate}}
 ]

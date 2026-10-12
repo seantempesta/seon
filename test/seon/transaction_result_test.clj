@@ -14,7 +14,7 @@
      (let [ctx (support/fork-cluster-ctx connection "transaction-result")
            created (support/agent-value
                     ctx
-                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/kind :function :seon.task/intent \"Verify\"} {:seon.agent/id \"reporter\" :seon.agent/branch :db :seon.agent/admission-closed-tx \"datomic.tx\"}])")
+                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/intent \"Verify\"} {:seon.agent/id \"reporter\" :seon.agent/branch :db :seon.agent/admission-closed-tx \"datomic.tx\"}])")
            changes (:seon.db/datoms created)
            transaction (:seon.db/tx created)]
        (is (= #{:seon.db/tx :seon.db/datoms} (set (keys created))))

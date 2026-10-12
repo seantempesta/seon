@@ -1,13 +1,11 @@
 [#:seon.task{:name
             "edit-hook-refuses-a-lawful-throw-of-a-registered-error",
-            :kind :function,
             :intent
             "`seon.contracts-compile-test/uncontained-changes` (run by the PreToolUse edit hook bin/seon-hook) refuses ANY edit to a defn that throws ex-info carrying a registered `:seon.error/type` with error/uncontained-throw unless the output union declares an error alternative. CLAUDE.md and docs/seon/specs/errors.md say the opposite: a function whose job is not to answer throws the one error map inside ex-info and declares only its success value. Reproduce: edit any line of `seon.id/structural-digest` (it throws `:seon.id/unhashable-error`, registered in seon.id.edn): the hook answers 'seon.id/structural-digest (row 127) throws to its caller 1 way(s) with no error alternative'. This blocked an EQUIVALENT 9-line speedup of seon.id (patch in docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md). Correct: a throw whose ex-data is a registered :seon.error variant built by the installed constructor or a declared literal is lawful and not a finding; keep refusing throws of undeclared data. Proof: a contracts-compile-test case where a changed defn throwing a registered variant yields no :uncontained-throw finding.",
             :evidence
             #{"docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md"}}
  #:seon.task{:name
             "empty-input-calls-analyzer-with-a-refused-empty-source-map",
-            :kind :function,
             :intent
             "`seon.contracts-compile-test/check` with :paths [] reaches namespace-contexts and calls `seon.fn.analyzer/analyze` with an empty sources map; the analyzer requires min 1 and throws a contract refusal. Return zero contract findings without analyzing when the selected source set is empty; preserve placement findings. Reproduced on default 42e569d9d, JVM root, result/e0f9f608c27e4. Regression should invoke check with no selected sources and assert its data result. Evidence: docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md.",
             :evidence

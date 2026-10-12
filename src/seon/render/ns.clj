@@ -98,12 +98,12 @@
   (max 0 (long (get unit :seon.render/distance 1))))
 
 (defn task-ai
-  "One task as data: its id, symbol, name, kind and namespace; beyond distance zero its intent and
+  "One task as data: its id, symbol, name and namespace; beyond distance zero its intent and
   must-reads. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
-        named (select-keys task [:seon.task/id :seon.task/sym :seon.task/name :seon.task/kind :seon.task/ns])]
+        named (select-keys task [:seon.task/id :seon.task/sym :seon.task/name :seon.task/ns])]
     (if (zero? (node-distance unit))
       named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
@@ -122,12 +122,12 @@
   proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{:seon.task/keys [id kind intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
+  (let [{:seon.task/keys [id intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
         entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
     [:article {:class "seon-family-entry seon-task-entry"}
-     [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
+     [:header [:p {:class "seon-kicker"} (str "Task · " task-ns)] [:h3 task-name " " [:code id]]]
      [:p {:class "seon-task-intent"} intent]
      (when (pos? (node-distance unit))
        [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))

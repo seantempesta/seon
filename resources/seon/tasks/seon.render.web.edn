@@ -1,75 +1,61 @@
 [#:seon.task{:name "the-render-cache-keeps-every-debug-view"
-             :kind :function
              :intent "The environment's `:seon.render/cache` atom held 69.8 MB at idle with no eviction; the graph page's ::graph-calls (36.7 MB) is deleted with that page, and ::invocations (27.5 MB) remains, with entries that retain read results. Retain read evidence without results, and bound the cache."
              :must-read #{seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
  #:seon.task{:name "a-page-renders-with-a-refused-database"
-             :kind :function
              :intent "page-response reads (`seon.db/db` connection) of a released connection and passes the refusal map on as `:seon.db/db`, so `seon.render.transcript/render-agent-header` refuses its input instead of the page answering the read refusal. It happened when seon.render.web-test's server kept serving after its cluster's connection was released (member two-tabs-each-get-their-own-complete-paint left unexited). A read refusal answers the request as that refusal; a server outliving its cluster's connection is the second defect."
              :must-read #{seon.render.web/page-response seon.render.transcript/render-agent-header}
              :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}
  #:seon.task{:name "reconnect-wire-test-walks-the-whole-window"
-             :kind :function
              :intent "`seon.render.web-test/reconnect-is-repaint-wire-test` takes about 200 s per run (200,627 ms, 248 assertions, test-data-assertions proof harness 2026-09-28): its check that no partial text exists at ANY basis walks every basis of the window as-of, so its cost follows the window, not the change, and it is far over its declared bound. Bound the check by what the change can reach (the bases the test itself committed, or one since-query over the window) so it runs sub-second."
              :must-read #{seon.render.web/render-step}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "an-unreportable-page-failure-is-only-a-log-line"
-             :kind :function
              :intent "When a page derivation throws and failed-page-result cannot record it, unreportable-page-result (src/seon/render/web.clj) logs a WARN text line and paints a string; no fault reaches anyone. It fired for every debug-tab registration in a render state without its environment (test-data-assertions harness, 2026-09-28: fault! refused a nil environment, then a nil connection). A log line alone is a defect: deliver the failure as data to whoever can act on it."
              :must-read #{seon.render.web/failed-page-result seon.render.web/unreportable-page-result}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "stale-debt-tags-remain-in-web-and-schema"
-             :kind :namespace
              :intent "Stale debt tags remain: render/web.clj:3193 (task seon.render.web/a-page-renders-with-a-refused-database) and schema.clj:20 (seon.schema/agents-can-validate, closed). Done when each tag names an open task or is deleted."
              :must-read #{seon.render.web/render-step}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/root-cause-census--report.md"}}
  #:seon.task{:name "pages-print-values-instead-of-the-printer-html-face"
-             :kind :namespace
              :intent "Web, health, error, schema, var, status, problems and repl pages print values themselves ([:pre (pr-str value)], [:code (print.value/bounded-text v)], 422/500/503 bodies of clipped results) instead of rendering them through the value printer's HTML face, so humans see clipped text the AI path does not and large values are printed whole (debug-value-html, repl render-html, create-owner-response). CLAUDE.md: printing is rendering with two consumers on one pipeline. Inventory class ui-print, 32 sites: render/web.clj 17, health.clj 5, error.clj 3, render/schema.clj 2, cluster/status.clj 1, problems.clj 1, render/var.clj 1, render/walk.clj 1, repl.clj 1. Done when every page shows values through the printer's hiccup output, and seon.render.web-test asserts the debug page for a 10 MB value returns under the printer's budget with its elision link."
              :must-read #{seon.health/finding-item}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--print-sites.tsv" "docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--notes.md"}}
  #:seon.task{:name "the-built-stylesheet-is-stale-against-its-source",
-            :kind :function,
             :intent
             "Running bin/css on HEAD 178aa24e0 rewrites resources/public/css/output.css with 112 added and 5 removed lines unrelated to any current edit (.grow, .shadow, the expanded .seon-graph-kinds rules): the committed stylesheet the browser serves is not the build of input.css. Done when output.css equals bin/css's output for the committed input.css and a check refuses drift.",
             :must-read #{seon.render.web/handler},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}
  #:seon.task{:name "a-reconnect-refuses-a-pass-derived-before-it-connected-is-red"
-  :kind :function
   :intent "`seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected` (web_test.clj:1538) is red on HEAD (measured 2026-10-12 through `bin/seon check`: 21,928 ms against its 5,000 ms bound, the assertion at web_test.clj:1585 failing; the held-pass wait is never entered). Correct: diagnose by the commit that changed its behavior and fix the producer or retire the assumption; the wait must be entered and the test must finish inside its bound. Done when green."
   :must-read #{seon.render.web/connected-value}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "a-route-throw-no-longer-answers-a-bounded-500"
-  :kind :function
   :intent "`seon.render.web-test/a-route-throw-answers-a-bounded-500-inside-the-handler` (web_test.clj:2145) is red on HEAD with no task. The handler must answer a bounded 500 inside itself when a route throws (nothing crashes). Correct: diagnose, fix the producer. Done when green."
   :must-read #{seon.render.web/handler}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "unrelated-transaction-no-longer-reuses-the-debug-observation"
-  :kind :function
   :intent "`seon.render.web-test/unrelated-transaction-reuses-debug-observation-and-render-call` (web_test.clj:1245) is red on HEAD with no task: an unrelated transaction should reuse the debug observation and render call (cost follows changed inputs) and does not. Correct: diagnose which read now invalidates the cache and fix the producer. Done when green. Note: reconnect-is-repaint-wire-test, also red, measured 10.1 s against a 5 s bound and is tracked by reconnect-wire-test-walks-the-whole-window."
   :must-read #{seon.render.web/debug-query}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "contract-query-params"
-             :kind :function
              :intent "Give `seon.render.web/query-params` a complete Malli contract that checks what its boundary is for, with the cheapest schema that checks it: registered names, every input and output, the error variants it returns. A contract that refuses a real value (a reaching test, a live call, your probe) is a finding, not friction: if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer emits a bad value, keep the contract, send root the finding with `my.message/send`, naming `seon.render.web/query-params` with the exact form, the refused value's essence and the Malli explain, and say so in your reply. Never widen to :any, [:maybe ...] or :map to go green. Done when `seon.contracts/gaps` answers [] for it and its reaching tests stay green and no slower."
              :must-read #{seon.render.web/query-params seon.contracts/gaps}
              :evidence #{"docs/seon/architecture/contracts-guide.md"}}
  #:seon.task{:name "the-root-page-shows-a-newly-adopted-commit-after-the-fence-revert"
-             :kind :function
              :intent "`seon.render.web-context-test/unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot` turned red with the fence revert (c53c9306e): after the test writes `:seon.source/commit-id` on its cluster row, the re-rendered /agent/root page no longer contains the commit (the status renderer is re-invoked, count 2; only the commit assertion fails, 10 pass 1 fail). Green at fee847013 in the bulk tier and alone (run 13b5fa3bb400); red at c53c9306e in the bulk tier (run 4fdc69db0f5e) and alone, twice. The revert changed `seon.cluster.source`, `seon.context`, `seon.test`, `seon.test.runner` and `seon.turn`, none of which `seon.cluster.status/render-html` names; find which reverted change altered the status block's cluster read (`seon.cluster.status/render-html` names its cluster by the caller context's `:seon.boot/cluster-name`) and fix it at its owner. Done when the test is green at HEAD."
              :must-read #{seon.cluster.status/render-html seon.render.web/derive-page seon.render.web-context-test/unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot}
              :evidence #{"docs/research/agent-platform/2026-10-11/revert-verification.md"}}
 
  #:seon.task{:name "the-debug-page-offers-no-session-actions"
-             :kind :function
              :intent "`seon.render.web-test/debug-algorithm-carries-the-render-evaluation-inputs` is red on HEAD (2026-10-12, whole-namespace run at 6433c7593 and bc347d583): its last assertion expects the debug page to render `.seon-session-actions input[name=action]` with the values \"virtual-turn\", \"compact\" and \"system-turn\", and the page renders none (actual #{}); no source under src names `seon-session-actions`, and AGENTS.md retires system turns. The two assertions before it (ten loads write no facts, status 200) pass. Correct: confirm with `git log -S seon-session-actions` which commit removed the actions, then delete the assertion that depends on them (the producer is gone) or, if an action is still offered, assert it by its current name; keep the test's subject, the evaluation inputs each render receives. Done when `seon.render.web-test/debug-algorithm-carries-the-render-evaluation-inputs` is green in a run of the whole namespace."
              :must-read #{seon.render.web/derive-page}
              :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-4.md"}}
  #:seon.task{:name "declared-entity-units-follow-the-agent-attributes-the-projection-declares"
-             :kind :function
              :intent "`seon.render.web-test/declared-units-are-components-in-schema-order` is red on HEAD (2026-10-12): the test lists nine `:seon.agent/*` and `:seon.message/inbound-content` attributes as a hand list, and `seon.render.web/declared-entity-units` of the packaged projection answers twenty-one, adding `:seon.agent/broken`, `:seon.agent/new-red`, `:seon.agent/end-calls` and following end attributes and `:seon.context/task`, `:seon.context/proofs`, `:seon.context/step`, `:seon.context/send-backs`; the order is still the entity schema's. A hand list beside a schema silently goes stale (AGENTS.md). Correct: derive the expected order from the schema's entries (`seon.schema/projection-from-database`, the entity's declared keys) instead of listing them, keeping the assertion that declared attributes retain schema order before block grouping. Done when `seon.render.web-test/declared-units-are-components-in-schema-order` is green and adding an attribute to `:seon.agent/entity` does not break it."
              :must-read #{seon.render.web/declared-entity-units seon.schema/projection-from-database}
              :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-4.md"}}]

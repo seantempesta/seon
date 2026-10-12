@@ -1,5 +1,4 @@
 [#:seon.task{:name "a-refused-census-batch-is-recorded-as-refused"
-             :kind :function
              :intent "`script/seon/interpreted_census.clj` appended nothing when `seon.test/run` refused a batch: the refusal answer still carries an empty `:results` vector, which the member branch took as a result, so 78 batches vanished from one run's output. `seon.interpreted-census/batch-lines` gives every symbol of a refused batch one `:refusal` line. Done when this proof is green."
              :must-read #{seon.test/run}
              :seon.task/evidence #{"script/seon/interpreted_census.clj"}}]

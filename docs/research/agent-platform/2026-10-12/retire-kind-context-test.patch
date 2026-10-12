@@ -1,0 +1,78 @@
+--- a/test/seon/context_test.clj	2026-10-12 21:43:58.485077914 +0700
++++ b/test/seon/context_test.clj	2026-10-12 21:46:11.558462064 +0700
+@@ -52,7 +52,7 @@
+   (test-support/with-running-agent
+    (fn [running agent-id connection]
+      (let [declaration {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+-                        :seon.task/name "shape" :seon.task/kind :function}
++                        :seon.task/name "shape"}
+            id (:seon.task/id (task/create! (assoc declaration :seon.task/intent "First.")))
+            task-section #(:seon.context/task (block running agent-id))]
+        (is (nil? (:seon.context/task (block running agent-id))) "an agent holding no task has no task section")
+@@ -87,7 +87,7 @@
+   ([running connection agent-id intent]
+   (let [_ (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
+         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+-                                         :seon.task/name "shape" :seon.task/kind :function :seon.task/intent intent}))]
++                                         :seon.task/name "shape" :seon.task/intent intent}))]
+     (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+     nil)))
+@@ -128,8 +128,7 @@
+    (fn [running agent-id connection]
+      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'names 'tq.cs/names)
+            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+-                                            :seon.task/name "names" :seon.task/kind :function
+-                                            :seon.task/intent "Use `seon.task/agent-attempt` and `:seon.task/intent`."
++                                            :seon.task/name "names" :seon.task/intent "Use `seon.task/agent-attempt` and `:seon.task/intent`."
+                                             :seon.task/must-read #{'seon.task/agent-task}}))]
+        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+@@ -143,7 +142,7 @@
+   (test-support/with-running-agent
+    (fn [running agent-id connection]
+      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'attributes 'tq.cs/attributes)
+-           base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs :seon.task/kind :function}
++           base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
+            _ (task/create! (assoc base :seon.task/name "first" :seon.task/intent "Comes first."))
+            id (:seon.task/id (task/create! (assoc base :seon.task/name "attributes" :seon.task/intent "Use `seon.task/agent-task`."
+                                                   :seon.task/must-read #{'seon.task/agent-attempt}
+@@ -162,8 +161,7 @@
+    (fn [running agent-id connection]
+      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'missing 'tq.cs/missing)
+            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+-                                            :seon.task/name "missing" :seon.task/kind :function
+-                                            :seon.task/intent "Fix `tq.cs/absent`."}))]
++                                            :seon.task/name "missing" :seon.task/intent "Fix `tq.cs/absent`."}))]
+        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+        ;; the task itself is tq.cs/missing, a name that resolves to it; the intent names one that resolves to nothing
+@@ -177,8 +175,7 @@
+    (fn [running agent-id connection]
+      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'library 'tq.cs/library)
+            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+-                                            :seon.task/name "library" :seon.task/kind :function
+-                                            :seon.task/intent "Validate with `malli.core/validator`."}))]
++                                            :seon.task/name "library" :seon.task/intent "Validate with `malli.core/validator`."}))]
+        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+        (let [[entry] (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")
+@@ -314,7 +311,7 @@
+      (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                     :seon.task/assigned (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                                       :seon.task/ns 'tq.cso :seon.task/name "area"
+-                                                                      :seon.task/kind :function :seon.task/intent "Square."}))
++                                                                      :seon.task/intent "Square."}))
+                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+      (evaluate running agent-id "(in-ns 'tq.cso)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
+      (let [handle (task/agent-task (db/db connection) agent-id)
+@@ -390,8 +387,7 @@
+                                            "test")
+            {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.shb)")
+            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+-                                            :seon.task/ns 'tq.shb :seon.task/name "area" :seon.task/kind :function
+-                                            :seon.task/intent "Square."}))]
++                                            :seon.task/ns 'tq.shb :seon.task/name "area" :seon.task/intent "Square."}))]
+        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                       :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+        (evaluate running agent-id "(in-ns 'tq.shb)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")

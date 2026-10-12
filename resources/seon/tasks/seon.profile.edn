@@ -1,33 +1,26 @@
 [#:seon.task{:name "cost-entities-are-built-only-for-selected-counters"
- :kind :function
  :intent "`seon.profile/live-costs` and `seon.profile/transaction-observation` select counter samples before `seon.profile/cost-entity` constructs entities. Preserve digest selection, context priority, warm and cold sample thresholds, and limits."
  :must-read #{seon.profile/live-costs seon.profile/transaction-observation seon.profile/cost-entity seon.db/cost-upserts}
  :evidence #{"docs/research/agent-platform/2026-10-12/cost-record.md"}}
  #:seon.task{:name "call-counters-are-jvm-wide-so-counting-tests-race"
-             :kind :function
              :intent "Tests that count calls now read seon.profile's per-definition counters (`seon.test-support/armed-counts`, armed-calls) instead of redefining the Var, which no longer breaks other tests; but a LongAdder counts every thread, so a concurrent member calling the same Var (`seon.sci.kernel/invoke`, `seon.schema/projection-from-database`, `seon.render/acquire-context!`) makes an exact count in another test red. Tests that filtered to their own thread (config-test sparse-file-reading, config-writer, db-test d/db) or by argument (retained counts per render symbol, web-test candidate-call-ids) stay redefinitions. Done when armed calls can be observed per scope, like `seon.db/*read-evidence-sink*` for reads (e.g. a bound call sink the armed wrapper appends to), armed-counts reads it, and two members counting the same Var concurrently each see only their own calls."
              :must-read #{seon.profile/measure seon.profile/cells}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "the-bracket-leaves-a-thread-local-entry-per-cell-on-every-thread"
-             :kind :function
              :intent "`seon.profile/timed` restores a cell's entry with (.set entered prior), so an outermost exit sets nil and leaves the ThreadLocal's slot in that thread's ThreadLocalMap: a long-lived thread (the prepl, a Flow proc thread) holds one entry per cell it ever called (up to about 2,560), and each ThreadLocal.get probes that map. Measured 2026-09-28: the same bracket cost 40 to 52 ns per call on the prepl thread depending on which ThreadLocal instance it drew, and 40 to 41 ns on fresh threads. Done when an outermost exit removes its entry (or the entry lives in one per-thread structure) and the bracket costs the same on a long-lived thread as on a fresh one, measured parent against change."
              :must-read #{seon.profile/timed seon.profile/with-cell}
              :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}
  #:seon.task{:name "reading-the-profile-cells-costs-3-ms"
-             :kind :function
              :intent "`seon.profile/cells` builds a vector of every live cell (2,673) on each call: 2.9 ms, and summing each cell's total counter over it 2.5 ms (default 2026-09-28); a health report reads it live every time (the counters move with the read itself, so no key can hold it). Done when the report's candidates (definitions with a second of inclusive time) are found without touching every cell, e.g. from the stored judgments once they land."
              :must-read #{seon.profile/cells seon.profile/observation}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md"}}
  #:seon.task{:name "no-per-symbol-profile-and-zero-calls-reads-as-unmeasured"
-             :kind :function
              :intent "There is no per-symbol profile function for an agent, and zero calls cannot be told from never measured. Done when a my.* call answers one symbol's calls, mean and max, and a symbol with no measurement answers a typed unknown while a measured zero answers zero."
              :must-read #{seon.profile/cell}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--read.md"}}
  #:seon.task{:name "cost-values-are-reliable-and-like-for-like"
-             :kind :function
              :intent "Every cost number shown or stored is like-for-like (owner ruling 2026-10-10: false regressions are the bug). `seon.profile/timed` splits a definition's first `:seon.config.fn.cost/cold-calls` calls in a process (its cell's `:seon.profile/ordinal`) into the sink's cold half; `seon.profile/transaction-observation` and `seon.db/cost-upserts` keep one `:seon.fn.cost/entity` per `:seon.fn.cost/key` (symbol and scope) with a cold and a warm sample, each replaced only from its own kind (`seon.profile/moved?`); `seon.batch/cost-diff` compares warm with warm and cold with cold in the same scope, and gives a ratio only with `:seon.config.fn.cost/min-calls` warm calls on both sides (else `:seon.cost.comparison/unknown`); `seon.batch/test-cost-diff` shows only tests whose reach differs from main's, never with a ratio."
              :must-read #{seon.profile/timed seon.profile/transaction-observation seon.db/cost-upserts seon.batch/cost-diff seon.batch/test-cost-diff}}
  #:seon.task{:name "cold-calls-dial-reaches-the-cell-from-the-cluster-configuration"
-             :kind :function
              :intent "`seon.instrument/arm-var!` and `seon.instrument/wrap-interpreted` give each new `seon.profile/cell` its `:seon.profile/cold-calls` from the shipped default (`seon.config/defaults`), so a cluster's own `:seon.config.fn.cost/cold-calls` never reaches the cells. Done when the arming request carries the effective dial (beside `:seon.config.error/max-evidence-bytes`) and a cell made under a cluster setting of 3 counts its first three calls cold."
              :must-read #{seon.instrument/arm-var! seon.instrument/wrap-interpreted seon.profile/cell seon.config/defaults}}]

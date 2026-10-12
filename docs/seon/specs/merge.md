@@ -48,8 +48,8 @@ to files without a merge (`my.program/write-branch!`, installed) and commit by b
   `:seon.merge/target-branch`, `:seon.merge/proofs` (each proof with its definition digest), `:seon.merge/run` and
   `:seon.merge/program-digest`, plus optional `:seon.merge/norms`. A task is a merge request because it carries
   `:seon.merge/source-branch`, validated by a specific Malli schema composed over the task schema; there is no kind
-  (ledger §3.15). Today: `seon.task/request-merge!` (src/seon/task.clj:655) writes `:seon.task/kind :merge` and a separate
-  proposal row; the rename slice folds the proposal row into the request (ledger §3.16, merge request data).
+  (ledger §3.15). Today: a task has no kind (its handle is `seon.id/id` over `[ns name]`), and a done branch is merged by
+  root's db<->flow from its assignment, with a separate proposal row; the rename slice folds the proposal row into the request (ledger §3.16, merge request data).
 - The source branch, read through `compare-branch` (src/seon/cluster/source.clj:824).
 - The merge branch, created off the target by `merge!` and named on the request as `:seon.merge/merge-branch`. It is
   kept until the request closes (today `candidate-gate!` src/seon/cluster.clj:2642 creates it and nothing keeps it).

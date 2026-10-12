@@ -69,8 +69,8 @@
   an-attempts-cluster-facts-copy-onto-main-by-identity
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-parent" :function)
-           child (task/task-handle 'fixture.tasks "squash-child" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-parent")
+           child (task/task-handle 'fixture.tasks "squash-child")
            parent-ref [:seon.task/id handle]
            child-ref [:seon.task/id child]
            parent (support/task-row handle "Original")
@@ -99,7 +99,7 @@
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-value-changed-on-both-sides-resolves-by-the-declared-rule
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-conflict" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-conflict")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original") :seon.error.occurrence/count 1)])
            base (db/db connection)
@@ -144,7 +144,7 @@
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-retraction-on-the-branch-retracts-on-an-unchanged-main-only
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-retract" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-retract")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original") :seon.task/evidence #{"docs/a"})])
            base (db/db connection)
@@ -169,7 +169,7 @@
   disjoint-set-additions-merge-as-their-union
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-members" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-members")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original")
                                                      :seon.task/evidence #{"docs/a" "docs/b"})])
@@ -195,7 +195,7 @@
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-cost" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-cost")
            entity [:seon.task/id handle]
            _ (support/transacted! connection (into [(support/task-row handle "Original")]
                                                    (support/agent-tx (db/db connection) "squash-cost")))
@@ -214,7 +214,7 @@
   the-three-way-on-one-changed-set-stays-within-its-cost-bound
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "squash-set-cost" :function)
+     (let [handle (task/task-handle 'fixture.tasks "squash-set-cost")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original")
                                                      :seon.task/evidence #{"docs/a" "docs/b"})])
@@ -252,7 +252,7 @@
    {:seon.test-support/fresh-store? true}
    (fn [connection]
      (let [base (db/db connection)
-           child (task/task-handle 'fixture.tasks "squash-allocator" :function)]
+           child (task/task-handle 'fixture.tasks "squash-allocator")]
        (support/transacted! connection [(support/task-row child "Child")])
        (let [branch (db/db connection)
              allocator (writing/eid-allocator branch)
@@ -264,8 +264,8 @@
          (is (= issued (.get ^java.util.concurrent.atomic.AtomicLong allocator)))))))
   (support/with-database
    (fn [connection]
-     (let [parent (task/task-handle 'fixture.tasks "squash-eid-parent" :function)
-           child (task/task-handle 'fixture.tasks "squash-eid-child" :function)
+     (let [parent (task/task-handle 'fixture.tasks "squash-eid-parent")
+           child (task/task-handle 'fixture.tasks "squash-eid-child")
            parent-ref [:seon.task/id parent]
            child-ref [:seon.task/id child]]
        (support/transacted! connection [(support/task-row parent "Parent")])
@@ -328,7 +328,7 @@
   a-natural-identity-born-on-both-sides-maps-to-mains-eid
   (support/with-database
    (fn [connection]
-     (let [parent (task/task-handle 'fixture.tasks "squash-collision-parent" :function)
+     (let [parent (task/task-handle 'fixture.tasks "squash-collision-parent")
            parent-ref [:seon.task/id parent]
 ]
        (support/transacted! connection [(support/task-row parent "Parent")])
@@ -494,7 +494,7 @@
 (deftest a-repeated-merge-adds-nothing
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-repeat" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-repeat")]
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
@@ -515,7 +515,7 @@
 (deftest a-facts-only-merge-is-never-due-for-publication
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-facts-only" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-facts-only")]
        (with-assigned-fork
         connection handle
         (fn [fork _ a]
@@ -535,7 +535,7 @@
 (deftest a-root-edit-after-capture-keeps-roots-value
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-root-edit" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-root-edit")]
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
@@ -552,7 +552,7 @@
 (deftest a-reverted-branch-value-reverts-on-main
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-revert" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-revert")]
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
@@ -566,7 +566,7 @@
 (deftest an-occurrence-counted-on-the-branch-adds-once-on-main
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-count" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-count")]
        (support/transacted! connection (occurrence-tx (db/db connection)))
        (with-assigned-fork
         connection handle
@@ -588,7 +588,7 @@
   ;; validation is the writer's and is the same for any write of these facts
   (support/with-database
    (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks "merge-cost" :function)]
+     (let [handle (task/task-handle 'fixture.tasks "merge-cost")]
        (with-assigned-fork
         connection handle
         (fn [fork _ a]
