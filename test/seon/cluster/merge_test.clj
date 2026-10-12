@@ -284,8 +284,9 @@
   ([running connection ns-sym task-name fix]
    (:seon.task/assignment (requested-agent! running connection ns-sym task-name fix))))
 
-(defn- requested-agent!
-  "`requested!`'s agent: the assignment's key, the agent and its branch's connection."
+(defn- assigned-agent!
+  "An own-branch agent assigned the task `<ns-sym>/<task-name>` that evaluates `fix` in that namespace on its
+  branch: the assignment's key, the agent and its branch's connection."
   [running connection ns-sym task-name fix]
   (let [agent-id (str "land-" task-name "-" (id/id))
         {branch :seon.store/branch on-branch :seon.db/connection} (support/own-branch-agent! running agent-id (str "(ns " ns-sym ")"))
@@ -294,12 +295,18 @@
         assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                 :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
     (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
-    (let [defined (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
-          requested (agent-eval running agent-id "(my.program/request-merge! {})")]
-      ;; a refused fixture step is surfaced, never left for the merge to miss
-      (if (:seon.task/merge-request (:seon.repl/value requested))
-        {:seon.task/assignment (:seon.task/assignment assigned) :seon.agent/id agent-id :seon.db/connection on-branch}
-        (throw (ex-info "The agent requested no merge." {:defined defined :requested requested}))))))
+    (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
+    {:seon.task/assignment (:seon.task/assignment assigned) :seon.agent/id agent-id :seon.db/connection on-branch}))
+
+(defn- requested-agent!
+  "`requested!`'s agent: `assigned-agent!`'s, which then requests its merge."
+  [running connection ns-sym task-name fix]
+  (let [{agent-id :seon.agent/id :as assigned} (assigned-agent! running connection ns-sym task-name fix)
+        requested (agent-eval running agent-id "(my.program/request-merge! {})")]
+    ;; a refused fixture step is surfaced, never left for the merge to miss
+    (if (:seon.task/merge-request (:seon.repl/value requested))
+      assigned
+      (throw (ex-info "The agent requested no merge." {:requested requested})))))
 
 (defn- merge!
   "Root's merge of `assignment` (`my.root/merge!`) through the cluster `execution`."
@@ -447,6 +454,36 @@
            (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass publishes it as the checkout's new HEAD")
            (is (= before (git! root "rev-parse" "HEAD^")) "in one commit"))
          (is (str/includes? (slurp (io/file root path)) fix) "the file holds the agent's span")
+         (finally (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'seon.task/a-done-branch-merges-with-no-merge-request-written-by-the-agent}
+           :seon.test/long "One own-branch agent's first request and assignment, one gate (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and one db<->flow pass."
+           :seon.test/long-ms 180000}
+  a-done-branch-merges-with-no-merge-request-written-by-the-agent
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           root (checkout! "done-merge-test" {"test/tq/land.clj" land-source})
+           _ (checkout-dial! connection root)
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           {key :seon.task/assignment agent-id :seon.agent/id on-branch :seon.db/connection}
+           (assigned-agent! running connection 'tq.land "area" fix)
+           digest #(:seon.program/definition-digest (db/pull (db/db %) [:seon.program/definition-digest] [:seon.fn/sym 'tq.land/area]))]
+       (try
+         (db/with-branch {:seon.db/connection on-branch}
+                         #(support/transacted! on-branch [[:db.fn/call #'turn/end-task-call agent-id :done
+                                                           (db/commit-id (db/db on-branch)) nil]]))
+         (let [branch-digest (digest on-branch)]
+           (is (empty? (db/q '[:find ?r :where [?r :seon.task/merge-request _]] (db/db on-branch)))
+               "the agent wrote no merge request")
+           (pass! running)
+           (is (= :merged (:seon.task/outcome (assignment-row connection key))) "one pass merges the done end")
+           (is (= 1 (:seon.task/merged-declarations (assignment-row connection key))) "with the one declaration it changed")
+           (is (= branch-digest (digest connection)) "main holds the branch's definition by its digest"))
          (finally (support/delete-root! root)))))))
 
 (def ^:private shape-source

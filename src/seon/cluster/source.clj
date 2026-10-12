@@ -859,6 +859,23 @@
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
          :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))))
 
+(def ^:private unmerged-sets
+  "The `seon.program/three-way` sets a branch holds that main lacks."
+  [:seon.program/added :seon.program/changed-on-branch :seon.program/retracted :seon.program/conflict])
+
+(defn unmerged-count
+  "How many declarations `branch` changed that main `database` lacks (`compare-branch` against main's head);
+  a refused comparison is thrown."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.plan/unmerged]}
+  [database store branch]
+  (let [{three :three :as compared} (compare-branch store branch database (get-in database [:config :branch]))]
+    (try (if three
+           (reduce + (map #(count (get three %)) unmerged-sets))
+           (let [refusal (some #(when (:seon.error/at %) %)
+                               (concat [(:c-id compared) (:base compared) (:changed compared)] (:maps compared)))]
+             (throw (ex-info (:seon.error/message refusal "Could not compare the branch with main.") refusal))))
+         (finally (release! [(:base compared) (:branch compared)])))))
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the

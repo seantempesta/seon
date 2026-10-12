@@ -200,15 +200,18 @@
            (empty? (d/datoms database :eavt a :seon.task/outcome))
            (conj [:db/add a :seon.task/outcome (if (= :sent-back end) :closed :merged)])))))))
 
-(defn- merge-request
-  "The latest merge request answering assignment `a` that the source `head` holds, with its proofs; nil when
-  the agent requested none. Read from the requests' own datoms: a branch head opens with primary indexes only."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:maybe [:map [:seon.task/proved :seon.task/proved]]]]}
-  [head a]
-  (when-let [request (->> (d/datoms head :aevt :seon.task/merge-request)
-                          (filter #(= a (:v (first (d/datoms head :eavt (:e %) :seon.task/of-assignment)))))
-                          (sort-by :tx) last)]
-    {:seon.task/proved (set (:seon.task/proved (db/pull head [:seon.task/proved] (:e request))))}))
+(defn- assigned-task
+  "The symbol of the task assignment `a` on main `database` assigns."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] :seon.task/sym]}
+  [database a]
+  (db/q '[:find ?sym . :in $ ?a :where [?a :seon.task/assigned ?h] [?t :seon.task/id ?h] [?t :seon.task/sym ?sym]]
+        database a))
+
+(defn- needed?
+  "Whether another task on `database` needs the task `sym`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] :boolean]}
+  [database sym]
+  (some? (db/q '[:find ?next . :in $ ?sym :where [?t :seon.task/sym ?sym] [?next :seon.task/needs ?t]] database sym)))
 
 (defn- assignment-row
   "Assignment `key`'s row on main `database`, with its merge base: the stored one, else the commit its branch
@@ -243,8 +246,9 @@
   the store it holds or its SCI context's environment holds) as ONE
   transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
   facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
-  when the agent requested the merge (its merge request on the branch names the proofs), the declarations
-  it changed since the base, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs and
+  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not
+  end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
+  proofs of the assignment's task on C (`seon.task/obligations`) and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
   `merge-tx` and `:seon.task/merged-declarations` (how many it moved) in its transaction, then the merge
   branch is deleted; the files the checkout `root` would hold
@@ -271,8 +275,18 @@
       (let [{a :db/id branch :seon.task/branch base :seon.task/merge-base} row
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
             target (db/db connection)
-            head (when (uuid? commit) (db/commit-database target commit))
-            request (when head (try (merge-request head a) (finally (source/release! [head]))))
+            ;; one comparison with main decides whether declarations merge; their proofs are the assignment's
+            ;; task's, read on the branch head. A sent-back source, or a step another task needs (its product's
+            ;; designed reds pass no gate before M7, `seon.merge/a-merge-whose-reached-definition-moved-writes-nothing`),
+            ;; merges its facts only.
+            task-sym (assigned-task target a)
+            unmerged (when (and (uuid? commit) (not= base commit) (not (needed? target task-sym)))
+                       (source/unmerged-count target store branch))
+            owed (when (and unmerged (pos? unmerged))
+                   (let [head (db/commit-database target commit)]
+                     (try (when-not (= :sent-back (:v (first (d/datoms head :eavt a :seon.task.attempt/end))))
+                            (task/obligations head task-sym))
+                          (finally (source/release! [head])))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]
@@ -288,7 +302,8 @@
         (cond
           (not (uuid? commit)) commit
           (= base commit) {:seon.task/assignment key :seon.task/merge-base commit :seon.merge/conflicts []}
-          (nil? request)
+          (:seon.error/at owed) owed
+          (nil? owed)
           (let [report (db/transact! connection {:tx-data merge-call :tx-meta meta})]
             (if (:db-after report)
               (let [result (answer (:db-before report) (:db-after report))]
@@ -296,8 +311,7 @@
                 result)
               report))
           :else
-          (let [proofs (into #{} (map first) (:seon.task/proved request))
-                prepared (source/prepare-merge! context store branch proofs nil root)
+          (let [prepared (source/prepare-merge! context store branch (:seon.task/proofs owed) nil root)
                 ;; the merge records, in its own transaction, how many declarations it moved: what publication reads
                 moved [:db/add a :seon.task/merged-declarations (count (:seon.source/expected-digests prepared))]
                 accepted (when (:seon.source/candidate prepared)
@@ -336,15 +350,6 @@
                             :seon.error/message "The cluster names no :seon.config.fs/working-root to publish into; nothing was written."
                             :seon.source/write-back-refused :root-refused :seon.error/offending cluster-name}))))
 
-(defn- merged-request
-  "The run id of the merge request on main `database` answering assignment `a`; {} when it names none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:map [:seon.task/run-id {:optional true} :seon.task/run-id]]]}
-  [database a]
-  (or (db/q '[:find (pull ?r [:seon.task/run-id]) . :in $ ?a
-              :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-            database a)
-      {}))
-
 (defn publish!
   "Publish assignment `key`'s merged declarations into the cluster's checkout (`checkout`) through
   `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
@@ -379,9 +384,8 @@
       :else
       (let [_ (source/claim-paths! root lane paths)
             written (source/write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})
-            run-id (:seon.task/run-id (merged-request database a))
             committed (when-not (:seon.error/at written)
-                        (source/commit! root written (acceptance database key (cond-> accepted run-id (assoc :seon.test.run/id run-id)))))
+                        (source/commit! root written (acceptance database key accepted)))
             outcome (cond (:seon.error/at written) (refuse written)
                           (:seon.error/at committed) (refuse committed)
                           :else (let [recorded (db/transact! connection [[:db/add a :seon.task/git-commit (:seon.git/commit committed)]])]

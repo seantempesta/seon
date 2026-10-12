@@ -2072,24 +2072,6 @@
     (try (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]] head agent-id)
          (finally (source/release! [head])))))
 
-(def ^:private unmerged-sets
-  "The `seon.program/three-way` sets a branch holds that main lacks."
-  [:seon.program/added :seon.program/changed-on-branch :seon.program/retracted :seon.program/conflict])
-
-(defn- unmerged-count
-  "How many declarations `branch` changed that main `database` lacks (`seon.cluster.source/compare-branch`
-  against main's head); a refused comparison is thrown."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.plan/unmerged]}
-  [database store branch]
-  (let [{three :three :as compared} (source/compare-branch store branch database (get-in database [:config :branch]))]
-    (try (if three
-           (reduce + (map #(count (get three %)) unmerged-sets))
-           (let [refusal (some #(when (:seon.error/at %) %)
-                               (concat [(:c-id compared) (:base compared) (:changed compared)] (:maps compared)))]
-             (throw (ex-info (:seon.error/message refusal "db<->flow could not compare the agent's branch with main.")
-                             refusal))))
-         (finally (source/release! [(:base compared) (:branch compared)])))))
-
 (defn- taskless-agents
   "Every agent on main `database` whose branch the store's `branches` holds, is not main's and that no assignment
   names: its end, main's row's else its branch head's, whether `started` runs its graph and, once ended, how
@@ -2109,7 +2091,7 @@
                          (cond-> {:db/id g :seon.agent/id id :seon.task/branch b
                                   :seon.flow.plan/started? (contains? started id)}
                            end (assoc :seon.agent/admission-closed-tx end
-                                      :seon.flow.plan/unmerged (unmerged-count database store b)))))))
+                                      :seon.flow.plan/unmerged (source/unmerged-count database store b)))))))
           (sort-by second rows))))
 
 (defn lifecycle-facts
@@ -2248,7 +2230,7 @@
                             :db/id))]
         (when-not cancelled?
           (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts)
-                          (unmerged-count (db/db connection) store branch)))
+                          (source/unmerged-count (db/db connection) store branch)))
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))
                             :tx-meta {:seon.squash/source-branch branch :seon.squash/source-commit (db/commit-id head)}}))
       (finally (source/release! [head])))
