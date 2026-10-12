@@ -1433,15 +1433,7 @@
                  :seon.schema/identity schema-key
                  :seon.schema/member :seon.program/partition
                  :seon.schema/expected #{:seon.program :seon.data :seon.cluster}
-                 :seon.schema/offending properties})))
-    (when (and (:seon.db/attributes properties)
-               (= :seon.cluster (:seon.program/partition properties))
-               (not identity?))
-      (throw (ex-info "A cluster entity schema must declare an identity."
-                      {:seon.error/operation 'seon.schema/build-projection
-                       :seon.schema/identity schema-key
-                       :seon.schema/member :seon.db/identity
-                       :seon.schema/offending properties}))))
+                 :seon.schema/offending properties}))))
   nil)
 
 (defn assert-complete-contract!
