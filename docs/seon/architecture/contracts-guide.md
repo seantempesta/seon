@@ -135,7 +135,7 @@ without a call edge, so an `unused` entry is a candidate to verify, not a verdic
   executing test var's SCI context, so it turns green on the agent's branch once its `defn` carries a complete contract.
   Its reaching tests must stay green.
 - **Cost.** A contract that makes a reaching test slower is a regression. The COST-REG card
-  (`docs/seon/schedule/cards/COST-REG.md`) turns a reaching test that got more expensive red; until it lands, the
+  (`docs/seon/schedule/cards/COST-REG.md`) turns a reaching test that got more expensive red; until it is committed, the
   agent measures its function's representative call before and after (§2.6) and reports the numbers.
 - **Cases are temporary.** Root deletes a case when its task merges or retires; the table and its untagged
   `a-contracted-function-has-no-gaps` case stay. The lasting guard is merge acceptance:
