@@ -830,7 +830,7 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files root-refusal)
+(declare proven-files root-refusal identity-namespace new-path)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -1201,6 +1201,7 @@
   {:malli/schema [:=> [:cat :string :seon.source/file-bytes] :nil]}
   [path candidate]
   (let [file (io/file path)
+        _ (io/make-parents file)
         staged (java.io.File/createTempFile ".write-back-" ".clj" (.getParentFile file))]
     (try
       (Files/write (.toPath staged) ^bytes candidate (make-array java.nio.file.OpenOption 0))
@@ -1281,14 +1282,19 @@
                   (cond was (:seon.fn/file was)
                         (qualified-symbol? declared) (namespace-path before (symbol (namespace declared)))))
         files (into #{} (map file-of) recorded)
+        ;; A namespace main never published has no file: it starts as empty bytes, then its `ns` form.
+        fresh? (and (= #{nil} files) (every? (comp nil? second) recorded))
+        ns-source (when fresh? (:seon.ns/source (pull after [:seon.ns/name (identity-namespace (first identities))])))
         {path :seon.fn.file/relative-path recorded-digest :seon.fn.file/digest
-         relative-root :seon.fn.file/relative-root} (first files)
+         relative-root :seon.fn.file/relative-root} (if fresh? {:seon.fn.file/relative-path (new-path identities)} (first files))
+        relative-root (if fresh? (first (str/split path #"/")) relative-root)
         file (io/file root (str path))
-        base-bytes (when (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
-        base-digest (some-> base-bytes sha-256)
+        base-bytes (cond fresh? (some-> ns-source (str "\n") (.getBytes "UTF-8"))
+                         (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
+        base-digest (if fresh? (sha-256 (byte-array 0)) (some-> base-bytes sha-256))
         base-text (some-> ^bytes base-bytes (String. "UTF-8"))
         ;; The file's declarations now: as `before` recorded them, or read again when the file changed since.
-        ours (when (and base-bytes (not= recorded-digest base-digest)) (file-rows before root relative-root path base-text))
+        ours (when (and base-bytes (not fresh?) (not= recorded-digest base-digest)) (file-rows before root relative-root path base-text))
         conflicting (when (and ours (not (:seon.fn/index-refused ours))) (conflicts before after ours (set identities)))
         changes (if ours (mapv (fn [[identity _ now]] [identity (get ours identity) now]) recorded) recorded)
         before-entities (keep second changes)
@@ -1309,7 +1315,8 @@
                         (keep (fn [[_ was now]] (when (and was now (not (:seon.ns/name was))) (first (span-of was)))))
                         seq (apply min))
         ;; Additions first: one inserted at the anchor precedes the replacement starting there.
-        edits (fn [] (vec (for [[_ was now] (sort-by (fn [[_ was]] (if was 1 0)) changes)]
+        edits (fn [] (vec (for [[_ was now] (sort-by (fn [[_ was]] (if was 1 0)) changes)
+                                :when (not (and fresh? (:seon.ns/name now)))]
                             (cond
                               (and was now) [(span-of was) (source-of now)]
                               was (let [[start stop] (span-of was)] [[(from-blank start) stop] ""])
@@ -1321,7 +1328,8 @@
                  (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
     (cond
       (empty? identities) (refuse :no-replacement "The accepted merge changed no declaration." {})
-      (or (not= 1 (count files)) (nil? path) (some (fn [[_ _ now]] (and now (nil? (source-of now)))) changes))
+      (or (not= 1 (count files)) (nil? path) (and fresh? (nil? ns-source))
+          (some (fn [[_ _ now]] (and now (nil? (source-of now)))) changes))
       (refuse :one-file "Each change needs its source and one file."
               {:seon.error/offending identities})
       (nil? base-bytes) (refuse :file-absent "The changed declarations' file is absent under the root." {})
@@ -1618,20 +1626,39 @@
           :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
                  :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
 
+(defn- identity-namespace
+  "The namespace symbol `identity` belongs to: a namespace's own name, else its symbol's namespace."
+  {:malli/schema [:=> [:cat :seon.program/declaration-identity] [:maybe :symbol]]}
+  [[attribute declared]]
+  (cond (= :seon.ns/name attribute) declared
+        (qualified-symbol? declared) (symbol (namespace declared))))
+
+(defn- new-path
+  "The relative path publication creates for the namespace `identities` (one namespace's changes) declare
+  anew: `<root>/<munged name>.clj`, `test` for a namespace holding only deftests or named `*-test`, else `src`."
+  {:malli/schema [:=> [:cat [:sequential :seon.program/declaration-identity]] :seon.source/path]}
+  [identities]
+  (let [namespace-name (identity-namespace (first identities))
+        tests-only? (every? (fn [[attribute]] (#{:seon.test/sym :seon.ns/name} attribute)) identities)
+        root (if (or tests-only? (str/ends-with? (str namespace-name) "-test")) "test" "src")]
+    (str root "/" (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/")) ".clj")))
+
 (defn- change-path
   "The relative path of the one file `identity`'s change is written into: a
   task's file (`task-path`), a schema's resource (`schema-path`), the declaration's own file as `before`
-  recorded it, else (an addition) its namespace's file; nil when neither is
-  recorded."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :seon.source/path]]}
-  [before [attribute declared :as identity]]
+  recorded it, else (an addition) its namespace's file; for a namespace `before` records no file for, the
+  file publication creates (`new-path` over the merge's `identities` in that namespace); nil when the
+  identity names no namespace."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set :seon.program/declaration-identity] [:maybe :seon.source/path]]}
+  [before identities [attribute declared :as identity]]
   (case attribute
     :seon.task/sym (task-path declared)
     :seon.schema/key (schema-path declared)
     (or (get-in (db/pull before [{:seon.fn/file [:seon.fn.file/relative-path]}] identity)
                 [:seon.fn/file :seon.fn.file/relative-path])
-        (when (qualified-symbol? declared)
-          (:seon.fn.file/relative-path (namespace-path before (symbol (namespace declared))))))))
+        (when-let [namespace-name (identity-namespace identity)]
+          (or (:seon.fn.file/relative-path (namespace-path before namespace-name))
+              (new-path (filter #(= namespace-name (identity-namespace %)) identities)))))))
 
 (defn- proven-files
   "`proven-file` (`proven-schema-file` for schemas, `proven-task-file` for
@@ -1642,7 +1669,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
                   [:or [:vector :seon.source/proof] :seon.source/write-back-error]]}
   [before after identities root]
-  (let [groups (group-by #(change-path before %) identities)]
+  (let [groups (group-by #(change-path before identities %) identities)]
     (cond
       (empty? identities) (write-back-refusal :no-replacement "The accepted merge changed no declaration." {})
       (contains? groups nil)
@@ -1664,7 +1691,8 @@
         merged (held-digests after identities)
         moved (moved-digests merged (held-digests (db/db connection) identities))
         proven (when (empty? moved) (proven-files before after identities root))
-        disk-digest #(sha-256 (Files/readAllBytes (.toPath (io/file root (str (:seon.source/path %))))))
+        disk-digest #(let [file (io/file root (str (:seon.source/path %)))]
+                       (sha-256 (if (.isFile file) (Files/readAllBytes (.toPath file)) (byte-array 0))))
         changed (when (vector? proven) (first (remove #(= (:seon.source/base-digest %) (disk-digest %)) proven)))
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
     (cond
@@ -1756,7 +1784,7 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted] [:vector :seon.source/path]]}
   [connection {identities :seon.program/identities before :seon.source/base-commit-id}]
   (let [database (d/commit-as-db connection before)]
-    (try (vec (sort-by str (into #{} (keep #(change-path database %)) identities)))
+    (try (vec (sort-by str (into #{} (keep #(change-path database identities %)) identities)))
          (finally (d/release-materialized-db database)))))
 
 (defn write-back!

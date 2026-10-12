@@ -485,6 +485,56 @@
            (is (= [text git-commit] [(slurp file) (git! root "rev-parse" "HEAD")]) "a second pass changes nothing"))
          (finally (support/delete-root! root)))))))
 
+(def ^:private base-source
+  ;; a green namespace carrying two tasks, so an agent's task can add a namespace beside it
+  (str "(ns tq.base\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+       "(defn one\n  \"One.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  1)\n\n"
+       "(defn two\n  \"Two.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  2)\n\n"
+       "(deftest ^{:seon/tasks #{'tq.base/one}} one-test (is (= 1 (one))))\n\n"
+       "(deftest ^{:seon/tasks #{'tq.base/two}} two-test (is (= 2 (two))))\n"))
+
+(deftest ^{:seon.test/long "One own-branch agent per namespace, two merges (each one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and two publication passes."
+           :seon.test/long-ms 240000}
+  a-new-namespace-is-published-to-its-own-file
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           root (checkout! "new-namespace-test" {"test/tq/base.clj" base-source})
+           _ (checkout-dial! connection root)
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)]
+       (try
+         (doseq [[ns-sym task-name path code sym]
+                 [['tq.fresh "one" "src/tq/fresh.clj"
+                   "(ns tq.fresh\n  (:require [clojure.test :refer [deftest is]]))\n(defn greet\n  \"The greeting.\"\n  {:malli/schema [:=> [:cat :string] :string]}\n  [n]\n  (str \"hi \" n))\n(deftest greet-test (is (= \"hi a\" (greet \"a\"))))"
+                   'tq.fresh/greet]
+                  ['tq.fresh-test "two" "test/tq/fresh_test.clj"
+                   "(ns tq.fresh-test\n  (:require [clojure.test :refer [deftest is]]))\n(deftest alone (is (= 1 1)))"
+                   'tq.fresh-test/alone]]]
+           (testing (str ns-sym " is written to " path)
+             (let [request (assigned! running connection 'tq.base task-name code)
+                   before (git! root "rev-parse" "HEAD")
+                   merged (merge! execution request)]
+               (is (nil? (:seon.error/message merged)) "the merge answers no refusal")
+               (pass! running)
+               (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection request)
+                     text (when (.isFile (io/file root path)) (slurp (io/file root path)))]
+                 (is (nil? refused) "the publication answers no refusal")
+                 (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
+                 (is (= before (git! root "rev-parse" "HEAD^")) "in one commit")
+                 (is (= [path] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit)))
+                     "carrying exactly the new file")
+                 (is (str/starts-with? (str text) (str "(ns " ns-sym)) "the file begins with the ns form")
+                 (is (str/includes? (str text) (str "(deftest" )) "and holds the declarations" )
+                 (let [recorded (db/pull (db/db connection) [{:seon.fn/file [:seon.fn.file/relative-path]} :seon.fn/form-span]
+                                         (if (= 'tq.fresh ns-sym) [:seon.fn/sym sym] [:seon.test/sym sym]))]
+                   (is (= path (get-in recorded [:seon.fn/file :seon.fn.file/relative-path])) "main records the file")
+                   (is (vector? (:seon.fn/form-span recorded)) "and the declaration's span"))))))
+         (finally (support/delete-root! root)))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.agent/a-requested-green-end-merges-and-publishes-with-no-hand-act}
            :seon.test/long "One own-branch agent's first request, assignment and request run, one gate (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and two db<->flow passes."
            :seon.test/long-ms 180000}

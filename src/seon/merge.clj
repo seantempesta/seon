@@ -2,6 +2,7 @@
   "Root's merge of an assignment's branch onto main: one three-way squash merge from its merge base, the
   cluster facts inside main's writer and the requested declarations through the gate, in one transaction."
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -363,16 +364,22 @@
 
 (defn- indexed!
   "Main's program after publication `written` installed its files under `root`: each written source file
-  main records, analyzed again (`seon.fn/index!` of those paths), so main holds the file's digest and each
+  main records or this publication created (a namespace main never published), analyzed again
+  (`seon.fn/index!` of those paths), so main holds the file's digest and each
   of its declarations' file and span, and a later merge splices into them. Answers the index result, nil
-  when no written path is a source file main records."
+  when no written path is such a source file."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.fn/root :seon.source/written]
                   [:or :nil :seon.reconcile/result]]}
   [connection root written]
   (let [database (db/db connection)
-        files (db/q '[:find ?path ?root :in $ [?path ...]
+        known (db/q '[:find ?path ?root :in $ [?path ...]
                       :where [?f :seon.fn.file/relative-path ?path] [?f :seon.fn.file/relative-root ?root]]
-                    database (:seon.source/changed-paths written))]
+                    database (:seon.source/changed-paths written))
+        ;; a file this publication created: it declares its namespace anew, under the root its path starts with
+        created (for [{path :seon.source/path added :seon.source/added} (:seon.source/files written)
+                      :when (some (comp #{:seon.ns/name} first) added)]
+                  [path (first (str/split path #"/"))])
+        files (into (set known) created)]
     (when (seq files)
       (fn/index! {:seon.db/connection connection
                   :seon.schema/projection (or (db/carried-projection database) (schema/handed-projection))

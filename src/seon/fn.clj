@@ -65,11 +65,15 @@
   [directory path]
   (io/file (fs/absolute-path directory path)))
 
+(defn- source-path?
+  "Whether `file` is named as a Clojure source file, existing or not (a file publication is about to create)."
+  [file]
+  (or (str/ends-with? (.getName ^java.io.File file) ".clj")
+      (str/ends-with? (.getName ^java.io.File file) ".cljc")))
+
 (defn- source-file?
   [file]
-  (and (.isFile ^java.io.File file)
-       (or (str/ends-with? (.getName ^java.io.File file) ".clj")
-           (str/ends-with? (.getName ^java.io.File file) ".cljc"))))
+  (and (.isFile ^java.io.File file) (source-path? file)))
 
 (defn- under-root?
   "True when this canonical file is a descendant of this canonical directory."
@@ -1656,7 +1660,7 @@
 
 (defn- lint-entities
   "Identify findings by owner, claim and duplicate occurrence; positions are values."
-  {:malli/schema [:=> [:cat :string [:fn seon.fn/source-file?] :map [:sequential :map] [:sequential :map]] [:vector :seon.lint/finding]]}
+  {:malli/schema [:=> [:cat :string [:fn seon.fn/source-path?] :map [:sequential :map] [:sequential :map]] [:vector :seon.lint/finding]]}
   [directory file context entities findings]
   (let [path (.getCanonicalPath ^java.io.File file)
         declarations (filter :seon.fn/form-span entities)]
