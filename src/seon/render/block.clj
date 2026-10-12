@@ -78,7 +78,9 @@
   ;; therefore doubles; everything else becomes `_<hex>_`. That is what
   ;; makes the map injective — a scheme that DROPPED unsafe characters
   ;; is exactly how two names become one id and two blocks morph over
-  ;; each other.
+  ;; each other. Only ASCII letters and digits pass through, not
+  ;; Unicode ones: `Character/isLetterOrDigit` would let `é` and `٣`
+  ;; through unescaped, so the test is the explicit ASCII ranges.
   (let [text (subs (str name) 1)
         builder (StringBuilder. (+ 8 (.length ^String text)))]
     (.append builder "surface-")
@@ -86,7 +88,9 @@
       (let [character (.charAt ^String text index)]
         (cond
           (= \_ character) (.append builder "__")
-          (or (Character/isLetterOrDigit character)
+          (or (<= (int \a) (int character) (int \z))
+              (<= (int \A) (int character) (int \Z))
+              (<= (int \0) (int character) (int \9))
               (= \. character)
               (= \- character)) (.append builder character)
           :else (doto builder
