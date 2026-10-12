@@ -704,6 +704,11 @@
               (is (= {:seon.task.attempt/end :error}
                      (select-keys (db/pull database [:seon.task.attempt/end :seon.task/outcome] a) [:seon.task.attempt/end :seon.task/outcome]))
                   "the refused merge is the assignment's :error end, not an outcome")
+              (let [intents (db/q '[:find [?i ...] :in $ ?k :where [?t :seon.task/sym ?s] [(namespace ?s) ?n] [(= ?n "seon.task")]
+                                    [?t :seon.task/intent ?i] [(clojure.string/includes? ?i ?k)]]
+                                  database key)]
+                (is (= 1 (count intents)) "the refusal is delivered to root as one problem task naming the assignment")
+                (is (every? #(clojure.string/includes? % ":seon.source/write-back-error") intents) "which names the refusal's type"))
               (is (contains? (registry/branches (agent/handle-store handle)) branch) "its branch stays")
               (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "its graph was stopped and joined")
               (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] database)))

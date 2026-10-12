@@ -1968,26 +1968,6 @@
            (throw (ex-info (or (ex-message cause) "db<->flow's action failed.") {:seon.flow.plan/action action} cause)))))
   nil)
 
-(defn- failed-pass!
-  "db<->flow's one catch, the Flow proc's boundary, for its pass's `failure`.
-  The assignment a failed `:attempt`, `:start-flow`, `:merge-base` or `:merge` names ends `:error` on main with the
-  failure's message as its reason, so no later pass derives that action again (`seon.task/ready` reads
-  the end as terminal); the failure is recorded as db<->flow's fault."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.error/throwable] :nil]}
-  [handle failure]
-  (let [action (:seon.flow.plan/action (ex-data failure))
-        cause (or (when action (ex-cause failure)) failure)
-        key (:seon.task/assignment action)
-        connection (:seon.db/connection handle)]
-    (when (and key (#{:attempt :start-flow :merge-base :merge} (:seon.flow.plan/op action))
-               (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
-      (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
-                          [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
-                           (or (not-empty (ex-message cause)) "db<->flow's action failed.")]]))
-    (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
-                                         :seon.db.process/id (:seon.db.process/id handle)})
-    nil))
-
 (defn- branch-end
   "The end `branch`'s head records on attempt `key`, read from main `database`'s store; {} when the head records
   none."
@@ -2165,6 +2145,32 @@
                                                       key "\" :seon.task/reason why}).")})]
     (when (:seon.error/at created)
       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
+    nil))
+
+(defn- failed-pass!
+  "db<->flow's one catch, the Flow proc's boundary, for its pass's `failure`.
+  The assignment a failed `:attempt`, `:start-flow`, `:merge-base` or `:merge` names ends `:error` on main with the
+  failure's message as its reason, so no later pass derives that action again (`seon.task/ready` reads
+  the end as terminal); the failure is recorded as db<->flow's fault. A refused `:merge` also delivers root's
+  problem task for that end (`ended-problem!`), naming the refusal's type and message."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.error/throwable] :nil]}
+  [handle failure]
+  (let [action (:seon.flow.plan/action (ex-data failure))
+        cause (or (when action (ex-cause failure)) failure)
+        key (:seon.task/assignment action)
+        connection (:seon.db/connection handle)]
+    (when (and key (#{:attempt :start-flow :merge-base :merge} (:seon.flow.plan/op action))
+               (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
+      (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
+                          [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
+                           (or (not-empty (ex-message cause)) "db<->flow's action failed.")]])
+      (when (= :merge (:seon.flow.plan/op action))
+        (ended-problem! connection action :error
+                        (str (when-let [type (:seon.error/type (ex-data cause))] (str (pr-str type) " "))
+                             (or (not-empty (ex-message cause)) "db<->flow's merge was refused."))
+                        (source/unmerged-count (db/db connection) (handle-store handle) (:seon.task/branch action)))))
+    (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
+                                         :seon.db.process/id (:seon.db.process/id handle)})
     nil))
 
 (defn- close!
