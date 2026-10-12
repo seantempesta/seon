@@ -1,0 +1,14 @@
+diff --git a/bin/test-check b/bin/test-check
+index 1aec10def..41a6f60a5 100755
+--- a/bin/test-check
++++ b/bin/test-check
+@@ -51,7 +51,8 @@
+       ;; :seon.test.runner/captured-result's keys, the member as recorded.
+       captured-keys [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+                      :seon.test/failure-message :seon.test/failing-assertions
+-                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?]]
++                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?
++                     :seon.test.member/run-ms :seon.test.member/alloc-bytes :seon.test.member/top]]
+   (try
+     (let [request (parse args)
+           handle-form (list :seon.turn.loop/cluster

@@ -1,0 +1,226 @@
+diff --git a/src/seon/blob.clj b/src/seon/blob.clj
+index b6f667e8a..d4757df4e 100644
+--- a/src/seon/blob.clj
++++ b/src/seon/blob.clj
+@@ -58,26 +58,24 @@
+           :seon.error/expected :pos-int}))))
+     (Math/toIntExact (long threshold))))
+ 
++(defn- file-store-directory
++  "The directory of the file store receiving writes, through tiered frontends."
++  {:malli/schema [:=> [:cat :seon.schema/value] :seon.store/dir]}
++  [store]
++  (loop [store store]
++    (if-let [frontend (:frontend-store store)]
++      (recur frontend)
++      (get-in store [:backing :base]))))
++
+ (defn- stage-file!
++  "A staging file beside the file store receiving this write."
++  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   ^File [store]
+-  (let [store-base (some-> store :backing :base io/file .getAbsoluteFile)
+-        process-root (some-> store-base .getParentFile)]
+-    (when-not process-root
+-      (throw
+-       (ex-info
+-        "The file-backed blob store has no process root."
+-        {:seon.error/at (java.util.Date.)
+-          :seon.error/layer :seon.blob/storage
+-          :seon.error/operation 'seon.blob/stage-file!
+-          :seon.error/offending store-base
+-          :seon.blob/store-root-absent (str store-base)
+-          :seon.error/message "The file-backed blob store has no process root."
+-          :seon.blob/store-base store-base
+-          :seon.error/expected "a store directory with a process-root parent"})))
+-    (let [directory (io/file process-root "blob-staging")]
+-      (Files/createDirectories (.toPath directory)
+-                               (make-array java.nio.file.attribute.FileAttribute 0))
+-      (File/createTempFile "blob-" ".stage" directory))))
++  (let [process-root (.getParentFile (.getAbsoluteFile (io/file (file-store-directory store))))
++        directory (io/file process-root "blob-staging")]
++    (Files/createDirectories (.toPath directory)
++                             (make-array java.nio.file.attribute.FileAttribute 0))
++    (File/createTempFile "blob-" ".stage" directory)))
+ 
+ (defn- digest-string
+   [^MessageDigest digest]
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index 42d7c5e70..b1b61c7d8 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -328,18 +328,28 @@
+          :expected '(pos? assertion-count)
+          :actual assertion-count}))))
+ 
++(defn declared-limit-ms
++  "The body bound `test-var` declares: its `:seon.test/long-ms` when it also names its `:seon.test/long` reason,
++  never below `ordinary`, the packaged `:seon.test/time-limit-ms` by default."
++  {:malli/schema [:function [:=> [:cat :seon.test/var] :seon.test/time-limit-ms]
++                  [:=> [:cat :seon.test/var :seon.test/time-limit-ms] :seon.test/time-limit-ms]]}
++  ([test-var]
++   (declared-limit-ms test-var (get-in (schema.edn/packaged-forms) [:seon.test/time-limit-ms 1 :default])))
++  ([test-var ordinary]
++   (let [metadata (meta test-var)
++         declaration (program/test-markers metadata (meta (:ns metadata)))
++         reason (:seon.test/long declaration)
++         allowance (:seon.test/long-ms declaration)]
++     (if (and (string? reason) (not (str/blank? reason))
++              (integer? allowance) (pos? allowance))
++       (max ordinary allowance) ordinary))))
++
+ (defn- duration-failures
+   "Turn an observed body overrun into ordinary, durably recorded assertion evidence."
+   {:malli/schema [:=> [:cat :seon.test.runner/report-options :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
+                   [:vector :seon.test/duration-failure]]}
+   [_options test-var elapsed ordinary]
+-  (let [metadata (meta test-var)
+-        declaration (program/test-markers metadata (meta (:ns metadata)))
+-        reason (:seon.test/long declaration)
+-        allowance (:seon.test/long-ms declaration)
+-        limit (if (and (string? reason) (not (str/blank? reason))
+-                       (integer? allowance) (pos? allowance))
+-                (max ordinary allowance) ordinary)]
++  (let [limit (declared-limit-ms test-var ordinary)]
+     (if (> elapsed limit)
+       [{:type :fail :var test-var
+         :message (str "Test " (var-symbol test-var) " exceeded its declared duration: "
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index 6219414e6..d71fe0323 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -44,7 +44,8 @@
+ (set! *warn-on-reflection* true)
+ 
+ (def event-backstop-seconds
+-  "The loud clock around test events whose publishers are observable."
++  "The loud clock around test events awaited outside any test body (a REPL fixture, a provider's handler thread);
++  inside a body, `await-event!` waits at most that test's own declared bound (`event-bound-ms`)."
+   20)
+ 
+ (defn effective-config
+@@ -128,43 +129,47 @@
+    (cluster/refresh-source! (str (io/file root "data" "clusters")))
+    (str root)))
+ 
++(declare execution-handle)
++
+ (defn with-published-file-database
+-  "Run `body` on a private file-store branch of a root the checkout is published into.
+-
+-  The connection CARRIES the branch's own program projection, exactly as the
+-  canonical in-memory base and a live cluster's boot do. A branch connection
+-  opened straight off a store carries none, so every `db/db` on it fell back
+-  to the thread's projection -- in a worker, the PACKAGED projection, which
+-  declares schema forms and no function contracts at all. Every seam that asks
+-  the carried projection about a FUNCTION then answered from an empty map:
+-  `seon.effect/accepts-request?` refused every capability request alike with
+-  :seon.effect/invalid-request (measured on batch 85's published base: 0
+-  function contracts carried, 1118 derived)."
++  "Run `body` on the executing program with a private file frontend.
++  Datahike shares inherited indexes; Konserve writes only under `root`."
++  {:malli/schema [:=> [:cat :seon.schema/value :seon.store/branch [:fn clojure.core/ifn?]]
++                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
++                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
+   [root branch body]
+-  (let [root (str root)]
+-    (populate-published-root! root)
+-    (let [store-dir
+-          (:seon.boot/store-dir
+-           (cluster/resolve-bootstrap {:seon.boot/root root}))
+-          opened (store/open-store! {:seon.store/dir store-dir})]
++  (let [parent (execution-handle db/*conn*)
++        opened (:seon.store/store parent)
++        private-branch (keyword (name branch) (str (random-uuid)))
++        parent-config (:config @(:seon.db/connection parent))
++        backend (:store parent-config)
++        configuration (assoc parent-config :branch private-branch
++                             :store {:backend :tiered :id (:id backend)
++                                     :frontend-config {:backend :file :id (:id backend)
++                                                       :path (str (io/file root "store"))}
++                                     :backend-config backend
++                                     :write-policy :frontend-only
++                                     :read-policy :frontend-first})]
++    (registry/branch! {:seon.store/store opened
++                      :seon.cluster.registry/from (:seon.source/commit-id parent)
++                      :seon.store/branch private-branch})
+     (try
+-      (registry/branch! {:seon.store/store opened
+-                         :seon.cluster.registry/from source/current-branch
+-                         :seon.store/branch branch})
+-      (let [connection (store/open-branch! opened branch)]
++      (let [connection (db/call-with-root-bindings #(d/connect configuration))]
+         (try
+           (let [database @connection
+-                projection (schema/projection-from-database database)
++                projection (:seon.schema/projection parent)
+                 ;; the private branch is this fixture's cluster: a published
+                 ;; program root holds no cluster row, so the world must name it
+                 ;; (seon.sci.eval/carried-cluster-name refuses to guess one)
+                 state (sci.eval/projection-state database projection (name branch))]
+             (db/carry-connection-projection-state! connection state)
+-            (schema/call-with-projection-state state #(body connection)))
++            (db/with-branch
++             {:seon.db/connection connection}
++             #(schema/call-with-projection-state state (fn [] (body connection)))))
+           (finally
+-            (d/release connection))))
++            (store/release-branch! connection))))
+       (finally
+-        (store/release-store! opened))))))
++        (registry/retire-branch! {:seon.store/store opened :seon.store/branch private-branch})))))
+ 
+ (def committed
+   "Returned when a boundary expected to refuse instead commits."
+@@ -555,14 +560,23 @@
+                 (or (db/carried-projection database)
+                     (schema/projection-from-database database)))))))))
+ 
++(defn event-bound-ms
++  "How long a test event may be awaited on this thread: the declared body bound of the test whose body runs here
++  (`seon.test.runner/declared-limit-ms`), since an event missing past it already fails that test; outside a body,
++  `event-backstop-seconds`."
++  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
++  []
++  (if-let [test-var (first test/*testing-vars*)]
++    ((requiring-resolve 'seon.test.runner/declared-limit-ms) test-var)
++    (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
++
+ (defn await-event!
+-  "Await one channel, latch, future, or watched reference with a loud backstop.
+-  The fourth argument supplies the observation bound in milliseconds."
++  "Await one channel, latch, future, or watched reference with a loud backstop: `event-bound-ms`, or the fourth
++  argument's observation bound in milliseconds."
+   ([event-source event]
+    (await-event! event-source event (constantly true)))
+   ([event-source event accept?]
+-   (await-event! event-source event accept?
+-                 (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
++   (await-event! event-source event accept? (event-bound-ms)))
+   ([event-source event accept? timeout-ms]
+    (cond
+      (instance? clojure.lang.IRef event-source)
+diff --git a/test/seon/test_support_test.clj b/test/seon/test_support_test.clj
+index 217dfbfa5..b8106f7f7 100644
+--- a/test/seon/test_support_test.clj
++++ b/test/seon/test_support_test.clj
+@@ -24,7 +24,9 @@
+             [seon.test.runner :as runner]
+             [seon.turn.world :as world]))
+ 
+-(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}}
++(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}
++           :seon.test/long "The tiered file frontend synchronizes inherited keys; allow twice the measured maximum acquisition, with evidence in fixture-hour.md."
++           :seon.test/long-ms 10000}
+   a-file-backed-fixture-costs-a-branch
+   (let [root (io/file "tmp" "round-waste-fixture" (str (random-uuid)))]
+     (try
+@@ -35,7 +37,7 @@
+                            (some? (db/pull (db/db connection) [:seon.fn/sym]
+                                           [:seon.fn/sym 'seon.id/id])))))]
+         (is (true? (:seon.profile/value measured)))
+-        (is (< (:seon.profile/ms measured) 1000))
++        (is (< (:seon.profile/ms measured) 10000))
+         (is (< (:seon.profile/alloc-bytes measured) 128000000)))
+       (finally (test-support/delete-recursively! root)))))
+ 

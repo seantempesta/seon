@@ -1,0 +1,536 @@
+diff --git a/bin/test-check b/bin/test-check
+index 1aec10def..41a6f60a5 100755
+--- a/bin/test-check
++++ b/bin/test-check
+@@ -51,7 +51,8 @@
+       ;; :seon.test.runner/captured-result's keys, the member as recorded.
+       captured-keys [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+                      :seon.test/failure-message :seon.test/failing-assertions
+-                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?]]
++                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?
++                     :seon.test.member/run-ms :seon.test.member/alloc-bytes :seon.test.member/top]]
+   (try
+     (let [request (parse args)
+           handle-form (list :seon.turn.loop/cluster
+diff --git a/src/seon/blob.clj b/src/seon/blob.clj
+index b6f667e8a..be9e445eb 100644
+--- a/src/seon/blob.clj
++++ b/src/seon/blob.clj
+@@ -5,7 +5,9 @@
+             [clojure.test.check.generators :as gen]
+             [datahike.gc-guard :as gc-guard]
+             [konserve.core :as k]
++            [seon.config :as config]
+             [seon.db :as db]
++            [seon.env :as env]
+             [seon.error.refusal :as error]
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn])
+@@ -40,44 +42,32 @@
+ (schema.edn/load! {})
+ 
+ (defn- binary-threshold
++  "The inline threshold of the cluster carried by the connection."
++  {:malli/schema [:=> [:cat :seon.db/connection] :seon.config.eval.result/blob-threshold]}
+   [connection]
+-  (let [threshold
+-        (db/q
+-         (db/db connection)
+-         '[:find ?threshold .
+-           :where
+-           [_ :seon.config.eval.result/blob-threshold ?threshold]])]
+-    (when-not (and (integer? threshold) (pos? threshold))
+-      (throw
+-       (ex-info
+-        "Blob threshold is not a positive integer."
+-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/binary-threshold
+-         {:seon.error/offending threshold
+-          :seon.blob/threshold-attribute :seon.config.eval.result/blob-threshold
+-          :seon.error/message "Blob threshold is not a positive integer."
+-          :seon.error/expected :pos-int}))))
+-    (Math/toIntExact (long threshold))))
++  (let [database (db/db connection)
++        cluster-name (:seon.boot/cluster-name (env/of (meta database)))
++        effective (config/effective database cluster-name)]
++    (:seon.config.eval.result/blob-threshold effective)))
++
++(defn- file-store-directory
++  "The directory of the file store receiving writes, through tiered frontends."
++  {:malli/schema [:=> [:cat :seon.schema/value] :seon.store/dir]}
++  [store]
++  (loop [store store]
++    (if-let [frontend (:frontend-store store)]
++      (recur frontend)
++      (get-in store [:backing :base]))))
+ 
+ (defn- stage-file!
++  "A staging file beside the file store receiving this write."
++  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+   ^File [store]
+-  (let [store-base (some-> store :backing :base io/file .getAbsoluteFile)
+-        process-root (some-> store-base .getParentFile)]
+-    (when-not process-root
+-      (throw
+-       (ex-info
+-        "The file-backed blob store has no process root."
+-        {:seon.error/at (java.util.Date.)
+-          :seon.error/layer :seon.blob/storage
+-          :seon.error/operation 'seon.blob/stage-file!
+-          :seon.error/offending store-base
+-          :seon.blob/store-root-absent (str store-base)
+-          :seon.error/message "The file-backed blob store has no process root."
+-          :seon.blob/store-base store-base
+-          :seon.error/expected "a store directory with a process-root parent"})))
+-    (let [directory (io/file process-root "blob-staging")]
+-      (Files/createDirectories (.toPath directory)
+-                               (make-array java.nio.file.attribute.FileAttribute 0))
+-      (File/createTempFile "blob-" ".stage" directory))))
++  (let [process-root (.getParentFile (.getAbsoluteFile (io/file (file-store-directory store))))
++        directory (io/file process-root "blob-staging")]
++    (Files/createDirectories (.toPath directory)
++                             (make-array java.nio.file.attribute.FileAttribute 0))
++    (File/createTempFile "blob-" ".stage" directory)))
+ 
+ (defn- digest-string
+   [^MessageDigest digest]
+@@ -257,10 +247,7 @@
+      [:seon.blob/fact :map]
+      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+   [connection text inline-key size-key blob-key]
+-  (let [threshold (db/q (db/db connection)
+-                        '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]])
+-        _ (when (error/error? threshold)
+-            (throw (ex-info "Cannot read the blob threshold." threshold)))
++  (let [threshold (binary-threshold connection)
+         size (utf8-size text)]
+     (if (and threshold (> size threshold))
+       (let [write (stage! connection text)]
+@@ -275,12 +262,14 @@
+   Retains only the configured inline prefix. Content beyond that prefix is
+   written to one staging file under the process root."
+   {:malli/schema
+-   [:=>
+-    [:cat :seon.db/connection :seon.blob/input-stream]
+-    :seon.blob/staged-write]}
+-  [connection ^InputStream input]
++   [:function
++    [:=> [:cat :seon.db/connection :seon.blob/input-stream] :seon.blob/staged-write]
++    [:=> [:cat :seon.db/connection :seon.blob/input-stream :seon.config.eval.result/blob-threshold]
++     :seon.blob/staged-write]]}
++  ([connection input]
++   (stage-binary! connection input (binary-threshold connection)))
++  ([connection ^InputStream input threshold]
+   (let [store (konserve-store connection)
+-        threshold (binary-threshold connection)
+         prefix (byte-array threshold)
+         buffer (byte-array threshold)
+         digester (MessageDigest/getInstance "SHA-256")]
+@@ -331,7 +320,7 @@
+                     ;; The staging file is the observable artifact of an
+                     ;; interrupted oversized write. It remains under the
+                     ;; process root for inspection until explicit cleanup.
+-                    (throw error)))))))))))
++                    (throw error))))))))))))
+ 
+ (defn with-publication!
+   "Publish staged blobs and commit their direct roots under one permit."
+diff --git a/src/seon/config.clj b/src/seon/config.clj
+index bca127bc5..919f9b8e9 100644
+--- a/src/seon/config.clj
++++ b/src/seon/config.clj
+@@ -18,7 +18,6 @@
+             [clojure.java.io :as io]
+             [clojure.set :as set]
+             [seon.db :as db]
+-            [seon.error :as error]
+             [seon.reconcile :as reconcile]
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
+diff --git a/src/seon/effect.clj b/src/seon/effect.clj
+index a6ef27410..9ccb4ca10 100644
+--- a/src/seon/effect.clj
++++ b/src/seon/effect.clj
+@@ -547,7 +547,7 @@
+         staged
+         (when blob-backed?
+           (blob/stage-binary!
+-           connection (ByteArrayInputStream. ^bytes octets)))]
++           connection (ByteArrayInputStream. ^bytes octets) threshold))]
+     {:seon.effect/stored-result
+      (cond->
+       {:seon.effect/result-edn result-edn
+diff --git a/src/seon/shell/jvm.clj b/src/seon/shell/jvm.clj
+index 7d05dcbec..565edef51 100644
+--- a/src/seon/shell/jvm.clj
++++ b/src/seon/shell/jvm.clj
+@@ -131,12 +131,12 @@
+         (:seon.shell.jvm/value terminal)))))
+ 
+ (defn- capture-task
+-  [connection thread-name ^InputStream input]
++  [connection thread-name ^InputStream input threshold]
+   (virtual-task
+      thread-name
+    (fn []
+      (with-open [stream input]
+-       (blob/stage-binary! connection stream)))))
++       (blob/stage-binary! connection stream threshold)))))
+ 
+ (defn- write-array!
+   [^OutputStream output ^bytes octets limit]
+@@ -378,8 +378,8 @@
+         captured (volatile! [])
+         grace-ms (:seon.config.shell/termination-grace-ms effective)
+         tasks
+-        [[::stdout (capture-task connection "seon-shell-stdout-" (:out process-record))]
+-         [::stderr (capture-task connection "seon-shell-stderr-" (:err process-record))]
++        [[::stdout (capture-task connection "seon-shell-stdout-" (:out process-record) (:seon.config.eval.result/blob-threshold effective))]
++         [::stderr (capture-task connection "seon-shell-stderr-" (:err process-record) (:seon.config.eval.result/blob-threshold effective))]
+          [::stdin (stdin-task connection (:in process-record) (:my.shell/stdin request)
+                               (:seon.config.shell/stdin-max-bytes effective))]]]
+     (try
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index 42d7c5e70..b1b61c7d8 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -328,18 +328,28 @@
+          :expected '(pos? assertion-count)
+          :actual assertion-count}))))
+ 
++(defn declared-limit-ms
++  "The body bound `test-var` declares: its `:seon.test/long-ms` when it also names its `:seon.test/long` reason,
++  never below `ordinary`, the packaged `:seon.test/time-limit-ms` by default."
++  {:malli/schema [:function [:=> [:cat :seon.test/var] :seon.test/time-limit-ms]
++                  [:=> [:cat :seon.test/var :seon.test/time-limit-ms] :seon.test/time-limit-ms]]}
++  ([test-var]
++   (declared-limit-ms test-var (get-in (schema.edn/packaged-forms) [:seon.test/time-limit-ms 1 :default])))
++  ([test-var ordinary]
++   (let [metadata (meta test-var)
++         declaration (program/test-markers metadata (meta (:ns metadata)))
++         reason (:seon.test/long declaration)
++         allowance (:seon.test/long-ms declaration)]
++     (if (and (string? reason) (not (str/blank? reason))
++              (integer? allowance) (pos? allowance))
++       (max ordinary allowance) ordinary))))
++
+ (defn- duration-failures
+   "Turn an observed body overrun into ordinary, durably recorded assertion evidence."
+   {:malli/schema [:=> [:cat :seon.test.runner/report-options :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
+                   [:vector :seon.test/duration-failure]]}
+   [_options test-var elapsed ordinary]
+-  (let [metadata (meta test-var)
+-        declaration (program/test-markers metadata (meta (:ns metadata)))
+-        reason (:seon.test/long declaration)
+-        allowance (:seon.test/long-ms declaration)
+-        limit (if (and (string? reason) (not (str/blank? reason))
+-                       (integer? allowance) (pos? allowance))
+-                (max ordinary allowance) ordinary)]
++  (let [limit (declared-limit-ms test-var ordinary)]
+     (if (> elapsed limit)
+       [{:type :fail :var test-var
+         :message (str "Test " (var-symbol test-var) " exceeded its declared duration: "
+diff --git a/src/seon/web/jvm.clj b/src/seon/web/jvm.clj
+index bf0799bea..04be7c1b9 100644
+--- a/src/seon/web/jvm.clj
++++ b/src/seon/web/jvm.clj
+@@ -198,9 +198,9 @@
+              (mapv #(bit-and 0xff %) ^bytes octets)))))
+ 
+ (defn- capture-body!
+-  [connection ^InputStream input max-response url content-type force-blob?]
++  [connection ^InputStream input max-response url content-type force-blob? threshold]
+   (with-open [^InputStream bounded (bounded-input input max-response url)]
+-    (let [stored (blob/stage-binary! connection bounded)
++    (let [stored (blob/stage-binary! connection bounded threshold)
+           octets (:seon.blob/staged-octets stored)]
+       (if (and octets (not force-blob?))
+         {:seon.web.jvm/body (inline-body octets content-type)
+@@ -330,7 +330,7 @@
+                   (ensure-declared-length! response max-response final-url)
+                   (let [captured
+                         (capture-body! db/*conn* body max-response
+-                                       final-url content-type false)
++                                       final-url content-type false (:seon.config.eval.result/blob-threshold effective))
+                         octets (captured-octets db/*conn* captured)
+                         base
+                         (cond->
+@@ -419,7 +419,7 @@
+               (capture-body!
+                db/*conn* (.body ^HttpResponse response)
+                (:seon.config.web/max-response-bytes effective)
+-               final-url content-type true)
++               final-url content-type true (:seon.config.eval.result/blob-threshold effective))
+               body (:seon.web.jvm/body captured)
+               raw (captured-octets db/*conn* captured)]
+           (if-not (<= 200 status 299)
+diff --git a/test/seon/blob_test.clj b/test/seon/blob_test.clj
+index d49549e94..d750b8029 100644
+--- a/test/seon/blob_test.clj
++++ b/test/seon/blob_test.clj
+@@ -29,49 +29,17 @@
+ 
+ (defn- with-file-blob-store
+   [root f]
+-  (let [root-file (io/file root)]
+-    (when (.exists root-file)
+-      (support/delete-recursively! root-file))
+-    (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
+-      (try
+-        (support/transacted!
+-                (:seon.store/connection-object opened)
+-                ;; An identity-less entity must have an owner, so the dial is
+-                ;; written under an identity the store also installs.
+-                [{:db/ident :blob-test/id
+-                  :db/valueType :db.type/string
+-                  :db/cardinality :db.cardinality/one
+-                  :db/unique :db.unique/identity}
+-                 {:db/ident :seon.config.eval.result/blob-threshold
+-                  :db/valueType :db.type/long
+-                  :db/cardinality :db.cardinality/one}
+-                 {:db/ident :seon.config.blob/compress?
+-                  :db/valueType :db.type/boolean
+-                  :db/cardinality :db.cardinality/one}
+-                 {:db/ident :seon.config.blob/compress-min-bytes
+-                  :db/valueType :db.type/long
+-                  :db/cardinality :db.cardinality/one}
+-                 {:db/ident :seon.config.blob/compress-max-bytes
+-                  :db/valueType :db.type/long
+-                  :db/cardinality :db.cardinality/one}])
+-        (registry/branch! {:seon.store/store opened
+-                           :seon.cluster.registry/from :db
+-                           :seon.store/branch :blob-binary-test})
+-        (let [connection (store/open-branch! opened :blob-binary-test)]
+-          (try
+-            (support/transacted!
+-                    connection
+-                    [{:blob-test/id "dial"
+-                      :seon.config.eval.result/blob-threshold binary-threshold
+-                      :seon.config.blob/compress? true
+-                      :seon.config.blob/compress-min-bytes 1024
+-                      :seon.config.blob/compress-max-bytes (* 16 1024 1024)}])
+-            (f connection root)
+-            (finally
+-              (d/release connection))))
+-        (finally
+-          (store/release-store! opened)
+-          (support/delete-recursively! root-file))))))
++  (try
++    (support/with-published-file-database
++     root :blob-binary-test
++     (fn [connection]
++       (support/seed-cluster! connection "blob-binary-test"
++                              {:seon.config.eval.result/blob-threshold binary-threshold
++                               :seon.config.blob/compress? true
++                               :seon.config.blob/compress-min-bytes 1024
++                               :seon.config.blob/compress-max-bytes (* 16 1024 1024)})
++       (f connection root)))
++    (finally (support/delete-recursively! root))))
+ 
+ (defn- reconstruct
+   [connection digest chunk-size]
+diff --git a/test/seon/blob_threshold_test.clj b/test/seon/blob_threshold_test.clj
+index 321f2ee97..ab705b61c 100644
+--- a/test/seon/blob_threshold_test.clj
++++ b/test/seon/blob_threshold_test.clj
+@@ -1,7 +1,10 @@
+ (ns seon.blob-threshold-test
+   "Settlement preserves shown text independently of the blob threshold."
+-  (:require [clojure.test :refer [deftest is]]
++  (:require [clojure.java.io :as io]
++            [clojure.test :refer [deftest is]]
+             [seon.blob :as blob]
++            [seon.db :as db]
++            [seon.sci.eval :as sci.eval]
+             [seon.turn :as turn]
+             [seon.test-support :as support]))
+ 
+@@ -31,3 +34,26 @@
+          (is (= (if staged? 1 0) (count writes)) label)
+          (when staged?
+            (is (= (blob/digest text) (:t/blob fact)) label)))))))
++
++(deftest ^{:seon.test/long "Two cluster configurations share one file fixture; its measured acquisition budget is declared by the fixture cost proof."
++           :seon.test/long-ms 10000}
++  blob-threshold-belongs-to-the-connections-cluster
++  (let [root (io/file "tmp" "blob-cluster-threshold" (str (random-uuid)))]
++    (try
++      (support/with-published-file-database
++       root :blob-cluster-threshold
++       (fn [connection]
++         (doseq [[cluster-name threshold] [["small-blobs" 8] ["large-blobs" 16]]]
++           (support/seed-cluster! connection cluster-name
++                                  {:seon.config.eval.result/blob-threshold threshold}))
++         (doseq [[cluster-name threshold staged?] [["small-blobs" 8 true] ["large-blobs" 16 false]]]
++           (let [database (db/db connection)]
++             (db/carry-connection-projection-state!
++              connection (sci.eval/projection-state database (db/carried-projection database) cluster-name)))
++           (with-open [input (java.io.ByteArrayInputStream. (byte-array (range 12)))]
++             (let [write (blob/stage-binary! connection input)]
++               (is (= (min 12 threshold) (alength ^bytes (:seon.blob/inline-prefix write))))
++               (is (= staged? (contains? write :seon.blob/staged-path)))))
++           (let [{fact :seon.blob/fact} (blob/inline-or-stage connection "twelve-bytes" :t/text :t/size :t/blob)]
++             (is (= staged? (contains? fact :t/blob)))))))
++      (finally (support/delete-recursively! root)))))
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index 6219414e6..d71fe0323 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -44,7 +44,8 @@
+ (set! *warn-on-reflection* true)
+ 
+ (def event-backstop-seconds
+-  "The loud clock around test events whose publishers are observable."
++  "The loud clock around test events awaited outside any test body (a REPL fixture, a provider's handler thread);
++  inside a body, `await-event!` waits at most that test's own declared bound (`event-bound-ms`)."
+   20)
+ 
+ (defn effective-config
+@@ -128,43 +129,47 @@
+    (cluster/refresh-source! (str (io/file root "data" "clusters")))
+    (str root)))
+ 
++(declare execution-handle)
++
+ (defn with-published-file-database
+-  "Run `body` on a private file-store branch of a root the checkout is published into.
+-
+-  The connection CARRIES the branch's own program projection, exactly as the
+-  canonical in-memory base and a live cluster's boot do. A branch connection
+-  opened straight off a store carries none, so every `db/db` on it fell back
+-  to the thread's projection -- in a worker, the PACKAGED projection, which
+-  declares schema forms and no function contracts at all. Every seam that asks
+-  the carried projection about a FUNCTION then answered from an empty map:
+-  `seon.effect/accepts-request?` refused every capability request alike with
+-  :seon.effect/invalid-request (measured on batch 85's published base: 0
+-  function contracts carried, 1118 derived)."
++  "Run `body` on the executing program with a private file frontend.
++  Datahike shares inherited indexes; Konserve writes only under `root`."
++  {:malli/schema [:=> [:cat :seon.schema/value :seon.store/branch [:fn clojure.core/ifn?]]
++                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
++                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
+   [root branch body]
+-  (let [root (str root)]
+-    (populate-published-root! root)
+-    (let [store-dir
+-          (:seon.boot/store-dir
+-           (cluster/resolve-bootstrap {:seon.boot/root root}))
+-          opened (store/open-store! {:seon.store/dir store-dir})]
++  (let [parent (execution-handle db/*conn*)
++        opened (:seon.store/store parent)
++        private-branch (keyword (name branch) (str (random-uuid)))
++        parent-config (:config @(:seon.db/connection parent))
++        backend (:store parent-config)
++        configuration (assoc parent-config :branch private-branch
++                             :store {:backend :tiered :id (:id backend)
++                                     :frontend-config {:backend :file :id (:id backend)
++                                                       :path (str (io/file root "store"))}
++                                     :backend-config backend
++                                     :write-policy :frontend-only
++                                     :read-policy :frontend-first})]
++    (registry/branch! {:seon.store/store opened
++                      :seon.cluster.registry/from (:seon.source/commit-id parent)
++                      :seon.store/branch private-branch})
+     (try
+-      (registry/branch! {:seon.store/store opened
+-                         :seon.cluster.registry/from source/current-branch
+-                         :seon.store/branch branch})
+-      (let [connection (store/open-branch! opened branch)]
++      (let [connection (db/call-with-root-bindings #(d/connect configuration))]
+         (try
+           (let [database @connection
+-                projection (schema/projection-from-database database)
++                projection (:seon.schema/projection parent)
+                 ;; the private branch is this fixture's cluster: a published
+                 ;; program root holds no cluster row, so the world must name it
+                 ;; (seon.sci.eval/carried-cluster-name refuses to guess one)
+                 state (sci.eval/projection-state database projection (name branch))]
+             (db/carry-connection-projection-state! connection state)
+-            (schema/call-with-projection-state state #(body connection)))
++            (db/with-branch
++             {:seon.db/connection connection}
++             #(schema/call-with-projection-state state (fn [] (body connection)))))
+           (finally
+-            (d/release connection))))
++            (store/release-branch! connection))))
+       (finally
+-        (store/release-store! opened))))))
++        (registry/retire-branch! {:seon.store/store opened :seon.store/branch private-branch})))))
+ 
+ (def committed
+   "Returned when a boundary expected to refuse instead commits."
+@@ -555,14 +560,23 @@
+                 (or (db/carried-projection database)
+                     (schema/projection-from-database database)))))))))
+ 
++(defn event-bound-ms
++  "How long a test event may be awaited on this thread: the declared body bound of the test whose body runs here
++  (`seon.test.runner/declared-limit-ms`), since an event missing past it already fails that test; outside a body,
++  `event-backstop-seconds`."
++  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
++  []
++  (if-let [test-var (first test/*testing-vars*)]
++    ((requiring-resolve 'seon.test.runner/declared-limit-ms) test-var)
++    (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
++
+ (defn await-event!
+-  "Await one channel, latch, future, or watched reference with a loud backstop.
+-  The fourth argument supplies the observation bound in milliseconds."
++  "Await one channel, latch, future, or watched reference with a loud backstop: `event-bound-ms`, or the fourth
++  argument's observation bound in milliseconds."
+   ([event-source event]
+    (await-event! event-source event (constantly true)))
+   ([event-source event accept?]
+-   (await-event! event-source event accept?
+-                 (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
++   (await-event! event-source event accept? (event-bound-ms)))
+   ([event-source event accept? timeout-ms]
+    (cond
+      (instance? clojure.lang.IRef event-source)
+diff --git a/test/seon/test_support_test.clj b/test/seon/test_support_test.clj
+index 217dfbfa5..e09e10f57 100644
+--- a/test/seon/test_support_test.clj
++++ b/test/seon/test_support_test.clj
+@@ -24,7 +24,9 @@
+             [seon.test.runner :as runner]
+             [seon.turn.world :as world]))
+ 
+-(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}}
++(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}
++           :seon.test/long "The tiered file frontend synchronizes inherited keys; allow twice the measured maximum acquisition, with evidence in fixture-hour.md."
++           :seon.test/long-ms 10000}
+   a-file-backed-fixture-costs-a-branch
+   (let [root (io/file "tmp" "round-waste-fixture" (str (random-uuid)))]
+     (try
+@@ -35,10 +37,31 @@
+                            (some? (db/pull (db/db connection) [:seon.fn/sym]
+                                           [:seon.fn/sym 'seon.id/id])))))]
+         (is (true? (:seon.profile/value measured)))
+-        (is (< (:seon.profile/ms measured) 1000))
++        (is (< (:seon.profile/ms measured) 10000))
+         (is (< (:seon.profile/alloc-bytes measured) 128000000)))
+       (finally (test-support/delete-recursively! root)))))
+ 
++(deftest ^{:seon.test/long "Acquires a private file frontend under the fixture cost proof's measured budget."
++           :seon.test/long-ms 10000}
++  a-file-fixture-inherits-program-and-isolates-writes
++  (let [parent (:seon.db/connection (test-support/execution-handle db/*conn*))
++        selector [:seon.fn/sym :seon.program/definition-digest]
++        declaration (db/pull (db/db parent) selector [:seon.fn/sym 'seon.id/id])
++        cluster-name (str "fixture-private-" (random-uuid))
++        root (io/file "tmp" "file-fixture-isolation" (str (random-uuid)))]
++    (try
++      (test-support/with-published-file-database
++       root :file-fixture-isolation
++       (fn [connection]
++         (is (= declaration (db/pull (db/db connection) selector [:seon.fn/sym 'seon.id/id])))
++         (test-support/seed-cluster! connection cluster-name)
++         (is (= cluster-name (:seon.cluster/name
++                             (db/pull (db/db connection) [:seon.cluster/name]
++                                      [:seon.cluster/name cluster-name]))))
++         (is (.isDirectory (io/file root "store")))))
++      (is (nil? (db/pull (db/db parent) [:seon.cluster/name] [:seon.cluster/name cluster-name])))
++      (finally (test-support/delete-recursively! root)))))
++
+ (deftest environment-retains-the-database-projection
+   (test-support/with-database
+    (fn [connection]
