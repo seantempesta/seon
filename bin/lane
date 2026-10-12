@@ -5,6 +5,8 @@
 #   bin/lane add     LANE PATH...        claim more
 #   bin/lane commit  LANE -m MSG [--test NS]... [--include-long] PATH...
 #                                        lint and check the candidate, then commit exactly PATH...
+#   bin/lane commit  LANE -m MSG --at-candidate --test NS... PATH...
+#                                        check the exact candidate archive in its own JVM (dependency changes).
 #   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--accept-red-before TEST]... PATH...
 #                                        lint, and prove PATH... by AGENT's branch evidence on the
 #                                        live root instead of a throwaway JVM (falls back to the check)
@@ -450,7 +452,7 @@ commit() {
   local lane="$1"; shift
   valid_lane "$lane"
   [[ -e "$claims/$lane.paths" ]] || refuse "lane $lane has no claims; run bin/lane claim first"
-  local message="" tests=() paths=() path evidence_agent="" accepted=()
+  local message="" tests=() paths=() path evidence_agent="" accepted=() at_candidate=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -m) message="$2"; shift 2 ;;
@@ -458,6 +460,7 @@ commit() {
       --accept-red-before) [[ $# -ge 2 ]] || refuse "--accept-red-before needs a test symbol"; accepted+=("$2"); shift 2 ;;
       --test) [[ $# -ge 2 ]] || refuse "--test needs a test name"; tests+=("--test" "$2"); shift 2 ;;
       --include-long) tests+=("--include-long"); shift ;;
+      --at-candidate) at_candidate=1; shift ;;
       *) paths+=("${1#./}"); shift ;;
     esac
   done
@@ -520,8 +523,14 @@ commit() {
     echo "== documentation only: no program input; bin/seon check not run"
   else
     [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); nothing committed"
-    echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
-    bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
+    local check_args=("${paths[@]}")
+    if [[ -n "$at_candidate" ]]; then
+      local revision
+      revision="$(git commit-tree "$tree" -p HEAD -m "$message")"
+      check_args=(--at "$revision")
+    fi
+    echo "== bin/seon check ${check_args[*]} ${tests[*]+"${tests[*]}"}"
+    bin/seon check "${check_args[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
   fi
   [[ -n "$lint_pid" ]] && { wait "$lint_pid" || true; }
   lint_pid=""
