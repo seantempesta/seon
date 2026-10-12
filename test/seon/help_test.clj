@@ -271,3 +271,18 @@
        (is (some? line) "a help line explains :seon.context/chain")
        (is (every? #(str/includes? (str line) %) [":seon.context/before" ":seon.context/after" ":seon.context/merged" "already on your branch"])
            "it names the steps before with what each merged, the steps after, and that the merged work is on the branch")))))
+
+(deftest help-teaches-sending-back-a-wrong-proof-and-writing-a-law
+  (with-help-agent
+   (fn [connection]
+     (support/assign-task! connection "help")
+     (let [implement (str/join "\n" (done-lines @connection "help"))]
+       (is (and (str/includes? implement "(my.task/send-back!") (str/includes? implement "do not bend the code")
+                (str/includes? implement "special-cases one row"))
+           "Implement's Done sends a row it believes wrong back instead of bending the code to it"))))
+  (with-prove-agent
+   (fn [connection]
+     (let [prove (str/join "\n" (done-lines @connection "help"))]
+       (is (and (str/includes? prove "(clojure.test.check/quick-check") (str/includes? prove ":seed 42")
+                (str/includes? prove "a law catches a wrong row"))
+           "Prove's Done teaches a law as a seeded property beside the table rows")))))

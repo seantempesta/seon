@@ -18,14 +18,16 @@
   "The Done group of an :implement step."
   {:seon.help/title "Done"
    :seon.help/lines
-   ["Every deftest in :seon.context/proofs is green on your branch and no test you reach is broken. They start red: read :seon.context/proof-failures, change the function that produces the wrong value, and read the next block. A test already green proves nothing."]})
+   ["Every deftest in :seon.context/proofs is green on your branch and no test you reach is broken. They start red: read :seon.context/proof-failures, change the function that produces the wrong value, and read the next block. A test already green proves nothing."
+    "A proof that contradicts the intent or itself, a row you believe is wrong, is not yours to satisfy: do not bend the code to it and do not weaken it. Send the task back with the row and why: (my.task/send-back! {:my.task/reason \"Row [\\\"/a\\\" \\\"/a/b\\\" false] contradicts the intent: /a/b is under /a.\"}). Code that special-cases one row to pass is wrong."]})
 
 (def ^:private prove-done
   "The Done group of a :prove step."
   {:seon.help/title "Done"
    :seon.help/lines
    ["Your product is red deftests for the step after you, tagged with ITS name from :seon.context/after, never your own: (deftest ^{:seon/tasks #{'the.ns/next-step}} names-the-case (is (= 3 (the.ns/f 2)))). Prefer a new row in the table test your instructions name; define a new deftest only for a behavior no test covers."
-    "A function the test calls that does not exist yet is a defn in the owner's namespace with its contract and the body (throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented})). A failing assertion or that error is a designed red and merges; an unresolved symbol or a setup error is not. Your reds show under :seon.context/product-tests. Done is those reds designed, your own proofs green, nothing broken."]})
+    "A function the test calls that does not exist yet is a defn in the owner's namespace with its contract and the body (throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented})). A failing assertion or that error is a designed red and merges; an unresolved symbol or a setup error is not. Your reds show under :seon.context/product-tests. Done is those reds designed, your own proofs green, nothing broken."
+    "Where a general law holds (a round trip, an inverse, every path extended by a component is under it), write it as a property with a bounded generator and a fixed :seed beside a few table rows; a law catches a wrong row: (deftest ^{:seon/tasks #{'the.ns/next-step}} reverse-twice-is-identity (is (:pass? (clojure.test.check/quick-check 100 (clojure.test.check.properties/for-all [s (clojure.test.check.generators/vector clojure.test.check.generators/small-integer 0 5)] (= s (reverse (reverse s)))) :seed 42))))."]})
 
 (defn- held-step
   "The step of the task `agent-id` holds on `database`; :implement when it holds none."
