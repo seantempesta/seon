@@ -186,7 +186,7 @@
             database namespace-name)
     []
     (let [source (pr-str (list 'ns namespace-name
-                               '(:require [my.message] [my.turn] [seon.db]
+                               '(:require [my.message] [my.turn] [seon.db :as db] [seon.program :as program]
                                           [seon.bootstrap :refer [help dir doc]]
                                           [clojure.test :refer [deftest is]])))
           events (reader/read

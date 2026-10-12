@@ -157,3 +157,16 @@
            "a non-root JVM-mode request is refused, naming root")
        (is (= before [(host-state 'seon.sci.forgive watched) (host-state 'seon.sci.reader-test watched)])
            "no namespace or Var of the host JVM was loaded, reloaded or replaced")))))
+
+(deftest
+  a-fresh-agent-namespace-resolves-the-db-and-program-aliases-its-context-shows
+  ;; the docstrings and test bodies an agent reads write `db/` and `program/`;
+  ;; its starting namespace must resolve them
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (is (= [[] [true]]
+            [(vec (keep :seon.repl/error (step "(fn? db/q)" agent-id running)))
+             (vec (keep :seon.repl/value (step "(fn? db/q)" agent-id running)))])
+         "an alias form in a fresh agent namespace evaluates to its value, without an error")
+     (is (empty? (keep :seon.repl/error (step "(some? program/declaration-row)" agent-id running)))
+         "the program alias resolves too"))))
