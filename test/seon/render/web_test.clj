@@ -2259,8 +2259,7 @@ handle))}}
       (fn [_connection server _context]
         (is (nil? (:seon.render.web/wanted-port server)))))))
 
-(deftest ^{:seon/tasks #{'seon.render.web/the-web-worker-executor-is-never-shut-down}}
-  a-stopped-server-has-shut-down-its-worker-executor
+(deftest a-stopped-server-has-shut-down-its-worker-executor
   (with-server
     (fn [connection _first-server _graph]
       (let [service (service-request connection {})

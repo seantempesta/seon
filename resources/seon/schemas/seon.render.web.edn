@@ -34,6 +34,7 @@
                                [:cat :seon.schema/value] :seon.schema/value],
                   :run-server [:=> {:description "Bind an http-kit server for a handler and its options; answers the server or throws the bind failure."}
                                [:cat [:fn clojure.core/ifn?] :map] :seon.schema/value],
+                  :executor :seon.flow/executor,
                   :http-server
                   [:fn
                    {:error/message "must be an http-kit server"
@@ -103,6 +104,7 @@
                     :seon.render.web/http-server]
                    [:seon.render.web/port :seon.render.web/port]
                    [:seon.render.web/url :seon.render.web/url]
+                   [:seon.render.web/executor :seon.render.web/executor]
                    [:seon.render.web/wanted-port
                     {:optional true}
                     :seon.render.web/wanted-port]],

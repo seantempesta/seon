@@ -3570,7 +3570,10 @@
         bound (http/server-port server)]
     (cond-> {:seon.render.web/server server
              :seon.render.web/port bound
-             :seon.render.web/url (str "http://127.0.0.1:" bound)}
+             :seon.render.web/url (str "http://127.0.0.1:" bound)
+             ;; http-kit does not own the pool it is given, so the descriptor
+             ;; keeps it for stop! to shut down
+             :seon.render.web/executor workers}
       ;; present exactly when the wanted port was not the bound one, so
       ;; "did this fall back?" is key presence rather than a comparison
       ;; every reader has to remember to make
@@ -3605,6 +3608,10 @@
   two exit facts, each awaited under the delivery bound. Nil once both
   arrived, else the first timeout, naming the pages still held.
 
+  The worker executor http-kit was given is the server's to own: it is shut
+  down on every path, and its termination is the third exit fact, awaited
+  under the same bound.
+
   ## Costs
 
   - Scratch probe on default 2026-09-28 (real http-kit + Datastar SSE, three
@@ -3613,7 +3620,8 @@
     the bound (300 ms bound: 305 ms), naming its page."
   {:malli/schema [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]]}
   [{server :seon.render.web/server registration :seon.render.web/registration
-    backstop-ms :seon.config.eval/time-limit-ms}]
+    backstop-ms :seon.config.eval/time-limit-ms
+    ^java.util.concurrent.ExecutorService executor :seon.render.web/executor}]
   (let [stopped (http/server-stop! server)
         feeds-exited (async/promise-chan)
         exited! (fn [_ _ _ open] (when (empty? open) (async/offer! feeds-exited true)))]
@@ -3623,5 +3631,12 @@
       ;; http-kit answers nil when the server was already stopping
       (or (when stopped (await-exit! {:seon.await/blocking-deref stopped} backstop-ms ::server-thread))
           (some-> (await-exit! {:seon.await/port-operations [feeds-exited]} backstop-ms ::feed-writers)
-                  (assoc-in [:seon.error/data ::open-pages] (vec (keys @registration)))))
-      (finally (remove-watch registration ::stop!)))))
+                  (assoc-in [:seon.error/data ::open-pages] (vec (keys @registration))))
+          ;; close shuts down and returns only once every task ended, so the
+          ;; promise is delivered on termination and never on a timeout
+          (let [terminated (promise)]
+            (Thread/startVirtualThread #(do (.close executor) (deliver terminated true)))
+            (await-exit! {:seon.await/blocking-deref terminated} backstop-ms ::worker-executor)))
+      (finally
+        (remove-watch registration ::stop!)
+        (.shutdown executor)))))
