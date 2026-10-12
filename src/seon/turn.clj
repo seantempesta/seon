@@ -5304,12 +5304,18 @@
 (defn- first-proof-run-t
   "The transaction of the first run of the proofs of the task `agent-id` holds recorded on `database`, the agent's
   branch, after its attempt's row: the attempt's own proving, never a run its value inherited from a predecessor;
-  nil when none ran, the proofs' read refusal when they cannot be read."
+  for a task naming no proof, the transaction of the attempt's row itself (nothing is left to prove, so the
+  attempt has proved first); nil when none ran, the proofs' read refusal when they cannot be read."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.error/value]]}
   [database agent-id]
   (let [proofs (task-proofs database agent-id)]
-    (if (or (:seon.error/at proofs) (empty? proofs))
-      (when (:seon.error/at proofs) proofs)
+    (cond
+      (:seon.error/at proofs) proofs
+      (empty? proofs)
+      (db/q '[:find (max ?attempt) . :in $ ?id
+              :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?attempt]]
+            database agent-id)
+      :else
       (db/q '[:find (min ?t) . :in $ ?id [?proof ...]
               :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?attempt]
               (not-join [?g ?attempt] [?b :seon.task/agent ?g] [?b :seon.task/assigned _ ?later] [(> ?later ?attempt)])
@@ -5318,10 +5324,11 @@
 
 (defn proof-run-recorded?
   "True when a run of the task `agent-id` holds has its proofs recorded on `database`, the agent's branch, after
-  its attempt's row (red or green), or when the task names no proof: the attempt has proved first."
+  its attempt's row (red or green), or when the task names no proof and holds its attempt: the attempt has proved
+  first."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (or (empty? (task-proofs database agent-id)) (some? (first-proof-run-t database agent-id))))
+  (some? (first-proof-run-t database agent-id)))
 
 (defn- prove-turn
   "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no

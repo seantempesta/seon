@@ -870,8 +870,7 @@
                  "the Prove predecessor records no merge request")
              (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-prove-step-admitted-by-its-successor-opens-a-model-turn}}
-  a-prove-step-admitted-by-its-successor-opens-a-model-turn
+(deftest a-prove-step-admitted-by-its-successor-opens-a-model-turn
   ;; q is a :prove step with no proof of its own: admission starts it because i needs it (`plan-facts`), so its
   ;; fresh attempt is work. Its one model reply writes i's red proof, its product, and it ends :done.
   (binding [*space* "tq.chainbare"]

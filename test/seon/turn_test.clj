@@ -2031,6 +2031,22 @@
                        [:seon.task/assignment (id/id [h 1])]))
            "the end names the task the work went back to, as a ref on the attempt")))))
 
+(deftest a-fresh-attempt-of-a-task-naming-no-proof-is-work
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.noproof.edn"
+                                           "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"}]"}})
+     (let [agent-id "tq-noproof-agent"]
+       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+       (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'tq.noproof "a" :work)] :seon.task/execution :running]])
+       (support/transacted! connection (task/attempt-tx (db/db connection) (task/task-handle 'tq.noproof "a" :work) agent-id :tq-noproof))
+       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
+           "a task naming no proof has proved first once its attempt is written")
+       (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
+              (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))
+           "the attempt itself is the work whose product the model turn writes")))))
+
 (deftest ^{:seon/tasks #{'seon.test.runner/a-forked-value-reads-the-results-it-inherited}}
   a-predecessors-proof-run-does-not-count-as-the-attempts
   (support/with-database
