@@ -129,7 +129,8 @@ problem task unless the entity schema declares a rule.
    `seon.turn` while lane program-context holds them), each at its owner with a before and after number from the same
    probe.
 4. **Library words in src** (ledger §3.18 CN entries): done CN-27 frontier → ready (2ef43687f), CN-15 custody →
-   `with-branch` (de56c2570); in the tree CN-18 roster; CN-18 roster, CN-5 world → bindings, CN-6 receipt, CN-9 shown → printed value,
+   `with-branch` (de56c2570); in the tree CN-18 roster; open CN-9 shown → printed value, CN-5 world → bindings (waits on S5-05, S5-06,
+   EN-4, CN-20), CN-6 receipt (waits on EN-1, RP-14, RP-15a),
    one commit each with every caller; code a plan deletes is not renamed
    (`docs/research/agent-platform/2026-10-12/restart-audit/vocab-src-inventory.md`). Living prose is done (fede4d3d4,
    5c339d69a, 976e3888a, 02cf34720, 39cdc0f7f, 27fb60c0d and the specs commits).
