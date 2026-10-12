@@ -107,3 +107,80 @@ Result: Q1 40 claims: 36 hold, 3 false (assign! `:no-proofs`; `prove-turn` recor
 | M-final | `seon.cluster.agent/the-real-chain-runs-with-no-nudges` | task exists (agent.edn 80); deftest absent | yes | yes | sound |
 
 The probe branch of agent `narrow-check` was retired (`my.agent/retire-branch!`, retiring now, unlinks when its run exits). Nothing was written to main; no source was loaded.
+
+## Second check (f46d4e524), 2026-10-12
+
+The revised hybrid (M1..M18 + M-final, owner answers in §4) was read in full; every symbol and file it names was looked up, and behavior was re-run on default (agent `narrow-check`, retired; jvm mode read-only). Counts: Q1 18 claims, 14 hold, 3 false, 1 not reproducible. Q2 19 phases, 16 clean, 3 fail (M6, M8, M10). Q3 19 phases, 17 sound, 2 with a defect (M1, M18). Five of the nine first-check failures are closed; the other four (2, 3, 8 and the deletion callers of 5) are closed except for the items below.
+
+### Remaining failures
+
+1. **M1: the test step cannot open zero model turns.** The second M1 deftest asserts `step-verdict` `:working` and "the loop opened zero model turns" for a branch whose proofs are all green at the base. `seon.turn/proved-unanswered?` (turn.clj 5350s) and `next-agent-work` (2360, 2441) open a model turn for any held `:running` task whose `seon.context/task-done?` is false, and with M1's rule that task is `:working`. M1 names no change to either, so the assertion contradicts the design until M8's `satisfied` close (the first draft's "stops calling the model" has the same gap).
+2. **M1: the base result is only the newest result.** §1 says `fork-point-red` reads the head's own result at the base program's reach digest from `seon.test.runner/latest-results`. `latest-results` answers one execution per test, the newest, so the base-program result survives only until the proof reruns on changed code (reproduced by reading the function: one `reduce` keeping the last run per symbol); after that the lookup falls back to opening the fork commit, which the cost bound ("≤ 2 ms per proof, one indexed read") does not describe.
+3. **M6: the rename leaves unconverted references.** `seon.cluster.squash` is named in seven task files (`seon.fault`, `seon.program`, `seon.cluster.agent`, `seon.cluster.source`, `seon.flow`, `seon.turn.world`, `seon.cluster.squash`) and in `docs/seon/architecture/vocabulary.md`; the `:seon/tasks` tags in `squash_test` are `seon.cluster.squash/…`. None is in M6's files, so the filed tasks U1/U3/U7 and the old squash task lose their identities (task ids derive from the namespace). `land!`/`land-held!` are "folded" in M6 but `seon.turn`'s `source-land!` delay (turn.clj 74) still resolves `seon.cluster.source/land!` until M8 (nil at call, not a load failure).
+4. **M8 names the wrong schema file.** `:seon.config.root/land?` is defined in `resources/seon/schemas/seon.config.root.edn`; M8 lists `seon.config.edn` (no `config.root` entry) and `config/default.edn` (which holds the key). The dial's schema stays after its readers are deleted.
+5. **M10 omits `resources/seon/schemas/seon.task.edn`.** `:seon.task.attempt/fork` is defined in `seon.task.attempt.edn` (listed) but the `:seon.task/assignment-row` map in `seon.task.edn` names it too (line 148 area), so deleting the attribute leaves a dangling schema reference.
+6. **M18's red proof does not test M18.** `seon.vocabulary/report` takes only `roots` (no entry selection); a test must filter `:totals` by CN id. The entries for attempt, copy and `:root` do not exist until M18 adds them, so for those the filtered test is green before the phase; only land (CN-26) and settle (CN-7) can be red today (CN-26: 11 remaining occurrences).
+
+### Q1. Live claims
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| `assign!`/`assignment-read` refuses `:no-proofs`, no all-green refusal (corrected) | holds | task.clj 569-586 |
+| `prove-turn` only runs proofs; `record-broken!` asks `fork-point-red` for head reds only; `step-observation` builds `[s (not (broken s))]` | holds | turn.clj 5308, 5470-5495; context.clj 204-222 |
+| The runner records `:seon.error/type` since be32e7501 and `proof-failures` carries it | holds | `git cat-file -t be32e7501` commit; runner.clj 188-208; context.clj `failure-keys` |
+| `seon.context/designed-red?` "exists" | holds, private | `defn-` at context.clj 118; M7 makes it public (listed) |
+| `fork-point-red` can read the head's own base-program result via `latest-results` keyed by reach digest | **false as stated** | `latest-results` keeps the newest run per test (runner.clj 2195-2240) |
+| M1 test step yields zero model turns for proofs green at the base | **false** | `proved-unanswered?` / `next-agent-work` (failure 1) |
+| `my.program/diff`, `declaration-diff`, `history`, `seon.program/exact-replacement-tx`, `changed-identities`, `seon.context/current-state` exist; `restore!`, `:seon.agent/green-before`, `:seon.context/changes`, `src/seon/merge.clj`, `seon.merge.edn` do not | holds | program.clj 340, 878, 928; program.cljc 853, 1629; context.clj 424; 0 hits for the rest |
+| `changed-identities` ≈ 0.8 ms warm; M14 bound ≤ 5 ms per eval request | holds | 0.057 ms for a two-change diff (200-call loop on default) |
+| `:seon.error.occurrence/count` readers `seon.fault`, `seon.error`, `seon.problems`, `seon.render.transcript` stay untouched with `:add` kept; hybrid-push recorded base 1, source 2, main 2 → 3 | holds | rg; hybrid-push.md line 38 |
+| All 18 filed tasks in §5 exist by ns/name | holds | each found in resources/seon/tasks (U1, U7, U0, U3, P7, U2, four `seon.turn`, change-reds, P8, P9, P10, U5, U4, frontier, P-final) |
+| `:seon.config.root/land?` lives in `seon.config.edn` | **false** | `seon.config.root.edn` line 1; failure 4 |
+| `seon.vocabulary` report can be restricted to six entries | **false** | `report` signature `[roots]`; failure 6 |
+| `seon.cluster.squash` requirers are `agent`, `task`, the script and three tests | **false (incomplete)** | seven task files and vocabulary.md also name it; failure 3 |
+| `seon.turn/fork-commit` reads `:seon.task.attempt/fork` and `registry/base-commit-id`; `merge-base` and `fork!` read `base-commit-id` | holds | turn.clj 5467-5468; source.clj 761; registry.clj 403-407, 517, 562 |
+| `fork-commit`'s fallback is gone once every agent has an assignment after M13 | not reproducible | design claim; outside agents such as `narrow-check` hold no assignment today |
+| `seon.task/create!` docstring is the `copy!` reference in task.clj (M3 calls it `delete-branch!`'s) | holds with a mislabel | task.clj 538 is `create!`; the file is listed |
+| P1, P3, P4 as before | holds | reproduced in the first check |
+| `:add` exact at an advanced base | holds | P4 plus hybrid-push line 38 |
+| Source unchanged since the first check | holds | `git diff d7a9cc5b1 HEAD -- src` empty |
+
+### Q2. Deletions with their last caller (revised order)
+
+| Phase | Deleted | Remaining callers at that point | Verdict |
+|---|---|---|---|
+| M1, M2, M9, M11, M14, M15, M16, M-final | nothing | none | clean |
+| M3 | `copy!`, `squash-merge!`, `selected-coordinates` | `agent.clj` 2165, `registry_test` 820, `db_flow_test` 551-554 and docstrings 538, 2149 all in M3's files; the `:seon.squash/attempt` writer between M3 and M5 is unstated (`unlanded-ends` would re-select ended attempts each pass; idempotent, HEAD boots) | clean |
+| M4 | `conflict-task!` | `db_flow_test` 680, `squash_test` 101 listed | clean |
+| M5 | `land-ends!`, marker and `seon.squash.edn` entries, `unlanded-ends`, `branch-end`, `settle-kept-branches!`, `record-error-end!`, `ended-problem!`, `detached!`, `open-merge-request?`, `successor-waits?`, the catches | `successor-waits?` callers are `land-ends!` and `settle-kept-branches!`, both gone (no unused var); `plan-facts` `:done` reader stated alive until M8; `turn/land-ended!` loses its only caller here and dies in M8 | clean |
+| M6 | none (rename, fold) | seven task files, vocabulary.md, `:seon/tasks` tags (failure 3) | **fails** |
+| M7 | `change-reds`, `declarations-held-tx`, `:parents` | `source.clj` 1047 and `test_test` 362-386 listed; task `change-reds-judges-…` retired in §5 | clean |
+| M8 | both `request-merge!`, `red-first`, `end-merge-request`, `land-end!`, `land-ended!`, `landing-tx`, `root-execution`, request row and view, `:merge` kind, `land?`, `:done` | `source.clj` readers moved in M6; `seon.context`/`message` moved in M6; `leaf-done`, `plan-facts` and `done?` converted here; AGENTS.md and repl SKILL.md listed; `seon.config.root.edn` unlisted (failure 4) | **fails** |
+| M10 | `:seon.task.attempt/fork`, `attempt-rows-tx`, `seed-attempt!`, predecessor clause | `fork-commit` (turn.clj patch), `task.clj` 629/682, agent.clj listed; `seon.task.edn` `assignment-row` unlisted (failure 5) | **fails** |
+| M12 | `follow!`'s main write | agent.clj listed | clean |
+| M13 | `agents-to-start`, `host/start!` graph start | `lazy_agents_test` 24-34 listed | clean |
+| M17 | `:base/` ref, `advance-base!`, `base-commit-id` readers | registry.clj 353-370, 403, 517, 562; `source.clj` 761, `fork-commit` fallback, `squash_test` 263/331/350-365 all listed | clean |
+| M18 | retired words | scripted sweep; `:root` default in `program.cljc` 98 and the `:conflict` enum in `seon.cluster.edn` fall in the sweep | clean |
+
+### Q3. Red proofs
+
+| Phase | Proof | Verdict |
+|---|---|---|
+| M1 | `seon.context-test/a-proof-green-before-the-work-is-not-done` red today (P1: all three shapes `:done`); `seon.turn-test/the-test-step-records-the-proofs-green-at-the-base` red by absence but asserts zero model turns | **defect** (failure 1) |
+| M2 | `seon.cluster.squash-test/disjoint-set-additions-merge-as-their-union` red (P3) | sound |
+| M3 | four deftests; the U1 and U7 tasks exist, the first deftest carries U1 | sound (the "unmerged" dependency on M4 is gone) |
+| M4 | `a-conflict-keeps-its-three-values-on-the-merge-branch` | sound |
+| M5 | `a-merged-assignment-whose-graph-survived-a-crash-is-stopped-and-deleted`; P7 exists with no deftest | sound |
+| M6 | `my.root-test/a-merge-is-keyed-by-the-assignment` (`test/my/root_test.clj` exists) | sound |
+| M7 | `a-merge-whose-reached-definition-moved-writes-nothing`; `a-prove-steps-designed-reds-pass-the-gate` (typed vs untyped red matches the runner, which sets the type only from `ex-data`) | sound |
+| M8 | `a-done-branch-merges-with-no-merge-request-written-by-the-agent`, `a-satisfied-task-closes-with-no-model-call` | sound |
+| M10 | `a-join-forks-main-after-both-needs-merge`, `a-prove-steps-red-product-merges-into-main` | sound |
+| M11 | `a-sibling-merge-that-breaks-a-proof-undoes-done` | sound |
+| M12 | `a-cancelled-assignment-closes-without-a-task-for-root`; P8 and P9 tasks exist | sound |
+| M13 | the deftest tagged `seon.turn/a-held-task-opens-no-model-turn` (task exists, named by ns/name now) | sound |
+| M14 | `seon.context-test/the-current-state-shows-the-branch-diff-since-its-merge-base` | sound |
+| M15 | `my.program-test/restore-returns-an-entity-to-its-merge-base-value` | sound |
+| M16 | U5 `seon.cluster.message/root-offers-a-sent-message-once-and-merges-its-record` exists | sound |
+| M17 | U4 `seon.cluster.registry/a-merged-base-older-than-the-window-survives-collection`, deftest takes the task's name | sound |
+| M18 | `seon.vocabulary-test/the-merge-path-names-no-retired-word` | **defect** (failure 6) |
+| M-final | `seon.cluster.agent/the-real-chain-runs-with-no-nudges` | sound |
