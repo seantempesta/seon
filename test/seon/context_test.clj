@@ -296,3 +296,35 @@
        (is (= (select-keys from-branch outcome) (select-keys (context/ended (db/db connection) entry) outcome))
            "the recorded outcome is what the branch showed")
        (is (= {:green 1} (:seon.task/proof-counts from-branch)) "the task's one proof is green")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main
+                         'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
+  each-step-kind-is-done-by-its-one-rule
+  ;; head: each test's status at the step's branch head; fork point: the tests it held, true when red there
+  (let [green {:seon.context/proof-status :green}
+        red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
+        errored {:seon.context/proof-status :red :seon.context/proof-failures [{:type :error}]}
+        pending {:seon.context/proof-status :pending}
+        judged (fn [step proofs product head fork-point]
+                 (context/step-status {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
+                                       :seon.context/head head :seon.context/fork-point fork-point}))]
+    (doseq [[step proofs product head fork-point status broken new-red why]
+            [[:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p true} :done #{} #{} "its proof green, nothing broken"]
+             [:implement #{} #{} {} {} :working #{} #{} "no proof proves nothing"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} :working #{} #{} "its proof red"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p pending} {'tq.rule/p true} :working #{} #{} "its proof unrun at its reach"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/r red} {'tq.rule/p true 'tq.rule/r false} :working #{'tq.rule/r} #{} "a test green at the fork point is red"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/r red} {'tq.rule/p true 'tq.rule/r true} :done #{} #{} "a test already red at the fork point is not broken"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/n red} {'tq.rule/p true} :working #{} #{'tq.rule/n} "a new red is no implement step's work"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} :done #{} #{'tq.rule/s} "its product red by assertions, new"]
+             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q green 'tq.rule/s red} {'tq.rule/q true} :done #{} #{'tq.rule/s} "with its own proof green"]
+             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true} :working #{} #{'tq.rule/s} "its own proof red"]
+             [:prove #{} #{} {} {} :working #{} #{} "no product"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} :working #{} #{} "its product green proves nothing"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :working #{} #{'tq.rule/s} "an error is no designed red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :working #{} #{} "a product its fork point already held is not new"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]]]
+      (is (= {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+             (judged step proofs product head fork-point))
+          why))))

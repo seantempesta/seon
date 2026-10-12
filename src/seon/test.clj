@@ -3042,57 +3042,52 @@
            (when-let [refusal (:seon.test/recording-refusal result)]
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
 
+(defn fork-point-red
+  "Of `tests`, those the commit `commit` holds, each true when it is red there: the result that commit holds at
+  its own reach (inherited evidence), else one run on a branch forked at that commit from `execution`, the
+  agent's own world, recorded there and released after, bounded by `limit-ms` (else the cluster's check dial). A
+  test with no result even then is not red there."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.source/commit-id [:sequential :seon.test/sym] [:maybe pos-int?]]
+                  [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
+  [execution commit tests limit-ms]
+  (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+        fork (source/database store commit)
+        present (into [] (comp (distinct) (filter #(seq (db/datoms fork :avet :seon.test/sym %)))) (sort tests))
+        results (when (seq present) (runner/latest-results fork present))
+        reach (when (seq present) (runner/reach-digests fork present))
+        inherited (when-not (some :seon.error/at [results reach])
+                    (into {} (keep #(let [test-symbol (:seon.test/sym %)]
+                                      (when (and test-symbol (= (get reach test-symbol) (:seon.test.member/reach-digest %)))
+                                        [test-symbol (runner/red-result? %)])))
+                          results))
+        due (into #{} (remove #(contains? inherited %)) present)
+        ran (when (and inherited (seq due))
+              (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})
+                    connection (:seon.db/connection child)]
+                (try (db/call-with-custody
+                      {:seon.db/connection connection}
+                      #(run (cond-> {:seon.test/policy :named :seon.test/execution child :seon.test/recording-connection connection
+                                     :seon.test/identities due :seon.test/rerun? true :seon.test/include-long? true}
+                              limit-ms (assoc :seon.test/check-time-limit-ms limit-ms))))
+                     (finally (@release-context! child)))))]
+    (or (some #(when (:seon.error/at %) %) [results reach ran])
+        (merge (zipmap present (repeat false))
+               (into {} (keep #(when-let [test-symbol (:seon.test/sym %)] [test-symbol (runner/red-result? %)]))
+                     (:seon.test/results ran))
+               inherited))))
+
 (defn change-reds
-  "Of `tests`, those red on `branch` (a branch's database) whose same test, under
-  the same evaluator, is not red on main at main's current reach: the reds the
-  branch's change made, sorted. A test not red on the branch (green, unrun or
-  unknown) is not the change's, and one main does not hold is not red there.
-  Main's side is its recorded result of the branch
-  member's evaluator at main's current reach; where main holds none, those tests
-  are evaluated once on `main` (root's world on the merge target, recording
-  there), an interpreted member's namespace interpreted there too."
+  "Of `tests`, those red on `branch` (a branch's database) whose same test is not red at `main`'s head (root's
+  world, the merge target): the reds the branch's change made, sorted. A test not red on the branch is not the
+  change's, and one main does not hold is not red there. Main's side is `fork-point-red` at main's head commit:
+  its recorded result, else one run on a branch forked there, never recorded on main."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source [:sequential :seon.test/sym]]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
   [branch main tests]
-  (let [latest (fn [database names]
-                 (let [results (if (seq names) (runner/latest-results database (vec names)) [])]
-                   (if (:seon.error/at results)
-                     results
-                     (into {} (map (juxt (some-fn :seon.test/sym :seon.test/error-test-symbol) identity)) results))))
-        on-branch (latest branch (sort (distinct tests)))
-        red (when (map? on-branch)
-              (into [] (comp (filter #(runner/red-result? (val %))) (map key)) (sort-by key on-branch)))
-        evaluator #(:seon.test.member/evaluator (get on-branch %))
-        ;; main's result of the same test under the same evaluator at its current reach: red or not;
-        ;; a test main does not hold is not red there
-        judged (fn [database]
-                 (let [held (filterv #(seq (db/datoms database :avet :seon.test/sym %)) red)
-                       on-main (latest database held)
-                       reach (if (seq held) (runner/reach-digests database held) {})]
-                   (or (some #(when (:seon.error/at %) %) [on-main reach])
-                       (into (zipmap red (repeat false))
-                             (for [test-symbol held
-                                   :let [result (get on-main test-symbol)]]
-                               [test-symbol
-                                (when (and (:seon.test/pass-count result) (evaluator test-symbol)
-                                           (= (evaluator test-symbol) (:seon.test.member/evaluator result))
-                                           (= (get reach test-symbol) (:seon.test.member/reach-digest result)))
-                                  (runner/red-result? result))])))))
-        main-db #(db/db (:seon.db/connection main))
-        before (when (seq red) (judged (main-db)))
-        due (when (map? before) (vec (keep (fn [[test-symbol red?]] (when (nil? red?) test-symbol)) before)))
-        interpreted (into #{} (comp (filter #(= :interpreted (evaluator %))) (map (comp symbol namespace))) due)
-        request (cond-> {:seon.test/policy :named :seon.test/execution main
-                         :seon.test/recording-connection (:seon.db/connection main)
-                         :seon.test/identities (set due) :seon.test/rerun? true :seon.test/include-long? true}
-                  (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted))
-        ;; main's own evidence, recorded in main's custody
-        ran (when (seq due)
-              (db/call-with-custody {:seon.db/connection (:seon.db/connection main)} (fn [] (run request))))
-        after (cond (seq due) (if (:seon.error/at ran) ran (judged (main-db)))
-                    :else before)]
-    (cond
-      (:seon.error/at on-branch) on-branch
-      (empty? red) []
-      (:seon.error/at after) after
-      :else (into [] (comp (remove #(true? (get after %)))) red))))
+  (let [names (vec (sort (distinct tests)))
+        results (if (seq names) (runner/latest-results branch names) [])
+        red (when-not (:seon.error/at results)
+              (into [] (comp (filter runner/red-result?) (keep :seon.test/sym) (distinct)) results))
+        on-main (when (seq red) (fork-point-red main (db/commit-id (db/db (:seon.db/connection main))) red nil))]
+    (or (some #(when (:seon.error/at %) %) [results on-main])
+        (vec (sort (remove #(true? (get on-main %)) red))))))

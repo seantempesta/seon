@@ -12,7 +12,7 @@
             [seon.cluster.squash :as squash]
             [seon.batch]
             [seon.config :as config]
-            [seon.context]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
             [seon.flow :as flow]
@@ -221,16 +221,19 @@
              database proof)))
 
 (defn- chain-world
-  "Call `body` with the chain world's cluster handle over `connection` once `tasks` (name → needs, proof body) are
-  ingested, each with its one proof, and set :running; every graph db<->flow started is released after."
-  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string [:tuple [:set :string] :string]]
+  "Call `body` with the chain world's cluster handle over `connection` once `tasks` (name → needs, proof body and
+  optional step kind) are ingested, each with its one proof (none for a nil body: a predecessor writes it), and set
+  :running; every graph db<->flow started is released after."
+  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string [:or [:tuple [:set :string] [:maybe :string]]
+                                                                   [:tuple [:set :string] [:maybe :string] :seon.task/step]]]
                        [:=> [:cat :seon.agent/context-source] :seon.schema/value]]
                   :seon.schema/value]}
   [connection tasks body]
   (test-support/seed-cluster! connection "tq-chain")
   (task/index-tasks! {:seon.db/connection connection
-                      :seon.task/files {(str "resources/seon/tasks/" *space* ".edn") (str "[" (apply str (for [[task-name [needs _]] (sort tasks)]
+                      :seon.task/files {(str "resources/seon/tasks/" *space* ".edn") (str "[" (apply str (for [[task-name [needs _ step]] (sort tasks)]
                                                                        (str "#:seon.task{:name \"" task-name "\" :kind :work :intent \"Do " task-name ".\""
+                                                                            (when step (str " :step " step))
                                                                             (when (seq needs)
                                                                               (str " :needs #{" (apply str (map #(str "[:seon.task/sym " *space* "/" % "] ") needs)) "}"))
                                                                             "} ")))
@@ -246,7 +249,7 @@
                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
                                       :seon.agent/id "tq-chain-author"})
                         (symbol (str *space* "-proofs"))
-                        (apply str (for [[task-name [_ proof]] (sort tasks)]
+                        (apply str (for [[task-name [_ proof]] (sort tasks) :when proof]
                                      (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/" task-name "}} proves-" task-name " "
                                           proof ")\n"))))
   (test-support/transacted! connection (mapv #(vector :db/add [:seon.task/id (chain-handle %)] :seon.task/execution :running)
@@ -789,3 +792,41 @@
               (is (seq (proof-runs database (proof "s"))) "after its pass recorded its proof run")
               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
                   "with nothing interrupted")))))))))
+
+;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
+;;; is a red proof for its successor, written on its own branch.
+
+(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
+  a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
+  ;; p is a :prove step: its own proof is green once a deftest tagged i exists, and that deftest, i's red proof,
+  ;; is its product. The one model reply writes it, red as it must be: new at p's fork point, so p broke nothing
+  ;; and ends :done.
+  (binding [*space* "tq.chainprove"]
+  (test-support/with-database
+   (fn [connection]
+     (let [ledger (atom [])]
+       (test-support/with-provider
+        ledger (test-support/reply-queue
+                [(str "(in-ns 'tq.chainprove-behavior)\n"
+                      "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))")])
+        (fn [server]
+          (chain-world
+           connection {"p" [#{} (str "(clojure.test/is (contains? (:seon.task/proofs (seon.task/task-edges (seon.db/db) '"
+                                     *space* "/i)) 'tq.chainprove-behavior/i-behaves))")
+                            :prove]
+                       "i" [#{"p"} nil]}
+           (fn [handle]
+             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                             :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+             (pass! handle (:seon.agent/routing handle))
+             (let [[[_ branch-p]] (seq (attempts connection "p"))
+                   p-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
+                                                                    :seon.store/branch branch-p})]
+               (is (= {:green 1} (await-on! p-connection
+                                            #(let [counts (:seon.context/counts (context/proofs (db/db p-connection) (symbol *space* "p")))]
+                                               (when (= {:green 1} counts) counts))
+                                            ::p-proof-green))
+                   "the model's reply turned p's step proof green on its branch"))
+             (is (= :done (landed! handle connection "p" ::p-ended))
+                 "its step proof is green and its only red test is its product, new at its fork point")
+             (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))

@@ -7,6 +7,7 @@
             [seon.mcp :as mcp]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.host :as host]
             [seon.cluster.message :as message]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -2042,3 +2043,36 @@
        (proof-run!)
        (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
            "the attempt's own run of its proofs is its proving first")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main}
+           :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run."
+           :seon.test/long-ms 30000}
+  the-test-step-writes-nothing-on-main
+  ;; `identity-test` reaches `area`, exists at the fork point and was never run there: the step runs it once at
+  ;; the fork commit in the agent's own world, finds it green there and red at the head, and records it broken
+  ;; on the agent's branch. Main is never read for the verdict nor written.
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "broken-" (id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (support/execution-handle nil))]])
+           _ (support/declare-source! connection 'tq.brk
+                                      (str "(ns tq.brk (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.brk/area}} area-test (is (= 25 (area 5))))\n"
+                                           "(deftest identity-test (is (= 3 (area 3))))\n")
+                                      "test")
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.brk)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.brk :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))
+           _ (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                            :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+           before (db/commit-id (db/db connection))]
+       (mcp/call (json/write-str {"name" "eval_clj"
+                                  "arguments" {"code" "(in-ns 'tq.brk)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"
+                                               "agent" agent-id "cluster" running}}))
+       (is (= #{'tq.brk/identity-test}
+              (set (:seon.agent/broken (db/pull (db/db target) [:seon.agent/broken] [:seon.agent/id agent-id]))))
+           "the step recorded what the change broke on the agent's branch")
+       (is (= before (db/commit-id (db/db connection))) "and main's head did not move")))))

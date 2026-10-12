@@ -24,6 +24,26 @@
                :proofs [:map {:description "Counts by status, then each proof in symbol order."}
                         [:seon.context/counts [:map-of :seon.context/proof-status [:int {:min 1}]]]
                         [:seon.context/proof-list [:vector :seon.context/proof]]]
+               :observed [:map {:description "One test at a step's head: its status at its current reach and, when red, its failing assertions. Producer: seon.context/head-entries."}
+                          [:seon.context/proof-status :seon.context/proof-status]
+                          [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
+               :head [:map-of {:description "The tests a step is judged by, as its branch's head holds them."} :seon.test/sym :seon.context/observed]
+               :fork-point [:map-of {:description "The tests of a step's head its fork point held, each true when it was red there."} :seon.test/sym :boolean]
+               :broken [:set {:description "The tests red at a step's head that its fork point held and that were not red there: what the step's change broke."} :seon.test/sym]
+               :new-red [:set {:description "The tests red at a step's head that its fork point did not hold: a Prove step's product, never breakage."} :seon.test/sym]
+               :step-observation [:map {:description "What one step is judged by: its obligations, its head and its fork point. Producer: seon.context/step-observation; consumer: seon.context/step-status."}
+                                  [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
+                                  [:seon.task/product :seon.task/product]
+                                  [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]]
+               :step-status [:map {:description "A step judged by its one rule. Producer: seon.context/step-status."}
+                             [:seon.task/status [:enum :done :working]]
+                             [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]]
+               :step-verdict [:map {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
+                              [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
+                              [:seon.task/product :seon.task/product]
+                              [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]
+                              [:seon.task/status [:enum :done :working]]
+                              [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]]
                :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
                         [:seon.context/items :my.message/inbox]
                         [:seon.render/operations [:vector :seon.render/read-form]]]

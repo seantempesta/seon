@@ -45,7 +45,8 @@
             [seon.task :as task]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]
-            [seon.sci.reader :as reader])
+            [seon.sci.reader :as reader]
+            [seon.cluster.registry :as registry])
   (:import [java.util Date]
            [java.util.concurrent Executor]))
 
@@ -79,8 +80,12 @@
   (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-reaching
   (delay (requiring-resolve 'seon.test/reaching)))
-(defonce ^:private test-change-reds
-  (delay (requiring-resolve 'seon.test/change-reds)))
+(defonce ^:private test-fork-point-red
+  (delay (requiring-resolve 'seon.test/fork-point-red)))
+(defonce ^:private context-step-observation
+  (delay (requiring-resolve 'seon.context/step-observation)))
+(defonce ^:private context-step-status
+  (delay (requiring-resolve 'seon.context/step-status)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -5452,40 +5457,56 @@
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
-(defn- reached-red
-  "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, that
-  the change made red: red there and not red on main, root's world `main`, under the same evaluator
-  (`seon.test/change-reds`), sorted; [] when the branch changed nothing a test sees."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source :seon.agent/id
-                       [:or :seon.test/changed :seon.error/value]]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [database main agent-id changed]
-  (if (:seon.error/at changed)
-    (if (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) [] changed)
-    (let [proofs (task-proofs database agent-id)
-          reached (when-not (:seon.error/at proofs)
-                    (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
-          tests (when (sequential? reached) (vec (remove (set proofs) reached)))]
-      (or (some #(when (:seon.error/at %) %) [proofs reached])
-          (if (seq tests) (@test-change-reds database main tests) [])))))
+(defn- fork-commit
+  "The commit the agent's step is judged against, read on `database`, its branch: its open attempt's fork point
+  (`:seon.task.attempt/fork`, a predecessor's end commit), else the commit its branch was forked at; nil on a
+  branch with no fork (main itself)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.source/commit-id]]}
+  [database agent-id]
+  (let [attempt (task/agent-attempt database agent-id)]
+    (or (when (int? attempt) (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] attempt)))
+        (registry/base-commit-id database (get-in database [:config :branch])))))
 
-(defn- record-reached-red!
-  "Record on the agent's row on its branch `connection` the tests its whole change `changed` made red
-  (`reached-red`, judged against main, root's world in `cluster`), replacing the previous step's: what
-  `seon.context/task-done?` reads. Answers them."
-  {:malli/schema [:=> [:cat :map :seon.db/connection :seon.agent/id [:or :seon.test/changed :seon.error/value]]
+(defn- record-broken!
+  "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point
+  (`seon.context/step-status`): the head is its obligations and the tests reaching its whole change `changed`;
+  each red there is looked up at the fork point (`seon.test/fork-point-red`, in the agent's own world, bounded
+  by `limit-ms`). Records the verdict's broken and new reds on the agent's row on its branch, replacing the
+  previous step's, and answers the broken tests, sorted. Nothing is read or written on main."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id [:or :seon.test/changed :seon.error/value] pos-int?]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [cluster connection agent-id changed]
-  (let [database (db/db connection)
-        red (reached-red database (root-execution cluster) agent-id changed)
-        held (set (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))
-        tx (when (vector? red)
-             (into (mapv #(vector :db/retract [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove (set red) held))
-                   (map #(vector :db/add [:seon.agent/id agent-id] :seon.agent/reached-red %) (remove held red))))]
-    (if (or (:seon.error/at red) (empty? tx))
-      red
-      (let [report (db/transact! connection tx)]
-        (if (:seon.error/at report) report red)))))
+  [execution agent-id changed limit-ms]
+  (let [connection (:seon.db/connection execution)
+        database (db/db connection)
+        handle (task/agent-task database agent-id)
+        sym (when (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
+        reached (cond (not (:seon.error/at changed)) (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)})
+                      (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) []
+                      :else changed)
+        ;; the head: every reached test, judged as new until the fork point says otherwise
+        head (when (and sym (sequential? reached))
+               (@context-step-observation database agent-id sym {:seon.context/broken #{} :seon.context/new-red (set reached)}))
+        reds (when (map? head)
+               (into [] (comp (filter #(= :red (:seon.context/proof-status (val %)))) (map key)) (:seon.context/head head)))
+        commit (when (seq reds) (fork-commit database agent-id))
+        fork-point (cond (empty? reds) {}
+                         commit (@test-fork-point-red execution commit reds limit-ms)
+                         ;; no fork: the head is its own fork point
+                         :else (zipmap reds (repeat true)))
+        verdict (when (and (map? head) (not (:seon.error/at fork-point)))
+                  (@context-step-status (assoc head :seon.context/fork-point fork-point)))
+        record (fn [attribute tests]
+                 (let [held (set (get (db/pull database [attribute] [:seon.agent/id agent-id]) attribute))]
+                   (into (mapv #(vector :db/retract [:seon.agent/id agent-id] attribute %) (remove tests held))
+                         (map #(vector :db/add [:seon.agent/id agent-id] attribute %) (remove held tests)))))
+        tx (when verdict
+             (into (record :seon.agent/broken (:seon.context/broken verdict))
+                   (record :seon.agent/new-red (:seon.context/new-red verdict))))
+        written (when (seq tx) (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))]
+    (if (nil? sym)
+      []
+      (or (some #(when (:seon.error/at %) %) [reached head fork-point written])
+          (vec (sort (:seon.context/broken verdict)))))))
 
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
@@ -5506,16 +5527,16 @@
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
       (let [reaching (run-reaching execution (max 1 left) changed platform)
             ;; a derivation that fails is shown beside the step's values, never in place of them
-            red (try (record-reached-red! cluster connection agent-id changed)
+            red (try (record-broken! execution agent-id changed limit)
                      (catch Throwable failure
                        (or (error/refusal failure)
                            (seon.error.refusal/diagnostic
-                            (Date.) :seon.turn/test-step `record-reached-red!
-                            {:seon.error/message "The reached tests' status could not be recorded."
+                            (Date.) :seon.turn/test-step `record-broken!
+                            {:seon.error/message "The tests the change broke could not be judged."
                              :seon.error/exception-class (.getName (class failure))}))))]
         (some-> (summary (ran-something proofs) (ran-something reaching) platform)
                 (merge (test-costs (db/db connection) [proofs reaching]))
-                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/reached-red red)))))
+                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red)))))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error

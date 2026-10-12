@@ -116,6 +116,24 @@
          (zero? (+ (:seon.test/fail-count result) (:seon.test/error-count result)))) :green
     :else :red))
 
+(defn- head-entries
+  "Each of `names` `database` holds, by symbol, with its status at its current reach and, when red, its
+  failing assertions; the reads' refusal when one refuses."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]]
+                  [:or :seon.context/head :seon.error/value]]}
+  [database names]
+  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))
+        digests (when (seq names) (runner/reach-digests database names))
+        results (when (seq names) (runner/latest-results database names))]
+    (or (some #(when (:seon.error/at %) %) [digests results])
+        (let [by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)]
+          (into {} (for [s names
+                         :let [result (by-sym s)
+                               status (proof-status result (get digests s))
+                               failures (when (= :red status) (proof-failures result))]]
+                     [s (cond-> {:seon.context/proof-status status}
+                          failures (assoc :seon.context/proof-failures failures))]))))))
+
 (defn proofs
   "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
@@ -125,28 +143,44 @@
         names (when-not (:seon.error/at edges) (vec (sort (:seon.task/proofs edges))))]
     (if (empty? names)
       (when (:seon.error/at edges) edges)
-      (let [digests (runner/reach-digests database names)
-            results (runner/latest-results database names)
-            sources (when-not (or (:seon.error/at digests) (:seon.error/at results))
+      (let [head (head-entries database (set names))
+            sources (when-not (:seon.error/at head)
                       (into {} (db/q database '[:find ?s ?src :in $ [?s ...] :where [?t :seon.test/sym ?s] [?t :seon.test/source ?src]]
                                      names)))]
-        (or (some #(when (:seon.error/at %) %) [sources digests results])
-            (let [by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
-                  entries (mapv (fn [s]
-                                  (let [result (by-sym s)
-                                        status (proof-status result (get digests s))]
-                                    (cond-> {:seon.test/sym s :seon.test/source (sources s) :seon.context/proof-status status}
-                                      (= :red status) (as-> entry (if-let [f (proof-failures result)]
-                                                                    (assoc entry :seon.context/proof-failures f) entry)))))
+        (or (some #(when (:seon.error/at %) %) [sources head])
+            (let [entries (mapv #(merge {:seon.test/sym % :seon.test/source (sources %) :seon.context/proof-status :pending}
+                                        (head %))
                                 names)]
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))
 
-(defn- all-green?
-  "True when the proofs section `proven` holds proofs and every one is green."
-  {:malli/schema [:=> [:cat [:or :nil :seon.context/proofs :seon.error/value]] :boolean]}
-  [proven]
-  (= #{:green} (set (keys (:seon.context/counts proven)))))
+(defn- designed-red?
+  "True when the head entry `entry` is red only by failing assertions (`:fail` reports): a designed red, never a
+  compile or reference error."
+  {:malli/schema [:=> [:cat [:maybe :seon.context/observed]] :boolean]}
+  [entry]
+  (let [failures (:seon.context/proof-failures entry)]
+    (boolean (and (= :red (:seon.context/proof-status entry)) (seq failures) (every? #(= :fail (:type %)) failures)))))
+
+(defn step-status
+  "The status of a step from one observation: `:seon.context/broken`, the head's reds present at the fork point
+  and not red there; `:seon.context/new-red`, the head's reds absent there; and `:seon.task/status`, `:done` by
+  the step's one rule, else `:working`. An `:implement` step is done when its proofs are nonempty and all green,
+  nothing is broken and every new red is a proof; a `:prove` step when its own proofs are all green, its product
+  is nonempty, nothing is broken and its new reds are exactly its product, each red by failing assertions."
+  {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
+  [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
+    head :seon.context/head fork-point :seon.context/fork-point}]
+  (let [status #(get-in head [% :seon.context/proof-status])
+        reds (into #{} (comp (map key) (filter #(= :red (status %)))) head)
+        broken (into #{} (filter #(false? (get fork-point %))) reds)
+        new-red (into #{} (remove #(contains? fork-point %)) reds)
+        green? (fn [tests] (every? #(= :green (status %)) tests))
+        done? (case step
+                :implement (and (seq proofs) (green? proofs) (empty? broken) (every? proofs new-red))
+                :prove (and (green? proofs) (seq product) (empty? broken) (= new-red product)
+                            (every? (comp designed-red? head) product)))]
+    {:seon.task/status (if done? :done :working) :seon.context/broken broken :seon.context/new-red new-red}))
 
 (defn held-task
   "The declaration of the task `agent-id` holds, read on `database`, its world (its branch holds its
@@ -161,17 +195,44 @@
             ;; a cardinality-many pull is a vector; the declaration holds a set
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
+(defn step-observation
+  "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
+  (`seon.task/obligations`), the head's entries for them and for `judged`, the tests the agent's test step
+  found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
+  present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
+  supplies the step's last record."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym
+                       [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
+                  [:or :seon.context/step-observation :seon.error/value]]}
+  [database agent-id sym judged]
+  (let [owed (task/obligations database sym)
+        row (when-not judged (db/pull database [:seon.agent/broken :seon.agent/new-red] [:seon.agent/id agent-id]))
+        broken (set (or (:seon.context/broken judged) (:seon.agent/broken row)))
+        new-red (set (or (:seon.context/new-red judged) (:seon.agent/new-red row)))
+        head (when-not (:seon.error/at owed)
+               (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))]
+    (or (some #(when (:seon.error/at %) %) [owed head])
+        (assoc owed :seon.context/head head
+                    :seon.context/fork-point (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))))))
+
+(defn step-verdict
+  "The held task's step on `database`, the agent's branch, judged by `step-status` over `step-observation`: the
+  observation with its status; nil when the agent holds no task."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.context/step-verdict :seon.error/value]]}
+  [database agent-id]
+  (let [held (held-task database agent-id)
+        observation (when (and held (not (:seon.error/at held)))
+                      (step-observation database agent-id (:seon.task/sym held) nil))]
+    (cond (:seon.error/at held) held
+          (:seon.error/at observation) observation
+          observation (merge observation (step-status observation)))))
+
 (defn task-done?
-  "True when the task `agent-id` holds has proofs, all green on `database`, the agent's branch, and its turn's
-  test step found no reached test its change made red (`:seon.agent/reached-red` absent: red on the branch and not
-  red on main under the same evaluator, `seon.test/change-reds`): the task is done for the agent, pending root's
-  merge, and the turn loop opens no continuation for it."
+  "True when the step of the task `agent-id` holds is done on `database`, the agent's branch (`step-verdict`): the
+  task is done for the agent, pending root's merge, and the turn loop opens no continuation for it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (let [held (held-task database agent-id)]
-    (boolean (and held (not (:seon.error/at held))
-                  (all-green? (proofs database (:seon.task/sym held)))
-                  (empty? (:seon.agent/reached-red (db/pull database [:seon.agent/reached-red] [:seon.agent/id agent-id])))))))
+  (= :done (:seon.task/status (step-verdict database agent-id))))
 
 (defn- unshown
   "The inbox `items` no turn of `agent-id` has handled: a closed model turn's
@@ -340,8 +401,8 @@
 
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
-  main reads it now, and its turns left with the task's status (`:done` once every
-  proof is green, then `:capped` with no turns left, else `:working`) and the namespace
+  main reads it now, and its turns left with the task's status (`:done` once its step is done,
+  `step-verdict`, then `:capped` with no turns left, else `:working`) and the namespace
   it is in (`agent-namespace`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
@@ -360,6 +421,7 @@
         held (when-not (:seon.error/at found) found)
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
+        verdict (when held (step-verdict database agent-id))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items)
                    items
@@ -372,9 +434,9 @@
         namespace (agent-namespace database agent-id held)
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
-    (or (some #(when (:seon.error/at %) %) (concat [found left proven unread] reads))
+    (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
-                                       held (assoc :seon.task/status (cond (all-green? proven) :done
+                                       held (assoc :seon.task/status (cond (= :done (:seon.task/status verdict)) :done
                                                                            (zero? left) :capped
                                                                            :else :working))
                                        namespace (assoc :seon.context/namespace namespace))}

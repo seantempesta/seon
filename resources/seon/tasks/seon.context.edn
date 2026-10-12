@@ -34,7 +34,7 @@
  #:seon.task{:name "a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red"
   :kind :function
   :intent "A Design+Prove step can never end :done. Its work is a red behavior proof tagged with the step that needs it (TASK-CHAIN §3); on its branch that test is red and main does not hold it, so `seon.test/change-reds` lists it, the turn stores it as `:seon.agent/reached-red`, and `seon.context/task-done?` answers false although the step's own proofs are green. Observed on default 2319152dc (chain experiment 1, attempt e95d4e90b70f): its step proof went green at call 5, `:seon.agent/reached-red` held its own new test, and the agent spent calls 6-15 restating that it was done until it ended :capped. Correct: a red test tagged only with tasks other than the held one (here the successor that `:seon.task/needs` the held step) is that task's proof, not a test the change broke; it is neither reached-red nor blocks `seon.context/task-done?`. Proof: `seon.cluster.db-flow-test/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red` (in the evidence patch until db_flow_test's owner applies it)."
-  :must-read #{seon.context/task-done? seon.test/change-reds seon.task/task-edges}
+  :must-read #{seon.context/step-status seon.context/task-done? seon.task/obligations seon.task/task-edges}
   :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-1.md" "docs/research/agent-platform/2026-10-12/chain-experiment-1-proofs.patch"}}
  #:seon.task{:name "reached-reds-are-invisible-to-the-agent"
   :kind :function
