@@ -84,7 +84,7 @@
             [seon.cluster.status]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
-            [seon.cluster.squash :as squash]
+            [seon.merge :as merge]
             [seon.cluster.store :as store]
             [seon.id :as id]
             [seon.env :as env]
@@ -1913,7 +1913,7 @@
 
 (defn- write-merge-base!
   "Write on main attempt `key`'s merge base, the commit its `branch` forked at (`seon.cluster.registry/base-commit-id`),
-  unless main already holds one: `seon.cluster.squash/merge-tx` moves it from there."
+  unless main already holds one: `seon.merge/merge-tx` moves it from there."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch [:maybe :seon.task/assignment]] :nil]}
   [handle branch key]
   (when key
@@ -2131,7 +2131,7 @@
                                :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
                                                       (when reason (str ": " reason)) ". Nothing was merged to main;"
                                                       " its branch " (name branch) " is kept. Merge it by hand with"
-                                                      " seon.cluster.squash/merge!, or delete it with"
+                                                      " seon.merge/merge!, or delete it with"
                                                       " my.agent/retire-branch!.")})]
     (when (:seon.error/at created)
       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
@@ -2177,7 +2177,7 @@
                                            (throw (ex-info "The assignment's branch retains no fork commit to merge from."
                                                            {:seon.error/message "The assignment's branch retains no fork commit to merge from."
                                                             :seon.store/branch branch})))]])
-      :merge (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
+      :merge (db/with-branch {:seon.db/connection connection} #(merge/merge! connection a branch {}))
       :close (close! connection action)
       ;; the stop lets the pass that wrote the end finish, then joins it
       :stop (do (when-let [registry (entry-registry routing agent-id)]

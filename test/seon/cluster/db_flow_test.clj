@@ -10,7 +10,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
-            [seon.cluster.squash :as squash]
+            [seon.merge :as merge]
             [seon.batch]
             [seon.config :as config]
             [seon.context :as context]
@@ -589,7 +589,7 @@
                 store (agent/handle-store handle)]
             (pass! handle routing)
             (let [[_ branch agent-id a] (end-on-branch! handle connection "e" :done)]
-              (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
+              (db/with-branch {:seon.db/connection connection} #(merge/merge! connection a branch {}))
               (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
               (pass! handle routing)
               (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
@@ -627,7 +627,7 @@
               (pass! handle routing)
               (is (= 1 (count (copies (db/db connection) branch))) "a second pass writes nothing")
               (testing "root's by-hand merge lands what the success path would"
-                (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (squash/merge! connection a branch {})))
+                (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (merge/merge! connection a branch {})))
                       merged (merge!)]
                   (is (pos? (:seon.squash/datoms merged)))
                   (is (= "Refined on the branch." (intent)))

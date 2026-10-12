@@ -1,6 +1,6 @@
-(ns seon.cluster.squash-test
+(ns seon.merge-test
   (:require [clojure.test :refer [deftest is]]
-            [seon.cluster.squash :as squash]
+            [seon.merge :as merge]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -64,7 +64,7 @@
                         :seon.cluster.eval/at #inst "2026-10-11T00:00:00Z"
                         :seon.cluster.eval/source "(+ 1 1)"})) (range 10)))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   an-attempts-cluster-facts-copy-onto-main-by-identity
   (support/with-database
    (fn [connection]
@@ -82,7 +82,7 @@
                                   :seon.task/children #{child-ref}}
                                 {:db/id assignment :seon.task.attempt/end :done}])
            target base
-           squash-merge (ns-resolve 'seon.cluster.squash 'squash-merge)]
+           squash-merge (ns-resolve 'seon.merge 'squash-merge)]
        (is (some? squash-merge))
        (when squash-merge
          (let [picked (squash-merge source base target (schema/handed-projection))
@@ -95,7 +95,7 @@
                      (:db/id (db/pull copied [:db/id] child-ref))))
            (is (= "Original" (:seon.task/intent (db/pull target [:seon.task/intent] parent-ref))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-value-changed-on-both-sides-resolves-by-the-declared-rule
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-value-changed-on-both-sides-resolves-by-the-declared-rule
   (support/with-database
    (fn [connection]
      (let [handle (task/task-handle 'fixture.tasks "squash-conflict" :function)
@@ -106,7 +106,7 @@
            target (checked-value base [{:db/id entity :seon.error.occurrence/count 4}])]
        (doseq [[rule expected conflicts] [[:root 4 1] [:ours 4 0] [:theirs 3 0] [:add 6 0]]]
          (let [projection (rule-projection (schema/handed-projection) rule)
-               result (squash/squash-merge source base target projection)
+               result (merge/squash-merge source base target projection)
                copied (checked-value target {:tx-data (:tx-data result)})]
            (is (= expected (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
            (is (= conflicts (count (:conflicts result))))
@@ -115,14 +115,14 @@
              (is (= [{:entity (:db/id (db/pull base [:db/id] entity)) :attribute :seon.error.occurrence/count :base 1 :ours 4 :theirs 3}]
                     (:conflicts result))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-copy-of-an-unchanged-branch-is-empty
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-copy-of-an-unchanged-branch-is-empty
   (support/with-database
    (fn [connection]
      (let [base (db/db connection)
            projection (schema/handed-projection)]
-       (is (empty? (:tx-data (squash/squash-merge base base base projection))))))))
+       (is (empty? (:tx-data (merge/squash-merge base base base projection))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} program-and-runtime-facts-never-copy
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} program-and-runtime-facts-never-copy
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx (db/db connection) "squash-runtime"))
@@ -136,11 +136,11 @@
                                                           (message/candidate {:my.message/to "squash-runtime"
                                                                               :my.message/content "Hello"})
                                                           "squash-runtime")))
-           result (squash/squash-merge source base base (schema/handed-projection))]
+           result (merge/squash-merge source base base (schema/handed-projection))]
        (is (empty? (:tx-data result)))
        (is (empty? (:conflicts result)))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-retraction-on-the-branch-retracts-on-an-unchanged-main-only
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-retraction-on-the-branch-retracts-on-an-unchanged-main-only
   (support/with-database
    (fn [connection]
      (let [handle (task/task-handle 'fixture.tasks "squash-retract" :function)
@@ -151,8 +151,8 @@
            projection (schema/handed-projection)
            target (checked-value base [{:db/id entity :seon.task/evidence #{"docs/b"}}
                                        [:db/retract entity :seon.task/evidence "docs/a"]])
-           unchanged (squash/squash-merge source base base projection)
-           concurrent (squash/squash-merge source base target projection)]
+           unchanged (merge/squash-merge source base base projection)
+           concurrent (merge/squash-merge source base target projection)]
        (doseq [[from to] [[base source]
                          [(db/basis-t base) source]
                          [(db/as-of base (db/basis-t base)) source]
@@ -164,7 +164,7 @@
        (is (empty? (:tx-data concurrent)))
        (is (empty? (:conflicts concurrent)))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/disjoint-set-additions-merge-as-their-union}}
+(deftest ^{:seon/tasks #{'seon.merge/disjoint-set-additions-merge-as-their-union}}
   disjoint-set-additions-merge-as-their-union
   (support/with-database
    (fn [connection]
@@ -186,12 +186,12 @@
                  [[] ["docs/a"] [] ["docs/b"] #{}]]]
        (doseq [[oa orr ta tr merged] rows]
          (let [target (change oa orr)
-               result (squash/squash-merge (change ta tr) base target projection)
+               result (merge/squash-merge (change ta tr) base target projection)
                copied (checked-value target {:tx-data (:tx-data result)})]
            (is (= [] (:conflicts result)))
            (is (= merged (set (:seon.task/evidence (db/pull copied [:seon.task/evidence] entity)))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
   (support/with-database
    (fn [connection]
      (let [handle (task/task-handle 'fixture.tasks "squash-cost" :function)
@@ -202,14 +202,14 @@
            source (checked-value (ten-evaluation-attempt base "squash-cost")
                                  [{:db/id entity :seon.task/intent "Refined"}])
            projection (schema/handed-projection)
-           measured (profile/measure #(squash/squash-merge source base base projection))]
+           measured (profile/measure #(merge/squash-merge source base base projection))]
        (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff-squash.edn")
              (value/core-text (dissoc measured :seon.profile/value)))
        (is (<= (:seon.profile/ms measured) 10))
        (is (number? (:seon.profile/alloc-bytes measured)))
        (is (<= (:seon.profile/alloc-bytes measured) 5000000))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/disjoint-set-additions-merge-as-their-union}}
+(deftest ^{:seon/tasks #{'seon.merge/disjoint-set-additions-merge-as-their-union}}
   the-three-way-on-one-changed-set-stays-within-its-cost-bound
   (support/with-database
    (fn [connection]
@@ -221,7 +221,7 @@
            source (checked-value base [[:db/add entity :seon.task/evidence "docs/z"]])
            target (checked-value base [[:db/add entity :seon.task/evidence "docs/y"]])
            projection (schema/handed-projection)
-           run #(squash/squash-merge source base target projection)
+           run #(merge/squash-merge source base target projection)
            _ (run)
            measured (profile/measure run)]
        (is (<= (:seon.profile/ms measured) 5))))))
@@ -245,7 +245,7 @@
       (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))
   nil)
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   a-branch-born-entity-keeps-its-eid-on-main
   (support/with-database
    {:seon.test-support/fresh-store? true}
@@ -256,7 +256,7 @@
        (let [branch (db/db connection)
              allocator (writing/eid-allocator branch)
              issued (.get ^java.util.concurrent.atomic.AtomicLong allocator)
-             result (squash/squash-merge branch base base (schema/handed-projection))
+             result (merge/squash-merge branch base base (schema/handed-projection))
              copied (checked-value base (:tx-data result))]
          (is (= (:db/id (db/pull branch [:db/id] [:seon.task/id child]))
                 (:db/id (db/pull copied [:db/id] [:seon.task/id child]))))
@@ -276,7 +276,7 @@
                                       {:db/id parent-ref :seon.task/children #{child-ref}}])
             (let [branch (db/db fork)
                   eid (:db/id (db/pull branch [:db/id] child-ref))
-                  squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection))
+                  squash (merge/squash-merge branch base (db/db connection) (schema/handed-projection))
                   copied (checked-value (db/db connection) (:tx-data squash))
                   next-before (:db/id (db/pull (checked-value (db/db connection) [{:db/ident :fixture.squash/next}]) [:db/id] :fixture.squash/next))
                   replayed (checked-value copied (:tx-data squash))
@@ -288,7 +288,7 @@
                      next-after))
               (is (< next-before next-after))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   the-merge-base-is-the-merge-requests
   (support/with-database
    (fn [connection]
@@ -323,7 +323,7 @@
                      :seon.sci.admit/caps (config/result-caps config/defaults)
                      :seon.config.error/max-evidence-bytes (:seon.config.error/max-evidence-bytes config/defaults)})))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   a-natural-identity-born-on-both-sides-maps-to-mains-eid
   (support/with-database
    (fn [connection]
@@ -344,7 +344,7 @@
               (is (not= (:e theirs) (:e ours)))
               (support/transacted! fork [{:db/id (:e theirs) :seon.error.occurrence/related (:e theirs)}])
               (let [branch (db/db fork)
-                    squash (squash/squash-merge branch base (db/db connection) (schema/handed-projection))
+                    squash (merge/squash-merge branch base (db/db connection) (schema/handed-projection))
                     copied (checked-value (db/db connection) (:tx-data squash))
                     entity (db/pull copied [:db/id :seon.error.occurrence/count :seon.error.occurrence/related]
                                     [:seon.error.occurrence/id (:v theirs)])]
@@ -353,7 +353,7 @@
                 (is (= (:e ours) (get-in entity [:seon.error.occurrence/related :db/id])))
                 (is (= 1 (count (d/datoms copied :avet :seon.error.occurrence/id (:v theirs))))))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   the-merge-base-retains-the-count-needed-by-add
   (support/with-database
    (fn [connection]
@@ -367,7 +367,7 @@
                 head (db/db connection)
                 base (source/merge-base candidate head target branch)
                 entity (:e (first (d/datoms candidate :aevt :seon.error.occurrence/id)))
-                result (squash/squash-merge candidate base head (schema/handed-projection))
+                result (merge/squash-merge candidate base head (schema/handed-projection))
                 copied (checked-value head (:tx-data result))]
             (is (= 1 (:seon.error.occurrence/count (db/pull base [:seon.error.occurrence/count] entity))))
             (try
@@ -379,7 +379,7 @@
                   (finally (source/release! [advanced]))))
               (finally (source/release! [base]))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   a-base-ref-keeps-the-fork-commit-only-until-retirement
   (let [root (str "tmp/sol-p1-squash/retention-" (random-uuid))
         opened (store/open-store! {:seon.store/dir (str root "/store")})
@@ -425,7 +425,7 @@
   (let [agent-id (str "merge-" handle)]
     (support/transacted! connection (into [(support/task-row handle "a")]
                                           (support/agent-tx (db/db connection) agent-id)))
-    ;; a conflict is written as root's problem task (`seon.cluster.squash/conflict-task!`)
+    ;; a conflict is written as root's problem task (`seon.merge/conflict-task!`)
     (when-not (:db/id (db/pull (db/db connection) [:db/id] [:seon.agent/id "root"]))
       (support/transacted! connection (support/agent-tx (db/db connection) "root")))
     (with-fork
@@ -438,10 +438,10 @@
                                              [:seon.task/assignment (:seon.task/assignment row)]))))))))
 
 (defn- merged!
-  "Merge `branch` onto main for assignment `a` through `seon.cluster.squash/merge!`, under main's custody."
+  "Merge `branch` onto main for assignment `a` through `seon.merge/merge!`, under main's custody."
   {:malli/schema [:=> [:cat :seon.db/connection :int :seon.store/branch] [:maybe :seon.squash/copy]]}
   [connection a branch]
-  (when-let [merge! (ns-resolve 'seon.cluster.squash 'merge!)]
+  (when-let [merge! (ns-resolve 'seon.merge 'merge!)]
     (db/with-branch {:seon.db/connection connection} #(merge! connection a branch {}))))
 
 (defn- intent-on
@@ -466,10 +466,10 @@
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
           (let [commit (db/commit-id (db/db fork))
                 first-merge (merged! connection a branch)]
-            (is (some? first-merge) "seon.cluster.squash/merge! exists")
+            (is (some? first-merge) "seon.merge/merge! exists")
             (is (= "b" (intent-on connection handle)))
             (is (= commit (merge-base-on connection a)) "the merge base moved to the merged source commit")
-            (is (= [] ((or (ns-resolve 'seon.cluster.squash 'merge-tx) (constantly nil))
+            (is (= [] ((or (ns-resolve 'seon.merge 'merge-tx) (constantly nil))
                           (db/db connection) a commit (db/carried-projection (db/db connection))))
                 "the writer's transaction data for a repeat is empty")
             (let [second-merge (merged! connection a branch)]
@@ -538,7 +538,7 @@
         (fn [fork _ a]
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
           (let [main (db/db connection)
-                measured (profile/measure #(squash/merge-tx main a (db/commit-id (db/db fork))
+                measured (profile/measure #(merge/merge-tx main a (db/commit-id (db/db fork))
                                                             (db/carried-projection main)))]
             (is (= 3 (count (:seon.profile/value measured))) "the intent's retraction and assertion and the moved base")
             (is (<= (:seon.profile/ms measured) 20)))))))))

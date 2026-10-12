@@ -1,4 +1,4 @@
-(ns seon.cluster.squash
+(ns seon.merge
   "Three-way squash merge of declared cluster facts onto main, computed inside main's writer."
   (:require [clojure.set :as set]
             [datahike.api :as d]
@@ -66,7 +66,7 @@
 
 (defn squash-merge
   "Transaction data and conflicts for source relative to its merge base and target."
-  {:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}
+  {:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
                        :seon.db/database-value :seon.schema/projection]
                   [:map [:tx-data :seon.store/transaction-data]
@@ -132,7 +132,7 @@
                                :seon.task/kind :work
                                :seon.task/intent (str "Branch " (name branch) " and main both changed " attribute
                                                       " of entity " entity " since their merge base; main kept its value."
-                                                      " Read the three values with seon.cluster.squash/squash-merge and decide.")})]
+                                                      " Read the three values with seon.merge/squash-merge and decide.")})]
     (when (:seon.error/at created)
       (throw (ex-info (:seon.error/message created "The conflict's problem task was refused.") created)))
     nil))

@@ -1,7 +1,7 @@
 (ns astra-cost-handoff
   "Attribution probes for the projection hand-off and squash cost bounds."
   (:require [seon.batch :as batch]
-            [seon.cluster.squash :as squash]
+            [seon.merge :as merge]
             [seon.db :as db]
             [seon.profile :as profile]
             [seon.program :as program]))
@@ -30,7 +30,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
                   [:map-of :qualified-keyword :map]]}
   [source base projection]
-  (let [whole (costs (profile/measure #(squash/squash-merge source base base projection)))
+  (let [whole (costs (profile/measure #(merge/squash-merge source base base projection)))
         changed (db/since (db/history source) (db/basis-t base))]
     {::squash whole
      ::attributes (into {}

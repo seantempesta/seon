@@ -30,7 +30,7 @@
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
-            [seon.cluster.squash :as squash]
+            [seon.merge :as merge]
             [seon.cluster.store :as store]
             [seon.schema]
             [seon.schema.datahike :as schema-datahike]
@@ -797,7 +797,7 @@
 (deftest
   a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
   ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every head; an end copy is a plain
-  ;; transaction with no parent link (`seon.cluster.squash/merge!`), so a deleted attempt's commits and nodes reach
+  ;; transaction with no parent link (`seon.merge/merge!`), so a deleted attempt's commits and nodes reach
   ;; nothing and are swept.
   (with-program-store
    (fn [store connection]
@@ -826,7 +826,7 @@
                                          (db/commit-id (db/db fork))))))
                           (finally (store/release-branch! fork)))
              before-copy (clean-key-count store)
-             copied (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
+             copied (db/with-branch {:seon.db/connection connection} #(merge/merge! connection a branch {}))
              with-copy (clean-key-count store)]
          (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
          (is (pos? (:seon.squash/datoms copied)))
