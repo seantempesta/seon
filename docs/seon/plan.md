@@ -115,32 +115,33 @@ narrow check (live claims reproduce on default; every deletion is committed with
 phase names a red proof that resolves) and then tasks. Conflicts on copy-back keep main's value and become root's
 problem task unless the entity schema declares a rule.
 
-1. **Immutable program context, E3–E7** (lane program-context, Opus; running): the request cost findings 1 and 3
-   (about 29 ms and 22 MB per request), then the weight measurement. Proof:
-   `seon.turn-test/an-eval-request-on-an-unchanged-program-forks-nothing` as a measured-cost assertion through
-   `seon.profile/measure`.
-2. **Done and merge, one design round** (running: dig `docs/research/agent-platform/2026-10-12/dig-done-and-merge.md`;
-   Opus and Astra plans `plan-done-and-merge-{opus,astra}.md`; then the Fable hybrid and the narrow check). The owner,
-   2026-10-12: done is derived from green proofs with no verb, root merges from main, every edge case modeled, no
-   guards. It replaces U0–U7 and **absorbs P3's merge-gate conversion and P7–P10** (starters, per-action catches, stop
-   versus cancel, relaunch, held successors): those are the round's edge cases, so building them first would be
-   rebuilt after the hybrid. P-final (the real chain with zero nudges) follows its phases.
-3. **The recording transaction, the reads and configuration** (cost findings 2, 4, 5, 6; Astra, beside 1 on disjoint
-   files: `seon.db`, `seon.config`, `seon.profile`, the konserve and Datahike forks, never `seon.sci.eval` or
-   `seon.turn` while lane program-context holds them), each at its owner with a before and after number from the same
-   probe.
-4. **Library words in src** (ledger §3.18 CN entries): done CN-27 `frontier` → `ready` (2ef43687f), CN-15 `custody`
-   → `with-branch` (de56c2570), CN-18 `roster` → registry (d0ebba656); open CN-9 `shown` → printed value, CN-5 `world` →
-   bindings (waits on S5-05, S5-06, EN-4, CN-20), CN-6 `receipt` (waits on EN-1, RP-14, RP-15a),
-   one commit each with every caller; code a plan deletes is not renamed
-   (`docs/research/agent-platform/2026-10-12/restart-audit/vocab-src-inventory.md`). Living prose is done (fede4d3d4,
-   5c339d69a, 976e3888a, 02cf34720, 39cdc0f7f, 27fb60c0d and the specs commits).
-5. **Findings filed with red proofs** (Sonnet): `seon.db/branch-connection` throwing on `:current-src` and `:base/*`
-   branches; the 165–178 ms first acquisition; integers printed as entity references; `seon.turn/planned-sources`
-   contradicting `seon.sci.forgive/forgive` on repair; `file:line` citations in `seon.render/call-reach-key` and
-   `seon.flow/fault-port` docstrings.
-6. **Phase numbering and task intents**: every filed phase task names its document (`AW`, `P`, `U`, `E`, `H`); 25 stale
-   tags are retired or retargeted.
+Revised by root after the Fable audit (docs/research/agent-platform/2026-10-12/fable-audit.md, 48e095303) and the
+owner's answers of 2026-10-12. Running now: lanes branch-repl, chain-2, cost-gb, dig-test-results, lane-batch.
+
+1. **The lanes' branch REPL works** (Opus, lane branch-repl): a lane's changed first-party namespace acquires on its
+   branch, the acquisition error names its entity within the bound, an agent's own refusal does not mark the cluster
+   `:faulted`, and `bin/lane commit --branch-evidence` proves an ordinary function without a check JVM. Today's 193
+   check JVMs and about 234 minutes of check time were this path failing.
+2. **The goal probe in flight** (Opus, lane chain-2): chain experiment 2 on HEAD, merged by root by hand; numbers
+   against experiment 1. Then the **first automatic merge** of one ordinary task as soon as M6 and M8 allow (owner:
+   one ordinary task first, the chain after).
+3. **Done and merge, M2–M18 then M-final**, in the hybrid's order (M1 done: 3fe23b2c0, 346645d56); split the
+   collision points `seon.turn` and `seon.cluster.agent` before eleven phases queue on them.
+4. **Test results as Seon data** (design round; dig running): which tests are red and which reds a change caused is
+   a query over stored runs at equal reach digests, shown in the agent's reply and current-state block, and read by
+   `--branch-evidence` and `bin/seon check` through the same path (owner: model it for Seon agents first, then let
+   our lanes use the same mechanism). Main holds no test runs today; the design says how it gets them. Planners get
+   the narrow-check questions in their brief.
+5. **Costs agents pay** (Astra, lane cost-gb): the test step after a `defn` (0.6–1.9 GB), cold reach digests
+   (3.1 s / 6 GB), the repeated base read; proofs are end-to-end measured costs (AGENTS.md, 64668ecae).
+6. **Immutable program context E3, E5–E7** after item 1 (E3 needs E5; the proc cannot yet install a returned
+   context).
+7. **Paused until M8 (owner):** the `src` CN renames (CN-9, CN-5, CN-6). Prose stays enforced by
+   `seon.vocabulary-test/living-prose-names-no-retired-word`.
+
+Rules adopted 2026-10-12: performance proofs are the targeted cost end to end, a measured regression or no gain is
+not committed; dependency and fork bumps and wide renames only inside a scheduled restart batch (`bin/lane commit
+--restart-batch`, lane lane-batch); design-round planners get the narrow-check questions up front.
 
 **Older direction, still the plan unless a phase above replaces it** (statuses are the audit's where stated):
 
