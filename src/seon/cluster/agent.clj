@@ -1733,11 +1733,11 @@
         leaves (when (set? ready) (vec ready))
         syms (when leaves (db/q '[:find ?h ?s :in $ [?h ...] :where [?t :seon.task/id ?h] [?t :seon.task/sym ?s]]
                                 database leaves))
-        open (db/q '[:find ?h ?k ?id ?b ?i
+        open (db/q '[:find ?h ?k ?id ?b ?i :in $ %
                      :where [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
                      [?a :seon.task/assigned ?h] [?a :seon.task/assignment ?k] [?a :seon.task/branch ?b]
-                     [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] [?t :seon.task/execution ?i]]
-                   database)
+                     [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] (execution ?t ?i)]
+                   database task/ready-rules)
         ended (db/q '[:find ?h (count ?a) :where [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _]
                       [?t :seon.task/id ?h]]
                     database)
@@ -2123,7 +2123,7 @@
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
                              ;; a cancelled task's attempt holding no end of its own is closed :cancelled
                              end (or main-end on-branch
-                                     (when (= :cancelled (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id h])))
+                                     (when (= :cancelled (task/execution database h))
                                        :cancelled))
                              publish? (publication-due? row)]
                          (when (uuid? head)

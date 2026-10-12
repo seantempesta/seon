@@ -119,7 +119,9 @@
                             :unreadable-file "[{"
                             :invalid-entry "[#:seon.task{:name \"x\" :intnet \"i\"}]"
                             :invalid-name "[#:seon.task{:name \"x y\" :intent \"i\"}]"
-                            :duplicate-name "[#:seon.task{:name \"x\" :intent \"i\"} #:seon.task{:name \"x\" :intent \"j\"}]"}]
+                            :duplicate-name "[#:seon.task{:name \"x\" :intent \"i\"} #:seon.task{:name \"x\" :intent \"j\"}]"
+                            ;; a child takes its goal from its subject; a task with no parent has none to take
+                            :no-intent "[#:seon.task{:name \"x\" :instructions \"i\"}]"}]
          (is (= rule (refusal #(ingest! connection text)))))
        (testing "only #{} at an optional set member is absence; other values, a retired or derived member included, meet the closed entry"
          (doseq [members [":unknown []" ":must-read #{a/b}" ":references #{a/b}" ":needs {}" ":id \"000000000000\"" ":id []"]]

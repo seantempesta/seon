@@ -7,7 +7,8 @@
             [seon.id :as id]
             [clojure.string :as str]
             [seon.render.route :as route]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.task :as task]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -877,10 +878,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.message/cause]
                   :seon.message/undeliverable]}
   [database recipient cause]
-  (let [intent (db/q '[:find ?intent . :in $ ?id
+  (let [intent (db/q '[:find ?intent . :in $ % ?id
                        :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g]
                               [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
-                              [?t :seon.task/execution ?intent]] database recipient)]
+                              (execution ?t ?intent)] database task/ready-rules recipient)]
     (seon.error.refusal/error
      :seon.message/undeliverable
      {:seon.error/operation `send!

@@ -1516,7 +1516,7 @@
         prefix (some-> qualifier node/string (subs 1))
         members (dissoc declaration :seon.task/ns)
         order (distinct (concat (keep #(when (keyword? %) %) (map node/sexpr (remove node/whitespace-or-comment? (node/children inner))))
-                                [:seon.task/name :seon.task/step :seon.task/intent :seon.task/children :seon.task/needs]))
+                                [:seon.task/name :seon.task/step :seon.task/intent :seon.task/instructions :seon.task/children :seon.task/needs]))
         value (node/coerce (apply array-map (mapcat (fn [k] (when (contains? members k)
                                                               [(if (= prefix (namespace k)) (keyword (name k)) k) (members k)]))
                                                     order)))

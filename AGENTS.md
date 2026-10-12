@@ -414,8 +414,11 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
   name; the task is `ns/name`), `:seon.task/intent` (what must become true, short, with its references inline) and
-  optional `:seon.task/needs`; its identity is `seon.id/id` over `[ns name]`. The writer derives
-  `:seon.task/references` (the qualified symbols the intent cites) for queries; it is never authored. Its proofs are the deftests carrying `ns/name` in
+  optional `:seon.task/needs`; its identity is `seon.id/id` over `[ns name]`. A chain is a subject with step
+  `:seon.task/children` in one file: the subject declares the intent (the goal), each step its `:seon.task/step` and
+  `:seon.task/instructions` (its own work), and a step's task is `clojure.core/merge` of both down the children, its
+  own keys last (`seon.task/effective`); one `:running` on the subject launches it. The writer derives
+  `:seon.task/references` (the qualified symbols intent and instructions cite) for queries; it is never authored. Its proofs are the deftests carrying `ns/name` in
   `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a case to an existing table test; write
   a new deftest only for a behavior no test covers; a task already green proves nothing; at merge root keeps a new
   test only if it guards a new behavior class.

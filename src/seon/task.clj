@@ -135,10 +135,13 @@
         entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
     (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
-    (mapv (fn [{:seon.task/keys [name] :as entry}]
-            (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
-            (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
-          entries)))
+    (let [children (into #{} (comp (mapcat :seon.task/children) (map second)) entries)]
+      (mapv (fn [{:seon.task/keys [name] :as entry}]
+              (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
+              ;; a child takes its goal from its subject; a task no entry owns has none to take
+              (when-not (or (:seon.task/intent entry) (children (task-sym ns name))) (refuse-task! :no-intent entry {}))
+              (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
+            entries))))
 
 (def ^:private tree-attributes
   "The task attributes whose values are other tasks: authored and compared as lookup refs `[:seon.task/sym ns/name]`."
@@ -256,17 +259,18 @@
         (refused 'seon.task/refuse-needs-cycle :needs-cycle (symbol (namespace (first syms))) syms)))))
 
 (defn- with-references
-  "`task` with the references its intent cites (`seon.ref/names`), derived by the writer; none is no key."
+  "`task` with the references its intent and instructions cite (`seon.ref/names`), derived by the writer; none is no key."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:seon.task/keys [intent] :as task}]
-  (let [cited (when intent (ref/names intent))]
+  [{:seon.task/keys [intent instructions] :as task}]
+  (let [cited (into #{} (mapcat ref/names) (keep identity [intent instructions]))]
     (if (seq cited) (assoc task :seon.task/references cited) (dissoc task :seon.task/references))))
 
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
   whose handle changed frees its unique symbol before its new entity claims it; a handle whose
   stored declaration differs from the caller's `basis`, both under the writer's projection,
-  refuses with base, current and proposed."
+  refuses with base, current and proposed. A new task no proposed or stored task owns as a child is
+  written `:held`; a child runs under its subject's execution (`seon.task/execution`)."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
                        :seon.task/basis] [:vector :seon.schema/value]]}
   [projection stored by-id basis]
@@ -274,7 +278,8 @@
                     :seon.task/references)
         ;; what the writer holds for a task: its declaration and the references derived from its intent
         held (fn [task] (when task (cond-> (declaration projection task)
-                                     (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task))))))]
+                                     (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task))))))
+        owned-children (into #{} (mapcat :seon.task/children) (concat (vals stored) (vals by-id)))]
     (refs-last
      (into []
           (mapcat (fn [id]
@@ -290,6 +295,7 @@
                                                    current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
                         current (replacement-tx (stored id) proposed owned)
+                        (owned-children [:seon.task/sym (:seon.task/sym proposed)]) [(dissoc proposed :seon.task/execution)]
                         :else [(assoc proposed :seon.task/execution :held)]))))
           (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id)))))))
 
@@ -306,12 +312,13 @@
     []))
 
 (defn- held-tx
-  "`[:db/add task :seon.task/execution :held]` for every stored task with no intent: an absent
-  intent is never read as running, so a task is :held until someone sets :running."
+  "`[:db/add task :seon.task/execution :held]` for every stored task with no execution and no parent: an
+  absent execution is never read as running, so a root is :held until someone sets :running, and a child
+  runs under its subject's (`seon.task/execution`)."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
   [database]
   (if (contains? (:schema database) :seon.task/execution)
-    (let [unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _])] database)]
+    (let [unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _]) (not [_ :seon.task/children ?e])] database)]
       (when (read-error unset) (throw (ex-info (:seon.error/message unset) unset)))
       (mapv (fn [e] [:db/add e :seon.task/execution :held]) (sort unset)))
     []))
@@ -627,13 +634,15 @@
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
   name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
   tasks as lookup refs `[:seon.task/sym ns/name]`, and needs that would leave a task
-  waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the intent.
+  waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the intent and
+  instructions; a step declares its own `:seon.task/instructions` and takes the goal it omits from its subject.
 
   Example:
   (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-                             [:seon.task/intent :seon.task/intent]
+                             [:seon.task/intent {:optional true} :seon.task/intent]
+                             [:seon.task/instructions {:optional true} :seon.task/instructions]
                              [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
@@ -642,7 +651,7 @@
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
     (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/step :seon.task/intent
-                                                    :seon.task/children :seon.task/needs]) agent-id)
+                                                    :seon.task/instructions :seon.task/children :seon.task/needs]) agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
           report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
       (if (:seon.error/at report)
@@ -906,8 +915,11 @@
 (def ready-rules
   "The stratified rules `ready` reads: `leaf-done` (an assignment of it merged on main, outcome
   :merged, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
-  inherited needs) and `blocked` (a need with an open leaf at or under it)."
-  '[[(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task/outcome :merged ?tx]
+  inherited needs), `blocked` (a need with an open leaf at or under it) and `execution` (a task's own
+  `:seon.task/execution`, else its nearest ancestor's down `:seon.task/children`)."
+  '[[(execution ?t ?e) [?t :seon.task/execution ?e]]
+    [(execution ?t ?e) [?p :seon.task/children ?t] [(missing? $ ?t :seon.task/execution)] (execution ?p ?e)]
+    [(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task/outcome :merged ?tx]
      (not-join [?t ?tx] [?b :seon.task.attempt/end :sent-back ?tx2] [?b :seon.task.attempt/target ?t] [(> ?tx2 ?tx)])]
     [(under ?n ?l) [?n :seon.task/children ?l]]
     [(under ?n ?l) [?n :seon.task/children ?c] (under ?c ?l)]
@@ -917,17 +929,62 @@
     [(needs* ?t ?n) [?p :seon.task/children ?t] (needs* ?p ?n)]
     [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]])
 
+(defn execution
+  "The execution task `handle` runs under in `database`: its own `:seon.task/execution`, else its nearest
+  ancestor's down `:seon.task/children` (the `execution` rule of `ready-rules`); nil when none declares one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/execution :seon.db/invalid-read-error]]}
+  [database handle]
+  (db/q '[:find ?e . :in $ % ?h :where [?t :seon.task/id ?h] (execution ?t ?e)] database ready-rules handle))
+
+(defn effective
+  "The effective task of `handle` in `database`: its handle and symbol, and `clojure.core/merge` of the
+  `:seon.task/intent` and `:seon.task/instructions` each task declares from its root subject down
+  `:seon.task/children` to it, its own keys last. Content merges down children only, never along needs.
+  nil when `database` holds no such task."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/effective :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database handle]
+  (let [content [:seon.task/intent :seon.task/instructions]
+        step (db/pull database (into [:db/id :seon.task/id :seon.task/sym] content) [:seon.task/id handle])]
+    (if (or (nil? step) (read-error step))
+      step
+      ;; the declarations from the step up to its root, then merged root first
+      (loop [eid (:db/id step) lineage (list (select-keys step content))]
+        (let [parent (db/q '[:find ?p . :in $ ?c :where [?p :seon.task/children ?c]] database eid)
+              pulled (when (int? parent) (db/pull database content parent))]
+          (cond (read-error parent) parent
+                (read-error pulled) pulled
+                (int? parent) (recur parent (conj lineage (or pulled {})))
+                :else (apply merge (select-keys step [:seon.task/id :seon.task/sym]) lineage)))))))
+
+(defn goal-owner
+  "The handle of the task that declares the goal task `handle` reads in `database` (`effective`): itself when
+  it declares a `:seon.task/intent`, else its nearest ancestor up `:seon.task/children` that does; nil when
+  `database` holds no such task."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/handle :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database handle]
+  (loop [lookup [:seon.task/id handle]]
+    (let [task (db/pull database [:db/id :seon.task/id :seon.task/intent] lookup)
+          parent (when (:db/id task) (db/q '[:find ?p . :in $ ?c :where [?p :seon.task/children ?c]] database (:db/id task)))]
+      (cond (read-error task) task
+            (read-error parent) parent
+            (or (nil? task) (:seon.task/intent task) (not (int? parent))) (:seon.task/id task)
+            :else (recur parent)))))
+
 (defn ready
-  "The handles of every task that should be running now in `database` (main's): the leaves whose own
-  intent is :running (no inheritance: ingestion and `create!` write :held on every task, so an absent
-  intent never appears and nothing launches by being read here), not done, without a terminal end other
+  "The handles of every task that should be running now in `database` (main's): the leaves whose
+  execution is :running (their own, else their nearest ancestor's, the `execution` rule: ingestion writes
+  :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without a terminal end other
   than :done (an :error end, a failed start among them, is terminal too: no pass assigns it again by
   itself), minus those a need blocks.
-  Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
+  The execution is bound to a variable, then compared: Datahike loses the rule's binding of `?t` for the
+  later negated rules when the call carries the constant. Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
   hundred times more. A leaf with an open attempt stays in it; the registry tells running from launch."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
   [database]
-  (let [eligible (db/q '[:find ?t ?h :in $ % :where [?t :seon.task/execution :running]
+  (let [eligible (db/q '[:find ?t ?h :in $ % :where (execution ?t ?x) [(= ?x :running)]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
                                    [(contains? #{:given-back :capped :stalled :cancelled :error} ?e)])]

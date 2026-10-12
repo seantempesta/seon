@@ -1,13 +1,14 @@
 (ns ^{:seon.ns/context-relevant? true} my.task
-  "My task: the one I hold with its proofs (`current`), its intent rewritten as
-  the work clarifies it (`refine!`), and how I give it back when I cannot make
+  "My task: the one I hold with its proofs (`current`), its goal or my step's
+  instructions rewritten as the work clarifies them (`refine!`), and how I give it back when I cannot make
   its proofs green (`send-back!`). Success has no verb: my
   task ends when its proofs are green. Call preparation supplies my database
   and identity.
 
   Example:
   (my.task/current {})"
-  (:require [seon.context :as context]
+  (:require [clojure.string :as str]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.ref :as ref]
@@ -37,38 +38,55 @@
       (assoc sections :seon.agent/id agent-id))))
 
 (defn refine!
-  "Rewrite my task's intent on my branch; the merge carries it to main.
+  "Rewrite my chain's goal or my step's own work on my branch; the merge carries it to main.
 
-  The new intent is prose naming its references inline: backticked fully
-  qualified symbols and keywords, tasks as `ns/task-name`, and paths with
-  `#heading` anchors. My next context resolves them. Answers the task's handle,
-  whether it changed, and each reference that does not resolve as its problem.
+  `:seon.task/intent` is the goal: it is written on the subject, the task that declares the goal my step
+  reads (`seon.task/goal-owner`), so every step of my chain reads it next (`seon.task/effective`).
+  `:seon.task/instructions` is my step's own work, written on the task I hold. Both are prose naming their
+  references inline: backticked fully qualified symbols and keywords, tasks as `ns/task-name`, and paths
+  with `#heading` anchors. My next context resolves them. Answers the handle of the task I hold, whether a
+  declaration changed, and each reference that does not resolve as its problem.
 
   Example:
-  (my.task/refine! {:seon.task/intent \"Make `seon.db/q` answer its refusal as data; see docs/seon/specs/merge.md#1-the-merge-request.\"})"
+  (my.task/refine! {:seon.task/intent \"Make `seon.db/q` answer its refusal as data; see docs/seon/specs/merge.md#1-the-merge-request.\"})
+  (my.task/refine! {:seon.task/instructions \"The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`.\"})"
   {:malli/schema [:=> [:cat :my.task/refine-request]
                   [:or :my.task/refined :seon.task/refused-error :seon.task/conflict-error :my.task/no-task-error :seon.error/value]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent}]
+  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent instructions :seon.task/instructions}]
   (let [database (db/db connection)
         handle (task/agent-task database agent-id)
-        held (when (string? handle) (db/pull database [:seon.task/ns] [:seon.task/id handle]))
-        ;; the declarations of the task's namespace as stored now: the basis the writer checks
-        basis (when (:seon.task/ns held)
-                (task/task-basis database {(str "resources/seon/tasks/" (:seon.task/ns held) ".edn") "[]"}))]
+        subject (when (and intent (string? handle)) (task/goal-owner database handle))
+        ;; each task the refinement writes, with the members written on it
+        writes (when (string? handle)
+                 (cond-> {}
+                   (string? subject) (assoc subject {:seon.task/intent intent})
+                   instructions (update handle merge {:seon.task/instructions instructions})))
+        write! (fn [target changes]
+                 (let [held (db/pull (db/db connection) [:seon.task/ns] [:seon.task/id target])
+                       ;; the declarations of the task's namespace as stored now: the basis the writer checks
+                       basis (when (:seon.task/ns held)
+                               (task/task-basis (db/db connection) {(str "resources/seon/tasks/" (:seon.task/ns held) ".edn") "[]"}))]
+                   (cond (:seon.error/at held) held
+                         (:seon.error/at basis) basis
+                         :else (task/create! (merge (get basis target) changes
+                                                    {:seon.db/connection connection :seon.agent/id agent-id
+                                                     :seon.task/basis (select-keys basis [target])})))))]
     (cond
       (:seon.error/at handle) handle
       (nil? handle) (refusal/error :my.task/no-task-error {:seon.error/operation 'my.task/refine! :my.task/holder agent-id
                                                            :seon.error/message "I hold no task to refine."})
-      (:seon.error/at held) held
-      (:seon.error/at basis) basis
+      (:seon.error/at subject) subject
       :else
-      (let [written (task/create! (merge (assoc (get basis handle) :seon.task/intent intent)
-                                         {:seon.db/connection connection :seon.agent/id agent-id
-                                          :seon.task/basis (select-keys basis [handle])}))
-            resolved (when-not (:seon.error/at written) (ref/references (db/db connection) {:seon.ref/text intent}))
+      (let [written (reduce (fn [answers [target changes]]
+                              (let [answer (write! target changes)]
+                                (if (:seon.error/at answer) (reduced answer) (conj answers answer))))
+                            [] (sort-by key writes))
+            resolved (when-not (:seon.error/at written)
+                       (ref/references (db/db connection) {:seon.ref/text (str/join "\n\n" (keep identity [intent instructions]))}))
             problems (filterv :seon.ref/problem-kind resolved)]
-        (or (some #(when (:seon.error/at %) %) resolved)
-            (cond-> written
+        (or (when (:seon.error/at written) written)
+            (some #(when (:seon.error/at %) %) resolved)
+            (cond-> {:seon.task/id handle :seon.task/changed? (boolean (some :seon.task/changed? written))}
               (seq problems) (assoc :my.task/problems problems)))))))
 
 (defn send-back!

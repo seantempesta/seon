@@ -299,3 +299,44 @@
       (adopted-file "Fix." "Sides.") ["Refined." "Sides."] 0
       ;; a republication changing area too keeps main's area and writes one problem task for root
       (adopted-file "Squared." "Sides.") ["Refined." "Sides."] 1)))
+
+;;; CHAIN: a subject with a Prove and an Implement step, authored sparse in one file (hybrid-chains §4.1).
+
+(defn- chain-entries
+  "The tq.tree chain: the subject's `goal`, Prove's instructions and Implement's `own` members."
+  {:malli/schema [:=> [:cat :string :string] [:vector :string]]}
+  [goal own]
+  [(str "#:seon.task{:name \"subject\" :intent \"" goal "\" " (children ["prove" "implement"]) "}")
+   "#:seon.task{:name \"prove\" :step :prove :instructions \"Add rows to `tq.tree-test/rows`.\"}"
+   (str "#:seon.task{:name \"implement\" " (needs "prove") " :instructions \"Fix `tq.tree/scan`.\" " own "}")])
+
+(deftest a-steps-effective-task-is-its-subjects-merged-with-its-own
+  (test-support/with-database
+   (fn [connection]
+     (apply ingest! connection (chain-entries "Make `tq.tree/scan` idempotent." ":intent \"Only the body.\""))
+     (let [content #(select-keys (task/effective (db/db connection) (handle %)) [:seon.task/intent :seon.task/instructions])]
+       (are [step expected] (= expected (content step))
+         "subject" {:seon.task/intent "Make `tq.tree/scan` idempotent."}
+         "prove" {:seon.task/intent "Make `tq.tree/scan` idempotent." :seon.task/instructions "Add rows to `tq.tree-test/rows`."}
+         "implement" {:seon.task/intent "Only the body." :seon.task/instructions "Fix `tq.tree/scan`."})
+       (is (= #{'tq.tree-test/rows}
+              (set (:seon.task/references (db/pull (db/db connection) [:seon.task/references] [:seon.task/id (handle "prove")]))))
+           "the writer derives references from the instructions too")
+       (apply ingest! connection (chain-entries "Make `tq.tree/scan` total." ""))
+       (is (= "Make `tq.tree/scan` total." (:seon.task/intent (content "implement")))
+           "a refined subject intent is the step's next view once its own intent is gone")))))
+
+(deftest a-running-subject-readies-its-first-step-only
+  (test-support/with-database
+   (fn [connection]
+     (apply ingest! connection (chain-entries "Make `tq.tree/scan` idempotent." ""))
+     (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-tree-agent"))
+     (let [execution #(:seon.task/execution (db/pull (db/db connection) [:seon.task/execution] [:seon.task/id (handle %)]))
+           running (after (db/db connection) [[["subject" :execution :running]]])]
+       (is (= [:held nil nil] (mapv execution ["subject" "prove" "implement"])) "ingestion holds the root only")
+       (is (= #{} (task/ready (db/db connection))) "a held subject holds its steps")
+       (is (= #{(handle "prove")} (task/ready running)) "one fact on the subject launches its first step")
+       (is (= :running (task/execution running (handle "implement"))) "a step runs under its subject's execution")
+       (is (= #{(handle "implement")} (task/ready (after running [[["prove" :merged]]]))))
+       (is (= #{} (task/ready (after running [[["implement" :execution :held]] [["prove" :merged]]])))
+           "a step's own :held keeps it held")))))

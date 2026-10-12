@@ -14,10 +14,11 @@
                       :my.turn/completed
                       [:map [:my.task/target {:optional true} :my.task/target]
                        [:my.task/counterexample {:optional true} :my.task/counterexample]]]
-          :refine-request [:map {:description "A refinement of the task an agent holds: its new intent, prose naming its references as backticked fully qualified symbols, keywords and tasks and paths with #heading anchors. Connection and agent are supplied by call preparation."}
+          :refine-request [:map {:description "A refinement of the task an agent holds: a new goal, written on the subject that declares it (seon.task/goal-owner), or new instructions, its own step's work; prose naming its references as backticked fully qualified symbols, keywords and tasks and paths with #heading anchors. Connection and agent are supplied by call preparation."}
                            [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                           [:seon.task/intent :seon.task/intent]]
-          :refined [:map {:description "A refinement as my.task/refine! answers it: the task's handle, whether its declaration changed on the agent's branch, and each reference of the new intent that does not resolve."}
+                           [:seon.task/intent {:optional true} :seon.task/intent]
+                           [:seon.task/instructions {:optional true} :seon.task/instructions]]
+          :refined [:map {:description "A refinement as my.task/refine! answers it: the held task's handle, whether a declaration changed on the agent's branch, and each reference of the new text that does not resolve."}
                     [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]
                     [:my.task/problems {:optional true} :my.task/problems]]
           :problems [:vector {:description "Each reference of a refined intent that does not resolve on the agent's branch, as its problem."} :seon.ref/problem]

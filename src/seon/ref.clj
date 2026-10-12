@@ -206,13 +206,15 @@
               {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
               (:seon.error/at found) found
               :else {:seon.ref/name reference :seon.render/operations [read-form]}))
-      (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/intent]
+      (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/intent :seon.task/instructions]
                            (cond (seq (db/datoms database :avet :seon.fn/sym reference)) [:seon.fn/sym reference]
                                  (seq (db/datoms database :avet :seon.test/sym reference)) [:seon.test/sym reference]
                                  :else [:seon.task/sym reference]))]
         (cond
           (:seon.error/at found) found
-          (:seon.task/sym found) {:seon.ref/name reference :doc (first (str/split-lines (:seon.task/intent found)))}
+          ;; a step may declare only its instructions, taking its goal from its subject
+          (:seon.task/sym found) {:seon.ref/name reference
+                                  :doc (first (str/split-lines (some found [:seon.task/intent :seon.task/instructions])))}
           (or (:seon.fn/sym found) (:seon.test/sym found))
           (cond-> {:seon.ref/name reference :seon.render/operations [read-form]}
             (:seon.fn/doc found) (assoc :doc (summary (:seon.fn/doc found))))
@@ -266,7 +268,7 @@
             test-entity (when-not (:seon.fn/sym function)
                           (db/pull database [:seon.test/sym :seon.test/source :seon.fn/calls] [:seon.test/sym reference]))
             task (when-not (or (:seon.fn/sym function) (:seon.test/sym test-entity))
-                   (db/pull database [:seon.task/sym :seon.task/intent] [:seon.task/sym reference]))]
+                   (db/pull database [:seon.task/sym :seon.task/intent :seon.task/instructions] [:seon.task/sym reference]))]
         (cond
           (:seon.error/at function) function
           (:seon.fn/sym function)
@@ -287,8 +289,9 @@
                         (:seon.test/source test-entity) (assoc :seon.test/source (:seon.test/source test-entity)))
             (inner database #{reference} "" (set (:seon.fn/calls test-entity))))
           (:seon.error/at task) task
-          (:seon.task/sym task) (with-inner {:seon.ref/name reference :seon.task/intent (:seon.task/intent task)}
-                                  (inner database #{reference} (:seon.task/intent task) #{}))
+          (:seon.task/sym task) (with-inner (merge {:seon.ref/name reference} (select-keys task [:seon.task/intent :seon.task/instructions]))
+                                  (inner database #{reference}
+                                         (str/join "\n\n" (keep task [:seon.task/intent :seon.task/instructions])) #{}))
           :else (library-name reference))))))
 
 (declare resolve-path)

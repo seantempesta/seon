@@ -57,6 +57,7 @@
                            [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
                            [:seon.test/source {:optional true} :seon.test/source]
                            [:seon.task/intent {:optional true} :seon.task/intent]
+                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                            [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin, the one read operation and the names its text cites, one level; never its text."}
                           [:seon.ref/path :seon.ref/path]

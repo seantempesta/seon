@@ -52,3 +52,30 @@
 
 (deftest send-back-with-a-blank-reason-answers-its-error
   (is (:seon.error/at (my.task/send-back! {:my.task/reason "  "}))))
+
+(deftest a-refined-goal-is-every-steps-goal
+  (with-root false
+   (fn [connection]
+     (test-support/declare-proof! connection 'tq.chain-test 'rows 'tq.chain/implement)
+     (task/index-tasks!
+      {:seon.db/connection connection
+       :seon.task/files {"resources/seon/tasks/tq.chain.edn"
+                         (str "[#:seon.task{:name \"subject\" :intent \"Scan.\" :children #{[:seon.task/sym tq.chain/prove] [:seon.task/sym tq.chain/implement]}}"
+                              " #:seon.task{:name \"prove\" :step :prove :instructions \"Add rows.\"}"
+                              " #:seon.task{:name \"implement\" :needs #{[:seon.task/sym tq.chain/prove]} :instructions \"Fix it.\"}]")}})
+     (task/assign! {:seon.db/connection connection :seon.task/assigned (task/task-handle 'tq.chain "implement")
+                    :seon.task/agent [:seon.agent/id "root"] :seon.task/branch (get-in (db/db connection) [:config :branch])
+                    :seon.agent/context-source (test-support/context-source connection)})
+     (let [declared #(task/task-declaration (db/db connection) (task/task-handle 'tq.chain %))
+           content #(select-keys (task/effective (db/db connection) (task/task-handle 'tq.chain %)) [:seon.task/intent :seon.task/instructions])
+           prove (declared "prove")]
+       (is (true? (:seon.task/changed? (my.task/refine! {:seon.db/connection connection :seon.agent/id "root"
+                                                          :seon.task/intent "Scan twice; the rows are `tq.chain-test/rows`."}))))
+       (is (= "Scan twice; the rows are `tq.chain-test/rows`." (:seon.task/intent (declared "subject"))) "the goal is written on the subject")
+       (is (= {:seon.task/intent "Scan twice; the rows are `tq.chain-test/rows`." :seon.task/instructions "Add rows."} (content "prove"))
+           "every step of the chain reads it")
+       (is (= prove (declared "prove")) "no other step's declaration changes")
+       (my.task/refine! {:seon.db/connection connection :seon.agent/id "root" :seon.task/instructions "Fix the body only."})
+       (is (= "Fix the body only." (:seon.task/instructions (declared "implement"))) "instructions are the held step's own")
+       (is (= [prove "Scan twice; the rows are `tq.chain-test/rows`."] [(declared "prove") (:seon.task/intent (declared "subject"))])
+           "refining instructions changes only the held step")))))

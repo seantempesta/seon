@@ -2223,11 +2223,11 @@
 (declare first-proof-run-t latest-answering-turn-t proof-run-recorded? prove-turn step-limit-ms)
 
 (defn- attempt-running?
-  "True when the task `handle` an agent holds has intent :running on `database`, its branch (forked from
-  the main commit db<->flow wrote its attempt in)."
+  "True when the task `handle` an agent holds runs under execution :running on `database`, its branch (forked
+  from the main commit db<->flow wrote its attempt in): its own, else its subject's (`seon.task/execution`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
-  (= :running (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id handle]))))
+  (= :running (task/execution database handle)))
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose first proof run on `database`, its branch, came
