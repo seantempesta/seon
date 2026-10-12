@@ -144,6 +144,21 @@
            heads (set (map first (mapcat taught-forms lines)))]
        (is (contains? heads 'seon.schema/register!) "help teaches the registration form")))))
 
+(deftest help-prints-whole-without-a-large-value-finding
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [reply (support/reply (agent-text "(help)" agent-id running))]
+       (is (= [] (filterv #(= :large-value (:seon.repl/finding %)) (:seon.repl/findings reply)))
+           "a value the printer shows whole is not flagged large")))))
+
+(deftest ^{:seon/tasks #{'my.program/source-finds-a-schema-registered-in-the-same-eval-request}}
+  source-finds-a-schema-registered-in-the-same-eval-request
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [code "(do (seon.schema/register! :comp.order/qty :int) (my.program/source :comp.order/qty))"
+           value (:seon.repl/value (support/reply (agent-text code agent-id running)))]
+       (is (nil? (:seon.program/not-found value)) "the key registered a moment ago is found")))))
+
 (deftest dir-lists-what-an-agent-calls-as-an-agent-calls-it
   (support/with-running-agent
    (fn [running agent-id _]
