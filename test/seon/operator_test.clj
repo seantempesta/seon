@@ -201,6 +201,19 @@
       (is (nil? (root {:seon.operator/managed-root "/root" :seon.operator/command :start
                        :seon.config/manifest {:seon.config.fs/working-root "/elsewhere"}}))))))
 
+(deftest a-throwaway-jvm-never-takes-the-roots-derived-web-port
+  ;; A check's throwaway JVM boots a cluster named "default", whose derived port
+  ;; is the root's bookmark (7994). Booted in the root's restart window it held
+  ;; that port, and the root's new JVM served on an ephemeral one for its whole life.
+  (let [port (fn [request] (find (:seon.config/environment (operator/boot-request request "/checkout"))
+                                 :seon.config.web/port))]
+    (testing "a throwaway JVM's view binds a port the operating system chooses"
+      (is (= [:seon.config.web/port 0]
+             (port {:seon.operator/managed-root "/check" :seon.operator/command :start
+                    :seon.operator/throwaway? true}))))
+    (testing "the root's own JVM keeps its derived port"
+      (is (nil? (port {:seon.operator/managed-root "/root" :seon.operator/command :start}))))))
+
 (deftest check-slots-are-granted-in-ticket-order
   ;; One slot, a holder, then three waiters filed 150 ms apart (the first behind
   ;; a ticket whose process is dead): they must acquire in filing order.

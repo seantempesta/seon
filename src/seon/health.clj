@@ -618,7 +618,8 @@
     (:seon.error/at value) (select-keys value [:seon.error/operation :seon.error/message])
     :else
     (case k
-      :seon.health/readiness (select-keys value [:seon.boot/missing-layers :seon.boot/ready-ms :seon.render.web/url])
+      :seon.health/readiness (select-keys value [:seon.boot/missing-layers :seon.boot/ready-ms :seon.render.web/url
+                                                                 :seon.render.web/wanted-port])
       :seon.health/problems (into (sorted-map) (map (fn [[family rows]] [family (count rows)])) value)
       :seon.health/status (select-keys value [:seon.cluster.status/heap-used :seon.cluster.status/heap-live :seon.cluster.status/heap-max
                                               :seon.cluster.status/open-turns :seon.cluster.status/platform-threads])

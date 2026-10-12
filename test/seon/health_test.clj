@@ -134,6 +134,17 @@
               [(:seon.instrument/replaced-var root)]))
         "a bare Var name is not a replaced root")))
 
+(deftest a-view-on-a-fallen-back-port-says-which-port-it-wanted
+  ;; bin/seon status showed only the served url, so a view that lost its
+  ;; derived port (the bookmark) to another JVM read as healthy (2026-10-12).
+  (let [readiness {:seon.boot/missing-layers [] :seon.boot/ready-ms 1
+                   :seon.render.web/url "http://127.0.0.1:52872" :seon.render.web/wanted-port 7994}]
+    (is (= 7994 (get-in (health/render-ai {:seon.render/value {:seon.health/cluster "default"
+                                                               :seon.health/state :observed
+                                                               :seon.health/findings []
+                                                               :seon.health/readiness readiness}})
+                        [:seon.health/units :seon.health/readiness :seon.render.web/wanted-port])))))
+
 (deftest a-slower-boot-phase-is-a-regression-until-it-recovers
   ;; Default 2026-09-28: the source-current phase took 15.5 s on one program
   ;; and 27.8 s on the next (bin/seon start 20.0 s -> 32.1 s ready), and

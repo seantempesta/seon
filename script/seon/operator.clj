@@ -774,13 +774,20 @@
 (defn boot-request
   "`request` with the agents' filesystem working root (`:seon.config.fs/working-root`)
   bound to `checkout` in its configuration environment, unless its manifest or
-  environment already decides that dial."
+  environment already decides that dial. A throwaway JVM's view binds a port the
+  operating system chooses (`:seon.config.web/port` 0): its cluster is named like
+  the root's, so the derived port is the root's bookmark."
   {:malli/schema [:=> [:cat :seon.operator/request :string] :seon.operator/request]}
   [request checkout]
-  (if (or (find (:seon.config/manifest request) :seon.config.fs/working-root)
-          (find (:seon.config/environment request) :seon.config.fs/working-root))
-    request
-    (assoc-in request [:seon.config/environment :seon.config.fs/working-root] checkout)))
+  (let [throwaway? (:seon.operator/throwaway? request)
+        request (dissoc request :seon.operator/throwaway?)
+        decided? (fn [dial] (or (find (:seon.config/manifest request) dial)
+                                (find (:seon.config/environment request) dial)))]
+    (cond-> request
+      (not (decided? :seon.config.fs/working-root))
+      (assoc-in [:seon.config/environment :seon.config.fs/working-root] checkout)
+      (and throwaway? (not (decided? :seon.config.web/port)))
+      (assoc-in [:seon.config/environment :seon.config.web/port] 0))))
 
 (defn- launch-child!
   "Launch one JVM whose program is the directory `source` and return its
@@ -790,7 +797,7 @@
   directory, which the next move prunes (`prune-archives!`)."
   [request source reuse-classes?]
   (let [throwaway? (boolean (:seon.operator/throwaway? request))
-        request (boot-request (dissoc request :seon.operator/throwaway?) (repository-root))
+        request (boot-request request (repository-root))
         root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
