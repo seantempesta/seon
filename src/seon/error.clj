@@ -895,8 +895,10 @@
                     "the declared schema")
         expected (schema-expectation described-problem)
         missing-key (last path)
-        ;; the same name the caller's map holds under another namespace
-        held-key (when (and missing? (qualified-keyword? missing-key) (map? parent))
+        ;; the same name the caller's map holds under another namespace; a
+        ;; Datahike database is a record whose seq is its datoms, never walked
+        held-key (when (and missing? (qualified-keyword? missing-key) (map? parent)
+                            (not (db/database-value? parent)))
                    (some #(when (and (qualified-keyword? %) (= (name %) (name missing-key))) %)
                          (keys parent)))]
     (cond-> {:seon.error/path (vec path)

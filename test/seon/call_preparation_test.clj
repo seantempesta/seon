@@ -135,6 +135,14 @@
    (swap! entered inc)
    :two-arity))
 
+(defn probe-database-then-registry
+  "The `seon.cluster.agent/lifecycle-facts` shape: a leading database the
+  world supplies, then a map input no binding supplies."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.flow.plan/registry] :boolean]}
+  [_database _registry]
+  (swap! entered inc)
+  true)
+
 (defn probe-connection-name
   "The identity of the connection this call was supplied.
 
@@ -666,7 +674,8 @@
    'probe-current-database #'probe-current-database
    'probe-shortcut #'probe-shortcut
    'probe-leading-database #'probe-leading-database
-   'probe-connection-name #'probe-connection-name})
+   'probe-connection-name #'probe-connection-name
+   'probe-database-then-registry #'probe-database-then-registry})
 
 (defn- arm-probes!
   "Arm the probes as a cluster arms its loaded program (`instrument/apply!`):
@@ -888,6 +897,26 @@
        (is (= :two-labels (probe ctx "probe-shortcut \"a\" \"b\""))
            "a declared arity whose first input is another schema is matched in
             full, never prefixed")))))
+
+(deftest a-short-call-fills-only-its-binding-inputs-and-refuses-the-rest-by-name
+  ;; K7 (chain-experiment-5): `(lifecycle-facts d)` filled its database by
+  ;; schema name, left the caller's database in the registry slot no binding
+  ;; supplies, and its refusal could not be built: a ClassCastException about
+  ;; Datom and Map$Entry instead of the registry named.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection database-entities)
+     (let [ctx (probe-ctx connection connection)]
+       (reset! entered 0)
+       (let [refusal (test-support/refusal-data
+                      #(armed-eval ctx (str "(seon.call-preparation-test/probe-database-then-registry "
+                                            "(seon.call-preparation-test/probe-current-database))")))]
+         (is (= :input (:seon.instrument/check refusal)))
+         (is (= 'seon.call-preparation-test/probe-database-then-registry (:seon.error/operation refusal)))
+         (is (= [[1 :seon.flow.plan/started] [1 :seon.flow.plan/paused]]
+                (mapv :seon.error/schema-path (:seon.error/problems refusal)))
+             "only the registry, the input no binding supplies, is refused, by its declared keys")
+         (is (zero? @entered) "the body never ran"))))))
 
 (deftest an-unavailable-supplier-refuses-before-the-body
   (testing "the unavailable face: a flat value naming the target, the key and
