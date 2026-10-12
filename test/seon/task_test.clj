@@ -95,7 +95,7 @@
          {:seon.task/assignment assignment :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
           :seon.task/revision (task/task-revision (db/db connection) handle) :seon.task/agent [:seon.agent/id "tq-tree-agent"]
           :seon.task/branch :tq-tree :seon.task.attempt/end :error :seon.task.attempt/relaunch "The execution is repaired."
-          :seon.task.attempt/relaunch-fork commit :seon.task.attempt/target [:seon.task/id handle]
+          :seon.task.attempt/target [:seon.task/id handle]
           :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit}
          {:seon.task.fire/id firing :seon.task.fire/at #inst "2026-10-11T00:00:00Z" :seon.task.fire/of [:seon.task/id handle]
           :seon.task.fire/to [:seon.agent/id "tq-tree-agent"]}])
@@ -110,9 +110,9 @@
          (is (= 'seon.task/create!
                 (:seon.fn/sym (:seon.task/function (db/pull database [{:seon.task/function [:seon.fn/sym]}] [:seon.task/id handle])))))
          (is (= {:seon.task.attempt/end :error :seon.task.attempt/relaunch "The execution is repaired."
-                 :seon.task.attempt/relaunch-fork commit :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit
+                 :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit
                  :seon.task/attempt-of 'tq.tree/a :seon.task.attempt/target 'tq.tree/a}
-                (-> (db/pull database [:seon.task.attempt/end :seon.task.attempt/relaunch :seon.task.attempt/relaunch-fork
+                (-> (db/pull database [:seon.task.attempt/end :seon.task.attempt/relaunch
                                        :seon.task.attempt/reason :seon.task.attempt/commit
                                        :seon.task/attempt-of :seon.task.attempt/target] [:seon.task/assignment assignment])
                     (update :seon.task/attempt-of sym-of) (update :seon.task.attempt/target sym-of))))

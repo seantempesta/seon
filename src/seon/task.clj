@@ -678,22 +678,43 @@
           :else {:seon.task/revision revision :seon.agent/id agent-id :seon.task/proofs (:seon.task/proofs edges)})))
 
 (defn- next-attempt
-  "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`:
-  one more than its ended attempts."
+  "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`: its
+  latest, `:seon.task/attempts-made`, while that attempt is open, else one more, so a removed attempt never
+  re-mints its identity or branch."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or [:tuple [:int {:min 1}] :seon.task/assignment] :seon.db/invalid-read-error]]}
   [database handle]
-  (let [ended (db/q '[:find (count ?a) . :in $ ?handle
-                      :where [?t :seon.task/id ?handle] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _]]
-                    database handle)]
-    (or (read-error ended)
-        (let [number (inc (or ended 0))] [number (id/id [handle number])]))))
+  (let [made (db/q '[:find ?m . :in $ ?handle :where [?t :seon.task/id ?handle] [?t :seon.task/attempts-made ?m]]
+                   database handle)
+        latest (when (int? made) (db/pull database [:db/id :seon.task.attempt/end] [:seon.task/assignment (id/id [handle made])]))]
+    (or (read-error made) (read-error latest)
+        (let [number (if (and (:db/id latest) (not (:seon.task.attempt/end latest))) made (inc (or made 0)))]
+          [number (id/id [handle number])]))))
+
+(defn relaunched
+  "The end commit and merge base of task `handle`'s latest attempt in `database` when db<->flow relaunched it
+  (`:seon.task.attempt/relaunch`, `seon.cluster.agent/close!`): its next attempt forks that commit, so the work
+  carries over, and keeps that merge base, so its merge takes both attempts' changes; nil otherwise."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil [:map [:seon.task.attempt/commit :seon.task.attempt/commit]
+                             [:seon.task/merge-base :seon.task/merge-base]]
+                   :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [latest (db/q '[:find (max ?n) . :in $ ?h
+                       :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
+                     database handle)
+        row (when (int? latest)
+              (db/q '[:find (pull ?a [:seon.task.attempt/relaunch :seon.task.attempt/commit :seon.task/merge-base]) .
+                      :in $ ?h ?n :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
+                    database handle latest))]
+    (or (read-error latest) (read-error row)
+        (when (:seon.task.attempt/relaunch row) (select-keys row [:seon.task.attempt/commit :seon.task/merge-base])))))
 
 (defn attempt-tx
   "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main
-  `database`: its row, numbered one more than the task's ended attempts and identified by
-  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value and the merge base, the
-  commit the branch forked at, when the branch exists; [] when that
+  `database`: its row, numbered one more than the task's `:seon.task/attempts-made` (written beside it) and identified by
+  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value and the merge base: the
+  commit the branch forked at when the branch exists, else a relaunched predecessor's (`relaunched`); [] when that
   attempt is already written. The agent it names may be created in the same transaction. An unknown
   task refuses `:unknown-task`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id :seon.store/branch]
@@ -701,15 +722,18 @@
   [database handle agent-id branch]
   (let [[number attempt :as next] (next-attempt database handle)
         revision (task-revision database handle)
-        base (registry/base-commit-id database branch)]
+        predecessor (relaunched database handle)
+        base (or (registry/base-commit-id database branch) (:seon.task/merge-base predecessor))]
     (cond (read-error next) next
           (read-error revision) revision
+          (read-error predecessor) predecessor
           (nil? revision) (refused 'seon.task/attempt-tx :unknown-task 'seon.task handle)
           (:db/id (db/pull database [:db/id] [:seon.task/assignment attempt])) []
           :else [(cond-> {:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
                           :seon.task.attempt/number number :seon.task/revision revision
                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}
-                   base (assoc :seon.task/merge-base base))])))
+                   base (assoc :seon.task/merge-base base))
+                 [:db/add [:seon.task/id handle] :seon.task/attempts-made number]])))
 
 (defn attempt-rows-tx
   "The transaction data writing onto `branch-db` attempt `key`'s row as main `database` holds it, under
@@ -979,8 +1003,8 @@
   "The handles of every task that should be running now in `database` (main's): the leaves whose
   execution is :running (their own, else their nearest ancestor's, the `execution` rule: ingestion writes
   :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without a terminal end other
-  than :done (an :error end, a failed start among them, is terminal too: no pass assigns it again by
-  itself), minus those a need blocks.
+  than :done that db<->flow did not relaunch (`:seon.task.attempt/relaunch`; an :error end, a failed start among them, is
+  terminal too: no pass assigns it again by itself), minus those a need blocks.
   The execution is bound to a variable, then compared: Datahike loses the rule's binding of `?t` for the
   later negated rules when the call carries the constant. Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
   hundred times more. A leaf with an open attempt stays in it; the registry tells running from launch."
@@ -989,7 +1013,8 @@
   (let [eligible (db/q '[:find ?t ?h :in $ % :where (execution ?t ?x) [(= ?x :running)]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
-                                   [(contains? #{:given-back :capped :stalled :cancelled :error} ?e)])]
+                                   [(contains? #{:given-back :capped :stalled :cancelled :error} ?e)]
+                                   [(missing? $ ?a :seon.task.attempt/relaunch)])]
                        database ready-rules)
         blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database ready-rules))]
     (or (read-error eligible) (read-error blocked)

@@ -337,6 +337,13 @@
  ; normally — nothing is dropped and nothing is written.
  :seon.config.run/max-episode-runs 100
 
+ ; HOW OFTEN a :capped or :stalled attempt with work on its branch
+ ; continues by itself: its next attempt forks its end commit, so the work
+ ; carries over, and keeps its merge base, so the merge takes both
+ ; attempts' changes. Two (hybrid-chains D5): the per-attempt call cap
+ ; already bounds each attempt's spend; an end with no work never relaunches.
+ :seon.config.run/relaunches 2
+
  ; WHO hears what nobody else can be told about: the agent a core fault
  ; with no namespace steward is mailed to, which wakes that agent's turn.
  ; `commit-tx` refuses to address an agent this cluster does not have, so a

@@ -37,6 +37,7 @@
         [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
         [:seon.task/execution {:optional true} :seon.task/execution]
+        [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
         [:seon.task/function {:optional true} :seon.task/function]]
  :children [:set {:seon.db/component true :seon.db/component-schema :seon.task/task
@@ -48,6 +49,7 @@
  :execution [:enum {:seon.db/index true :seon.wake/starts true
                     :description "The task's execution (runtime-follows-db §3), inherited down :seon.task/children: a task runs under its own, else its nearest ancestor's (seon.task/execution). Ingestion and create! write :held on a new task with no parent, so one :running fact on a subject launches its steps, and a step's own value keeps it apart. :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
              :held :running :paused :stopped :cancelled]
+ :attempts-made [:int {:min 1 :description "How many attempts of this task were ever written (seon.task/attempt-tx writes it with each attempt): the next is one more, so a removed attempt never re-mints its identity or branch."}]
  :cron [:string {:min 1 :description "When a recurring task fires: a cron expression, parsed by the schedule's cron library (runtime-follows-db §6)."}]
  :zone [:string {:min 1 :description "The time zone a task's cron expression is read in."}]
  :function [:and {:seon.fn/reference-to :seon.fn/sym
@@ -115,8 +117,7 @@
                   [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
                   [:seon.task/merged-declarations {:optional true} :seon.task/merged-declarations]
                   [:seon.task/git-commit {:optional true} :seon.task/git-commit] [:seon.task/refusal {:optional true} :seon.task/refusal]
-                  [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
-                  [:seon.task.attempt/relaunch-fork {:optional true} :seon.task.attempt/relaunch-fork]]
+                  [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]]
  :merge [:and {:seon.db/index true :description "The merge task an end message names."} :seon.task/handle]
  :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome, or for a parent its children all done."} :seon.task/outcome :seon.task/children]
  :resolution [:map {:description "Why a task is closed: derived, never stored."}

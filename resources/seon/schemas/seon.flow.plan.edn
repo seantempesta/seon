@@ -8,14 +8,16 @@
                 [:seon.task/branch :seon.task/branch]
                 [:seon.task/execution :seon.task/execution]]
  :open [:vector {:description "Every attempt on main with no end."} :seon.flow.plan/open-attempt]
- :ended [:map-of {:description "Per task, its ended attempts: its next attempt is one more."} :seon.task/handle [:int {:min 0}]]
+ :attempts-made [:map-of {:description "Per task, its :seon.task/attempts-made: its next attempt is one more."} :seon.task/handle :seon.task/attempts-made]
+ :relaunch [:map-of {:description "Per task whose latest attempt db<->flow relaunched (seon.task/relaunched), the commit its next attempt forks: that attempt's end commit."} :seon.task/handle :seon.source/commit-id]
  :created [:map-of {:description "Per task, the transaction of its identity datom: the oldest starts first."} :seon.task/handle [:int {:min 0}]]
  :cluster [:enum {:description "The cluster's intent: :paused starts nothing new and pauses every graph."} :running :paused]
  :facts [:map {:description "What db<->flow reads on main before it plans (seon.cluster.agent/plan-facts)."}
          [:seon.flow.plan/startable :seon.flow.plan/startable]
          [:seon.flow.plan/invalid :seon.flow.plan/invalid]
          [:seon.flow.plan/open :seon.flow.plan/open]
-         [:seon.flow.plan/ended :seon.flow.plan/ended]
+         [:seon.flow.plan/attempts-made :seon.flow.plan/attempts-made]
+         [:seon.flow.plan/relaunch :seon.flow.plan/relaunch]
          [:seon.flow.plan/created :seon.flow.plan/created]
          [:seon.flow.plan/cluster :seon.flow.plan/cluster]]
  :started [:set {:description "The agents whose graph the registry holds."} :seon.agent/id]
@@ -26,9 +28,9 @@
           [:seon.flow.plan/paused :seon.flow.plan/paused]]
  :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), write its missing merge base, squash-merge its branch, publish its merged declarations into the checkout, write its non-merged end on main, stop its graph, delete its branch."}
       :attempt :start-flow :problem :pause :resume :stop :cancel :merge-base :merge :publish :close :delete-branch]
- :fork-point [:= {:description "Where an attempt's branch forks: main's head, which holds every need's merge."} :main]
+ :fork-point [:or {:description "Where an attempt's branch forks: main's head, which holds every need's merge, or a relaunched attempt's end commit (:seon.flow.plan/relaunch)."} [:= :main] :seon.source/commit-id]
  :class [:enum {:description "Which problem a :problem action records."} :invalid-task]
- :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under; a taskless agent's :stop and :delete-branch name no task."}
+ :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under and the fork point; a taskless agent's :stop and :delete-branch name no task."}
           [:seon.flow.plan/op :seon.flow.plan/op]
           [:seon.task/assigned {:optional true} :seon.task/assigned]
           [:seon.task/assignment {:optional true} :seon.task/assignment]
