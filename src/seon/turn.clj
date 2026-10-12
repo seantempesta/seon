@@ -2517,6 +2517,21 @@
                        "Your reply began with a response; send a form."
                        "Your reply had no form; only comments/prose. Send a form.")))
 
+(defn- reply-sources
+  "The ordered forms of a model `completion`'s reply text (`planned-sources`).
+  A reply with no form whose tool calls named tools that do not exist answers
+  the no-forms refusal naming them."
+  {:malli/schema
+   [:=> [:cat :seon.ai/successful-completion :seon.ns/name :seon.config.eval.result/max-source]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
+  [{text :seon.ai/text unknown :seon.ai/unknown-tool-calls} namespace-name max-source]
+  (let [planned (planned-sources text namespace-name max-source)]
+    (if (and unknown (:seon.cluster.reply/no-forms planned))
+      (assoc planned
+             :seon.ai/unknown-tool-calls unknown
+             :seon.error/message "Your reply had no form: it called tools that do not exist, named in :seon.ai/unknown-tool-calls. Your one tool is eval: put Clojure forms in its code.")
+      planned)))
+
 (defn code-sources
   "The ordered forms of code: an outside agent's evaluation, a file, a generated form.
 
@@ -3964,7 +3979,7 @@
                   (if (and (:seon.config.ai/no-provider settings)
                            (empty? reply-text))
                     []
-                    (planned-sources reply-text namespace-name max-source))
+                    (reply-sources completion namespace-name max-source))
                   no-forms? (:seon.cluster.reply/no-forms prepared)
                   sources (cond
                             (vector? prepared) prepared

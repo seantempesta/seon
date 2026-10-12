@@ -1406,9 +1406,10 @@
               (when channel (async/close! channel)))))))))
 
 (defn reply-queue
-  "A provider reply function answering `texts` in order, one per request; past
-  the last it throws, which the provider answers as a 500."
-  {:malli/schema [:=> [:cat [:vector :string]] [:=> [:cat :map] :string]]}
+  "A provider reply function answering `texts` (reply texts or assistant
+  messages) in order, one per request; past the last it throws, which the
+  provider answers as a 500."
+  {:malli/schema [:=> [:cat [:vector [:or :string :map]]] [:=> [:cat :map] [:or :string :map]]]}
   [texts]
   (let [remaining (atom texts)]
     (fn [_document]
@@ -1427,10 +1428,26 @@
       (.write out payload))
     nil))
 
+(defn- provider-events
+  "The SSE body streaming assistant `message`: its content, then each tool
+  call with its arguments in two fragments, as providers send them."
+  {:malli/schema [:=> [:cat [:map-of :string :seon.ai/json-value]] :string]}
+  [message]
+  (let [event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")
+        fragments (fn [index {{arguments "arguments"} "function" :as call}]
+                    (let [half (quot (count arguments) 2)]
+                      [(event {"delta" {"tool_calls" [(assoc-in (assoc call "index" index) ["function" "arguments"] (subs arguments 0 half))]}})
+                       (event {"delta" {"tool_calls" [{"index" index "function" {"arguments" (subs arguments half)}}]}})]))]
+    (apply str (concat [(event {"delta" {"content" (get message "content" "")}})]
+                       (mapcat fragments (range) (get message "tool_calls"))
+                       [(event {"delta" {"content" ""} "finish_reason" (if (seq (get message "tool_calls")) "tool_calls" "stop")})
+                        "data: [DONE]\n\n"]))))
+
 (defn- provider-server!
   "Start a local OpenAI-compatible provider, so `seon.ai/complete` runs as
-  installed. `ledger` gets each request document; `answer` returns its text, or
-  throws: 500. `timings`, when given, gets `[received-ns responded-ns]` per request."
+  installed. `ledger` gets each request document; `answer` returns its text or
+  its assistant message, or throws: 500. `timings`, when given, gets
+  `[received-ns responded-ns]` per request."
   {:malli/schema [:=> [:cat [:fn some?] [:fn ifn?] [:maybe [:fn some?]]] [:fn some?]]}
   [ledger answer timings]
   (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
@@ -1442,16 +1459,13 @@
            (try
              (let [request (json/read-str (slurp (.getRequestBody exchange)))
                    _ (swap! ledger conj request)
-                   text (answer request)
-                   event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")]
+                   answered (answer request)
+                   message (if (string? answered) {"content" answered} answered)]
                (if (get request "stream")
-                 (provider-send! exchange 200 "text/event-stream"
-                                 (str (event {"delta" {"content" text}})
-                                      (event {"delta" {"content" ""} "finish_reason" "stop"})
-                                      "data: [DONE]\n\n"))
+                 (provider-send! exchange 200 "text/event-stream" (provider-events message))
                  (provider-send! exchange 200 "application/json"
-                                 (json/write-str {"choices" [{"message" {"content" text}
-                                                              "finish_reason" "stop"}]}))))
+                                 (json/write-str {"choices" [{"message" message
+                                                              "finish_reason" (if (seq (get message "tool_calls")) "tool_calls" "stop")}]}))))
              (catch Throwable failure
                (provider-send! exchange 500 "application/json"
                                (json/write-str {"error" {"message" (ex-message failure)}})))

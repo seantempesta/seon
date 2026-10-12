@@ -601,8 +601,20 @@
           (conj (pop history) {"role" "user" "content" [(text-part replies) (text-part block)]})
           (conj history {"role" "user" "content" block}))))))
 
+(def ^:private eval-tool
+  "The model's one tool: its `code` is the REPL's input, read as reply text is."
+  {"type" "function"
+   "function" {"name" "eval"
+               "description" "Evaluate Clojure forms at your REPL; what the REPL answers comes back in the next message."
+               "parameters" {"type" "object"
+                             "properties" {"code" {"type" "string"
+                                                   "description" "Clojure forms, each starting at column zero; prose in ;; comments."}}
+                             "required" ["code"]}}})
+
 (defn request-body
-  "The provider request document, or a pre-call flat error. Pure."
+  "The provider request document, or a pre-call flat error. Pure.
+  Every provider Seon speaks is OpenAI-compatible chat, so every request
+  declares the one tool, `eval`."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/request-body]}
   [projection {:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
     stream? :seon.ai/stream?
@@ -613,6 +625,7 @@
   (let [base (cond->
                {"model" model
                 "stream" (boolean stream?)
+                "tools" [eval-tool]
                 ;; a request naming no wrapping sends its prompt as one transcript
                 "messages" (messages (:seon.ai/wrapping request :transcript) system
                                      (:seon.ai/exchanges request []) prompt)}
@@ -655,6 +668,33 @@
                (str "The provider stream carried unreadable data: " reason ".")
                {:seon.error/data {::body payload}}))
 
+(defn- tool-call-fragment?
+  "Whether `fragment` is one streamed piece of a tool call: an indexed object
+  whose function name and arguments, when present, are text."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [fragment]
+  (and (map? fragment)
+       (int? (get fragment "index"))
+       (let [function (get fragment "function")]
+         (or (nil? function)
+             (and (map? function)
+                  (not (invalid-optional-string? function "name"))
+                  (not (invalid-optional-string? function "arguments")))))))
+
+(defn- fold-tool-calls
+  "`calls`, the tool calls streamed so far by index, with `fragments` added:
+  a name is kept, argument text is appended."
+  {:malli/schema [:=> [:cat :seon.ai/tool-calls [:sequential :map]] :seon.ai/tool-calls]}
+  [calls fragments]
+  (reduce (fn [calls {index "index" {tool "name" arguments "arguments"} "function"}]
+            (update calls index
+                    (fn [call]
+                      (cond-> (or call {"arguments" ""})
+                        (string? tool) (assoc "name" tool)
+                        (string? arguments) (update "arguments" str arguments)))))
+          calls
+          fragments))
+
 (defn- stream-chunk-error
   {:malli/schema [:=> [:cat :string :seon.schema/value] [:maybe :seon.ai/unparseable-body-error]]}
   [payload document]
@@ -682,6 +722,11 @@
           "the content delta was not text"
           (invalid-optional-string? delta "reasoning_content")
           "the reasoning delta was not text"
+          (and (map? delta)
+               (some? (get delta "tool_calls"))
+               (not (and (sequential? (get delta "tool_calls"))
+                         (every? tool-call-fragment? (get delta "tool_calls")))))
+          "the tool calls delta was not an array of indexed calls"
           (invalid-optional-string? choice "finish_reason")
           "the finish reason was not text"
           (and (contains? document "usage")
@@ -733,6 +778,7 @@
                   reasoning-delta
                   (some-> delta-document (get "reasoning_content"))
                   finish-reason (some-> choice (get "finish_reason"))
+                  fragments (some-> delta-document (get "tool_calls"))
                   usage (get document "usage")
                   text (cond-> (:seon.ai/text snapshot)
                          (string? delta) (str delta))
@@ -742,6 +788,8 @@
                     (str (:seon.ai/reasoning-partial snapshot)
                          reasoning-delta))]
               (cond-> (assoc snapshot :seon.ai/text text)
+                (seq fragments)
+                (update :seon.ai/tool-calls (fnil fold-tool-calls (sorted-map)) fragments)
                 (some? reasoning)
                 (assoc :seon.ai/reasoning-partial reasoning)
                 ;; newest usage wins, and only when the provider sent one
@@ -812,10 +860,46 @@
           {:seon.ai/text "" :seon.ai/tokens 0}
           lines))
 
+(defn- eval-code
+  "The `code` text of one `eval` call's JSON `arguments`, or nil when they are
+  not an object carrying it."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :string]]}
+  [arguments]
+  (when (string? arguments)
+    (let [decoded (try (json/read-str arguments) (catch Exception _ nil))]
+      (when (and (map? decoded) (string? (get decoded "code")))
+        (get decoded "code")))))
+
+(defn- tool-call-reply
+  "The reply of `content` and the tool `calls`: the content text followed by
+  each `eval` call's code, in order, and the names of calls to any other tool;
+  or the declared error for a call this cannot read."
+  {:malli/schema [:=> [:cat [:maybe :string] [:sequential :seon.schema/value]]
+                  [:or :seon.ai/tool-call-reply :seon.ai/unparseable-body-error]]}
+  [content calls]
+  (reduce (fn [reply {tool "name" arguments "arguments" :as call}]
+            (let [code (when (= "eval" tool) (eval-code arguments))]
+              (cond
+                (string? code)
+                (update reply :seon.ai/text #(if (str/blank? %) code (str % "\n" code)))
+
+                (and (string? tool) (seq tool) (not= "eval" tool))
+                (update reply :seon.ai/unknown-tool-calls (fnil conj []) tool)
+
+                :else
+                (reduced (unparseable 'seon.ai/tool-call-reply "choices.message.tool_calls"
+                                      "The provider's tool call carried no name, or an eval call no code text."
+                                      {:seon.error/offending call :seon.error/data {::tool-call call}})))))
+          {:seon.ai/text (or content "")}
+          calls))
+
 (defn- parsed-completion
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value] :seon.ai/parsed-completion]}
-  [content reasoning-content finish-reason usage tokens body-shape]
-  (let [evidence (cond-> {::body-shape body-shape}
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value [:sequential :seon.schema/value]] :seon.ai/parsed-completion]}
+  [content reasoning-content finish-reason usage tokens body-shape tool-calls]
+  (let [reply (when (or (nil? content) (string? content)) (tool-call-reply content tool-calls))
+        text (:seon.ai/text reply)
+        unknown (:seon.ai/unknown-tool-calls reply)
+        evidence (cond-> {::body-shape body-shape}
                    (and (string? reasoning-content) (seq reasoning-content))
                    (assoc ::reasoning-content reasoning-content)
                    (string? finish-reason)
@@ -832,10 +916,13 @@
                    "The provider's assistant reasoning was not text."
                    {:seon.error/offending reasoning-content :seon.error/data evidence})
 
+      (contains? reply :seon.ai/unreadable-response-member) reply
+
       (and (string? reasoning-content)
            (seq reasoning-content)
            (not= "stop" finish-reason)
-           (str/blank? content))
+           (str/blank? text)
+           (empty? unknown))
       (declared-error :seon.ai/reasoning-without-answer-error 'seon.ai/parsed-completion
                       {:seon.error/offending reasoning-content
                        :seon.ai/unanswered-reasoning-count (count reasoning-content)
@@ -848,7 +935,7 @@
                        :seon.error/member :seon.ai/text
                        :seon.error/expected "assistant text after reasoning"})
 
-      (and (= "length" finish-reason) (str/blank? content))
+      (and (= "length" finish-reason) (str/blank? text) (empty? unknown))
       (declared-error :seon.ai/token-starvation-error 'seon.ai/parsed-completion
                       {:seon.error/offending finish-reason
                        :seon.error/message "The provider exhausted the completion budget before replying."
@@ -857,9 +944,9 @@
                        :seon.error/member :seon.ai/finish-reason
                        :seon.error/expected "a completion budget sufficient for assistant text"})
 
-      (or (and (string? content) (seq content))
-          (and (= "stop" finish-reason) (or (nil? content) (string? content))))
-      (cond-> {:seon.ai/text (or content "")}
+      (or (seq text) (seq unknown) (= "stop" finish-reason))
+      (cond-> {:seon.ai/text text}
+        (seq unknown) (assoc :seon.ai/unknown-tool-calls unknown)
         (and (string? reasoning-content) (seq reasoning-content))
         (assoc :seon.ai/reasoning-content reasoning-content)
         (map? usage) (assoc :seon.ai/usage usage)
@@ -894,15 +981,21 @@
             message (some-> choice (get "message"))
             content (some-> message (get "content"))
             reasoning-content (some-> message (get "reasoning_content"))
+            tool-calls (some-> message (get "tool_calls"))
             finish-reason (some-> choice (get "finish_reason"))
             usage (when (map? body) (get body "usage"))]
-        (parsed-completion
-         content
-         reasoning-content
-         finish-reason
-         usage
-         (some-> usage (get "completion_tokens"))
-         body-shape)))))
+        (if (and (some? tool-calls) (not (and (sequential? tool-calls) (every? map? tool-calls))))
+          (unparseable 'seon.ai/completion-text "choices.message.tool_calls"
+                       "The provider's tool calls were not an array of objects."
+                       {:seon.error/offending tool-calls :seon.error/data {::body-shape body-shape}})
+          (parsed-completion
+           content
+           reasoning-content
+           finish-reason
+           usage
+           (some-> usage (get "completion_tokens"))
+           body-shape
+           (mapv #(get % "function" %) tool-calls)))))))
 
 (defn normalize-usage
   "Comparable token counts derived from one open provider usage document."
@@ -1137,7 +1230,8 @@
          (:seon.ai/finish-reason snapshot)
          (:seon.ai/usage snapshot)
          (:seon.ai/tokens snapshot)
-         ::empty-stream)))))
+         ::empty-stream
+         (vec (vals (:seon.ai/tool-calls snapshot))))))))
 
 (defn- output-observed?
   [evidence]

@@ -75,9 +75,16 @@
            [:map
            [:seon.ai/missing-credential-variable :seon.ai/missing-credential-variable]
            [:seon.error/message :seon.error/message]]],
+          :unknown-tool-calls [:vector {:min 1 :description "The names of the tools a reply called that do not exist, in reply order; the one tool is eval."} [:string {:min 1}]],
+          :tool-call [:map {:description "One tool call as the provider's function object: its name and its JSON arguments text."}
+                      ["name" {:optional true} :string] ["arguments" {:optional true} :string]],
+          :tool-calls [:map-of {:description "The tool calls streamed so far, by the provider's call index."} :int :seon.ai/tool-call],
+          :tool-call-reply [:map [:seon.ai/text :seon.ai/text]
+                            [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls]],
           :partial
           [:map
            [:seon.ai/text :string]
+           [:seon.ai/tool-calls {:optional true} :seon.ai/tool-calls]
            [:seon.ai/reasoning-partial
             {:optional true}
             :seon.ai/reasoning-partial]
@@ -330,6 +337,7 @@
           :successful-completion
           [:map
             [:seon.ai/text :seon.ai/text]
+            [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls]
             [:seon.ai/reasoning-content
              {:optional true}
              :seon.ai/reasoning-content]

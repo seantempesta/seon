@@ -249,17 +249,18 @@
              database agent-id)))
 
 (defn- green-task!
-  "Assign `agent-id` the task `tq.end/area` whose proof is red, then let the model define the fix through
-  `replies` until the agent's admission closes; answers the provider's request documents."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]}
-  [running agent-id connection replies]
+  "Assign `agent-id` the task `area` in namespace `owner` whose proof is red, then let the model define the fix
+  through `replies` (texts or assistant messages) until the agent's admission closes; answers the provider's
+  request documents."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :symbol [:vector [:or :string :map]]] [:vector :map]]}
+  [running agent-id connection owner replies]
   ;; root's home is this member's branch, so the end message reaches root inside the fixture and the end closes
   (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
                              (:seon.cluster/name (support/execution-handle nil))]])
-  (agent-eval running agent-id "(ns tq.end) (defn area [r] r)")
-  (agent-eval running agent-id "(in-ns 'tq.end) (clojure.test/deftest ^{:seon/tasks #{'tq.end/area}} area-test (clojure.test/is (= 25 (tq.end/area 5))))")
+  (agent-eval running agent-id (str "(ns " owner ") (defn area [r] r)"))
+  (agent-eval running agent-id (str "(in-ns '" owner ") (clojure.test/deftest ^{:seon/tasks #{'" owner "/area}} area-test (clojure.test/is (= 25 (" owner "/area 5))))"))
   (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                         :seon.task/ns 'tq.end :seon.task/name "area" :seon.task/intent "Square."}))
+                                         :seon.task/ns owner :seon.task/name "area" :seon.task/intent "Square."}))
         ledger (atom [])]
     (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
@@ -283,7 +284,7 @@
   a-done-agent-opens-no-work-turn
   (support/with-running-agent
    (fn [running agent-id connection]
-     (let [sent (green-task! running agent-id connection ["(in-ns 'tq.end)\n(defn area [r] (* r r))"])
+     (let [sent (green-task! running agent-id connection 'tq.end ["(in-ns 'tq.end)\n(defn area [r] (* r r))"])
            database (db/db connection)]
        (is (= 1 (count sent)) "one model call turned the proof green")
        (is (some? (:seon.agent/admission-closed-tx
@@ -294,6 +295,24 @@
        (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})) "a wake opens no work turn")
        (is (= 1 (model-turns (db/db connection) agent-id)) "the model was not called again")))))
 
+
+(deftest ^{:seon.test/long "Two setup evaluations with their test steps, then one fixture-model pass and its test step."
+           :seon.test/long-ms 30000}
+  a-model-defines-through-its-eval-tool
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [code "(in-ns 'tq.tool)\n(defn area [r] (* r r))"
+           sent (green-task! running agent-id connection 'tq.tool
+                             [{"content" ""
+                               "tool_calls" [{"id" "call-0" "type" "function"
+                                              "function" {"name" "eval" "arguments" (json/write-str {"code" code})}}]}])
+           database (db/db connection)]
+       (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get (first sent) "tools")))
+           "the request offered the one tool")
+       (is (= 1 (count sent)) "one model call, whose eval call turned the proof green")
+       (is (some? (:seon.agent/admission-closed-tx
+                   (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))
+           "the task's end closed the agent's admission")))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-task-end-never-reaches-root}
            :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass."

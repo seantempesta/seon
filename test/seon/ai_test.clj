@@ -1254,3 +1254,46 @@
                                           (assoc base :seon.ai/system "help" :seon.ai/wrapping :chat
                                                       :seon.ai/exchanges [one]))
                          "messages")))))))
+
+(defn- tool-call
+  "One provider tool call to `name` whose JSON arguments carry `code`."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :string :seon.ai/json-value]]}
+  [name code]
+  {"id" (str "call-" name) "type" "function"
+   "function" {"name" name "arguments" (json/write-str {"code" code})}})
+
+(defn- tool-reply
+  "The completion of a one-shot provider document whose message has `content` and `calls`."
+  {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] :seon.ai/parsed-completion]}
+  [content calls]
+  (ai/completion-text {"choices" [{"message" {"content" content "tool_calls" calls}
+                                   "finish_reason" "tool_calls"}]}))
+
+(deftest a-tool-call-named-eval-is-the-replys-code
+  (testing "the request declares one tool, eval, whose one required parameter is code"
+    (let [tools (get (ai/request-body (seon.schema/handed-projection) base) "tools")]
+      (is (= ["eval"] (mapv #(get-in % ["function" "name"]) tools)))
+      (is (= ["code"] (get-in tools [0 "function" "parameters" "required"])))))
+  (testing "an eval call's code is the reply text, after any content, in order"
+    (is (= "(in-ns 'seon.sci.forgive)"
+           (:seon.ai/text (tool-reply "" [(tool-call "eval" "(in-ns 'seon.sci.forgive)")]))))
+    (is (= ";; plan\n(+ 1 2)\n(+ 3 4)"
+           (:seon.ai/text (tool-reply ";; plan" [(tool-call "eval" "(+ 1 2)") (tool-call "eval" "(+ 3 4)")])))))
+  (testing "a call to another tool is named on the completion and is not read as code"
+    (let [completion (tool-reply nil [(tool-call "my.program/edit" "(+ 1 2)")])]
+      (is (= ["my.program/edit"] (:seon.ai/unknown-tool-calls completion)))
+      (is (= "" (:seon.ai/text completion)))
+      (is (= ["my.program/edit"]
+             (:seon.ai/unknown-tool-calls (#'turn/reply-sources completion 'user 10000)))
+          "the no-forms error names the unknown tool")))
+  (testing "streamed argument fragments fold to the same text"
+    (let [chunk #(str "data: " (json/write-str {"choices" [%]}) "\n\n")
+          body (str (chunk {"delta" {"content" ";; plan"}})
+                    (chunk {"delta" {"tool_calls" [{"index" 0 "id" "call-0" "type" "function"
+                                                    "function" {"name" "eval" "arguments" "{\"code\":\"(+ 1"}}]}})
+                    (chunk {"delta" {"tool_calls" [{"index" 0 "function" {"arguments" " 2)\"}"}}]}})
+                    (chunk {"delta" {} "finish_reason" "tool_calls"})
+                    "data: [DONE]\n\n")
+          completion (#'ai/streamed-completion
+                      (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8")) nil)]
+      (is (= ";; plan\n(+ 1 2)" (:seon.ai/text completion))))))
