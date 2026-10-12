@@ -44,6 +44,14 @@
                               [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]
                               [:seon.task/status [:enum :done :working]]
                               [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]]
+               :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
+                            [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]
+                            [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
+               :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
+                      [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :working]]
+                      [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
+                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions when done."} [:vector :seon.context/test-entry]]
+                      [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]]
                :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
                         [:seon.context/items :my.message/inbox]
                         [:seon.render/operations [:vector :seon.render/read-form]]]
@@ -52,6 +60,7 @@
                       :seon.render/ai seon.context/current-state-ai}
                 [:seon.context/task {:optional true} :seon.context/task]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
+                [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
@@ -69,6 +78,7 @@
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
+                [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]

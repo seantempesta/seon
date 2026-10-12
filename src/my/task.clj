@@ -10,11 +10,13 @@
             [seon.run :as run]))
 
 (defn current
-  "My task and its proofs with their status on my branch.
+  "My task, its proofs with their status on my branch, and my step as judged.
 
   The declaration I hold (`seon.context/held-task`) and its proofs section,
   counts first, then each proof with its status and, when red, its failures
-  (`seon.context/proofs`). Holding no task answers my agent id alone.
+  (`seon.context/proofs`); then my step (`seon.context/step-section`): its kind and
+  status, the tests my change broke and, for a Prove step, the product I owe, each
+  with its failures. Holding no task answers my agent id alone.
 
   Example:
   (my.task/current {})
@@ -26,11 +28,13 @@
   {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.task/current :seon.error/value]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [held (context/held-task database agent-id)
-        proven (when (and held (not (:seon.error/at held))) (context/proofs database (:seon.task/sym held)))]
-    (or (some #(when (:seon.error/at %) %) [held proven])
+        proven (when (and held (not (:seon.error/at held))) (context/proofs database (:seon.task/sym held)))
+        verdict (when (and held (not (:seon.error/at held))) (context/step-verdict database agent-id))]
+    (or (some #(when (:seon.error/at %) %) [held proven verdict])
         (cond-> {:seon.agent/id agent-id}
           held (assoc :seon.context/task held)
-          proven (assoc :seon.context/proofs proven)))))
+          proven (assoc :seon.context/proofs proven)
+          verdict (assoc :seon.context/step (context/step-section verdict))))))
 
 (defn send-back!
   "Give my task back without green proofs.

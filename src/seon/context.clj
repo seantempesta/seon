@@ -227,6 +227,22 @@
           (:seon.error/at observation) observation
           observation (merge observation (step-status observation)))))
 
+(defn step-section
+  "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, then each
+  test that keeps it from done beside its proofs: the tests its change broke, for a Prove step the product it
+  owes its successors, and any other new red; each with its status and, when red, its failing assertions.
+  Lists are absent when empty."
+  {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
+  [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product head :seon.context/head
+    broken :seon.context/broken new-red :seon.context/new-red status :seon.task/status}]
+  (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
+        product (when (= :prove step) product)
+        other (remove (into (set proofs) product) new-red)]
+    (cond-> {:seon.task/step step :seon.task/status status}
+      (seq broken) (assoc :seon.context/broken-tests (entries broken))
+      (seq product) (assoc :seon.context/product-tests (entries product))
+      (seq other) (assoc :seon.context/new-red-tests (entries other)))))
+
 (defn task-done?
   "True when the step of the task `agent-id` holds is done on `database`, the agent's branch (`step-verdict`): the
   task is done for the agent, pending root's merge, and the turn loop opens no continuation for it."
@@ -403,7 +419,7 @@
   "The current-state block's data for `agent-id`: its held task's declaration as the
   main reads it now, and its turns left with the task's status (`:done` once its step is done,
   `step-verdict`, then `:capped` with no turns left, else `:working`) and the namespace
-  it is in (`agent-namespace`). Sections are
+  it is in (`agent-namespace`), and the step section (`step-section`) beside its proofs. Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
   instant and content. `:seon.context/cost` holds the branch's stored function costs
@@ -442,6 +458,7 @@
                                        namespace (assoc :seon.context/namespace namespace))}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
+          verdict (assoc :seon.context/step (step-section verdict))
           (seq reads) (assoc :seon.context/must-reads reads)
           cost (assoc :seon.context/cost cost)
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
@@ -452,7 +469,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------

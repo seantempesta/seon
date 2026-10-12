@@ -1,7 +1,8 @@
-#:my.task{:current [:map {:description "The task an agent holds with its proofs and their status on its branch (my.task/current); the task and proofs are absent when it holds none."}
+#:my.task{:current [:map {:description "The task an agent holds with its proofs and their status on its branch, and its step as judged (my.task/current); the task and proofs are absent when it holds none."}
                     [:seon.agent/id :seon.agent/id]
                     [:seon.context/task {:optional true} :seon.context/task]
-                    [:seon.context/proofs {:optional true} :seon.context/proofs]]
+                    [:seon.context/proofs {:optional true} :seon.context/proofs]
+                    [:seon.context/step {:optional true} :seon.context/step]]
           :reason [:string {:min 1 :description "Why an agent gives its task back without green proofs: the reply root reads."}]
           :target [:and {:description "The task that owns the mistake a send-back names, by symbol."} :seon.task/sym]
           :counterexample [:and {:description "The data showing why the task cannot be made green as written."} :seon.schema/value]

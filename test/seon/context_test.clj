@@ -328,3 +328,39 @@
       (is (= {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
              (judged step proofs product head fork-point))
           why))))
+
+(deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
+           :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."
+           :seon.test/long-ms 30000}
+  broken-tests-show-with-their-failures
+  ;; the change turns the proof green and breaks `identity-test`: the block and my.task/current show it with its
+  ;; failing assertion beside the green proof, and the status they show is the one task-end reads
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "shows-broken-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.shb
+                                           (str "(ns tq.shb (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(deftest ^{:seon/tasks #{'tq.shb/area}} area-test (is (= 25 (area 5))))\n"
+                                                "(deftest identity-test (is (= 3 (area 3)) \"area keeps its side\"))\n")
+                                           "test")
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.shb)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.shb :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id "(in-ns 'tq.shb)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
+       (let [step (:seon.context/step (block running agent-id))
+             current (:seon.context/step (shown running agent-id "(my.task/current {})"))
+             [broken] (:seon.context/broken-tests step)]
+         (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
+         (is (= 'tq.shb/identity-test (:seon.test/sym broken)) "the broken test is shown")
+         (is (= ["area keeps its side"] (mapv :message (:seon.context/proof-failures broken))) "with its failing assertion")
+         (is (= step current) "my.task/current shows the same step")
+         (is (= :working (:seon.task/status step)
+                (:seon.task/status (:seon.context/turns (block running agent-id))))
+             "the step is not done, and the block's status says so")
+         (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
