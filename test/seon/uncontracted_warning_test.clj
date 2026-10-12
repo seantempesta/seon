@@ -24,3 +24,14 @@
        (is (= #{'my.uw/one} (set (:seon.eval/uncontracted (finding-of first-reply)))))
        (is (= 2 (:seon.eval/uncontracted-count (finding-of second-reply))))
        (is (nil? (finding-of contracted)))))))
+
+(deftest an-any-slot-defn-reply-names-the-slot
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [call (fn [code]
+                  (support/mcp-reply
+                   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                             "arguments" {"cluster" running "agent" agent-id "code" code}})))))
+           reply (call "(in-ns 'my.uwa) (defn loose {:malli/schema [:=> [:cat :any] :int]} [x] 1)")]
+       (is (= #{['my.uwa/loose :seon.fn.contract.finding/any :seon.fn.contract.position/input 0]}
+              (set (:seon.eval/contract-gaps (finding-of reply)))))))))

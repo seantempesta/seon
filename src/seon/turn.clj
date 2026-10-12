@@ -166,7 +166,8 @@
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
                                               :seon.eval/elisions :seon.eval/full :seon.eval/budget-override
                                               :seon.eval/value-class
-                                              :seon.eval/uncontracted :seon.eval/uncontracted-count]))
+                                              :seon.eval/uncontracted :seon.eval/uncontracted-count
+                                              :seon.eval/contract-gaps]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -1126,6 +1127,7 @@
    :seon.eval/value-class
    :seon.eval/uncontracted
    :seon.eval/uncontracted-count
+   :seon.eval/contract-gaps
    :seon.eval/print-length
    :seon.eval/print-level
    :seon.eval/print-budget])
@@ -4421,7 +4423,7 @@
         batch (seon.batch/evaluate-batch request)
         registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))
         bound (entry-bindings batch ctx)
-        uncontracted (turn.batch/uncontracted-measures basis agent-id (:seon.batch/entries batch))]
+        uncontracted (turn.batch/uncontracted-measures request (:seon.batch/working batch) agent-id (:seon.batch/entries batch))]
     {:seon.turn.loop/evaluated-sources
      (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]
              (let [row (get rows (- ordinal first-ordinal))

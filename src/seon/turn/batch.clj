@@ -31,6 +31,7 @@
             [seon.fn :as sfn]
             [seon.batch]
             [seon.blob :as blob]
+            [seon.cluster.source :as source]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
             [seon.render :as render]
@@ -732,45 +733,62 @@
   (into (set removals) (keep #(or (:seon.fn/sym %) (:seon.test/sym %))) entities))
 
 (defn- prior-uncontracted
-  "The symbols the agent's earlier evaluations recorded as defined without a
-  contract whose function row still has none on `database`."
+  "The symbols the agent's earlier evaluations recorded as defined with an incomplete contract."
   {:malli/schema [:=> [:cat :seon.db/database-value :string] [:set :qualified-symbol]]}
   [database agent-id]
   (set (db/q '[:find [?s ...] :in $ ?agent
                :where [?e :seon.eval/uncontracted ?s]
                [?e :seon.cluster.eval/run ?t]
-               [?t :seon.turn/agent ?agent]
-               [?f :seon.fn/sym ?s]
-               [(missing? $ ?f :seon.fn/spec)]]
+               [?t :seon.turn/agent ?agent]]
              database [:seon.agent/id agent-id])))
 
+(defn- gap-fact
+  "One contract gap (`seon.cluster.source/contract-gaps`) as `:seon.eval/contract-gaps` holds it: function,
+  finding, position kind and input index (-1 for a position that is no input)."
+  {:malli/schema [:=> [:cat :seon.fn.contract/finding-row] [:tuple :qualified-symbol :qualified-keyword :qualified-keyword :int]]}
+  [{sym :seon.fn/sym finding :seon.fn.contract/finding position :seon.fn.contract/position}]
+  (let [[kind index] (if (vector? position) position [position -1])]
+    [sym finding kind index]))
+
+(defn- judged-database
+  "`working` with the last change among `entries` applied: the batch applies a change to its working value only
+  when a later form can read it, so the last one's functions are not yet there to be judged."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value [:sequential :map]] :seon.db/database-value]}
+  [request working entries]
+  (let [change (some :seon.batch/change (rseq (vec entries)))
+        facts (when change (form-facts request working change))
+        applied (when (vector? facts) (db/with working facts))]
+    (if (and applied (not (:seon.error/message applied))) applied working)))
+
 (defn uncontracted-measures
-  "Per ordinal, for each entry whose change defines functions without
-  `:seon.fn/spec`: `:seon.eval/uncontracted` (those symbols) and
-  `:seon.eval/uncontracted-count`, the agent's uncontracted definitions on its
-  branch after that entry (earlier evaluations' still uncontracted, less what
-  the batch redefined or removed, plus this form's). One query, and only when
-  some entry defines one."
-  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:maybe :string] [:sequential :map]]
+  "Per ordinal, for each entry whose change defines functions that `working` (with the last change applied) holds with an incomplete contract
+  (`seon.cluster.source/contract-gaps`, the one rule: missing, :any or :some): `:seon.eval/uncontracted` (those
+  symbols), `:seon.eval/contract-gaps` (each gap's slot) and `:seon.eval/uncontracted-count`, the agent's
+  functions still with a gap after that entry (earlier evaluations' still with one, less what the batch
+  redefined or removed, plus this form's). One read, and only when some entry defines a function."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string] [:sequential :map]]
                   [:map-of :seon.cluster.eval/ordinal :map]]}
-  [database agent-id entries]
-  (let [own (fn [{change :seon.batch/change}]
-              (into #{} (comp (filter :seon.fn/sym) (remove :seon.fn/spec) (map :seon.fn/sym))
-                    (:seon.batch/entities change)))]
-    (if-not (and database agent-id (some (comp seq own) entries))
+  [request working agent-id entries]
+  (let [own (fn [{change :seon.batch/change}] (into #{} (keep :seon.fn/sym) (:seon.batch/entities change)))]
+    (if-not (and working agent-id (some (comp seq own) entries))
       {}
-      (loop [[entry & more] entries
-             held (prior-uncontracted database agent-id)
-             measures {}]
-        (if-not entry
-          measures
-          (let [added (own entry)
-                held (into (reduce disj held (some-> entry :seon.batch/change defined-symbols)) added)]
-            (recur more held
-                   (cond-> measures
-                     (seq added) (assoc (:seon.batch/ordinal entry)
-                                        {:seon.eval/uncontracted added
-                                         :seon.eval/uncontracted-count (count held)})))))))))
+      (let [judged (judged-database request working entries)
+            prior (prior-uncontracted judged agent-id)
+            gaps (group-by :seon.fn/sym
+                           (source/contract-gaps judged (into #{} (map #(vector :seon.fn/sym %)) (into prior (mapcat own) entries))))]
+        (loop [[entry & more] entries
+               held (set (filter gaps prior))
+               measures {}]
+          (if-not entry
+            measures
+            (let [added (set (filter gaps (own entry)))
+                  held (into (reduce disj held (some-> entry :seon.batch/change defined-symbols)) added)]
+              (recur more held
+                     (cond-> measures
+                       (seq added) (assoc (:seon.batch/ordinal entry)
+                                          {:seon.eval/uncontracted added
+                                           :seon.eval/contract-gaps (into #{} (comp (mapcat gaps) (map gap-fact)) added)
+                                           :seon.eval/uncontracted-count (count held)}))))))))))
 
 (defn- admitted-form
   "The form one entry read, where it ran."
@@ -802,7 +820,7 @@
   run recorded (`record-facts`): what the run's reply prints."
   {:malli/schema [:=> [:cat :seon.batch/batch] :seon.turn.loop/evaluated-sources]}
   [batch]
-  (let [measures (uncontracted-measures (:seon.batch/basis batch) (get-in batch [:seon.batch/world :seon.agent/id])
+  (let [measures (uncontracted-measures batch (:seon.batch/working batch) (get-in batch [:seon.batch/world :seon.agent/id])
                                         (:seon.batch/entries batch))]
     (mapv (fn [{ordinal :seon.batch/ordinal :as entry}]
             {:seon.cluster.eval/ordinal ordinal
@@ -814,7 +832,7 @@
   "The run and its evaluations, through the recording writer."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.store/transaction-data]}
   [{{agent-id :seon.agent/id turn-id :seon.turn/id} :seon.batch/world basis :seon.batch/basis start-ns :seon.batch/start-ns
-    record-call :seon.turn.batch/record-call} batch]
+    record-call :seon.turn.batch/record-call :as request} batch]
   (let [entries (:seon.batch/entries batch)]
     ;; a batch with no agent or no form records nothing: the empty transaction
     (if-not (and agent-id (seq entries))
@@ -826,7 +844,7 @@
          :seon.turn/reply-size (count (:seon.batch/text batch ""))
          :seon.turn/sources (mapv (fn [e] {:seon.cluster.eval/source (or (:seon.batch/source e) "")
                                        :seon.ns/name (or (:seon.batch/ns-before e) 'user)}) entries)
-         :seon.turn/evaluations (let [measures (uncontracted-measures basis agent-id entries)]
+         :seon.turn/evaluations (let [measures (uncontracted-measures request (:seon.batch/working batch) agent-id entries)]
                                   (mapv #(evaluation-record turn-id % (get measures (:seon.batch/ordinal %))) entries))}]])))
 
 (defn revalidate

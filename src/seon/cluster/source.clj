@@ -1040,7 +1040,7 @@
     (when-not (vector? findings) (throw (ex-info (str (:seon.error/message findings)) findings)))
     (filterv (comp incomplete-findings :seon.fn.contract/finding) findings)))
 
-(defn- gap-symbols
+(defn gap-symbols
   "The functions `gaps` (`contract-gaps`) names, once each, ordered by symbol."
   {:malli/schema [:=> [:cat [:vector :seon.fn.contract/finding-row]] [:vector :seon.fn/sym]]}
   [gaps]

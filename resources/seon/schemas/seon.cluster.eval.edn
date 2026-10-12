@@ -95,6 +95,7 @@
                      [:seon.eval/budget-override {:optional true} :seon.eval/budget-override]
                      [:seon.eval/uncontracted {:optional true} :seon.eval/uncontracted]
                      [:seon.eval/uncontracted-count {:optional true} :seon.eval/uncontracted-count]
+                     [:seon.eval/contract-gaps {:optional true} :seon.eval/contract-gaps]
                      [:seon.eval/print-length
                       {:optional true}
                       :seon.eval/print-length]

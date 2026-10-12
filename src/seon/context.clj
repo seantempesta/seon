@@ -318,13 +318,13 @@
         (into {} (keep (fn [[s result]] (case (proof-status result (get digests s)) :green [s false] :red [s true] nil)))
               results))))
 
-(defn- uncontracted
-  "The functions the agent `agent-id`'s branch `database` changed since its task's merge base that carry no
-  complete contract (`seon.cluster.source/uncontracted`): what that merge refuses. The merge base is the one its
+(defn- contract-gaps
+  "The gaps (`seon.cluster.source/contract-gaps`) in the contracts of the functions the agent `agent-id`'s branch
+  `database` changed since its task's merge base: what that merge refuses. The merge base is the one its
   attempt row holds (a relaunched attempt keeps its predecessor's, so the change is the task's across attempts),
   for a row holding none the commit the branch forked at (`seon.turn/fork-commit`); nil on main itself."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or :nil [:vector :seon.fn/sym] :seon.error/value]]}
+                  [:or :nil [:vector :seon.fn.contract/finding-row] :seon.error/value]]}
   [database agent-id]
   (let [held (db/q '[:find ?m . :in $ ?id :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/merge-base ?m]]
                    database agent-id)
@@ -333,7 +333,7 @@
     (cond (:seon.error/at held) held
           (nil? base) nil
           :else (try (let [changed (program/changed-identities (db/basis-t base) database source/merge-bound)]
-                       (if (:seon.error/at changed) changed (source/uncontracted database changed)))
+                       (if (:seon.error/at changed) changed (source/contract-gaps database changed)))
                      (finally (source/release! [base]))))))
 
 (defn step-observation
@@ -342,7 +342,7 @@
   found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
   present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
   supplies the step's last record, each proof's known result at the fork point (`base-results`) replaces it and,
-  for an implement step, the functions its merge would refuse uncontracted (`uncontracted`) are observed."
+  for an implement step, the contract gaps its merge would refuse (`contract-gaps`) are observed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym
                        [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
                   [:or :seon.context/step-observation :seon.error/value]]}
@@ -355,12 +355,13 @@
                (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))
         base (when (and (not judged) (map? head) (not (:seon.error/at head)))
                (base-results database (set (filter head (:seon.task/proofs owed)))))
-        refused (when (and (not judged) (= :implement (:seon.task/step owed))) (uncontracted database agent-id))]
+        refused (when (and (not judged) (= :implement (:seon.task/step owed))) (contract-gaps database agent-id))]
     (or (some #(when (:seon.error/at %) %) [owed head base refused])
         (cond-> (assoc owed :seon.context/head head
                             :seon.context/fork-point (merge (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))
                                                             base))
-          (seq refused) (assoc :seon.context/uncontracted refused)))))
+          (seq refused) (assoc :seon.context/uncontracted (source/gap-symbols refused)
+                                          :seon.context/contract-gaps (mapv #(select-keys % [:seon.fn/sym :seon.fn.contract/position :seon.fn.contract/finding]) refused))))))
 
 (defn step-verdict
   "The held task's step on `database`, the agent's branch, judged by `step-status` over `step-observation`: the
@@ -383,7 +384,7 @@
   {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product head :seon.context/head
     broken :seon.context/broken new-red :seon.context/new-red status :seon.task/status
-    uncontracted :seon.context/uncontracted}]
+    uncontracted :seon.context/uncontracted gaps :seon.context/contract-gaps}]
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
         product (when (= :prove step) product)
         other (remove (into (set proofs) product) new-red)]
@@ -391,7 +392,8 @@
       (seq broken) (assoc :seon.context/broken-tests (entries broken))
       (seq product) (assoc :seon.context/product-tests (entries product))
       (seq other) (assoc :seon.context/new-red-tests (entries other))
-      (seq uncontracted) (assoc :seon.context/uncontracted uncontracted))))
+      (seq uncontracted) (assoc :seon.context/uncontracted uncontracted)
+      (seq gaps) (assoc :seon.context/contract-gaps gaps))))
 
 (defn task-finished?
   "True when the held task's step is done or satisfied.

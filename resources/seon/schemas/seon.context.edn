@@ -62,14 +62,20 @@
                                   [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                                   [:seon.task/product :seon.task/product]
                                   [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]
-                                  [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]]
+                                  [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
+                                  [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]
                :uncontracted [:vector {:min 1 :description "The functions an implement step's branch changed since its task's merge base with no complete :malli/schema, private ones included: its merge refuses them (seon.cluster.source/uncontracted), so the step is not done. Producer: seon.context/step-observation."} :seon.fn/sym]
+               :contract-gaps [:vector {:min 1 :description "Each function, slot and finding keeping an implement step's merge from accepting its contracts (seon.cluster.source/contract-gaps): a missing contract, or an unjustified :any or :some slot, at its position. Producer: seon.context/step-observation."}
+                               [:map [:seon.fn/sym :seon.fn/sym]
+                                [:seon.fn.contract/position :seon.fn.contract/position]
+                                [:seon.fn.contract/finding :seon.fn.contract/finding]]]
                :green-before [:set {:description "A step's proofs known green at its fork point, from the runs its branch already holds at the reach digest each had there (seon.test.runner/result-at-reach); derived, never stored. Producer: seon.context/step-status."} :seon.test/sym]
                :step-status [:map {:description "A step judged by its one rule. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :satisfied :working]]
                              [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
                              [:seon.context/green-before {:optional true} :seon.context/green-before]
-                             [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]]
+                             [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
+                                  [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]
                :step-verdict [:map {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
                               [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                               [:seon.task/product :seon.task/product]
@@ -77,7 +83,8 @@
                               [:seon.task/status [:enum :done :satisfied :working]]
                               [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
                               [:seon.context/green-before {:optional true} :seon.context/green-before]
-                              [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]]
+                              [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
+                                  [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]
                :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
                             [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]
                             [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
@@ -90,7 +97,8 @@
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
                       [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions or unimplemented stubs when done."} [:vector :seon.context/test-entry]]
                       [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]
-                      [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]]
+                      [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
+                                  [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]
                :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
                         [:seon.context/items :my.message/inbox]
                         [:seon.render/operations [:vector :seon.render/read-form]]]

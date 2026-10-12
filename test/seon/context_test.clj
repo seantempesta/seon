@@ -541,6 +541,34 @@
              "the uncontracted helper keeps the step working, named beside its status")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
+(deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and one read of its block."
+           :seon.test/long-ms 30000}
+  an-any-slot-contract-keeps-an-implement-step-working-and-names-the-slot
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "any-slot-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.anyslot
+                                           (str "(ns tq.anyslot (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(deftest ^{:seon/tasks #{'tq.anyslot/area}} area-test (is (= 25 (area 5))))\n")
+                                           "test")
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.anyslot)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.anyslot :seon.task/name "area" :seon.task/intent "Square."}))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id (str "(in-ns 'tq.anyslot)\n"
+                                       "(defn area {:malli/schema [:=> [:cat :any] :int]} [r] (* r r))"))
+       (let [step (:seon.context/step (block running agent-id))]
+         (is (= :working (:seon.task/status step)) "the :any slot keeps the step working")
+         (is (= [{:seon.fn/sym 'tq.anyslot/area :seon.fn.contract/finding :seon.fn.contract.finding/any
+                  :seon.fn.contract/position [:seon.fn.contract.position/input 0]}]
+                (:seon.context/contract-gaps step))
+             "the section names the function, the slot and the finding")
+         (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
+
 (deftest
   a-prove-steps-start-offers-the-owner-and-the-test-namespace-its-instructions-name
   (test-support/with-running-agent

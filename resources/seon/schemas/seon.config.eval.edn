@@ -25,7 +25,7 @@
                     [:seon.eval/uncontracted-count
                      {:optional true
                       :seon.repl/finding :uncontracted
-                      :seon.repl/with [:seon.eval/uncontracted]
+                      :seon.repl/with [:seon.eval/uncontracted :seon.eval/contract-gaps]
                       :seon.repl/fix "Contract every function you define: put {:malli/schema [:=> [:cat :int] :int]} (your own input and output schemas) after the docstring or name, e.g. (defn inc2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2)). Uncontracted definitions are refused at merge."}
                      [:<= 0]]
                     [:seon.eval/budget-override
