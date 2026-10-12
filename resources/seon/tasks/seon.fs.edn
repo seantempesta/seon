@@ -10,4 +10,14 @@
  #:seon.task{:name "implement-a-path-under-a-root-answers-true"
              :needs #{[:seon.task/sym seon.fs/prove-a-path-under-a-root-answers-true]}
              :instructions "Make the table green by changing `seon.fs/under-path?` only: an ancestor that already ends in the separator is not given a second one, so \"/\" and a trailing-slash root contain what lies under them. Keep it safe: a sibling that shares a prefix (\"/a/bc\" under \"/a/b\") is never under."}
+ #:seon.task{:name "an-equal-root-and-target-have-no-intermediate-paths"
+             :intent "`seon.fs/intermediate-paths` answers `[\"/r\"]` where root and target are the same path: `(#'seon.fs/intermediate-paths root target)` with both `/r` as `java.nio.file.Path`. The result is the paths from the root down to, and not including, the target, so a target equal to its root has none and answers `[]`; a target below the root keeps its root first (`/r` to `/r/a/b` answers `/r` and `/r/a`). Its one caller, `seon.fs/delete-recursively!`, reads the result only to refuse an intermediate symlink. Read `seon.fs/intermediate-paths`."
+             :seon.task/children #{[:seon.task/sym seon.fs/prove-an-equal-root-and-target-have-no-intermediate-paths]
+                                   [:seon.task/sym seon.fs/implement-an-equal-root-and-target-have-no-intermediate-paths]}}
+ #:seon.task{:name "prove-an-equal-root-and-target-have-no-intermediate-paths"
+             :step :prove
+             :instructions "In `seon.fs-test` add (1) a table test of `seon.fs/intermediate-paths` as `[root target expected]` cases, in that one order, each path a string turned into a `java.nio.file.Path` and the result compared as strings: [\"/r\" \"/r\" []], [\"/r\" \"/r/a\" [\"/r\"]], [\"/r\" \"/r/a/b\" [\"/r\" \"/r/a\"]], and a trailing-slash root [\"/r/\" \"/r/a/b\" [\"/r\" \"/r/a\"]]; and (2) a property law with `clojure.test.check/quick-check` and a fixed `:seed`: for a generated root and a generated list of segments appended to it, every element of the result is the root or under it and a strict ancestor of the target. Tag both `^{:seon/tasks #{'seon.fs/implement-an-equal-root-and-target-have-no-intermediate-paths}}`. `seon.fs/intermediate-paths` is private: call it through its Var, `(#'seon.fs/intermediate-paths root target)`. Run them red on your branch (the root = target row is the red one)."}
+ #:seon.task{:name "implement-an-equal-root-and-target-have-no-intermediate-paths"
+             :needs #{[:seon.task/sym seon.fs/prove-an-equal-root-and-target-have-no-intermediate-paths]}
+             :instructions "Make the table and the property green by changing `seon.fs/intermediate-paths` only: a target equal to its root answers `[]`, and a target below the root keeps answering the root and each directory down to, not including, the target."}
 ]
