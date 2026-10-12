@@ -53,8 +53,8 @@ Three documents number their phases. To end the collision, `hybrid-agent-world` 
 | M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | filed, not started | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md` | M1 first |
 | E1 | [immutable-env](../research/agent-platform/2026-10-12/hybrid-immutable-env.md) | done | f424382cd: `reference-code/sci` bump, `sci.core/freeze` | |
 | E2 | immutable-env | done | f424382cd: `seon.sci.eval/program-context`, `seon.sci.eval-test/no-agent-work-writes-a-program-context` | |
-| E3 | immutable-env | not started | needs E5 first: settlement and `my.program` still write into the base, so a fresh branch forks it (`program-context-notes.md`) | |
-| E4 | immutable-env | done | 172b23e7c: an unchanged program forks nothing, a moved one forks the program context once; `base-bindings` deleted; on default warm `(+ 1 2)` fork 12.7 → 0.4 ms, test step 13.6 → 2.6 ms, request 77–89 → 61–71 ms. Open: proof `a-private-atom-survives-another-agents-program-change` and the proof-table rows | |
+| E3 | immutable-env | not started | needs E5 first: the recording transaction and `my.program` still write into the base, so a fresh branch forks it (`program-context-notes.md`) | |
+| E4 | immutable-env | done | 172b23e7c: an unchanged program forks nothing, a moved one forks the program context once; `base-bindings` deleted; on default warm `(+ 1 2)` fork 12.7 → 0.4 ms, test step 13.6 → 2.6 ms, request 77–89 → 61–71 ms. Open: proof `a-private-atom-survives-another-agents-program-change` and the proof-table entries | |
 | E5 | immutable-env | not started | `transfer-evaluated-roots!`, `acquire!`, `copy-base-ctx`, `fork-cluster-ctx`, `branch-ctx` remain; the proc cannot yet install a returned context (graph handle and registry both hold it) | |
 | E6 | immutable-env | partial | b7cc27520 forks the predecessor's end commit as `:seon.task.attempt/fork`; `write-attempt!` still takes `(first (sort fork-point))`, so the octopus fork is absent | red proof `a-successor-starts-from-its-predecessors-program-context` |
 | E7 | immutable-env | partial | 35e906c38: a branch's definitions weigh only what they add; `script/seon/program_context_weight.clj` does not exist | measure one base, replace the 12,288 B per function constant |
@@ -129,9 +129,9 @@ problem task unless the entity schema declares a rule.
    files: `seon.db`, `seon.config`, `seon.profile`, the konserve and Datahike forks, never `seon.sci.eval` or
    `seon.turn` while lane program-context holds them), each at its owner with a before and after number from the same
    probe.
-4. **Library words in src** (ledger §3.18 CN entries): done CN-27 frontier → ready (2ef43687f), CN-15 custody →
-   `with-branch` (de56c2570); in the tree CN-18 roster; open CN-9 shown → printed value, CN-5 world → bindings (waits on S5-05, S5-06,
-   EN-4, CN-20), CN-6 receipt (waits on EN-1, RP-14, RP-15a),
+4. **Library words in src** (ledger §3.18 CN entries): done CN-27 `frontier` → `ready` (2ef43687f), CN-15 `custody`
+   → `with-branch` (de56c2570), CN-18 `roster` → registry (d0ebba656); open CN-9 `shown` → printed value, CN-5 `world` →
+   bindings (waits on S5-05, S5-06, EN-4, CN-20), CN-6 `receipt` (waits on EN-1, RP-14, RP-15a),
    one commit each with every caller; code a plan deletes is not renamed
    (`docs/research/agent-platform/2026-10-12/restart-audit/vocab-src-inventory.md`). Living prose is done (fede4d3d4,
    5c339d69a, 976e3888a, 02cf34720, 39cdc0f7f, 27fb60c0d and the specs commits).

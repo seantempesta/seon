@@ -5,7 +5,7 @@ date: 2026-07-26
 tags: [decision, architecture, flow, runtime]
 ---
 
-# ADR-005: Adopt core.async.flow through its public API and SPI
+# ADR-005: Use core.async.flow through its public API and SPI
 
 ## Decision
 

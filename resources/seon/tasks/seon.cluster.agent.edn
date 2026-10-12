@@ -78,6 +78,7 @@
  #:seon.task{:name "the-real-chain-runs-with-no-nudges"
              :kind :function
              :intent "(hybrid-done-and-merge M-final) After M1-M18 are merged and default restarts on that HEAD, the chain test `seon.cluster.db-flow-test/a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit` is extended to Design+Prove (an expected red product) then Implement then auto-merge, with no hand end edits, no copying of proofs to main and no successor launched by hand (injected provider replies); then chain experiment 1's subject (`seon.sci.forgive/segments`, trailing prose) reruns paid with the same instructions: about 5 + 4 calls, at most one send-back, merged into main with zero nudges. Files: `test/seon/cluster/db_flow_test.clj`; the run's note under `docs/research/agent-platform/`. After M18 (`seon.vocabulary/the-merge-path-names-no-retired-identifier`)."
+             :needs #{[:seon.task/sym seon.vocabulary/the-merge-path-names-no-retired-identifier]}
              :must-read #{seon.cluster.agent/db<->flow seon.cluster.agent/plan seon.turn/task-end seon.context/current-state seon.sci.forgive/segments}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
  #:seon.task{:name "a-join-forks-main-after-both-needs-merge"

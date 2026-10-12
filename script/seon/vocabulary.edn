@@ -1,0 +1,32 @@
+;; Retired words and the Clojure, library or git word that replaces them, by sense.
+;; Authority: AGENTS.md "Words and where they come from", docs/seon/architecture/vocabulary.md and the
+;; ledger's CN entries (docs/seon/schedule/agent-loop-ledger.md §3.18). Read by script/seon/vocabulary.clj.
+;; :prose? true means the word also has an ordinary English sense that stays ("tests pass", "pass the map").
+{:retired
+ [{:id "CN-1" :pattern "\\barm(s|ed|ing)?\\b|\\bdisarm\\w*" :use "instrument, instrumented, instrumenting (Malli: `malli.instrument`, `m/-instrument`); for an agent's graph: start, stop (CN-2)"}
+  {:id "CN-3" :pattern "\\bprojections?\\b" :use "the Malli part: registry (`malli.registry`); the Datahike part: database schema"}
+  {:id "CN-5" :pattern "\\bworlds?\\b" :use "the evaluation's bindings (`binding`, `bound-fn*`, `with-bindings`); for what an agent holds: its checked-out branch and its SCI context"}
+  {:id "CN-6" :pattern "\\breceipts?\\b" :use "tx-report for a transaction's answer (Datahike `TxReport`); result for everything else"}
+  {:id "CN-7" :pattern "\\bsettle(s|d|ment|ments)?\\b|\\bsettling\\b" :use "the recording transaction; transact, record"}
+  {:id "CN-8" :pattern "\\benvelopes?\\b" :use "reply (prepl's message map)"}
+  {:id "CN-9" :pattern "\\bshown text\\b" :use "printed value"}
+  {:id "CN-10" :pattern "\\bfaults?\\b" :use "error, recorded error"}
+  {:id "CN-11" :pattern "\\bdiagnostics?\\b" :use "error (an error map beside the value), or finding (clj-kondo's word) where it is one"}
+  {:id "CN-12" :pattern "\\btest members?\\b" :use "test var"}
+  {:id "CN-14" :pattern "\\bgate sets?\\b" :use "the tests reaching the change"}
+  {:id "CN-15" :pattern "\\bcustody\\b" :use "checked-out branch"}
+  {:id "CN-16" :pattern "\\bsuppl(y|ies|ied)\\b" :prose? true :use "defaults (Malli `:default`, `default-value-transformer`) where it means filling omitted inputs; plain English otherwise"}
+  {:id "CN-17" :pattern "\\badopt(s|ed|ing|ion|ions)?\\b" :use "reload (`require :reload`, clj-reload) for code; for schema resources: transact the schema"}
+  {:id "CN-18" :pattern "\\brosters?\\b" :use "registry, or the collection's own word (contexts, graphs, branches)"}
+  {:id "CN-20" :pattern "\\bpass(es)?\\b|\\bbatch(es)?\\b" :prose? true :use "eval request where it means one submission of forms; plain English otherwise (tests pass, pass a value)"}
+  {:id "CN-22" :pattern "\\boverlays?\\b" :use "branch definitions (an agent's program changes); overrides (configuration)"}
+  {:id "CN-25" :pattern "(?<!in a )\\brows?\\b" :use "entity, datom, transaction data (Datahike); in a markdown table: entry; in a table test: case (clojure.test `are`)"}
+  {:id "CN-26" :pattern "\\b(un)?land(s|ed|ing|ings)?\\b" :use "merge, merged, unmerged (git); for a lane's own work: commit, committed; a landing note is a commit note"}
+  {:id "CN-27" :pattern "\\bfrontier\\b" :use "ready (`seon.task/ready`, owner 2026-10-12)"}]
+
+ ;; The documents agents read first, in the owner's order (2026-10-12): AGENTS.md, the current plan and its
+ ;; specs and architecture, the skills. Schedule cards, task files and dated research are archived or
+ ;; rewritten with their subject, never swept for words alone.
+ ;; Documents whose job is to list the retired words.
+ :authorities ["docs/seon/architecture/vocabulary.md"]
+ :living ["AGENTS.md" "docs/seon/plan.md" "docs/seon/architecture" "docs/seon/specs" ".agents/skills"]}

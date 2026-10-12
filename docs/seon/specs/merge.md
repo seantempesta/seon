@@ -1,6 +1,6 @@
 ---
 type: spec
-status: approved in part (2026-10-08): git vocabulary, one merge!, target branch, norms, merge when every test is green
+status: superseded by docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md (owner answers 2026-10-12); formerly approved in part (2026-10-08): git vocabulary, one merge!, target branch, norms, merge when every test is green
 revised: 2026-10-08
 tags: [spec, merge, root]
 ---

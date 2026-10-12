@@ -148,20 +148,20 @@ Seven machinery commits: one. The surviving writer's floor (13-14 MB) and db<->f
 entrant → its read stage (a value) + text
 one cursor, as at a REPL, for each form:
     READ    the next form at the live cursor (§3.3)
-    EVAL    in the agent's world and current namespace; SCI runs it; nothing is refused;
+    EVAL    in the agent's SCI context and current namespace; SCI runs it; nothing is refused;
             agent writes commit as they run; observations captured WHEN they occur (Var writes
             with their metadata at that time, macro expansions, deletions)
-    PRINT   the result value, once, while observation is open → shown text, handle, diagnostics
+    PRINT   the result value, once, while observation is open → printed value, handle, errors
             (lazy realization happens here and is observed)
 once per eval request:
     ANALYZE one clj-kondo run over the eval request's code, joined to the captured observations by span;
             skipped when nothing was defined; JVM eval requests have no SCI observation and no analysis
-    RECORD  ONE transaction at the writer on the branch's tip: evaluation rows, program facts
-            (the final state; dangling references as findings), the call row, agent facts,
+    RECORD  ONE transaction at the writer on the branch's tip: evaluation entities, program facts
+            (the final state; dangling references as findings), the call entity, agent facts,
             delivered items, error occurrences; staged blobs published around the commit
-    FINISH  each reply = its shown result + diagnostics accumulated through RECORD, composed by
+    FINISH  each reply = its printed result + errors accumulated through RECORD, composed by
             the value printer from already-printed units; a later failure (recording included)
-            is a diagnostic beside the value, never a replacement for it
+            is an error beside the value, never a replacement for it
     TEST    when the eval request evaluated a form: the task's proofs, then the tests reaching the change, on the
             agent's branch, serially, up to the step bound (§3.5); each request carries the eval request id,
             so its results are recorded with the eval request; the reply carries the step's summary as data
