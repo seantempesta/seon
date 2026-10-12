@@ -862,7 +862,7 @@
       (merge value (select-keys request [:seon.message/id :my.message/assignment :my.message/reason :seon.task/end :seon.task/merge])))))
 
 (defn- inbox-port
-  "The recipient's inbox in the execution roster and its branch children."
+  "The recipient's inbox in the execution roster's tree: its root and every branch child below it, at any depth."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.agent/id]
                   [:maybe :seon.flow/channel]]}
   [routing recipient]
@@ -870,7 +870,7 @@
     (let [root (loop [roster routing]
                  (if-let [parent (:seon.agent/parent @roster)] (recur parent) roster))]
       (some #(get-in @% [:seon.agent/started recipient :seon.agent/inbox])
-            (cons root (vals (:seon.agent/children @root)))))))
+            (tree-seq (constantly true) #(vals (:seon.agent/children @%)) root)))))
 
 (defn- undeliverable
   "The sender's undeliverable value, naming recipient intent and channel outcome."

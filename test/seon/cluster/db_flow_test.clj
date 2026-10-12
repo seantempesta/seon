@@ -12,6 +12,7 @@
             [seon.cluster.squash :as squash]
             [seon.batch]
             [seon.config :as config]
+            [seon.context]
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.id :as id]
@@ -684,3 +685,37 @@
               (is (= "Refined by root." (intent)) "after the end copy main keeps root's concurrent edit")
               (is (= 1 (count (problems))) "and writes exactly one problem task for it")
               (is (= "A child of mine." (:seon.task/intent (child))) "the agent's child task reached main with the end")))))))))
+
+;;; P7: a message travels on the recipient's inbox channel and is written once, by the recipient, on its own branch.
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-received-message-is-written-on-the-recipients-branch-and-rendered-in-its-context}}
+  a-received-message-is-written-on-the-recipients-branch-and-rendered-in-its-context
+  (binding [*space* "tq.inbox"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"m" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)]
+            (pass! handle routing)
+            (let [[[_ branch agent-id]] (seq (attempts connection "m"))
+                  on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
+                                                                :seon.store/branch branch})
+                  _ (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "m"))) ::proved)
+                  held (fn [conn id] (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]] (db/db conn) id))
+                  send! #(message/send! {:my.message/to agent-id :my.message/content % :seon.agent/routing routing}
+                                        connection "root")
+                  first-sent (send! "Look at the proof.")
+                  id (:seon.message/id first-sent)
+                  _ (when id (await-on! on-branch #(held on-branch id) ::received))
+                  started (System/nanoTime)
+                  warm (send! "And again.")
+                  _ (await-on! on-branch #(held on-branch (:seon.message/id warm)) ::received-warm)
+                  elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+              (is (= {:seon.message/accepted true} (dissoc first-sent :seon.message/id)) "the send is an accepted offer")
+              (is (some? (held on-branch id)) "the recipient's branch holds the message by identity")
+              (is (nil? (held connection id)) "main does not")
+              (is (some #(= id (:my.message/id %))
+                        (get-in (seon.context/current-state (db/db on-branch) agent-id) [:seon.context/unread :seon.context/items]))
+                  "and the recipient's context shows it")
+              (is (< elapsed-ms 30) "offer to write within 30 ms warm")))))))))
