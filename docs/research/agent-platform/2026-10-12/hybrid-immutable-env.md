@@ -77,6 +77,7 @@ swaps nothing. Red proof `sci.fork-bindings-test/a-fork-of-a-frozen-context-writ
 after the fork, the child defines and the map does not see it, a fork of the plain context still swaps its source;
 fork under 1 µs / 3 KB. Files: `reference-code/sci/src/sci/core.cljc`, `reference-code/sci/test/sci/fork_bindings_test.clj`;
 the pin bump commits with `--test seon.sci.eval-test`. Owner: Opus. Task `seon.sci.eval/a-fork-of-a-frozen-context-writes-nothing`.
+Status: done (f424382cd).
 
 **E2. The program context is a value.** `seon.sci.eval/program-context` derives on a builder, freezes, caches under one
 kind; `base-ctx` becomes a fork of it for its remaining callers (loadable at every step). Red proof
@@ -84,6 +85,7 @@ kind; `base-ctx` becomes a fork of it for its remaining callers (loadable at eve
 `defn`s, rebinds a program Var, `def`s an atom and `my.program/ns-unmap!`s; every map in the value is `identical?` to
 before; two commits with equal program revisions answer the `identical?` value; warm lookup under 0.5 ms / 0.5 MB.
 Files: `src/seon/sci/eval.clj`, `test/seon/sci/eval_test.clj`. Owner: Opus. Task `seon.sci.eval/the-program-context-is-a-value`.
+Status: done (f424382cd, 35e906c38); its key is content only since 786915ca3 (namespaces by name, source and bindings; arming by `seon.sci.eval/projection-delta`).
 
 **E3. One fork per agent.** `fork-for-agent` (value in, context out) replaces `copy-base-ctx`, `fork-cluster-ctx`,
 `branch-ctx` and `fork-for-turn`'s fresh path at `acquire-context!`, `seon.test`'s request world and `seon.cluster.boot`.
@@ -93,6 +95,7 @@ beyond the lookup (14.5 ms / 9.1 MB with two forks); records how many functions 
 `src/seon/sci/eval.clj`, `src/seon/cluster/agent.clj` (held by p4-branch-writes: a patch for root), `src/seon/test.clj`,
 `src/seon/cluster/boot.clj`, `test/seon/cluster/agent_test.clj`. Owner: Opus. Task
 `seon.cluster.agent/a-fresh-agents-environment-costs-one-fork` (rewritten in place).
+Status: partial. An agent context is one fork of the program context (`seon.sci.eval/forked-program`), but a fresh branch still forks its base too: the base stays live until E5 (program-context-notes.md §2).
 
 **E4. The idle boundary forks only when the program moved.** `resume-turn` and `acquire-context!` compare keys; moved →
 fork the new value and carry the layer against the held value; the new context is returned and installed by the proc;
@@ -103,6 +106,7 @@ fork the new value and carry the layer against the held value; the new context i
 advances and a return to an earlier commit; a published own Var, a deletion, an alias change). Files: `src/seon/turn.clj`
 (held by p4: patch), `src/seon/sci/eval.clj`, `src/seon/cluster/agent.clj` (patch), `test/seon/turn_test.clj` (patch),
 `test/seon/sci/eval_test.clj`. Owner: Opus. Task `seon.turn/an-eval-request-on-an-unchanged-program-forks-nothing`.
+Status: done except the proc installing the returned context (program-context-notes.md §1): equal key, no acquisition and no fork; `base-bindings` deleted; the writer keeps its context after a covered settlement (§3). Proof `seon.turn-test/an-eval-request-on-an-unchanged-program-forks-nothing`; the second proof and the proof-table rows are not written.
 
 **E5. A settlement derives the next value.** The settlement path builds the next value through `interpret-overlay!` on a
 builder forked from the current value, freezes and inserts it; `acquire!` and `transfer-evaluated-roots!` go. Red proof

@@ -1646,7 +1646,7 @@
                 ;; the replacement too; retain only the destination's ns.
                 (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))))
 
-(declare base-bindings acquired-database? stale-reach reinterpret-reach! interpret-affected! carry-promotions!
+(declare program-key-input acquired-database? stale-reach reinterpret-reach! interpret-affected! carry-promotions!
          namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
 (defn acquired-program
@@ -1798,8 +1798,6 @@
                                 ::evaluated? true
                                 ::prepared-projection projection}))
                             installations)]
-        (when-let [snapshot (::base-bindings agent-ctx)]
-          (reset! snapshot (base-bindings ctx)))
         ;; The agent's snapshot holds the rows its own definitions committed, so
         ;; its next regeneration reads them unchanged rather than another writer's.
         (when-let [agent-snapshot (::kernel/program-snapshot agent-ctx)]
@@ -1810,8 +1808,12 @@
                    (every? :seon.sci.eval/installed installed)
                    (installation-covers-program-change?
                     ctx written-on report installations (context-projection ctx)))
-          (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
-            (swap! (::kernel/program-snapshot target) assoc ::acquired-basis (acquired-basis db))))
+          ;; The writer's context holds what it settled: both serve the settled
+          ;; commit's program key, so its next request forks nothing.
+          (let [input (program-key-input db ctx)]
+            (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
+              (swap! (::kernel/program-snapshot target)
+                     #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input))))))
         ;; A definition that landed in a new Var of `ctx` leaves the callers and
         ;; tests analyzed against its previous Var calling that one: they are
         ;; analyzed again here, as one Clojure Var would be seen.
@@ -2783,7 +2785,7 @@
                 all-function-rows)})
          commit-fault!))))))
 
-(declare same-program-root?)
+(declare same-program-root? program-context program-revisions loaded-basis)
 
 (defn- inherited?
   "Whether `ctx` holds the Var at `qualified` as `base`'s Var, or as its own Var holding the base's root."
@@ -3249,25 +3251,36 @@
         (int? level) (assoc :seon.print/level level)
         (pos-int? budget) (assoc :seon.print/budget budget)))))
 
-(defn- base-bindings
-  "Snapshot program roots, as `ctx` binds them, to distinguish the entering
-  private layer."
-  [ctx]
-  (sci.ctx-store/with-ctx ctx
-    (into {}
-          (mapcat
-           (fn [[namespace-name bindings]]
-             (map (fn [[binding-name binding]]
-                    [[namespace-name binding-name]
-                     (if (sci.utils/var? binding)
-                       ;; the root, never this thread's binding: a copied host
-                       ;; dynamic Var derefs to the request's own value (its
-                       ;; read-evidence sink), which the snapshot would keep
-                       [(if (sci.vars/hasRoot binding) (sci.vars/getRawRoot binding) absent-intern)
-                        (dissoc (meta binding) :sci/generation)]
-                       [binding])])
-                  bindings)))
-          (sci/namespace-state ctx))))
+(def ^:private carried-snapshot-keys
+  "The program snapshot entries a context's custody owns, never its program:
+  what a fork of a program context takes from the context it serves as."
+  [::acquired-basis ::loaded-commit-id ::loaded-basis ::loaded-connection ::armed-dials :seon.flow/commit-fault!])
+
+(defn- forked-program
+  "One fork of the program context `value`, serving as `base` serves: `base`'s
+  custody, world and custody-owned snapshot entries (`carried-snapshot-keys`),
+  fresh kernel atoms of the value's program, and the value it forked from."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
+  [value base]
+  (assoc (merge base (inherit-var-bindings! (sci/fork value)))
+         ::kernel/installed-functions (atom (::kernel/installed-functions value))
+         ::kernel/program-snapshot
+         (atom (merge (::kernel/program-snapshot value)
+                      (select-keys @(::kernel/program-snapshot base) carried-snapshot-keys)
+                      {::program-context value}))))
+
+(defn- program-key-input
+  "What `database`'s program context is a function of, as `base` serves it:
+  the store, the program and dial revisions, and the revision of the adoption
+  record naming the loaded commit (`loaded-basis`). Nil for a value with no
+  committed revisions."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.sci.eval/ctx] [:or :nil :seon.schema/value]]}
+  [database base]
+  (let [projection (or (db/carried-projection database) (schema/projection-from-database database))]
+    (when-let [revisions (program-revisions database projection)]
+      [(store-identity database) revisions
+       (db/content-revisions database (vec (sort (config/dial-attributes projection))))
+       (loaded-basis (loaded-source @(::kernel/program-snapshot base) database))])))
 
 (defn- same-program-root?
   "Contract wrappers retain their original interpreted callable as metadata."
@@ -3285,77 +3298,91 @@
                        (get-in after [:functions % ::function-source])))
         symbols))
 
+(defn- own-namespaces
+  "The namespaces of `ctx`'s `layer` that hold its own work: those whose map is
+  not the one `previous` (the program context it forked from) holds, and those
+  of a Var it rebound. Proportional to the namespaces, never their Vars."
+  [layer previous own-binding]
+  (into (into #{} (keep (fn [[namespace-name entries]]
+                          (when-not (identical? entries (get previous namespace-name)) namespace-name)))
+              layer)
+        (keep #(some-> (:ns (meta %)) sci/ns-name))
+        (keys own-binding)))
+
 (defn- regenerate-agent-context!
-  "Fork the replacement base and carry the private layer as actual objects.
+  "Fork the program context `value`, serving as `base` serves, and carry
+  `ctx`'s private layer into it as actual objects.
 
   The private layer is what the agent's own evaluation added: Vars its SCI
-  generations defined, its own bindings of inherited Vars, and Vars at a path the base it forked from never had (a
-  namespace it required from the JVM, `load-host-namespace`). Owned private
-  Vars keep their roots, including captured values; an own definition keeps its
-  Var, which takes another writer's definition of its row in place. Inherited
-  program bindings are replaced. A JVM restart has no entering context and
-  consequently preserves no private objects. No database read restores them.
-  An unavailable execution's private layer is the unrestored one, so it
-  carries nothing: the context is the base acquired at the branch head."
-  [ctx base]
-  (let [;; Every generation this context held: SCI stamps a Var born in one,
+  generations defined, its own bindings of inherited Vars, and Vars at a path
+  the program context it forked from never had (a namespace it required from
+  the JVM, `load-host-namespace`). Only the namespaces holding them are read
+  (`own-namespaces`): a namespace map the context shares with that value holds
+  none. Owned private Vars keep their roots, including captured values; an own
+  definition keeps its Var, which takes another writer's definition of its
+  row. Inherited program bindings are replaced. A JVM restart has no entering
+  context and consequently preserves no private objects. No database read
+  restores them."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/program-context :seon.sci.eval/ctx]
+                  :seon.sci.eval/ctx]}
+  [ctx value base]
+  (let [env @(:env ctx)
+        ;; Every generation this context held: SCI stamps a Var born in one,
         ;; and each regeneration gives the context a new one.
-        generations (conj (get @(:env ctx) ::generations #{}) (:sci/generation @(:env ctx)))
-        layer (sci/namespace-state ctx)
-        previous @(::base-bindings ctx)
-        current (base-bindings base)
-        base-layer (sci/namespace-state base)
+        generations (conj (get env ::generations #{}) (:sci/generation env))
+        layer (:namespaces env)
+        snapshot @(::kernel/program-snapshot ctx)
+        previous (:namespaces (:env (or (::program-context snapshot) value)))
+        base-layer (:namespaces (:env value))
+        root-of #(if (sci.vars/hasRoot %) (sci.vars/getRawRoot %) absent-intern)
         own-binding (own-bindings ctx)
-        changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
-                                             @(::kernel/program-snapshot base)
+        visited (own-namespaces layer previous own-binding)
+        changed? #(seq (replaced-definitions snapshot (::kernel/program-snapshot value)
                                              [(symbol (str %1) (str %2))]))
         private-bindings
         (sci.ctx-store/with-ctx ctx
           (doall
-           (for [[namespace-name entries] layer
-                 [local-name entry] entries
+           (for [namespace-name visited
+                 [local-name entry] (get layer namespace-name)
                  :when (sci.utils/var? entry)
                  :let [path [namespace-name local-name]
-                       root (if (sci.vars/hasRoot entry) (sci.vars/getRawRoot entry) absent-intern)
-                       held (get current path)
-                       transferred? (boolean (and held (same-program-root? root (first held))))
+                       held (get-in base-layer path)
+                       transferred? (boolean (and held (same-program-root? (root-of entry)
+                                                                           (if (sci.utils/var? held) (root-of held) held))))
                        binding (get own-binding entry)
                        rebound? (some? binding)
                        own? (or rebound? (contains? generations (:sci/generation (meta entry))))
                        changed (when-not transferred? (changed? namespace-name local-name))
-                       adopted (when (and own? changed (sci.utils/var? (get-in base-layer path)))
-                                 (get-in base-layer path))]
+                       adopted (when (and own? changed (sci.utils/var? held)) held)]
                  ;; An own Var stays the Var its callers' closures hold, as one
-                 ;; Clojure Var does, with this context's binding of it:
-                 ;; settlement transfers its root into the base, and another
-                 ;; writer's definition of its row is adopted into it. Only a
-                 ;; deleted row drops it.
+                 ;; Clojure Var does, with this context's binding of it, and
+                 ;; another writer's definition of its row is adopted into it.
+                 ;; Only a deleted row drops it.
                  :when (if own?
                          (or transferred? (not changed) adopted)
-                         (and (not (contains? previous path)) (not changed) (not transferred?)))]
+                         (and (not (contains? (get previous namespace-name) local-name))
+                              (not changed) (not transferred?)))]
              [namespace-name local-name entry (or transferred? (some? adopted)) adopted
               binding])))
         private-names (into #{} (map (fn [[namespace-name local-name _]]
                                       (symbol (str namespace-name) (str local-name))))
                             private-bindings)
-        ;; the base's row of a transferred or adopted definition is the current one
+        ;; the program context's row of a transferred or adopted definition is the current one
         snapshot-names (into #{} (keep (fn [[namespace-name local-name _ base-row?]]
                                          (when-not base-row?
                                            (symbol (str namespace-name) (str local-name)))))
                              private-bindings)
+        forked (forked-program value base)
         regenerated
-        (inherit-var-bindings!
-         (assoc (merge ctx (sci/fork base))
-                ::base-bindings (atom current)
-                ::kernel/installed-functions
-                (atom (into @(::kernel/installed-functions base)
-                            (filter private-names)
-                            @(::kernel/installed-functions ctx)))
-                ::kernel/program-snapshot
-                (atom (update @(::kernel/program-snapshot base) :functions merge
-                              (select-keys (:functions @(::kernel/program-snapshot ctx))
-                                           snapshot-names)))
-                :seon.sci.eval/private-state :preserved-in-memory))]
+        (assoc (merge ctx forked)
+               ::kernel/installed-functions
+               (atom (into @(::kernel/installed-functions forked)
+                           (filter private-names)
+                           @(::kernel/installed-functions ctx)))
+               ::kernel/program-snapshot
+               (atom (update @(::kernel/program-snapshot forked) :functions merge
+                             (select-keys (:functions snapshot) snapshot-names)))
+               :seon.sci.eval/private-state :preserved-in-memory)]
     ;; The regenerated context takes a new generation, so it writes no Var
     ;; its earlier forks share in place; the Vars born in the ones it held
     ;; stay its own.
@@ -3371,9 +3398,9 @@
           (sci/bind-root! regenerated entry @adopted)
           (reset-meta! entry (merge (meta adopted) (select-keys (meta entry) [:ns]))))
         (sci/add-namespace! regenerated namespace-name {local-name entry})))
-    (doseq [[namespace-name entries] layer
-            [local-name entry] entries
-            :let [prior (first (get previous [namespace-name local-name]))]
+    (doseq [namespace-name visited
+            [local-name entry] (get layer namespace-name)
+            :let [prior (get-in previous [namespace-name local-name])]
             :when (and (not (sci.utils/var? entry)) (not= entry prior))]
       (swap! (:env regenerated) update-in [:namespaces namespace-name local-name]
              (fn [current]
@@ -3384,7 +3411,6 @@
     ;; Agent graphs retain the entering handle. Preserve its owned atoms while
     ;; replacing the environment with the regenerated fork's environment.
     (reset! (:env ctx) @(:env regenerated))
-    (reset! (::base-bindings ctx) current)
     (reset! (::kernel/installed-functions ctx)
             @(::kernel/installed-functions regenerated))
     (reset! (::kernel/program-snapshot ctx)
@@ -3440,9 +3466,15 @@
                       db agent-id))))
 
 (defn fork-for-turn
-  "Fork the current base and reapply the agent's in-memory private layer.
-  A fresh fork (no carried agent context: a restart) binds each of the agent's
-  settled handles to a marker naming its value's class; values are never stored."
+  "The agent's context for this turn, serving as the base `ctx` serves.
+
+  An agent context whose program key (`program-key-input`) is the branch
+  head's is returned as it is: no fork, no walk. A moved key looks up the
+  head's program context (`program-context`); the identical value keeps the
+  context too, and another value is forked once with the agent's private layer
+  carried across (`regenerate-agent-context!`). A fresh fork (no carried agent
+  context: a restart) binds each of the agent's settled handles to a marker
+  naming its value's class; values are never stored."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
                   :seon.sci.eval/defs-fork-result]}
   [{base-ctx :seon.sci.eval/ctx
@@ -3453,22 +3485,36 @@
         ;; A fresh context reads the agent's session and handles from its
         ;; evaluations; an agent that never ran has none to read.
         history? (and (not carried?) (agent-ran? db agent-id))
-        ctx (if agent-ctx
-              (regenerate-agent-context! agent-ctx base-ctx)
+        base-snapshot @(::kernel/program-snapshot base-ctx)
+        ;; the key the base's acquisition of this very commit computed, else derived
+        input (if (and (::program-key base-snapshot)
+                       (= (db/commit-id db) (get-in base-snapshot [::acquired-basis :seon.source/commit-id])))
+                (::program-key base-snapshot)
+                (program-key-input db base-ctx))
+        held (some-> agent-ctx ::kernel/program-snapshot deref)
+        value (when-not (and carried? input (= input (::program-key held)))
+                (program-context db (loaded-database base-ctx db)))
+        ctx (cond
+              (not carried?)
               (env/carry-state
-               (assoc (inherit-var-bindings! (sci/fork base-ctx))
-                             ::turn-fork? true
-                             ::base-bindings (atom (base-bindings base-ctx))
-                             ::result-objects (atom {})
-                             ::kernel/installed-functions
-                             (atom @(::kernel/installed-functions base-ctx))
-                             ::kernel/program-snapshot
-                             (atom @(::kernel/program-snapshot base-ctx))
-                             ::print-session
-                             (atom (or (when history? (session-print-options db agent-id)) {})))
+               (assoc (forked-program value base-ctx)
+                      ::turn-fork? true
+                      ::result-objects (atom {})
+                      ::print-session
+                      (atom (or (when history? (session-print-options db agent-id)) {})))
                (if (env/environment? (env/of base-ctx))
                  (env/environment-state (env/of base-ctx))
-                 (projection-state db (context-projection base-ctx)))))
+                 (projection-state db (context-projection base-ctx))))
+
+              (or (nil? value) (identical? value (::program-context held)))
+              agent-ctx
+
+              :else
+              (regenerate-agent-context! agent-ctx value base-ctx))
+        ;; the custody's per-commit entries and the key the context now serves
+        _ (swap! (::kernel/program-snapshot ctx)
+                 #(cond-> (merge % (select-keys @(::kernel/program-snapshot base-ctx) carried-snapshot-keys))
+                    input (assoc ::program-key input)))
         ctx (cond-> (assoc ctx ::bind-result! #'bind-result!)
               (contains? base-ctx ::custody) (assoc ::base-ctx base-ctx))
         assigned-namespace (agent-namespace db agent-id)]
@@ -3745,7 +3791,9 @@
          recorder (:seon.flow/commit-fault! arm-request)
          ctx (copy-base-ctx source database loaded recorder)
          acquired (record-acquisition-refusals! ctx database (::acquisition source) recorder)]
-     (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired ::armed-dials dials)
+     (let [input (program-key-input database ctx)]
+       (swap! (::kernel/program-snapshot ctx)
+              #(cond-> (assoc % ::acquisition acquired ::armed-dials dials) input (assoc ::program-key input))))
      (assoc ctx ::acquisition acquired))))
 
 (defn- loaded-basis
@@ -3854,9 +3902,12 @@
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
   (sci.ctx-store/with-ctx ctx
-    (let [snapshot @(::kernel/program-snapshot ctx)]
-      (if (acquired-database? ctx database)
+    (let [snapshot @(::kernel/program-snapshot ctx)
+          input (program-key-input database ctx)]
+      (if (or (and input (= input (::program-key snapshot))) (acquired-database? ctx database))
         (do
+          (when (and input (not= input (::program-key snapshot)))
+            (swap! (::kernel/program-snapshot ctx) assoc ::program-key input))
           ;; Same program: the acquired value advances to the supplied one, so
           ;; a branch opened at it holds the acquired program by commit id.
           (when-not (= (acquired-basis database) (::acquired-basis snapshot))
@@ -3909,6 +3960,8 @@
                                    ::loaded-basis (loaded-basis source))
                       (::loaded-connection snapshot)
                       (assoc ::loaded-connection (::loaded-connection snapshot))))
+            (when-let [input (program-key-input database ctx)]
+              (swap! (::kernel/program-snapshot ctx) assoc ::program-key input))
             recorded))))))
 
 (defn- acquire-function-from-database!

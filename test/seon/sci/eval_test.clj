@@ -209,6 +209,12 @@
        (is (= "{:a 1}" (sci/eval-string* ctx "(pr-str {:a 1})"))
            "the branch's evaluator keeps printing")))))
 
+(defn- namespace-paths
+  "Every `[namespace name]` `ctx`'s namespaces hold."
+  [ctx]
+  (set (for [[namespace-name entries] (sci/namespace-state ctx) [entry-name _] entries]
+         [namespace-name entry-name])))
+
 (deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
   (test-support/with-database
    (fn [connection]
@@ -264,7 +270,7 @@
                                                    :seon.fn/source (:seon.fn/source admitted))})
              b-next (fork initial b after)
              c (fork regenerated nil after)
-             private-regenerated (#'eval/regenerate-agent-context! b regenerated)]
+             private-regenerated (#'eval/regenerate-agent-context! b (eval/program-context after) regenerated)]
          (is (= :interpreted (:seon.sci.eval/load-state installed)))
          (is (str/includes?
               (:seon.schema.admission/note
@@ -273,8 +279,7 @@
          ;; Regeneration also interprets the override's affected callers
          ;; (39a337013) and binds their host names; incremental installation
          ;; installs the one entity, so its names are a subset.
-         (is (set/subset? (set (keys (#'eval/base-bindings initial)))
-                          (set (keys (#'eval/base-bindings regenerated))))
+         (is (set/subset? (namespace-paths initial) (namespace-paths regenerated))
              "regeneration resolves every name incremental installation resolves")
          (let [affected (:seon.fn/affected
                          (seon.fn/reverse-closure {:seon.db/db after
@@ -2691,19 +2696,6 @@
          (is (eval/acquired-database? ctx current))
          (is (identical? acquisition (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db current})))
          (is (= (db/commit-id current) (:seon.source/commit-id (eval/acquired-program ctx)))))))))
-
-(deftest a-context-snapshot-holds-a-dynamic-roots-value-never-the-requests-binding
-  ;; A copied host dynamic Var bound for one request (seon.db/*read-evidence-sink*) derefs to that
-  ;; request's value on its thread; the snapshot a context keeps past the request holds the root, so
-  ;; the request's sink is unreachable from the context once the request ends.
-  (let [namespace-name 'probe.request-sink
-        sink (sci/new-dynamic-var 'sink ::root {:ns (sci/create-ns namespace-name nil)})
-        ctx (sci/init {:namespaces {namespace-name {'sink sink}}})
-        request-value (Object.)
-        snapshot (sci/binding [sink request-value] (#'eval/base-bindings ctx))
-        held (first (get snapshot [namespace-name 'sink]))]
-    (is (= ::root held) "the snapshot holds the root")
-    (is (not (identical? request-value held)) "never the request's binding")))
 
 (defn- with-fresh-fork
   "Call `f` with a connection to a fresh committed fork of `connection`'s head, then retire it."

@@ -17,6 +17,7 @@
             [seon.repl :as repl]
             [seon.render :as render]
             [seon.batch]
+            [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.sci.observe :as observe]
             [seon.test-support :as support]
@@ -1967,6 +1968,24 @@
      (let [[counted made] (counted-request running agent-id connection "sci"
                                            "(in-ns 'cc.one) (defn twice [x] (* 2 x))")]
        (is (= made counted) "a defn's reply counts the commits its branch advanced")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/an-eval-request-on-an-unchanged-program-forks-nothing}}
+  an-eval-request-on-an-unchanged-program-forks-nothing
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [request #(json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                              "arguments" {"cluster" running "agent" agent-id
+                                                                           "mode" "sci" "code" "(+ 1 2)"}})))]
+       (request)
+       (request)
+       (let [measured (profile/measure request)
+             called (:seon.profile/called measured)
+             reply (:seon.profile/value measured)]
+         (is (= 3 (:seon.repl/value (support/mcp-reply reply))))
+         (is (zero? (get called 'seon.sci.eval/regenerate-agent-context! 0)) "no regeneration")
+         (is (zero? (get called 'seon.sci.eval/forked-program 0)) "no fork of a program context")
+         (is (<= (:fork (:seon.cost/stages (support/mcp-request reply))) 0.5)
+             "the fork stage of an unchanged program is the key comparison alone"))))))
 
 (deftest a-reply-of-commented-forms-names-them
   (let [r (turn/planned-sources ";; (my.program/source 'seon.db/q)\n;; (+ 1 2)" 'user 100000)]
