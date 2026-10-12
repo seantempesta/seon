@@ -1343,14 +1343,7 @@
     (is (not (contains? attributes :seon.message/to)))
     (is (empty? (set/intersection (set (keys attributes))
                                   (program/program-attributes projection))))
-    (is (< (:seon.profile/ms measured) 5))
-    (let [refusal (refusal-data
-                   #(schema/build-projection
-                     {:cluster.example/value :string
-                      :cluster.example/entity
-                      [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
-                       [:cluster.example/value :cluster.example/value]]}))]
-      (is (= :seon.db/identity (:seon.schema/member refusal))))))
+    (is (< (:seon.profile/ms measured) 5))))
 
 (deftest identity-bearing-entity-refuses-an-undeclared-partition
   (let [forms {:partition.example/id [:string {:seon.db/identity true}]

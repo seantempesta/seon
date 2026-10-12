@@ -1760,15 +1760,15 @@
     (with-bindings {#'schema/*projection* nil}
       (is (nil? (schema/current-projection)) "the bootstrap path is the one exercised")
       (is (= :inst (get-in forms [:seon.error/at])) "the entity reaches :inst")
-      (doseq [[population identity]
-              [[forms :seon.config/error]
+      (doseq [[population identity message]
+              [[forms :seon.config/error "a packaged entity reaching :inst is admitted"]
                [(assoc forms ::cluster-component
                        [:map {:seon.db/attributes true
                               :seon.program/partition :seon.cluster}
                         [::component-value :string]])
-                ::cluster-component]]]
+                ::cluster-component "an identity-less cluster component is admitted"]]]
         (is (vector? (admit population identity))
-            "a stored entity declaration is admitted without requiring an identity"))
+            message))
       (testing "a reference nothing declares still refuses by name"
         (let [refused (admit (assoc forms ::bootstrap-referrer [:vector ::never-declared])
                              ::bootstrap-referrer)]
