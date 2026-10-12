@@ -41,7 +41,7 @@ f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; t
 | M1, M2, M3, M5, M6 | done | 3fe23b2c0, 346645d56; 3eca1a962; 767551c7b; 1b09d8043, c74ef3437; 7c3077b9e, 3da1f6449 (`m6-notes.md`; a requested branch waits for root until item 1) | |
 | M9 (narrowed), M8a | done, live after root's restart | 05d3eb2ed (M9: `seon.merge/publish!` as due work, proof red→green, publishing pass 260 ms / 175 MB); M8a in the commit after it (`requested?` deleted; requested ends merge through the gate, then publish) | restart default; probe one Implement chain (item 4) |
 | M12, M10, M13 | filed; deftests absent; M13's entrant end decided (item 2) | | item 2 |
-| M7, M8 rest | filed; deftests absent | | item 6 |
+| M7, M8 rest | M8 rest started: S5 done (2736c187d, `leaf-done` reads `:merged`); the dead chain (`land-ended!`, `land-end!`, `landing-tx`, `root-execution`, `land!`, `:seon.config.root/land?`) is a checked patch for `turn.clj`'s holder; publication's signal needs root's decision; M7 not started | 2736c187d; `m8-rest-notes.md`, `m8-dead-chain.patch`, `m8-s5-db-flow-test.patch` | apply both patches (agent-batch, dsml); root decides (b) |
 | M4 | paused | no conflict in four chains; `conflict-task!` stays until one is observed (`prebrief-m4.md` holds the design question for then) | when observed |
 | M11, M14–M18, M-final | filed | | after item 6 |
 | G1, G3, G4, G5, G9 | done | 6a687ac17, 9116692ea, 5640aef92, ea27cde53, 98720b4eb | |
