@@ -388,6 +388,44 @@
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
 
+(deftest ^{:seon/tasks #{'seon.test/a-base-run-is-kept-on-the-agents-branch}
+           :seon.test/long "Two forks and one nested seon.test/run of one red member at the base commit."
+           :seon.test/long-ms 15000}
+  a-base-run-is-read-at-the-next-step-without-running
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        test-symbol 'seon.test-test/red-at-the-base
+        base-branch (keyword (str "base-run-base-" (id/id)))
+        agent-branch (keyword (str "base-run-agent-" (id/id)))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch base-branch
+                           :seon.cluster.registry/from (db/commit-id (db/db main-conn)) :seon.db/db (db/db main-conn)})
+        base (cluster.agent/acquire-context! target nil {:seon.agent/branch base-branch})
+        _ (test-support/transacted! (:seon.db/connection base)
+                                    [(test-support/program-entity
+                                      (db/db (:seon.db/connection base)) [:seon.test/sym test-symbol]
+                                      "(clojure.test/deftest red-at-the-base (clojure.test/is (= 1 2)))")])
+        commit (db/commit-id (db/db (:seon.db/connection base)))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch agent-branch
+                           :seon.cluster.registry/from commit :seon.db/db (db/db (:seon.db/connection base))})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch agent-branch})
+        conn (:seon.db/connection candidate)
+        runs #(count (db/datoms (db/db conn) :avet :seon.test.run/id))
+        before (runs)]
+    (try
+      (let [first-answer (sut/fork-point-red candidate commit [test-symbol] nil)
+            after-first (runs)
+            second-answer (sut/fork-point-red candidate commit [test-symbol] nil)]
+        (is (= {test-symbol true} first-answer) "the base run answers red")
+        (is (= (inc before) after-first) "the base run is kept on the agent's branch")
+        (is (= {test-symbol true} second-answer) "the kept run answers the next step")
+        (is (= after-first (runs)) "the next step executes no body"))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (cluster.agent/release-context! base)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch agent-branch})
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch base-branch})))))
+
 (deftest ^{:seon/tasks #{'seon.test/a-branch-test-world-runs-the-jvm-loaded-program-not-its-fork-point-record}
            :seon.test/long "Two forks and one nested seon.test/run of one member on the second."
            :seon.test/long-ms 15000}

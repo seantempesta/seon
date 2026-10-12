@@ -2397,10 +2397,12 @@
 
 (defn- newest-results
   "The result of the newest admitted execution among `members` (member entity to test symbol) on `database`, one
-  per test, sorted by symbol: one query for the runs holding the members and one over those runs, however many."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :int :qualified-symbol]]
+  per test, sorted by symbol: one query for the runs holding the members and one over those runs, however many.
+  With `own?`, only runs of this branch's lineage: a run of another commit recorded here (its tested branch) is
+  read only at its key."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :int :qualified-symbol] :boolean]
                   [:vector [:or :seon.test/result :seon.test/result-unknown]]]}
-  [database members]
+  [database members own?]
   (let [runs (when (seq members)
                (mapv (fn [[run member]] [(members member) run])
                      (execution-read
@@ -2408,13 +2410,14 @@
                               :where [?run :seon.test.run/members ?member]]
                             database (vec (keys members))))))
         admitted (when (seq runs)
-                   (into {} (map (fn [[run id selected]] [run [id selected]]))
+                   (into {} (keep (fn [[run id selected tested]] (when-not (and own? tested) [run [id selected]])))
                          (execution-read
-                          (db/q '[:find ?run ?id ?selected
+                          (db/q '[:find ?run ?id ?selected ?tested
                                   :in $ [?run ...]
                                   :where [?run :seon.test.run/id ?id]
                                          [?run :seon.test.run/selection-tx ?selected]
-                                         (not [?run :seon.test.run/published-base-digest])]
+                                         (not [?run :seon.test.run/published-base-digest])
+                                         [(get-else $ ?run :seon.test.run/tested-branch false) ?tested]]
                                 database (vec (distinct (map second runs)))))))
         entities (into #{} (keep (fn [[test-symbol run]]
                                    (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
@@ -2448,7 +2451,8 @@
     (newest-results database
                     (into {} (for [test-symbol (distinct test-symbols)
                                    {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
-                               [member test-symbol])))
+                               [member test-symbol]))
+                    true)
     (catch Exception failure (result-read-error "latest-results" failure))))
 
 (defn result-at-reach
@@ -2465,7 +2469,7 @@
                                  :when (= digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest)))))]
                              [member test-symbol]))]
       (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
-            (newest-results database members)))
+            (newest-results database members false)))
     (catch Exception failure (result-read-error "result-at-reach" failure))))
 
 (defn red-result?

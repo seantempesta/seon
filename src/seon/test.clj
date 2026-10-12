@@ -1375,6 +1375,8 @@
              members :seon.test.run/members :as request}]
   (let [run-id (:seon.test.run/id run)
         snapshot? (some? (:seon.test.run/published-base-digest run))
+        ;; A run of another commit (a base the destination forked from) keeps its tested program's digest and basis.
+        tested? (some? (:seon.test.run/tested-branch run))
         ;; Its commit is the adopted program agreeing with its record
         ;; (`seon.sci.eval/loaded-identity`), read here at the writer.
         cluster-entity (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
@@ -1383,7 +1385,7 @@
         ;; Speculative revisions retain untouched program attributes at the writer.
         ;; A present matching digest proves the tested program still holds;
         ;; without that evidence, the existing basis/history checks decide.
-        digest (if (or snapshot?
+        digest (if (or snapshot? tested?
                        (some-> (:seon.test.run/program-revisions run)
                                (= (runner/program-revisions-digest database)))
                        (= (:seon.test.run/unchanged-through-t request) (db/basis-t database))
@@ -1425,8 +1427,7 @@
     (when-not (or snapshot? (:seon.cluster/name cluster-entity))
       (admission-refusal! :seon.test/cluster-unavailable run-id
                           :explicit-authority-cluster cluster))
-    (when (and (not snapshot?) (or (not= branch (:seon.test.run/branch run))
-                                  (:seon.test.run/tested-branch run)))
+    (when (and (not snapshot?) (not= branch (:seon.test.run/branch run)))
       (admission-refusal! :seon.test/cluster-mismatch run-id branch
                           (select-keys run [:seon.test.run/branch
                                             :seon.test.run/tested-branch])))
@@ -1442,7 +1443,7 @@
               (not= digest (:seon.test.run/program-digest run)))
       (admission-refusal! :seon.test/program-mismatch run-id digest
                           (:seon.test.run/program-digest run)))
-    (when (and (not snapshot?) (or (> (:seon.test.run/basis-t run) (db/basis-t database))
+    (when (and (not snapshot?) (not tested?) (or (> (:seon.test.run/basis-t run) (db/basis-t database))
               (> (get request :seon.test.run/change-basis-t 0)
                  (:seon.test.run/basis-t run))))
       (admission-refusal! :seon.test/invalid-basis run-id
@@ -2701,7 +2702,11 @@
             ;; here on, before or during a member, makes that member unknown.
             since @sci.eval/loaded-identity
             reach (when (seq runnable) (runner/reach-digests database runnable))
-            provenance (:seon.test.run/provenance selection)
+            tested-branch (get-in database [:config :branch])
+            destination (get-in (db/db recording) [:config :branch])
+            provenance (cond-> (:seon.test.run/provenance selection)
+                         (not= tested-branch destination)
+                         (assoc :seon.test.run/branch destination :seon.test.run/tested-branch tested-branch))
             exclusion-entities
             (when runnable
               (vec (concat
@@ -2985,8 +2990,9 @@
   eligibility (`:named` needs identities or namespaces; `:incremental` derives
   changed reach and outstanding obligations from recorded evidence; `:platform`
   the declared rows; `:all` every eligible row). Selection and admission read
-  and write the explicit `:seon.test/recording-connection`, which must hold the
-  execution branch; `:seon.db/writer` (default `seon.db/transact!`)
+  and write the explicit `:seon.test/recording-connection`, the execution's
+  branch or, for a run of another commit (`fork-point-red`'s base), the branch
+  that keeps it, named its destination beside the tested branch; `:seon.db/writer` (default `seon.db/transact!`)
   writes admission and stop there. A member whose recorded green still holds,
   or whose recorded red ran on this same program, is answered from the record
   with `:seon.test/unchanged` and no execution, unless the request asks
@@ -3092,34 +3098,32 @@
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
 
 (defn fork-point-red
-  "Of `tests`, those the commit `commit` holds, each true when it is red there: the result that commit holds at
-  its own reach (inherited evidence), else one run on a branch forked at that commit from `execution`, the
-  agent's own world, recorded there and released after, bounded by `limit-ms` (else the cluster's check dial). A
-  test with no result even then is not red there."
+  "Of `tests`, those the commit `commit` holds, each true when it is red there: the result held at its reach in
+  that commit, on the commit or on `execution`'s branch, else one run on a branch forked at that commit from
+  `execution`, recorded on `execution`'s connection, where the next call reads it at the same key, bounded by
+  `limit-ms` (else the cluster's check dial). A test with no result even then is not red there."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.source/commit-id [:sequential :seon.test/sym] [:maybe pos-int?]]
                   [:or [:map-of :seon.test/sym :boolean] :seon.error/value]]}
   [execution commit tests limit-ms]
   (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
         fork (source/database store commit)
+        recording (:seon.db/connection execution)
         present (into [] (comp (distinct) (filter #(seq (db/datoms fork :avet :seon.test/sym %)))) (sort tests))
-        results (when (seq present) (runner/latest-results fork present))
         reach (when (seq present) (runner/reach-digests fork present))
-        inherited (when-not (some :seon.error/at [results reach])
-                    (into {} (keep #(let [test-symbol (:seon.test/sym %)]
-                                      (when (and test-symbol (= (get reach test-symbol) (:seon.test.member/reach-digest %)))
-                                        [test-symbol (runner/red-result? %)])))
-                          results))
+        held (when (and (seq present) (not (:seon.error/at reach)))
+               [(runner/result-at-reach fork reach) (runner/result-at-reach (db/db recording) reach)])
+        inherited (when (and (seq present) (not-any? :seon.error/at (cons reach held)))
+                    (update-vals (apply merge held) runner/red-result?))
         due (into #{} (remove #(contains? inherited %)) present)
         ran (when (and inherited (seq due))
-              (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})
-                    connection (:seon.db/connection child)]
+              (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})]
                 (try (db/with-branch
-                      {:seon.db/connection connection}
-                      #(run (cond-> {:seon.test/policy :named :seon.test/execution child :seon.test/recording-connection connection
+                      {:seon.db/connection recording}
+                      #(run (cond-> {:seon.test/policy :named :seon.test/execution child :seon.test/recording-connection recording
                                      :seon.test/identities due :seon.test/rerun? true :seon.test/include-long? true}
                               limit-ms (assoc :seon.test/check-time-limit-ms limit-ms))))
                      (finally (@release-context! child)))))]
-    (or (some #(when (:seon.error/at %) %) [results reach ran])
+    (or (some #(when (:seon.error/at %) %) (concat [reach ran] held))
         (merge (zipmap present (repeat false))
                (into {} (keep #(when-let [test-symbol (:seon.test/sym %)] [test-symbol (runner/red-result? %)]))
                      (:seon.test/results ran))
