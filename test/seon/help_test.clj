@@ -5,8 +5,10 @@
             [edamame.core :as edamame]
             [seon.mcp :as mcp]
             [seon.bootstrap :as bootstrap]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.task :as task]
             [seon.test-support :as support]))
 
 ;; The opening no longer evaluates (help) first: the agent's identity unit
@@ -37,6 +39,25 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.help/lines]}
   [database]
   (help-lines (:seon.help/groups (bootstrap/help-value database "help"))))
+
+(defn- done-lines
+  "The lines of the Done group help-value answers for `agent-id` on `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.help/lines]}
+  [database agent-id]
+  (let [done (filter #(= "Done" (:seon.help/title %)) (:seon.help/groups (bootstrap/help-value database agent-id)))]
+    (assert (= 1 (count done)) "help shows exactly one Done group")
+    (:seon.help/lines (first done))))
+
+(defn- with-prove-agent
+  "Run `body` with the fixture connection and an agent holding a :prove step."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] :seon.schema/value]}
+  [body]
+  (with-help-agent
+   (fn [connection]
+     (support/assign-task! connection "help")
+     (support/transacted! connection [{:db/id [:seon.task/id (task/agent-task @connection "help")]
+                                       :seon.task/step :prove}])
+     (body connection))))
 
 (deftest an-agent-identity-offers-help-as-its-operation
   (with-help-agent
@@ -176,9 +197,32 @@
            "no arglist names a supplied world member")))))
 
 (deftest help-teaches-how-a-deftest-names-its-task
-  (let [lines (lines-of (seon.db/db))]
-    (is (some #(clojure.string/includes? % "(deftest ^{:seon/tasks #{'") lines)
-        "help teaches a deftest whose name carries :seon/tasks")))
+  (with-prove-agent
+   (fn [connection]
+     (is (some #(str/includes? % "(deftest ^{:seon/tasks #{'") (done-lines @connection "help"))
+         "a Prove step's help teaches a deftest whose name carries :seon/tasks"))))
+
+(deftest help-teaches-each-step-its-done
+  (with-prove-agent
+   (fn [connection]
+     (let [prove (str/join "\n" (done-lines @connection "help"))]
+       (is (every? #(str/includes? prove %) [":seon.context/after" ":seon.context/product-tests" ":seon.error/unimplemented"])
+           "Prove's Done names the step after, the product tests and the unimplemented stub")
+       (is (not (str/includes? prove ":seon.context/proof-failures")) "Prove's Done is not Implement's")
+       (is (str/includes? prove "never your own") "Prove tags the successor, never its own task"))))
+  (with-help-agent
+   (fn [connection]
+     (support/assign-task! connection "help")
+     (let [implement (str/join "\n" (done-lines @connection "help"))]
+       (is (str/includes? implement ":seon.context/proof-failures") "Implement's Done names the proof failures")
+       (is (not (str/includes? implement ":seon.error/unimplemented")) "Implement's Done is not Prove's")))))
+
+(deftest help-is-shorter-than-it-was-and-never-says-root-reviews
+  (with-prove-agent
+   (fn [connection]
+     (let [text (str/join "\n" (lines-of @connection))]
+       (is (< (tokens/estimate text) 2162) "the help is below its former 2,162 tokens, the longer Prove Done included")
+       (is (not (re-find #"(?i)root (reviews|answers)|ask root|\"root\"" text)) "nothing waits on root")))))
 
 (deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-in-ns-first-and-no-probing}}
   help-teaches-locals-need-their-bindings-not-in-ns
@@ -196,14 +240,14 @@
    (fn [connection]
      (let [groups (:seon.help/groups (bootstrap/help-value @connection "help"))
            text (str/join "\n" (help-lines groups))]
-       (is (= ["Who you are" "Reading your context" "Done" "How work proceeds" "The REPL" "Data"
-               "Ask root or give the task back" "Clojure and Malli gotchas"]
+       (is (= ["Who you are" "How to speak" "Your task" "Done" "How work proceeds" "Write what you learn"
+               "When you cannot" "Each reply is data" "Data"]
               (mapv :seon.help/title groups))
            "help carries each orienting group, in reading order")
        (is (every? #(str/includes? text %)
-                   [":seon.context/proofs" ":pending" ":seon.ref/message" ":seon.render/operations"
-                    "There is no done call" ":malli/schema you write" "merge refuses it" "tool-call markup"
-                    "with-redefs" "(my.turn/wait" "(my.task/send-back!" "my.message/send"])
+                   [":seon.context/proofs" ":pending" ":seon.render/operations" "There is no done call"
+                    "merge refuses it" "You have one tool, eval." "keep the ;; comments you were shown"
+                    "with-redefs" "(my.task/send-back!" "(my.task/refine!" "merges onto main by itself"])
            "each group says what it is for: the block's parts, done, the contract form, the REPL, the don'ts and the way out")))))
 
 (deftest help-teaches-the-common-gotchas-and-names-only-symbols-that-exist
@@ -211,10 +255,8 @@
    (fn [connection]
      (let [groups (:seon.help/groups (bootstrap/help-value @connection "help"))
            text (str/join "\n" (help-lines groups))
-           gotchas (:seon.help/lines (first (filter #(= "Clojure and Malli gotchas" (:seon.help/title %)) groups)))
            symbols (distinct (map second (re-seq #"(?<![:\w./'])([a-z][\w.-]*\.[\w.-]*/[\w!?*<>=-]+)" text)))]
-       (is (= 5 (count gotchas)) "help carries its five gotcha lines")
-       (is (every? #(str/includes? (str/join "\n" gotchas) %) ["[:= {} nil]" "[:cat in1 in2]" "(contains? {:k false} :k)" "mapv" "ns-aliases" ":seon.error/problems"])
+       (is (every? #(str/includes? text %) ["[:= {} nil]" "[:cat in1 in2]" "(contains? {:k false} :k)" "mapv" "ns-aliases" ":seon.error/problems"])
            "each gotcha names its remedy")
        (is (not (re-find #"\[:maybe :" text)) "no line advises [:maybe ...]")
        (is (seq symbols) "help names qualified symbols")
