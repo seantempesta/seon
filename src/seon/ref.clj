@@ -193,7 +193,7 @@
                                                   home
                                                   (or (some-> (get aliases requested) ns-name) requested)))})))
 
-(defn- brief
+(defn brief
   "One name a referent's own content names, shown one level: its name, a one-line summary and the form that reads
   it; never its content."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]}

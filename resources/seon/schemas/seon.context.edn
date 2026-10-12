@@ -4,6 +4,29 @@
                 [:seon.task/sym :seon.task/sym]
                 [:seon.task/intent :seon.task/intent]
                 [:seon.task/instructions {:optional true} :seon.task/instructions]],
+               :merged [:map {:description "What main's merge of a step before the held task moved, by family, each name shown one level (seon.ref/brief): its summary and the form that reads it, never its content; families absent when empty. Producer: seon.context/merged."}
+                        [:seon.context/functions {:optional true} :seon.context/functions]
+                        [:seon.context/schemas {:optional true} :seon.context/schemas]
+                        [:seon.context/tests {:optional true} :seon.context/tests]
+                        [:seon.context/tasks {:optional true} :seon.context/tasks]]
+               :functions [:vector {:description "The functions a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
+               :schemas [:vector {:description "The schemas a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
+               :tests [:vector {:description "The deftests a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
+               :tasks [:vector {:description "The tasks a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
+               :step-before [:map {:description "A step the held task needs: its kind and, once main merged an assignment of it, :seon.task/outcome :merged with what that merge moved. Producer: seon.context/step-before."}
+                             [:seon.task/sym :seon.task/sym] [:seon.task/step :seon.task/step]
+                             [:seon.task/outcome {:optional true} :seon.task/outcome]
+                             [:seon.context/merged {:optional true} :seon.context/merged]]
+               :step-after [:map {:description "A step that needs the held task: its symbol, the name a Prove step tags its product with, its kind and its instructions."}
+                            [:seon.task/sym :seon.task/sym] [:seon.task/step :seon.task/step]
+                            [:seon.task/instructions {:optional true} :seon.task/instructions]]
+               :subject [:and {:description "The task whose :seon.task/children holds the held task: the owner of the goal its chain shares."} :seon.task/sym]
+               :before [:vector {:description "The steps the held task needs, merged onto main before its branch forked when each shows :merged."} :seon.context/step-before]
+               :after [:vector {:description "The steps that need the held task, each with its instructions."} :seon.context/step-after]
+               :chain [:map {:description "The chain the held task is a step of: its subject, the steps before it and the steps after it; absent when it has none. Producer: seon.context/chain."}
+                       [:seon.context/subject {:optional true} :seon.context/subject]
+                       [:seon.context/before {:optional true} :seon.context/before]
+                       [:seon.context/after {:optional true} :seon.context/after]]
                :send-backs [:vector {:description "The latest send-back to the held task: the step that sent it back and the reason its attempt recorded (seon.context/send-backs); absent when none was sent."}
                             [:map [:seon.task/sym :seon.task/sym] [:seon.task.attempt/reason :seon.task.attempt/reason]]]
                :turns
@@ -66,8 +89,9 @@
                         [:seon.context/items :my.message/inbox]
                         [:seon.render/operations [:vector :seon.render/read-form]]]
                :task-sections
-               [:map {:description "The held task's sections, one projection for the block and my.task/current: the task, its proofs each with its resolution, its step, the latest send-back and every other reference it makes, resolved. Producer: seon.context/task-sections."}
+               [:map {:description "The held task's sections, one projection for the block and my.task/current: the task, its chain, its proofs each with its resolution, its step, the latest send-back and every other reference it makes, resolved. Producer: seon.context/task-sections."}
                 [:seon.context/task {:optional true} :seon.context/task]
+                [:seon.context/chain {:optional true} :seon.context/chain]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
@@ -76,6 +100,7 @@
                [:map {:description "The current-state block's data, derived at each model call from stored facts and never stored; sections are absent when empty."
                       :seon.render/ai seon.context/current-state-ai}
                 [:seon.context/task {:optional true} :seon.context/task]
+                [:seon.context/chain {:optional true} :seon.context/chain]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
@@ -95,6 +120,7 @@
                 [:seon.context/task {:optional true}
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
                   [:seon.task/instructions {:optional true} :seon.task/instructions]]]
+                [:seon.context/chain {:optional true} :seon.context/chain]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]

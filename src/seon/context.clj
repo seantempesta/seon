@@ -6,6 +6,7 @@
   attempt records the basis it was assembled at."
   (:require [seon.batch :as batch]
             [seon.bootstrap :as bootstrap]
+            [seon.cluster.source :as source]
             [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.error.refusal]
@@ -200,16 +201,77 @@
 
 (defn- task-references
   "Every reference the held task makes, resolved once on `database` by the one rule (`seon.ref/references`): the
-  names and paths its effective intent and instructions cite, the tasks it needs and its `proofs`."
+  names and paths its effective intent and instructions cite and its `proofs`. The tasks it needs are its chain's
+  steps before it (`chain`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.task/keys [id intent instructions]} proofs]
-  (let [needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
-                    database id)]
-    (if (db/read-refusal? needs)
-      [needs]
-      (ref/references database {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
-                                :seon.ref/names (into (set needs) proofs)}))))
+  [database {:seon.task/keys [intent instructions]} proofs]
+  (ref/references database {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
+                            :seon.ref/names proofs}))
+
+(def ^:private merged-families
+  "The key each declaration family a merge moved is shown under, by its identity attribute."
+  {:seon.fn/sym :seon.context/functions :seon.schema/key :seon.context/schemas
+   :seon.test/sym :seon.context/tests :seon.task/sym :seon.context/tasks})
+
+(defn- merged
+  "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family, each
+  name one level (`seon.ref/brief`): its summary and the form that reads it, never its content. Families are
+  absent when empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id] [:or :seon.context/merged :seon.error/value]]}
+  [database commit]
+  (let [accepted (source/merge-accepted (db/branch-connection database (get-in database [:config :branch])) commit)]
+    (if (:seon.error/at accepted)
+      accepted
+      (let [shown (reduce (fn [shown [attribute value]]
+                            (if-let [family (merged-families attribute)]
+                              (update shown family (fnil conj []) (ref/brief database value))
+                              shown))
+                          {} (sort-by (comp str second) (:seon.program/identities accepted)))]
+        (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))))
+
+(defn- step-before
+  "The step `sym` the held task needs, as its chain shows it on `database`: its kind and, once main merged an
+  assignment of it, `:seon.task/outcome` `:merged` with what that merge moved (`merged`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.context/step-before :seon.error/value]]}
+  [database sym]
+  (let [task (db/pull database [:seon.task/step] [:seon.task/sym sym])
+        merges (db/q '[:find ?a ?tx :in $ ?s :where [?t :seon.task/sym ?s] [?a :seon.task/attempt-of ?t]
+                       [?a :seon.task/outcome :merged ?tx]]
+                     database sym)
+        latest (when (and (seq merges) (not (:seon.error/at merges))) (first (apply max-key second merges)))
+        commit (when latest (:seon.task/merge-commit (db/pull database [:seon.task/merge-commit] latest)))
+        moved (when commit (merged database commit))]
+    (or (some #(when (:seon.error/at %) %) [task merges moved])
+        (cond-> {:seon.task/sym sym :seon.task/step (get task :seon.task/step :implement)}
+          latest (assoc :seon.task/outcome :merged)
+          (seq moved) (assoc :seon.context/merged moved)))))
+
+(defn- chain
+  "The chain the held task `id` is a step of, on `database`: its subject (the task whose `:seon.task/children`
+  holds it), the steps before it (its `:seon.task/needs`, `step-before`) and the steps after it (the tasks that
+  need it, each with its kind and instructions); nil when it has none of the three."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :nil :seon.context/chain :seon.error/value]]}
+  [database id]
+  (let [subject (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?p :seon.task/children ?t] [?p :seon.task/sym ?s]]
+                      database id)
+        needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
+                    database id)
+        successors (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?n :seon.task/needs ?t] [?n :seon.task/sym ?s]]
+                         database id)
+        read-error (some #(when (:seon.error/at %) %) [subject needs successors])
+        before (when-not read-error (mapv #(step-before database %) (sort needs)))
+        after (when-not read-error
+                (mapv #(let [task (db/pull database [:seon.task/sym :seon.task/step :seon.task/instructions] [:seon.task/sym %])]
+                         (if (:seon.error/at task) task (merge {:seon.task/step :implement} task)))
+                      (sort successors)))]
+    (or read-error
+        (some #(when (:seon.error/at %) %) (concat before after))
+        (when (or subject (seq before) (seq after))
+          (cond-> {}
+            subject (assoc :seon.context/subject subject)
+            (seq before) (assoc :seon.context/before before)
+            (seq after) (assoc :seon.context/after after))))))
 
 (defn send-backs
   "The latest send-back to the task `handle` on `database`: the attempt of another step that ended
@@ -489,14 +551,15 @@
 
 (defn task-sections
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
-  handle, symbol, goal and its step's instructions; its
+  handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
   proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
   and every other reference it makes, resolved. Empty when it holds none.
 
   ## Costs
 
   One assignment query and one task pull, the proofs' reach digests and latest results, the step observation,
-  one send-back query and one resolution per distinct reference."
+  one send-back query, three chain queries with one `seon.cluster.source/merge-accepted` per merged step before it,
+  and one resolution per distinct reference."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.context/task-sections :seon.error/value]]}
   [database agent-id]
   (let [held (held-task database agent-id)]
@@ -505,12 +568,14 @@
       (let [proven (proofs database (:seon.task/sym held))
             verdict (step-verdict database agent-id)
             sent-back (send-backs database (:seon.task/id held))
+            steps (chain database (:seon.task/id held))
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
             reads (when-not (:seon.error/at proven) (task-references database held proof-names))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
-        (or (some #(when (:seon.error/at %) %) (concat [proven verdict] reads))
+        (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps] reads))
             (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions])}
+              steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
                             (update proven :seon.context/proof-list
                                     (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
@@ -569,7 +634,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is use-fixtures]]
+            [datahike.api :as d]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
             [seon.context :as context]
@@ -60,6 +61,7 @@
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (is (= {:seon.task/sym 'tq.cs/shape :seon.task/intent "First."} (task-section)))
+       (is (not (contains? (block running agent-id) :seon.context/chain)) "a task with no subject, needs or successor has no chain")
        (is (= :working (:seon.task/status (:seon.context/turns (block running agent-id)))))
        (is (int? (:my.agent/turns-left (:seon.context/turns (block running agent-id)))))
        (task/create! (assoc declaration :seon.task/intent "Second."
@@ -142,16 +144,69 @@
    (fn [running agent-id connection]
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'attributes 'tq.cs/attributes)
            base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
-           _ (task/create! (assoc base :seon.task/name "first" :seon.task/intent "Comes first."))
            id (:seon.task/id (task/create! (assoc base :seon.task/name "attributes"
-                                                  :seon.task/intent "Use `seon.task/agent-task`; see `AGENTS.md#data-and-contracts`."
-                                                  :seon.task/needs #{[:seon.task/sym 'tq.cs/first]})))]
+                                                  :seon.task/intent "Use `seon.task/agent-task`; see `AGENTS.md#data-and-contracts`.")))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [reads (shown running agent-id "(mapv #(select-keys % [:seon.ref/name :seon.ref/path :seon.task/intent]) (:seon.context/must-reads (seon.context/current-state)))")]
          (is (some #{{:seon.ref/name 'seon.task/agent-task}} reads) "the intent's names")
-         (is (some #{{:seon.ref/name 'tq.cs/first :seon.task/intent "Comes first."}} reads) "the tasks it needs, by their intent")
          (is (some #{{:seon.ref/path "AGENTS.md"}} reads) "the paths the intent cites"))))))
+
+(defn- declaring-commit
+  "The commit on `connection`'s branch whose transaction declared the test `sym`: walking back from the head, the
+  last commit whose parent does not hold it."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym] :uuid]}
+  [connection sym]
+  (loop [commit (db/commit-id (db/db connection))]
+    (let [database (d/commit-as-db connection commit)
+          parent (first (d/parent-commit-ids database))
+          before (d/commit-as-db connection parent)
+          held? (seq (d/datoms before :avet :seon.test/sym sym))]
+      (run! d/release-materialized-db [database before])
+      (if held? (recur parent) commit))))
+
+(deftest a-steps-block-names-its-chain
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.ch}
+           prove (:seon.task/id (task/create! (assoc base :seon.task/name "prove" :seon.task/step :prove
+                                                     :seon.task/instructions "Add a row for the empty input.")))
+           implement (:seon.task/id (task/create! (assoc base :seon.task/name "implement" :seon.task/needs #{[:seon.task/sym 'tq.ch/prove]}
+                                                         :seon.task/instructions "Make the rows green.")))
+           _ (task/create! (assoc base :seon.task/name "subject" :seon.task/intent "Scanning is total."
+                                  :seon.task/children #{[:seon.task/sym 'tq.ch/prove] [:seon.task/sym 'tq.ch/implement]}))
+           ;; the Prove step's product, defined at the agent's REPL: a red deftest tagged with its successor;
+           ;; the commit that declared it stands for main's merge commit carrying it
+           _ (evaluate running agent-id (str "(ns tq.ch-test (:require [clojure.test :refer [deftest is]]))\n"
+                                             "(deftest ^{:seon/tasks #{'tq.ch/implement}} rows (is (= 1 2)))"))
+           merge-commit (declaring-commit connection 'tq.ch-test/rows)
+           assign! #(task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                                   :seon.task/assigned % :seon.task/agent [:seon.agent/id agent-id]
+                                   :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           proving (:seon.task/assignment (assign! prove))
+           prove-chain (:seon.context/chain (block running agent-id))]
+       (is (= 'tq.ch/subject (:seon.context/subject prove-chain)) "the step names its subject, the goal's owner")
+       (is (= [{:seon.task/sym 'tq.ch/implement :seon.task/step :implement :seon.task/instructions "Make the rows green."}]
+              (:seon.context/after prove-chain))
+           "the Prove step names the step after it, the name its product is tagged with, and what that step will do")
+       (is (not (contains? prove-chain :seon.context/before)) "no step comes before it")
+       ;; root's merge of the Prove assignment, as `seon.merge/merge!` records it on main
+       (test-support/transacted! connection [[:db/add [:seon.task/assignment proving] :seon.task.attempt/end :done]
+                                             [:db/add [:seon.task/assignment proving] :seon.task/outcome :merged]
+                                             [:db/add [:seon.task/assignment proving] :seon.task/merge-commit merge-commit]])
+       (assign! implement)
+       (let [state (block running agent-id)
+             [before] (get-in state [:seon.context/chain :seon.context/before])]
+         (is (= {:seon.task/sym 'tq.ch/prove :seon.task/step :prove :seon.task/outcome :merged}
+                (select-keys before [:seon.task/sym :seon.task/step :seon.task/outcome]))
+             "the Implement step names the step before it as merged")
+         (is (some #{'tq.ch-test/rows} (map :seon.ref/name (get-in before [:seon.context/merged :seon.context/tests])))
+             "with the tests it merged, each a name with the form that reads it")
+         (is (not-any? :seon.test/source (get-in before [:seon.context/merged :seon.context/tests]))
+             "a merged declaration is shown one level, never its content")
+         (is (= {:seon.task/sym 'tq.ch/implement :seon.task/intent "Scanning is total." :seon.task/instructions "Make the rows green."}
+                (:seon.context/task state))
+             "the task is the subject's goal with the step's own instructions"))))))
 
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
