@@ -5,7 +5,7 @@
 Software has rarely grown linearly: each addition tangles with what already exists, so cost and defects grow faster
 than capability. Seon is a different way to build software, one that grows by **accretion**, the way Clojure has:
 open data, stable names, new names for new meanings, and every part observable. Many agents work at once, each on
-its own branch in its own SCI world, and design, prove and implement software cheaply and safely. The system gets
+its own branch in its own SCI context, and design, prove and implement software cheaply and safely. The system gets
 smaller, faster and more certain as they work.
 
 Four properties make that possible:
@@ -44,7 +44,7 @@ Every change follows the same order, from the data outward:
 4. **Change the owner.** When something is in the way, follow the data flow to the part that owns it and change it
    there. A good fix usually removes code, and every addition names what it replaces.
 5. **Measure before and after.** A design is judged by its measured cost against what the work must do, on real
-   data, with the numbers in the landing.
+   data, with the numbers in the commit message.
 6. **Prove the whole loop.** A change counts when it works end to end through the same path agents use: defined at
    the REPL, proven by its tests, written back and committed.
 
@@ -55,7 +55,7 @@ Seon agents too: they use the same branch, REPL entrance, checks and reviewed me
 root.
 
 - **Core is composable.** One shared database (stable values, one writer, cheap branches), one shared SCI runtime (a
-  base context each agent forks into its own world) and render functions over data; each agent is its own
+  program context each agent forks into its own SCI context) and render functions over data; each agent is its own
   concurrent Flow graph. Parts compose as functions and stage values into one system. MCP, the test harness and the
   web are views that enter through the agent's path and render its values, sharing its model, evaluator, printer and
   store.
@@ -63,20 +63,19 @@ root.
   once, SCI evaluates them, the facts come from what the evaluation observed (with clj-kondo's analysis of the same
   text joined by exact source span), and one transaction records it all. Everything uses it: product agents, outside
   agents through MCP, tests through the harness, render forms in context assembly (and the debug page, which displays
-  that assembly), schema registration, gates and merge. An entrant needing another reader or evaluator (JVM mode, a
-  file, a test body) supplies that stage as a value to the same pipeline. A form is parsed once and evaluated once;
-  its facts and shown text are stored and queryable, while its result value lives in the runtime (after a crash or
+  that assembly), schema registration, checks and merge. An entrant needing another reader or evaluator (JVM mode, a
+  file, a test body) passes that stage as a value to the same pipeline. A form is parsed once and evaluated once;
+  its facts and printed value are stored and queryable, while its result value lives in the runtime (after a crash or
   restart its handle answers that the value is gone). Everything before the print is a real value under its Malli
   schema: live in the runtime, a database fact or a blob. The pipeline is: text in (prose becomes comments and
-  delimiters are repaired where unambiguous) → forms read and evaluated → facts and shown text stored → at the edge,
+  delimiters are repaired where unambiguous) → forms read and evaluated → facts and printed value stored → at the edge,
   the value's schema selects its most specific render, if any → the value printer. Every shown value passes through
   the value printer, render output included.
-- **The path is total.** It always returns the evaluated value. A later stage's failure (gate, renderer, recording,
-  classification) is attached beside the value as a diagnostic and recorded as an error, and the value still
-  returns.
+- **The path is total.** It always returns the evaluated value. A later stage's failure (entry policy, renderer, recording,
+  classification) is attached beside the value as an error map and recorded, and the value still returns.
 - **Agents change the program in REPL terms**: `defn` inside the target namespace (after `in-ns`), as in Clojure,
   `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted entities; the
-  working medium is the REPL. Product agents work through declared evaluation, adoption and test requests.
+  working medium is the REPL. Product agents work through declared eval, reload and test requests.
 
 ## How to think
 
@@ -106,7 +105,7 @@ root.
   counters, the SCI interrupt flag, the running Thread and clojure.test's report counter; cache counters are
   Caffeine's `recordStats`. Any further atom needs a reason the owner accepts in plain words, and a lint checks this
   (ledger §3.19). Live host objects with no data form (Flow graphs, channels, executors, SCI contexts, listeners) live
-  in exactly one roster per scope (process, then cluster execution), keyed by stable ids, passed explicitly and
+  in exactly one registry per scope (process, then cluster execution), keyed by stable ids, passed explicitly and
   observable in status; admission and retirement are writer-checked facts. Per-call accumulation is a fold.
 - **Grow by accretion.** Require no more, promise no less: open maps, validated declared members, optional additions
   and new names for changed semantics.
@@ -127,31 +126,31 @@ describing the same things; a word that drifts splits one concept into two. The 
 [vocabulary](docs/seon/architecture/vocabulary.md). A new concept gets its word recorded there before the word appears
 in code, schemas, tasks or prose, and a rename converts every use in the same commit.
 
-**Use the libraries for every concept they own.** Each row is already solved by the project named. Before touching
+**Use the libraries for every concept they own.** Each entry is already solved by the project named. Before touching
 the concept, read its source under `reference-code/<project>` and Seon's caller, then use its functions and its words.
 When Seon code duplicates one of these, the fix is to delete it and call the library. If the library truly cannot do
-what is needed, bring the owner the exact gap. Retired words survive in code only until their rename lands; new code
+what is needed, bring the owner the exact gap. Retired words survive in code only until their rename (ledger §3.18) converts them; new code
 and prose use the library's words.
 
 | Concept | Use (project, source) | Retired words |
 |---|---|---|
-| REPL round: read, eval, print, caught; one eval request per submission | `clojure.main/repl`, prepl, nREPL `eval` ([clojure](https://github.com/clojure/clojure), [nrepl](https://github.com/nrepl/nrepl)) | "pass", "batch", own stage names |
-| function schemas, instrumenting, validation, defaults | `m/-instrument`, `malli.instrument`, `m/validator`, `m/explain`, `malli.registry`, `default-value-transformer` ([malli](https://github.com/metosin/malli)) | own wrappers, "armed", "projection", "supply" |
-| transactions, branches, merge, data conversion | `transact` → tx-report, `branch!`, `delete-branch!`, `merge!`, norms ([datahike](https://github.com/replikativ/datahike), our fork) | "receipt", "settlement", "unlink", "migration" |
+| REPL round: read, eval, print, caught; one eval request per submission | `clojure.main/repl`, prepl, nREPL `eval` ([clojure](https://github.com/clojure/clojure), [nrepl](https://github.com/nrepl/nrepl)) | `pass`, `batch`, own stage names |
+| function schemas, instrumenting, validation, defaults | `m/-instrument`, `malli.instrument`, `m/validator`, `m/explain`, `malli.registry`, `default-value-transformer` ([malli](https://github.com/metosin/malli)) | own wrappers, `armed`, `projection`, `supply` |
+| transactions, branches, merge, data conversion | `transact` → tx-report, `branch!`, `delete-branch!`, `merge!`, norms ([datahike](https://github.com/replikativ/datahike), our fork) | `receipt`, `settlement`, `unlink`, `migration` |
 | interpreters for agents | `sci/init`, `sci/fork`, SCI's reader ([sci](https://github.com/babashka/sci), our fork) | a second evaluator or reader |
 | reading and editing Clojure text | [edamame](https://github.com/borkdude/edamame), [rewrite-clj](https://github.com/clj-commons/rewrite-clj) | string or regex parsing of code |
-| per-evaluation dynamic state | `binding`, `bound-fn*`, `with-bindings` (clojure.core) | "world", "environment" |
-| tests | clojure.test report maps, `malli.generator/check`, [kaocha](https://github.com/lambdaisland/kaocha) | "member", "accretion test" |
-| reloading code | `require :reload`, [clj-reload](https://github.com/tonsky/clj-reload) | own dependency ordering, "adoption" |
+| per-evaluation dynamic state | `binding`, `bound-fn*`, `with-bindings` (clojure.core) | `world`, `environment` |
+| tests | clojure.test report maps, `malli.generator/check`, [kaocha](https://github.com/lambdaisland/kaocha) | `member`, `accretion test` |
+| reloading code | `require :reload`, [clj-reload](https://github.com/tonsky/clj-reload) | own dependency ordering, `adoption` |
 | static analysis | [clj-kondo](https://github.com/clj-kondo/clj-kondo) analysis and findings | own analyzers |
-| errors | `ex-info`, `ex-data`, `Throwable->map`, `clojure.main/ex-triage` | "fault", own exception printers |
+| errors | `ex-info`, `ex-data`, `Throwable->map`, `clojure.main/ex-triage` | `fault`, own exception printers |
 | printing | [fipp](https://github.com/brandonbloom/fipp) via the one value printer; `*print-length*`-style budget | a second printer, `pr-str` copies |
 | configuration files | `aero.core/read-config` with `#profile`, `#env`, `#include`, `#ref` ([aero](https://github.com/juxt/aero)); Malli validates the result | own EDN loaders, profile or precedence code |
 | caching | [Caffeine](https://github.com/ben-manes/caffeine) via `seon.cache`, its `recordStats` | own counters, `memoize`, atoms |
 | agent execution | `clojure.core.async.flow` procs and step-fns ([core.async](https://github.com/clojure/core.async)) | own schedulers, state tags |
 | durable bytes | [konserve](https://github.com/replikativ/konserve) (our fork) | own stores |
-| merging vocabulary | git: branch, main, merge request, source/target branch, merge base, ours/theirs, unmerged | invented names |
-| stored data | Datahike: entity, attribute, value, datom, transaction (`t`), commit (a stored snapshot, named by its commit id) | "row", "table", "column", "record" for facts |
+| merging vocabulary | git: branch, main, merge request, source/target branch, merge base, ours/theirs, unmerged | `land`, `landing`, `unlanded`, invented names |
+| stored data | Datahike: entity, attribute, value, datom, transaction (`t`), commit (a stored snapshot, named by its commit id) | `row`, `table`, `column`, `record` for facts |
 
 Words genuinely Seon's, recorded in [vocabulary](docs/seon/architecture/vocabulary.md): task, proof, reaching test,
 turn, render function, current-state block, write-back, wake, answered t. Seams per area:
@@ -171,17 +170,17 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    the code they name; living documents cite code by symbol (which resolves to file and line), never a hand-written
    `path:N`; a stale skill is a high-priority defect; delete unverifiable claims, never hedge them.
 2. **Probe.** Start Clojure changes with `bin/seon status` and MCP `runtime_status`; report and record degraded or
-   missing tools first. Use `eval_clj` with explicit root and cluster; JVM mode has no custody, so pass the
+   missing tools first. Use `eval_clj` with explicit root and cluster; JVM mode has no checked-out branch, so pass the
    connection, e.g. `(seon.cluster.boot/connection "default")`. SCI mode mutates its shared context: keep probes
    disposable, in scratch namespaces or branches with finite inputs. Reproduce with one small form, inspect the
-   complete envelope and installed schema, call the owner, then try the smaller algorithm. On real data: parse,
+   complete reply and installed schema, call the owner, then try the smaller algorithm. On real data: parse,
    transform, validate each value against its schema, store it (disposable branch or `d/with`), pull it back and
    compare. Try data models and ideas at the REPL before writing them down. Never load uncommitted source into
    default's JVM: try it on your own agent's SCI branch. Verify a tool's limit before reporting it. Every reply is
-   also a health check: read its timing, diagnostics and recorded errors. An error, a panic instead of an error value,
+   also a health check: read its timing, findings and recorded errors. An error, a panic instead of an error value,
    a recorded error without its task, or an ordinary operation over one second is a finding. Record it as a task, even when it is outside your
    assignment. Record exact forms, values and timings; the edge cases found become the regressions.
-3. **Design the smallest composition.** Open the owning spec or landing note with one or two lines naming what
+3. **Design the smallest composition.** Open the owning spec or design note with one or two lines naming what
    exists, its data flow and the principal Clojure approach. State what disappears, each operation's cost and target
    complexity, the concerns separated, and the simplest alternative: dependency seam, existing function or deletion.
    Research existing libraries before writing a replacement. Line counts are a codebase budget, not a per-change
@@ -198,7 +197,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
      bowed out of, and FIXES what it finds: super-linear transformations, repeated work (the same derivation
      executed thousands of times, whole-program work per change, re-reading what the caller holds).
    - **Every lane refuses bad changes on sight** and proves its own slice before committing (see "Prove
-     each slice before it lands"). Every review is dual (a fresh Opus agent and Astra, independently) and never
+     each slice before it is committed"). Every review is dual (a fresh Opus agent and Astra, independently) and never
      substitutes for that proof.
    - **Root** assigns file ownership so the two never edit the same file at once, rules on disputes, and resolves
      already-ruled questions by citing their authority. For a new decision with hours of cross-owner work, root
@@ -210,21 +209,21 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    sweeps once across the full set, then lint, load and hand-fix exceptions. HEAD must boot: before committing, lint
    `src script test` with `--cache false` and compile touched contracts, schema and configuration resources with
    their consumers (shipped defaults included) from a `git archive` of HEAD plus the diff, with zero findings.
-   A change to schema resources, publication, indexing, adoption, boot or arming is proven by publishing and adopting
-   it on a branch of the live store: a fresh install is adoption onto an empty store, the same path, never a second
-   one to rehearse. Root's batched `start --head` restores the previous commit when a new JVM cannot boot.
+   A change to schema resources, publication, indexing, reload, boot or instrumentation is proven by publishing and
+   reloading it on a branch of the live store: a fresh install is the same reload onto an empty store, never a second
+   path to rehearse. Root's batched `start --head` restores the previous commit when a new JVM cannot boot.
    Designs and plans are revised in place — corrections go into their owning sections, never a parallel spec or
    appended ruling log. Correct false current claims in the same commit; keep dated audits and evidence outside plans.
    Fix problems on code you touch when that takes about fifteen minutes, within file ownership (`bin/lane add` or a
    patch); otherwise create a task and reference it (`ns/task-name`) in that var's docstring. When a design proves
    wrong, stop and report it with options instead of patching around it.
-6. **Prove the installed change.** Verify publication, adoption, reload and arming, then repeat the probe. A shell
+6. **Prove the installed change.** Verify publication, reload and instrumentation, then repeat the probe. A shell
    edit or disabled hook proves none of these; neither does restarting to find out. Prove at the REPL and statically
-   first; root batches one restart for many landings. Prove schema changes incrementally on a branch of a live store;
-   inability to adopt is a publication defect, never a reason to boot from zero. Observe browser paint separately.
+   first; root batches one restart for many commits. Prove schema changes incrementally on a branch of a live store;
+   inability to reload is a publication defect, never a reason to boot from zero. Observe browser paint separately.
 7. **Report honestly.** Broken things first, then evidence, changed paths, commit, sizes, net source/test lines,
-   timings, memory and verification limits in the landing note. Unavailable evidence is not a pass. Commit
-   measurement scripts; publication changes need their clock row. Disposable probes go in `tmp/`, reusable checks in
+   timings, memory and verification limits in the commit message. Unavailable evidence is not a pass. Commit
+   measurement scripts; publication changes carry their timing. Disposable probes go in `tmp/`, reusable checks in
    `test/`. Search existing issues before recording one per defect class; evidence must outlive chat. The issue
    index is the owner's ranked schedule: assigned agents never edit it.
 
@@ -232,14 +231,14 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 - **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
   JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
-  boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from the roster; retention
+  boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from `d/branches`; retention
   GC reclaims its commits without per-branch cleanup. A finished agent's branch is deleted once its task is done or
   given back and its merge request is closed, so its history and blobs can be collected.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
   environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration. Boot
-  reads each dial from the configuration it applied, never the store's pre-adoption value, so a new dial exists at
+  reads each dial from the configuration it applied, never the store's value from before the reload, so a new dial exists at
   its first read. Every size, count, byte budget, heap cap, timeout and threshold is a dial whose shipped default fits
   a 16 GB machine running many agents beside the user's work, never derived from the host's RAM: a 4 GB heap cap,
   `seon.cache` 512 MB with live results inside it, Datahike's node cache byte-bounded (replacing its soft-referenced
@@ -254,73 +253,74 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   differing entities and their affected callers in SCI and bind compiled Vars for the rest. A branch never changes
   the platform: compiled (host-bound) code, the evaluator, printer and test runner included, keeps running as
   compiled and working on every branch, and sees a change only after merge and reload; what the branch evaluates
-  from source sees its definitions. Compute host-bound status per declaration, never from a namespace roster.
-- **An agent's context** is its SCI world; its task selects custody of the live cluster head or its own branch.
+  from source sees its definitions. Compute host-bound status per declaration, never from a hand list of namespaces.
+- **An agent's context** is its SCI context; its task selects the branch it checks out: the live cluster head or its
+  own branch.
   Every agent, filesystem agents on their own named branches included, uses the one REPL entrance. Private defs,
   atoms and objects survive program changes advanced in place at idle boundaries; each eval request reacquires from
   the branch head, reusing content-valid derivations.
-- **Reload and adoption.** A reload is `require :reload` for changed namespaces and their dependents. Adoption goes
-  entities → load → arm → record and waits for no one. Stability comes from branch custody: work that overlaps a reload
+- **Reload.** A reload is `require :reload` for changed namespaces and their dependents. It goes entities → load →
+  instrument → record and waits for no one. Stability comes from the checked-out branch: work that overlaps a reload
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
-  execution unavailable until exact bytes, behavior and arming converge; never call an unchanged record healthy.
-  Ordinary clusters keep their program; selected development clusters adopt explicitly.
+  execution unavailable until exact bytes, behavior and instrumentation converge; never call an unchanged entity healthy.
+  Ordinary clusters keep their program; selected development clusters reload explicitly.
 - **Merge is a root task.** An agent's green end requests the merge (`seon.task/request-merge!`) once its proofs pass
   and no test its change broke is red on its source branch; the merge request is a task. Root's tools live in `my.root`
   (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use git's words: a merge request is
   reviewed, then merged (`:merged`) or closed with a reason (`:closed`); root reads the diff before it merges until
-  criteria for automatic merges are written. Root works it through the ordinary REPL holding both worlds — a
-  merge branch forked from the target branch (main) and a copy of the agent's world — with easy tools to move data
-  between them, and chooses exactly what to take by identity from the diff value (since the merge base; ours is the
+  criteria for automatic merges are written. Root works it through the ordinary REPL holding both sides — a
+  merge branch forked from the target branch (main) and a fork of the agent's SCI context on its source branch — with
+  easy tools to move data between them, and chooses exactly what to take by identity from the diff value (since the merge base; ours is the
   target, theirs the source); the task never lists what to merge. `merge!` commits only when every test on the merge
   branch is green (the proofs, the tests reaching the change and whatever root chose to run, recorded as evidence); a
   test already red on main stops it for root. Conflicts stay unmerged on the merge branch for repair. Norms run in
   their listed order. The writer checks the touched entities' digests; only root's merge advances main, and the
   agent's branch is deleted when its merge request closes. Local green never implies shared acceptance.
-- **Write-back** uses the same gate, checks file bases, stages exact-span changes and reindexes to prove equivalent
+- **Write-back** uses the same checks, checks file bases, stages exact-span changes and reindexes to prove equivalent
   declarations before installation.
 
 ## Data and contracts
 
-- **Model from the agent outward.** The agent's record is its one-hop attachments (task, settings, messages,
+- **Model from the agent outward.** The agent entity is its one-hop attachments (task, settings, messages,
   evaluations, calls), each with a declared render; context is rendering what is attached, detail one requery away.
   Tell a story, not a star: agent (current namespace, answered basis, disposition) → its evaluations in agent order,
   each with the call that produced it; no turn or run entity sits between. Namespace information lives on the
   namespace, agent information on the agent. Every stored fact names its consumer or is deleted; hiding it behind a filter or a
   missing render is not a fix. Choose each relationship deliberately: component, optional or required peer ref, identity
-  value, or a settlement-moved edge; a statement about a living entity is a ref, an observed name is a value; a component
+  value, or an edge the recording transaction moves; a statement about a living entity is a ref, an observed name is a value; a component
   is validated as its whole owning value on each write, so size trees by what each write owns.
-- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent's world is its own
+- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent holds its own
   branch and its own SCI fork, and nothing else: it writes only its branch, never main or another branch, and never
   loads code into the platform JVM. That is what lets many agents run at once safely. Its tracked facts (task
   refinements, children, its end, sent messages) and its code reach main only through its one merge request, whose
   contents are the derived diff since its merge base: root's `db<->flow`, woken by the branch's listen route,
   auto-merges the rule-trusted parts it owns as they change, and everything else waits in that merge request for
-  root's review (git's untrusted-contributor model: an agent never pushes). Only root acts cluster-wide: its world is
+  root's review (git's untrusted-contributor model: an agent never pushes). Only root acts cluster-wide: it holds
   main, and it auto-merges, merges, starts and stops agents and loads code. Root and an agent differ only by
-  what their world holds. **Agents transact facts; root reacts.** An agent never performs an effect that reaches main
+  the branch they hold. **Agents transact facts; root reacts.** An agent never performs an effect that reaches main
   or another agent: it writes its end, refinements, outgoing messages and merge request as facts on its own branch,
   and root's `db<->flow`, woken by that branch's listen route, executes everything that affects main or other agents
   (auto-merge, message delivery, stopping it, starting its successors, problem tasks). Effects local to its compartment
-  (model calls, its own evaluation, its own tests in a fork of its environment) stay its own. Within its compartment an agent may make serious changes, first-party code included: the
+  (model calls, its own evaluation, its own tests in a fork of its SCI context) stay its own. Within its compartment an agent may make serious changes, first-party code included: the
   immutable database and rollback are the safety net. What each kind of entrant receives (database value, connection,
-  branch, SCI fork, agent id, task, capabilities) and where its writes land is declared once in the owning spec,
+  branch, SCI fork, agent id, task, capabilities) and where its writes go is declared once in the owning spec,
   never implied.
-- **Pass the world explicitly.** Carry database/connection, projection, environment, render profile, proc and
-  settlement inputs, including profiling and test ownership. Custody elides only the agent's db/conn; it authorizes
-  no other ambient service.
-- **Supply defaults by declared schema name, from the world.** The armed wrapper plans each function's supply once at
-  arm time and fills omitted inputs at call time, never from the parse (a call's target is known only when it runs).
-  Any input, required or optional, whose declared schema is a member of the evaluation's world (connection, writer,
-  agent, task, profile, call sink, SCI context) comes from that evaluation's own world, never a global or another
-  world; a database value is never held in a world: it is read from the world's connection at the call, so a call
-  after a write sees it; this includes world-member keys missing from a map argument whose schema declares them. Supply runs
-  before input validation, so a forgotten world member never fails the call, and it only fills what is missing: a
-  value the caller passes, such as another branch's database, is never overwritten. Other omitted optional inputs stay
-  absent. A function whose meaning needs a world member to be absent
-  (no custody) declares a different schema name. A missing required member refuses by name. A call already matching a
+- **Pass the evaluation's bindings explicitly.** Carry the database or connection, the registry, render profile, proc
+  and recording inputs, including profiling and test ownership. The checked-out branch elides only the agent's
+  db/conn; it authorizes no other ambient service.
+- **Fill defaults by declared schema name, from the evaluation's bindings.** The instrumented wrapper plans each
+  function's defaults once, when it is instrumented, and fills omitted inputs at call time, never from the parse (a
+  call's target is known only when it runs). Any input, required or optional, whose declared schema is one of the
+  evaluation's bindings (connection, writer, agent, task, profile, call sink, SCI context) comes from that
+  evaluation's own bindings, never a global or another evaluation's; a database value is never bound: it is read from
+  the bound connection at the call, so a call after a write sees it; this includes binding keys missing from a map
+  argument whose schema declares them. Defaults are filled before input validation, so a forgotten binding never
+  fails the call, and only what is missing is filled: a value the caller passes, such as another branch's database,
+  is never overwritten. Other omitted optional inputs stay absent. A function whose meaning needs a binding to be
+  absent (no checked-out branch) declares a different schema name. A missing required binding refuses by name. A call already matching a
   declared arity is never prefixed; caller arguments always win; structural resemblance is not identity.
   See the [data guide](docs/seon/architecture/data-modeling-guide.md).
-- **Decide at the authority.** Derive at the writer or supply its decision; validate a pre-read's basis there if it
+- **Decide at the authority.** Derive at the writer or pass its decision; validate a pre-read's basis there if it
   could change. Mirrors are derived, drift-checked or explicitly historical, never silently current state.
 - **Declare facts at their producer.** Search the registry before adding a key. Use fully namespaced keys, one
   schema per identity and `seon.id`; identities are minted by their owner (a task's handle by ingestion), never
@@ -335,9 +335,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   refuse invalidating deletion, optional refs may sweep, components cascade. Repair surviving declaration references
   in the same transaction or refuse; never invent placeholder functions or tests.
 - **Separate storage from observation.** Store a value when it must outlive its subject; a stored copy of a value
-  (recorded error evidence, an effect's result) is the value printer's shown text plus ids, nothing more.
+  (recorded error evidence, an effect's result) is the value printer's printed value plus ids, nothing more.
 - **Three places, one decision.** The full live value lives once, in `seon.cache` under its result handle (an LRU
-  under the configured byte budget). Datahike holds small facts and shown text up to the one threshold dial
+  under the configured byte budget). Datahike holds small facts and printed values up to the one threshold dial
   (`:seon.config.eval.result/blob-threshold`, UTF-8 bytes); anything larger is a konserve blob (immutable, compressed)
   staged and committed in the same transaction as the fact holding its digest and size. The form is decided once,
   where the stored form is produced, by `seon.blob/inline-or-stage`; no other dial or step re-decides it. Never build a
@@ -347,24 +347,24 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   attribute lists from entity schemas and selectors: a hand list beside a schema silently drops the next key. Never
   silently truncate pulls. Require each function's and test's analysis digest:
   an empty cardinality-many is not proof of work.
-- **Use the database owner.** Direct `datahike.api` calls belong only in `seon.db`, store/registry, classified
-  branch-custody owners and system listeners; keep `my.*` thin. Put provenance on transactions, derive write bounds
+- **Use the database owner.** Direct `datahike.api` calls belong only in `seon.db`, store/registry, the classified
+  owners of a checked-out branch and system listeners; keep `my.*` thin. Put provenance on transactions, derive write bounds
   from it and retain proposed data in bounded refusals. Reconcile config differences; resolve function symbols to
   current entities.
 - **Contract every admitted function, private ones included.** Complete, well-formed, fully namespaced Malli schemas
-  and reaching tests. Compile touched contracts against the packaged projection; use declared schemas or registered
+  and reaching tests. Compile touched contracts against the packaged registry; use declared schemas or registered
   named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries. Every
   bug fix adds or tightens the contract at the producer of the bad value, so that class of bug is refused at its
   source from then on; a contract is not proof of a body's error union, its regression is. Existing uncontracted
   functions are back-filled as generated tasks (`seon.contracts/task`, the [contracts guide](docs/seon/architecture/contracts-guide.md)),
   skipping those with a pending deletion task or no live use.
   A new or changed function without a complete contract: the edit hook refuses it; the REPL admits it with a
-  warning beside its value that grows as the agent's uncontracted definitions accumulate; the merge gate refuses
+  warning beside its value that grows as the agent's uncontracted definitions accumulate; the merge check refuses
   a merge request that carries one.
 - **Keep entry policy separate from merge.** Schema and test entry default to `:gate`, refusing before evaluation;
-  explicit `:warn` admits experiments with declared diagnostics. A missing function contract is never refused at
+  explicit `:warn` admits experiments with declared findings. A missing function contract is never refused at
   the REPL: the value returns with the growing warning above. Preserve malformed authored contracts as data; never
-  arm them or substitute stale wrappers. Arm every valid contract: invalid inputs prevent entry, invalid outputs
+  instrument them or substitute stale wrappers. Instrument every valid contract: invalid inputs prevent entry, invalid outputs
   refuse. Entry policy never relaxes merge acceptance.
 - **Documentation is data.** A docstring says briefly what the function returns; Markdown headings (Examples, Edge
   cases, Errors, Known issues) only on public `my.*` docstrings; cross-cutting knowledge in Markdown pages. A
@@ -385,8 +385,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
   name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
-  qualified symbols) and optional `:seon.task/evidence` (paths); `:seon.task/kind` is still required until its retirement row lands. Its proofs are the deftests carrying `ns/name` in
-  `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a row to an existing table test; write
+  qualified symbols) and optional `:seon.task/evidence` (paths); `:seon.task/kind` is still required until its retirement is merged. Its proofs are the deftests carrying `ns/name` in
+  `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a case to an existing table test; write
   a new deftest only for a behavior no test covers; a task already green proves nothing; at merge root keeps a new
   test only if it guards a new behavior class.
   References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
@@ -404,7 +404,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 ## Failure and execution
 
 - **Nothing crashes.** No evaluation, reply, eval request, page, tool call, test run or boot step ever ends in an uncaught
-  exception. A function whose job is to answer (`my.*` tools, validators, merge checks, gates) RETURNS its error map
+  exception. A function whose job is to answer (`my.*` tools, validators, merge checks, entry policy) RETURNS its error map
   and lists exactly those variants (target: one `:multi` on `:seon.error/type`); every other function throws the same
   map inside `ex-info` and declares only its success value, except reads, which return refusals until the errors
   spec's S-reads converts each read family with its callers. There are three catches: a returning tool's one top catch
@@ -422,10 +422,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   branch, a large value one blob digest, a place (atom, delay, promise) its class and identity, never its contents.
   Missing evidence is a typed unknown, never nil, a default or message-only success.
 - **Deliver every error to whoever can act on it.** Seon's own failures are errors (the errors cut retires the
-  separate fault concept). Every occurrence returns as data in the reply of the agent whose evaluation or call it
+  separate `fault` concept). Every occurrence returns as data in the reply of the agent whose evaluation or call it
   happened in (the MCP reply for outside agents, the next context for Seon agents, both reading the same saved
   observation), with a result handle to follow; an agent's own mistake is only delivered. Target (the errors cut;
-  today `seon.fault` records faults): the entrant records Seon's own errors once per signature at main, with
+  today `seon.fault` records them): the entrant records Seon's own errors once per signature at main, with
   a count, a task and one notification; repeats only count. A recorded error resolves when its producer is deleted, or
   when the producer changed and its task's proofs (at least one) ran green since. Recording without delivery, a log
   line or a panic alone is a defect. A graph stops only when its own execution cannot continue or storage fails.
@@ -441,10 +441,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Recover facts, not execution.** Never resume interrupted execution or serialize private objects or live
   results. An eval request reads and evaluates every form, then writes its recording transaction as ONE synchronous transaction, durable
   before it answers, under 100 ms; no fire-and-forget write, so the next call sees it. A crash before that transaction loses
-  that eval request's bookkeeping (evaluation rows, call row, answered basis), never an effect a form already made durable;
+  that eval request's bookkeeping (evaluation entities, call entity, answered t), never an effect a form already made durable;
   the work stays due, so an effect repeats unless its owner is idempotent. Until the agent-loop cut, boot closes
   interrupted runs and marks their unfinished evaluations. Everything with consequences beyond the form (merges,
-  write-back, tasks, config, schema adoption, boot and publication records, recorded errors, branch lifecycle,
+  write-back, tasks, config, schema reload, boot and publication facts, recorded errors, branch lifecycle,
   deliveries) is likewise durable before its caller is answered.
 - **Derive work and completion.** Work is a listened wake the agent has not answered; a message subject is literal,
   `:seon.message/from` marks inside wakes; never replay writes or effects. Context is rendered live from the agent's
@@ -483,7 +483,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   `:seon.render/html` key (the master override: a renderer symbol, an inline function or rendered data); a render
   function whose contract fits the value, defined in the viewing agent's namespace; the schema's declared pair (most
   specific first, along the schema's ancestry); none, so the value goes to the value printer directly. Whether a render function serves AI or HTML is its attachment key where attached, else its declared output
-  schema, never a separate fact; like any function, its omitted declared inputs are supplied by schema name.
+  schema, never a separate fact; like any function, its omitted declared inputs are filled by schema name.
 - **Return data, not comments; renders return data.** What comes back to an agent is data whenever possible: a reply
   is one map whose keys carry the value, its handle, its timing, its errors and its findings; comment lines are
   confusing next to data and agents repeat them. A render function takes the value and returns data, never forms to
@@ -494,32 +494,32 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   - The HTML face returns hiccup: a thing with a look and its operations.
   - The form face (`:seon.render/form`) returns the form that shows how this data can be found again, e.g. its
     requery. It is shown as data beside the value and is never executed by the render step.
-  - A render runs once, when the reply that shows it is built, inside the viewer's world. It is READ-ONLY: it gets a
+  - A render runs once, when the reply that shows it is built, inside the viewer's SCI context. It is READ-ONLY: it gets a
     database value, and no connection or writer. Its database reads are captured as read evidence, and the render is
     cached by what it read, so a changed read re-renders it.
-  - Work with consequences belongs to the evaluation that caused it. For example, a defn's batch schedules its reaching
+  - Work with consequences belongs to the evaluation that caused it. For example, a defn's eval request schedules its reaching
     test agents; the Var render only reads their status.
   - A render is cached by the value's content digest, so nothing renders twice. A model call stores its basis, not
     its prompt; a history unit re-renders only when its content, profile or the printer changes.
   - Render output goes straight to the value printer, which never re-dispatches. A render that wants a nested thing
     rendered calls that render explicitly.
-  - A render that fails falls back to the value itself, printed, with one diagnostic. Failed rendering gives a
-    diagnostic; error base and satisfied schema renderers compose; an attribute request stays an attribute request.
+  - A render that fails falls back to the value itself, printed, with one error beside it. Failed rendering gives an
+    error; error base and satisfied schema renderers compose; an attribute request stays an attribute request.
 - **Apply presentation limits once.** The value printer holds the one budget and spreads it across the value's shape;
   nothing else clips, and nothing prints unbounded: a log line, exception message, test report or HTTP error that
   prints a value outside the value printer is a defect. Printing is rendering with two consumers on one pipeline: AI agents
   through MCP and humans through the browser share the same selection, node tree and cut retrieval; only the final
-  output (text or hiccup) differs. Save exact shown text, select whole prompt units, never clip HTML or historical
+  output (text or hiccup) differs. Save the exact printed value, select whole prompt units, never clip HTML or historical
   units again. Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery, with
   cuts counted. Derive missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly
   output, and state the size of anything an agent sees in estimated tokens, never bytes or characters.
 
 ## Proof and performance
 
-- **Test the real system with injected worlds.** Plain `deftest` or contracted test functions declaring their
-  inputs, the same for humans and agents. The harness prepares worlds once through canonical writers and helpers —
+- **Test the real system with injected inputs.** Plain `deftest` or contracted test functions declaring their
+  inputs, the same for humans and agents. The harness prepares its databases and contexts once through canonical writers and helpers —
   every fixture write carries what the writer checks, digests included — surfaces every refusal, shares reads and
-  branches writes from a captured commit. Use real SCI, armed contracts and fixed render profiles; substitute only
+  branches writes from a captured commit. Use real SCI, instrumented contracts and fixed render profiles; substitute only
   external effects, as explicit values. No hand-built entities, bespoke fixture machinery or Var redefinitions. Tests are
   deterministic: generated inputs are bounded so every seed passes.
   A test checks one behavior, asserted on DATA: the value, the render's data, the stored fact or the error's key that
@@ -527,51 +527,51 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   value printer's own tests and a few declared golden transcripts. A test body is a program run through the one path,
   so its failure values reach the runner's report through the value printer. An assertion message is prose and never
   prints a value.
-- **Run tests as agents run.** Fork the context onto the test branch, inject custody, run the body in its member's
-  context, unlink. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
+- **Run tests as agents run.** Fork the context onto the test branch, check that branch out, run the body in its test
+  var's context, delete the branch. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
   platform/bootstrap, declared destructive and host-bound work gets isolated JVMs. If an edit cannot reach the main
   JVM, report the precise gap. No JVM-global test state (loaded program identity included) or restoring reloaded
-  roots; preserve instrumentation (a test arms only its own Vars, never the whole JVM); never `alter-var-root`,
+  roots; preserve instrumentation (a test instruments only its own Vars, never the whole JVM); never `alter-var-root`,
   `with-redefs`, `load-file` or `intern` over any Var. A test driver waits for what production waits for. Stop
   graphs before retracting their facts; release resources even if setup or cleanup fails.
-- **Require current positive proof.** Select tests by current dependencies and each member's actual tested program
-  and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
-  with no armed calls; a recording failure is not success. Keep one regression per behavior class, and destructive
+- **Require current positive proof.** Select tests by current dependencies and each test var's actual tested program
+  and input evidence; past observed reach is advisory. Unknown or red cannot reuse green. Record completion even
+  with no instrumented calls; a recording failure is not success. Keep one regression per behavior class, and destructive
   isolation until proven confined.
-- **Prove each slice before it lands; run the broad tiers centrally.** An ordinary function changes REPL-first: the
+- **Prove each slice before it is committed; run the broad tiers centrally.** An ordinary function changes REPL-first: the
   lane `defn`s it on its own branch in the main JVM, the reaching tests run there incrementally (unchanged green
-  members reused by reach digest), and the file is written back from the branch. It commits through `bin/lane commit
+  test vars reused by reach digest), and the file is written back from the branch. It commits through `bin/lane commit
   LANE --branch-evidence AGENT PATHS`, which checks that each committed file declares exactly its branch's definition
   digests and that every test reaching them holds green evidence current on that branch, lints, and boots no JVM; a
   changed declaration no test reaches is unproven. Host-bound and platform slices (a declaration SCI cannot
   interpret, the evaluator, writer, test runner, boot, schema publication, schema resources, configuration,
   dependencies, `bin/` and `script/`) commit through `bin/lane commit LANE -m MSG --test NS... PATHS`, which runs
-  `bin/seon check`: the candidate archive (HEAD plus the slice) is published and adopted on disposable branches, then
+  `bin/seon check`: the candidate archive (HEAD plus the slice) is published and reloaded on disposable branches, then
   a throwaway JVM boots from it and runs the named tests through the one runner; any red, boot failure or lint error
-  refuses the commit. Name the tests reaching the change. Root restarts default after each landing and runs
+  refuses the commit. Name the tests reaching the change. Root restarts default after each batch of commits and runs
   platform/affected integration and the bulk tier once, not per edit. Classify each red from stored runs by the
   commit that changed its behavior, then delete tests of deleted machinery, update retired assumptions or fix the
-  surviving owner; replacement behavior tests land with the cut; never wholesale-triage reds. Gate inputs are
-  `seon.test.cache/input-roots`: documentation never publishes or widens gates; fix a tool that does so before
+  surviving owner; replacement behavior tests are committed with the cut; never wholesale-triage reds. Test-selection inputs are
+  `seon.test.cache/input-roots`: documentation never publishes or widens test selection; fix a tool that does so before
   proceeding. HEAD must load and the named probe answer.
 - **Make bounds honest.** Tests fail beyond their declared bound, default five seconds; a longer bound carries a
   reason naming the measured operation, its numbers in profile evidence. Distinguish acquisition from warm execution; priming never
   excuses a timeout. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
 - **Make ordinary work sub-second.** Profile every contracted call; time boot, reload, publication, probes, tests
-  and transactions; measure memory. A result over one second names the responsible armed functions and the causing
+  and transactions; measure memory. A result over one second names the responsible instrumented functions and the causing
   agent fixes the cost before continuing, or justifies beside the number its proportionality and why it cannot be
   sub-second. Over ten seconds needs explicit owner authorization and an issue even when justified. "Cold",
   "expected" and "known cost" are not reasons; reject reports lacking these numbers.
 - **Make cost follow changed inputs.** Eliminate whole-program work per change and per-call work that belongs once
   per evaluation. Branch creation is not full context construction. Hash admitted source inputs; compare commit
-  identities for unchanged adoption. Hot-path commits time the same probe on parent and change and report every
+  identities for an unchanged reload. Hot-path commits time the same probe on parent and change and report every
   regression with its numbers. Judge cost against what the work must do (what it is proportional to), never an invented
   target: 10× over that expectation means wrong work to find and fix. Every policy number is a config dial sized for a
   16 GB machine.
 - **Reuse content-valid work; derive without stamps.** Key derivations by what they read: content digests or the
   dependency's upstream change tracking. A commit id identifies a database value, not an excuse to recompute after
   unrelated writes. Memoize functions of immutable values; no writer `vary-meta`, transaction-carried candidate
-  projection or atom beside a connection. Use Datahike commit ids and definition digests for identity,
+  registry or atom beside a connection. Use Datahike commit ids and definition digests for identity,
   `versioning.cljc` for lineage, `history`/`as-of` for time, `d/listen` for notification and the writer for
   serialization; cite the seam first. Reads, renders, probes and evaluations never invalidate derived state; count
   misses and recompute only reached invalid inputs.
@@ -584,7 +584,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 ## Operating and collaborating
 
 - **Work as a Seon agent.** Our own lanes are the first Seon agents. Root files each slice as a task with a red tagged
-  proof (an existing failing test, a table row, or a measured-cost assertion through `seon.profile/measure`) and assigns
+  proof (an existing failing test, a table-test case, or a measured-cost assertion through `seon.profile/measure`) and assigns
   it; the lane's first form reads its block, `(seon.context/current-state)`, then works by `defn` on its branch: the
   edit hook evaluates changed forms there and the proofs and reaching tests run by themselves after each eval request.
   It writes back with `my.program/write-branch!`, commits with `--branch-evidence`, and files every gap in its context
@@ -611,13 +611,13 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   distributions; use them to design, not only to review: open-ended review of a design anchors on its author and
   turns hypothetical failures into fences. A clear slice needs one plan and the narrow check. Root runs this shape
   by hand until the scheduler runs it as a task tree.
-- **Restart in batches.** A restart or reset is a batch: root lands every ready dependency or fork bump and pending fix
+- **Restart in batches.** A restart or reset is a batch: root commits every ready dependency or fork bump and pending fix
   just before it. Nothing is ever left staged in the shared index (it blocks every lane's commit).
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
   nuke, never deleted internals. Every JVM runs a committed archive, submodules at their pinned revisions, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
   the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset
-  unlinks and forks from program entities, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
+  deletes branches and forks from program entities, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
   deletion of the store and all derived caches and the rebuild and boot from committed inputs, reports full failures
   and falls back to the newest booting commit rather than refusing recovery. A competing start that wins the
   replacement gap is never killed or deleted by the loser. Destructive drills and signals need a root and a verified
