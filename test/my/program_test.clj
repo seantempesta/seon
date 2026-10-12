@@ -19,8 +19,7 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'my.program/a-function-called-through-its-callers-is-reached-by-their-tests}}
-  a-function-called-through-its-callers-is-reached-by-their-tests
+(deftest a-function-called-through-its-callers-is-reached-by-their-tests
   ;; chain experiment 2: `seon.render.value/prepare` is gated by the printer's tests, but `classify`, which
   ;; `make-node` calls on every value `prepare` prints, is reached by none, so an Implement step that changed it
   ;; ran only its own proof and was judged to have broken nothing.
