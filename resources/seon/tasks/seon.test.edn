@@ -255,4 +255,10 @@
              :kind :function
              :intent "`seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content` uses `with-redefs` over `seon.test.runner/reach-digests` to observe which tests `seon.test/select` derives a key for (AGENTS.md: never redefine a Var). Done when the assertion reads an observable value instead (the call sink's `seon.batch/executed` through `seon.profile/measure`, or a selection fact) and the redefinition is gone."
              :must-read #{seon.test/select seon.test.runner/reach-digests seon.profile/measure}
-             :evidence #{"test/seon/test/selection_test.clj"}}]
+             :evidence #{"test/seon/test/selection_test.clj"}}
+ #:seon.task{:name "a-test-reading-task-tags-reruns-when-a-test-is-tagged"
+             :kind :function
+             :intent "A Prove step's own proof (TASK-CHAIN §3b) reads the program it holds: `(seq (:seon.task/proofs (seon.task/task-edges (seon.db/db) successor)))`. `seon.test/select` keys its result by what its body executed (hybrid-test-results R2) and not by the tag facts it read, so after the agent tags a test with the successor the red is reused (`:seon.test/unchanged true`, executed 0) and the step can never end by itself: chain experiment 3 attempts 285fdccc2fa6 and 02110a533e26 were capped on it, and root rewrote the end. The owner ruled other cluster data unkeyed (hybrid-test-results §2); a test tag is a program fact on the test entity. Root decides the producer before this is assigned: the step proof takes the held step's branch commit as a declared input (the decision of `seon.context/a-step-proof-cannot-observe-its-agents-test-evidence`), the key includes the `:seon.task/tasks` facts of the tests a body read, or the Prove step's done is derived from its product alone, with no step proof (chain experiment 2's G1, being fixed by lane g1)."
+             :must-read #{seon.test/select seon.test.runner/reach-digests seon.task/task-edges seon.context/step-status}
+             :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-3.md" "docs/research/agent-platform/2026-10-12/hybrid-test-results.md"}}
+]

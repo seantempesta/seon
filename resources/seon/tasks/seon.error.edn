@@ -99,4 +99,10 @@
              :intent "`seon.error/prepare` must return a value admitted by `:seon.error/prepared` when an instrumentation observation carries `:seon.instrument/arm :guard`. Lane sol-retire-connection's edit-hook SCI entrance on default 2b49056a8 repeatedly refuses the recording itself: expected :input or :output, got :guard, called by `seon.error/recording`. Make the producer and its installed error schema agree so the original error is recorded and delivered."
              :must-read #{seon.error/prepare seon.error/recording seon.instrument/violation malli.core/-instrument}
              :evidence #{"docs/research/agent-platform/2026-10-11/sol-retire-connection.md"
-                         "docs/research/agent-platform/2026-10-11/sol-loose-ends.md"}}]
+                         "docs/research/agent-platform/2026-10-11/sol-loose-ends.md"}}
+ #:seon.task{:name "a-definitions-local-is-answered-with-that-definition"
+             :kind :function
+             :intent "An agent changing one branch of a long definition evaluates that branch alone, e.g. `(do (.append out text (int copied) (int i)) ...)` inside `seon.sci.forgive` (a local of `seon.sci.forgive/scan`), and `seon.error/reply-value` answers `Unable to resolve symbol: out` with `:seon.error/nearest` forms by name words across the program ((my.test/run), (seon.blob/get connection content-digest), ...), none naming `seon.sci.forgive/scan`. In chain experiment 3 four Implement attempts spent calls this way (locals out, open, pending, prefix!, top?, c). Done when the reply to an unresolved simple symbol offers the definitions of the frame's namespace whose source binds that name (a form naming `seon.sci.forgive/scan`), from `seon.error/nearest-calls` or a sibling read of `:seon.fn/source`, at a cost proportional to that namespace's definitions (today the reply costs about 1.1 GB and 390 ms for one unresolved name)."
+             :must-read #{seon.error/reply-value seon.error/nearest-calls seon.error/nearest-names}
+             :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-3.md"}}
+]

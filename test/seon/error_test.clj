@@ -1879,3 +1879,13 @@
                                                                                           :seon.error/data (ex-data e)}]}))))]
     (is (some #{'inst?} (:seon.error/nearest (guessed :inst)))
         "the refusal names the registered schema nearest the guess")))
+
+(deftest ^{:seon/tasks #{'seon.error/a-definitions-local-is-answered-with-that-definition}}
+  a-definitions-local-is-answered-with-that-definition
+  ;; An agent that evaluates part of a long body alone reads "Unable to resolve symbol: out" (chain experiment 3:
+  ;; locals of seon.sci.forgive/scan, in four Implement attempts); the reply offers the definition that binds that name.
+  (let [reply (seon.error/reply-value (seon.db/db) {:seon.error/message "Unable to resolve symbol: out"
+                                                    :seon.program/not-found 'out
+                                                    :seon.sci.eval/stacktrace [['seon.sci.forgive 1 5]]})]
+    (is (some #{'seon.sci.forgive/scan} (tree-seq coll? seq (:seon.error/nearest reply)))
+        "the forms offered name the definition whose local the agent evaluated alone")))

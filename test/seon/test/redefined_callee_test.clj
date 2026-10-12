@@ -59,3 +59,25 @@
        (is (true? (:seon.test/passed? green)) "the test is green against the first definition")
        (is (= 1 (:seon.test/executed-count checked)) "a changed function the body called by a computed name re-executes the test")
        (is (false? (:seon.test/passed? checked)) "the test is red against the redefinition")))))
+
+(deftest ^{:seon/tasks #{'seon.test/a-test-reading-task-tags-reruns-when-a-test-is-tagged}
+           :seon.test/long "Four eval requests of an own-branch agent, each with its automatic test step: 4.9 s measured on default's JVM (lane chain-3)."
+           :seon.test/long-ms 15000}
+  a-test-reading-task-tags-reruns-when-a-test-is-tagged
+  ;; A Prove step's own proof reads the tags of the program it holds (TASK-CHAIN §3b): its red must not be
+  ;; reused once the agent tags a test with its successor (chain experiment 3, attempts 285fdccc2fa6 and 02110a533e26).
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "tag-reader-" (random-uuid))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(seon.task/create! {:seon.task/ns 'rc.tags :seon.task/name \"next-step\" :seon.task/kind :work :seon.task/intent \"The next step.\"})\n"
+                   "(ns rc.tags (:require [clojure.test :refer [deftest is]]))\n"
+                   "(deftest step-proof (is (seq (:seon.task/proofs (seon.task/task-edges (seon.db/db) 'rc.tags/next-step)))))"))
+           check "(select-keys (my.test/check {:seon.test/identities #{'rc.tags/step-proof}}) [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"
+           red (agent-value running agent-id check)
+           _ (agent-value running agent-id "(in-ns 'rc.tags)\n(deftest ^{:seon/tasks #{'rc.tags/next-step}} product (is (= 1 2)))")
+           checked (agent-value running agent-id check)]
+       (is (false? (:seon.test/passed? red)) "the step proof is red while no test carries the successor's tag")
+       (is (= 1 (:seon.test/executed-count checked)) "a tag written since the red result re-executes the step proof")
+       (is (true? (:seon.test/passed? checked)) "the step proof is green once a test carries the successor's tag")))))
