@@ -172,6 +172,35 @@
        (is (string? (:seon.ref/message (first (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
            "the problem says what failed and what to do")))))
 
+(deftest a-refined-intent-is-the-next-blocks-task-with-its-references-resolved
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (let [refined (shown running agent-id "(my.task/refine! {:seon.task/intent \"Use `seon.task/agent-attempt`.\"})")
+           state (block running agent-id)]
+       (is (true? (:seon.task/changed? refined)) "the agent's own branch holds the new intent")
+       (is (= "Use `seon.task/agent-attempt`." (get-in state [:seon.context/task :seon.task/intent])))
+       (is (some #{'seon.task/agent-attempt} (map :seon.ref/name (:seon.context/must-reads state)))
+           "the next block resolves the reference the refinement added")))))
+
+(deftest a-refinement-naming-nothing-answers-its-problem
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (is (= [{:seon.ref/name 'tq.cs/absent :seon.ref/problem-kind :unresolved}]
+            (mapv #(select-keys % [:seon.ref/name :seon.ref/problem-kind])
+                  (:my.task/problems (shown running agent-id "(my.task/refine! {:seon.task/intent \"Fix `tq.cs/absent`.\"})"))))))))
+
+(deftest a-proof-the-intent-names-is-shown-once-beside-its-status
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id "Make `tq.cs-test/shape` pass.")
+     (let [state (block running agent-id)
+           [proof] (get-in state [:seon.context/proofs :seon.context/proof-list])]
+       (is (string? (:seon.test/source proof)) "the proof's resolution, its source, sits with its status")
+       (is (not-any? #{'tq.cs-test/shape} (map :seon.ref/name (:seon.context/must-reads state)))
+           "and nowhere else")))))
+
 (deftest a-library-symbol-resolves-with-its-pinned-revision
   (test-support/with-running-agent
    (fn [running agent-id connection]

@@ -136,7 +136,9 @@
                           failures (assoc :seon.context/proof-failures failures))]))))))
 
 (defn proofs
-  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof."
+  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof with
+  its status and, when red, its failures. Its source is its resolution among the task's references
+  (`task-sections`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :nil :seon.context/proofs :seon.error/value]]}
   [database sym]
@@ -144,14 +146,9 @@
         names (when-not (:seon.error/at edges) (vec (sort (:seon.task/proofs edges))))]
     (if (empty? names)
       (when (:seon.error/at edges) edges)
-      (let [head (head-entries database (set names))
-            sources (when-not (:seon.error/at head)
-                      (into {} (db/q database '[:find ?s ?src :in $ [?s ...] :where [?t :seon.test/sym ?s] [?t :seon.test/source ?src]]
-                                     names)))]
-        (or (some #(when (:seon.error/at %) %) [sources head])
-            (let [entries (mapv #(merge {:seon.test/sym % :seon.test/source (sources %) :seon.context/proof-status :pending}
-                                        (head %))
-                                names)]
+      (let [head (head-entries database (set names))]
+        (or (when (:seon.error/at head) head)
+            (let [entries (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) names)]
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))
 
@@ -209,17 +206,17 @@
               (:seon.task/evidence pulled) (update :seon.task/evidence set))))))
 
 (defn- task-references
-  "Every reference the held task's attributes make, resolved on `database` by the one rule (`seon.ref/references`):
-  the names in its intent and instructions, its must-read names, the tasks it needs, its evidence paths."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task]
+  "Every reference the held task makes, resolved once on `database` by the one rule (`seon.ref/references`): the
+  names in its intent and instructions, its must-read names, the tasks it needs, its `proofs` and its evidence paths."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.task/keys [id intent instructions must-read evidence]}]
+  [database {:seon.task/keys [id intent instructions must-read evidence]} proofs]
   (let [needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
                     database id)]
     (if (db/read-refusal? needs)
       [needs]
       (ref/references database (cond-> {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
-                                        :seon.ref/names (into (set must-read) needs)}
+                                        :seon.ref/names (-> (set must-read) (into needs) (into proofs))}
                                  (seq evidence) (assoc :seon.ref/paths evidence))))))
 
 (defn send-backs
@@ -498,11 +495,43 @@
   [sym]
   {:seon.render/operations [(list 'in-ns (list 'quote (symbol (namespace sym))))]})
 
+(defn task-sections
+  "The held task's sections for `agent-id` on `database`, its branch: the task by handle, symbol and intent; its
+  proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
+  and every other reference it makes, resolved. Empty when it holds none.
+
+  ## Costs
+
+  One assignment query and one task pull, the proofs' reach digests and latest results, the step observation,
+  one send-back query and one resolution per distinct reference."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.context/task-sections :seon.error/value]]}
+  [database agent-id]
+  (let [held (held-task database agent-id)]
+    (if (or (nil? held) (:seon.error/at held))
+      (or held {})
+      (let [proven (proofs database (:seon.task/sym held))
+            verdict (step-verdict database agent-id)
+            sent-back (send-backs database (:seon.task/id held))
+            proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
+            reads (when-not (:seon.error/at proven) (task-references database held proof-names))
+            resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
+            others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
+        (or (some #(when (:seon.error/at %) %) (concat [proven verdict] reads))
+            (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions])}
+              proven (assoc :seon.context/proofs
+                            (update proven :seon.context/proof-list
+                                    (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
+              verdict (assoc :seon.context/step
+                             (cond-> (step-section verdict)
+                               (= :implement (:seon.task/step verdict))
+                               (assoc :seon.context/start (step-start (:seon.task/sym held)))))
+              (seq sent-back) (assoc :seon.context/send-backs sent-back)
+              (seq others) (assoc :seon.context/must-reads others)))))))
+
 (defn current-state
-  "The current-state block's data for `agent-id`: its held task's declaration as the
-  main reads it now, and its turns left with the task's status (`:done` once its step is done,
+  "The current-state block's data for `agent-id`: its held task's sections (`task-sections`), and its turns left with the task's status (`:done` once its step is done,
   `step-verdict`, then `:capped` with no turns left, else `:working`) and the namespace
-  it is in (`agent-namespace`), and the step section (`step-section`) beside its proofs. Sections are
+  it is in (`agent-namespace`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
   instant and content. `:seon.context/cost` holds the branch's stored function costs
@@ -510,7 +539,7 @@
 
   ## Costs
 
-  One assignment query, one task pull, the turn count, one pull per unread message,
+  The held task's sections (`task-sections`), the turn count, one pull per unread message,
   one query of the agent's handled messages, one scan of the branch's cost entities
   and one query of main's for them."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
@@ -518,10 +547,8 @@
   [database agent-id]
   (let [found (held-task database agent-id)
         held (when-not (:seon.error/at found) found)
+        sections (when held (task-sections database agent-id))
         left (turn/turns-left database agent-id)
-        proven (when held (proofs database (:seon.task/sym held)))
-        verdict (when held (step-verdict database agent-id))
-        sent-back (when held (send-backs database (:seon.task/id held)))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items)
                    items
@@ -532,21 +559,14 @@
                        (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
         namespace (agent-namespace database agent-id held)
-        reads (when held (task-references database held))]
-    (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
-        (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
-                                       held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)
-                                                                           (zero? left) :capped
-                                                                           :else :working))
-                                       namespace (assoc :seon.context/namespace namespace))}
-          held (assoc :seon.context/task held)
-          proven (assoc :seon.context/proofs proven)
-          verdict (assoc :seon.context/step
-                         (cond-> (step-section verdict)
-                           (= :implement (:seon.task/step verdict))
-                           (assoc :seon.context/start (step-start (:seon.task/sym held)))))
-          (seq sent-back) (assoc :seon.context/send-backs sent-back)
-          (seq reads) (assoc :seon.context/must-reads reads)
+        status (get-in sections [:seon.context/step :seon.task/status])]
+    (or (some #(when (:seon.error/at %) %) [found sections left unread])
+        (cond-> (merge sections
+                       {:seon.context/turns (cond-> {:my.agent/turns-left left}
+                                              held (assoc :seon.task/status (cond (#{:done :satisfied} status) status
+                                                                                  (zero? left) :capped
+                                                                                  :else :working))
+                                              namespace (assoc :seon.context/namespace namespace))})
           cost (assoc :seon.context/cost cost)
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
                                                     :seon.render/operations ['(my.message/inbox)]})))))

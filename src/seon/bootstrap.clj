@@ -36,8 +36,9 @@
      :seon.help/lines
      ["Your current-state block is the last part of every request; it is already there, and (seon.context/current-state) reads it again."
       ":seon.context/task is what must become true; its :seon.task/intent states the conditions. :seon.context/step is :implement, make the proofs green, or :prove, write red tests for the intent; its :seon.context/start holds the form that enters the owner's namespace."
-      ":seon.context/proofs are the deftests that show the task done, each with a :seon.context/proof-status: :red fails, :pending has no result for your current code yet, :green passes."
-      ":seon.context/must-reads are what your task names: a function's doc, arglists and :malli/schema, a schema's form; their :seon.render/operations read its source, callers and reaching tests. One with a :seon.ref/problem-kind did not resolve; its :seon.ref/message says what to do."
+      ":seon.context/proofs are the deftests that show the task done, each with its :seon.test/source and a :seon.context/proof-status: :red fails, with its :seon.context/proof-failures, :pending has no result for your current code yet, :green passes. They run after each eval request and the next block shows their status."
+      ":seon.context/must-reads are what your task names, each resolved once under :seon.ref/name or :seon.ref/path: a function's :doc, :arglists and :malli/schema, a schema's :seon.ref/schema-form, a test's :seon.test/source, a task's :seon.task/intent, a document's heading; their :seon.render/operations read the rest. One with a :seon.ref/problem-kind did not resolve; its :seon.ref/message says what to do."
+      ":seon.context/turns holds the model calls you have left and :seon.context/namespace, the namespace you are in now."
       ":seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:intent ...}, its keys :seon.task/intent and so on."]}
     {:seon.help/title "Done"
      :seon.help/lines
@@ -47,7 +48,7 @@
     {:seon.help/title "How work proceeds"
      :seon.help/lines
      ["1. Read the owner of what the task names: (doc seon.db/q), (my.program/source 'seon.db/q), (my.program/callers 'seon.db/q), (my.program/search :seon.task/intent)."
-      "2. Enter the namespace that owns it: (in-ns 'the.owner.ns). Your own :seon.context/namespace is scratch: a definition there changes no owner."
+      "2. Enter the namespace that owns it: (in-ns 'the.owner.ns). A definition changes the namespace it is evaluated in."
       "3. Define a function in the namespace that owns it, its contract written on the defn: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). It replaces the definition on your branch."
       "4. Call it on real inputs and read the value. A body's locals exist only inside their binding: call the function, or redefine it with the probe inside."
       "5. A :prove step writes a deftest naming its task in :seon/tasks: (deftest ^{:seon/tasks #{'the.task.ns/name}} increments (is (= 3 (inc 2))))."
@@ -71,6 +72,7 @@
     {:seon.help/title "Ask root or give the task back"
      :seon.help/lines
      ["Ask: my.message/send with :my.message/to \"root\" and :my.message/content, then (my.turn/wait {:my.turn/note \"Waiting for root's answer.\"}) as the reply's last form pauses until the answer arrives."
+      "Write what you learn into your task: (my.task/refine! {:seon.task/intent \"Make `seon.db/q` answer its refusal; see docs/seon/specs/merge.md#1-the-merge-request.\"}) rewrites its intent on your branch. A reference is a backticked fully qualified symbol or keyword, a task `ns/task-name`, or a path with a #heading anchor; your next block resolves each one."
       "A wrong or impossible task goes back with its reason: (my.task/send-back! {:my.task/reason \"The proof asserts the old shape; the intent asks for the new one.\"})."]}
     {:seon.help/title "Clojure and Malli gotchas"
      :seon.help/lines

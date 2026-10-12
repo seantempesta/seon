@@ -3,7 +3,8 @@
                     [:seon.context/task {:optional true} :seon.context/task]
                     [:seon.context/proofs {:optional true} :seon.context/proofs]
                     [:seon.context/step {:optional true} :seon.context/step]
-                    [:seon.context/send-backs {:optional true} :seon.context/send-backs]]
+                    [:seon.context/send-backs {:optional true} :seon.context/send-backs]
+                    [:seon.context/must-reads {:optional true} :seon.context/must-reads]]
           :reason [:string {:min 1 :description "Why an agent gives its task back without green proofs: the reply root reads."}]
           :target [:and {:description "The task that owns the mistake a send-back names, by symbol."} :seon.task/sym]
           :counterexample [:and {:description "The data showing why the task cannot be made green as written."} :seon.schema/value]
@@ -12,4 +13,13 @@
           :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it."}
                       :my.turn/completed
                       [:map [:my.task/target {:optional true} :my.task/target]
-                       [:my.task/counterexample {:optional true} :my.task/counterexample]]]}
+                       [:my.task/counterexample {:optional true} :my.task/counterexample]]]
+          :refine-request [:map {:description "A refinement of the task an agent holds: its new intent, prose naming its references as backticked fully qualified symbols, keywords and tasks and paths with #heading anchors. Connection and agent are supplied by call preparation."}
+                           [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                           [:seon.task/intent :seon.task/intent]]
+          :refined [:map {:description "A refinement as my.task/refine! answers it: the task's handle, whether its declaration changed on the agent's branch, and each reference of the new intent that does not resolve."}
+                    [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]
+                    [:my.task/problems {:optional true} :my.task/problems]]
+          :problems [:vector {:description "Each reference of a refined intent that does not resolve on the agent's branch, as its problem."} :seon.ref/problem]
+          :no-task-error [:and {:description "A task verb called by an agent that holds no task."} :seon.error/base [:map [:my.task/holder :my.task/holder]]]
+          :holder [:string {:min 1 :description "The id of the agent a task verb was called by, named in its refusal as an observed value."}]}
