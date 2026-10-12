@@ -9,6 +9,8 @@
  :seon.program/digest-map
  [:map-of :seon.program/declaration-identity :seon.program/definition-digest]
  :seon.program/identity-set [:set :seon.program/declaration-identity]
+ :seon.program/conflict
+ [:set {:description "The declarations the source branch and main both changed since the merge base (seon.program/three-way), by symbol."} :symbol]
  :seon.program/conflict-digests
  [:map-of :seon.program/declaration-identity
   [:map

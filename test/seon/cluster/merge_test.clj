@@ -424,6 +424,31 @@
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
 
+(deftest ^{:seon.test/long "One own-branch agent's first request and assignment, one program write on main and one merge that stops at prepare-merge!'s three-way (no nested test run)."
+           :seon.test/long-ms 120000}
+  a-merge-conflict-reports-its-variant
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           root (checkout! "conflict-test" {"test/tq/land.clj" land-source})
+           _ (checkout-dial! connection root)
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           area [:seon.fn/sym 'tq.land/area]
+           request (assigned! running connection "area"
+                              "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+           _ (support/transacted! connection
+                                  (support/replacement-tx (db/db connection) area
+                                                          "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (+ r r))" {}))]
+       (try
+         (let [refused (merge! execution request)]
+           (is (= :seon.source/conflict-error (:seon.error/type refused)))
+           (is (= #{'tq.land/area} (:seon.program/conflict refused)) "the conflicting declaration"))
+         (finally (support/delete-root! root)))))))
+
 (def ^:private refine-tasks
   ;; two entries, each over two lines; a namespace no other test of this JVM creates tasks in
   (str "[#:seon.task{:name \"area\"\n             :intent \"Fix.\"}\n"

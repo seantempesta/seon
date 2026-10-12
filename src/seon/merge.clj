@@ -312,7 +312,8 @@
               (refusal/error :seon.source/conflict-error
                              {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.merge/merge!
                               :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and merge again."
-                              :seon.task/assignment key :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
+                              :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
+                             :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
               (not (:seon.source/candidate prepared)) prepared
               (not (:seon.source/commit-id accepted)) accepted
               (:seon.error/at result) (assoc result :seon.source/accepted accepted)
