@@ -1808,36 +1808,33 @@
   (delay (requiring-resolve 'seon.cluster/seed-cluster-facts!)))
 
 (defn- digest-differences
-  "The declarations `world` and `candidate` hold at different definition
-  digests, as `[offered-by-candidate held-by-world]` identity sets.
-
-  Entity ids differ between lineages, so declarations compare by stored
-  definition digest: a digest one value holds and the other lacks names a
-  declaration that was added, changed or retracted. A refused read answers
-  its refusal."
+  "Declaration differences as `[offered held]` identity sets.
+  Equal committed attribute revisions prove an empty difference."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:vector :qualified-keyword]]
                   [:or [:tuple :seon.program/identity-set :seon.program/identity-set] :seon.error/value]]}
-  [world candidate families]
-  (let [;; One query per value (0.5 ms on 10,779 declarations; the armed
-        ;; `db/datoms` read of the same range measured 44 ms).
-        by-digest (fn [database]
-                    (let [found (db/q '[:find ?digest ?e :where [?e :seon.program/definition-digest ?digest]]
-                                      database)]
-                      (if (:seon.error/at found) found (into {} found))))
-        [held offered :as maps] (mapv by-digest [world candidate])
-        named (fn [database digests other]
-                (let [entities (db/pull-many database families
-                                         (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
-                                               digests))]
-                  (if (:seon.error/at entities) entities
-                      (into #{} (mapcat (fn [entity] (keep #(when-some [v (get entity %)] [% v]) families)))
-                            entities))))
-        present (when-not (some :seon.error/at maps) (named candidate offered held))
-        changed (when (set? present) (named world held offered))]
-    (cond (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
-          (not (set? present)) present
-          (not (set? changed)) changed
-          :else [present changed])))
+  [baseline candidate families]
+  (let [attributes (conj families :seon.program/definition-digest)
+        prior (db/content-revisions baseline attributes)]
+    (if (and prior (= prior (db/content-revisions candidate attributes)))
+      [#{} #{}]
+      (let [by-digest (fn [database]
+                        (let [found (db/q '[:find ?digest ?e :where [?e :seon.program/definition-digest ?digest]]
+                                          database)]
+                          (if (:seon.error/at found) found (into {} found))))
+            [held offered :as maps] (mapv by-digest [baseline candidate])
+            named (fn [database digests other]
+                    (let [entities (db/pull-many database families
+                                                (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
+                                                      digests))]
+                      (if (:seon.error/at entities) entities
+                          (into #{} (mapcat (fn [entity] (keep #(when-some [v (get entity %)] [% v]) families)))
+                                entities))))
+            present (when-not (some :seon.error/at maps) (named candidate offered held))
+            changed (when (set? present) (named baseline held offered))]
+        (cond (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
+              (not (set? present)) present
+              (not (set? changed)) changed
+              :else [present changed])))))
 
 (defn- behavior-differences
   "`digest-differences`' `[offered held]` without the declarations `world`
