@@ -93,3 +93,26 @@ RESTART NEEDED for 2736c187d to be live on default (ordinary `src/seon/task.clj`
   `seon.task.edn`, deftest absent): an own-branch agent defines the fix, its done end is written with no request,
   one `db<->flow` pass: `:merged`, main's `:seon.program/definition-digest` of the fixed function equals the
   branch's, and the branch holds no `:seon.task/merge-request`.
+
+### (c) gate, committed fa0b0b6cb (lane goal-m8c); refused-merge writes, 7a4fba11c
+
+- **A refused merge's writes on main** (7a4fba11c). Measured (probe run 68cce6c04481, every attribute in
+  `db/since` main's basis-t after a refused `merge!`): only `:seon.test.run/*`, `:seon.test.member/*`,
+  `:seon.fn.cost/*` and the transaction's own attributes: `seon.test/change-reds`' main side
+  (`seon.test/fork-point-red` records on the execution's connection since R5, 3130cd58c), root's own evidence,
+  which main keeps by the owner's Q2/R8. No assignment, program or cluster fact. The test now asserts no attribute
+  of `seon.program/program-attributes` or `seon.program/cluster-attributes` was written; change-reds' docstring
+  corrected.
+- **The gate** (fa0b0b6cb). `seon.merge/merge!` counts with `seon.cluster.source/unmerged-count` (moved from
+  `seon.cluster.agent`) and gates with `seon.task/obligations`' `:seon.task/proofs` of the assignment's task on the
+  branch head. Facts only for a `:sent-back` source and for a step another task needs (the producer rule
+  `end-task!` applied before; a Prove step's product reds pass no gate until M7). `publish!` no longer reads the
+  request; `merge-request` and `merged-request` are deleted. Proof red on HEAD (run 516b8f25b293), green (run
+  571360df84c7). `seon.cluster.db-flow-test`: HEAD's three reds, same tally (runs 15e982d8be0f, 47db8056ddd3).
+- **Left: the verb's deletion**, one commit with `src/seon/turn.clj` (lane one-bound holds it, with
+  `test/seon/turn_continue_test.clj`): `seon.turn/end-task!`'s merge clause (`merge?`, `recorded`, `execution`,
+  `request` and its fault), `end-merge-request`, the `program-request-merge!` delay; `my.program/request-merge!`;
+  `seon.task/request-merge!`, `red-first`; the request schema in `seon.task.edn`; tests: merge-test's
+  `requested-agent!` becomes `assigned-agent!` (its callers keep their assertions), `seon.cluster.host-test`
+  427-460, `seon.turn-continue-test` 306, 427-520, `seon.cluster.db-flow-test` 461, 470, 751, 989. Retire
+  `seon.task/a-done-branch-merges-with-no-merge-request-written-by-the-agent` in that commit (its deftest is green).
