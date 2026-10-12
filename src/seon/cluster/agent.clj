@@ -1815,17 +1815,23 @@
 
 (defn- write-attempt!
   "Write an `:attempt` action on main before anything runs.
-  The agent's creation and the attempt row are ONE transaction; nothing is
-  written when the attempt already is."
+  The agent's creation and the attempt row are ONE transaction, the row
+  recording its fork point when that is a predecessor's end commit
+  (`:seon.task.attempt/fork`), so a restart forks the same world; nothing is
+  written when the attempt already is. Several predecessors' end commits fork
+  the first: their octopus merge is not built."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
-  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch :as action}]
+  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch fork-point :seon.flow.plan/fork-point
+           :as action}]
   (let [connection (:seon.db/connection handle)
         database (db/db connection)
         tx (task/attempt-tx database h agent-id branch)
-        known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)]
+        known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)
+        fork (when (set? fork-point) (first (sort fork-point)))]
     (when (map? tx) (throw (ex-info (:seon.error/message tx "The attempt could not be derived.") tx)))
     (when (seq tx)
-      (write! connection (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle)))) tx)))
+      (write! connection (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle))))
+                               (cond-> tx fork (update 0 assoc :seon.task.attempt/fork fork)))))
     nil))
 
 (defn handle-store
@@ -1836,34 +1842,37 @@
       (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))))))
 
 (defn- fork-attempt!
-  "Fork the attempt's `branch` from its `fork-point` unless the store holds it.
-  The fork point is main's head, or the end commit of the task's need (a nested
-  fork toward main from the need's branch); a need whose branch is gone forks
-  main, which its merge reached."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch :seon.flow.plan/fork-point] :nil]}
-  [handle branch fork-point]
+  "Fork attempt `key`'s `branch` unless the store holds it: from the fork point its row on main records
+  (`:seon.task.attempt/fork`, a predecessor's end commit, a nested fork toward main from the predecessor's
+  branch, which db<->flow keeps while a successor waits on it), else from main's head. A predecessor whose
+  branch is gone refuses loudly: nothing falls back to main."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch :seon.task/assignment] :nil]}
+  [handle branch key]
   (let [database (db/db (:seon.db/connection handle))
         store (handle-store handle)
         main-branch (get-in database [:config :branch])
-        commit (when (set? fork-point) (first (sort fork-point)))
+        commit (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] [:seon.task/assignment key]))
         parent (when commit (db/q '[:find ?b . :in $ ?c :where [?a :seon.task.attempt/commit ?c] [?a :seon.task/branch ?b]]
                                   database commit))
-        source (when (and (keyword? parent) (contains? (registry/roster store) parent))
-                 (db/branch-database database parent))
+        _ (when (and commit (not (and (keyword? parent) (contains? (registry/roster store) parent))))
+            (throw (ex-info "The attempt's predecessor branch is gone, so its fork point cannot be read."
+                            {:seon.error/message "The attempt's predecessor branch is gone, so its fork point cannot be read."
+                             :seon.task/assignment key :seon.task.attempt/fork commit :seon.store/branch parent})))
         result (when-not (contains? (registry/roster store) branch)
-                 (registry/fork! (if source
-                                   {:seon.store/store store :seon.store/branch branch :seon.db/db source
-                                    :seon.cluster.registry/from commit :seon.branch/target main-branch}
-                                   {:seon.store/store store :seon.store/branch branch :seon.db/db database
+                 (if commit
+                   (let [source (db/branch-database database parent)]
+                     (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db source
+                                      :seon.cluster.registry/from commit :seon.branch/target main-branch}))
+                   (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db database
                                     :seon.cluster.registry/from main-branch})))]
     (when (:seon.error/at result) (throw (ex-info (:seon.error/message result "The attempt's fork was refused.") result)))
     nil))
 
 (defn- seed-attempt!
   "Write attempt `key`'s agent and row onto the branch `connection` holds when its fork point predates them
-  (a need's end commit): the agent under main's entity id (its identity first, then its creation upserts onto
-  it) and the row with its task (`seon.task/attempt-rows-tx`), so the agent reads its assignment in its own
-  world and the end copy names main's entities."
+  (a predecessor's end commit), at fork: the agent under main's entity id (its identity first, then its
+  creation upserts onto it) and the row (`seon.task/attempt-rows-tx`), naming its task by identity in the
+  branch's world, so the agent reads its assignment there and its end names main's entities."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :seon.flow.plan/action] :nil]}
   [handle connection {key :seon.task/assignment agent-id :seon.agent/id :as action}]
   (let [main (db/db (:seon.db/connection handle))]
@@ -1883,9 +1892,8 @@
   there when the fork point predates them (`seed-attempt!`), and start its flow.
   A repeat finds the branch, its rows and the started graph and does nothing new."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/facts :seon.flow.plan/action] :nil]}
-  [handle facts {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch
-                 intent :seon.task/execution :as action}]
-  (fork-attempt! handle branch (or (not-empty (get-in facts [:seon.flow.plan/basis h])) :main))
+  [handle _facts {agent-id :seon.agent/id branch :seon.task/branch intent :seon.task/execution :as action}]
+  (fork-attempt! handle branch (:seon.task/assignment action))
   (let [execution (acquire-context! handle nil {:seon.agent/branch branch})]
     (seed-attempt! handle (:seon.db/connection execution) action)
     (start-branch-flow! handle execution agent-id (or intent :running))
@@ -1900,8 +1908,8 @@
 
 (defn- follow!
   "Make `agent-id`'s started graph follow the action's op.
-  Pause or resume it in place (recorded on its entry), stop and join it, or
-  stop it and end its open attempt `:cancelled`."
+  Pause or resume it in place (recorded on its entry), stop and join it letting
+  its current pass finish, or interrupt and stop it and end its open attempt `:cancelled`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/action] :nil]}
   [handle routing {op :seon.flow.plan/op agent-id :seon.agent/id key :seon.task/assignment}]
   (when-let [roster (entry-roster routing agent-id)]
@@ -1910,7 +1918,9 @@
                  (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] true))
       :resume (do (flow/resume (:seon.flow/graph (started roster agent-id)))
                   (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] false))
-      (:stop :cancel) (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster})))
+      ;; a stop lets the current pass finish; only a cancel interrupts it
+      :stop (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster :seon.agent/finish? true})
+      :cancel (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster})))
   (when (= :cancel op)
     (write! (:seon.db/connection handle)
             [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :cancelled]
@@ -2040,14 +2050,18 @@
   nil)
 
 (defn- detached!
-  "Run `work` as io work on `handle`'s work launcher, its failure recorded as db<->flow's fault;
-  inline when no launcher accepts it."
+  "Run `work` as io work on `handle`'s work launcher, its failure recorded as db<->flow's fault.
+  A handle whose environment holds no launcher, or a launcher that refuses the work, throws: a running
+  cluster always holds one, so its absence is a construction defect, never a second, inline path."
   {:malli/schema [:=> [:cat :seon.agent/context-source :string [:=> [:cat] :nil]] :nil]}
   [handle submission-id work]
   (let [environment (env/of handle)
         launcher (:seon.flow/work-launcher environment)
-        submitted (when launcher
-                    (seon.flow/submit!
+        _ (when-not launcher
+            (throw (ex-info "db<->flow's detached work has no work launcher."
+                            {:seon.error/message "db<->flow's detached work has no work launcher."
+                             :seon.flow/submission-id submission-id})))
+        submitted (seon.flow/submit!
                      launcher
                      {:seon.env/environment environment :seon.flow/workload :io :seon.flow/submission-id submission-id
                       :seon.flow/work-fn (fn [_] (work))
@@ -2057,8 +2071,53 @@
                           (fault/fault! environment failure
                                         {:seon.error/layer :seon.flow/plan :seon.error/operation `detached!
                                          :seon.db.process/id (:seon.db.process/id handle)}))
-                        nil)}))]
-    (when-not submitted (work))
+                        nil)})]
+    (when-not submitted
+      (throw (ex-info "The work launcher refused db<->flow's detached work."
+                      {:seon.error/message "The work launcher refused db<->flow's detached work."
+                       :seon.flow/submission-id submission-id})))
+    nil))
+
+(defn- successor-waits?
+  "Whether a leaf task needing (own or inherited) the task done attempt `a` ended has no attempt yet forked
+  from its end commit on a branch the `store` holds: the predecessor's branch is its fork point's ref."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.db/entity-id] :boolean]}
+  [database store a]
+  (let [roster (registry/roster store)
+        commit (:seon.task.attempt/commit (db/pull database [:seon.task.attempt/commit] a))
+        successors (when commit
+                     (db/q '[:find [?t ...] :in $ % ?a
+                             :where [?a :seon.task/attempt-of ?l] [?t :seon.task/id _] (not [?t :seon.task/children _])
+                             (needs* ?t ?n) (self-or-under ?n ?l)]
+                           database task/frontier-rules a))
+        forked? (fn [t] (some #(contains? roster %)
+                              (db/q '[:find [?b ...] :in $ ?t ?c
+                                      :where [?s :seon.task/attempt-of ?t] [?s :seon.task.attempt/fork ?c] [?s :seon.task/branch ?b]]
+                                    database t commit)))]
+    (when (map? successors) (throw (ex-info (:seon.error/message successors "The successors could not be read.") successors)))
+    (boolean (some (complement forked?) successors))))
+
+(defn- settle-kept-branches!
+  "Delete each landed :done attempt's branch db<->flow kept as its successors' fork point once none waits,
+  no merge request is open and its cluster keeps no ended branches."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
+  [handle routing]
+  (let [connection (:seon.db/connection handle)
+        database (db/db connection)
+        store (handle-store handle)
+        roster (registry/roster store)
+        landed (db/q '[:find ?a ?b ?id :where [_ :seon.squash/attempt ?a] [?a :seon.task.attempt/end :done]
+                       [?a :seon.task/branch ?b] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                     database)]
+    (when (map? landed) (throw (ex-info (:seon.error/message landed "The landed attempts could not be read.") landed)))
+    (doseq [[a branch agent-id] landed
+            :when (and (contains? roster branch) (not (open-merge-request? database a))
+                       (not (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?)))
+                       (not (successor-waits? database store a)))]
+      (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
+                                               :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                              branch)]
+        (throw (ex-info (:seon.error/message refused "The kept branch was not deleted.") refused))))
     nil))
 
 (defn land-ends!
@@ -2068,7 +2127,8 @@
   The graph stops without interrupting the pass that wrote the end, and is joined.
   A merge request still open keeps the branch until it closes (`seon.task/close!`),
   landing it with no root when `:seon.config.root/land?` says so; else a successful
-  end deletes its branch unless `:seon.config.agent/keep-ended-branches?` keeps it;
+  end deletes its branch unless `:seon.config.agent/keep-ended-branches?` keeps it or, :done, a successor
+  still waits to fork from its end commit (`successor-waits?`; `settle-kept-branches!` deletes it later);
   an error end keeps it. Each end's failure is db<->flow's fault and the rest still land."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/ends] :nil]}
   [handle routing ends]
@@ -2089,7 +2149,7 @@
               (do (release-branch! routing branch)
                   (when (= :done end)
                     (detached! handle (str "land-" (name branch)) #(do (turn/land-ended! handle agent-id) nil))))
-              (and copied? (not keep?))
+              (and copied? (not keep?) (not (and (= :done end) (successor-waits? database (handle-store handle) a))))
               (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store (handle-store handle)
                                                        :seon.agent/routing routing :seon.env/environment (env/of handle)}
                                                       branch)]
@@ -2227,6 +2287,7 @@
                                :seon.db.process/id (:seon.db.process/id handle) :seon.agent/id agent-id}))))
        ;; the ended attempts land on main first, so the plan reads them ended (P2)
        (try (land-ends! handle routing (unlanded-ends @connection (handle-store handle)))
+            (settle-kept-branches! handle routing)
             (catch Exception failure
               (fault/fault! (env/of handle) failure
                             {:seon.error/layer :seon.flow/plan :seon.error/operation `unlanded-ends

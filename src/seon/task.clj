@@ -602,44 +602,45 @@
                   :seon.task.attempt/number number :seon.task/revision revision
                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}])))
 
-(def ^:private task-ref-attributes
-  "The task attributes naming other entities, left out when a task is written onto a branch that lacks it."
-  #{:seon.task/children :seon.task/needs :seon.task/faults :seon.task/created-by :seon.task/function})
-
 (defn attempt-rows-tx
   "The transaction data writing onto `branch-db` attempt `key`'s row as main `database` holds it, under
-  main's entity id, with its task (scalar facts, main's id) when `branch-db` lacks it, so the branch's
-  agent reads its assignment in its own world and the end copy lands on the same entities; [] when
-  `branch-db` holds the row. The row names its agent by id: the branch holds the agent."
+  main's entity id, naming its task and agent by identity, so the branch's agent reads its assignment in
+  its own world and the end names main's entities; [] when `branch-db` holds the row. The branch's world
+  holds the task and the agent (it forked main, or a predecessor's end commit, after both existed): a
+  task it lacks refuses `:unknown-task`, never imported."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/assignment]
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database branch-db key]
   (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
-                               :seon.task.attempt/number {:seon.task/agent [:seon.agent/id]}
-                               {:seon.task/attempt-of [:db/id]}]
+                               :seon.task.attempt/number :seon.task.attempt/fork {:seon.task/agent [:seon.agent/id]}]
                      [:seon.task/assignment key])
         handle (:seon.task/assigned row)
-        task (when (string? handle) (db/pull database '[*] [:seon.task/id handle]))
         present? (fn [lookup] (:db/id (db/pull branch-db [:db/id] lookup)))]
-    (cond (some read-error [row task]) (some read-error [row task])
+    (cond (read-error row) row
           (not (string? handle)) (refused 'seon.task/attempt-rows-tx :unassigned 'seon.task key)
           (present? [:seon.task/assignment key]) []
-          :else
-          (let [task-present? (present? [:seon.task/id handle])
-                attempt-of (get-in row [:seon.task/attempt-of :db/id])]
-            (cond-> []
-              (and (not task-present?) attempt-of) (conj (apply dissoc task task-ref-attributes))
-              true (conj (cond-> (-> row
-                                     (dissoc :seon.task/attempt-of)
-                                     (assoc :seon.task/agent [:seon.agent/id (get-in row [:seon.task/agent :seon.agent/id])]))
-                           attempt-of (assoc :seon.task/attempt-of (if task-present? [:seon.task/id handle] attempt-of)))))))))
+          (not (present? [:seon.task/id handle])) (refused 'seon.task/attempt-rows-tx :unknown-task 'seon.task handle)
+          :else [(assoc row :seon.task/agent [:seon.agent/id (get-in row [:seon.task/agent :seon.agent/id])]
+                        :seon.task/attempt-of [:seon.task/id handle])])))
+
+(defn- task-placed!
+  "Write the task `handle` on the branch `target` as main `database` declares it, by the task writer, when the
+  branch lacks it (root created it after the branch forked): its whole declaration, children and needs by
+  identity, so a task naming one the branch lacks refuses at the writer. nil, or the refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/connection :seon.task/handle] [:maybe :seon.error/value]]}
+  [database target handle]
+  (when-not (:db/id (db/pull (db/db target) [:db/id] [:seon.task/id handle]))
+    (let [stored (stored-tasks database :seon.task/id #{handle})]
+      (or (read-error stored)
+          (let [report (refusal-data #(written target [[:db.fn/call #'adopt-tasks-tx [(dissoc (stored handle) :db/id)] #{handle} {}]]))]
+            (when (:seon.error/at report) report))))))
 
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
   working on `:seon.task/branch`, binding the revision it reviews now: the
   attempt row, written on `connection` (main, root's world) and, when the agent
-  works on a branch of its own, on that branch too under main's ids
-  (`attempt-rows-tx`), so the agent reads its assignment in its own world; a
+  works on a branch of its own, on that branch too under main's ids, with the
+  task when the branch lacks it (`task-placed!`, `attempt-rows-tx`), so the agent reads its assignment in its own world; a
   branch this process holds no connection to refuses `:no-world`. A task with no
   proof refuses `:no-proofs`.
   Nothing runs here: the agent's first pass proves first (`seon.turn/prove-turn`),
@@ -663,7 +664,8 @@
             [_ attempt] (next-attempt (db/db connection) handle)
             own (when (and (not (:seon.error/at report)) (not= branch (get-in (db/db connection) [:config :branch])))
                   (if-let [target (db/branch-connection (db/db connection) branch)]
-                    (let [rows (attempt-rows-tx (db/db connection) (db/db target) attempt)]
+                    (let [placed (task-placed! (db/db connection) target handle)
+                          rows (if (:seon.error/at placed) placed (attempt-rows-tx (db/db connection) (db/db target) attempt))]
                       (if (and (vector? rows) (seq rows))
                         (db/call-with-custody {:seon.db/connection target} #(db/transact! target rows))
                         rows))

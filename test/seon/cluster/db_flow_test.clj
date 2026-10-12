@@ -14,6 +14,7 @@
             [seon.config :as config]
             [seon.context]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.sci.eval :as sci.eval]
@@ -719,3 +720,72 @@
                         (get-in (seon.context/current-state (db/db on-branch) agent-id) [:seon.context/unread :seon.context/items]))
                   "and the recipient's context shows it")
               (is (< elapsed-ms 30) "offer to write within 30 ms warm")))))))))
+
+;;; A chain step forks its predecessor's end commit, recorded on its attempt; nothing falls back to main.
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+  a-successor-forks-its-predecessors-end-commit-recorded-on-its-attempt
+  (binding [*space* "tq.forkpoint"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)]
+            (pass! handle routing)
+            (let [[[key-a branch-a]] (seq (attempts connection "a"))
+                  a-connection (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-a})]
+              (test-support/transacted! a-connection (test-support/agent-tx (db/db a-connection) "tq-fork-marker"))
+              (end-on-branch! handle connection "a" :done)
+              (pass! handle routing)
+              (let [end-commit (:seon.task.attempt/commit (db/pull (db/db connection) [:seon.task.attempt/commit]
+                                                                   [:seon.task/assignment key-a]))
+                    [[key-b branch-b]] (seq (attempts connection "b"))]
+                (is (uuid? end-commit) "A's end landed on main with its commit")
+                (is (= end-commit (:seon.task.attempt/fork (db/pull (db/db connection) [:seon.task.attempt/fork]
+                                                                    [:seon.task/assignment key-b])))
+                    "B's attempt records A's end commit as its fork point")
+                (is (some? (db/q '[:find ?a . :where [?a :seon.agent/id "tq-fork-marker"]]
+                                 (db/branch-database (db/db connection) branch-b)))
+                    "and B's branch forked from it, not from main")
+                (pass! handle routing)
+                (is (eventually #(not (contains? (registry/roster store) branch-a)))
+                    "once B forked, A's kept branch is deleted")
+                (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                    "with no fault recorded"))))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+  detached-work-without-a-launcher-refuses-and-never-runs-inline
+  (binding [*space* "tq.detached"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"d" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [bare (-> handle (dissoc env/state-carrier) (env/carry (dissoc (env/of handle) :seon.flow/work-launcher)))
+                ran (promise)
+                refused (try (#'agent/detached! bare "tq-detached" #(do (deliver ran true) nil)) nil
+                             (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+            (is (= "tq-detached" (:seon.flow/submission-id refused)) "a handle with no launcher refuses the work by name")
+            (is (not (realized? ran)) "and never runs it inline"))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+  a-stopped-attempt-finishes-its-current-pass
+  (binding [*space* "tq.stopfinish"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"s" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)]
+            (pass! handle routing)
+            ;; the attempt's first pass runs its proofs now; stopping meanwhile lets that pass finish
+            (test-support/transacted! connection [[:db/add [:seon.task/id (chain-handle "s")] :seon.task/execution :stopped]])
+            (pass! handle routing)
+            (let [[[_ branch agent-id]] (seq (attempts connection "s"))
+                  database (db/branch-database (db/db connection) branch)]
+              (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id)) "the graph is stopped")
+              (is (seq (proof-runs database (proof "s"))) "after its pass recorded its proof run")
+              (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
+                  "with nothing interrupted")))))))))
