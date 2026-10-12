@@ -906,7 +906,7 @@
   (let [member (:seon.call-preparation/key slot)
         world seon.batch/*world*
         ;; no world holds a database value: it is the current value of the
-        ;; custody in force (a fixture branch inside `seon.db/call-with-custody`),
+        ;; custody in force (a fixture branch inside `seon.db/with-branch`),
         ;; else of the world's connection, read at this call (owner ruling
         ;; 2026-09-28), as `seon.instrument/calling-environment` reads it
         v (if (= :seon.db/db member)

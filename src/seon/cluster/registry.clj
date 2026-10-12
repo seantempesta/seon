@@ -276,7 +276,7 @@
                            (schema/handed-projection)
                            (schema/projection-from-database database))]
         ;; The new branch's own write, never the caller's custody.
-        (db/call-with-custody
+        (db/with-branch
          {:seon.db/connection connection}
          #(schema/call-with-projection
            projection
@@ -407,7 +407,7 @@
                                              (base-commit-id database parent))})]
                     (if (:seon.error/at retained)
                       retained
-                      (db/call-with-custody
+                      (db/with-branch
                        {:seon.db/connection connection}
                        #(schema/call-with-projection
                          projection

@@ -789,7 +789,7 @@
 
   Its database is the custody in force at the call (`seon.db/db`: the
   evaluation's scoped read basis, else the custody connection's current
-  value), so a call inside `seon.db/call-with-custody` — a fixture branch, a
+  value), so a call inside `seon.db/with-branch` — a fixture branch, a
   deliberate write elsewhere — is supplied that custody's database, never the
   value its world was scoped with. Without custody the world stands as it is.
 

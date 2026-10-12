@@ -419,7 +419,7 @@
                     (capture-and-report-event!
                      options capture selected-namespaces default-report
                      reported-signatures event))]
-          (db/call-with-custody custody
+          (db/with-branch custody
             #(run-selected-tests (sort selected-namespaces) test-vars
                                  (:seon.sci.eval/ctx custody))))
         (let [results (captured-results @capture)

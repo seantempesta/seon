@@ -18,7 +18,7 @@
              owned (create-ns (gensym "seon.test.seed-preparation-test.probe-"))
              probe (intern owned (with-meta 'probe {:test body :seon.test/seed seeds}) nil)]
          ;; The body receives this member's custody, as `seon.test/member-result` supplies it.
-         (try (db/call-without-custody
+         (try (db/with-branch {}
                #(#'sut/bounded-result (atom {}) {} (or test-symbol (symbol probe)) (constantly probe) 5000
                                       {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.test/member handle}
                                       (fn [_] nil)))

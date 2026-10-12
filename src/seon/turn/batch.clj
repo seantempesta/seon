@@ -872,7 +872,7 @@
         ;; thread's: an entrant called from inside another evaluation records
         ;; on its own world's branch
         commit! (fn [tx] (let [r (binding [seon.batch/*world* world]
-                                    (db/call-with-custody {:seon.db/connection conn} #(writer conn tx)))]
+                                    (db/with-branch {:seon.db/connection conn} #(writer conn tx)))]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
                   (let [tx (try (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))

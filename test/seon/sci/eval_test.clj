@@ -1542,7 +1542,7 @@
         "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")])
      (let [ctx (assoc (eval/build-base-ctx (seon.schema/handed-projection))
                       :seon.sci.eval/custody #:seon.db{:connection connection})
-           acquired (db/call-with-custody
+           acquired (db/with-branch
                      {:seon.db/connection foreign}
                      #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
            occurrence '[:find ?error .
@@ -2440,7 +2440,7 @@
   ;; before its callee must still resolve it (Clojure's `declare`).
   (test-support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
         (let [ctx (test-support/fork-cluster-ctx connection)
               declared! (fn [sym source]

@@ -18,7 +18,7 @@ Use `seon.db`. Its query and pull owners accept explicit immutable
 database values or agent-supplied defaults (`seon.db/q`, `seon.db/pull`).
 Its transaction owner accepts an explicit connection or the
 agent's connection and returns errors as values (`seon.db/transact!`).
-A host JVM probe should supply an explicit checked-out branch (`seon.db/call-with-custody`).
+A host JVM probe should supply an explicit checked-out branch (`seon.db/with-branch`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
 `:tx-meta`, or a raw vector/sequence. A map lacking `:tx-data`

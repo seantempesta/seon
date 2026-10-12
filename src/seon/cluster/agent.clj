@@ -484,7 +484,7 @@
   (if (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]]
             (db/db connection) (:seon.message/id value))
     false
-    (let [result (db/call-with-custody
+    (let [result (db/with-branch
                   {:seon.db/connection connection}
                   #(db/transact! connection [[:db.fn/call #'message/send-call value]]))]
       (if (:db-after result)
@@ -1066,7 +1066,7 @@
   (when projection
     (let [changes ((requiring-resolve 'seon.cluster/branch-declaration-changes) (db/db connection) projection)]
       (when (seq changes)
-        (let [result (db/call-with-custody {:seon.db/connection connection}
+        (let [result (db/with-branch {:seon.db/connection connection}
                        #(schema/call-with-projection projection
                           (fn [] (db/transact! connection {:tx-data changes}))))]
           (when-not (:db-after result)
@@ -1179,7 +1179,7 @@
                  ;; The fork owner retains the merge base; acquisition assigns
                  ;; the agent on the connection it just acquired.
                  _ (when (and create? agent-id)
-                     (let [result (db/call-with-custody {:seon.db/connection connection}
+                     (let [result (db/with-branch {:seon.db/connection connection}
                                     #(db/transact! connection
                                       [{:db/id [:seon.agent/id agent-id]
                                         :seon.agent/branch branch}]))]
@@ -1521,7 +1521,7 @@
         run-id (open-turn! connection agent-id)]
     (when run-id
       ;; The graph's own branch, never the releasing caller's custody.
-      (let [result (db/call-with-custody
+      (let [result (db/with-branch
                     {:seon.db/connection connection}
                     #(db/transact!
                       connection
@@ -1826,7 +1826,7 @@
   "Transact `tx` on `connection` under its own custody; throws the writer's refusal."
   {:malli/schema [:=> [:cat :seon.db/connection [:or :seon.db/tx-data :seon.store/transaction]] :seon.db/transaction-report]}
   [connection tx]
-  (let [report (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx))]
+  (let [report (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx))]
     (when-not (:db-after report)
       (throw (ex-info (:seon.error/message report "db<->flow's write was refused.") report)))
     report))
@@ -2161,7 +2161,7 @@
       (try
         (let [copied? (#{:done :sent-back} end)]
           (if copied?
-            (db/call-with-custody {:seon.db/connection connection}
+            (db/with-branch {:seon.db/connection connection}
                                   #(squash/copy! connection branch nil {:seon.squash/attempt a}))
             (record-error-end! connection ended))
           (when-let [roster (entry-roster routing agent-id)]

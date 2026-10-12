@@ -44,7 +44,7 @@
      (let [;; Recovery and seeding are this cluster's own writes, never an
            ;; enclosing evaluation's custody.
            [instance process]
-           (db/call-with-custody
+           (db/with-branch
             {:seon.db/connection connection}
             (fn []
               (let [recovery (cluster/recover-runs! connection)
@@ -247,7 +247,7 @@
         _ (schema/call-with-projection-state
            initial-projection-state
            ;; The provisional connection's own schema accretion.
-           #(db/call-with-custody
+           #(db/with-branch
              {:seon.db/connection provisional-connection}
              (fn []
                (cluster/require-coherent-program!

@@ -53,7 +53,7 @@
       (try
         (db/carry-connection-projection-state!
           child (eval/projection-state @child (db/carried-projection captured) cluster-name))
-        (db/call-with-custody {} #(body child))
+        (db/with-branch {} #(body child))
         nil
         (finally (d/release child))))
     (finally (d/delete-branch! connection branch))))
@@ -106,7 +106,7 @@
   branch-definitions-and-unchanged-callers-share-one-context
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [_ (support/seed-cluster! connection "realities-proof")
            captured (db/db connection)
@@ -198,7 +198,7 @@
   a-data-only-commit-reuses-the-acquired-program-and-a-program-entity-reacquires
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [live (support/fork-cluster-ctx connection)
              before (db/db connection)
@@ -272,7 +272,7 @@
   an-override-of-a-declaration-the-indexer-marks-host-bound-refuses-by-name
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [live (support/fork-cluster-ctx connection)
              ;; host-bound by its own call of a macro SCI does not interpret (log/warn)
@@ -312,7 +312,7 @@
   two-concurrent-acquisitions-of-one-program-derive-it-once
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [a (support/fork-cluster-ctx connection)
              b (support/fork-cluster-ctx connection)
@@ -344,7 +344,7 @@
   agent-branches-and-a-settings-write-share-the-cluster-base
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [cluster-name (:seon.cluster/name (support/execution-handle connection))
              live (support/fork-cluster-ctx connection)
@@ -403,7 +403,7 @@
   an-adoption-record-moves-the-loaded-program-every-acquisition-compares-against
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [subject 'seon.cluster/warn-low-space!
              cluster-name (:seon.cluster/name (support/execution-handle connection))
@@ -484,7 +484,7 @@
   ;; branch's own rows only, and the branch predates the row.
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [subject 'seon.render.value/bounded-text
              before (db/db connection)
@@ -507,7 +507,7 @@
   an-unchanged-host-bound-caller-of-a-changed-definition-runs-as-compiled
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [changed 'seon.fs/filesystem-space
              caller 'seon.cluster/warn-low-space!
@@ -546,7 +546,7 @@
   interpreted-callers-resolve-unchanged-names-to-compiled-vars
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        (let [changed 'seon.render.hiccup/class-value
              before (db/db connection)
@@ -589,7 +589,7 @@
   an-interpreted-caller-resolves-its-compiled-namespace-aliases-privates-and-core
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
        ;; exact! calls effect/request!, an alias my.edit makes with a
        ;; top-level require outside its ns form; write-edn-atomically! calls
@@ -618,7 +618,7 @@
   ;; a fork onto the later value must hold the later value's program.
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
         (declared! connection 'seon.sci.eval-test/fork-after-commit-probe
                    "(defn ^{:malli/schema [:=> [:cat] :int]} fork-after-commit-probe [] 7)")
@@ -636,7 +636,7 @@
   a-loaded-programs-digests-are-read-once-per-commit
   (support/with-database
    (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
+     (db/with-branch {:seon.db/connection connection}
       (fn []
         (let [loaded-digests #'eval/loaded-digests
               function-digests #'eval/function-digests

@@ -75,7 +75,7 @@
   this; nothing is inherited from the submitting thread."
   {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
   [world f]
-  (db/call-with-custody (select-keys world [:seon.db/connection])
+  (db/with-branch (select-keys world [:seon.db/connection])
                         #(with-bindings (cond-> (merge (:seon.batch/scope world {})
                                                        {#'seon.batch/*world* world})
                                           ;; a form's reads land in its own sink

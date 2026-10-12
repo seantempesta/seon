@@ -250,7 +250,7 @@
   [connection tx-data]
   ;; A fixture writes the connection it names as that world's own work, even
   ;; inside another fixture's custody (a nested `with-database`).
-  (let [report (db/call-with-custody {:seon.db/connection connection}
+  (let [report (db/with-branch {:seon.db/connection connection}
                                      #(db/transact! connection tx-data))]
     (when-not (and (map? report)
                    (some? (:db-after report)))
@@ -958,7 +958,7 @@
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
   [connection extra-schema body]
-  (db/call-with-custody
+  (db/with-branch
    {:seon.db/connection connection}
    #(schema/call-with-projection-state
      (:seon.sci.eval/projection-state (meta connection))
@@ -1239,7 +1239,7 @@
    `bin/seon config apply` does. A later manifest changes only its own keys."
   [connection cluster-name manifest]
   (checked-fixture-result
-   (db/call-with-custody {:seon.db/connection connection}
+   (db/with-branch {:seon.db/connection connection}
                          #(config/apply! {:seon.db/connection connection
                                           :seon.boot/cluster-name cluster-name
                                           :seon.config/manifest manifest}))))
@@ -1263,7 +1263,7 @@
   ([connection cluster-name manifest]
    (apply-config! connection cluster-name manifest)
    (checked-fixture-result
-    (db/call-with-custody {:seon.db/connection connection}
+    (db/with-branch {:seon.db/connection connection}
                           #(cluster/ensure-cluster-entity!
                             connection cluster-name cluster/boot-process-identity)))
    ;; The entity a fork records (registry/fork-entity): the seeded cluster descends
@@ -1484,5 +1484,5 @@
   {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :string] :seon.schema/value]}
   [running agent-id connection text]
   (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))]
-    (db/call-with-custody {:seon.db/connection connection}
+    (db/with-branch {:seon.db/connection connection}
       #(drive/inbound! connection (:seon.cluster/name handle) cluster/boot-process-identity agent-id text))))

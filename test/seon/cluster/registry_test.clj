@@ -781,7 +781,7 @@
                                    (d/schema source)))
       (db/carry-connection-projection-state!
        connection (sci.eval/projection-state @connection (db/carried-projection source) (:seon.cluster/name handle)))
-      (db/call-with-custody {:seon.db/connection connection} #(body opened connection))
+      (db/with-branch {:seon.db/connection connection} #(body opened connection))
       (finally
         (store/release-store! opened)
         (delete-recursively! root)))
@@ -809,7 +809,7 @@
                                                      :seon.cluster.registry/from (db/commit-id base) :seon.db/db base})))
        (let [fork (db/carry-connection-projection-state! (store/open-branch! store branch)
                                                          (:seon.sci.eval/projection-state (meta connection)))
-             commits (try (db/call-with-custody
+             commits (try (db/with-branch
                            {:seon.db/connection fork}
                            #(doall (for [n (range 10)]
                                      (do (test-support/transacted! fork [{:db/id [:seon.task/id handle]
@@ -817,7 +817,7 @@
                                          (db/commit-id (db/db fork))))))
                           (finally (store/release-branch! fork)))
              before-copy (clean-key-count store)
-             copied (db/call-with-custody {:seon.db/connection connection} #(squash/copy! connection branch nil {}))
+             copied (db/with-branch {:seon.db/connection connection} #(squash/copy! connection branch nil {}))
              with-copy (clean-key-count store)]
          (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
          (is (pos? (:seon.squash/datoms copied)))

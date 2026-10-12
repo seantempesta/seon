@@ -2267,7 +2267,7 @@
             home (:seon.db/connection execution)
             ;; the landing is root's work on root's branch: its writes run in that branch's custody
             [landed recorded]
-            (db/call-with-custody
+            (db/with-branch
              {:seon.db/connection home}
              #(let [landed (@source-land! execution (select-keys request [:seon.task/merge-request :seon.task/merge :seon.task/branch
                                                                           :seon.task/commit :seon.task/proved :seon.task/run-id
@@ -2309,7 +2309,7 @@
                                 :seon.error/operation operation
                                 :seon.db.process/id (:seon.db.process/id cluster)
                                 :seon.agent/id agent-id}))
-        write! (fn [tx] (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))]
+        write! (fn [tx] (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
     (when-let [end (task-end (db/db connection) agent-id)]
       (let [database (db/db connection)
             held (task/agent-task database agent-id)
@@ -5507,7 +5507,7 @@
         tx (when verdict
              (into (record :seon.agent/broken (:seon.context/broken verdict))
                    (record :seon.agent/new-red (:seon.context/new-red verdict))))
-        written (when (seq tx) (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))]
+        written (when (seq tx) (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
     (if (nil? sym)
       []
       (or (some #(when (:seon.error/at %) %) [reached head fork-point written])

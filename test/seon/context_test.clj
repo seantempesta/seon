@@ -289,7 +289,7 @@
            outcome [:seon.task/calls :seon.task/prompt-tokens :seon.task/completion-tokens :seon.task/proof-counts :seon.task/red-proofs]]
        (is (= :done (turn/task-end (db/db connection) agent-id)) "the fix turned the proof green")
        ;; the end observed as the agent's loop observes it
-       (db/call-with-custody {:seon.db/connection connection}
+       (db/with-branch {:seon.db/connection connection}
                              #(#'turn/end-task! (test-support/running-cluster running) agent-id))
        (is (some? (:seon.agent/end-calls (db/pull (db/db connection) [:seon.agent/end-calls] [:seon.agent/id agent-id])))
            "the end recorded the agent's outcome")

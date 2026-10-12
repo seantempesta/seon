@@ -35,7 +35,7 @@
   {:malli/schema [:=> [:cat :seon.db/connection :string :qualified-keyword :seon.schema/definition] :seon.schema/projection]}
   [connection cluster-name schema-key definition]
   (support/seed-cluster! connection cluster-name)
-  (db/call-with-custody
+  (db/with-branch
    {:seon.db/connection connection}
    #(config/apply! {:seon.db/connection connection
                    :seon.boot/cluster-name cluster-name}))

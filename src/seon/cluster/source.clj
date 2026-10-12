@@ -462,7 +462,7 @@
                            :seon.error/offending missing
                            :seon.error/data {:seon.source/commit-id expected}
           :seon.test.run/branch current-branch})
-                         (db/call-with-custody {:seon.db/connection connection} ; the scratch's own write
+                         (db/with-branch {:seon.db/connection connection} ; the scratch's own write
                         (fn [] (schema/call-with-projection
                         projection
                         #(if (contains? completion :seon.test.runner/results)
@@ -631,7 +631,7 @@
         (let [outcome
               (let [connection (store/open-branch! store scratch)]
           (try
-            (db/call-with-custody {:seon.db/connection connection} ; the scratch's own work
+            (db/with-branch {:seon.db/connection connection} ; the scratch's own work
             (fn [] (let [previous-database
                   (when expected-commit
                     (or (:seon.source/previous-database populate-request)

@@ -40,7 +40,7 @@
   (let [connection (get-in request [:seon.turn.loop/cluster :seon.db/connection])
         ;; The agent's work is its own branch's: under the member's custody the
         ;; writer refuses a write naming the candidate branch.
-        submitted (db/call-with-custody {:seon.db/connection connection}
+        submitted (db/with-branch {:seon.db/connection connection}
                                         #(agent/evaluate-source! (assoc request :seon.cluster.reply/text text)))
         run-id (:seon.turn/id submitted)]
     (is run-id "the agent accepted the submission")

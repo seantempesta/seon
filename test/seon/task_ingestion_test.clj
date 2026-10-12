@@ -189,7 +189,7 @@
      (test-support/with-database
       (fn [destination]
         ;; The inner fixture holds destination's custody; the source's writes run under its own.
-        (let [publish! #(is (:seon.task/changed? (db/call-with-custody {:seon.db/connection source} (fn [] (ingest! source %))))
+        (let [publish! #(is (:seon.task/changed? (db/with-branch {:seon.db/connection source} (fn [] (ingest! source %))))
                             "the source admits the edit")
               adopt! #(test-support/transacted! destination (task/adopt-tasks-call @source @destination))
               intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))

@@ -77,7 +77,7 @@
   writer refuses a write naming another branch, as the bridge's prepl, which
   binds none, never sees."
   [hosted f]
-  (db/call-with-custody {:seon.db/connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])} f))
+  (db/with-branch {:seon.db/connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])} f))
 
 (defn- assign-hosted!
   "Assign the hosted agent a task on its branch, where a test world without a
@@ -437,7 +437,7 @@
                                   [?m :seon.message/about ?about]] (db/db connection)))
             declaration {:seon.task/ns host-ns :seon.task/name "square" :seon.task/kind :function :seon.task/intent "Square."}
             task-id (read-string (first (hosted-run! hosted (str "(:seon.task/id (seon.task/create! '" (pr-str declaration) "))"))))
-            as-root #(db/call-with-custody {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
+            as-root #(db/with-branch {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
         (support/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
         (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
         (is (nil? (:seon.error/message (as-root task/assign! {:seon.agent/context-source handle :seon.task/assigned task-id
@@ -606,7 +606,7 @@
             connection (:seon.db/connection execution)]
         (try
           ;; The file entity as a publication the loaded program has moved past left it.
-          (db/call-with-custody {:seon.db/connection connection}
+          (db/with-branch {:seon.db/connection connection}
             #(support/transacted!
               connection
               [(support/program-fn-entity
@@ -628,7 +628,7 @@
             execution (agent/acquire-context! handle nil {:seon.agent/branch branch})
             connection (:seon.db/connection execution)]
         (try
-          (db/call-with-custody {:seon.db/connection connection}
+          (db/with-branch {:seon.db/connection connection}
             #(do (support/transacted! connection [(support/namespace-entity (db/db connection) host-ns)])
                  (support/transacted! connection
                    [(support/program-fn-entity (db/db connection) 'my.agents.host-probe/dropped-callee
@@ -691,7 +691,7 @@
 (defn- send-from-cluster!
   "`my.message/send` from `sender` (`sender!`) as the cluster's own work."
   [handle connection sender request]
-  (db/call-with-custody {:seon.db/connection connection}
+  (db/with-branch {:seon.db/connection connection}
     #(my.message/send (merge {:seon.db/connection connection :seon.agent/id sender
                               :seon.agent/context-source handle}
                              request))))
@@ -732,7 +732,7 @@
         (is (= ["1"] (hosted-run! hosted "1")))
         (is (nil? (host/stop! hosted)))
         (try
-          (let [sent (db/call-with-custody {:seon.db/connection connection}
+          (let [sent (db/with-branch {:seon.db/connection connection}
                        #(agent/evaluate-source!
                          {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id "cluster-sender"
                           :seon.agent/segmenter 'seon.turn/code-sources

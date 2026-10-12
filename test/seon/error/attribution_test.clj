@@ -134,7 +134,7 @@
                         (:seon.sci.eval/projection-state (meta attempt)))]
            (try
              (let [receipt (binding [seon.batch/*world* {:seon.agent/id "worker"}]
-                             (db/call-with-custody
+                             (db/with-branch
                               {:seon.db/connection cluster}
                               #(fault/fault! (env/environment
                                               {:seon.boot/cluster-name cluster-name

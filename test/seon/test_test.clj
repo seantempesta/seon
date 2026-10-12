@@ -378,7 +378,7 @@
       (test-support/transacted! conn [(test-support/program-entity
                                        (db/db conn) [:seon.test/sym test-symbol]
                                        "(clojure.test/deftest only-on-the-branch (clojure.test/is (= 1 2)))")])
-      (let [ran (db/call-with-custody {:seon.db/connection conn}
+      (let [ran (db/with-branch {:seon.db/connection conn}
                   #(sut/run {:seon.test/policy :named :seon.test/execution candidate
                              :seon.test/recording-connection conn :seon.test/identities #{test-symbol}}))]
         (is (= [1] (mapv :seon.test/fail-count (:seon.test/results ran))) "the test is red on the branch")
@@ -507,7 +507,7 @@
                       request {:seon.test/execution (assoc attempt :seon.agent/id "evidence-proof")
                                :seon.test/recording-connection conn
                                :seon.test/policy :named :seon.test/identities #{test-symbol}}
-                      check! #(db/call-with-custody {:seon.db/connection conn} (fn [] (sut/run %)))
+                      check! #(db/with-branch {:seon.db/connection conn} (fn [] (sut/run %)))
                       ran (check! (assoc request :seon.test/rerun? true))
                       reused (check! request)]
                   {:digest (sut/reach-digest (db/db connection) test-symbol)

@@ -28,7 +28,7 @@
                                       :seon.test/fail-count 0 :seon.test/error-count 0
                                       :seon.test.member/began? true :seon.test.member/ended? true}]}]
     (try
-      (let [recorded (db/call-with-custody {:seon.db/connection connection}
+      (let [recorded (db/with-branch {:seon.db/connection connection}
                          ;; the branch's own work, as the agent's my.test/check-platform call is
                          #(platform/record! connection (db/db connection) (:seon.cluster/name target) checked))
             database (db/db connection)]

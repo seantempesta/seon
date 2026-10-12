@@ -153,7 +153,7 @@
     (try
       (let [connection (store/open-branch! store branch)]
         (try
-          (db/call-with-custody
+          (db/with-branch
            {:seon.db/connection connection}
            (fn []
              (let [database (db/db connection)

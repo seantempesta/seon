@@ -2710,7 +2710,7 @@
       ;; work: under a caller's custody the writer refuses writes naming
       ;; another branch (seon.db/foreign-connection-error).
       (try
-        (db/call-with-custody
+        (db/with-branch
          {:seon.db/connection (:seon.db/connection execution)}
          #(let [identities (write! execution)
                 candidate-ms (ms started)]
@@ -2832,7 +2832,7 @@
         (if (= prior-commit (:seon.source/commit-id published))
           0
           (let [identities (published-changes held published prior-commit published-database)]
-            (db/call-with-custody {:seon.db/connection connection}
+            (db/with-branch {:seon.db/connection connection}
                                   ;; `published` names only the head guard's
                                   ;; commit: `current-src`'s, which stays put
                                   #(adopt-entities! connection (merge published (source/current held))

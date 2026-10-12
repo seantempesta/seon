@@ -23,7 +23,7 @@ what triggered recording. An ordinary member world had no refusals, so the
 verify runs never reached this path.
 
 The branch-assignment write a few lines earlier already uses
-`(db/call-with-custody {} ...)`. The refusal record belongs to the acquired
+`(db/with-branch {} ...)`. The refusal record belongs to the acquired
 branch too, so it should be written under that branch's custody. It should
 not inherit the caller's.
 

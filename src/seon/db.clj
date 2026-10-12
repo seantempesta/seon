@@ -440,23 +440,24 @@
 
     :else {:datahike/connection-id (connection-id connection)}))
 
-(defn call-with-custody
-  "Call `f` with EXACTLY the cluster custody its caller handed over.
+(defn with-branch
+  "Call `f` with EXACTLY the checked-out branch its caller handed over.
 
-  The custody is a VALUE on the request: `:seon.db/connection` present means
-  `f` runs as that cluster's own work and the elided `seon.db` arities reach
-  it; the key ABSENT means no custody at all, and those arities refuse and
-  name what they needed. Nothing here re-reads a dynamic var to decide — the
-  caller that knows whose work this is says so, and this binds that answer.
+  The checked-out branch is a VALUE on the request: `:seon.db/connection`
+  present means `f` runs as that branch's own work and the elided `seon.db`
+  arities reach it; the key ABSENT means no branch is checked out, and those
+  arities refuse and name what they needed. Nothing here re-reads a dynamic
+  var to decide: the caller that knows whose work this is says so, and this
+  binds that answer.
 
   A read basis is never inherited: `*read-database*` is scoped by ONE
-  evaluation, so a scope that switches custody starts from the connection.
-  An evaluation's receipt travels only with its own connection's custody: its
-  lookup ref names an evaluation on that branch alone, so a switch to another
-  connection stamps no receipt.
+  evaluation, so a scope that switches branches starts from the connection.
+  An evaluation's result travels only with its own connection: its lookup ref
+  names an evaluation on that branch alone, so a switch to another connection
+  stamps no result.
 
   `seon.test.runner/run-var!` is the caller this exists for. An agent running
-  its own tests inside its evaluation is doing that cluster's work; a host
+  its own tests inside its evaluation is doing that branch's work; a host
   REPL running the same test Var is not, and hands nothing."
   {:malli/schema [:=> [:cat :seon.db/custody-request [:fn clojure.core/ifn?]]
                   [:or :seon.schema/validation-refusal
@@ -469,31 +470,6 @@
             *receipt* (when (identical? (:seon.db/connection request) *conn*) *receipt*)
             *open* (when (identical? (:seon.db/connection request) *conn*) *open*)]
     (f)))
-
-(defn call-without-custody
-  "Call `f` with NO ambient cluster custody bound on this thread.
-
-  The elided `seon.db` arities exist so an AGENT's evaluation writes its own
-  cluster without naming it. Anything else running on a thread that inherited
-  those bindings — an in-process test body, a fixture helper that elides its
-  connection — silently writes the LIVE cluster instead of failing. On
-  2026-09-17 that put a test's synthetic schema rows into `default`'s datoms
-  and every later write on the cluster was refused, which filled the store.
-
-  Removing the bindings turns that silence into the ordinary loud refusal
-  `seon.db` already has: a read or write with no connection names what it
-  needed. Absence is the honest answer here, never a fallback to whichever
-  cluster happens to be in scope.
-
-  This is `call-with-custody` with nothing handed: ONE scope, and absence is
-  one of its two ordinary answers."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
-                  [:or :seon.schema/validation-refusal
-                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                         :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
-                         :gen/elements [nil false 0 "" :k [] {}]}]]]}
-  [f]
-  (call-with-custody {} f))
 
 (defn database-value-identity
   "Plain-data identity of a COMMITTED immutable Datahike database value.

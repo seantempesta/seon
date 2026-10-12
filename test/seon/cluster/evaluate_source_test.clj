@@ -293,7 +293,7 @@
    (fn [{:keys [agent-id code]}]
      (code (str "(defn close-my-admission! \"Closes my admission outside my run's custody.\""
                 " {:malli/schema [:=> [:cat :seon.db/connection] :boolean]} [c]"
-                " (some? (seon.db/call-with-custody {} #(seon.db/transact! c [[:db/add [:seon.agent/id \""
+                " (some? (seon.db/with-branch {} #(seon.db/transact! c [[:db/add [:seon.agent/id \""
                 agent-id "\"] :seon.agent/admission-closed-tx \"datomic.tx\"]]))))"))
      (let [result (code "(close-my-admission!)\n(+ 1 2)")]
        (is (= ["true" "3"] (mapv (comp :seon.eval/shown :seon.sci.eval/evaluation)
@@ -309,10 +309,10 @@
   ;; form and is never recorded as an open fault against first-party code.
   (with-started-agent
    (fn [{:keys [connection code]}]
-     (let [result (code "(seon.db/call-with-custody {} #(seon.db/transact! nil []))")]
+     (let [result (code "(seon.db/with-branch {} #(seon.db/transact! nil []))")]
        (is (some? (:seon.cluster.eval/error (:seon.sci.eval/evaluation (first (:seon.turn.loop/evaluated-sources result)))))
            "the refusal is delivered on the form")
-       (is (empty? (filterv #(= 'seon.db/call-with-custody (get-in % [:seon.error/fact :seon.error/producer]))
+       (is (empty? (filterv #(= 'seon.db/with-branch (get-in % [:seon.error/fact :seon.error/producer]))
                             (seon.problems/open-faults (db/db connection))))
            "no open fault blames the compiled caller of the agent's closure")))))
 

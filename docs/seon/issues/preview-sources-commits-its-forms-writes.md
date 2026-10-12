@@ -29,7 +29,7 @@ form's shown text is a `#:seon.db{:tx 536874336 …}` report.
 The fork inherits two carriers of the connection:
 
 1. `::custody :seon.db/connection`. `evaluate` reads it (`src/seon/sci/eval.clj:4059-4060`) and
-   binds it with `db/call-with-custody` (`:4092`).
+   binds it with `db/with-branch` (`:4092`).
 2. The environment's `:seon.db/connection`. Call preparation supplies it to `my.*` writers
    (`src/seon/call_preparation.clj:1201-1205`).
 

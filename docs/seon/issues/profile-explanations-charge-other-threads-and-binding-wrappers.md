@@ -20,7 +20,7 @@ included"), but every consumer reads the ranking as the operation's own cost. Th
    `content-projection` / `declaration-content-key` / `arity-content-key` miss appeared only in windows
    where `seon.test*` cells also grew.
 2. **Binding wrappers rank first.** `seon.schema/call-with-projection`, `call-with-projection-state`
-   (`src/seon/schema.clj:1279-1294`) and `seon.db/call-with-custody` are a dynamic `binding` around a
+   (`src/seon/schema.clj:1279-1294`) and `seon.db/with-branch` are a dynamic `binding` around a
    whole operation. Their inclusive total is the operation, so they top every explanation and read as
    the cost:
    - P3a's stage table charged 193 ms to `call-with-projection-state`;

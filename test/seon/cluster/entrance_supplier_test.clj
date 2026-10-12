@@ -58,7 +58,7 @@
 (deftest supplied-context-acquires-and-releases-an-isolated-evaluation
   (#'acquisition-test/with-published-store
    (fn [connection held]
-    (db/call-with-custody {:seon.db/connection connection}
+    (db/with-branch {:seon.db/connection connection}
      (fn []
      (support/seed-cluster! connection "acquisition")
      (support/transacted!

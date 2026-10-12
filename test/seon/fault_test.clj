@@ -250,7 +250,7 @@
                             (:seon.sci.eval/projection-state (meta attempt)))]
               (try
                (let [since (db/basis-t (db/db attempt))
-                     receipt (db/call-with-custody
+                     receipt (db/with-branch
                               {:seon.db/connection cluster}
                               #(fault/fault! (env/environment
                                               {:seon.boot/cluster-name cluster-name

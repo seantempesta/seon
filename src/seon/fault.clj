@@ -260,7 +260,7 @@
                                 (folded-tx target))
                       result (when (and (:seon.db/tx-data data) (not (string? only-count)))
                                ;; the target's own custody: a write to another branch is refused otherwise
-                               (db/call-with-custody
+                               (db/with-branch
                                 {:seon.db/connection target}
                                 #(blob/with-publication! target staged
                                    (fn [] (db/transact! target (into (vec (:seon.db/tx-data data)) carried))))))]

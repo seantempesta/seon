@@ -482,7 +482,7 @@
   agent's own loop does."
   {:malli/schema [:=> [:cat :string :map :seon.agent/id] :nil]}
   [running execution agent-id]
-  (db/call-with-custody {:seon.db/connection (:seon.db/connection execution)}
+  (db/with-branch {:seon.db/connection (:seon.db/connection execution)}
     #(#'turn/end-task! (assoc execution :seon.db.process/id (:seon.db.process/id (support/running-cluster running))) agent-id)))
 
 (defn- answering
@@ -529,7 +529,7 @@
            execution (fixed-end! running agent-id 'tq.endp "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")]
        (is (= :done (turn/task-end (db/db (:seon.db/connection execution)) agent-id)) "the fix turned the proof green")
        ;; an end interrupted after it requested the merge and before it told root
-       (db/call-with-custody {:seon.db/connection (:seon.db/connection execution)}
+       (db/with-branch {:seon.db/connection (:seon.db/connection execution)}
          #((requiring-resolve 'my.program/request-merge!)
            {:my.program/context (assoc execution :my.program/base-ctx (:seon.sci.eval/base-ctx execution))
             :seon.db/connection (:seon.db/connection execution) :seon.agent/id agent-id}))

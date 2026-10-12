@@ -160,7 +160,7 @@
                      (not [?agent :seon.agent/admission-closed-tx])]
                    @connection)
         closed (when (seq open)
-                 (db/call-with-custody {:seon.db/connection connection}
+                 (db/with-branch {:seon.db/connection connection}
                    #(db/transact! connection (mapv (fn [row] [:db/add row :seon.agent/admission-closed-tx "datomic.tx"]) open))))]
     (if (:seon.error/at closed)
       closed

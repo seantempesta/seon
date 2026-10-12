@@ -21,7 +21,7 @@
          execution# (if (= "root" ~agent-id) handle# (seon.cluster.agent/acquire-context! handle# ~agent-id))
          connection# (:seon.db/connection execution#)
          began# (System/nanoTime)
-         run# (seon.db/call-with-custody
+         run# (seon.db/with-branch
                {:seon.db/connection connection#}
                #(seon.test/run {:seon.test/execution execution# :seon.test/recording-connection connection#
                                 :seon.test/policy :named :seon.test/identities '~(set symbols)

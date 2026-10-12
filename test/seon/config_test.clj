@@ -427,11 +427,11 @@
                     connection
                     (cluster/attribute-change-tx @connection [:seon.config/overlay-keys] {}))
            _ (is (nil? (get-in @connection [:schema :seon.config/overlay-keys])))
-           applied (db/call-with-custody
+           applied (db/with-branch
                     {:seon.db/connection connection}
                     #(config/apply! (assoc request :seon.config/manifest
                                            {:seon.config.ai/no-provider true})))
-           sparse (db/call-with-custody
+           sparse (db/with-branch
                    {:seon.db/connection connection}
                    #(config/apply! (assoc request :seon.config/manifest
                                           {:seon.config.run/max-episode-runs 3})))

@@ -492,7 +492,7 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/tx-data]
                   [:or :seon.db/transaction-report :seon.error/value]]}
   [connection tx]
-  (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))
+  (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))
 
 (defn- task-entity
   "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
@@ -681,7 +681,7 @@
                     (let [placed (task-placed! (db/db connection) target handle)
                           rows (if (:seon.error/at placed) placed (attempt-rows-tx (db/db connection) (db/db target) attempt))]
                       (if (and (vector? rows) (seq rows))
-                        (db/call-with-custody {:seon.db/connection target} #(db/transact! target rows))
+                        (db/with-branch {:seon.db/connection target} #(db/transact! target rows))
                         rows))
                     (refused 'seon.task/assign! :no-world 'seon.task branch)))
             row (when-not (some :seon.error/at [report own])

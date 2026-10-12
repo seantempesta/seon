@@ -8,7 +8,7 @@
   "Evaluate `source` in `my.catalog` as an agent does and write its declaration entity."
   [{connection :seon.db/connection ctx :seon.sci.eval/ctx} source]
   (let [evaluation (support/await-event!
-                    (future (db/call-with-custody {:seon.db/connection connection}
+                    (future (db/with-branch {:seon.db/connection connection}
                               #(sci.eval/evaluate {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
                                                    :seon.cluster.eval/ns [:seon.ns/name 'my.catalog]
                                                    :seon.sci.admit/caps (config/result-caps config/defaults)

@@ -1248,7 +1248,7 @@
                         (:seon.sci.eval/projection-state (meta attempt)))]
            (try
              (settled-evaluation! cluster "cluster-copy-0" 0)
-             (let [receipt (db/call-with-custody
+             (let [receipt (db/with-branch
                             {:seon.db/connection cluster}
                             #(fault/fault! (env/environment
                                             {:seon.boot/cluster-name cluster-name

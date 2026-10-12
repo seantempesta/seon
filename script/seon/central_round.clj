@@ -29,7 +29,7 @@
   `(let [handle# (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))
          connection# (:seon.db/connection handle#)
          bound# (seon.test/declared-bound-ms (seon.db/db connection#) '~(set symbols))]
-     (seon.db/call-with-custody
+     (seon.db/with-branch
       {:seon.db/connection connection#}
       #(seon.test/run {:seon.test/execution handle# :seon.test/recording-connection connection#
                        :seon.test/policy :named :seon.test/identities '~(set symbols)

@@ -81,7 +81,7 @@
   acquisition-owns-only-its-isolated-resources
   (with-published-store
    (fn [connection held]
-    (db/call-with-custody {:seon.db/connection connection}
+    (db/with-branch {:seon.db/connection connection}
      (fn []
      (support/seed-cluster! connection "acquisition")
      (let [branch (get-in @connection [:config :branch])]

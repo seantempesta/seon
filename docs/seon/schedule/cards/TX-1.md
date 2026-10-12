@@ -48,7 +48,7 @@ commits, measure-then-fix, below).
 - ADD `seon.cluster.host/register!` (public; the one place a registration is written)
   `{:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.agent/branch :seon.ns/name :seon.cluster/name] [:or :nil :seon.db/transaction-refused-error]]}`
   `[connection agent-id branch namespace-name cluster-name]`: `nil` when `registered?`, else the `home-call`
-  transaction under `(db/call-with-custody {} …)`, answering `nil` on commit or the refusal. `start!` calls it for
+  transaction under `(db/with-branch {} …)`, answering `nil` on commit or the refusal. `start!` calls it for
   each target (replacing its inline `db/transact!`).
 - CHANGE `seon.mcp/execution` (`:171`), contract unchanged: in the `:else` branch, when `home` is nil, first
   `(host/register! connection agent-id branch (or namespace-name 'user) (:seon.cluster/name handle))` on the cluster

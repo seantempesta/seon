@@ -2482,7 +2482,7 @@
                (db/transact! connection [[:db/add [:seon.test/sym test-symbol] :seon.test/long "An owned attribute."]])))
            "an owned attribute is still checked")))))
 
-(deftest a-custody-switch-to-another-connection-carries-no-receipt
+(deftest a-branch-switch-to-another-connection-carries-no-receipt
   ;; An evaluation's receipt is a lookup ref valid only on its own branch
   ;; (`seon.sci.eval` binds it); a switch to another connection's custody must
   ;; not stamp it onto that branch's transactions.
@@ -2497,11 +2497,11 @@
             (is (= receipt (stamp))
                 "the evaluation's own custody stamps its receipt")
             (is (= receipt
-                   (db/call-with-custody {:seon.db/connection connection} stamp))
+                   (db/with-branch {:seon.db/connection connection} stamp))
                 "the same connection keeps it")
-            (is (nil? (db/call-with-custody {:seon.db/connection other} stamp))
+            (is (nil? (db/with-branch {:seon.db/connection other} stamp))
                 "another connection's custody carries none")
-            (is (nil? (db/call-with-custody {} stamp))
+            (is (nil? (db/with-branch {} stamp))
                 "no custody carries none"))))))))
 
 (deftest a-store-without-program-schema-admits-its-writes
@@ -3280,7 +3280,7 @@
                         fork (store/open-branch! store branch)]
                     (try
                       ;; a write lands on the branch whose custody it runs under
-                      (db/call-with-custody {:seon.db/connection fork}
+                      (db/with-branch {:seon.db/connection fork}
                                             #(db/transact! fork [{:db/ident k}]))
                       (d/q '[:find ?e . :in $ ?k :where [?e :db/ident ?k]] (db/db fork) k)
                       (finally (store/release-branch! fork)))))]

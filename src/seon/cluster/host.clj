@@ -82,7 +82,7 @@
         ;; branch: a message to or from it resolves on either, and root lists it.
         ;; The first writer's refusal is the answer; nothing starts.
         refused (some (fn [target]
-                        (let [result (db/call-with-custody {}
+                        (let [result (db/with-branch {}
                                        #(db/transact! target [[:db.fn/call #'home-call agent-id branch namespace-name
                                                                (:seon.cluster/name cluster-handle)]]))]
                           (when-not (:db-after result) result)))
@@ -180,7 +180,7 @@
                               (not [?agent :seon.agent/admission-closed-tx _])]
                             (db/db connection) branch))
         result (when (seq admitted)
-                 (db/call-with-custody {}
+                 (db/with-branch {}
                    #(db/transact! connection
                       (mapv (fn [eid] [:db/add eid :seon.agent/admission-closed-tx "datomic.tx"]) admitted))))]
     (if (and result (not (:db-after result))) result admitted)))
@@ -205,7 +205,7 @@
                 (cond
                   (:seon.error/at entity) entity
                   (and entity (not (:seon.agent/admission-closed-tx entity)))
-                  (let [result (db/call-with-custody {}
+                  (let [result (db/with-branch {}
                                  #(db/transact! connection
                                     [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
                     (when-not (:db-after result) result)))))

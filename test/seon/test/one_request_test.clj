@@ -31,7 +31,7 @@
         ;; context evaluates on a thread of its own, as a separate agent does.
         evaluation (support/await-event!
                     (future
-                     (db/call-with-custody
+                     (db/with-branch
                       {:seon.db/connection connection}
                       #(sci.eval/evaluate
                       {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)

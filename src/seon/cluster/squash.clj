@@ -170,4 +170,4 @@
   {:malli/schema [:=> [:cat :seon.squash/context :seon.store/branch [:maybe [:set :seon.program/identity]]]
                   :seon.squash/copy]}
   [{connection :seon.db/connection} branch selection]
-  (db/call-with-custody {:seon.db/connection connection} #(copy! connection branch selection {})))
+  (db/with-branch {:seon.db/connection connection} #(copy! connection branch selection {})))

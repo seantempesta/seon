@@ -105,7 +105,7 @@ Still open:
 ## Workaround today (root, JVM mode)
 
 ```clojure
-(let [i (get @seon.operator.runtime/running-instances "default") h (:seon.turn.loop/cluster i) host (seon.cluster.host/host! {:seon.turn.loop/cluster (assoc h :seon.store/store (:seon.store/store i)) :seon.agent/branch :agent-e84b11b8bd78 :seon.agent/id "chain2-forgive-1" :seon.ns/name 'user}) c (:seon.db/connection (:seon.turn.loop/cluster host))] (seon.db/call-with-custody {:seon.db/connection c} #(seon.eval.drive/inbound! c "default" seon.cluster/boot-process-identity "chain2-forgive-1" "Why did you act as you did?")))
+(let [i (get @seon.operator.runtime/running-instances "default") h (:seon.turn.loop/cluster i) host (seon.cluster.host/host! {:seon.turn.loop/cluster (assoc h :seon.store/store (:seon.store/store i)) :seon.agent/branch :agent-e84b11b8bd78 :seon.agent/id "chain2-forgive-1" :seon.ns/name 'user}) c (:seon.db/connection (:seon.turn.loop/cluster host))] (seon.db/with-branch {:seon.db/connection c} #(seon.eval.drive/inbound! c "default" seon.cluster/boot-process-identity "chain2-forgive-1" "Why did you act as you did?")))
 ```
 
 ## Acceptance

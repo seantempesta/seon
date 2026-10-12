@@ -206,15 +206,15 @@
 (deftest an-explicit-empty-custody-clears-the-callers-world
   ;; A JVM test body runs as its member (`kernel/*host-world*`), so an omitted
   ;; declared value is supplied from the member's world. A custody the caller
-  ;; states is not a default: `(call-with-custody {} f)` means no custody, and
+  ;; states is not a default: `(with-branch {} f)` means no custody, and
   ;; `seon.cluster.host/start!` relies on it to write another branch
   ;; deliberately. Its connection entry is optional, and call preparation
   ;; supplies only required inputs.
   (support/with-database
    (fn [connection]
-     (is (identical? connection (db/call-with-custody {:seon.db/connection connection} (fn [] db/*conn*))))
-     (is (nil? (db/call-with-custody {} (fn [] db/*conn*))))
-     (is (nil? (db/call-without-custody (fn [] db/*conn*)))))))
+     (is (identical? connection (db/with-branch {:seon.db/connection connection} (fn [] db/*conn*))))
+     (is (nil? (db/with-branch {} (fn [] db/*conn*))))
+     (is (nil? (db/with-branch {} (fn [] db/*conn*)))))))
 
 (deftest a-call-matching-a-declared-arity-is-never-prefixed
   ;; `seon.fn/gate-sets` declares a request-map arity and a positional

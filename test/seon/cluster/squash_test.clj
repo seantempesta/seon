@@ -196,7 +196,7 @@
       (let [fork (db/carry-connection-projection-state!
                   (store/open-branch! held-store branch)
                   (:seon.sci.eval/projection-state (meta connection)))]
-        (try (db/call-with-custody {:seon.db/connection fork} #(proof fork branch))
+        (try (db/with-branch {:seon.db/connection fork} #(proof fork branch))
              (finally (store/release-branch! fork))))
       (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))
   nil)
@@ -292,7 +292,7 @@
           connection
           (fn [fork _]
             (support/transacted! fork (occurrence-tx (db/db fork)))
-            (db/call-with-custody {:seon.db/connection connection}
+            (db/with-branch {:seon.db/connection connection}
                                  #(support/transacted! connection (occurrence-tx (db/db connection))))
             (let [branch (db/db fork)
                   theirs (first (d/datoms branch :aevt :seon.error.occurrence/id))

@@ -298,7 +298,7 @@
                                                                          :seon.sci.eval/ctx (:seon.sci.eval/ctx custody)
                                                                          :seon.env/environment environment}
                                                                   parent-sink (assoc :seon.batch/sink parent-sink))))]
-                    (db/call-with-custody
+                    (db/with-branch
                      (select-keys custody [:seon.db/connection])
                      (fn [] (sci.eval/call-detecting-program-change
                      loaded `bounded-result since
@@ -1976,7 +1976,7 @@
   [store branch cluster effective process base candidate]
   (let [connection (open-world! store branch cluster)]
     (try
-      (db/call-with-custody
+      (db/with-branch
        {:seon.db/connection connection}
        #(do (@seed-cluster-facts! connection cluster
                                   {:seon.config/effective effective
@@ -2192,7 +2192,7 @@
         connection (try (open-world! store request-branch cluster)
                         (catch Throwable failure (throw (release! failure [retire! drop!]))))
         report (when (seq overlay)
-                 (try (db/call-with-custody {:seon.db/connection connection}
+                 (try (db/with-branch {:seon.db/connection connection}
                                             #(let [report (db/transact! connection overlay)]
                                                ;; The overlay may carry declaration rows: the world's projection follows them.
                                                (when (:db-after report) (carry-world-projection! connection cluster))
@@ -3064,7 +3064,7 @@
         ran (when (and inherited (seq due))
               (let [child (@acquire-context! execution nil {:seon.agent/isolate? true :seon.cluster.registry/from commit})
                     connection (:seon.db/connection child)]
-                (try (db/call-with-custody
+                (try (db/with-branch
                       {:seon.db/connection connection}
                       #(run (cond-> {:seon.test/policy :named :seon.test/execution child :seon.test/recording-connection connection
                                      :seon.test/identities due :seon.test/rerun? true :seon.test/include-long? true}

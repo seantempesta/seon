@@ -30,7 +30,7 @@
            ;; The branch as one forked before the adoption that added the
            ;; attribute: no attribute, and no program row writing it.
            database (db/db branch)
-           retracted (db/call-with-custody {:seon.db/connection branch}
+           retracted (db/with-branch {:seon.db/connection branch}
                        #(db/transact! branch
                                       {:tx-data (into (mapv (fn [writer] [:db/retract writer :seon.fn/writes :seon.test.run/evaluator])
                                                             (db/q '[:find [?e ...] :where [?e :seon.fn/writes :seon.test.run/evaluator]] database))

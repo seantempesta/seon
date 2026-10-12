@@ -2368,7 +2368,7 @@
               ;; The refusals are this branch's own work, whoever acquires
               ;; it: agent acquisition or a lazy invocation under another
               ;; branch's custody (`kernel/ensure-function!`).
-              outcome (db/call-with-custody {:seon.db/connection connection}
+              outcome (db/with-branch {:seon.db/connection connection}
                                             #(db/transact! connection tx-data))]
           (cond-> (assoc state ::acquisition-refusals-recorded? true)
             (or (:seon.db.write.attempt/request-id outcome) (:seon.db/invalid-read outcome) (:seon.schema/expected-value outcome))
@@ -4764,7 +4764,7 @@
     (schema/call-with-projection-state
      projection-state
      (fn []
-       (db/call-with-custody
+       (db/with-branch
         (cond-> {} connection (assoc :seon.db/connection connection))
         (fn []
          (with-bindings {;; The bound read value carries this evaluation's
