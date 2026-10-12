@@ -16,6 +16,7 @@
             [malli.registry :as mr]
             [malli.util :as mu]
             [clojure.test.check.generators :as gen]
+            [edamame.core :as edamame]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.batch]
@@ -27,7 +28,8 @@
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.kernel :as kernel]))
+            [seon.sci.kernel :as kernel]
+            [seon.sci.lookup :as lookup]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -269,6 +271,23 @@
               {:seon.instrument.lookup/status :failed
                :seon.instrument.lookup/cause (failure-cause failure)}))
           lookup)))))
+
+(defn- example-forms
+  "The forms of the function's docstring Example, read as data (never run): from
+  the loaded Var, else from its program entity."
+  {:malli/schema [:=> [:cat :symbol] [:or :nil [:sequential :seon.schema/value]]]}
+  [function-symbol]
+  (try
+    (when-let [doc (or (some-> function-symbol find-var meta :doc)
+                       (some-> (env/of effect/*request-context*) :seon.db/connection db/db
+                               (->> (db/q '[:find ?doc .
+                                            :in $ ?function-symbol
+                                            :where [?function :seon.fn/sym ?function-symbol]
+                                                   [?function :seon.fn/doc ?doc]]
+                                          function-symbol))))]
+      (when-let [example (:example (lookup/docstring-parts doc))]
+        (not-empty (edamame/parse-string-all example {:auto-resolve (constantly 'user)}))))
+    (catch Throwable _ nil)))
 
 (defn- supplied-entry-problems
   {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:set [:tuple :int :keyword]]]]}
@@ -594,6 +613,9 @@
            (pos? other-alternatives) (assoc ::other-alternatives other-alternatives)
            (seq paths) (assoc ::problem-paths paths)
            caller (assoc ::caller caller))
+          (when arity?
+            (when-let [examples (example-forms function-symbol)]
+              {::examples examples}))
           (when arity?
             (select-keys lookup [:seon.instrument.lookup/status
                                  :seon.instrument.lookup/cause]))))))

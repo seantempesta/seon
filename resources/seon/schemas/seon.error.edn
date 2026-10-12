@@ -452,6 +452,7 @@
   [:seon.error/expected {:optional true} :seon.schema/value]
   [:seon.error/member {:optional true} :seon.error/source]
   [:seon.instrument/arglists {:optional true} :seon.schema/value]
+  [:seon.instrument/examples {:optional true} :seon.schema/value]
   [:seon.instrument/declared-arities {:optional true} :seon.schema/value]
   [:seon.instrument/caller {:optional true} :string]
   [:seon.error/fix {:optional true} :seon.error/fix]
