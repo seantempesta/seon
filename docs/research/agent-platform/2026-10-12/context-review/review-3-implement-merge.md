@@ -1,3 +1,10 @@
+---
+title: "Context review 3, lens implement-merge"
+type: research
+status: complete
+created: 2026-10-12
+---
+
 # Context review 3, lens implement-merge
 
 Reviewed: `docs/research/agent-platform/2026-10-12/context-review/3-implement-merge-first-facts.md` (task `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts`), read cold.
