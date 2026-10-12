@@ -50,7 +50,7 @@ Three documents number their phases. To end the collision, `hybrid-agent-world` 
 | P10 | step-semantics | absorbed into done-and-merge | three starters remain: `plan`, `agents-to-start`, `seon.cluster.host/start!`; no ROOT/AGENT declaration in `seon.mcp` | see M5, M7, M12, M13 |
 | P-final | step-semantics | not started | depends on P7–P10 and the merge-request redesign | |
 | U0–U7 | [push](../research/agent-platform/2026-10-12/hybrid-push.md) | superseded | replaced by M1–M18 of hybrid-done-and-merge; U0 and U2 tasks retired, U1/U3/U4/U5/U7 tasks reused there | |
-| M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | M1 done (3fe23b2c0, 346645d56), M2–M18 filed, not started | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md`; M1 under the owner rule of 2026-10-12 in `m1-notes.md` | M2 next |
+| M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | M1 done (3fe23b2c0, 346645d56), M2 done (3eca1a962), M3–M18 filed, not started | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md`; M1 under the owner rule of 2026-10-12 in `m1-notes.md` | M3 next |
 | E1 | [immutable-env](../research/agent-platform/2026-10-12/hybrid-immutable-env.md) | done | f424382cd: `reference-code/sci` bump, `sci.core/freeze` | |
 | E2 | immutable-env | done | f424382cd: `seon.sci.eval/program-context`, `seon.sci.eval-test/no-agent-work-writes-a-program-context` | |
 | E3 | immutable-env | not started | needs E5 first: the recording transaction and `my.program` still write into the base, so a fresh branch forks it (`program-context-notes.md`) | |
@@ -125,7 +125,7 @@ owner's answers of 2026-10-12. Running now: lanes branch-repl, chain-2, cost-gb,
 2. **The goal probe in flight** (Opus, lane chain-2): chain experiment 2 on HEAD, merged by root by hand; numbers
    against experiment 1. Then the **first automatic merge** of one ordinary task as soon as M6 and M8 allow (owner:
    one ordinary task first, the chain after).
-3. **Done and merge, M2–M18 then M-final**, in the hybrid's order (M1 done: 3fe23b2c0, 346645d56); split the
+3. **Done and merge, M3–M18 then M-final**, in the hybrid's order (M1 done: 3fe23b2c0, 346645d56; M2 done: 3eca1a962); split the
    collision points `seon.turn` and `seon.cluster.agent` before eleven phases queue on them.
 4. **Test results as Seon data** (design round; dig running): which tests are red and which reds a change caused is
    a query over stored runs at equal reach digests, shown in the agent's reply and current-state block, and read by
