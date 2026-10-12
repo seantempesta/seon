@@ -4,6 +4,7 @@
             [my.program :as program]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.profile :as profile]
             [seon.test-support :as support]
             [seon.program :as seon-program]))
 
@@ -83,3 +84,27 @@
            (is (nil? (get-in @(:env ctx) [:namespaces 'my.disposable.program]))))
          (is (nil? (db/pull (db/db connection) [:db/id] [:seon.ns/name 'my.disposable.program])))
          (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.disposable.program" "target")]))))))))
+
+(deftest ns-unmap-of-a-one-function-namespace-computes-the-deletion-report-once
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "program-unmap-once-fixture")
+     (let [target (symbol "my.unmap.once" "lone")
+           ctx (support/fork-cluster-ctx connection)
+           fork (sci/fork ctx)
+           context {:seon.sci.eval/ctx fork :my.program/base-ctx ctx :seon.db/connection connection}]
+       (support/transacted!
+        connection
+        [(seon-program/declaration-row
+          (db/carried-projection @connection)
+          {:seon.ns/name 'my.unmap.once :seon.ns/source "(ns my.unmap.once)"}
+          :all :agent)])
+       (support/transacted! connection [(support/program-fn-entity (db/db connection) target "(defn lone [] 1)")])
+       (doseq [target-ctx [ctx fork]]
+         (sci/eval-string* target-ctx "(do (in-ns 'my.unmap.once) (defn lone [] 1))"))
+       (let [measured (profile/measure #(program/ns-unmap! context target))
+             removed (:seon.profile/value measured)]
+         (is (= #{target} (:seon.program/affected removed)))
+         ;; One subject owns no other declaration: one breaks read, in the writer.
+         (is (= 1 (profile/calls-of measured 'my.program/breaks))
+             "ns-unmap! of a one-function namespace reads the subject's breakage once"))))))

@@ -525,38 +525,41 @@
   [context subject operation native-form]
   (read-result
    {:seon.program/subject subject} operation
+   ;; The deletion report is computed once, in the writer on the database value
+   ;; it retracts from; the writer delivers it and the caller answers from it.
    #(let [connection (:seon.db/connection context)
-          [report affected] (deletion-report (let [result (db/db connection)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result)) subject)]
-      (if (or (blocking? report) (some keyword? affected))
+          computed (promise)
+          result (db/transact!
+                  connection
+                  [[:db.fn/call
+                    (fn [database]
+                      (let [[current subjects :as report] (deletion-report database subject)]
+                        (deliver computed report)
+                        (when (or (blocking? current) (some keyword? subjects))
+                          (throw (ex-info "Program retraction refused." (refusal operation current subjects))))
+                        (mapv (fn [target]
+                                [:db/retractEntity (:seon.program/identity (locate database target))])
+                              (sort-by str subjects))))]])
+          [report affected] (when (realized? computed) @computed)]
+      (cond
+        (and report (or (blocking? report) (some keyword? affected)))
         (cond-> (refusal operation report affected)
           (some keyword? affected)
           (assoc :seon.error/message
                  "Namespace removal requires the schema owner's declaration-and-attribute retraction; its turn.clj seam is held."
                  :seon.error/data
                  (:seon.error/data (refusal operation report affected))))
-        (let [transaction
-              (let [result (db/transact!
-                connection
-                [[:db.fn/call
-                  (fn [database]
-                    (let [[current subjects] (deletion-report database subject)]
-                      (when (or (blocking? current) (some keyword? subjects))
-                        (throw (ex-info "Program retraction refused." (refusal operation current subjects))))
-                      (mapv (fn [target]
-                              [:db/retractEntity (:seon.program/identity (locate database target))])
-                            (sort-by str subjects))))]])]
- (if (:seon.db/transaction-refused result)
 
- (throw (ex-info (:seon.error/message result) result)) result))]
-          (native! (:seon.sci.eval/ctx context) native-form)
-          (native! (:my.program/base-ctx context) native-form)
-          {:seon.program/subject subject
-           :seon.program/affected (second (deletion-report (:db-before transaction) subject))
-           :seon.db/basis-t (db/basis-t (:db-after transaction))
-           :seon.program/unknown (:seon.program/unknown report)})))))
+        (:seon.db/transaction-refused result)
+        (throw (ex-info (:seon.error/message result) result))
+
+        :else
+        (do (native! (:seon.sci.eval/ctx context) native-form)
+            (native! (:my.program/base-ctx context) native-form)
+            {:seon.program/subject subject
+             :seon.program/affected affected
+             :seon.db/basis-t (db/basis-t (:db-after result))
+             :seon.program/unknown (:seon.program/unknown report)})))))
 
 (defn ns-unmap!
   "Retract a declaration, then unmap its Var in the executing fork and base.

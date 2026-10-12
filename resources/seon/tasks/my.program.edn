@@ -151,4 +151,8 @@
              :must-read #{my.program/diff my.program/ns-unmap! my.program/remove-ns! seon.program/exact-replacement-tx seon.context/current-state}
              :needs #{[:seon.task/sym seon.context/the-current-state-shows-the-branch-diff-since-its-merge-base]}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
-]
+ #:seon.task{:name "breaks-of-one-function-walks-the-program-graph"
+             :kind :function
+             :intent "One `my.program/breaks` of a function with no referrers costs about 13,000 instrumented calls and about 30 reads on default (`my.program/ns-unmap!` of a one-function namespace, after the deletion report runs once: 358 ms, 20.9 MB, 40k calls, 97 reads). Done when the calls and reads of one subject are proportional to its referrers, measured with `seon.profile/measure` on the same probe."
+             :must-read #{my.program/breaks seon.fn/gating-tests}
+             :evidence #{"docs/research/agent-platform/2026-10-12/ns-unmap-cost.md"}}]
