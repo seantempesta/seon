@@ -2618,8 +2618,8 @@
 (defn planned-sources
   "The ordered forms one ordinary source run executes from a model reply.
 
-  Read by the reply line rules (`segmented-sources` in `:reply` mode): prose
-  becomes each form's comment, and nothing is repaired."
+  Read by `segmented-sources` in `:reply` mode through `seon.sci.forgive/segments`: prose
+  becomes each form's comment, and unambiguous delimiter repairs are reported beside each source."
   {:malli/schema
    [:=> [:catn
          [:text :seon.cluster.reply/text]
