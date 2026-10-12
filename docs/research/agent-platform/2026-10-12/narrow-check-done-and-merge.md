@@ -184,3 +184,53 @@ The revised hybrid (M1..M18 + M-final, owner answers in §4) was read in full; e
 | M17 | U4 `seon.cluster.registry/a-merged-base-older-than-the-window-survives-collection`, deftest takes the task's name | sound |
 | M18 | `seon.vocabulary-test/the-merge-path-names-no-retired-word` | **defect** (failure 6) |
 | M-final | `seon.cluster.agent/the-real-chain-runs-with-no-nudges` | sound |
+
+## Third check (2b813c4ec), 2026-10-12
+
+Scope: the six second-check failures and every line `git diff f46d4e524 2b813c4ec` touched (M1, M6, M8, M10, M18, §5 rows, §7 code read). Verified at the code in the working tree (source unchanged since d7a9cc5b1) and by reading the runner and turn loop; nothing loaded, no main write. Counts: Q1 14 claims, 11 hold, 3 false. Q2 19 phases, 18 clean, 1 fails (M8). Q3 19 phases, 17 sound, 2 with a defect (M1, M18). Four failures remain: 1 DESIGN, 3 MECHANICAL.
+
+### The six second-check failures
+
+| # | Failure | Status in 2b813c4ec |
+|---|---|---|
+| 1 | M1 zero model turns | `:satisfied` status and the `proved-unanswered?`/`next-agent-work` edit are named and land in `turn.clj` lines 2360 and 2441, the only two `(not (task-done? …))` sites; but see remaining failure A: the judgment is never written on that pass |
+| 2 | M1 base result lost to `latest-results` | closed: `seon.test.runner/result-at-reach` (new, absent today) reads the retained run by reach digest; `test/seon/test/runner_test.clj` exists for its proof |
+| 3 | M6 rename holders | closed: exactly seven task files plus `docs/seon/architecture/vocabulary.md` plus requirers `agent`, `task`, the script, `registry_test`, `db_flow_test`, `squash_test` hold `seon.cluster.squash` (rg over the tree outside docs/research, tmp, reference-code); all are in M6's list; `land!` stays as a one-line caller for `turn.clj` 74 until M8 |
+| 4 | M8 wrong schema file | closed: `seon.config.root.edn` (key `:land?`) is named; but see remaining failure C |
+| 5 | M10 `seon.task.edn` | closed: `assignment-row` names `:seon.task.attempt/fork` (seon.task.edn 108) and the file is listed |
+| 6 | M18 proof independent of `report` | wording present but misplaced; see remaining failure B |
+
+### Remaining failures
+
+A. **M1: nothing writes `:seon.agent/green-before` on the pass that must idle. DESIGN.** The M1 deftest `seon.turn-test/a-task-satisfied-at-the-base-opens-no-model-turn` asserts that after one pass of a branch whose only proof was green before any form, the agent holds `:seon.agent/green-before #{'a/t}` and `step-verdict` is `:satisfied`. That pass is `prove-turn`, which reports `(report :closed 0)` with zero forms run; `step-due?` (turn.clj 5260) is `(pos? forms-run)`, so `test-step` and `record-broken!` (the only writer of `broken`/`new-red`, and M1's writer of `green-before`) never run on it. `step-observation` therefore has no `green-before` and `step-status` cannot answer `:satisfied`. Where the base judgment is made for a pass with no forms (the prove pass, or on read in `step-observation`) is a decision M1 does not state.
+
+B. **M18: the row was not updated; its new text sits in §5. MECHANICAL.** The M18 row in §6 (line 184) still carries the old proof `…/the-merge-path-names-no-retired-word` and "`seon.vocabulary`'s report restricted to those six entries" (false: `report` takes only roots). The new M18 text and the proof `seon.vocabulary-test/the-merge-path-names-no-retired-identifier` were pasted into the `seon.task/the-frontier-is-the-leaves-whose-needs-are-done` row of the §5 filed-task table (line 158), and the P-final row of that table became `| M-final | reuse as filed |` (line 159), dropping `seon.cluster.agent/the-real-chain-runs-with-no-nudges`. Also, the proof says it asserts empty the files under `src`, `test`, `resources/seon` and `script` holding the identifiers; its own file, `test/seon/vocabulary_test.clj` (untracked, lane root-docs), would hold them in its table, so it must build the names or exclude itself.
+
+C. **M8: living docs still name the deleted dial. MECHANICAL.** `docs/seon/plan.md` 22 and 205 (`seon.cluster.source/land!`, `:seon.config.root/land?`), `docs/seon/schedule/cards/TASK-CHAIN.md` 208 (`land-end!`) are prose the vocabulary report scans and would be false after M8; only AGENTS.md and the repl SKILL.md are listed.
+
+### Q1. Claims
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| `result-at-reach` is new; `latest-results` keeps the newest run per test | holds | 0 hits for `result-at-reach` in src; runner.clj 2195-2240 |
+| `:satisfied` is new in the `:seon.task/status` enum (seon.task.edn 95), file listed | holds | enum is `:working :requested :done :bailed :capped` |
+| `proved-unanswered?` and `next-agent-work` are the only turn openers keyed on `task-done?` | holds | turn.clj 2360, 2441 |
+| The agent's test step writes the base judgment on the zero-form pass | **false** | turn.clj 5313-5326, 5260, 5782 (failure A) |
+| Seven task files + vocabulary.md + requirers are all the `seon.cluster.squash` holders | holds | rg |
+| `seon.turn`'s `source-land!` delay resolves `seon.cluster.source/land!` (so M6 keeps `land!`) | holds | turn.clj 73-74, 2272 |
+| `:seon.config.root/land?` is declared in `seon.config.root.edn`; readers in `turn.clj`, `agent.clj`, `config/default.edn`, `turn_continue_test` | holds | rg |
+| `assignment-row` in `seon.task.edn` names `:seon.task.attempt/fork` | holds | seon.task.edn 108 |
+| `seon.vocabulary/report` takes only roots | holds | vocabulary.clj 53-65 |
+| `test/seon/test/runner_test.clj` exists | holds | ls |
+| `latest-results` measured 148 executions of 14 tests in 3.9 ms | holds | docstring, runner.clj 2203-2207 |
+| §5 net lines (−640, +355, net −285) | holds | arithmetic over §5 |
+| §5 filed-task table is intact | **false** | lines 158-159 (failure B) |
+| M8's list holds every holder of the `land?` dial's prose | **false** | plan.md, TASK-CHAIN.md (failure C) |
+
+### Q2. Deletions with their last caller
+
+All phases as in the second check except: M6 clean (task files, vocabulary.md, tags, `land!` caller kept); M10 clean (`seon.task.edn` listed); M8 fails on failure C only (code callers all listed: `source-land!` delay and `land!` deleted together; `seon.config.root.edn` named; `merge_test` converted in M6 for its `land!` uses). M1, M2, M4, M5, M7, M9, M11-M18, M-final clean.
+
+### Q3. Red proofs
+
+M1 defect (failure A; its first two deftests are sound and red today: `result-at-reach` absent, and `{'a/t false}` answers `:done` today, expected `:satisfied`). M18 defect (failure B). Every other phase sound as in the second check; M6's proof is unchanged and red by absence.
