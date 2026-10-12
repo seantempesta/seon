@@ -227,8 +227,9 @@
 (defn- measured-body
   "Run `body` with a fresh call sink and return its result with what the body
   cost on this thread: `:seon.test.member/alloc-bytes`, `:seon.test.member/run-ms`
-  and, when a world counted into the sink, `:seon.test.member/calls` and, given
-  a `limit`, at most that many `:seon.test.member/top` rows."
+  and, when a world counted into the sink, `:seon.test.member/calls`, the
+  definitions it executed (`:seon.test.member/executed`) and, given a `limit`,
+  at most that many `:seon.test.member/top` rows."
   {:malli/schema [:=> [:cat [:or :nil :seon.config.test.cost/top] [:=> [:cat :seon.batch/sink] :seon.schema/value]]
                   :seon.schema/value]}
   [limit body]
@@ -244,7 +245,8 @@
         alloc-bytes (max 0 (- (.getCurrentThreadAllocatedBytes mx) allocated))]
     (if (and (map? result) (not (:seon.error/at result)))
       (cond-> (assoc result :seon.test.member/alloc-bytes alloc-bytes :seon.test.member/run-ms run-ms)
-        seon.batch/*world* (assoc :seon.test.member/calls (reduce + 0 (vals (seon.batch/calls sink))))
+        seon.batch/*world* (assoc :seon.test.member/calls (reduce + 0 (vals (seon.batch/calls sink)))
+                                  :seon.test.member/executed (set (keys (seon.batch/executed sink))))
         (and seon.batch/*world* limit) (assoc :seon.test.member/top (seon.batch/top sink limit)))
       result)))
 
@@ -877,7 +879,7 @@
                      :seon.test.member/began? :seon.test.member/ended?
                      :seon.test.member/pass-count :seon.test.member/fail-count
                      :seon.test.member/error-count :seon.test.member/error
-                     :seon.test.member/reach-digest])
+                     :seon.test.member/reach-digest :seon.test.member/dynamic-calls])
             one (fn [entity attribute] (first (get-in facts [entity attribute])))
             sources source-ids
             input-digest (when (= 1 (count sources))
@@ -1149,7 +1151,17 @@
                                                                        (not (observed-reached test-symbol)))
                                                               test-symbol))))
                                                reuse-candidates)]
-                            (if (seq recorded) (selection-read! (runner/reach-digests database recorded)) {}))
+                            ;; Each key is computed with the definitions its latest
+                            ;; result's body ran outside the static closure.
+                            (if (seq recorded)
+                              (selection-read!
+                               (runner/reach-digests database recorded
+                                                     (into {} (keep (fn [test-symbol]
+                                                                      (when-let [ran (get-in facts [(second (get latest test-symbol))
+                                                                                                    :seon.test.member/dynamic-calls])]
+                                                                        [test-symbol (set ran)])))
+                                                           recorded)))
+                              {}))
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
                                  (when-let [[run-eid member] (get latest test-symbol)]
@@ -2798,10 +2810,11 @@
                                 outcome (-> outcome
                                             (update :seon.test/timings conj
                                                     (assoc timings :seon.test/sym test-symbol))
-                                            (update :seon.test/results conj result))]
+                                            ;; What the body executed is recording's input only.
+                                            (update :seon.test/results conj (dissoc result :seon.test.member/executed)))]
                             (cond
                               (not (:seon.test.run/terminated? result))
-                              (assoc outcome :seon.test/unfinished [result]
+                              (assoc outcome :seon.test/unfinished [(dissoc result :seon.test.member/executed)]
                                              ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)

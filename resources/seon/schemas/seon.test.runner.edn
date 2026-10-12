@@ -23,7 +23,9 @@
                     [:seon.test.member/calls {:optional true} :seon.test.member/calls]
                     [:seon.test.member/alloc-bytes {:optional true} :seon.test.member/alloc-bytes]
                     [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]
-                    [:seon.test.member/top {:optional true} :seon.test.member/top]],
+                    [:seon.test.member/top {:optional true} :seon.test.member/top]
+                    [:seon.test.member/executed {:optional true} :seon.test.member/executed]
+                    [:seon.test.member/dynamic-calls {:optional true} :seon.test.member/dynamic-calls]],
                    :captured-results
                    [:vector :seon.test.runner/captured-result],
                    :completion

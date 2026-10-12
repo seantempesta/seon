@@ -1154,8 +1154,8 @@
                ::nodes nodes))
       (catch Exception failure (reach-unavailable `reach-entries failure test-symbols)))))
 
-(defn reach-digests
-  "Each test's reach digest: the content of its static closure on `database`."
+(defn- static-reach-digests
+  "Each symbol's static reach digest on `database` (`reach-digests` without extra roots)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:or :seon.test/reach-digests :seon.test/unknown-error]]}
   [database test-symbols]
@@ -1189,6 +1189,32 @@
           :seon.error/member :seon.program/definition-digest
           :seon.error/offending tests}))
       :else (::digests entries))))
+
+(defn reach-digests
+  "Each test's reach digest: the content of its static closure on `database`,
+  and, given `extra-roots` (test -> the definitions its body executed outside
+  that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test with
+  no extra roots keeps its static digest."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                   [:or :seon.test/reach-digests :seon.test/unknown-error]]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
+                   [:or :seon.test/reach-digests :seon.test/unknown-error]]]}
+  ([database test-symbols]
+   (reach-digests database test-symbols {}))
+  ([database test-symbols extra-roots]
+   (let [extras (into #{} (comp (filter (comp (set test-symbols) key)) (mapcat val)) extra-roots)
+         digests (static-reach-digests database (into (vec test-symbols) (remove (set test-symbols)) (sort extras)))]
+     (if (seon.error.refusal/error? digests)
+       digests
+       (into {} (keep (fn [test-symbol]
+                        (when-let [digest (get digests test-symbol)]
+                          [test-symbol
+                           (if-let [roots (seq (get extra-roots test-symbol))]
+                             (id/id [digest (into (sorted-map) (map (juxt identity digests)) roots)] 64)
+                             digest)])))
+             test-symbols)))))
 
 (defn reach-memberships
   "The tested closure's function names, including unresolved targets.
@@ -1686,7 +1712,7 @@
               ;; What the body cost, measured on its own thread and sink.
               ::cost (select-keys result [:seon.test.member/calls :seon.test.member/alloc-bytes
                                           :seon.test.member/run-ms :seon.test.member/top
-                                          :seon.test.member/evaluator])
+                                          :seon.test.member/evaluator :seon.test.member/dynamic-calls])
               :seon.test.run/terminated? (true? (get result :seon.test.run/terminated? terminated?))
               :seon.test.report/values reports})) results)
         _ (when (not= (count results) (count (set (map :seon.test/sym results))))
@@ -1873,7 +1899,8 @@
               (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?
                                      :seon.test.member/calls :seon.test.member/alloc-bytes
                                      :seon.test.member/run-ms :seon.test.member/top
-                                     :seon.test.member/evaluator)
+                                     :seon.test.member/evaluator :seon.test.member/dynamic-calls
+                                     :seon.test.member/executed)
                              :db/id test-entity-id
                              :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t
@@ -2031,6 +2058,60 @@
                       (assoc :seon.test.failure/reports member-reports)))])))
           pairs)))
 
+(def ^:private harness-entries
+  "The runner's entrances into a test body (`run-var!` for a compiled test,
+  `seon.sci.eval/run-test` for an interpreted one): what their static closures
+  execute inside the body's call sink is the runner's work, not the test's."
+  '[seon.test.runner/run-var! seon.sci.eval/run-test])
+
+(defn- executed-roots
+  "What each result's body executed (`:seon.test.member/executed`) beyond its
+  static closure on `tested`: `::dynamic-calls`, test -> the declarations it
+  ran outside `reaches` (absent when none), and `::stale`, the tests whose body
+  ran a definition whose digest differs from `tested`'s for that symbol."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.test/reaches :seon.test/unknown-error]
+                       :seon.test.runner/captured-results]
+                  [:map [::dynamic-calls [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
+                   [::stale [:set :seon.test/sym]]]]}
+  [tested reaches results]
+  (let [executed (into {} (keep (fn [{test-symbol :seon.test/sym ran :seon.test.member/executed}]
+                                  (when (seq ran) [test-symbol ran])))
+                       results)
+        symbols (into [] (comp (mapcat val) (map first) (distinct)) executed)
+        declared (if (seq symbols)
+                   (into {} (execution-read
+                             (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
+                                     :where [?e :seon.fn/sym ?symbol] [?e :seon.program/definition-digest ?digest]]
+                                   tested symbols)))
+                   {})
+        static (if (seon.error.refusal/error? reaches) {} reaches)
+        ;; The runner's own work inside the body's sink (running the var,
+        ;; reporting, printing failures) is the harness's, not the test's, and
+        ;; a contract's predicates are its schema's, which the reach names by form.
+        harness (let [closures (when (seq executed) (reach-memberships tested (vec harness-entries)))]
+                  (cond-> (into (set harness-entries)
+                                (keys (schema/predicate-functions-in
+                                       (or (db/carried-projection tested) (schema/handed-projection)))))
+                    (and closures (not (seon.error.refusal/error? closures)))
+                    (into (mapcat val) closures)))]
+    {::dynamic-calls (into {} (keep (fn [[test-symbol ran]]
+                                      (let [closure (get static test-symbol #{})
+                                            outside (into (sorted-set)
+                                                          (comp (map first)
+                                                                (filter #(contains? declared %))
+                                                                (remove #(or (= test-symbol %) (contains? closure %)
+                                                                             (contains? harness %))))
+                                                          ran)]
+                                        (when (seq outside) [test-symbol outside]))))
+                           executed)
+     ::stale (into #{} (keep (fn [[test-symbol ran]]
+                               (when (some (fn [[symbol digest]]
+                                             (and (string? digest) (contains? declared symbol)
+                                                  (not= digest (get declared symbol))))
+                                           ran)
+                                 test-symbol)))
+                   executed)}))
+
 (defn commit-results!
   "Commit captured test results and return those exact committed facts."
   {:malli/schema
@@ -2040,12 +2121,24 @@
   (let [database (db/db connection)
         completion (prepare-failures! connection database completion)
         tested (:seon.db/db completion)
+        test-symbols (mapv :seon.test/sym results)
+        reaches (when tested (reach-memberships tested test-symbols))
+        prepared (:seon.test.runner/results completion)
+        {dynamic ::dynamic-calls stale ::stale} (when tested (executed-roots tested reaches prepared))
+        completion (assoc completion :seon.test.runner/results
+                          (mapv (fn [{test-symbol :seon.test/sym :as result}]
+                                  (cond-> (dissoc result :seon.test.member/executed)
+                                    (seq (get dynamic test-symbol))
+                                    (assoc :seon.test.member/dynamic-calls (get dynamic test-symbol))))
+                                prepared))
         completion (if tested
                      (assoc (dissoc completion :seon.db/db)
                             :seon.test/reach-digests
-                            (reach-digests tested (mapv :seon.test/sym results))
-                            :seon.test/reaches
-                            (reach-memberships tested (mapv :seon.test/sym results)))
+                            ;; A result whose body ran a definition other than the
+                            ;; tested one keys nothing: it is kept and never reused.
+                            (let [digests (reach-digests tested test-symbols dynamic)]
+                              (cond->> digests (not (seon.error.refusal/error? digests)) (#(apply dissoc % stale))))
+                            :seon.test/reaches reaches)
                      completion)
         transaction-report
         (if (seon.error.refusal/error? database)

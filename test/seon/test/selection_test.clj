@@ -163,9 +163,9 @@
        (let [acquire runner/reach-digests
              requested (atom #{})
              changed (with-redefs [runner/reach-digests
-                                  (fn [database symbols]
+                                  (fn [database symbols & extra-roots]
                                     (swap! requested into symbols)
-                                    (acquire database symbols))]
+                                    (apply acquire database symbols extra-roots))]
                        (select!))]
          (is (not (@requested (fixture-symbol "direct")))
              "A test already reaching changed code cannot reuse green; do not derive its reach digest.")

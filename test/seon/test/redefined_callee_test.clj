@@ -39,3 +39,23 @@
        (is (true? (:seon.test/passed? checked)) "the test is green against the redefinition")
        (is (true? (:seon.test/passed? again)) "an unchanged check stays green")
        (is (= 1 (:seon.test/reused-count again)) "an unchanged check reuses the recorded green")))))
+
+(deftest ^{:seon.test/long "Four eval requests of an own-branch agent, each with its automatic test step: about 3 s measured on default's JVM."
+           :seon.test/long-ms 15000}
+  a-test-reruns-when-a-function-it-calls-by-a-computed-name-changes
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "computed-callee-" (random-uuid))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(ns rc.computed (:require [clojure.test :refer [deftest is]]))\n"
+                   "(defn k2 \"Four.\" {:malli/schema [:=> [:cat] :int]} [] 4)\n"
+                   "(deftest computed-test (is (= 4 ((requiring-resolve (symbol \"rc.computed\" (str \"k\" 2)))))))"))
+           check "(select-keys (my.test/check {:seon.test/identities #{'rc.computed/computed-test}}) [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"
+           green (agent-value running agent-id check)
+           _ (agent-value running agent-id
+                          "(in-ns 'rc.computed)\n(defn k2 \"Five.\" {:malli/schema [:=> [:cat] :int]} [] 5)")
+           checked (agent-value running agent-id check)]
+       (is (true? (:seon.test/passed? green)) "the test is green against the first definition")
+       (is (= 1 (:seon.test/executed-count checked)) "a changed function the body called by a computed name re-executes the test")
+       (is (false? (:seon.test/passed? checked)) "the test is red against the redefinition")))))
