@@ -595,15 +595,22 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   stop and report when the code contradicts it. Work past about fifteen minutes is split. A fix that fights the design
   goes to the owner with options. `bin/lane commit` takes one `--test` per test and runs a declared-long test only when
   named by var.
-- **Design by independent plans and a hybrid** (owner, 2026-10-11: "that's how we do planning and design from now on").
-  Any design whose spec we are not sure of is a task tree: a subject task (what we know, what to look into, the
-  questions) → a **dig** (Haiku: buried data in `reference-code/`, our code, docs, notes and git history, including
-  earlier attempts and why they failed, so we never repeat them) → **two independent plans** written in parallel by
-  Opus and Sol (gpt-6.1-sol), neither seeing the other, each experimenting at the REPL, explaining how the existing
-  system and libraries already do the work, adding no infrastructure the libraries own, and phased with a proof per
-  phase → a **hybrid** by Fable after both return: the best of each, or something better if both missed it → the
-  phases as implementation tasks with red proofs. The models were trained on different distributions; use them to
-  design, not only to review. Root runs this shape by hand until the scheduler runs it as a task tree.
+- **Design by independent plans and a hybrid** (owner, 2026-10-11; revised 2026-10-12). Any design whose spec we are
+  not sure of is a task tree: a subject task (what we know, what to look into, the questions) → a thorough **dig**
+  (Haiku: buried data in `reference-code/`, our code, docs, notes and git history, including earlier attempts and why
+  they failed, and the existing references and docs to build on, so no plan starts from zero or redoes done work) →
+  **two independent plans** written in parallel by Opus and Astra (`gpt-6-astra`), neither seeing the other, each
+  experimenting at the REPL, explaining how the existing system and libraries already do the work, adding no
+  infrastructure the libraries own, and phased with a proof per phase → a **hybrid** by Fable, who wrote neither
+  plan: the best of each, or something better if both missed it → a **narrow check** before any task is filed:
+  every claim about the live system reproduces on default, every deletion is in the commit that converts its last
+  caller (HEAD boots after each phase), and every phase names a red proof that resolves → the phases as
+  implementation tasks with red proofs, and a phase-status line in the owning plan that each commit updates, so an
+  unfinished phase stays visible. After the phases merge, Astra reviews the work against the plan; each finding is
+  reproduced before it is fixed, at its root cause, never by a fence. The models were trained on different
+  distributions; use them to design, not only to review: open-ended review of a design anchors on its author and
+  turns hypothetical failures into fences. A clear slice needs one plan and the narrow check. Root runs this shape
+  by hand until the scheduler runs it as a task tree.
 - **Restart in batches.** A restart or reset is a batch: root lands every ready dependency or fork bump and pending fix
   just before it. Nothing is ever left staged in the shared index (it blocks every lane's commit).
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
