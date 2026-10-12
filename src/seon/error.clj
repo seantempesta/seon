@@ -112,7 +112,10 @@
   {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable]]
                   :seon.error/message]}
   [source failure]
-  (or (when (map? source) (not-empty (:seon.error/message source)))
+  (or (when (map? source)
+        (let [m (:seon.error/message source)]
+          (when (and (string? m) (not (str/blank? m)))
+            m)))
       (when (and (map? source)
                  (:seon.turn/rule source)
                  (:seon.turn/transition source))
