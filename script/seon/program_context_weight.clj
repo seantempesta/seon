@@ -36,7 +36,7 @@
   "JOL's view of this JVM, without self-attach: the serviceability agent's
   attach stops the process on macOS, and the walk needs only field offsets and
   object sizes."
-  {:malli/schema [:=> [:cat] [:fn #(instance? VirtualMachine %)]]}
+  {:malli/schema [:=> [:cat] :seon.schema/value]}
   []
   (doseq [property ["jol.skipDynamicAttach" "jol.skipInstallAttach" "jol.skipHotspotSAAttach"]]
     (System/setProperty property "true"))
@@ -44,7 +44,7 @@
 
 (defn- reference-offsets
   "The field offsets of `c`'s instance reference fields, its superclasses' included."
-  {:malli/schema [:=> [:cat [:fn #(instance? VirtualMachine %)] [:fn class?]] [:fn #(instance? (Class/forName "[J") %)]]}
+  {:malli/schema [:=> [:cat :seon.schema/value [:fn clojure.core/class?]] :seon.schema/value]}
   [^VirtualMachine vm ^Class c]
   (long-array
    (for [k (take-while some? (iterate #(.getSuperclass ^Class %) c))
@@ -56,7 +56,7 @@
   "The identities the JVM retains whatever the cache holds: every Var's root
   and metadata, and the SCI context store's current context as each of
   `contexts` sees it, the context every SCI evaluation shares."
-  {:malli/schema [:=> [:cat [:sequential :seon.sci.eval/program-context]] [:fn #(instance? IdentityHashMap %)]]}
+  {:malli/schema [:=> [:cat [:sequential :seon.sci.eval/program-context]] :seon.schema/value]}
   [contexts]
   (let [retained (IdentityHashMap.)]
     (doseq [n (all-ns) [_ v] (ns-map n) :when (var? v)]
@@ -71,9 +71,8 @@
   "Bytes of the objects reachable from `roots` that are not in `seen`, never
   entering a `shared` object; every reached object joins `seen`, strings only
   when `strings?`."
-  {:malli/schema [:=> [:cat [:sequential :seon.schema/value] [:fn #(instance? IdentityHashMap %)]
-                       [:fn #(instance? IdentityHashMap %)] :boolean]
-                  nat-int?]}
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :boolean]
+                  [:int {:min 0}]]}
   [roots ^IdentityHashMap shared ^IdentityHashMap seen strings?]
   (let [^VirtualMachine vm (jol-vm)
         offsets (HashMap.)
