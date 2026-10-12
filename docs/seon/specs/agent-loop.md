@@ -190,6 +190,63 @@ transaction; the authoritative copy is recorded once per signature at the task h
 caller's queued submission is dropped if it has not started; once started, it runs to its actual exit and is
 recorded.
 
+**What each entrant receives, and where its writes go** (owner 2026-10-12, `hybrid-audit-2.md` Q3 A). Every entrant
+is an agent; root and an agent differ only by the branch they hold. An entrant with a task holds an assignment
+(§3.11); an MCP or schedule entrant without a task is an agent with an **open compartment and no assignment**. No task
+is invented for it, and one lifecycle (`seon.cluster.agent/next-actions`) carries both.
+
+| Entrant | Agent id | Branch | SCI context | Database, connection | Writes go to |
+|---|---|---|---|---|---|
+| root (`:seon.mcp/agent` absent or `"root"`) | the cluster's root row | main | the cluster's | main's connection | main |
+| MCP, a new agent id | minted by the caller's name; its row is written on main and on its branch by `seon.cluster.host/home-call` (via `seon.mcp/execution` → `seon.cluster.host/register!`, `seon.cluster.host/host!`) | its own, `agent-<id>`, forked from main's head by `my.agent/create-branch!` | a fork of the cluster's, on its branch (`seon.cluster.agent/acquire-context!`, borrowing the branch: the execution does not own it) | its branch's connection; a database value is read from it per call | its branch only |
+| MCP, a known agent id | its row | its `:seon.agent/branch` | as above | as above | its branch only; a retired id (`:seon.agent/admission-closed-tx`) refuses by name |
+| schedule firing | the schedule's `:seon.schedule.task/owner` | that agent's branch | that agent's | as the agent | as the agent |
+| an assigned model agent | its row | the assignment's `:seon.task/branch` | a fork on that branch | its branch's connection | its branch only |
+
+Capabilities are the same `my.*` functions for every non-root entrant; only root holds main. An agent's facts and
+code reach main only through root's `db<->flow`: an assignment's through its merge (merge.md §1), a taskless agent's
+program change through a lane's write-back and commit, then reload (it never merges as facts).
+
+**A taskless agent's end** is the existing retirement fact, `:seon.agent/admission-closed-tx`, written **on its own
+branch** by the agent: `(my.agent/retire-branch! {:seon.store/branch <its own branch>})` (`my.agent/retire-own-branch!`
+closes admission on its branch's agent rows in its own connection's custody). It is the same fact an assignment's
+end writes (`seon.turn/end-task-call`). No idle timeout exists and none is added: an MCP session that never writes its
+end keeps its branch, as today. Its branch's listen route wakes root's `db<->flow` on that write (G8's route).
+
+**Its derivation.** `seon.cluster.agent/lifecycle-facts` also reads every agent on main whose `:seon.agent/branch` the
+store holds, is not main's branch, and that no assignment names (`[?x :seon.task/agent ?g]` absent). For each it
+reads its end from main's row, else from its branch head's row (one branch read per such agent, as `branch-end`
+does for an assignment), and, only once ended, its unmerged program change: `seon.cluster.source/compare-branch` of
+the branch against main's head (the comparison `my.program/diff` and merge share), whose `seon.program/three-way`
+sets `:seon.program/added`, `:seon.program/changed-on-branch`, `:seon.program/retracted` and
+`:seon.program/conflict` are all empty. A declaration main already holds with the same digest (a lane's change written
+back, committed and reloaded) is `:seon.program/unchanged`, so it is not unmerged. `next-actions` then applies the
+assignment's rule with "merged" read as "nothing unmerged":
+
+- ended and its graph started → `:stop` (first, as for an assignment);
+- ended, nothing unmerged → `:delete-branch` (`seon.task/delete-branch!`, root's `my.agent/retire-branch!` of
+  another's branch: `seon.cluster.host/retire!`, `seon.cluster.host/close-admissions!` on main, then the branch);
+- ended with an unmerged program change → no action: the branch is kept and listed by `seon.cluster.agent/lifecycle-facts`
+  for root, as a scratch probe's definitions are kept until its end is written;
+- not ended → no action.
+
+The row is the held row without the assignment's keys (`:seon.task/assignment`, `:seon.task/assigned`,
+`:seon.task/merge-base` absent) plus `:seon.flow.plan/unmerged` (the count of the four sets); the action carries
+`:seon.agent/id` and `:seon.task/branch` and no `:seon.task/assigned` (open schema accretion on
+`:seon.flow.plan/action`). Cost per pass: one branch read per open taskless agent; one fork-point read plus the
+changed declarations' digests per ended one.
+
+**Proof (M13).** `seon.cluster.agent/an-ended-taskless-agent-with-nothing-unmerged-has-its-branch-deleted`: an MCP
+agent hosted on its own branch writes its end with `my.agent/retire-branch!` of its own branch; after one `db<->flow`
+pass `(contains? (seon.cluster.registry/branches store) branch)` is false and main's agent row holds
+`:seon.agent/admission-closed-tx`; a second agent that `defn`s one function before its end keeps its branch and
+`next-actions` names no `:delete-branch` for it. Red today: `lifecycle-facts` reads assignments only, and the hosted
+execution borrows its branch, so `release-context!`'s unlink never runs for it.
+
+**Deleted with M13.** The own-branch unlink promise of `my.agent/retire-own-branch!` ("unlinks after my run exits"):
+the agent writes its end and root deletes. Boot's `seon.cluster.registry/retire-unclaimed!` stays only for branches no
+fact claims (merge candidates, checkpoints); a taskless agent's ended branch is the next pass's due work, not boot's.
+
 ### 3.3 Reading and evaluation
 
 **Reading, every mode.** Each form is read once at the live cursor, after the previous form ran, by SCI with the
