@@ -26,21 +26,12 @@
              :must-read #{seon.render.value/tree}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"
                          "docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
- #:seon.task{:name "a-short-identifier-string-is-cut-at-its-first-chunk"
-             :kind :function
-             :intent "An MCP JVM eval returning 9 contract findings (maps of :row :col :level :type :filename :message) showed every :filename as \"/Users/sean/src/\"…+23 with a subs dig form (default 2026-09-27): breadth before depth spread the budget so each string stayed at its 16-character first chunk, and the path, the one member that identifies the finding, was unreadable while :type and :level printed whole. Rule 5 grows strings by doubling chunks but charges a path like prose. Done when a string that fits the remaining budget at its level prints whole before sibling collections expand (or short strings count as scalars), with a regression over a vector of such finding maps."
-             :must-read #{seon.render.value/prepare}}
  #:seon.task{:name "a-cut-operation-in-render-data-is-not-runnable"
              :kind :function
              :intent "Render data's cuts name no handle, so an offered operation the budget reaches last prints as (`seon.render.walk/related` …1): its request map is cut and the form cannot be run (`seon.test/run`'s related data, 2026-09-28). An operation is a whole form or absent. Done when a `:seon.render/operations` form inside render data prints whole or is dropped whole, with a regression."
              :must-read #{seon.render.value/select-nodes seon.render.walk/related}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/related_data--proof.clj"}}
 
- #:seon.task{:name "short-strings-in-pairs-are-cut"
-            :kind :function
-            :intent "A 32-row vector of [string long] pairs (a profile summary, strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row, and a java.util.HashMap$Node printed as #object: the budget went to cut markers instead of the text. Done when a small tuple's string prints whole under the budget and a Map.Entry prints as its pair."
-            :must-read #{seon.render.value/prepare}
-            :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/mcp-dogfood--probe.clj"}}
  #:seon.task{:name "bounded-text-survives-in-the-render-namespace"
              :kind :function
              :intent "Render dedup: seon.print.value/bounded-text and throwable-text are the survivors (6618eda17); `seon.render.value/bounded-text` and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when `seon.render.value/bounded-text` is deleted and every caller converted in the same commit, lint clean."
@@ -48,10 +39,11 @@
  #:seon.task{:name "cuts-cost-more-than-they-hide-across-siblings",
             :kind :function,
             :intent
-            "Breadth before depth spends the budget on one cut per member: a vector of 50 eleven-line sources at 1,500 tokens shows the first whole, then 31 strings each cut at 64 characters with a 45-character subs form, and a health report shows four collapsed cache-kind maps as {…8 (get-in result/e… [`:seon.health/cache` `:seon.cache/kinds` :seon.cluster/file-derivation-key])}, each cut longer than the eight numbers it hides. Done when a level whose members would each be cut admits fewer members whole and folds the rest into the tail count, decided by cost, with a regression on these two shapes.",
+            "Breadth before depth spends the budget on one cut per member: a vector of 50 eleven-line sources at 1,500 tokens shows the first whole, then 31 strings each cut at 64 characters with a 45-character subs form, and a health report shows four collapsed cache-kind maps as {…8 (get-in result/e… [`:seon.health/cache` `:seon.cache/kinds` :seon.cluster/file-derivation-key])}, each cut longer than the eight numbers it hides. Done when a level whose members would each be cut admits fewer members whole and folds the rest into the tail count, decided by cost, with a regression on these two shapes and on two more that show the same cost: a vector of nine contract findings (maps of :row :col :level :type :filename :message) printed every :filename cut to its 16-character first chunk with a `subs` form while :type and :level printed whole, and a 32-row vector of [string long] pairs (strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row and a java.util.HashMap$Node as #object. A string that fits the remaining budget at its level prints whole before sibling collections expand (or short strings count as scalars), and a Map.Entry prints as its pair.",
             :must-read
             #{seon.render.value/admit-member
-              seon.render.value/select-nodes},
+              seon.render.value/select-nodes
+              seon.render.value/prepare},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}
  #:seon.task{:name "failed-selection-escapes-the-profile-budget",
