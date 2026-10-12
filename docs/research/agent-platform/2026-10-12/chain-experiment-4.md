@@ -161,3 +161,18 @@ problem tasks, if written. Attempt branches `:attempt-ee6cfaeb5c0b` (its project
 `-88ffa0a88cf2`, `-4438ded31ef2`, `-b279f729d49b` (the good code), `-69691a73d375` (stray schemas
 `:seon.render.web/stoppage`, `stop-outcome`, `stopped`), all for db<->flow to settle. The lane's probe branches
 `chain4-probe` and `chain4-proof` were retired.
+
+## Root merge (fec3d7737)
+
+The whole `seon.render.web-test` namespace (63 vars executed, no declared-long tests) ran through
+`bin/seon check --at REV --test seon.render.web-test --include-long` at the merge and at its parent.
+
+| Commit | Executed | Pass | Fail | Red vars |
+|---|---|---|---|---|
+| `6433c7593` (parent) | 63 | 314 | 6 | `a-reconnect-refuses-a-pass-derived-before-it-connected`, `debug-algorithm-carries-the-render-evaluation-inputs`, `declared-units-are-components-in-schema-order`, `a-stopped-server-has-shut-down-its-worker-executor` |
+| `fec3d7737` (merge) | 63 | 316 | 4 | the first three of those |
+
+No regression: the three shared reds are identical at both commits and predate the merge (the reconnect test
+exceeds its 5 s bound at about 21 s and its held-pass wait is never entered; the session-actions and
+declared-projection assertions are stale against current agent attributes). The only difference is
+`a-stopped-server-has-shut-down-its-worker-executor`, red at the parent and green at the merge, as intended.
