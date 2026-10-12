@@ -223,6 +223,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
      before it is committed"). **Every review is dual and independent**: a fresh Opus agent and Astra, neither seeing
      the other, each finding reproduced before it is fixed; a review never substitutes for the proof. A performance
      commit is proven by the cost it targets, end to end (see "Make cost follow changed inputs").
+   - **Improve the mechanisms, never patch around them** (owner, 2026-10-12). Every fix strengthens the general
+     machinery: the producer returns the right data, a schema-specific view is a render function, and only a gain for
+     all values goes into the value printer. No trimming, counting or special case added to pass one test. A lane or
+     root that finds itself adding edge cases in several places stops and asks for an audit to get back on track.
    - **Root** assigns file ownership so no two lanes edit one file at once, rules on disputes, resolves
      already-ruled questions by citing their authority, batches restarts, and merges. For a new decision with hours of
      cross-owner work, root offers three priced options: the simplest viable first, the recommendation marked, each
