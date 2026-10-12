@@ -286,3 +286,13 @@
        (is (and (str/includes? prove "(clojure.test.check/quick-check") (str/includes? prove ":seed 42")
                 (str/includes? prove "a law catches a wrong row"))
            "Prove's Done teaches a law as a seeded property beside the table rows")))))
+
+(deftest help-teaches-private-contracts-and-the-whole-proof-set
+  (with-help-agent
+   (fn [connection]
+     (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn seon.fs/path?]")) (lines-of @connection))
+         "a help line says defn- needs a contract and shows a named predicate")))
+  (with-prove-agent
+   (fn [connection]
+     (is (some #(str/includes? % "table rows and the property law both") (done-lines @connection "help"))
+         "the Prove Done group asks for every proof, rows and law"))))
