@@ -217,7 +217,7 @@
   "The fixed text before a scalar node's value: `#:seon.print{:face F, :value `."
   (into {} (map (fn [face] [face (str "#:seon.print{:face " face ", :value ")]))
         [::print/nil ::print/boolean ::print/number ::print/keyword ::print/symbol
-         ::print/char ::print/uuid ::print/inst ::print/string]))
+         ::print/char ::print/uuid ::print/inst ::print/string ::print/printed]))
 
 (defn- leaf-edn
   "One leaf's canonical EDN. A scalar node is its fixed prefix plus the
@@ -309,6 +309,7 @@
       (symbol? value) {::node (leaf! state (value-node ::print/symbol value))}
       (char? value) {::node (leaf! state (value-node ::print/char value))}
       (uuid? value) {::node (leaf! state (value-node ::print/uuid value))}
+      (print/printed? value) {::node (leaf! state (value-node ::print/printed (print/printed-text value)))}
 
       ;; Date is the ordinary inst and must take the allocation-free path.
       ;; Instant is the other core implementation and normalizes to Date;
@@ -573,6 +574,8 @@
     (::print/nil ::print/boolean ::print/number ::print/keyword
      ::print/symbol ::print/char ::print/string ::print/inst ::print/uuid)
     (::print/value print-node)
+
+    ::print/printed (print/printed (::print/value print-node))
 
     ::print/var {::reference "sci.lang.Var"
                  ::name (str "#'" (::print/name print-node))}

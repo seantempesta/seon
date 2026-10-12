@@ -10,6 +10,25 @@
             [malli.core :as m]
             [seon.schema.internal :as internal]))
 
+(defn printed
+  "A value that carries its already-printed `text`, a tagged literal `#seon.print/printed \"text\"`: the
+  value printer shows it as that text, unchanged, wherever it sits in a larger value."
+  {:malli/schema [:=> [:cat :string] :seon.print/printed]}
+  [text]
+  (tagged-literal 'seon.print/printed text))
+
+(defn printed?
+  "True when `x` is a `printed` value."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts any object and answers false for what is not a printed value.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [x]
+  (and (tagged-literal? x) (= 'seon.print/printed (:tag x))))
+
+(defn printed-text
+  "The text a `printed` value carries."
+  {:malli/schema [:=> [:cat :seon.print/printed] :string]}
+  [x]
+  (:form x))
+
 (defn- literal
   "`value` as readable EDN under fixed print bindings, bound only when the
   caller's differ: a binding frame costs more than printing a symbol."
@@ -59,6 +78,10 @@
 (def char-generator
   "Characters spanning named and escaped stock printed forms."
   (gen/elements [\a \space \newline \tab \return \backspace \formfeed]))
+
+(def printed-generator
+  "Printed values whose text reads as a symbol."
+  (gen/fmap #(printed (str "p" %)) gen/string-alphanumeric))
 
 (def projected-node-generator
   "A readable terminal projection for recursive print-node generation."
@@ -139,6 +162,7 @@
           (gen/fmap (fn [value] {::face ::keyword ::value value}) gen/keyword)
           (gen/fmap (fn [value] {::face ::symbol ::value value}) gen/symbol)
           (gen/fmap (fn [value] {::face ::char ::value value}) char-generator)
+          (gen/fmap (fn [value] {::face ::printed ::value (str "p" value)}) gen/string-alphanumeric)
           (gen/fmap (fn [value] {::face ::string ::value value}) gen/string)
           #?(:clj (gen/fmap (fn [ms] {::face ::inst
                                       ::value (java.util.Date. (long ms))})
@@ -442,7 +466,7 @@
 ;;; node it opens.
 
 (def ^:private scalar-kinds
-  #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
+  #{::nil ::boolean ::number ::keyword ::symbol ::char ::string ::printed
     ::inst ::uuid ::var ::type ::class ::object ::truncated-string
     ::failed ::elided ::pruned})
 
@@ -515,6 +539,8 @@
       ::nil [(text-op ::nil "nil")]
       (::boolean ::number ::keyword ::symbol ::char)
       [(text-op (::face node) (or (::text node) (literal value)))]
+      ;; A printed value is its saved text, shown unchanged.
+      ::printed [(text-op ::printed (or (::text node) value))]
       ::string [(text-op ::string (or (::text node) (string-literal value))
                          [:span {:class (css-class ::string)} (or (::text node) value)])]
       (::inst ::uuid) [(text-op ::tag (or (::text node) (literal value)))]

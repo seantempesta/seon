@@ -7,6 +7,7 @@
               :seon.print/keyword
               :seon.print/symbol
               :seon.print/char
+              :seon.print/printed
               :seon.print/string
               :seon.print/inst
               :seon.print/uuid
@@ -25,6 +26,7 @@
               :seon.print/elided
               :seon.print/projected
               :seon.print/pruned],
+             :printed [:fn {:description "A value that carries its already-printed text; the value printer shows it as that text, unchanged. Producer: seon.print/printed.", :gen/gen seon.print/printed-generator} clojure.core/tagged-literal?],
              :reference [:or :symbol :seon.db/ref],
              :references [:set :seon.print/reference],
              :identity-attributes [:set :qualified-keyword],
@@ -95,6 +97,11 @@
                   {:error/message "must be a printable character",
                    :gen/gen seon.print/char-generator}
                   seon.print/print-char?]]]]
+              [:seon.print/printed
+               [:map
+                [:seon.print/face [:= :seon.print/printed]]
+                [:seon.print/text {:optional true} :seon.print/text]
+                [:seon.print/value :string]]]
               [:seon.print/string
                [:map
                 [:seon.print/face

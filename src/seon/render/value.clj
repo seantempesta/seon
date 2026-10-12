@@ -738,6 +738,9 @@
       {:kind :name :node {::print/face ::print/symbol ::print/value x}
        :text (str (when (.getNamespace ^clojure.lang.Symbol x) (str (.getNamespace ^clojure.lang.Symbol x) "/"))
                   (.getName ^clojure.lang.Symbol x))}
+      ;; A value that carries its printed text is that text, unchanged.
+      (and (identical? c clojure.lang.TaggedLiteral) (print/printed? x))
+      {:kind :name :node {::print/face ::print/printed ::print/value (print/printed-text x)} :text (print/printed-text x)}
       (identical? c java.util.UUID) (scalar ::print/uuid x (str "#uuid \"" x "\""))
       (identical? c java.util.Date) (scalar ::print/inst x (str "#inst \"" (.toInstant ^java.util.Date x) "\""))
       (identical? c clojure.lang.BigInt)

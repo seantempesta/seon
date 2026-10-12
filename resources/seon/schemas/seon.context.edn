@@ -37,12 +37,12 @@
                :namespace [:and {:description "The namespace the agent is in: where its latest evaluation ended, else its held task's namespace. Producer: seon.context/current-state."} :seon.ns/name],
                :must-reads [:vector {:description "Each reference the held task's attributes make (its effective intent's and instructions' code spans and links, its needs), resolved once by one rule or as its problem; a reference to one of its proofs is placed with that proof instead."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
-               :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner as text."}
+               :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner and handed on as printed values."}
                                [:seon.error/type {:optional true} :seon.error/type]
                                [:type {:optional true} :seon.test.failure/type] [:message {:optional true} :string]
                                [:testing {:optional true} :seon.test.failure/testing-contexts]
                                [:file {:optional true} :string] [:line {:optional true} :seon.test.failure/line]
-                               [:expected-text {:optional true} :string] [:actual-text {:optional true} :string]]
+                               [:expected {:optional true} :seon.print/printed] [:actual {:optional true} :seon.print/printed]]
                :proof-failures [:vector {:description "Every failing assertion of a red proof, in a stable order (file, line, report)."} :seon.context/proof-failure]
                :proof [:map {:description "One proof of the held task: its status, its failures when red, and, placed here once, its resolution as a reference (its source)."}
                        [:seon.test/sym :seon.test/sym] [:seon.test/source {:optional true} :seon.test/source]

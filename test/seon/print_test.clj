@@ -518,3 +518,9 @@
     (is (every? #(re-matches #"\(f 'a\.b/g\d+\)" %) forms) "every shown form is whole")
     (is (not (re-find #"\(…" text)) "no form is shown as only its count")))
 
+
+(deftest a-printed-value-shows-its-text-unchanged-wherever-it-sits
+  (let [text "\"a\\\\b\" (= 4 (f 2))"]
+    (is (= (str "{:actual " text "}")
+           (render.value/core-text {:actual (print/printed text)}))
+        "the saved text is shown once, not escaped again as a string")))

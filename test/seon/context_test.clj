@@ -122,8 +122,21 @@
            failures (:seon.context/proof-failures (first (:seon.context/proof-list proofs)))]
        (is (= {:red 1} (:seon.context/counts proofs)))
        (is (= ["doubles" "triples"] (sort (mapv :message failures))) "each failing assertion is shown")
-       (is (every? #(re-find #"\(= \d" (:expected-text %)) failures) "the claim is the runner's stored text, marked as text")
-       (is (every? :actual-text failures))))))
+       (is (every? #(= '= (first (:expected %))) failures) "the claim is the runner's stored printed form, shown as the form it printed")
+       (is (every? :actual failures))))))
+
+(def ^:private backslash-proof-test
+  "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2))))")
+
+(deftest ^{:seon/tasks #{'seon.context/failure-printed-once}} a-failure-claim-shows-its-saved-printed-value-once
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (proof-task running connection agent-id)
+     (evaluate running agent-id "(ns tq.cs) (defn f [x] (str \\a (char 92) \\b))")
+     (evaluate running agent-id backslash-proof-test)
+     (evaluate running agent-id "(my.test/check {})")
+     (let [failure (first (:seon.context/proof-failures (first (:seon.context/proof-list (:seon.context/proofs (block running agent-id))))))]
+       (is (= '(not (= 4 "a\\b")) (:actual failure)) "the string a\\b shows as the value printer prints it once, not escaped again inside a string")))))
 
 (deftest the-block-resolves-the-names-a-task-references
   (test-support/with-running-agent

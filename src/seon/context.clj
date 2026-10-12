@@ -5,6 +5,7 @@
   agent's own model exchanges, then the block. Nothing of it is stored; an
   attempt records the basis it was assembled at."
   (:require [seon.batch :as batch]
+            [seon.print :as print]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.message :as message]
@@ -87,20 +88,23 @@
 
 ;; Every failing assertion of a red proof, in the order `seon.render.test` shows (file, line, report id)
 ;; so two passes show the same list. The
-;; runner stores a claim's expected and actual as the printer's shown text; they stay text, marked so.
+;; runner stores a claim's expected and actual as the printer's shown text; they are handed back as printed
+;; values, so the block shows that text once, unchanged.
 (def ^:private failure-keys
   {:seon.error/type :seon.error/type
    :seon.test.failure/type :type :seon.test.failure/message :message
    :seon.test.failure/testing-contexts :testing :seon.test.failure/reported-file :file
-   :seon.test.failure/line :line :seon.test.failure/expected :expected-text
-   :seon.test.failure/actual :actual-text})
+   :seon.test.failure/line :line :seon.test.failure/expected :expected
+   :seon.test.failure/actual :actual})
 
 (defn- proof-failures
   {:malli/schema [:=> [:cat [:or :seon.test/result :seon.test/result-unknown]]
                   [:or :nil :seon.context/proof-failures]]}
   [result]
   (when-let [reports (seq (:seon.test.failure/reports result))]
-    (mapv #(update-keys (select-keys % (keys failure-keys)) failure-keys)
+    (mapv #(cond-> (update-keys (select-keys % (keys failure-keys)) failure-keys)
+             (:seon.test.failure/expected %) (update :expected print/printed)
+             (:seon.test.failure/actual %) (update :actual print/printed))
           (sort-by (juxt #(get % :seon.test.failure/reported-file "") #(get % :seon.test.failure/line 0) :seon.test.report/id) reports))))
 
 (defn- proof-status
