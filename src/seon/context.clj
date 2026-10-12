@@ -91,7 +91,8 @@
 ;; so two passes show the same list. The
 ;; runner stores a claim's expected and actual as the printer's shown text; they stay text, marked so.
 (def ^:private failure-keys
-  {:seon.test.failure/type :type :seon.test.failure/message :message
+  {:seon.error/type :seon.error/type
+   :seon.test.failure/type :type :seon.test.failure/message :message
    :seon.test.failure/testing-contexts :testing :seon.test.failure/reported-file :file
    :seon.test.failure/line :line :seon.test.failure/expected :expected-text
    :seon.test.failure/actual :actual-text})
@@ -155,19 +156,24 @@
                :seon.context/proof-list entries}))))))
 
 (defn- designed-red?
-  "True when the head entry `entry` is red only by failing assertions (`:fail` reports): a designed red, never a
-  compile or reference error."
+  "True when the head entry `entry` is red only by failing assertions or errors typed `:seon.error/unimplemented`."
   {:malli/schema [:=> [:cat [:maybe :seon.context/observed]] :boolean]}
   [entry]
   (let [failures (:seon.context/proof-failures entry)]
-    (boolean (and (= :red (:seon.context/proof-status entry)) (seq failures) (every? #(= :fail (:type %)) failures)))))
+    (boolean
+     (and (= :red (:seon.context/proof-status entry)) (seq failures)
+          (every? #(or (= :fail (:type %))
+                       (and (= :error (:type %))
+                            (= :seon.error/unimplemented (:seon.error/type %))))
+                  failures)))))
 
 (defn step-status
   "The status of a step from one observation: `:seon.context/broken`, the head's reds present at the fork point
   and not red there; `:seon.context/new-red`, the head's reds absent there; and `:seon.task/status`, `:done` by
   the step's one rule, else `:working`. An `:implement` step is done when its proofs are nonempty and all green,
   nothing is broken and every new red is a proof; a `:prove` step when its own proofs are all green, its product
-  is nonempty, nothing is broken and its new reds are exactly its product, each red by failing assertions."
+  is nonempty, nothing is broken and its new reds are exactly its product, each red by failing
+  assertions or an unimplemented stub."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
     head :seon.context/head fork-point :seon.context/fork-point}]

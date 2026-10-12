@@ -184,7 +184,9 @@
   report for the blob tier; the whole values stay on the event in memory."
   {:malli/schema [:=> [:cat :map :map] :seon.test.failure/report]}
   [options event]
-  (let [[expected actual] (report-pair options event)]
+  (let [[expected actual] (report-pair options event)
+        error-type (when (instance? Throwable (:actual event))
+                     (:seon.error/type (ex-data (:actual event))))]
   (cond-> (with-meta {:seon.test.failure/type (:type event)}
             ;; The whole thrown value rides as metadata, in memory only: it is
             ;; no part of the report's value (equality, printing, identity),
@@ -203,6 +205,7 @@
     (and (integer? (:line event)) (pos? (:line event)))
     (assoc :seon.test.failure/line (:line event))
     (event-signature event) (assoc :seon.test.failure/signature (event-signature event))
+    error-type (assoc :seon.error/type error-type)
     (instance? Throwable (:actual event))
     (assoc :seon.test.failure/throwable (symbol (.getName (class (:actual event))))))))
 

@@ -13,6 +13,7 @@
                :must-reads [:vector {:description "Each reference the held task makes, resolved or as its problem."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
                :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner as text."}
+                               [:seon.error/type {:optional true} :seon.error/type]
                                [:type {:optional true} :seon.test.failure/type] [:message {:optional true} :string]
                                [:testing {:optional true} :seon.test.failure/testing-contexts]
                                [:file {:optional true} :string] [:line {:optional true} :seon.test.failure/line]
@@ -50,7 +51,7 @@
                :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :working]]
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
-                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions when done."} [:vector :seon.context/test-entry]]
+                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions or unimplemented stubs when done."} [:vector :seon.context/test-entry]]
                       [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]]
                :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
                         [:seon.context/items :my.message/inbox]

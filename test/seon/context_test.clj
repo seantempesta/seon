@@ -304,6 +304,7 @@
   (let [green {:seon.context/proof-status :green}
         red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
         errored {:seon.context/proof-status :red :seon.context/proof-failures [{:type :error}]}
+        unimplemented {:seon.context/proof-status :red :seon.context/proof-failures [{:type :error :seon.error/type :seon.error/unimplemented}]}
         pending {:seon.context/proof-status :pending}
         judged (fn [step proofs product head fork-point]
                  (context/step-status {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
@@ -319,6 +320,7 @@
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} :done #{} #{'tq.rule/s} "its product red by assertions, new"]
              [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q green 'tq.rule/s red} {'tq.rule/q true} :done #{} #{'tq.rule/s} "with its own proof green"]
              [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true} :working #{} #{'tq.rule/s} "its own proof red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s unimplemented} {} :done #{} #{'tq.rule/s} "its product red by an unimplemented stub"]
              [:prove #{} #{} {} {} :working #{} #{} "no product"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} :working #{} #{} "its product green proves nothing"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :working #{} #{'tq.rule/s} "an error is no designed red"]

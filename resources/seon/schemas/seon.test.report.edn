@@ -22,4 +22,5 @@
   [:seon.test.failure/actual-size {:optional true} :seon.test.failure/actual-size]
   [:seon.test.failure/reported-file {:optional true} :seon.test.failure/reported-file]
   [:seon.test.failure/line {:optional true} :seon.test.failure/line]
+  [:seon.error/type {:optional true} :seon.error/type]
   [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]]}

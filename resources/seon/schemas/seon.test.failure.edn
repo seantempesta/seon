@@ -32,6 +32,7 @@
   [:seon.test.failure/reported-file {:optional true} :seon.test.failure/reported-file]
   [:seon.test.failure/line {:optional true} :seon.test.failure/line]
   [:seon.test.failure/signature {:optional true} :seon.test.failure/signature]
+  [:seon.error/type {:optional true} :seon.error/type]
   [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]]
  :reports [:vector :seon.test.failure/report]
  :failure
@@ -54,6 +55,7 @@
   [:seon.test.failure/reported-file {:optional true} :seon.test.failure/reported-file]
   [:seon.test.failure/line {:optional true} :seon.test.failure/line]
   [:seon.test.failure/signature {:optional true} :seon.test.failure/signature]
+  [:seon.error/type {:optional true} :seon.error/type]
   [:seon.test.failure/throwable {:optional true} :seon.test.failure/throwable]
   [:seon.test.failure/first-run :seon.test.failure/first-run]
   [:seon.test.failure/last-run :seon.test.failure/last-run]
@@ -61,6 +63,7 @@
   [:seon.test.failure/last-seen-at :seon.test.failure/last-seen-at]]
  :value
  [:map
+  [:seon.error/type {:optional true} :seon.error/type]
   [:seon.test.failure/id :seon.test.failure/id]
   [:seon.test.failure/type :seon.test.failure/type]
   [:seon.test.failure/ordinal :seon.test.failure/ordinal]

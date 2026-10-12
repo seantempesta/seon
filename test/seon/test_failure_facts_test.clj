@@ -1,5 +1,5 @@
 (ns seon.test-failure-facts-test
-  (:require [seon.schema] [clojure.test :refer [deftest is testing]]
+  (:require [seon.schema] [seon.context :as context] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [sci.core :as sci]
             [seon.blob :as blob]
@@ -168,6 +168,22 @@
             (is (not= (:seon.test.report/id (report first-run))
                       (:seon.test.report/id (report second-run)))
                 "so each is its own report")))))))
+
+(deftest an-unimplemented-stub-is-a-prove-steps-designed-red
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s _ _]
+          (redeclare-probe!
+           connection s "(clojure.test/deftest probe (stub))"
+           "(defn stub {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"Not implemented.\" (seon.error.refusal/error :seon.error/unimplemented {:seon.error/operation 'tq.stub/stub :seon.error/message \"Not implemented.\" :seon.error/unimplemented-function 'tq.stub/stub}))))")
+          (let [result (run-probe connection s)
+                head (#'context/head-entries (db/db connection) #{s})]
+            (is (= 1 (:seon.test/error-count result)))
+            (is (= :seon.error/unimplemented (:seon.error/type (first (reports result)))))
+            (is (= :done (:seon.task/status
+                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s}
+                                                :seon.context/head head :seon.context/fork-point {}}))))))))))
 
 (deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database
