@@ -173,9 +173,10 @@
   proofs known green there, when any; and `:seon.task/status`. An `:implement` step is `:satisfied` when its
   proofs are nonempty, all green and all known green at the fork point: it has nothing to do. Else it is `:done`
   when its proofs are nonempty and all green, nothing is broken and every new red is a proof. A `:prove` step is
-  done when its own proofs are all green, its product is nonempty, nothing is broken and its new reds are exactly
-  its product, each red by failing assertions or an unimplemented stub; it is `:satisfied` when the same holds of
-  a product its fork point already held red and nothing is new: main holds its product. An `:implement` step is
+  done when its own proofs are all green, its product is nonempty and every product test is red at the head by
+  failing assertions or an unimplemented stub, nothing is broken and every new red is a product test (the rest its
+  fork point already held red); it is `:satisfied` when its fork point already held its whole product red and
+  nothing is new: main holds its product. A declared product test absent at the head keeps it `:working`. An `:implement` step is
   done only when its merge would accept it: a function it changed with no complete contract
   (`:seon.context/uncontracted`) keeps it `:working` and is named beside its status. Any other step is
   `:working`."
@@ -194,7 +195,7 @@
                                  (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product)))
         done? (case step
                 :implement (and (seq proofs) (green? proofs) (empty? broken) (every? proofs new-red) (empty? uncontracted))
-                :prove (and (green? proofs) (seq product) (empty? broken) (= new-red product)
+                :prove (and (green? proofs) (seq product) (empty? broken) (every? product new-red)
                             (every? (comp designed-red? head) product)))]
     (cond-> {:seon.task/status (cond satisfied? :satisfied done? :done :else :working)
              :seon.context/broken broken :seon.context/new-red new-red}

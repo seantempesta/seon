@@ -42,16 +42,20 @@
    (fn [connection]
      (ingest! connection (entry "ordinary" "") (entry "implement" ":step :implement")
               (entry "prove" ":step :prove") (entry "prove-own" ":step :prove")
-              (entry "body" (needs "prove")) (entry "body-own" (needs "prove-own")))
+              (entry "body" (needs "prove")) (entry "body-own" (needs "prove-own"))
+              (entry "prove-declared" ":step :prove :product #{tq.obligations/law tq.obligations/table}")
+              (entry "body-declared" (needs "prove-declared")))
      (doseq [[name tag] [['ordinary 'ordinary] ['implementation 'implement]
-                       ['product 'body] ['own 'prove-own] ['product-own 'body-own]]]
+                       ['product 'body] ['own 'prove-own] ['product-own 'body-own] ['table 'body-declared]]]
        (test-support/declare-proof! connection 'tq.obligations name (symbol "tq.tree" (str tag))))
      (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-obligations-agent"))
      (doseq [[name kind proofs product]
              [["ordinary" :implement '#{tq.obligations/ordinary} #{}]
               ["implement" :implement '#{tq.obligations/implementation} #{}]
               ["prove" :prove #{} '#{tq.obligations/product}]
-              ["prove-own" :prove '#{tq.obligations/own} '#{tq.obligations/product-own}]]]
+              ["prove-own" :prove '#{tq.obligations/own} '#{tq.obligations/product-own}]
+              ;; a declared product test no test holds yet is owed all the same
+              ["prove-declared" :prove #{} '#{tq.obligations/law tq.obligations/table}]]]
        (is (= {:seon.task/step kind :seon.task/proofs proofs :seon.task/product product}
               (task/obligations (db/db connection) (symbol "tq.tree" name))))
        (is (= proofs (:seon.task/proofs

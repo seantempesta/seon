@@ -16,13 +16,13 @@
  :entry [:map {:closed true :description "Stage 1: one authored entry of resources/seon/tasks/<ns>.edn; empty optional sets are absent. Its handle and symbol are derived, never written."}
          [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
          [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
-         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
+         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]]
  :file [:vector :seon.task/entry]
  :files [:map-of {:description "Task file path to its exact text; a deleted file is \"[]\", an empty declaration."} [:string {:min 1}] :string]
  :declaration [:map {:description "Stage 3: a task's declared content, compared as its revision (7.16). Its handle and symbol derive from it."}
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
                [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
-               [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
+               [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.cluster
               :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
@@ -35,7 +35,7 @@
         [:seon.task/faults {:optional true} :seon.task/faults]
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
         [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
-        [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
+        [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
         [:seon.task/execution {:optional true} :seon.task/execution]
         [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
@@ -148,7 +148,7 @@
  :links [:map {:description "Stage 3: the edges one holder's annotation produces."}
          [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read]
          [:seon.fn/see-also {:optional true} :seon.fn/see-also]]
- :product [:set :symbol]
+ :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done or satisfied."} :qualified-symbol]
  :obligations [:map [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set :symbol]

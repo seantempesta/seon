@@ -460,7 +460,9 @@
              [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {'tq.rule/s true} :working #{} #{} "a product held at the fork point red by an error is no designed red"]
              [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true 'tq.rule/s true} :working #{} #{} "a product held at the fork point beside its own proof red"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]]]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]
+             [:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red} {'tq.rule/s true} :working #{} #{} "a declared product test absent beside one its fork point held"]
+             [:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red 'tq.rule/l red} {'tq.rule/s true} :done #{} #{'tq.rule/l} "the absent product test supplied beside one its fork point held"]]]
       (is (= (cond-> {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
                green-before (assoc :seon.context/green-before green-before))
              (judged step proofs product head fork-point))

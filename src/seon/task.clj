@@ -506,18 +506,19 @@
                (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))))
 
 (defn obligations
-  "The step kind, own proofs and successors' product tests for task `sym` at `database`."
+  "The step kind, own proofs and product tests for task `sym` at `database`: the product is the tests the step
+  declares (`:seon.task/product`) and those tagged with a task that needs it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database sym]
-  (let [task (db/pull database [:seon.task/step] [:seon.task/sym sym])
+  (let [task (db/pull database [:seon.task/step :seon.task/product] [:seon.task/sym sym])
         proofs (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database sym)
         product (db/q '[:find [?s ...] :in $ ?t :where [?task :seon.task/sym ?t]
                         [?next :seon.task/needs ?task] [?next :seon.task/sym ?n]
                         [?e :seon.task/tasks ?n] [?e :seon.test/sym ?s]] database sym)]
     (or (some read-error [task proofs product])
         {:seon.task/step (get task :seon.task/step :implement)
-         :seon.task/proofs (set proofs) :seon.task/product (set product)})))
+         :seon.task/proofs (set proofs) :seon.task/product (into (set product) (:seon.task/product task))})))
 
 (defn task-edges
   "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
