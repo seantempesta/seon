@@ -20,4 +20,10 @@
  #:seon.task{:name "eval-clj-advertises-no-timeout"
              :kind :function
              :intent "`seon.mcp/eval-arguments` and `seon.mcp/tool-table` now declare the timeout and `seon.mcp-entrance-test/eval-clj-advertises-the-timeout-the-bridge-honours` passes. Complete the installed path: a freshly connected MCP client must receive that argument schema and a bounded `my.test/check-platform` request must return its result through the bridge. Preserve an end-to-end proof; the tool-table unit test alone does not establish that the connected client or bridge uses the new bound."
-             :must-read #{seon.mcp/tool-table seon.mcp/eval-arguments my.test/check-platform}}]
+             :must-read #{seon.mcp/tool-table seon.mcp/eval-arguments my.test/check-platform}}
+ #:seon.task{:name "a-fresh-agents-first-eval-request-acquires-its-branch-cheaply"
+             :kind :function
+             :intent "A fresh agent's first `mcp__seon__eval_clj` request spends 165-178 ms (restart audit) and 148.6 ms (re-measured on default 2026-10-12, agent `findings`, `(+ 1 2)`: `:custody` 148.6 of 257 ms) in the reply's `:custody` stage, the time from the entrance to the return of `seon.mcp/execution`, which for an unknown agent id runs `my.agent/create-branch!` (a `datahike.api/branch!` plus the agent's rows) and the agent's start. A branch is a pointer to shared immutable indexes, so it should cost one `d/branch!` and one recording transaction (single-digit ms, `seon.profile/measure`). Find the armed functions under `seon.mcp/execution` that own the 148 ms (profile cells before/after), and change that owner; phase E3 (`seon.cluster.agent/a-fresh-agents-environment-costs-one-fork`) covers the SCI fork part only. Done when the deftest the implementer writes first, `seon.mcp-test/a-fresh-agents-first-eval-request-acquires-its-branch-cheaply`, asserts through `seon.profile/measure` that the `:custody` stage of a first request is under the measured bound on the named armed functions."
+             :must-read #{seon.mcp/execution my.agent/create-branch! seon.cluster.agent/acquire-context! seon.profile/measure}
+             :evidence #{"docs/research/agent-platform/2026-10-12/restart-audit/cache-hits.md" "docs/research/agent-platform/2026-10-12/restart-audit/request-cost.md"}}
+]
