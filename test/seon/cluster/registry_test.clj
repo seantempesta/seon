@@ -840,3 +840,26 @@
            (is (= (+ baseline (- with-copy before-copy)) (clean-key-count store))
                "the store holds its baseline plus the one copied transaction")))
        nil))))
+
+(deftest
+  a-re-forked-branch-answers-its-own-fork-commit-as-its-merge-base
+  ;; `datahike.api/delete-branch!` leaves a deleted branch's head record in the store until collection; the
+  ;; merge base is the base ref the store's branches hold, so a retired branch has none and a re-fork under
+  ;; the same name answers the commit that fork made
+  (with-program-store
+   (fn [store connection]
+     (let [branch :attempt-re-forked
+           fork! #(registry/fork! {:seon.store/store store :seon.store/branch branch
+                                   :seon.cluster.registry/from :db :seon.db/db (db/db connection)})
+           first-fork (db/commit-id (db/db connection))
+           _ (is (:seon.cluster/created? (fork!)))
+           _ (is (= first-fork (registry/base-commit-id (db/db connection) branch)))
+           _ (d/transact connection [])
+           second-fork (db/commit-id (db/db connection))]
+       (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+       (is (nil? (registry/base-commit-id (db/db connection) branch)) "a retired branch has no merge base")
+       (is (:seon.cluster/created? (fork!)))
+       (is (= second-fork (registry/base-commit-id (db/db connection) branch))
+           "the re-fork's merge base is the commit it forked at")
+       (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+       nil))))

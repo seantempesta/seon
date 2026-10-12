@@ -357,11 +357,16 @@
   (keyword "base" (str (when-let [space (namespace branch)] (str space "/")) (name branch))))
 
 (defn base-commit-id
-  "The commit retained by a work branch's base ref."
+  "The commit retained by a work branch's base ref, or nil when the store's
+  branches hold no such ref: `delete-branch!` leaves a deleted ref's head
+  record until collection, and that record is no merge base."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
                   [:maybe :seon.source/commit-id]]}
   [database branch]
-  (get-in (head-record (:store database) (base-branch branch)) [:meta :datahike/commit-id]))
+  (let [konserve (:store database)
+        base (base-branch branch)]
+    (when (contains? (head-record konserve :branches) base)
+      (get-in (head-record konserve base) [:meta :datahike/commit-id]))))
 
 (defn advance-base!
   "Move a work branch's retained base to the immutable value just merged."
