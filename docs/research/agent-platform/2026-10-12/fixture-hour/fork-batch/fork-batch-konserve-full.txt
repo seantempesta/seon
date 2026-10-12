@@ -1,0 +1,52 @@
+
+Running tests in #{"test"}
+
+Testing konserve.compressor-test
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by net.jpountz.util.Native in an unnamed module (file:/Users/sean/.m2/repository/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+Testing konserve.filestore-jimfs-test
+
+Testing konserve.filestore-migration-test
+2026-10-12T12:58:20.137567Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.287722Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.407468Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.546379Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.624820Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.705093Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.768326Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+2026-10-12T12:58:20.829531Z :info konserve.filestore :konserve/old-schema-detected 
+  data: {:count 10, :msg "Files in old storage schema detected. Migration for each key will happen transparently the first time a key is accessed. Invoke konserve.core/keys to do so at once. Once all keys are migrated you can deactivate this initial check by setting detect-old-file-schema to false."}
+
+Testing konserve.filestore-test
+
+Testing konserve.gc-callback-test
+
+Testing konserve.lock-test
+
+Testing konserve.memory-test
+
+Testing konserve.read-miss-safe-test
+
+Testing konserve.storage-layout-test
+
+Testing konserve.store-test
+
+Testing konserve.tiered-range-test
+{:key :inherited, :ms 0.224833, :allocated-bytes 29144}
+{:key :local, :ms 0.19, :allocated-bytes 29064}
+
+Testing konserve.value-metadata-test
+
+Ran 92 tests containing 1397 assertions.
+0 failures, 0 errors.

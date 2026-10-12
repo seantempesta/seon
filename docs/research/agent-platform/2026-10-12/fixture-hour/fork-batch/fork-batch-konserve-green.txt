@@ -1,0 +1,9 @@
+
+Running tests in #{"test"}
+
+Testing konserve.tiered-range-test
+{:key :inherited, :ms 0.561708, :allocated-bytes 30712}
+{:key :local, :ms 0.4645, :allocated-bytes 30728}
+
+Ran 2 tests containing 26 assertions.
+0 failures, 0 errors.

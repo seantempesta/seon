@@ -1,0 +1,182 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+WARNING: abs already refers to: #'clojure.core/abs in namespace: datahike.experimental.graph-util, being replaced by: #'datahike.experimental.graph-util/abs
+WARNING: random-uuid already refers to: #'clojure.core/random-uuid in namespace: datahike.test.schema-test, being replaced by: #'datahike.test.schema-test/random-uuid
+--- clj-pss (clojure.test) ---------------------------
+datahike.test.overlay-test
+  overlay-writes-never-reach-the-shared-store
+    the overlay reads the shared store and its own writes
+    a second overlay of the same store is another world
+    the shared store and its open connection see nothing
+    deleting an overlay drops its writes and leaves the shared store
+    after release the shared store is unchanged and still opens[31m ERROR[m
+--- specs (clojure.test) ---------------------------
+datahike.test.overlay-test
+  overlay-writes-never-reach-the-shared-store
+    the overlay reads the shared store and its own writes
+    a second overlay of the same store is another world
+    the shared store and its open connection see nothing
+    deleting an overlay drops its writes and leaves the shared store
+    after release the shared store is unchanged and still opens[31m ERROR[m
+--- clj-hht (clojure.test) ---------------------------
+datahike.test.overlay-test
+  overlay-writes-never-reach-the-shared-store
+    the overlay reads the shared store and its own writes
+    a second overlay of the same store is another world
+    the shared store and its open connection see nothing
+    deleting an overlay drops its writes and leaves the shared store
+    after release the shared store is unchanged and still opens[31m ERROR[m
+
+Randomized with --seed 2125387264
+
+[31mERROR[m in datahike.test.overlay-test/overlay-writes-never-reach-the-shared-store (async.cljc:117)
+Uncaught exception, not in assertion.
+Exception: clojure.lang.ExceptionInfo: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "cfe72802-1d23-40cd-8981-dcb3a1faff4e" :db [:datahike/overlay #uuid "42519e4d-aeb9-4038-bc8d-8ca0bf404a3d"]]]}
+{}
+ at superv.async$throw_if_exception_.invokeStatic (async.cljc:117)
+    superv.async$throw_if_exception_.invoke (async.cljc:111)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: java.util.concurrent.ExecutionException: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "cfe72802-1d23-40cd-8981-dcb3a1faff4e" :db [:datahike/overlay #uuid "42519e4d-aeb9-4038-bc8d-8ca0bf404a3d"]]]}
+ at java.util.concurrent.CompletableFuture.wrapInExecutionException (CompletableFuture.java:345)
+    ...
+    datahike.tools$throwable_promise$reify__19292$fn__19293.invoke (tools.cljc:102)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first.
+{:type :database-has-active-connections, :connections [[#uuid "cfe72802-1d23-40cd-8981-dcb3a1faff4e" :db [:datahike/overlay #uuid "42519e4d-aeb9-4038-bc8d-8ca0bf404a3d"]]]}
+ at datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095$fn__63098.invoke (writing.cljc:912)
+    datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095.invoke (writing.cljc:899)
+    ...
+    datahike.writing$_delete_database_STAR_$fn__63092.invoke (writing.cljc:899)
+    ...
+╭───── Test output ───────────────────────────────────────────────────────
+│ 2026-10-12T13:03:08.639318Z :error datahike.writing [912 8] Cannot delete a database with active connections. Release them first. 
+│   data: {:type :database-has-active-connections, :connections [[#uuid "cfe72802-1d23-40cd-8981-dcb3a1faff4e" :db [:datahike/overlay #uuid "42519e4d-aeb9-4038-bc8d-8ca0bf404a3d"]]]}
+╰─────────────────────────────────────────────────────────────────────────
+
+[31mERROR[m in datahike.test.overlay-test/overlay-writes-never-reach-the-shared-store (async.cljc:117)
+Uncaught exception, not in assertion.
+Exception: clojure.lang.ExceptionInfo: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "12c55d60-fd88-4b37-9c8f-4224638a0a93" :db [:datahike/overlay #uuid "19d654f6-423c-4b04-a694-a5fddfeb1974"]]]}
+{}
+ at superv.async$throw_if_exception_.invokeStatic (async.cljc:117)
+    superv.async$throw_if_exception_.invoke (async.cljc:111)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: java.util.concurrent.ExecutionException: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "12c55d60-fd88-4b37-9c8f-4224638a0a93" :db [:datahike/overlay #uuid "19d654f6-423c-4b04-a694-a5fddfeb1974"]]]}
+ at java.util.concurrent.CompletableFuture.wrapInExecutionException (CompletableFuture.java:345)
+    ...
+    datahike.tools$throwable_promise$reify__19292$fn__19293.invoke (tools.cljc:102)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first.
+{:type :database-has-active-connections, :connections [[#uuid "12c55d60-fd88-4b37-9c8f-4224638a0a93" :db [:datahike/overlay #uuid "19d654f6-423c-4b04-a694-a5fddfeb1974"]]]}
+ at datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095$fn__63098.invoke (writing.cljc:912)
+    datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095.invoke (writing.cljc:899)
+    ...
+    datahike.writing$_delete_database_STAR_$fn__63092.invoke (writing.cljc:899)
+    ...
+╭───── Test output ───────────────────────────────────────────────────────
+│ 2026-10-12T13:03:09.099064Z :error datahike.writing [912 8] Cannot delete a database with active connections. Release them first. 
+│   data: {:type :database-has-active-connections, :connections [[#uuid "12c55d60-fd88-4b37-9c8f-4224638a0a93" :db [:datahike/overlay #uuid "19d654f6-423c-4b04-a694-a5fddfeb1974"]]]}
+╰─────────────────────────────────────────────────────────────────────────
+
+[31mERROR[m in datahike.test.overlay-test/overlay-writes-never-reach-the-shared-store (async.cljc:117)
+Uncaught exception, not in assertion.
+Exception: clojure.lang.ExceptionInfo: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "bcef8e2d-575b-4373-bdd6-83b02eac853e" :db [:datahike/overlay #uuid "1b13d0c3-73e8-432d-aa83-7066438befec"]]]}
+{}
+ at superv.async$throw_if_exception_.invokeStatic (async.cljc:117)
+    superv.async$throw_if_exception_.invoke (async.cljc:111)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: java.util.concurrent.ExecutionException: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first. {:type :database-has-active-connections, :connections [[#uuid "bcef8e2d-575b-4373-bdd6-83b02eac853e" :db [:datahike/overlay #uuid "1b13d0c3-73e8-432d-aa83-7066438befec"]]]}
+ at java.util.concurrent.CompletableFuture.wrapInExecutionException (CompletableFuture.java:345)
+    ...
+    datahike.tools$throwable_promise$reify__19292$fn__19293.invoke (tools.cljc:102)
+    datahike.tools$throwable_promise$reify__19292.deref (tools.cljc:102)
+    ...
+    datahike.api.impl$delete_database.invokeStatic (impl.cljc:68)
+    datahike.api.impl$delete_database.doInvoke (impl.cljc:68)
+    ...
+    datahike.test.overlay_test$fn__127476$fn__127496.invoke (overlay_test.clj:69)
+    datahike.test.overlay_test$fn__127476.invokeStatic (overlay_test.clj:31)
+    datahike.test.overlay_test/fn (overlay_test.clj:20)
+    ...
+Caused by: clojure.lang.ExceptionInfo: Cannot delete a database with active connections. Release them first.
+{:type :database-has-active-connections, :connections [[#uuid "bcef8e2d-575b-4373-bdd6-83b02eac853e" :db [:datahike/overlay #uuid "1b13d0c3-73e8-432d-aa83-7066438befec"]]]}
+ at datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095$fn__63098.invoke (writing.cljc:912)
+    datahike.writing$_delete_database_STAR_$fn__63092$state_machine__11744__auto____63095.invoke (writing.cljc:899)
+    ...
+    datahike.writing$_delete_database_STAR_$fn__63092.invoke (writing.cljc:899)
+    ...
+╭───── Test output ───────────────────────────────────────────────────────
+│ 2026-10-12T13:03:09.544388Z :error datahike.writing [912 8] Cannot delete a database with active connections. Release them first. 
+│   data: {:type :database-has-active-connections, :connections [[#uuid "bcef8e2d-575b-4373-bdd6-83b02eac853e" :db [:datahike/overlay #uuid "1b13d0c3-73e8-432d-aa83-7066438befec"]]]}
+╰─────────────────────────────────────────────────────────────────────────
+[31m3 tests, 36 assertions, 3 errors, 0 failures.[m
+----- Error --------------------------------------------------------------------
+Type:     clojure.lang.ExceptionInfo
+Message:  
+Data:     {:proc #object[java.lang.ProcessImpl 0x514b3a26 "Process[pid=225, exitValue=3]"], :exit 3, :in #object[java.lang.ProcessBuilder$NullOutputStream 0x35bb8e55 "java.lang.ProcessBuilder$NullOutputStream@35bb8e55"], :out #object[java.lang.ProcessBuilder$NullInputStream 0x5a71def6 "java.lang.ProcessBuilder$NullInputStream@5a71def6"], :err #object[java.lang.ProcessBuilder$NullInputStream 0x5a71def6 "java.lang.ProcessBuilder$NullInputStream@5a71def6"], :prev nil, :cmd ["clojure" "-M:test" "-m" "kaocha.runner" "--focus" "datahike.test.overlay-test"], :type :babashka.process/error}
+Location: /Users/sean/src/seon/reference-code/datahike/bb/src/tools/test.clj:8:25
+
+----- Context ------------------------------------------------------------------
+ 4:             [babashka.process :as p]
+ 5:             [clojure.java.io :as io]
+ 6:             [tools.build :as build]))
+ 7: 
+ 8: (defn clj [opts & args] (apply p/shell opts "clojure" args))
+                            ^--- 
+ 9: (defn git [opts & args] (apply p/shell opts "git" args))
+10: 
+11: (defn kaocha [& args]
+12:   (apply clj {:extra-env {"LOG_LEVEL" ":warn"}}
+13:          "-M:test" "-m" "kaocha.runner" args))
+
+----- Stack trace --------------------------------------------------------------
+babashka.process/check                    - <built-in>
+babashka.process/shell                    - <built-in>
+clojure.core/apply                        - <built-in>
+babashka.impl.process/shell               - <built-in>
+clojure.core/apply                        - <built-in>
+tools.test                                - /Users/sean/src/seon/reference-code/datahike/bb/src/tools/test.clj:8:25
+clojure.core/apply                        - <built-in>
+tools.test                                - /Users/sean/src/seon/reference-code/datahike/bb/src/tools/test.clj:12:3
+clojure.core/apply                        - <built-in>
+user-f54e0844-3aa4-4b5d-9ca2-228932955c10 - NO_SOURCE_PATH:38:1
+
