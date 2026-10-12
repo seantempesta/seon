@@ -14,7 +14,7 @@
   (list 'seon.bootstrap/help-value))
 
 (defn help-value
-  "The REPL instructions: literal lines teaching only installed forms."
+  "The REPL instructions: an orienting guide in titled groups, teaching only installed forms."
   {:seon/tasks #{'seon.bootstrap/session-end-is-taught-three-ways}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
@@ -27,56 +27,94 @@
   ;; its own pair, the render law's master override.
   {:seon.render/ai 'seon.bootstrap/render-help-ai
    :seon.render/html 'seon.bootstrap/render-help-html
-   :seon.help/lines
-   ["You are an agent at a REPL on your own branch; only what root merges reaches the cluster."
-    "Your task and proofs are in your block: (seon.context/current-state). Send forms; prose goes in ;; comments."
-    "Your block names your :seon.context/namespace. Define a function in the namespace that owns it: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)); every function has a contract."
-    "Change code at the REPL, never in files (no slurp, spit or io): (in-ns 'the.owner.ns) then (defn ...) replaces the function there; root writes files back when it merges."
-    "A body's locals exist only inside their binding: call the function on inputs, or redefine it with the probe inside."
-    "A test proves a task by naming it in :seon/tasks: (deftest ^{:seon/tasks #{'the.task.ns/name}} increments (is (= 3 (inc 2))))."
-    "Register a schema with (seon.schema/register! :comp.order/qty [:int {:min 1}])."
-    "Your task's proofs and the tests reaching your change run after each eval request; green proofs end your task and tell root."
-    "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program)."
-    "Ask root with my.message/send, :my.message/to \"root\" and :my.message/content."
-    "A reply is data: :value, :error, :findings and :result, a live symbol for later forms."
-    "Gotcha: never pass or store nil; absence is no key. Fix the caller, not the contract: an optional input is an optional key, [:map [:x {:optional true} :int]], never [:maybe ...]."
-    "Gotcha: in Malli [:= nil] and [:enum nil] are errors (nil lands in the properties slot); a literal is [:= {} nil]. A contract is [:=> [:cat in1 in2] out], inputs inside :cat."
-    "Gotcha: a keyword lookup is falsy for absent, nil and false alike; test presence with (contains? m :k) or (find m :k)."
-    "Gotcha: (some f xs) returns f's first truthy result, not the element: (some (fn [x] (when (even? x) x)) [1 2 3]) is 2."
-    "Gotcha: map and filter are lazy and escape (binding ...) and try; use mapv, into or run! there."
-    "Gotcha: write fully qualified symbols, (seon.db/q ...); an alias works only if (ns-aliases *ns*) shows it. #() literals do not nest."
-    "Gotcha: an error is a map; read :seon.error/type, :seon.error/message and :seon.error/problems, then change the form; never resend it unchanged."]})
+   :seon.help/groups
+   [{:seon.help/title "Who you are"
+     :seon.help/lines
+     ["You are a Seon agent at a Clojure REPL, on your own branch of the cluster's database. Your definitions live on that branch; they reach main only when root reviews and merges your work."
+      "The program is data: functions, tests, schemas and your task are entities you read and define at this REPL."]}
+    {:seon.help/title "Reading your context"
+     :seon.help/lines
+     ["Your current-state block is the last part of every request; it is already there, and (seon.context/current-state) reads it again."
+      ":seon.context/task is what must become true; its :seon.task/intent states the conditions. :seon.context/step is :implement, make the proofs green, or :prove, write red tests for the intent; its :seon.context/start names the owner's namespace and source."
+      ":seon.context/proofs are the deftests that show the task done, each with a :seon.context/proof-status: :red fails, :pending has no result for your current code yet, :green passes."
+      ":seon.context/must-reads are your change's reach: each function it touches, whose :seon.ref/callers are what your change can break and whose :seon.ref/tests check it. One with a :seon.ref/problem-kind did not resolve: tell root."
+      ":seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:intent ...}, its keys :seon.task/intent and so on."]}
+    {:seon.help/title "Done"
+     :seon.help/lines
+     ["Done is every proof green on your branch and every condition of the intent holding. The proofs, then the tests reaching your change, run by themselves after each eval request; all green completes your task and tells root. There is no done call."
+      "A test already green proves nothing: the evidence is a red proof turning green."
+      "A condition you cannot check at this REPL goes to root. You never run bin/seon, a shell or a file command."]}
+    {:seon.help/title "How work proceeds"
+     :seon.help/lines
+     ["1. Read the owner of what the task names: (doc seon.db/q), (my.program/source 'seon.db/q), (my.program/callers 'seon.db/q), (my.program/search :seon.task/intent)."
+      "2. Enter the namespace that owns it: (in-ns 'the.owner.ns). Your own :seon.context/namespace is scratch: a definition there changes no owner."
+      "3. Define a function in the namespace that owns it, its contract written on the defn: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). It replaces the definition on your branch."
+      "4. Call it on real inputs and read the value. A body's locals exist only inside their binding: call the function, or redefine it with the probe inside."
+      "5. A :prove step writes a deftest naming its task in :seon/tasks: (deftest ^{:seon/tasks #{'the.task.ns/name}} increments (is (= 3 (inc 2))))."
+      "A contract shown to you as :seon.fn/spec is the stored form of that :malli/schema. A defn without one is admitted with a warning in :findings, and merge refuses it."
+      "A contract names registered schemas: (my.program/source :seon.task/intent) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept."
+      "Change code at the REPL, never in files: no slurp, spit, clojure.java.io or shell. Root writes your definitions back to files when it merges. Delete one with (my.program/ns-unmap! 'the.owner.ns/increment)."]}
+    {:seon.help/title "The REPL"
+     :seon.help/lines
+     ["Send only Clojure forms, each starting at column zero; prose goes in ;; comments. Code quoted in prose at column zero is evaluated."
+      "Never send tool-call markup: no XML, DSML or JSON tool calls. The REPL reads only Clojure."
+      "Each reply is data: :value, :error, :findings, and :result, a symbol naming the live value that later forms use in its place. A cut value shows the form that reads the rest."
+      ":ms and :alloc-mb are the form's cost; ordinary forms take milliseconds. Each :findings entry names what went wrong and its :seon.repl/fix."
+      "Return values to inspect them; never println: printed output is kept and re-read in every later context."
+      "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program)."]}
+    {:seon.help/title "Data"
+     :seon.help/lines
+     ["Every value has a named Malli schema: reuse the names on the data flow. Keys are fully namespaced keywords; symbols stay symbols, never strings."
+      "Absence is no key: never pass, store or return nil. An optional input is an optional key, [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some."
+      "Fix a bad value in the function that produces it: never weaken a contract or a proof to pass, and add no fallback, retry, catch or guard around it."
+      "Never redefine Vars around a call: no with-redefs, alter-var-root, intern or load-file. Code you write holds no atom: state lives in database facts."]}
+    {:seon.help/title "Ask root or give the task back"
+     :seon.help/lines
+     ["Ask: my.message/send with :my.message/to \"root\" and :my.message/content, then (my.turn/wait {:my.turn/note \"Waiting for root's answer.\"}) as the reply's last form pauses until the answer arrives."
+      "A wrong or impossible task goes back with its reason: (my.task/send-back! {:my.task/reason \"The proof asserts the old shape; the intent asks for the new one.\"})."]}
+    {:seon.help/title "Clojure and Malli gotchas"
+     :seon.help/lines
+     ["In Malli [:= nil] and [:enum nil] are errors: nil lands in the properties slot; a literal is [:= {} nil]. A contract is [:=> [:cat in1 in2] out], every input inside :cat."
+      "A keyword lookup is falsy for absent, nil and false alike; test presence with (contains? {:k false} :k) or (find {:k false} :k)."
+      "map and filter are lazy and escape (binding ...) and try; realize them with mapv, into or run! there."
+      "Write fully qualified symbols, (seon.db/q ...); an alias works only if (ns-aliases *ns*) shows it."
+      "An error is a map: read :seon.error/type, :seon.error/message and :seon.error/problems, change the form, and never resend it unchanged."]}]})
 
 (defn render-help-ai
-  "Show the help lines, as data."
-  {:malli/schema [:=> [:cat :seon.help/help] :seon.help/lines]}
+  "Show the help groups, as data."
+  {:malli/schema [:=> [:cat :seon.help/help] :seon.help/groups]}
   [instructions]
-  (:seon.help/lines instructions))
+  (:seon.help/groups instructions))
+
+(defn- help-line-html
+  "One help line as a list item, each parenthesised form in it as code."
+  {:malli/schema [:=> [:cat :string] :seon.render/hiccup]}
+  [line]
+  (loop [remaining line children [:li]]
+    (let [start (.indexOf ^String remaining "(")]
+      (if (or (neg? start) (str/includes? remaining "\n"))
+        (conj children remaining)
+        (let [source (subs remaining start)
+              length (try
+                       (with-open [reader (clojure.lang.LineNumberingPushbackReader.
+                                           (java.io.StringReader. source))]
+                         (edn/read {:readers {} :default tagged-literal} reader)
+                         (dec (.getColumnNumber reader)))
+                       (catch Exception _ 0))]
+          (if (pos? length)
+            (recur (subs source length)
+                   (conj children (subs remaining 0 start)
+                         [:code (subs source 0 length)]))
+            (conj children remaining)))))))
 
 (defn render-help-html
-  "Show the same help lines as a list."
+  "Show the same help groups, each a heading over its list."
   {:malli/schema [:=> [:cat :seon.help/help] :seon.render/hiccup]}
   [instructions]
-  (let [line-html
-        (fn [line]
-          (loop [remaining line children [:li]]
-            (let [start (.indexOf ^String remaining "(")]
-              (if (or (neg? start) (str/includes? remaining "\n"))
-                (conj children remaining)
-                (let [source (subs remaining start)
-                      length (try
-                               (with-open [reader (clojure.lang.LineNumberingPushbackReader.
-                                                   (java.io.StringReader. source))]
-                                 (edn/read {:readers {} :default tagged-literal} reader)
-                                 (dec (.getColumnNumber reader)))
-                               (catch Exception _ 0))]
-                  (if (pos? length)
-                    (recur (subs source length)
-                           (conj children (subs remaining 0 start)
-                                 [:code (subs source 0 length)]))
-                    (conj children remaining)))))))]
-    (into [:ul {:class "seon-help seon-help-instructions"}]
-          (map line-html (:seon.help/lines instructions)))))
+  (into [:div {:class "seon-help seon-help-instructions"}]
+        (mapcat (fn [{:seon.help/keys [title lines]}]
+                  [[:h3 title] (into [:ul] (map help-line-html lines))]))
+        (:seon.help/groups instructions)))
 
 (defn situation
   "Derive one agent's live opening seeds from current database facts."

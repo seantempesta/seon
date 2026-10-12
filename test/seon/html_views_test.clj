@@ -75,10 +75,11 @@
 (deftest help-preserves-lines-and-ai
   (support/with-database
     (fn [_]
-      (let [unit {:seon.help/lines ["Inspect (dir my.task) before acting." "Then (doc seon.db/q)."]}
+      (let [unit {:seon.help/groups [{:seon.help/title "Reading"
+                                      :seon.help/lines ["Inspect (dir my.task) before acting." "Then (doc seon.db/q)."]}]}
             html (bootstrap/render-help-html unit)]
-        (readable! html ["<code>(dir my.task)</code>" "<code>(doc seon.db/q)</code>"])
-        (is (= (:seon.help/lines unit) (bootstrap/render-help-ai unit)))))))
+        (readable! html ["Reading" "<code>(dir my.task)</code>" "<code>(doc seon.db/q)</code>"])
+        (is (= (:seon.help/groups unit) (bootstrap/render-help-ai unit)))))))
 
 (deftest identity-pairs-preserve-ai
   (support/with-database

@@ -3043,9 +3043,9 @@
            [first-user second-user third-user] (mapv user messages)
            ;; the block's first section is the task; nothing before it in these exchanges shows a block
            block-start #(str/index-of % "#:seon.context{:task")
-           help (:seon.help/lines (seon.bootstrap/help-value (db/db connection) agent-id))]
+           help (seon.bootstrap/render-help-ai (seon.bootstrap/help-value (db/db connection) agent-id))]
        (is (= 3 (count sent)) "three model passes reached the provider")
-       (is (every? #(= help (test-support/reply (system %))) messages) "the system message is help's shown lines")
+       (is (every? #(= help (test-support/reply (system %))) messages) "the system message is help's shown groups")
        (is (not-any? #(str/includes? (system %) ":seon.render/ai") messages) "not the printed help map")
        (is (str/includes? help-reply (system (first messages))) "the same text (help) shows at the agent's REPL")
        (is (= :seon.render/request-error (:seon.error/type (seon.context/model-context (db/db connection) {} agent-id)))

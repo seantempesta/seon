@@ -1,6 +1,11 @@
 {:seon.help/lines [:vector :string]
+ :seon.help/title [:string {:min 1 :description "A help group's heading, a few words."}]
+ :seon.help/group [:map {:description "One titled group of help lines."}
+                   [:seon.help/title :seon.help/title]
+                   [:seon.help/lines :seon.help/lines]]
+ :seon.help/groups [:vector :seon.help/group]
  :seon.help/help
- [:map {:description "The REPL instructions returned as data by help."
+ [:map {:description "The REPL instructions returned as data by help: an orienting guide in titled groups."
         :seon.render/ai seon.bootstrap/render-help-ai
         :seon.render/html seon.bootstrap/render-help-html}
-  [:seon.help/lines :seon.help/lines]]}
+  [:seon.help/groups :seon.help/groups]]}

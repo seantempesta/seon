@@ -39,4 +39,4 @@
          (is (= explicit omitted))
          (is (not (and (map? omitted)
                        (or (:seon.db/invalid-read omitted) (:seon.schema/expected-value omitted))))))
-       (is (seq (:seon.help/lines (ffirst values))))))))
+       (is (seq (:seon.help/groups (ffirst values))))))))
