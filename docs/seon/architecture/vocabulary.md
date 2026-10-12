@@ -13,11 +13,12 @@ identifiers and historical quotations where accuracy needs them; do not carry re
 code. When you meet one, convert it in the same commit when in scope, otherwise file the issue.
 
 [AGENTS.md "Words and where they come from"](../../../AGENTS.md) is the authority for the first table; this page
-adds each library's source path, the git words, and Seon's own words. The approved renames (ledger §3.18, CN rows)
-apply to living documents now; code keeps its old spelling until its rename row lands and converts every caller.
-One submission of forms is an **eval request** (nREPL's word; code: pass, `seon.batch`, CN-20); its one transaction
-is the **recording transaction** (code: settlement, CN-7); what returns is the **reply** (code: envelope, CN-8); the
-stored text is the **printed value** (code: shown text, CN-9).
+adds each library's source path, the git words, and Seon's own words. The approved renames (ledger §3.18, the CN entries,
+and `script/seon/vocabulary.edn`, which the vocabulary check reads) apply to living documents now; code keeps its
+old spelling until its CN rename converts it with every caller. One submission of forms is an **eval request**
+(nREPL's word; code: `pass`, `seon.batch`, CN-20); its one transaction is the **recording transaction** (code:
+`settlement`, CN-7); what returns is the **reply** (code: `envelope`, CN-8); the stored text is the **printed value**
+(code: `shown`, CN-9).
 
 ## Concepts and their owning libraries
 
@@ -45,24 +46,25 @@ stored text is the **printed value** (code: shown text, CN-9).
 Datahike already speaks git (`branch!`, `delete-branch!`, `merge!`, `commit-id`, `parent-commit-ids` in
 `reference-code/datahike/src/datahike/versioning.cljc`), so a merge uses git's words where git's meaning holds. The
 reasoning and the rename slices live in [git-vocab](../../research/agent-platform/2026-10-08/git-vocab/git-vocab.md);
-a word marked (target) names its rename, not yet landed.
+a word marked (target) names its rename, not yet merged.
 
 | Term | Meaning | Retired words |
 |---|---|---|
 | branch | `branch!`: a named pointer to a commit; no copy | lane branch, worktree, fork of the database |
-| main | a cluster's own branch, the line every accepted change lands on; one per cluster, so a store has several | cluster head, home, "HEAD" for it |
+| main | a cluster's own branch, the line every accepted change is merged into; one per cluster, so a store has several | cluster head, home, "HEAD" for it |
 | checked-out branch | the branch an agent's context holds (`my.agent/branch`, `git branch --show-current`); a new checkout is a new context | custody (internal word in `seon.db/call-with-custody` only) |
+| merge, merged | `merge!` and git's merge: a source branch's changes enter the target branch, as a merge commit or a fast-forward; merged is the state after (owner 2026-10-12, CN-26) | land, landed, landing, unlanded |
 | merge request | a merge task asking root to merge a source branch into a target branch; a new commit from the same source updates it | proposal, candidate |
-| source branch, target branch | GitLab's pair: the branch proposed, the branch it lands on | head and base (both mean something else here), the proposing branch |
+| source branch, target branch | GitLab's pair: the branch proposed, the branch it is merged into | head and base (both mean something else here), the proposing branch |
 | merge base | the newest common ancestor commit (`git merge-base`) | base digest |
 | merge branch | the branch root's merge creates off the target, where tests run on the merged result before main moves | S, the candidate, the tested branch |
 | ours, theirs | in a conflict, ours is the target and theirs is the source, as in `git merge`; Seon never rebases | head digest, branch digest, changed-on-head |
 | unmerged | identities a conflict left unresolved on the merge branch; any write to one resolves it | conflict markers, unresolved |
 | behind | the identities main modified since the merge base (`git diff branch...main`) | head-only |
-| norm | Datahike's named, once-only data change (`:tx/norm`, `reference-code/datahike/src/datahike/norm/norm.clj`); a merge may carry one to migrate main's rows | migration |
-| delete branch | `delete-branch!`: the branch leaves the roster, its commits wait for retention GC; "retire" is for agents only | unlink, retire a branch |
+| norm | Datahike's named, once-only data change (`:tx/norm`, `reference-code/datahike/src/datahike/norm/norm.clj`); a merge may carry one to convert main's entities | migration |
+| delete branch | `delete-branch!`: the branch leaves `d/branches`, its commits wait for retention GC; "retire" is for agents only | unlink, retire a branch |
 | commit | a Datahike commit with parents; the program part has its own content identity, the program digest | basis (for a commit) |
-| squash merge | git's merge --squash as the copy-back: the three-way of declared cluster facts between the merge base, a source branch and main, landed as one plain transaction on main with no parent link to the source (`seon.cluster.squash/squash-merge`) | cherry-pick, data relay |
+| squash merge | git's merge --squash as the copy-back: the three-way of declared cluster facts between the merge base, a source branch and main, merged as one plain transaction on main with no parent link to the source (`seon.cluster.squash/squash-merge`) | cherry-pick, data relay |
 
 ## Seon's words
 
@@ -70,7 +72,7 @@ Words no library names. Each has one meaning.
 
 | Term | Meaning | Retired words |
 |---|---|---|
-| program context | the SCI context holding exactly the program one commit holds, frozen as a value (`seon.sci.eval/program-context`): keyed by program content in `seon.cache`, forked once per agent, never written; an agent's context is its fork plus custody and its private layer | base context, overlay context, branch program copy, "environment" for the SCI context |
+| program context | the SCI context holding exactly the program one commit holds, frozen as a value (`seon.sci.eval/program-context`): keyed by program content in `seon.cache`, forked once per agent, never written; an agent's context is its fork plus its checked-out branch and its private layer | base context, overlay context, branch program copy, "environment" for the SCI context |
 | task | the one family for work an agent does: an intent, linked facts, optional agent; a merge request is a task | issue, work packet |
 | `:seon.cluster` | the entity-schema partition for facts copied onto main at an attempt's successful end, with conflict rules declared on the schema or its entries (`seon.program/cluster-attributes`); messages remain `:seon.data` | mergeable data roster |
 | end copy | one transaction copying a successful attempt's cluster facts onto main, with source branch and commit as transaction metadata; an error end copies nothing | live relay |
@@ -88,12 +90,12 @@ Words no library names. Each has one meaning.
 | product | the deftests tagged with tasks whose `:seon.task/needs` names a Prove step; the new red tests that step supplies to its successors | proof-product entity |
 | obligations | `seon.task/obligations` selects the step kind, its own tagged proofs and its successors' tagged product tests from one database value; Implement requires proofs, Prove requires product | duplicate proof selection |
 | needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
-| frontier | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (`seon.task/frontier`); never stored | ready list, queue, scheduler state |
-| attempt | one assignment row of a task to an agent on a branch, numbered within its task (`seon.id/id [handle number]`, `seon.task/attempt-tx`), ended once by its end fact | run (of a task), launch |
+| ready | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (code: `seon.task/frontier` until CN-27 renames it `seon.task/ready`); never stored | frontier, ready list, queue, scheduler state |
+| attempt | one assignment entity of a task to an agent on a branch, numbered within its task (`seon.id/id [handle number]`, `seon.task/attempt-tx`), ended once by its end fact | run (of a task), launch |
 | intent | `:seon.task/execution`, the stored permission for an attempt: `:held` (never launched), `:running`, `:paused` (graph exists, nothing runs), `:stopped` (graph gone, resumable), `:cancelled` (terminal); cluster `:seon.cluster/execution` is `:running` or `:paused` | desired state, status, run state |
 | db<->flow | the one Flow process in the cluster graph that links Datahike and Flow both ways (`seon.cluster.agent/db<->flow`): it reads the facts, asks `plan` what to do, writes the attempt first and makes Flow follow (start, resume, pause, stop); the only thing that starts agent graphs | reconciler, armer, scheduler, dispatcher, launcher |
-| plan | the pure decision of db<->flow (`seon.cluster.agent/plan`): facts, roster and `:seon.config.agent/max-running` in, a vector of actions out (`:attempt`, `:start-flow`, `:problem`, `:pause`, `:stop`, `:cancel`) | arming pass, agents-to-arm |
-| start-flow!, stop-flow! | create, start and (under intent `:running`) resume one agent's graph on its branch execution, recorded in the roster under `:seon.agent/started`; its orderly stop and join (`seon.cluster.agent/start-flow!`, `stop-flow!`) | arm!, disarm!, arm an agent ("arm" stays for contracts) |
+| plan | the pure decision of db<->flow (`seon.cluster.agent/plan`): facts, the registry of running graphs and `:seon.config.agent/max-running` in, a vector of actions out (`:attempt`, `:start-flow`, `:problem`, `:pause`, `:stop`, `:cancel`) | arming pass, agents-to-arm |
+| start-flow!, stop-flow! | create, start and (under intent `:running`) resume one agent's graph on its branch execution, recorded in the registry of running graphs under `:seon.agent/started`; its orderly stop and join (`seon.cluster.agent/start-flow!`, `stop-flow!`) | arm!, disarm!, arm an agent, arm (for contracts: instrument) |
 | problem task | a task created by identity `[class subject]` when a problem is detected from facts (an end other than done, a send-back loop, a stale heartbeat, refused delivery, …), assigned to root or a fresh agent, carrying its instructions | alert, escalation, fault notification |
 | clock | the one proc that writes a firing fact for every cron task at its due instant and calls a cron task's function when it has one | timer, schedule proc, `seon.schedule.task` |
 | firing | `:seon.task.fire/*`: one due instant of a cron task, idempotent by `[task nominal-at]`; delivered to a live agent as a wake, else an attempt | tick, schedule fire |
@@ -103,7 +105,7 @@ Words no library names. Each has one meaning.
 
 Standing order: update older code, docs and comments using a legacy spelling from the third column in the same
 commit when in scope, or file the issue. The column is a recognition aid for reading, never an option for writing.
-Rows marked **[TARGET]** describe a ruled integration not yet proven; update the row with real source links when you
+Entries marked **[TARGET]** describe a ruled integration not yet proven; update the entry with real source links when you
 instantiate one.
 
 | Term | Meaning and grounding | Legacy spellings |
@@ -112,14 +114,14 @@ instantiate one.
 | database, `db` | the `seon.db` authority | store, inventory, memory |
 | boot / environment / running | boot is the 0→1 construction in dependency order (REPL first); the environment is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`), scoped per agent; running code receives it | the runtime, the platform, the tower, ambient |
 | call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | ambient injection, batteries |
-| **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this row when it lands | tile, live-tile, world |
+| **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this entry when it is merged | tile, live-tile, world |
 | surface; card (CSS only) | a context render; a visual component | tile |
 | web UI | `/`, `/ns/{namespace}`, `/agent/{id}`, their debug routes, and `/data` (`src/seon/render/route.clj`) | inspector |
 | cluster | one database branch, its agents, and shared plumbing; produces one environment | environment (for the cluster itself) |
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| **[TARGET] namespace agent**, `:seon.ns/agents` | An agent responsible for a namespace: its faults, tasks and requests render into that agent's context. Responsibility is many-to-many, a cardinality-many ref set on the namespace (owner ruling 2026-09-19, D1); `:seon.agent/namespace` remains the REPL's current namespace, a different fact. Routing never uses membership: a trigger maps to a TASK (D2). Plan: `docs/prds/steward-platform/plan/namespace-agents-plan-2026-09-19.md` | steward, `:seon.ns/steward`, `steward-call` |
+| **[TARGET] namespace agent**, `:seon.ns/agents` | An agent responsible for a namespace: its recorded errors, tasks and requests render into that agent's context. Responsibility is many-to-many, a cardinality-many ref set on the namespace (owner ruling 2026-09-19, D1); `:seon.agent/namespace` remains the REPL's current namespace, a different fact. Routing never uses membership: a trigger maps to a TASK (D2). Plan: `docs/prds/steward-platform/plan/namespace-agents-plan-2026-09-19.md` | steward, `:seon.ns/steward`, `steward-call` |
 | **[TARGET] task**, `seon.task` | The one family for work an agent does: linked facts (subject refs, tests, errors, functions) plus an optional agent. A "template" is the render pair and units the task's linked data selects, never an entity or a registry; a detected defect is a task whose subject came from a detector; a conversation is derived from `seon.message` facts. A trigger resolves to a task identity at the writer: an existing task's agent receives the occurrence as a wake, otherwise the task is created and an agent spun up (owner ruling 2026-09-19, D1–D2) | issue (as the family name), `seon.issue`, `my.task`, task template, work packet |
 | provider descriptor entity | one hosted provider's entity under the config singleton | adapter, integration |
 | packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
@@ -127,11 +129,11 @@ instantiate one.
 | `:interrupt-fn` | the ONE zero-arg fn sci calls on every fn body entrance and `loop/recur` (`reference-code/sci/doc/interrupt.md` ↔ `src/seon/sci/eval.clj`) | the guard, the door, the cage |
 | `interrupt!` | stops an eval uncatchably (`reference-code/sci/src/sci/interrupt.cljc`) | stop!, steering-error! |
 | `time-limit` | the SCI execution deadline; query-work and AI presentation have separate bounds (`reference-code/sci/doc/interrupt.md`) | fuel, gas, step budget |
-| `:seon.eval/fn-entries` | a RECORDED DIAGNOSTIC, never a limit | a step budget |
+| `:seon.eval/fn-entries` | a RECORDED FINDING, never a limit | a step budget |
 | every `fn` body entrance | where sci calls the `:interrupt-fn` | safepoint |
 | `ctx`, `fork` | sci's own names (`reference-code/sci/src/sci/core.cljc`) | warm base, the agent's world |
 | `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`) | eval pool, wait pool |
-| entity, entity map, datom, transaction data | Datahike's terms: a datom is `[e a v tx added?]`; an entity is the datoms sharing one `e` (a pull returns it as a map); transaction data is the entity maps and `[:db/add e a v]` a writer submits. A function, namespace, schema declaration or config is an entity identified by its identity attribute (`:seon.fn/sym`, `:seon.ns/name`, `:seon.schema/key`, `:seon.config/cluster`) | row, program row, schema row, config row |
+| entity, entity map, datom, transaction data | Datahike's terms: a datom is `[e a v tx added?]`; an entity is the datoms sharing one `e` (a pull returns it as a map); transaction data is the entity maps and `[:db/add e a v]` a writer submits. A function, namespace, schema declaration or config is an entity identified by its identity attribute (`:seon.fn/sym`, `:seon.ns/name`, `:seon.schema/key`, `:seon.config/cluster`) | row, program row, schema row, config row, row (owner 2026-10-12, CN-25) |
 | session | The agent’s ongoing REPL, with its namespace and evaluations attached to the agent. This names the REPL relationship, not a new entity between the agent and its evaluations (agent-loop.md §3.4; AGENTS.md “Model from the agent outward”). | runtime (for the session), SCI world (for its stored state) |
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization entities, transaction data | Static source population is admitted transaction data. The static prefix is `(help)`; there is no opening or input eval request (agent-loop.md §3.4). | bootstrap-plan rows, seed bundle |
@@ -152,7 +154,7 @@ instantiate one.
 | tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |
 | `my.agents.<id>` | the DEFAULT namespace for a temp agent only; real agents own namespaces anywhere. ASSIGNMENT IS NOT IDENTITY: `:seon.agent/namespace` is not unique (`resources/seon/schemas/seon.agent.edn`) — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches. Namespace responsibility follows the target many-to-many `:seon.ns/agents` relation in D1; it is separate from this REPL namespace | agent workspace, sandbox ns |
 | **[TARGET]** render function | A function returning data for AI or hiccup for HTML. Selection follows the value override, a matching function in the viewer’s namespace, then the most specific declared schema pair. The form face returns a requery form as data and never executes it. Every render output passes through the one value printer (AGENTS.md “Presentation”). | producer, view, executable render output |
-| `:seon.render/ai` | The AI render attachment: a function or rendered data. Its result is data for the value printer, never generated source executed by a system turn. Historical shown text stays as saved (AGENTS.md “Return data, not comments; renders return data”). | separate teaching prose, text render |
+| `:seon.render/ai` | The AI render attachment: a function or rendered data. Its result is data for the value printer, never generated source executed by a system turn. Historical printed values stay as saved (AGENTS.md “Return data, not comments; renders return data”). | separate teaching prose, text render |
 | `:seon.render/html` | the Hiccup consumed by the web UI, or the symbol naming its function (`src/seon/render/hiccup.clj`) | hiccup contract |
 | live result object | The full evaluation result, reached through `result/e<id>`. Installed code retains results in the SCI context; the approved target holds them once in `seon.cache` under its byte budget. Database facts keep small facts and printed text, with larger printed text in blobs. A restart loses the live value; its handle reports that it is gone (agent-loop.md §3.4). | result serialization, restorable node |
 | wire (external crossings only) | a crossing that LEAVES the process (provider HTTP, browser SSE); internal transport is channels, flow, facts | wire (internal) |
@@ -162,18 +164,18 @@ instantiate one.
 | base SCI context / agent SCI context / prompt | The cluster's program-only context derived by `seon.sci.eval/base-ctx` from one database value; each agent's retained handle receives a new fork with its private objects reapplied before later turns; the ordered rendering of its stored evaluations. Neither private objects nor prompt visibility gates callability ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj`; SCI `init`: `reference-code/sci/src/sci/core.cljc`, `fork`: `reference-code/sci/src/sci/core.cljc`, `intern`: `reference-code/sci/src/sci/core.cljc`) | turn fork, "the context" for all three |
 | override | A function identity whose current admission is `:agent` in an indexed `src` namespace; `seon.program/overrides` queries current admission and historical declaration/file relations from one database value (`src/seon/program.cljc`). It is never a stored flag. | override flag, namespace kind |
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
-| render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
+| render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting printed value. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
 | elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
 | elision form | the runnable form shown at a cut: plain clojure.core (`drop`, `take`, `nth`, `get-in`, `subs`, `keys`, `count`) on the live result symbol, lazy first, no Seon helper (owner 2026-10-08; code converts in PR-02, PR-10) | dig form |
 | `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
-| **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks (current operation owner: [seon.maintenance](../../../src/seon/maintenance.clj); scheduling remains a target); update this row when the owners land | maintenance daemon |
+| **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks (current operation owner: [seon.maintenance](../../../src/seon/maintenance.clj); scheduling remains a target); update this entry when the owners are merged | maintenance daemon |
 | private layer | The agent's defs and atoms as actual objects in its persistent SCI context, isolated from the base and other agents, lost on JVM restart. Installed functions, schemas, and tests are durable program facts ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); agent acquisition: `src/seon/cluster/agent.clj`; SCI isolation: `reference-code/sci/src/sci/core.cljc`) | `:seon.def/*`, session image, restored defs |
-| evaluation entity | The stored facts of one evaluated form, attached to the agent in agent order with the call that produced it. It carries source and observed evidence; the result value stays live in the runtime, while its printed value is saved inline or in a blob (agent-loop.md §3.1/§3.4). Legacy code keys remain until their rename lands. | frozen form entity, receipt, form-identity |
+| evaluation entity | The stored facts of one evaluated form, attached to the agent in agent order with the call that produced it. It carries source and observed evidence; the result value stays live in the runtime, while its printed value is saved inline or in a blob (agent-loop.md §3.1/§3.4). Legacy code keys remain until their CN rename converts them. | frozen form entity, receipt, form-identity |
 | the agent's history | Append-only history of the agent's own forms and results, using saved printed values. A static prefix and one fresh current-state block surround it; no opening, input or refresh eval request is inserted (agent-loop.md §3.4). | system-generated history, refreshed history |
 | `doc`, `dir` | REPL documentation as DATA from public program entities: `dir` returns symbol, arglists, first docstring line, and input/output contract; `doc` returns the full docstring and contract ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/sci/eval.clj`, `src/seon/sci/eval.clj`) | faces tool, print face, separate teaching prose |
 | `seon.id/id`, `seon.id/digest`, `seon.id/evaluation` | THE ONE IDENTITY DERIVATION: `id` hashes the value's structure with SHA-256, default length 12 or supplied length; zero arguments mint a fresh event. Equal maps and sets have equal ids regardless of order; vectors and lists differ (`src/seon/id.clj:246-261`). `digest` and `evaluation` call it ([owner](../../../src/seon/id.clj)). Ordinary turn IDs include branch, agent, and turn ordinal ([next-id](../../../src/seon/turn.clj)); their evaluation id is `(seon.id/evaluation turn ordinal)` because the turn already includes its branch, and the handle is `(seon.id/symbol-in "result" \e id)` ([handle](../../../src/seon/sci/admit.clj)). The explicit branch/turn/ordinal arity also remains available. `random-uuid` only for a genuinely fresh EVENT with no identity of its own. Never a new generator, never a second truncation (owner, 2026-09-08) | short-id, nanoid, hand-rolled hashes, `(str (random-uuid))` for things that have parts |
 | read evidence | The dependencies a read observed, used to reuse a derivation while its inputs remain current. It does not authorize reexecuting historical forms or appending refresh evaluations; writes and effects are never replayed (agent-loop.md §3.4; AGENTS.md “Reuse content-valid work; derive without stamps”). | copied read result, inbox-only refresh |
-| printed value | The exact value-printer output shown at evaluation time and saved with the observation. It includes elisions and retrieval forms and survives restart, but cannot restore the live value. Legacy `shown` keys keep their code spelling until their rename lands (agent-loop.md §3.4). | result EDN, serialized result, second printed copy |
+| printed value | The exact value-printer output shown at evaluation time and saved with the observation. It includes elisions and retrieval forms and survives restart, but cannot restore the live value. Legacy `shown` keys keep their code spelling until CN-9 renames them (agent-loop.md §3.4). | result EDN, serialized result, second printed copy |
 | candidates (per-render selection) | the contract-fitting render function selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
 | **program entities** | the declared program partition on a branch: functions, tests, schemas, namespaces, render pairs, contracts, analysis facts and test results keyed by the definition digests they exercised; everything else is data and never merges. Declared as `:seon.program/partition` on entity schemas, read by `seon.program/program-attributes` ([data-modeling guide](data-modeling-guide.md#9-how-a-malli-declaration-becomes-datahike-schema)) | a hand list, a stamped kind |
 | **[TARGET] host-bound entity** | a declaration SCI cannot interpret, computed per declaration | a namespace roster |
