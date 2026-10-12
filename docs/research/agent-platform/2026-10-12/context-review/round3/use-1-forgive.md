@@ -1,3 +1,10 @@
+---
+title: "Usefulness review, lens forgive"
+type: research
+status: complete
+created: 2026-10-12
+---
+
 # Usefulness review, lens forgive: forgiving-forgiven-text-changes-nothing
 
 Reviewer: use-1 (Haiku cold read). Input: `1-implement-forgive-forgiving-forgiven.md` only. Token counts are my rough estimates (about 4 characters per token), not `seon.ai.tokens/estimate`.
