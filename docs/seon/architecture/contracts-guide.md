@@ -108,8 +108,8 @@ something. Decide with evidence:
   vector; `seon.contracts/partitioned` was first declared `[:sequential ...]` and its instrumented contract refused the
   set on the first probe). Fix the contract and cite the observed shape.
 - **The producer emits a bad value.** Keep the tight contract. File a task on the producer with the exact form, the
-  refused value's essence and the Malli explain, naming the contracted function in its `:seon.task/must-read`
-  (that is how `seon.contracts/findings` counts the batch's bug yield), and say so in the reply.
+  refused value's essence and the Malli explain, citing the contracted function in its intent
+  (its `:seon.task/references` are how `seon.contracts/findings` counts the batch's bug yield), and say so in the reply.
 
 Never widen to `:any`, `[:maybe ...]` or `:map` to go green. Root reviews every loosened contract at merge.
 
@@ -122,8 +122,8 @@ as the properties slot): write `[:= {} nil]` or `:nil`.
 ## 5. Generating a contract task
 
 `seon.contracts/task` turns any uncontracted function into an assignable task declaration: name
-`contract-<name>` in the function's namespace, a short typed intent naming the function and this guide, must-read
-the function and `seon.contracts/gaps`. Nothing is copied into the intent: the resolver pulls the function's doc,
+`contract-<name>` in the function's namespace, a short typed intent citing the function, this guide and
+`seon.contracts/gaps` inline. Nothing is copied into the intent: the resolver pulls the function's doc,
 source, callers and tests into the agent's context from the backticked symbol. Create it with
 `seon.task/create!` or add it to `resources/seon/tasks/<ns>.edn`.
 

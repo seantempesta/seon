@@ -1,5 +1,6 @@
 (ns seon.context-cost-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [seon.context :as context]
             [seon.db :as db]
             [seon.profile :as profile]
@@ -16,7 +17,7 @@
                         'seon.task/agent-attempt 'seon.task/agent-task 'seon.db/pull 'seon.db/q}
            id (:seon.task/id
                (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/intent "Read the named attachments." :seon.task/must-read references}))]
+                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/intent (str "Read " (str/join ", " (map #(str "`" % "`") (sort references))) ".")}))]
        (is (not (:seon.error/type
                  (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                 :seon.db/connection connection :seon.task/assigned id

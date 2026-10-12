@@ -31,8 +31,8 @@
        (support/assign-task! connection agent-id)
        (let [handle (task/agent-task (db/db connection) agent-id)]
          (support/transacted! connection
-                             [[:db/add [:seon.task/id handle] :seon.task/must-read 'seon.turn.world/world]
-                              [:db/add [:seon.task/id handle] :seon.task/must-read 'seon.test.runner/reach-digests]]))
+                             [[:db/add [:seon.task/id handle] :seon.task/intent
+                               "Read `seon.turn.world/world` and `seon.test.runner/reach-digests`."]]))
        (let [parent (support/execution-handle connection)
              commit (db/commit-id (db/db connection))]
          (benchmark/empty-cache!)

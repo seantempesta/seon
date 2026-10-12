@@ -27,7 +27,7 @@
                        :seon.health/in [:seon.health/problems :seon.problems/error-signatures]
                        :seon.health/clues [[:seon.error/fact :seon.error/message] [:seon.problems/occurrences] [:seon.error/layer]
                                            [:seon.error/operation]]
-                       :description "A fault no resolution closes: its producer has not changed since its latest occurrence and nobody resolved it. Its subject is the producer (the blame rule), which its task's must-reads name; the operation that observed it is a clue, and a fault no authored definition produced has no subject."}
+                       :description "A fault no resolution closes: its producer has not changed since its latest occurrence and nobody resolved it. Its subject is the producer (the blame rule), which its task's intent cites; the operation that observed it is a clue, and a fault no authored definition produced has no subject."}
                  :seon.problems/error-signature
                  [:not [:map [:seon.error/resolution :seon.error/resolution]]]]
                 :agent-error-signature :string

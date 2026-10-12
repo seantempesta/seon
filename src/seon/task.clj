@@ -15,6 +15,7 @@
             [seon.error.refusal :as refusal]
             [seon.fn :as functions]
             [seon.id :as id]
+            [seon.ref :as ref]
             [seon.schema :as schema]))
 
 ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
@@ -254,6 +255,13 @@
       (when found
         (refused 'seon.task/refuse-needs-cycle :needs-cycle (symbol (namespace (first syms))) syms)))))
 
+(defn- with-references
+  "`task` with the references its intent cites (`seon.ref/names`), derived by the writer; none is no key."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:seon.task/keys [intent] :as task}]
+  (let [cited (when intent (ref/names intent))]
+    (if (seq cited) (assoc task :seon.task/references cited) (dissoc task :seon.task/references))))
+
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
   whose handle changed frees its unique symbol before its new entity claims it; a handle whose
@@ -262,13 +270,18 @@
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
                        :seon.task/basis] [:vector :seon.schema/value]]}
   [projection stored by-id basis]
-  (let [owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
+  (let [owned (conj (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))
+                    :seon.task/references)
+        ;; what the writer holds for a task: its declaration and the references derived from its intent
+        held (fn [task] (when task (cond-> (declared projection task)
+                                     (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task))))))]
     (refs-last
      (into []
           (mapcat (fn [id]
-                    (let [current (declared projection (stored id)) wanted (declared projection (by-id id))]
+                    (let [proposed (some-> (by-id id) with-references)
+                          current (declared projection (stored id)) wanted (declared projection proposed)]
                       (cond
-                        (= current wanted) []
+                        (= (held (stored id)) (held proposed)) []
                         ;; the basis was declared under the reader's projection; compare it under the writer's,
                         ;; so a member a schema change retired is no revision
                         (not= (declared projection (get basis id)) current)
@@ -276,8 +289,8 @@
                                                  (cond-> {} (get basis id) (assoc :seon.task/base (get basis id))
                                                    current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
-                        current (replacement-tx (stored id) (by-id id) owned)
-                        :else [(assoc (by-id id) :seon.task/execution :held)]))))
+                        current (replacement-tx (stored id) proposed owned)
+                        :else [(assoc proposed :seon.task/execution :held)]))))
           (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id)))))))
 
 (defn- symbol-tx
@@ -439,7 +452,7 @@
 
 (defn task-edges
   "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
-  namespaces and tasks whose must-read names one of its subjects, over one held value.
+  namespaces and tasks whose must-read (a definition's) or references (a task's) name one of its subjects, over one held value.
   The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
   [database sym]
@@ -452,7 +465,7 @@
                             (db/q [:find '[?h ...] :in '$ '[?target ...] :where ['?e reader '?target] ['?e holder '?h]]
                                   database (vec subjects)))
                           [[:seon.fn/must-read :seon.fn/sym] [:seon.fn/must-read :seon.test/sym]
-                           [:seon.fn/must-read :seon.ns/name] [:seon.task/must-read :seon.task/sym]]))]
+                           [:seon.fn/must-read :seon.ns/name] [:seon.task/references :seon.task/sym]]))]
     (or (read-error proofs) (some read-error subject-reads) (some read-error referrers)
         {:seon.task/subjects subjects :seon.task/proofs (set proofs)
          :seon.task/referrers (set (apply concat referrers))})))
@@ -552,14 +565,13 @@
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
   name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
   tasks as lookup refs `[:seon.task/sym ns/name]`, and needs that would leave a task
-  waiting on itself refuse `:needs-cycle`.
+  waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the intent.
 
   Example:
   (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-                             [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-                             [:seon.task/evidence {:optional true} :seon.task/evidence]
+                             [:seon.task/intent :seon.task/intent]
                              [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
@@ -568,7 +580,6 @@
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
     (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/step :seon.task/intent
-                                                    :seon.task/must-read :seon.task/evidence
                                                     :seon.task/children :seon.task/needs]) agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
           report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]

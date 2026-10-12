@@ -68,7 +68,7 @@
   (db/pull (db/db connection)
            [:seon.error/producer :seon.instrument/fn
             {:seon.error/occurrences [:seon.error.occurrence/count :seon.error/caller]}
-            {:seon.task/_faults [:seon.task/id :seon.task/sym :seon.task/must-read]}]
+            {:seon.task/_faults [:seon.task/id :seon.task/sym :seon.task/references]}]
            [:seon.error/signature signature]))
 
 (defn triaged-task!
@@ -77,8 +77,7 @@
   [connection signature producer]
   (let [{handle :seon.task/id} (task/create! {:seon.db/connection connection :seon.agent/id "root"
                                               :seon.task/ns (symbol (namespace producer))
-                                              :seon.task/name (str "fix-" (name producer)) :seon.task/intent "Make the producer stop failing."
-                                              :seon.task/must-read #{producer}})]
+                                              :seon.task/name (str "fix-" (name producer)) :seon.task/intent (str "Make `" producer "` stop failing.")})]
     (test-support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/faults [:seon.error/signature signature]]])
     [handle (:seon.task/sym (db/pull (db/db connection) [:seon.task/sym] [:seon.task/id handle]))]))
 

@@ -24,7 +24,7 @@
 
 (def ^:private task
   (str "[#:seon.task{:name \"related\""
-       " :intent \"Prove related data.\" :must-read #{rd.a/c}}]"))
+       " :intent \"Prove related data; read `rd.a/c`.\"}]"))
 
 (defn- world!
   "Admit the fixture program and its task through their canonical writers."
@@ -58,7 +58,7 @@
   (support/with-database
    (fn [connection]
      (let [pairs (set (:seon.render.walk/value-attributes (walk/graph-structure (db/carried-projection @connection))))]
-       (is (every? pairs [[:seon.fn/calls :seon.fn/sym] [:seon.task/must-read :seon.fn/sym] [:seon.test/subject :seon.fn/sym]
+       (is (every? pairs [[:seon.fn/calls :seon.fn/sym] [:seon.task/references :seon.fn/sym] [:seon.test/subject :seon.fn/sym]
                           [:seon.task/tasks :seon.task/sym] [:seon.fn.arity/input-refs :seon.schema/key]
                           [:seon.schema/references :seon.schema/key] [:seon.instrument/fn :seon.fn/sym]
                           [:seon.fn/references :seon.fn/sym] [:seon.task/assigned :seon.task/id]])
@@ -72,13 +72,13 @@
        (is (= [#{'rd.a/a} #{'rd.a/c}] [(names (:seon.fn/_calls data)) (names (:seon.fn/calls data))])
            "a function's callers and callees are its related data, each shown at distance zero")))))
 
-(deftest a-task-relates-its-subjects-proofs-and-must-reads
+(deftest a-task-relates-its-subjects-proofs-and-references
   (support/with-database
    (fn [connection]
      (world! connection)
      (let [data (walk/related (assoc (unit connection 32) :seon.render.walk/lookup [:seon.task/id handle]))]
-       (is (= [#{'rd.a/b 'rd.a/proves} #{'rd.a/c}] [(names (:seon.task/_tasks data)) (names (:seon.task/must-read data))])
-           "the definitions naming a task and the functions it must read are found through value references")))))
+       (is (= [#{'rd.a/b 'rd.a/proves} #{'rd.a/c}] [(names (:seon.task/_tasks data)) (names (:seon.task/references data))])
+           "the definitions naming a task and the functions its intent cites are found through value references")))))
 
 (deftest a-group-past-the-width-names-its-count-and-the-next-call
   (support/with-database

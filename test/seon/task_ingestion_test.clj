@@ -10,6 +10,7 @@
             [seon.fn]
             [seon.id]
             [seon.profile :as profile]
+            [seon.ref :as ref]
             [seon.task :as task]
             [seon.program :as program]
             [seon.test-support :as test-support]))
@@ -71,9 +72,11 @@
 (deftest ingested-tasks-answer-both-ways-and-unchanged-input-writes-nothing
   (test-support/with-database
    (fn [connection]
-     (let [entities (entities-of subject-source) text (task-text "Prove ingestion." ":must-read #{tq.a/g} :evidence #{}")]
+     (let [entities (entities-of subject-source) text (task-text "Prove ingestion; read `tq.a/g` and `:seon.task/intent`." ":needs #{}")]
        (admit! connection entities)
        (is (:seon.task/changed? (ingest! connection text)))
+       (is (= '#{tq.a/g} (set (:seon.task/references (db/pull @connection [:seon.task/references] [:seon.task/id handle]))))
+           "the writer derives the qualified symbols the intent cites")
        (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f tag}}
               (task/task-edges @connection tag)))
        (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
@@ -87,10 +90,10 @@
            (is (= {:seon.task/changed? false} again))
            (is (every? zero? (vals calls))))
          (is (empty? (seon.fn/reconcile-tx @connection entities []))))
-       (testing "the same aspect with a new intent keeps its handle; clearing a set retracts it"
+       (testing "the same aspect with a new intent keeps its handle; an intent citing nothing retracts its references"
          (is (:seon.task/changed? (ingest! connection (task-text "Changed." ""))))
          (is (= {:seon.task/intent "Changed."}
-                (db/pull @connection [:seon.task/intent :seon.task/must-read] [:seon.task/id handle]))))
+                (db/pull @connection [:seon.task/intent :seon.task/references] [:seon.task/id handle]))))
        (testing "removing one annotation drops only that edge"
          (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{'tq.a/prove-ingestion}}" "(defn g")))
          (is (= '#{tq.a tq.a/f} (:seon.task/subjects (task/task-edges @connection tag)))))
@@ -118,8 +121,8 @@
                             :invalid-name "[#:seon.task{:name \"x y\" :intent \"i\"}]"
                             :duplicate-name "[#:seon.task{:name \"x\" :intent \"i\"} #:seon.task{:name \"x\" :intent \"j\"}]"}]
          (is (= rule (refusal #(ingest! connection text)))))
-       (testing "only #{} at an optional set member is absence; other empty values meet the closed entry"
-         (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id \"000000000000\"" ":id []"]]
+       (testing "only #{} at an optional set member is absence; other values, a retired or derived member included, meet the closed entry"
+         (doseq [members [":unknown []" ":must-read #{a/b}" ":references #{a/b}" ":needs {}" ":id \"000000000000\"" ":id []"]]
            (let [text (str "[#:seon.task{:name \"x\" :intent \"i\" " members "}]")
                  refused (ingest! connection text)]
              (is (= :invalid-entry (:seon.task/refused refused)))
@@ -317,9 +320,10 @@
   (let [ignored (ignored-roots)
         entries (for [file (sort-by #(.getName ^java.io.File %) (.listFiles (io/file "resources/seon/tasks")))
                       entry (edn/read-string (slurp file))
-                      path (:seon.task/evidence entry)]
+                      path (keep :seon.ref/span (:seon.ref/spans (ref/document (:seon.task/intent entry))))
+                      :when (str/includes? path "/")]
                   {:file (.getPath ^java.io.File file) :task (:seon.task/name entry) :path path})
         offending (filter (fn [{:keys [path]}] (some #(str/starts-with? path %) ignored)) entries)]
     (is (some #{"tmp/"} ignored) "the census read the ignored directories")
-    (is (> (count entries) 100) "the census read the task evidence")
+    (is (> (count entries) 100) "the census read the paths the intents cite")
     (is (= [] (vec offending)) "each site is a task whose evidence names a gitignored path")))

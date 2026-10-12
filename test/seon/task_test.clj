@@ -90,7 +90,7 @@
            commit (random-uuid)]
        (test-support/transacted!
         connection
-        [{:db/id [:seon.task/id handle] :seon.task/step :prove :seon.task/execution :held :seon.task/instructions "Run these."
+        [{:db/id [:seon.task/id handle] :seon.task/step :prove :seon.task/execution :held
           :seon.task/cron "0 3 * * *" :seon.task/zone "UTC" :seon.task/function [:seon.fn/sym 'seon.task/create!]}
          {:seon.task/assignment assignment :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
           :seon.task/revision (task/task-revision (db/db connection) handle) :seon.task/agent [:seon.agent/id "tq-tree-agent"]
@@ -105,8 +105,8 @@
                 (update-vals (db/pull database [:seon.task/children] [:seon.task/sym 'tq.tree/p]) #(set (map sym-of %)))))
          (is (= {:seon.task/needs #{'tq.tree/p}}
                 (update-vals (db/pull database [:seon.task/needs] [:seon.task/sym 'tq.tree/b]) #(set (map sym-of %)))))
-         (is (= {:seon.task/step :prove :seon.task/execution :held :seon.task/instructions "Run these." :seon.task/cron "0 3 * * *" :seon.task/zone "UTC"}
-                (db/pull database [:seon.task/step :seon.task/execution :seon.task/instructions :seon.task/cron :seon.task/zone] [:seon.task/id handle])))
+         (is (= {:seon.task/step :prove :seon.task/execution :held :seon.task/cron "0 3 * * *" :seon.task/zone "UTC"}
+                (db/pull database [:seon.task/step :seon.task/execution :seon.task/cron :seon.task/zone] [:seon.task/id handle])))
          (is (= 'seon.task/create!
                 (:seon.fn/sym (:seon.task/function (db/pull database [{:seon.task/function [:seon.fn/sym]}] [:seon.task/id handle])))))
          (is (= {:seon.task.attempt/end :error :seon.task.attempt/relaunch "The execution is repaired."

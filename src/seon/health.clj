@@ -274,14 +274,14 @@
           findings)))
 
 (defn- with-tasks
-  "Each finding with the tasks whose must-reads name its subject."
+  "Each finding with the tasks whose intent cites its subject."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.health/finding]] [:vector :seon.health/finding]]}
   [database findings]
   (let [symbol-of #(cond (qualified-symbol? %) % (qualified-keyword? %) (symbol (namespace %) (name %)))
         subjects (vec (sort (into #{} (keep (comp symbol-of :seon.health/subject)) findings)))
         rows (if (seq subjects)
                (derived database [::tasks subjects]
-                        #(db/q '[:find ?s ?h :in $ [?s ...] :where [?t :seon.task/must-read ?s] [?t :seon.task/id ?h]]
+                        #(db/q '[:find ?s ?h :in $ [?s ...] :where [?t :seon.task/references ?s] [?t :seon.task/id ?h]]
                                % subjects))
                #{})
         tasks (reduce (fn [found [s h]] (update found s (fnil conj (sorted-set)) h)) {} (if (set? rows) rows #{}))]

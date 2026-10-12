@@ -99,7 +99,7 @@
 
 (defn task-ai
   "One task as data: its id, symbol, name and namespace; beyond distance zero its intent and
-  must-reads. Its subjects and proofs are its related data."
+  the references it cites. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
@@ -107,9 +107,9 @@
     (if (zero? (node-distance unit))
       named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
-      ;; shape); must-read is declared a set, so it is shown as one.
+      ;; shape); references are declared a set, so they are shown as one.
       (cond-> (merge named (select-keys task [:seon.task/intent]))
-        (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
+        (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task)))))))
 
 (defn task-form
   "The read of a task's edges. Shown, never executed."
@@ -118,11 +118,11 @@
   (list 'seon.task/task-edges '(seon.db/db) (list 'quote (:seon.task/sym (or (:seon.render/value unit) unit)))))
 
 (defn task-html
-  "Render one task as a card: intent, must-reads, evidence. Its subjects and
+  "Render one task as a card: intent and the references it cites. Its subjects and
   proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{:seon.task/keys [id intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
+  (let [{:seon.task/keys [id intent references] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
         entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
@@ -130,7 +130,7 @@
      [:header [:p {:class "seon-kicker"} (str "Task · " task-ns)] [:h3 task-name " " [:code id]]]
      [:p {:class "seon-task-intent"} intent]
      (when (pos? (node-distance unit))
-       [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
+       [:dl (entity "References" references)])]))
 
 ;;; The agent's held task (`:seon.task/of-agent`, a derived attachment of the agent): read from the
 ;;; agent's own world, whose branch holds its assignment.

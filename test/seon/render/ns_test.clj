@@ -162,7 +162,7 @@
    (fn [connection]
      (let [handle (task/task-handle 'tn.a "render-node")
            entry (str "[#:seon.task{:name \"render-node\""
-                      " :intent \"Render one node.\\nThen stop.\" :must-read #{tn.a/f}}]")
+                      " :intent \"Render one node with `tn.a/f`.\\nThen stop.\"}]")
            indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
            unit (fn [lookup distance]
@@ -172,10 +172,10 @@
        (testing "a task at distance 0 is its name"
          (is (= {:seon.task/id handle :seon.task/sym 'tn.a/render-node :seon.task/name "render-node" :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
-       (testing "a task at distance 1 shows its intent and must-reads; its proofs and subjects are related data"
+       (testing "a task at distance 1 shows its intent and the references it cites; its proofs and subjects are related data"
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
-           (is (= "Render one node.\nThen stop." (:seon.task/intent shown)))
-           (is (= #{'tn.a/f} (:seon.task/must-read shown)))
+           (is (= "Render one node with `tn.a/f`.\nThen stop." (:seon.task/intent shown)))
+           (is (= #{'tn.a/f} (:seon.task/references shown)))
            (is (= (list 'seon.task/task-edges (list 'seon.db/db) (list 'quote 'tn.a/render-node)) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the edges read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))

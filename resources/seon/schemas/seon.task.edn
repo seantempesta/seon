@@ -8,20 +8,19 @@
  :name [:string {:min 1 :description "The readable name, one symbol's name (seon.task/symbol-name?); with :ns the identifying aspect and the task's symbol."}]
  :step [:enum {:description "The step kind: Prove supplies new red product tests; Implement makes its proofs green. Absence reads as :implement at seon.task/obligations."} :prove :implement]
  :intent [:string {:min 1}]
- :must-read [:set {:min 1 :seon.program/definition-edge true :description "Functions a task's worker reads first; bare qualified symbols in task EDN."} :seon.program/edge-symbol]
- :evidence [:set {:min 1 :description "Repository paths of evidence documents; linked, never parsed."} [:string {:min 1}]]
+ :references [:set {:min 1 :seon.db/index true :seon.program/definition-edge true
+                     :description "The qualified symbols the task's intent cites as code spans (seon.ref/names), derived by the task writer whenever the intent is written; never authored."}
+              :seon.program/edge-symbol]
  :tasks [:set {:min 1 :seon.db/index true :seon.db/reference-to :seon.task/sym :description "The task symbols a definition's :seon/tasks names, as symbol values (never refs). On a deftest they are the tasks it proves; anywhere else the tasks it is subject to."} :qualified-symbol]
  :entry [:map {:closed true :description "Stage 1: one authored entry of resources/seon/tasks/<ns>.edn; empty optional sets are absent. Its handle and symbol are derived, never written."}
          [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-         [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-         [:seon.task/evidence {:optional true} :seon.task/evidence]
+         [:seon.task/intent :seon.task/intent]
          [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
  :file [:vector :seon.task/entry]
  :files [:map-of {:description "Task file path to its exact text; a deleted file is \"[]\", an empty declaration."} [:string {:min 1}] :string]
  :declaration [:map {:description "Stage 3: a task's declared content, compared as its revision (7.16). Its handle and symbol derive from it."}
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-               [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-               [:seon.task/evidence {:optional true} :seon.task/evidence]
+               [:seon.task/intent :seon.task/intent]
                [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.cluster
@@ -29,23 +28,21 @@
               :seon.render/form seon.render.ns/task-form}
         [:seon.task/id :seon.task/id] [:seon.task/sym :seon.task/sym] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
         [:seon.task/step {:optional true} :seon.task/step]
-        [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
-        [:seon.task/evidence {:optional true} :seon.task/evidence]
+        [:seon.task/intent :seon.task/intent] [:seon.task/references {:optional true} :seon.task/references]
         [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
         [:seon.task/faults {:optional true} :seon.task/faults]
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
         [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
-        [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/execution {:optional true} :seon.task/execution]
+        [:seon.task/execution {:optional true} :seon.task/execution]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
         [:seon.task/function {:optional true} :seon.task/function]]
  :children [:set {:seon.db/component true :seon.db/component-schema :seon.task/task
-                  :description "The child tasks a parent owns (runtime-follows-db §2): a parent never runs and is done when no leaf under it is open (seon.task/done?); its intent, must-read and evidence are what its children read. Authored in task EDN as lookup refs [:seon.task/sym ns/name]."}
+                  :description "The child tasks a parent owns (runtime-follows-db §2): a parent never runs and is done when no leaf under it is open (seon.task/done?); its intent is what its children read. Authored in task EDN as lookup refs [:seon.task/sym ns/name]."}
             :seon.db/ref]
  :needs [:set {:seon.db/index true :seon.wake/starts true
                :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
          :seon.db/ref]
- :instructions [:string {:min 1 :description "The data a task's step kind renders for its worker beyond its intent (a test run's test set and program basis, a problem's class)."}]
  :execution [:enum {:seon.db/index true :seon.wake/starts true
                     :description "The task's intent (runtime-follows-db §3); ingestion and create! write :held on a task with none, and only :running is launched (no inheritance from a parent). :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
              :held :running :paused :stopped :cancelled]
@@ -151,10 +148,10 @@
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set :symbol]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/proofs :seon.task/proofs] [:seon.task/referrers :seon.task/referrers]]
- :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and must-reads. Its subjects and proofs are its related data."}
+ :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]
         [:seon.task/ns {:optional true} :seon.task/ns]
-        [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]]
+        [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/references {:optional true} :seon.task/references]]
  :dangling [:map-of :seon.task/sym [:set :symbol]] :triage [:set :seon.task/sym]
  :findings [:map [:seon.task/dangling :seon.task/dangling] [:seon.task/triage :seon.task/triage]]
  :request [:map [:seon.db/connection :seon.db/connection] [:seon.task/files :seon.task/files] [:seon.task/basis {:optional true} :seon.task/basis]]

@@ -37,7 +37,7 @@
        "A contract that refuses a real value (a reaching test, a live call, your probe) is a finding, not friction: "
        "if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer "
        "emits a bad value, keep the contract, file a task on the producer naming `" function-symbol
-       "` in its must-read with the exact form, the refused value's essence and the Malli explain, and say so "
+       "` in its intent with the exact form, the refused value's essence and the Malli explain, and say so "
        "in your reply. Never widen to :any, [:maybe ...] or :map to go green. "
        "A caller that passes nil to an input is the producer of the bad value: change the caller so it does not pass nil (absence is no key), or take a map with the key optional; never contract nil with [:maybe ...] or :nil. "
        "Done when `seon.contracts/gaps` "
@@ -59,9 +59,7 @@
       host-bound?
       {:seon.task/ns (symbol (namespace function-symbol))
        :seon.task/name (str "contract-" (name function-symbol))
-       :seon.task/intent (intent function-symbol (true? host-bound?))
-       :seon.task/must-read #{function-symbol 'seon.contracts/gaps}
-       :seon.task/evidence #{guide}})))
+       :seon.task/intent (intent function-symbol (true? host-bound?))})))
 
 (def ^:private candidate-query
   ;; Source functions with no contract: test roots, macros, constants and value
@@ -116,7 +114,7 @@
                        :where (or [?c :seon.fn/calls ?s] [?c :seon.fn/references ?s])]
                      database symbols))
         named (when symbols
-                (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.task/must-read ?s]] database symbols))]
+                (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.task/references ?s]] database symbols))]
     (or (some #(when (db/read-refusal? %) %) [rows uses named])
         (partitioned rows (into {} uses) (set named)))))
 
@@ -124,12 +122,12 @@
   "The bug yield of contract tasks, by function.
 
   For each of `function-symbols`, the other
-  tasks naming it in their must-read (the producer tasks its contract work
+  tasks whose intent cites it (the producer tasks its contract work
   filed), or the refused read."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.fn/sym]]
                   [:or [:map-of :seon.fn/sym [:set :qualified-symbol]] :seon.db/invalid-read-error]]}
   [database function-symbols]
-  (let [named (db/q '[:find ?s ?t :in $ [?s ...] :where [?task :seon.task/must-read ?s] [?task :seon.task/sym ?t]]
+  (let [named (db/q '[:find ?s ?t :in $ [?s ...] :where [?task :seon.task/references ?s] [?task :seon.task/sym ?t]]
                     database function-symbols)]
     (if (db/read-refusal? named)
       named

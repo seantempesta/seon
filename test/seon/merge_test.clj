@@ -146,22 +146,22 @@
    (fn [connection]
      (let [handle (task/task-handle 'fixture.tasks "squash-retract")
            entity [:seon.task/id handle]
-           _ (support/transacted! connection [(assoc (support/task-row handle "Original") :seon.task/evidence #{"docs/a"})])
+           _ (support/transacted! connection [(assoc (support/task-row handle "Original") :seon.task/references #{'fx/a})])
            base (db/db connection)
-           source (checked-value base [[:db/retract entity :seon.task/evidence "docs/a"]])
+           source (checked-value base [[:db/retract entity :seon.task/references 'fx/a]])
            projection (schema/handed-projection)
-           target (checked-value base [{:db/id entity :seon.task/evidence #{"docs/b"}}
-                                       [:db/retract entity :seon.task/evidence "docs/a"]])
+           target (checked-value base [{:db/id entity :seon.task/references #{'fx/b}}
+                                       [:db/retract entity :seon.task/references 'fx/a]])
            unchanged (merge/squash-merge source base base projection)
            concurrent (merge/squash-merge source base target projection)]
        (doseq [[from to] [[base source]
                          [(db/basis-t base) source]
                          [(db/as-of base (db/basis-t base)) source]
                          [base (db/as-of source (db/basis-t source))]]]
-         (is (= #{[:seon.task/evidence (:db/id (db/pull base [:db/id] entity))]}
-                (program/changed-identities from to {} #{:seon.task/evidence :seon.task/intent}))))
-       (is (nil? (:seon.task/evidence (db/pull (checked-value base {:tx-data (:tx-data unchanged)})
-                                             [:seon.task/evidence] entity))))
+         (is (= #{[:seon.task/references (:db/id (db/pull base [:db/id] entity))]}
+                (program/changed-identities from to {} #{:seon.task/references :seon.task/intent}))))
+       (is (nil? (:seon.task/references (db/pull (checked-value base {:tx-data (:tx-data unchanged)})
+                                             [:seon.task/references] entity))))
        (is (empty? (:tx-data concurrent)))
        (is (empty? (:conflicts concurrent)))))))
 
@@ -172,25 +172,25 @@
      (let [handle (task/task-handle 'fixture.tasks "squash-members")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original")
-                                                     :seon.task/evidence #{"docs/a" "docs/b"})])
+                                                     :seon.task/references #{'fx/a 'fx/b})])
            base (db/db connection)
            projection (schema/handed-projection)
            change (fn [adds removes]
-                    (checked-value base (into (mapv #(vector :db/add entity :seon.task/evidence %) adds)
-                                              (map #(vector :db/retract entity :seon.task/evidence %)) removes)))
+                    (checked-value base (into (mapv #(vector :db/add entity :seon.task/references %) adds)
+                                              (map #(vector :db/retract entity :seon.task/references %)) removes)))
            ;; [ours-adds ours-removes theirs-adds theirs-removes merged]
-           rows [[["docs/y"] [] ["docs/z"] [] #{"docs/a" "docs/b" "docs/y" "docs/z"}]
-                 [[] ["docs/a"] ["docs/z"] [] #{"docs/b" "docs/z"}]
-                 [[] [] [] ["docs/a"] #{"docs/b"}]
-                 [["docs/y"] [] [] [] #{"docs/a" "docs/b" "docs/y"}]
-                 [[] ["docs/a"] [] ["docs/a"] #{"docs/b"}]
-                 [[] ["docs/a"] [] ["docs/b"] #{}]]]
+           rows [[['fx/y] [] ['fx/z] [] #{'fx/a 'fx/b 'fx/y 'fx/z}]
+                 [[] ['fx/a] ['fx/z] [] #{'fx/b 'fx/z}]
+                 [[] [] [] ['fx/a] #{'fx/b}]
+                 [['fx/y] [] [] [] #{'fx/a 'fx/b 'fx/y}]
+                 [[] ['fx/a] [] ['fx/a] #{'fx/b}]
+                 [[] ['fx/a] [] ['fx/b] #{}]]]
        (doseq [[oa orr ta tr merged] rows]
          (let [target (change oa orr)
                result (merge/squash-merge (change ta tr) base target projection)
                copied (checked-value target {:tx-data (:tx-data result)})]
            (is (= [] (:conflicts result)))
-           (is (= merged (set (:seon.task/evidence (db/pull copied [:seon.task/evidence] entity)))))))))))
+           (is (= merged (set (:seon.task/references (db/pull copied [:seon.task/references] entity)))))))))))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} one-attempts-copy-stays-within-its-cost-bound
   (support/with-database
@@ -217,10 +217,10 @@
      (let [handle (task/task-handle 'fixture.tasks "squash-set-cost")
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original")
-                                                     :seon.task/evidence #{"docs/a" "docs/b"})])
+                                                     :seon.task/references #{'fx/a 'fx/b})])
            base (db/db connection)
-           source (checked-value base [[:db/add entity :seon.task/evidence "docs/z"]])
-           target (checked-value base [[:db/add entity :seon.task/evidence "docs/y"]])
+           source (checked-value base [[:db/add entity :seon.task/references 'fx/z]])
+           target (checked-value base [[:db/add entity :seon.task/references 'fx/y]])
            projection (schema/handed-projection)
            run #(merge/squash-merge source base target projection)
            _ (run)

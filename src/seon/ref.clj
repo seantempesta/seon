@@ -322,6 +322,14 @@
          second
          (mapv #(answer database %)))))
 
+(defn names
+  "The qualified symbols `text` cites as code spans, read by the one rule `references` resolves."
+  {:malli/schema [:=> [:cat :string] [:set :qualified-symbol]]}
+  [text]
+  (let [roots (set (.list (io/file (fs/source-directory))))]
+    (into #{} (comp (keep #(candidate roots nil %)) (keep :seon.ref/name) (filter qualified-symbol?))
+          (:seon.ref/spans (document text)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; A doc section
 ;;; ---------------------------------------------------------------------------

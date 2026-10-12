@@ -1,17 +1,9 @@
 [#:seon.task{:name "a-test-entity-shows-its-failures-twice"
-             :intent "Pulling a test entity renders '(clojure.core/identity \"Test ...: fail ... expected ... actual ...\")' then ';=> ' the same string, then the recorded-result map with the same failures a third time, every string escaped three levels deep; one four-assertion red test cost 1,001 shown tokens and was cut (repl-dogfood 2026-09-27). An AI render of a test shows its verdict and failures once, as data."
-             :must-read #{seon.render.test/render-ai seon.test/recorded-result}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+             :intent "Pulling a test entity renders '(clojure.core/identity \"Test ...: fail ... expected ... actual ...\")' then ';=> ' the same string, then the recorded-result map with the same failures a third time, every string escaped three levels deep; one four-assertion red test cost 1,001 shown tokens and was cut (repl-dogfood 2026-09-27). An AI render of a test shows its verdict and failures once, as data. Read `seon.render.test/render-ai`, `seon.test/recorded-result` and `docs/research/agent-platform/repl-dogfood-2026-09-27.md`."}
  #:seon.task{:name "a-failed-test-renders-in-28-ms"
-             :intent "`seon.render.test/render-html` takes 28 ms per failed test (5 tests 142 ms, armed, default 2026-09-28), so `seon.problems/html-report` over 241 failed tests is 6.8 s: the health page shows problems as family counts instead. Find what one render is proportional to (its pulls of failure reports and blobs per test) and make it read only what it shows; done when html-report over 241 failed tests renders under a second."
-             :must-read #{seon.render.test/render-html seon.problems/html-report}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md"}}
+             :intent "`seon.render.test/render-html` takes 28 ms per failed test (5 tests 142 ms, armed, default 2026-09-28), so `seon.problems/html-report` over 241 failed tests is 6.8 s: the health page shows problems as family counts instead. Find what one render is proportional to (its pulls of failure reports and blobs per test) and make it read only what it shows; done when html-report over 241 failed tests renders under a second. Read `docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md`."}
  #:seon.task{:name "render-coverage-reads-the-retired-render-unknown-refusal-key"
-             :intent "render-coverage a-refused-render-producer-contributes-a-stable-typed-unknown reads the retired :seon.render.unknown/refusal key. Done when the test follows the current typed unknown and is green."
-             :must-read #{seon.render.test/render-ai}}
+             :intent "render-coverage a-refused-render-producer-contributes-a-stable-typed-unknown reads the retired :seon.render.unknown/refusal key. Done when the test follows the current typed unknown and is green. Read `seon.render.test/render-ai`."}
  #:seon.task{:name "a-test-render-omits-what-the-test-asserts",
             :intent
-            "`seon.render.test/render-ai` at distance 1 for seon.db-overhead-test/query-preparation-has-bounded-armed-work answers only its symbol, state \"pass\", `:seon.test/run-basis-t` and the host kind (72 ms, 5,220 armed calls): nothing of what the test asserts. An agent whose task names this proof must read its source separately. Done when the near view carries the test's assertions (its source lines or the is-forms as data) and drops the basis-t, asserted on the render's data.",
-            :must-read #{seon.render.test/render-ai},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]
+            "`seon.render.test/render-ai` at distance 1 for seon.db-overhead-test/query-preparation-has-bounded-armed-work answers only its symbol, state \"pass\", `:seon.test/run-basis-t` and the host kind (72 ms, 5,220 armed calls): nothing of what the test asserts. An agent whose task names this proof must read its source separately. Done when the near view carries the test's assertions (its source lines or the is-forms as data) and drops the basis-t, asserted on the render's data. Read `docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md`."}]

@@ -1,4 +1,2 @@
 [#:seon.task{:name "large-printed-output-refuses-the-evaluation"
-             :intent "Printed output over `:seon.config.eval.result/max-bytes` refuses the evaluation (admit.clj:117-135) instead of spilling into the blob tier as oversized values already do. Only the floor printer clips (AGENTS 'Apply presentation limits once'). Low evidence: no dogfood hit recorded."
-             :must-read #{seon.sci.admit/admit seon.sci.admit/refuse-over-bound!}
-             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"}}]
+             :intent "Printed output over `:seon.config.eval.result/max-bytes` refuses the evaluation (admit.clj:117-135) instead of spilling into the blob tier as oversized values already do. Only the floor printer clips (AGENTS 'Apply presentation limits once'). Low evidence: no dogfood hit recorded. Read `seon.sci.admit/admit`, `seon.sci.admit/refuse-over-bound!` and `docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md`."}]

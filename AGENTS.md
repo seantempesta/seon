@@ -413,18 +413,19 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   exact form and reply. Never work around bad context silently.
 - **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
-  name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
-  qualified symbols) and optional `:seon.task/evidence` (paths); its identity is `seon.id/id` over `[ns name]`, with no kind. Its proofs are the deftests carrying `ns/name` in
+  name; the task is `ns/name`), `:seon.task/intent` (what must become true, short, with its references inline) and
+  optional `:seon.task/needs`; its identity is `seon.id/id` over `[ns name]`. The writer derives
+  `:seon.task/references` (the qualified symbols the intent cites) for queries; it is never authored. Its proofs are the deftests carrying `ns/name` in
   `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a case to an existing table test; write
   a new deftest only for a behavior no test covers; a task already green proves nothing; at merge root keeps a new
   test only if it guards a new behavior class.
   References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
   e.g. `` `malli.core/validator` ``), a schema a backticked fully qualified keyword, any other file a relative path
   whose first segment names its base (the checkout, or `reference-code/<project>` at its pinned revision) with
-  `#heading` anchors. Never write a file or line for code: they are derived from the Var or the analysis. Evidence
+  `#heading` anchors. Never write a file or line for code: they are derived from the Var or the analysis. A reference
   never points into gitignored `tmp/`. Ingestion reports an unresolved reference as a problem on the task. Retire a
   task in the commit that deletes its subject or makes it moot. Write the intent typed: the fully qualified symbols
-  and keywords the work creates, changes and calls, the same ones in `:seon.task/must-read`; prose naming only the
+  and keywords the work creates, changes and calls, each backticked inline; prose naming only the
   behavior costs the agent its calls searching for the owner (bench E1, `cards/README-bench.md` Results).
 - **Use the agreed words** ("Words and where they come from" above). Keep JVM REPL and SCI evaluation, live result
   and printed value distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or

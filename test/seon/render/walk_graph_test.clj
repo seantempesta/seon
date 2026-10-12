@@ -26,7 +26,7 @@
 
 (def ^:private task
   (str "[#:seon.task{:name \"walk-graph\""
-       " :intent \"Prove the graph walk.\" :must-read #{tg.a/c}}]"))
+       " :intent \"Prove the graph walk through `tg.a/c`.\"}]"))
 
 (defn- world!
   "Admit the fixture program and its task through their canonical writers."
@@ -65,7 +65,7 @@
        (is (every? valid? graphs) "every graph is its declared value")
        (testing "N=0 is the root alone, always included though a task declares no pair"
          (is (= [handle] (order (graphs 0)))))
-       (testing "level 1 holds the subjects, the proof and the must-read, reached through value edges both ways"
+       (testing "level 1 holds the subjects, the proof and the reference its intent cites, reached through value edges both ways"
          (is (= {handle 0 'tg.a 1 'tg.a/a 1 'tg.a/p 1 'tg.a/proves 1 'tg.a/c 1} (levels (graphs 1)))))
        (testing "level 2 reaches callees; every definition precedes its user"
          (let [g (graphs 3) position (zipmap (order g) (range))]

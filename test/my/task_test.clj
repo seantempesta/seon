@@ -28,16 +28,6 @@
            "the task root holds")
        (is (seq (get-in current [:seon.context/proofs :seon.context/proof-list])) "its proofs, each with its status")))))
 
-(deftest current-answers-the-held-steps-instructions
-  ;; A step's instructions are data on the task its creator wrote (TASK-CHAIN §2); the agent reads them here.
-  (with-root true
-   (fn [connection]
-     (let [handle (task/agent-task (db/db connection) "root")]
-       (test-support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/instructions "Write the red proof first."]])
-       (is (= "Write the red proof first."
-              (get-in (my.task/current {:seon.db/db (db/db connection) :seon.agent/id "root"})
-                      [:seon.context/task :seon.task/instructions])))))))
-
 (deftest current-with-no-task-answers-the-agent-alone
   (with-root false
    (fn [connection]

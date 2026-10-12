@@ -99,11 +99,16 @@
            resolved (support/reply
                      (agent-text (pr-str (list 'mapv '(fn [s] [s (some? (resolve s))])
                                                (list 'quote (vec heads))))
-                                 agent-id running))]
+                                 agent-id running))
+           ;; a key the agent's own block shows is no lesson but the name of what it reads
+           shown (->> (support/reply (agent-text "(seon.context/current-state)" agent-id running))
+                      :seon.repl/value (tree-seq coll? seq) (filter qualified-keyword?) (map str) set)
+           lessons (reduce #(str/replace %1 %2 "") text (sort-by (comp - count) shown))]
        (is (seq forms) "help teaches forms")
        (is (every? second (:seon.repl/value resolved)) "every taught head resolves at the agent's REPL")
-       (is (not (re-find #"my\.agent/|my\.test/check|turns-left|NEXT turn" text))
-           "no shelved, deleted or self-running lesson")
+       (is (contains? shown ":my.agent/turns-left") "the block shows the turns left")
+       (is (not (re-find #"my\.agent/|my\.test/check|turns-left|NEXT turn" lessons))
+           "no shelved, deleted or self-running lesson beside the keys the block shows")
        (is (not (str/includes? text "…")) "the printed help carries no elision")))))
 
 (deftest help-teaches-defn-in-the-namespace-that-owns-the-function

@@ -7,10 +7,11 @@
 (deftest a-generated-task-is-the-declaration-its-task-file-holds
   (let [database (db/db)
         generated (contracts/task database 'seon.fs/attributes)
-        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/intent
-                                  :seon.task/must-read :seon.task/evidence]
+        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/intent :seon.task/references]
                         [:seon.task/sym 'seon.fs/contract-attributes])]
-    (is (= generated (-> stored (update :seon.task/must-read set) (update :seon.task/evidence set))))))
+    (is (= generated (dissoc stored :seon.task/references)))
+    (is (= '#{seon.fs/attributes seon.contracts/gaps} (set (:seon.task/references stored)))
+        "the writer derives the names the generated intent cites")))
 
 (deftest the-report-partitions-uncontracted-source-functions-once
   (let [database (db/db)
@@ -25,7 +26,10 @@
          (contracts/gaps (db/db) 'seon.contracts-test/absent))))
 
 (deftest a-contract-task-is-not-its-own-finding
-  (is (= {'seon.fs/attributes #{}} (contracts/findings (db/db) ['seon.fs/attributes]))))
+  (let [found (contracts/findings (db/db) ['seon.fs/attributes])]
+    (is (= #{'seon.fs/attributes} (set (keys found))))
+    (is (not (contains? (found 'seon.fs/attributes) 'seon.fs/contract-attributes))
+        "the contract task citing its function is not a task its work filed")))
 
 (deftest a-generated-intent-sends-a-nil-input-to-its-caller
   ;; The call evidence is not read: the rule is in every generated intent.

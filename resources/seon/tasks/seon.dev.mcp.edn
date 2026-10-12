@@ -1,11 +1,7 @@
 [#:seon.task{:name "large-source-request-fails-in-the-bridge",
             :intent
-            "MCP eval_clj request containing load-string of about 95 KB source fails immediately with 'Tool eval_clj failed in the MCP bridge (PREPL evaluation failed.)' and misleading start-JVM guidance, while {:alive true} succeeds and same source loads when assembled through separate smaller requests. Verify actual bridge failure and report a structured size/compilation error; do not claim a limit from this one observation.",
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+            "MCP eval_clj request containing load-string of about 95 KB source fails immediately with 'Tool eval_clj failed in the MCP bridge (PREPL evaluation failed.)' and misleading start-JVM guidance, while {:alive true} succeeds and same source loads when assembled through separate smaller requests. Verify actual bridge failure and report a structured size/compilation error; do not claim a limit from this one observation. Read `docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md`."}
  #:seon.task{:name
             "the-timeout-remedy-names-a-parameter-eval-clj-does-not-declare",
             :intent
-            "An eval_clj call over 32 s answers 'Retry with a larger timeout_ms' (script/seon/dev/mcp.clj), and the bridge reads arguments \"timeout_ms\", but the eval_clj tool's declared input schema has only agent, cluster, code, mode, namespace, so an MCP client cannot pass it. Declare timeout_ms in the tool schema (with its bound) or stop naming it. Seen 2026-10-07 by lane r-turn.",
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}]
+            "An eval_clj call over 32 s answers 'Retry with a larger timeout_ms' (script/seon/dev/mcp.clj), and the bridge reads arguments \"timeout_ms\", but the eval_clj tool's declared input schema has only agent, cluster, code, mode, namespace, so an MCP client cannot pass it. Declare timeout_ms in the tool schema (with its bound) or stop naming it. Seen 2026-10-07 by lane r-turn. Read `docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md`."}]

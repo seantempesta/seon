@@ -85,7 +85,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private task-selector
-  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions :seon.task/must-read :seon.task/evidence])
+  [:seon.task/id :seon.task/sym :seon.task/intent])
 
 ;; Every failing assertion of a red proof, in the order `seon.render.test` shows (file, line, report id)
 ;; so two passes show the same list. The
@@ -199,25 +199,19 @@
   (let [handle (task/agent-task database agent-id)]
     (cond (:seon.error/at handle) handle
           (string? handle)
-          (let [pulled (db/pull database task-selector [:seon.task/id handle])]
-            ;; a cardinality-many pull is a vector; the declaration holds a set
-            (cond-> pulled
-              (:seon.task/must-read pulled) (update :seon.task/must-read set)
-              (:seon.task/evidence pulled) (update :seon.task/evidence set))))))
+          (db/pull database task-selector [:seon.task/id handle]))))
 
 (defn- task-references
   "Every reference the held task makes, resolved once on `database` by the one rule (`seon.ref/references`): the
-  names in its intent and instructions, its must-read names, the tasks it needs, its `proofs` and its evidence paths."
+  names and paths its intent cites, the tasks it needs and its `proofs`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.task/keys [id intent instructions must-read evidence]} proofs]
+  [database {:seon.task/keys [id intent]} proofs]
   (let [needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
                     database id)]
     (if (db/read-refusal? needs)
       [needs]
-      (ref/references database (cond-> {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
-                                        :seon.ref/names (-> (set must-read) (into needs) (into proofs))}
-                                 (seq evidence) (assoc :seon.ref/paths evidence))))))
+      (ref/references database {:seon.ref/text intent :seon.ref/names (into (set needs) proofs)}))))
 
 (defn send-backs
   "The latest send-back to the task `handle` on `database`: the attempt of another step that ended
@@ -517,7 +511,7 @@
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
         (or (some #(when (:seon.error/at %) %) (concat [proven verdict] reads))
-            (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions])}
+            (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/intent])}
               proven (assoc :seon.context/proofs
                             (update proven :seon.context/proof-list
                                     (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
