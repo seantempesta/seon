@@ -274,8 +274,9 @@
       (seq other) (assoc :seon.context/new-red-tests (entries other)))))
 
 (defn task-finished?
-  "True when the step of the task `agent-id` holds on `database`, the agent's branch, is done or satisfied
-  (`step-verdict`): nothing is left for a model turn to do."
+  "True when the held task's step is done or satisfied.
+  The step is the one the task `agent-id` holds on `database`, the agent's branch (`step-verdict`): nothing is left
+  for a model turn to do."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (contains? #{:done :satisfied} (:seon.task/status (step-verdict database agent-id))))
