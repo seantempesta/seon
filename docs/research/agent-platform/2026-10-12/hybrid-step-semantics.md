@@ -57,7 +57,7 @@ settled by the smaller mechanism that the existing data already supports.
 | `:implement` | `:proofs` nonempty, all green at the head; `broken` = ∅; `new-red` ⊆ `:proofs` (so none) | the agent's test step on its branch; verdict written on its branch (`:seon.agent/broken`, the end) | when no task `needs` it: root's merge task |
 | `:prove` | `:proofs` (optional) all green; `:product` nonempty; `new-red` = `:product`, each red by `:fail` or an `:error` of type `:seon.error/unimplemented`; `broken` = ∅ | same | never: its program reaches its successors by fork |
 | both | `:sent-back` carries a target and counterexample (`my.task/send-back!`) and is never green | the agent's pass | none |
-| validity | `obligations` nonempty at the fork point (`:proofs` for `:implement`, `:product` for `:prove`) | root's `plan-facts` on the basis commit's value | — |
+| validity | `obligations` has own `:proofs` at the fork point for `:implement`; `:prove` has own `:proofs` or a successor task declares it in `:seon.task/needs` (the successor intent describes the product) | root's `plan-facts` on the basis commit's value | — |
 
 **Cost.** `obligations`: two AVET reads. `step-status`: set arithmetic over results the step already read (Opus: six rows
 in 5 ms). Baseline: one inherited-evidence read per reaching test red at the head, and a run at the fork point only for

@@ -71,6 +71,8 @@
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.cache :as cache]
             [seon.await :as await]
             [seon.batch]
             [seon.bootstrap :as bootstrap]
@@ -1689,7 +1691,8 @@
                                        (assoc row :seon.flow.plan/op :start-flow :seon.task/execution :running)])))
                        fresh)
         problems (mapv (fn [handle] {:seon.flow.plan/op :problem :seon.flow.plan/class :invalid-task
-                                     :seon.task/assigned handle})
+                                     :seon.task/assigned handle
+                                     :seon.task/intent "Restore the step's obligations at its fork point: an :implement step needs tagged proofs; a :prove step needs its own tagged proofs or a successor task declaring it in :seon.task/needs."})
                        (sort (remove attempted invalid)))]
     (into problems (concat followed launches))))
 
@@ -1699,11 +1702,31 @@
   [reads]
   (some #(when (and (map? %) (:seon.error/at %)) %) reads))
 
+(defn- basis-valid?
+  "Whether `sym` has admission obligations at its fork `commit`, else the held main value."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :uuid] :seon.task/sym]
+                  [:or :boolean :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database commit sym]
+  (cache/lookup ::basis-valid [(or commit (db/commit-id database)) sym]
+                (constantly 1)
+                #(let [basis (if commit
+                               (d/commit-as-db (db/schema-database database) commit {:secondary-indices? false})
+                               database)
+                       owed (task/obligations basis sym)]
+                   (cond
+                     (:seon.error/at owed) owed
+                     (seq (:seon.task/proofs owed)) true
+                     (= :prove (:seon.task/step owed))
+                     (let [successor (db/q '[:find ?next . :in $ ?s :where [?t :seon.task/sym ?s]
+                                            [?next :seon.task/needs ?t]] basis sym)]
+                       (if (map? successor) successor (some? successor)))
+                     :else false))
+                (fn [value] (not (and (map? value) (:seon.error/at value))))))
+
 (defn plan-facts
   "What db<->flow reads on main `database` before it plans.
-  The frontier's leaves split by validity (a leaf is valid with at least one
-  proof), the open attempts with their task's intent, ended counts, creation
-  order, and the end commits of each leaf's done needs."
+  The frontier's leaves split by obligations at their fork point, with open
+  attempts, ended counts, creation order and done needs' end commits."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.flow.plan/facts :seon.db/invalid-read-error]]}
   [database]
   (let [frontier (task/frontier database)
@@ -1724,12 +1747,14 @@
                                    [?a :seon.task/attempt-of ?l] [?a :seon.task.attempt/end :done]
                                    [?a :seon.task.attempt/commit ?c]]
                                  database task/frontier-rules leaves))
-        proved (when (and syms (not (map? syms)))
-                 (into #{} (keep (fn [[handle sym]]
-                                   (let [edges (task/task-edges database sym)]
-                                     (when (seq (:seon.task/proofs edges)) handle))))
-                       syms))]
-    (or (read-failure [frontier syms open ended created basis])
+        basis-by-task (when-not (map? basis)
+                        (reduce (fn [m [h c]] (update m h (fnil conj #{}) c)) {} basis))
+        owed (when (and syms (not (map? syms)) basis-by-task)
+               (mapv (fn [[handle sym]]
+                       [handle (basis-valid? database (first (sort (get basis-by-task handle))) sym)])
+                     syms))
+        proved (into #{} (keep (fn [[handle valid?]] (when (true? valid?) handle))) owed)]
+    (or (read-failure (into [frontier syms open ended created basis] (map second owed)))
         {:seon.flow.plan/startable (into #{} (filter proved) leaves)
          :seon.flow.plan/invalid (into #{} (remove proved) leaves)
          :seon.flow.plan/open (mapv (fn [[h k id b i]] {:seon.task/assigned h :seon.task/assignment k :seon.agent/id id
@@ -1737,7 +1762,7 @@
                                     open)
          :seon.flow.plan/ended (into {} ended)
          :seon.flow.plan/created (into {} created)
-         :seon.flow.plan/basis (reduce (fn [m [h c]] (update m h (fnil conj #{}) c)) {} basis)
+         :seon.flow.plan/basis basis-by-task
          :seon.flow.plan/cluster :running})))
 
 (defn- started-entries
@@ -1930,11 +1955,10 @@
 (defn- write-problem!
   "Write the problem task a `:problem` action names, by identity, so a repeat writes nothing."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
-  [handle {h :seon.task/assigned class :seon.flow.plan/class}]
+  [handle {h :seon.task/assigned class :seon.flow.plan/class intent :seon.task/intent}]
   (let [created (task/create! {:seon.db/connection (:seon.db/connection handle) :seon.agent/id "root"
                                :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" h) :seon.task/kind :work
-                               :seon.task/intent (str "Task " h " is :running but cannot start: it names no proof. "
-                                                      "Tag a failing deftest with it, or hold it.")})]
+                               :seon.task/intent intent})]
     (when (:seon.error/at created) (throw (ex-info (:seon.error/message created "The problem task was refused.") created)))
     nil))
 

@@ -388,7 +388,8 @@
                  "with no fault recorded")))
          (finally (release! routing))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt
+                        'seon.turn/a-merge-request-comes-only-from-a-step-no-task-needs}}
   a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
   (binding [*space* "tq.chain"]
   (test-support/with-database
@@ -400,11 +401,19 @@
           (pass! handle (:seon.agent/routing handle))
           (is (empty? (attempts connection "b")) "B waits on A")
           (is (= :done (landed! handle connection "a" ::a-ended)) "A's green proofs end it, with no model call")
+          (is (empty? (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
+                              [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
+                            (db/db connection) (chain-handle "a")))
+              "a step its successor needs records no merge request")
           (pass! handle (:seon.agent/routing handle))
           (let [[[_ branch-b]] (seq (attempts connection "b"))]
             (is (seq (proof-runs-on (db/branch-database (db/db connection) branch-b) (proof "a")))
                 "B's branch forked from A's end commit: it holds A's proof run")
-            (is (= :done (landed! handle connection "b" ::b-ended)) "and B ends the chain")))))))))
+            (is (= :done (landed! handle connection "b" ::b-ended)) "and B ends the chain")
+            (is (seq (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
+                             [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
+                           (db/db connection) (chain-handle "b")))
+                "the step no task needs records its merge request")))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-fresh-attempt-is-work-without-a-message 'seon.turn/a-send-back-names-its-target-on-the-attempt}}
   a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target
@@ -796,7 +805,8 @@
 ;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
 ;;; is a red proof for its successor, written on its own branch.
 
-(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
+(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
+                        'seon.turn/a-merge-request-comes-only-from-a-step-no-task-needs}}
   a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
   ;; p is a :prove step: its own proof is green once a deftest tagged i exists, and that deftest, i's red proof,
   ;; is its product. The one model reply writes it, red as it must be: new at p's fork point, so p broke nothing
@@ -829,4 +839,63 @@
                    "the model's reply turned p's step proof green on its branch"))
              (is (= :done (landed! handle connection "p" ::p-ended))
                  "its step proof is green and its only red test is its product, new at its fork point")
+             (is (empty? (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
+                                 [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
+                               (db/db connection) (chain-handle "p")))
+                 "the Prove predecessor records no merge request")
              (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
+
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-successor-whose-proof-its-predecessor-wrote-starts}}
+  a-successor-whose-proof-its-predecessor-wrote-starts
+  ;; i's only proof is written on a's branch before a ends :done at that commit; i forks from that commit, where its
+  ;; proof is, so i is startable there: it gets its attempt and no :invalid-task problem is written on main.
+  (binding [*space* "tq.chainsucc"]
+  (test-support/with-database
+   (fn [connection]
+     (chain-world
+      connection {"a" [#{} "(clojure.test/is (= 1 2))"] "i" [#{"a"} nil]}
+      (fn [handle]
+        (let [routing (:seon.agent/routing handle)]
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}})
+          (pass! handle routing)
+          (let [[[key-a branch-a]] (seq (attempts connection "a"))
+                a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
+                                                                 :seon.store/branch branch-a})]
+            (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) (proof "a"))) ::a-proved)
+            ;; a's work: i's red proof, defined on a's branch as a's agent would
+            (test-support/define! (world/world {:seon.db/connection a-connection :seon.boot/cluster-name "tq-chain"
+                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db a-connection))
+                                                                                              (db/db a-connection) a-connection)
+                                                :seon.batch/sink (seon.batch/sink)
+                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                :seon.agent/id "tq-chain-author"})
+                                  'tq.chainsucc-behavior
+                                  (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))"))
+            (test-support/transacted! connection
+                                      [[:db/add [:seon.task/assignment key-a] :seon.task.attempt/end :done]
+                                       [:db/add [:seon.task/assignment key-a] :seon.task.attempt/commit
+                                        (db/commit-id (db/db a-connection))]])
+            (pass! handle routing)
+            (is (= 1 (count (attempts connection "i"))) "a's green end starts i from a's commit")
+            (is (empty? (db/q '[:find ?t :where [?t :seon.task/name ?n] [(clojure.string/starts-with? ?n "invalid-task")]]
+                              (db/db connection)))
+                "and writes no :invalid-task problem for it")))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-successor-whose-proof-its-predecessor-wrote-starts}}
+  admission-reads-a-prove-steps-proof-or-successor-declaration
+  (binding [*space* "tq.admission"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"p" [#{} "(clojure.test/is (= 1 2))" :prove]
+                    "q" [#{} nil :prove] "i" [#{"q"} "(clojure.test/is (= 1 2))"]
+                    "r" [#{} nil :prove]
+                    "s" [#{} nil] "j" [#{"s"} "(clojure.test/is (= 1 2))"]}
+        (fn [_]
+          (let [observed (agent/plan-facts (db/db connection))]
+            (is (= (set (map chain-handle ["p" "q"])) (:seon.flow.plan/startable observed))
+                "Prove starts with own proofs or a successor declaration")
+            (is (= (set (map chain-handle ["r" "s"])) (:seon.flow.plan/invalid observed))
+                "Prove without either and Implement without proofs cannot start"))))))))

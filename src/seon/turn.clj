@@ -2292,7 +2292,7 @@
 
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`), all in the agent's
-  own world (its branch, custody): request the merge of its change when it ended green
+  own world (its branch, custody): request the merge of its change when it ended green and no task needs it
   (`my.program/request-merge!`, the agent's own act; a merge request this end already recorded is reused,
   `end-merge-request`), record the agent's outcome (`seon.context/end-summary-tx`), then close the agent and
   write the end on its attempt in one transaction (`end-task-call`). Nothing reaches main here: the end
@@ -2311,8 +2311,13 @@
                                 :seon.agent/id agent-id}))
         write! (fn [tx] (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [recorded (when (= :done end) (end-merge-request (db/db connection) agent-id))
-            execution (when (and (= :done end) (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
+      (let [database (db/db connection)
+            held (task/agent-task database agent-id)
+            needed? (db/q '[:find ?next . :in $ ?h :where [?t :seon.task/id ?h]
+                            [?next :seon.task/needs ?t]] database held)
+            merge? (and (= :done end) (nil? needed?))
+            recorded (when merge? (end-merge-request database agent-id))
+            execution (when (and merge? (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
             request (or recorded
                         (when execution
                           (@program-request-merge! {:my.program/context (assoc execution :my.program/base-ctx
