@@ -933,8 +933,7 @@
                               (db/db connection)))
                 "and writes no :invalid-task problem for it")))))))))
 
-(deftest ^{:seon/tasks #{'seon.context/a-send-back-reason-reaches-the-targets-next-attempt}}
-  a-send-back-reason-reaches-the-targets-next-attempt
+(deftest a-send-back-reason-reaches-the-targets-next-attempt
   ;; chain experiment 2: the Implement agent's counterexample reached root's end message only, so the relaunched
   ;; Design+Prove agent never saw why it was sent back. a sends itself back with a reason; its next attempt reads it.
   (binding [*space* "tq.chainback"]

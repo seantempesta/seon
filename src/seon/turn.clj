@@ -2165,6 +2165,15 @@
                      database agent-id)]
     (when (symbol? target) target)))
 
+(defn- sent-back-reason
+  "The reply of the completed turn of `agent-id` on `database` that sent its work back (`:seon.turn/result`), or nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task.attempt/reason]]}
+  [database agent-id]
+  (db/q '[:find ?reason . :in $ ?agent-id
+          :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+          [?turn :seon.turn/disposition :completed] [?turn :seon.turn/sent-back-to _] [?turn :seon.turn/result ?reason]]
+        database agent-id))
+
 (defn task-end
   "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
   green (`seon.context/task-done?`), `:sent-back` once a turn completed naming the task that owns the mistake
@@ -2188,14 +2197,15 @@
   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
   branch): the agent's admission closed and, on its open attempt (`seon.task/agent-attempt`),
   `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back, `:seon.task.attempt/target`
-  the task `target` names, as one transaction; nothing when the admission is already closed, so a task's
+  the task `target` names and `:seon.task.attempt/reason` the sending turn's reply, as one transaction; nothing when the admission is already closed, so a task's
   end is recorded once. No message: root learns of the end when db<->flow copies it to main
   (`seon.cluster.agent/land-ends!`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
                        :seon.task.attempt/commit [:maybe :seon.task/sym]]
                   :seon.store/transaction-data]}
   [database agent-id end commit target]
-  (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))]
+  (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))
+        reason (when (and (= :sent-back end) target) (sent-back-reason database agent-id))]
     (cond (closed-on? database agent-id) []
           ;; a transaction function's throw is its writer's refusal
           (:seon.error/at attempt) (throw (ex-info (:seon.error/message attempt) attempt))
@@ -2203,7 +2213,10 @@
                   attempt (into [[:db/add attempt :seon.task.attempt/end end]
                                  [:db/add attempt :seon.task.attempt/commit commit]])
                   (and attempt (= :sent-back end) target)
-                  (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])))))
+                  (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])
+                  ;; the reason is the completed turn's reply, a fact the target's next attempt reads
+                  (and attempt (= :sent-back end) target reason)
+                  (conj [:db/add attempt :seon.task.attempt/reason reason])))))
 
 (defn- end-merge-request
   "The merge request the end of the task `agent-id` holds already recorded on `home` (its branch, or main

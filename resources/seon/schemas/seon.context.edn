@@ -5,6 +5,8 @@
                 [:seon.task/intent :seon.task/intent]
                 [:seon.task/instructions {:optional true} :seon.task/instructions]
                 [:seon.task/must-read {:optional true} :seon.task/must-read]],
+               :send-backs [:vector {:description "The latest send-back to the held task: the step that sent it back and the reason its attempt recorded (seon.context/send-backs); absent when none was sent."}
+                            [:map [:seon.task/sym :seon.task/sym] [:seon.task.attempt/reason :seon.task.attempt/reason]]]
                :turns
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
@@ -66,6 +68,7 @@
                 [:seon.context/task {:optional true} :seon.context/task]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
+                [:seon.context/send-backs {:optional true} :seon.context/send-backs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
@@ -85,6 +88,7 @@
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
+                [:seon.context/send-backs {:optional true} :seon.context/send-backs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]

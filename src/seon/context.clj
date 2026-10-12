@@ -206,6 +206,21 @@
             ;; a cardinality-many pull is a vector; the declaration holds a set
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
+(defn send-backs
+  "The latest send-back to the task `handle` on `database`: the attempt of another step that ended
+  `:sent-back` targeting it, as its sender and the reason it recorded (`seon.turn/end-task-call`); a vector,
+  empty when none was sent. The relaunched agent reads why it was sent back."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.context/send-backs]}
+  [database handle]
+  (let [sent (db/q '[:find ?tx ?sender ?reason :in $ ?handle
+                     :where [?t :seon.task/id ?handle] [?a :seon.task.attempt/target ?t]
+                     [?a :seon.task.attempt/end :sent-back ?tx] [?a :seon.task.attempt/reason ?reason]
+                     [?a :seon.task/attempt-of ?s] [?s :seon.task/sym ?sender]]
+                   database handle)]
+    (if-let [[_ sender reason] (when (seq sent) (apply max-key first sent))]
+      [{:seon.task/sym sender :seon.task.attempt/reason reason}]
+      [])))
+
 (defn- base-results
   "Each of `proofs` with a known result at the fork point of `agent-id`'s branch `database` (`seon.turn/fork-commit`):
   the run the branch already holds at the reach digest the proof has in that commit (`seon.test.runner/result-at-reach`),
@@ -476,6 +491,7 @@
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
         verdict (when held (step-verdict database agent-id))
+        sent-back (when held (send-backs database (:seon.task/id held)))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items)
                    items
@@ -497,6 +513,7 @@
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
           verdict (assoc :seon.context/step (step-section verdict))
+          (seq sent-back) (assoc :seon.context/send-backs sent-back)
           (seq reads) (assoc :seon.context/must-reads reads)
           cost (assoc :seon.context/cost cost)
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
@@ -507,7 +524,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------

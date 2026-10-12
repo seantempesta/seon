@@ -29,12 +29,14 @@
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [held (context/held-task database agent-id)
         proven (when (and held (not (:seon.error/at held))) (context/proofs database (:seon.task/sym held)))
-        verdict (when (and held (not (:seon.error/at held))) (context/step-verdict database agent-id))]
+        verdict (when (and held (not (:seon.error/at held))) (context/step-verdict database agent-id))
+        sent-back (when (and held (not (:seon.error/at held))) (context/send-backs database (:seon.task/id held)))]
     (or (some #(when (:seon.error/at %) %) [held proven verdict])
         (cond-> {:seon.agent/id agent-id}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
-          verdict (assoc :seon.context/step (context/step-section verdict))))))
+          verdict (assoc :seon.context/step (context/step-section verdict))
+          (seq sent-back) (assoc :seon.context/send-backs sent-back)))))
 
 (defn send-back!
   "Give my task back without green proofs.
