@@ -1102,5 +1102,13 @@
               (is (= :merged (:seon.task/outcome before)) "the Implement block names the step before it as merged")
               (is (some #{(symbol rows "twice-doubles")} (map :seon.ref/name (get-in before [:seon.context/merged :seon.context/tests])))
                   "with the tests it merged"))
+            ;; the Implement step's work: the stub's body, then its end at that commit
+            (define-on! i-connection (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
+            (test-support/transacted! connection
+                                      [[:db/add [:seon.task/assignment key-i] :seon.task.attempt/end :done]
+                                       [:db/add [:seon.task/assignment key-i] :seon.task.attempt/commit (db/commit-id (db/db i-connection))]])
+            (pass! handle routing)
+            (is (= :merged (outcome key-i)) "its green proof merges the Implement step")
+            (is (task/done? (db/db connection) (chain-handle "i")) "and the chain is done")
             (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                 "with no fault recorded"))))))))

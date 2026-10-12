@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as refusal]
+            [seon.fn :as fn]
             [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -360,11 +361,31 @@
                             :seon.error/message "The cluster names no :seon.config.fs/working-root to publish into; nothing was written."
                             :seon.source/write-back-refused :root-refused :seon.error/offending cluster-name}))))
 
+(defn- indexed!
+  "Main's program after publication `written` installed its files under `root`: each written source file
+  main records, analyzed again (`seon.fn/index!` of those paths), so main holds the file's digest and each
+  of its declarations' file and span, and a later merge splices into them. Answers the index result, nil
+  when no written path is a source file main records."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.fn/root :seon.source/written]
+                  [:or :nil :seon.reconcile/result]]}
+  [connection root written]
+  (let [database (db/db connection)
+        files (db/q '[:find ?path ?root :in $ [?path ...]
+                      :where [?f :seon.fn.file/relative-path ?path] [?f :seon.fn.file/relative-root ?root]]
+                    database (:seon.source/changed-paths written))]
+    (when (seq files)
+      (fn/index! {:seon.db/connection connection
+                  :seon.schema/projection (or (db/carried-projection database) (schema/handed-projection))
+                  :seon.fn/root root :seon.fn/roots (vec (sort (into #{} (map second) files)))
+                  :seon.fn/changed-paths (into #{} (map first) files)
+                  :seon.source/previous-database database}))))
+
 (defn publish!
   "Publish assignment `key`'s merged declarations, task entries included, into the cluster's checkout (`checkout`) through
   `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
   (`seon.cluster.source/merge-accepted` of its `:seon.task/merge-commit`), written back
-  (`seon.cluster.source/write-back!`, which proves and reindexes each file) and committed as one git
+  (`seon.cluster.source/write-back!`, which proves and reindexes each file), main's record of those files
+  analyzed again (`indexed!`), and committed as one git
   commit of exactly those paths (`seon.cluster.source/commit!`) under the merge's own claim in `bin/lane`'s
   ledger (lane `merge-<key>`), then `:seon.task/git-commit` written. A path another lane claims, or one
   with uncommitted changes the merge's claim does not cover, waits: nothing is written and the
@@ -394,9 +415,11 @@
       :else
       (let [_ (source/claim-paths! root lane paths)
             written (source/write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})
-            committed (when-not (:seon.error/at written)
+            indexed (when-not (:seon.error/at written) (indexed! connection root written))
+            committed (when-not (or (:seon.error/at written) (:seon.error/at indexed))
                         (source/commit! root written (acceptance database key accepted)))
             outcome (cond (:seon.error/at written) (refuse written)
+                          (:seon.error/at indexed) (refuse indexed)
                           (:seon.error/at committed) (refuse committed)
                           :else (let [recorded (db/transact! connection [[:db/add a :seon.task/git-commit (:seon.git/commit committed)]])]
                                   (if (:db-after recorded)
