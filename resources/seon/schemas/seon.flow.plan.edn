@@ -47,7 +47,6 @@
  :head [:and {:description "The commit an assignment's branch head names now."} :seon.source/commit-id]
  :started? [:boolean {:description "Whether the registry holds the assignment's agent's graph."}]
  :kept? [:boolean {:description "Whether a merged branch stays: its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?), or a successor still forks from its end commit."}]
- :requested? [:boolean {:description "Present (true) when the branch head holds the agent's merge request for the assignment: its declarations merge with its facts only through root's merge (my.root/merge!), so db<->flow merges nothing of it (until hybrid-done-and-merge M8)."}]
  :publish? [:boolean {:description "Present (true) when the assignment merged declarations main records no git commit or refusal for: its publication into the checkout is due (seon.merge/publish!)."}]
  :held-assignment [:map {:description "One assignment whose branch the store holds, as db<->flow derives its lifecycle from it (seon.cluster.agent/lifecycle-facts): its end (main's, else its branch head's), its merge base and head, whether its graph runs and whether its branch stays once merged."}
                    [:db/id :seon.db/entity-id]
@@ -61,6 +60,5 @@
                    [:seon.flow.plan/head :seon.flow.plan/head]
                    [:seon.flow.plan/started? :seon.flow.plan/started?]
                    [:seon.flow.plan/kept? :seon.flow.plan/kept?]
-                   [:seon.flow.plan/requested? {:optional true} :seon.flow.plan/requested?]
                    [:seon.flow.plan/publish? {:optional true} :seon.flow.plan/publish?]]
  :held [:vector {:description "Every assignment whose branch the store holds, by key."} :seon.flow.plan/held-assignment]}

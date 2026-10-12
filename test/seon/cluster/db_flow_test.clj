@@ -136,8 +136,6 @@
             [[{:seon.flow.plan/head c2 :seon.flow.plan/started? true} [] "running: no end anywhere"]
              [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :merge]
               "ended on its branch: the graph stops, then the branch merges"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/requested? true :seon.flow.plan/head c2 :seon.flow.plan/started? true}
-              [:stop :close] "a requested merge carries declarations: the graph stops, its end alone is written on main and root merges it"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1} [:delete-branch]
               "root merged it: deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
@@ -376,9 +374,10 @@
                                               ::retire-ended)))
                     child (get-in @routing [:seon.agent/children branch])
                     graph (get-in @child [:seon.agent/started agent-id :seon.flow/executor])
-                    ;; the end stops the graph and releases its connections; the branch's merge request waits for root
+                    ;; the end stops the graph and releases its connections; its merge, refused in a world with
+                    ;; no checkout for the proofs' file, keeps the branch for root
                     _ (pass! handle routing)
-                    _ (is (contains? (registry/branches store) branch) "the requested merge keeps the branch for root")
+                    _ (is (contains? (registry/branches store) branch) "the refused merge keeps the branch for root")
                     closed (task/close! {:seon.db/connection connection :seon.store/store store
                                          :seon.agent/routing (if from-attempt? child routing)}
                                         key :closed "The lifecycle proof closes this request.")]
@@ -389,7 +388,8 @@
                 (is (= :released @(:wrapped-atom branch-connection)))
                 (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
                 (is (not (contains? (registry/branches store) branch)))
-                (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))))))))))))
+                (is (= 1 (count (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection))))
+                    "the refused merge is the only fault"))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-chain-starts-its-first-step-and-its-end-starts-the-next-from-its-commit
@@ -712,10 +712,10 @@
                          (registry/retire-branch! {:seon.store/store (agent/handle-store handle)
                                                    :seon.store/branch branch})))))))))))
 
-(deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
-  a-requested-green-end-waits-on-its-branch-for-roots-merge
-  ;; the agent requested the merge of its change: its facts and declarations merge together, by root
-  ;; (my.root/merge!, seon.merge/merge!), so db<->flow stops the graph and writes only its end on main
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-requested-green-end-merges-and-publishes-with-no-hand-act}}
+  a-requested-end-whose-files-no-checkout-holds-merges-nothing
+  ;; db<->flow merges a requested green end like any done end; this world's cluster names no checkout that
+  ;; holds the proofs' file, so the gate refuses before acceptance: nothing reaches main but the :error end
   (binding [*space* "tq.endcustody"]
     (test-support/with-database
      (fn [connection]
@@ -731,23 +731,20 @@
                   _ (landed! handle connection "g" ::g-ended)
                   database (db/db connection)
                   head (db/branch-database database branch)]
-              (is (= (first (copies database branch))
-                     (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
-                  "the end reached main alone, in one transaction from the branch")
+              (is (seq (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]] head a))
+                  "the agent requested its merge on its branch")
               (is (empty? (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
                                 database a))
-                  "its merge request stays on the branch for root's merge")
-              (is (seq (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]] head a)))
+                  "nothing of it reached main")
               (is (not= (db/commit-id head) (:seon.task/merge-base (db/pull database [:seon.task/merge-base] a)))
-                  "and nothing merged")
-              (is (= [:done] (keep #(when (= key (:seon.task/assignment %)) (:seon.task.attempt/end %))
-                                   (my.root/merge-requests {:seon.db/db database})))
-                  "root's open merge requests show it done")
+                  "its base did not move")
+              (is (= {:seon.task.attempt/end :error}
+                     (select-keys (db/pull database [:seon.task.attempt/end :seon.task/outcome] a) [:seon.task.attempt/end :seon.task/outcome]))
+                  "the refused merge is the assignment's :error end, not an outcome")
+              (is (contains? (registry/branches (agent/handle-store handle)) branch) "its branch stays")
               (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "its graph was stopped and joined")
-              (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] head))
-                  "without interrupting the pass that wrote the end")
-              (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] database))
-                  "with no fault recorded")))))))))
+              (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] database)))
+                  "and the refusal is one fault for root")))))))))
 
 (deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
   a-refinement-on-a-branch-reaches-main-only-at-the-end

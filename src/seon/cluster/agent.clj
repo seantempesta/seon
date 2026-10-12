@@ -2019,21 +2019,17 @@
     nil))
 
 (defn- branch-end
-  "The end `branch`'s head records on attempt `key`, read from main `database`'s store, and whether the head holds
-  the agent's merge request for it (`:seon.flow.plan/requested?`); nil when the head records no end."
+  "The end `branch`'s head records on attempt `key`, read from main `database`'s store; {} when the head records
+  none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.task/assignment]
-                  [:maybe [:map [:seon.task.attempt/end :seon.task.attempt/end]
-                           [:seon.flow.plan/requested? {:optional true} :seon.flow.plan/requested?]]]]}
+                  [:map [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]]]}
   [database branch key]
-  (when-let [head (db/branch-database database branch)]
-    (try (let [[a end] (db/q '[:find [?a ?e] :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
-                             head key)
-               ;; from the requests' own datoms: a branch head opens with primary indexes only
-               requested? (and (keyword? end)
-                               (some #(= a (:v (first (d/datoms head :eavt (:e %) :seon.task/of-assignment))))
-                                     (d/datoms head :aevt :seon.task/merge-request)))]
-           (when (keyword? end) (cond-> {:seon.task.attempt/end end} requested? (assoc :seon.flow.plan/requested? true))))
-         (finally (source/release! [head])))))
+  (if-let [head (db/branch-database database branch)]
+    (try (let [end (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                         head key)]
+           (if (keyword? end) {:seon.task.attempt/end end} {}))
+         (finally (source/release! [head])))
+    {}))
 
 (def ^:private merged-ends
   "The ends whose branch squash-merges onto main; every other end only reaches main as the end itself."
@@ -2076,8 +2072,8 @@
   "What db<->flow reads before it derives the ended assignments' actions (`next-actions`).
   Every assignment on main `database` whose branch the `store` holds: its end on main, else on its branch head
   (one branch read per assignment main holds no end for or whose head is not merged), its merge base and branch head commit, whether
-  `registry` runs its graph, whether its branch holds the agent's merge request, and, ended to merge, whether its
-  branch stays once merged (`kept?`)."
+  `registry` runs its graph, whether its publication is due, and, ended to merge, whether its branch stays once
+  merged (`kept?`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.flow.plan/registry] :seon.flow.plan/held]}
   [database store {started :seon.flow.plan/started}]
   (let [rows (db/q '[:find ?a ?k ?h ?b ?id
@@ -2089,11 +2085,13 @@
     (into [] (keep (fn [[a k h b id]]
                      (when (contains? branches b)
                        (let [{main-end :seon.task.attempt/end base :seon.task/merge-base :as row}
-                             (db/pull database [:seon.task.attempt/end :seon.task/merge-base :seon.task/outcome
-                                                :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal] a)
+                             ;; an assignment holding none of these yet pulls as nil
+                             (or (db/pull database [:seon.task.attempt/end :seon.task/merge-base :seon.task/outcome
+                                                    :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal] a)
+                                 {})
                              head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b})
                              ;; the branch is read while it holds something unmerged
-                             {on-branch :seon.task.attempt/end requested? :seon.flow.plan/requested?}
+                             {on-branch :seon.task.attempt/end}
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
                              end (or main-end on-branch)
                              publish? (publication-due? database a row)]
@@ -2104,7 +2102,6 @@
                                     :seon.flow.plan/kept? (boolean (and (merged-ends end)
                                                                         (kept? database branches a id end)))}
                              end (assoc :seon.task.attempt/end end)
-                             requested? (assoc :seon.flow.plan/requested? true)
                              publish? (assoc :seon.flow.plan/publish? true)
                              main-end (assoc :seon.flow.plan/main-end main-end)
                              base (assoc :seon.task/merge-base base)))))))
@@ -2115,10 +2112,9 @@
   Derived from the facts alone, never from a marker, so a pass after any crash derives what is left: an
   ended assignment's graph stops first, letting its last pass finish (`:stop`); an end to merge (:done,
   :sent-back) with no merge base gets one (`:merge-base`) and merges while its branch head differs from its
-  merge base and main holds no other end (`:merge`), unless main holds its end with no merge base (copied
-  to main before merge bases existed) or the branch holds the agent's merge request, whose declarations
-  merge with its facts only through root's merge (`my.root/merge!`, the same `seon.merge/merge!`), so its end
-  alone is written on main for root (`:close`); any other end main lacks is written there (`:close`); a merge
+  merge base and main holds no other end (`:merge`: its facts, and the declarations the agent's merge request
+  names once `seon.cluster.source/prepare-merge!`'s gate passes), unless main holds its end with no merge base
+  (copied to main before merge bases existed); any other end main lacks is written there (`:close`); a merge
   whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
   a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
   (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
@@ -2127,22 +2123,19 @@
   [held]
   (into [] (mapcat (fn [{end :seon.task.attempt/end main-end :seon.flow.plan/main-end base :seon.task/merge-base
                          head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
-                         requested? :seon.flow.plan/requested? publish? :seon.flow.plan/publish? :as row}]
+                         publish? :seon.flow.plan/publish? :as row}]
                      (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
                                                             :seon.task/branch])
                                           :seon.flow.plan/op %)
                            ;; an end main holds with no merge base was copied before merge bases existed
                            copied? (and main-end (nil? base))
-                           merge? (and (merged-ends end) (or (nil? main-end) (merged-ends main-end)))
-                           ;; a requested merge carries declarations: root merges it whole (my.root/merge!)
-                           merging? (and merge? (not copied?) (not= head base) (not requested?))]
+                           merge? (and (merged-ends end) (or (nil? main-end) (merged-ends main-end)))]
                        (cond-> []
                          ;; the graph stops first, so the merge takes the head its last pass left
                          (and end started?) (conj (action :stop))
                          (and merge? (nil? base) (not copied?)) (conj (action :merge-base))
-                         merging? (conj (action :merge))
-                         ;; a requested merge's end waits for root on main, with nothing merged
-                         (and end (nil? main-end) (or requested? (not (merged-ends end)))) (conj (action :close))
+                         (and merge? (not copied?) (not= head base)) (conj (action :merge))
+                         (and end (nil? main-end) (not (merged-ends end))) (conj (action :close))
                          ;; publication reads main alone: the merge commit, then the checkout
                          publish? (conj (action :publish))
                          ;; deletion reads main after the merge and its publication: their own writes wake the next pass
