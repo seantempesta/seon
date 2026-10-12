@@ -530,33 +530,28 @@
   ;; was reached by reproducing the diagnostic instead of reading the fact
   ;; (`docs/prds/steward-platform/research/over-bound-evaluation-contract-2026-09-17.md`,
   ;; "Second finding").
-  ;; Only this suite's Var is armed (changed identities), and the scope
-  ;; restores it: an `apply!` without changed identities re-armed every
-  ;; production Var without its supplied-default plan, and nothing restored
-  ;; them (red-triage 2026-09-27: 2,247 of 2,249 wrappers lost their plans).
+  ;; The runner arms this suite's Var where the test runs: compiled, the
+  ;; first load arms what it interned (`seon.test/arm-first-loads!`);
+  ;; interpreted, the definition's own contract is installed on its SCI Var.
+  ;; The test never arms it itself: compiled arming cannot reach an
+  ;; interpreted Var, so a test that armed would test the JVM, not its subject.
   (test-support/with-database
    (fn [_connection]
-     (test-support/preserving-instrumentation-state
-      (fn []
-       (is (= 1 (:seon.instrument/registered
-                 (instrument/apply!
-                  {:seon.instrument/changed-identities
-                   #{[:seon.fn/sym 'seon.error-test/wide-return-narrow-violation]}}))))
-       (let [thrown (try (wide-return-narrow-violation 1)
-                         (catch Throwable throwable throwable))
-             prepared (error/prepare (request thrown))
-             fact (:seon.error/fact prepared)
-             fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
-         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown)))
-         (is (= [:seon.ns/name 'user] (edn/read-string (:seon.instrument/actual fact)))
-             "the value at the violation path is kept: the leaf, never the request it rode in")
-         (is (pos? (:seon.instrument/actual-size fact))
-             "the offending value's own size is recorded")
-         (is (< (:seon.instrument/actual-size fact)
-                (:seon.error/data-size fact))
-             "the offending value is measured, never the source it rode in")
-         (is (<= fact-bytes evidence-bytes)
-             "stored fault fact was UTF-8 bytes")))))))
+     (let [thrown (try (wide-return-narrow-violation 1)
+                       (catch Throwable throwable throwable))
+           prepared (error/prepare (request thrown))
+           fact (:seon.error/fact prepared)
+           fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
+       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown)))
+       (is (= [:seon.ns/name 'user] (edn/read-string (:seon.instrument/actual fact)))
+           "the value at the violation path is kept: the leaf, never the request it rode in")
+       (is (pos? (:seon.instrument/actual-size fact))
+           "the offending value's own size is recorded")
+       (is (< (:seon.instrument/actual-size fact)
+              (:seon.error/data-size fact))
+           "the offending value is measured, never the source it rode in")
+       (is (<= fact-bytes evidence-bytes)
+           "stored fault fact was UTF-8 bytes")))))
 
 (deftest fault-preparation-bounds-the-fact-and-omits-disposable-flow-state
   ;; THE CLASS PROOF for B1. A fault's evidence is a STORED value and goes
@@ -1935,6 +1930,5 @@
     (doseq [[what source failure expected] cases]
       (let [answer (#'seon.error/message source failure)]
         (is (string? answer) what)
-        (is (not (re-matches #"\s*" answer))
-            (str what " -- the answer is never blank, got " (pr-str answer)))
+        (is (not (re-matches #"\s*" answer)) what)
         (is (= expected answer) what)))))
