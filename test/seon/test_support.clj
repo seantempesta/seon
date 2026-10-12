@@ -1246,11 +1246,13 @@
 
 (defn task-row
   "A complete task entity for fixtures that need one plain identified entity with a required
-  string: the twelve-character `handle` and its `intent`."
+  string: the twelve-character `handle` and its `intent`. Its name is `task-` and the handle,
+  one symbol's name (`seon.task/symbol-name?`) for any handle, so the printed task reads back."
   {:malli/schema [:=> [:cat :seon.task/handle :seon.task/intent] :seon.task/task]}
   [handle intent]
-  {:seon.task/id handle :seon.task/sym (symbol "fixture.tasks" handle) :seon.task/ns 'fixture.tasks :seon.task/name handle
-   :seon.task/kind :function :seon.task/intent intent})
+  (let [task-name (str "task-" handle)]
+    {:seon.task/id handle :seon.task/sym (symbol "fixture.tasks" task-name) :seon.task/ns 'fixture.tasks
+     :seon.task/name task-name :seon.task/kind :function :seon.task/intent intent}))
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents.

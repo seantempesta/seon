@@ -189,14 +189,10 @@
             ;; Under one commit per form the run's entities were written only at
             ;; settlement, and every write a form made refused "Nothing found
             ;; for entity id [:seon.cluster.eval/id ...]" (task c9e0cde3edb3).
-            (let [task-id (id/id)
-                  ;; the fixture symbol's name is the hex id, which may start with a digit: no
-                  ;; reader accepts that token, so the form builds the symbol
-                  row (let [row (support/task-row task-id "written by a form")]
-                        (assoc row
-                               :seon.task/sym (list 'symbol "fixture.tasks" task-id)
-                               :seon.task/ns (list 'quote (:seon.task/ns row))))
-                  result (code (pr-str (list 'seon.db/transact! {:tx-data [row]})))
+            (let [;; a handle leading with a digit: the fixture's printed symbol still reads back
+                  task-id (str "0" (subs (id/id) 1))
+                  result (code (pr-str (list 'seon.db/transact!
+                                             (list 'quote {:tx-data [(support/task-row task-id "written by a form")]}))))
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
               (is (not-any? :seon.cluster.eval/error receipts))
               (is (= (receipt-id-of result)
