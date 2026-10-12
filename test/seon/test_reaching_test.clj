@@ -71,8 +71,7 @@
            '[:seon.test/sym reach.fixture/b-test] "(deftest b-test (is (= 1 (b 1))))"))
 
 (defn- derived-digests
-  "The reach indexes the central cache holds for the request `test-symbols`,
-  one per distinct reached graph content it was derived for."
+  "The reach indexes retained for the selected tests' graph content."
   {:malli/schema [:=> [:cat [:set :seon.test/sym]] :int]}
   [test-symbols]
   (count (filter #(= test-symbols (first %)) (keys (seon.cache/retained :seon.test.runner/reach-index)))))
@@ -164,6 +163,8 @@
              "(defn d {:malli/schema [:=> [:cat :int] :int]} [n] (c (identity n)))")
     (let [after (runner/reach-digests (db/db connection) [tc ta])]
      (is (not= (get together tc) (get after tc)) "a change inside the cycle")
+     (is (= after (runner/reach-digests (db/as-of (db/db connection) (db/basis-t (db/db connection))) [tc ta]))
+         "incremental components equal a derivation without a committed revision cache")
      (is (= (get together ta) (get after ta)) "a test outside the cycle keeps its digest"))))))
 
 (deftest a-call-edge-changed-under-an-unchanged-definition-digest-changes-the-reach

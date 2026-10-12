@@ -2,8 +2,41 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.program :as program]
+            [seon.profile :as profile]
+            [seon.render.value :as value]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/the-first-reach-digest-after-a-change-costs-what-changed
+                        'seon.test.runner/verified-recomputes-reach-digests-for-the-whole-program}}
+  a-changed-programs-first-reach-digest-is-subsecond
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           names (vec (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database)))
+           selected ['seon.request-cost-test/a-request-counts-its-own-calls-reads-and-transactions]
+           cold (profile/measure #(runner/reach-digests database names))
+           subset (profile/measure #(runner/reach-digests database selected))]
+       (support/transacted!
+        connection
+        [(support/revision database [:seon.fn/sym 'seon.id/id]
+                           {:seon.fn/doc "Reach cost fixture documentation."})])
+       (let [changed (db/db connection)
+             one (profile/measure #(runner/reach-digests changed selected))
+             all (profile/measure #(runner/reach-digests changed names))
+             summary (into {}
+                           (map (fn [[stage measured]]
+                                  [stage (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes
+                                                               :seon.profile/reads :seon.profile/calls
+                                                               :seon.profile/ranked-by-self])]))
+                           {::cold cold ::subset subset ::one one ::all all})]
+         (when-let [path (System/getenv "SEON_REACH_COST_FILE")]
+           (spit path (value/core-text summary)))
+         (is (every? string? (map (:seon.profile/value one) selected)))
+         (is (= (:seon.profile/value one) (select-keys (:seon.profile/value all) selected)))
+         (is (zero? (profile/calls-of subset 'seon.test.runner/reached-graph)))
+         (is (< (:seon.profile/ms one) 100.0))
+         (is (< (:seon.profile/alloc-bytes one) 128000000)))))))
 
 (deftest program-digest-uses-the-databases-program-shapes
   (support/with-database
@@ -41,7 +74,7 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           tests ['seon.id-test/data-shape-and-explicit-length-determine-identity
+           tests ['seon.id-test/identity-is-a-function-of-the-values-structure
                   'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol]
            reaches (runner/reach-memberships database tests)]
        (is (contains? (get reaches (first tests)) 'seon.id/id) "the subject is reached")
@@ -52,7 +85,7 @@
 (deftest a-digest-follows-its-closures-content-and-nothing-else
   (support/with-database
    (fn [connection]
-     (let [reaching 'seon.id-test/data-shape-and-explicit-length-determine-identity
+     (let [reaching 'seon.id-test/identity-is-a-function-of-the-values-structure
            elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
            symbols [reaching elsewhere]
            before (runner/reach-digests (db/db connection) symbols)]
@@ -77,7 +110,7 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           reaching 'seon.id-test/data-shape-and-explicit-length-determine-identity
+           reaching 'seon.id-test/identity-is-a-function-of-the-values-structure
            elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
            symbols [reaching elsewhere]
            reaches (runner/reach-memberships database symbols)]
