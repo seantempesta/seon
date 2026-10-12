@@ -933,8 +933,24 @@
                      :seon.ns.refer/target-name local}))))
         (keys (:seon.schema.projection/forms projection))))
 
+(defn- declared-namespace-metadata
+  "The metadata a stored `ns` form declares: its name's metadata merged with
+  its attr-map, as clj-kondo reads a file's `ns` form."
+  {:malli/schema [:=> [:cat :symbol :string] :map]}
+  [namespace-name namespace-source]
+  (let [[_ declared-name & clauses]
+        (edamame/parse-string namespace-source {:all true :location? seq? :read-cond :allow :features #{:clj}
+                                                :auto-resolve #(if (= :current %) namespace-name %)
+                                                :readers (fn [_] identity)})
+        attributes (some #(when (map? %) %) (take 2 clauses))]
+    (merge {} (meta declared-name) attributes)))
+
 (defn- runtime-namespace-form
-  [namespace-name namespace-entity referenced-namespaces]
+  "The `ns` form a runtime analysis reads for `namespace-name`: its requires
+  and imports, and the metadata the namespace declares (`declared`) as its
+  attr-map, so a submitted deftest inherits the namespace's test markers as
+  it does in its file."
+  [namespace-name namespace-entity referenced-namespaces declared]
   (let [program-requires
         (into #{}
               (remove #{namespace-name})
@@ -949,6 +965,7 @@
                      vec)]
     (apply list
            (cond-> ['ns namespace-name]
+             (seq declared) (conj declared)
              (seq requires) (conj (apply list :require requires))
              (seq imports) (conj (apply list :import imports))))))
 
@@ -1063,12 +1080,17 @@
                              database namespace-names
                              (analyzer/referenced-program-namespaces
                               namespace-name (mapv :form-source group)))
+                 ;; the namespace the database holds declares its metadata in its source
+                 declared (when-let [stored (:seon.ns/source
+                                             (db/pull database [:seon.ns/source] [:seon.ns/name namespace-name]))]
+                            (declared-namespace-metadata namespace-name stored))
                  namespace-source
                  (print/form-text (runtime-namespace-form
                                    namespace-name
                                    (update namespace-entity :seon.ns/refers
                                            (fnil into []) interpreter-refers)
-                                   referenced))
+                                   referenced
+                                   declared))
                  authored (into #{} (map :seon.ns.refer/local) (:seon.ns/refers namespace-entity))]
              (reduce (fn [{:keys [lines] :as state} {form-source :form-source}]
                        (let [form-lines (count (filter #{\newline} form-source))]
@@ -1080,7 +1102,7 @@
                          (update :chunks conj namespace-source "\n")
                          (update :lines + (count (filter #{\newline} namespace-source)) 1)
                          (update :namespaces update namespace-name
-                                 #(or % {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced))
+                                 #(or % {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced nil))
                                          :seon.fn/synthetic-refers (into #{} (comp (map :seon.ns.refer/local) (remove authored)) interpreter-refers)})))
                      group)))
          (let [opening (if (seq prelude) (str prelude "\n") "")]

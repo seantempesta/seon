@@ -182,6 +182,48 @@
              (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
            ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
 
+(deftest a-repl-deftest-in-a-marked-namespace-is-written-back-and-reindexes-equal
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ connection]
+     (let [suffix (id/id)
+           agent-id (str "ns-marker-" suffix)
+           fixture-ns (symbol (str "nsmarker" suffix ".core-test"))
+           test-symbol (symbol (str fixture-ns) "marked-answers")
+           path (str "test/nsmarker" suffix "/core_test.clj")
+           root ((requiring-resolve 'seon.test-support/temp-root) (str "ns-marker-test-" suffix))
+           file (io/file root path)]
+       (io/make-parents file)
+       (spit file (str "(ns ^{:seon.test/platform \"Moving part: a sample.\"}\n    " fixture-ns
+                       "\n  (:require [clojure.test :refer [deftest is]]))\n"))
+       (try
+         (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})]
+           ((requiring-resolve 'seon.test-support/transacted!)
+            connection (function/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           (eval! (str "(in-ns '" fixture-ns ") (deftest marked-answers (is (= 1 1)))") agent-id running)
+           (let [base (db/commit-id (db/db connection))
+                 branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))
+                 agent-connection (-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch)
+                                      ::host/execution :seon.db/connection)
+                 held (db/pull (db/db agent-connection) [:seon.test/platform :seon.program/definition-digest]
+                               [:seon.test/sym test-symbol])
+                 written (source/write-back!
+                          {:seon.db/connection agent-connection :seon.fn/root root
+                           :seon.source/accepted {:seon.program/identities #{[:seon.test/sym test-symbol]}
+                                                  :seon.source/base-commit-id base
+                                                  :seon.source/commit-id (db/commit-id (db/db agent-connection))}})
+                 reindexed (some #(when (= test-symbol (:seon.test/sym %)) %)
+                                 (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]}))]
+             (is (= "Moving part: a sample." (:seon.test/platform held))
+                 "the REPL deftest carries the marker its namespace declares")
+             (is (= {} (select-keys written [:seon.error/message :seon.source/write-back-refused :seon.error/offending]))
+                 "write-back answers no refusal")
+             (is (= (:seon.program/definition-digest held) (:seon.program/definition-digest reindexed))
+                 "the written file reindexes to the branch's digest")))
+         (finally
+           (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+             (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
+           ((requiring-resolve 'seon.test-support/delete-root!) root)))))))
+
 (deftest an-unchanged-committed-nilable-contract-is-admitted-and-written-back
   ;; the nilable-return rule judges a new or changed contract; one equal to
   ;; the committed contract keeps its committed admission at the REPL and in
