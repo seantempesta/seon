@@ -2764,6 +2764,34 @@
            "an unchanged program forks the cluster base: no overlay is derived")
        (is (<= (:seon.cache/bytes (overlay) 0) (:seon.cache/bytes before 0)))))))
 
+(deftest ^{:seon/tasks #{'seon.sci.eval/equal-programs-on-two-branches-share-one-program-context}}
+  equal-programs-on-two-branches-share-one-program-context
+  (test-support/with-database
+   (fn [connection]
+     (eval/program-context (db/db connection))
+     (let [misses #(get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/program-context :seon.cache/misses] 0)
+           define! (fn [fork]
+                     (test-support/transacted! fork [(test-support/namespace-entity (db/db fork) 'probe.equal)])
+                     (test-support/transacted!
+                      fork [(test-support/program-fn-entity (db/db fork) (symbol "probe.equal" "twice")
+                                                            "(defn twice [x] (* 2 x))")])
+                     (db/db fork))]
+       (with-fresh-fork
+        connection
+        (fn [left-fork]
+          ;; another write first: the left branch's entity ids and commits differ from the right's
+          (test-support/transacted! left-fork [(test-support/task-row "equalprogram" "Shift entity ids.")])
+          (let [left (eval/program-context (define! left-fork))]
+            (with-fresh-fork
+             connection
+             (fn [right-fork]
+               (let [right-db (define! right-fork)
+                     before (misses)
+                     right (eval/program-context right-db)]
+                 (is (= 4 (sci/eval-string* (sci/fork right) "(probe.equal/twice 2)")))
+                 (is (identical? left right) "equal program content answers the identical program context")
+                 (is (= before (misses)) "the second branch derives no program context")))))))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/the-program-context-is-a-value}}
   an-unchanged-program-context-is-derived-once-and-reused
   (test-support/with-database

@@ -2899,9 +2899,12 @@
      ::added added
      ::namespaces namespaces
      ::tests tests
-     ;; What the plan's interpretation is a function of: its definitions by
-     ;; digest, its namespace and test rows by content.
-     ::digest (id/digest 32 [(select-keys held (concat overridden added)) namespaces tests])}))
+     ;; What the plan's interpretation is a function of, by content only: its
+     ;; definitions by digest, its namespaces by name, source and bindings, its
+     ;; tests by row content. Entity ids differ per branch for equal programs.
+     ::digest (id/digest 32 [(select-keys held (concat overridden added))
+                             (mapv (juxt :seon.ns/name namespace-key) namespaces)
+                             tests])}))
 
 (defn- overlay-plan
   "The overlay of one program against the loaded commit, shared across data writes."
@@ -3634,19 +3637,34 @@
         acquired (overlay! ctx database plan)]
     (assoc (freeze-program ctx) ::acquisition acquired)))
 
+(defn- projection-delta
+  "The digest of the schema forms and function contracts `database`'s
+  projection holds otherwise than `loaded`'s, and of the keys it lacks: what an
+  overlay's wrappers arm under beyond its plan, by content."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:string {:min 32 :max 32}]]}
+  [database loaded]
+  (let [own (or (db/carried-projection database) (schema/projection-from-database database))
+        held (or (db/carried-projection loaded) (schema/projection-from-database loaded))
+        section (fn [k]
+                  (let [own (get own k) held (get held k)]
+                    [(reduce-kv (fn [delta key value]
+                                  (let [prior (get held key ::absent)]
+                                    (if (or (identical? value prior) (= value prior)) delta (assoc delta key value))))
+                                {} own)
+                     (into (sorted-set) (remove #(contains? own %)) (keys held))]))]
+    (id/digest 32 [(section :seon.schema.projection/forms) (section :seon.schema.projection/function-contracts)])))
+
 (defn- program-content-key
   "The key a program context is kept under: the loaded program's [store
-  loaded-commit], a changed program's with its plan's digest, projection
-  revisions and armed dials. Nil when `loaded` is uncommitted."
+  loaded-commit], a changed program's with its plan's digest, its projection's
+  difference from the loaded one (`projection-delta`) and armed dials, all
+  content. Nil when `loaded` is uncommitted."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:or :nil :map]]
                   [:or :nil [:vector :seon.schema/value]]]}
   [database loaded plan]
   (when-let [base-key (cluster-base-key loaded)]
     (if plan
-      (conj base-key (::digest plan)
-            ;; the declarations its wrappers arm under
-            (db/content-revisions database schema/projection-attributes)
-            (armed-dials database))
+      (conj base-key (::digest plan) (projection-delta database loaded) (armed-dials database))
       base-key)))
 
 (defn- derive-program-context
