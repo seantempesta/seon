@@ -341,7 +341,7 @@ still producing at/layer; `fail!`. Invisible: no caller uses them yet. Test: T8,
 
 **P3 Type producers, by owner family (BEHAVIOR CHANGE, declared per family).** Each family converts its sites to the
 new arities with named variants. Typing changes which render pair is chosen and the recorded signature, so each family
-slice states its render and signature change and lands with its regression. Test: T1 on `my.fs/read`; per-family `are`
+slice states its render and signature change and is committed with its regression. Test: T1 on `my.fs/read`; per-family `are`
 cases of input to type. References: `malli/src/malli/core.cljc:203-207`; `datahike/src/datahike/db/transaction.cljc:27-32`;
 `clj-reload/src/clj_reload/core.clj:367-381`.
 
