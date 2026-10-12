@@ -40,8 +40,15 @@
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
-           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's docstring summary, arglists and contract as the agent writes it (:malli/schema), with the forms that read its source, callers and reaching tests; a schema key's form; a test's source; a task's intent."}
+           :brief [:map {:description "A name a referent's own content cites, shown one level: its name, a one-line summary and the form that reads it, never its content. Producer: seon.ref/brief."}
+                   [:seon.ref/name :seon.ref/name] [:doc {:optional true} :string]
+                   [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
+           :references [:vector {:description "The references a referent's own content makes (a docstring's or intent's or schema description's or doc section's cited names, a function's or test's program calls), each one level."}
+                        [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]
+           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's source, whole, and its contract as the agent writes it (:malli/schema), with the forms that read its callers and reaching tests; a schema key's form; a test's source; a task's intent; each with the references its content makes, one level."}
                            [:seon.ref/name :seon.ref/name]
+                           [:seon.fn/source {:optional true} :seon.fn/source]
+                           [:seon.ref/references {:optional true} :seon.ref/references]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]
                            [:malli/schema {:optional true} :seon.schema/value]
@@ -51,13 +58,14 @@
                            [:seon.test/source {:optional true} :seon.test/source]
                            [:seon.task/intent {:optional true} :seon.task/intent]
                            [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
-           :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin and the one read operation, never its text."}
+           :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin, the one read operation and the names its text cites, one level; never its text."}
                           [:seon.ref/path :seon.ref/path]
                           [:seon.ref/anchor {:optional true} :seon.ref/anchor]
                           [:seon.ref/heading :seon.ref/heading]
                           [:seon.ref/pin {:optional true} :seon.ref/pin]
                           [:seon.ref/line {:optional true} :seon.ref/line]
-                          [:seon.render/operations [:vector :seon.render/read-form]]]
+                          [:seon.render/operations [:vector :seon.render/read-form]]
+                          [:seon.ref/references {:optional true} :seon.ref/references]]
            :resolved [:or {:description "A reference resolved: a name to its definition, or a path to its document."}
                       :seon.ref/resolved-name :seon.ref/resolved-doc]
            :reference-text [:string {:min 1 :description "A based relative path with an optional #anchor, as an agent writes it."}]

@@ -2,7 +2,6 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [are deftest is]]
-            [my.program :as program]
             [seon.db :as db]
             [seon.error]
             [seon.mcp :as mcp]
@@ -51,20 +50,14 @@
        (is (= 1 headings))
        (is (= {'seon.ref/parsed 1} calls))))))
 
-(deftest a-function-whose-arglists-auto-resolve-a-keyword-resolves
-  (test-support/with-running-agent
-   (fn [running agent-id _]
-     (is (= ['([{:seon.print/keys [node children]}])]
-            (shown running agent-id "(mapv :arglists (seon.ref/references {:seon.ref/text \"`seon.print/close-frame`\"}))"))))))
-
 (deftest an-unloaded-library-name-resolves-from-the-dependency-cache
   (test-support/with-running-agent
    (fn [running agent-id _]
      (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"`seon.operator/check!` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
-                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin]) (update :seon.ref/pin :seon.ref/project))) found))")
+                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin :seon.fn/source]) (update :seon.ref/pin :seon.ref/project))) found))")
            [operator slurp-backward absent] (shown running agent-id code)
            source (shown running agent-id "(with-out-str (clojure.repl/source rewrite-clj.paredit/slurp-backward))")]
-       (is (= '[[request] nil] [(first (:arglists operator)) (:seon.ref/problem-kind operator)]))
+       (is (string? (:seon.fn/source operator)) "a program function shows its source")
        (is (= {:arglists '([zloc]) :seon.ref/pin "rewrite-clj"} (select-keys slurp-backward [:arglists :seon.ref/pin])))
        (is (= :unresolved (:seon.ref/problem-kind absent)))
        (is (str/starts-with? source "(defn ^{:deprecated"))))))
@@ -103,11 +96,10 @@
        (is (= :file (:seon.ref/section-missing answer)))
        (is (some #{"README.md"} (:seon.ref/nearest answer)))))))
 
-(deftest a-resolved-function-offers-a-source-form-that-shows-its-source
-  (let [database (db/db)
-        source-form (some #(when (= 'my.program/source (first %)) %) (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
-    (is (= '(my.program/source 'seon.ref/references) source-form))
-    (is (string? (:source (program/source database (second (second source-form))))))))
+(deftest a-referenced-function-shows-its-source-whole
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/references`"})]
+    (is (= (:seon.fn/source (db/pull (db/db) [:seon.fn/source] [:seon.fn/sym 'seon.ref/references])) (:seon.fn/source entry))
+        "a function is its source, as code")))
 
 (deftest a-span-of-a-name-and-more-words-is-prose
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Use `seon.ref/references`, not `seon.ref/section AGENTS.md` or `foo/bar baz`."})]
@@ -141,12 +133,10 @@
 
 (deftest a-referenced-function-offers-its-callers-and-reaching-tests-as-forms
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (= ['(my.program/source 'seon.ref/section)
-            '(my.program/callers {:seon.program/subject 'seon.ref/section})
-            '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})]
+    (is (= ['(my.program/callers 'seon.ref/section) '(my.program/tests-reaching 'seon.ref/section)]
            (:seon.render/operations entry))
-        "the forms that read its body, its callers and its reaching tests")
-    (is (= #{:seon.ref/name :doc :arglists :malli/schema :seon.render/operations} (set (keys entry)))
+        "the forms that read its callers and its reaching tests")
+    (is (= #{:seon.ref/name :seon.fn/source :malli/schema :seon.render/operations :seon.ref/references} (set (keys entry)))
         "its own content only: no callers or tests pulled in")))
 
 (deftest a-held-path-resolves-as-a-span-does
@@ -161,8 +151,31 @@
 
 (deftest a-referenced-test-shows-its-own-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
-    (is (= #{:seon.ref/name :seon.test/source} (set (keys entry))) "a test resolves to its own content, like any reference")
+    (is (= #{:seon.ref/name :seon.test/source :seon.ref/references} (set (keys entry))) "a test resolves to its own content, like any reference")
     (is (re-find #"a-span-of-a-name-and-more-words-is-prose" (:seon.test/source entry)))))
+
+(defn- cited
+  "The names `text`'s one referent cites in its own content, each as `seon.ref/brief` shows it."
+  [text]
+  (into {} (map (juxt :seon.ref/name identity)) (:seon.ref/references (first (ref/references (db/db) {:seon.ref/text text})))))
+
+(deftest a-referents-own-references-show-one-level-for-every-text-kind
+  (are [text name] (= [(list 'my.program/source (list 'quote name))] (:seon.render/operations (get (cited text) name)))
+    ;; a function's docstring
+    "`my.task/current`" 'seon.context/task-sections
+    ;; a test body's program calls
+    "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`" 'seon.ref/references
+    ;; a task's intent
+    "`seon.ref/a-reference-with-no-path-is-a-missing-file`" 'seon.ref/locate
+    ;; a schema's description
+    "`:seon.batch/inserted`" 'seon.sci.forgive/forgive
+    ;; a doc section's text
+    "`AGENTS.md#data-and-contracts`" 'seon.blob/inline-or-stage))
+
+(deftest a-referents-own-reference-is-a-summary-and-a-read-never-its-content
+  (let [brief (get (cited "`my.task/current`") 'seon.context/task-sections)]
+    (is (= #{:seon.ref/name :doc :seon.render/operations} (set (keys brief))))
+    (is (not (contains? brief :seon.ref/references)) "one level: a cited name's own references are not pulled")))
 
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]

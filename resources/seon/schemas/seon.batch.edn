@@ -80,8 +80,10 @@
  :repair [:map {:description "One change the forgiving scan made to an unbalanced text: closers (or a string's quote) inserted on a line, or a stray closer dropped from it."}
           [:seon.batch/line pos-int?]
           [:seon.batch/at {:description "Where in the forgiven text the change was made; the segment whose span starts at or before it owns the repair."} nat-int?]
-          [:seon.batch/inserted {:optional true} :string]
-          [:seon.batch/dropped {:optional true} :string]]
+          [:seon.batch/inserted {:optional true} :seon.batch/inserted]
+          [:seon.batch/dropped {:optional true} :seon.batch/dropped]]
+ :inserted [:string {:description "The closers, or a string's closing quote, the forgiving scan inserted on a line. Producer: `seon.sci.forgive/forgive`."}]
+ :dropped [:string {:description "A stray closer, or the prose, the forgiving scan dropped from a line. Producer: `seon.sci.forgive/forgive`."}]
  :repairs [:vector :seon.batch/repair]
  :forgiven [:map {:description "A text forgiven by seon.sci.forgive/forgive: the text, each top-level form's span in it, and the repairs when its delimiters did not balance."}
             [:seon.batch/text :seon.batch/text]

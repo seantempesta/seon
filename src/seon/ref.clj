@@ -193,41 +193,102 @@
                                                   home
                                                   (or (some-> (get aliases requested) ns-name) requested)))})))
 
+(defn- brief
+  "One name a referent's own content names, shown one level: its name, a one-line summary and the form that reads
+  it; never its content."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]}
+  [database reference]
+  (let [read-form (list 'my.program/source (if (keyword? reference) reference (list 'quote reference)))
+        summary #(first (str/split-lines (:summary (lookup/docstring-parts %))))]
+    (if (qualified-keyword? reference)
+      (let [found (lookup/schema-documentation database reference reference)]
+        (cond (:seon.sci.eval/documentation-unavailable found)
+              {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
+              (:seon.error/at found) found
+              :else {:seon.ref/name reference :seon.render/operations [read-form]}))
+      (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/intent]
+                           (cond (seq (db/datoms database :avet :seon.fn/sym reference)) [:seon.fn/sym reference]
+                                 (seq (db/datoms database :avet :seon.test/sym reference)) [:seon.test/sym reference]
+                                 :else [:seon.task/sym reference]))]
+        (cond
+          (:seon.error/at found) found
+          (:seon.task/sym found) {:seon.ref/name reference :doc (first (str/split-lines (:seon.task/intent found)))}
+          (or (:seon.fn/sym found) (:seon.test/sym found))
+          (cond-> {:seon.ref/name reference :seon.render/operations [read-form]}
+            (:seon.fn/doc found) (assoc :doc (summary (:seon.fn/doc found))))
+          :else (let [library (library-name reference)]
+                  (if (:seon.ref/problem-kind library)
+                    library
+                    (cond-> (select-keys library [:seon.ref/name :doc])
+                      true (assoc :seon.render/operations [(list 'doc reference)])))))))))
+
+(defn- inner
+  "The references a referent's own content makes, each shown one level (`brief`): the names its `text` cites by
+  the one rule and the program functions it `calls`, in that order, the `excluded` names (itself) left out; nil
+  when none."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.ref/name] :string [:set :symbol]]
+                  [:or :nil [:vector [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]]]}
+  [database excluded text calls]
+  (let [roots (set (.list (io/file (fs/source-directory))))
+        cited (keep #(:seon.ref/name (candidate roots nil %)) (:seon.ref/spans (document text)))
+        program (filter #(seq (db/datoms database :avet :seon.fn/sym %)) (sort-by str calls))
+        names (into [] (comp (remove excluded) (distinct)) (concat cited program))]
+    (when (seq names) (mapv #(brief database %) names))))
+
+(defn- with-inner
+  "`entry` with the references its own content makes, one level, when it makes any."
+  {:malli/schema [:=> [:cat :map [:maybe [:vector :seon.schema/value]]] :map]}
+  [entry references]
+  (cond-> entry (seq references) (assoc :seon.ref/references references)))
+
 (defn- resolve-name
-  "One referenced name resolved to its current definition on `database`: a program function's own content (its
-  docstring's summary, arglists and contract as the agent writes it) with the forms that read its source, callers
-  and reaching tests; a schema key's form; a test's source; a task's intent; or a problem."
+  "One referenced name resolved to its current definition on `database`: a program function's source, whole, and
+  its contract as the agent writes it, with the forms that read its callers and reaching tests; a schema key's
+  form; a test's source; a task's intent; or a problem. Each carries the references its own content makes, one
+  level (`inner`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
                     :seon.ref/message (problem-messages :unresolved)}
-        ;; a program declaration's source is answered by my.program/source, a value;
-        ;; clojure.repl/source only prints and answers nil
-        source (list 'my.program/source (list 'quote reference))]
+        subject (list 'quote reference)]
     (if (qualified-keyword? reference)
-      (let [found (lookup/schema-documentation database reference reference)]
+      (let [found (lookup/schema-documentation database reference reference)
+            form (:form found)
+            properties (when (and (vector? form) (map? (second form))) (second form))]
         (cond
           (:seon.sci.eval/documentation-unavailable found) unresolved
           (:seon.error/at found) found
-          :else {:seon.ref/name reference :seon.ref/schema-form (:form found)}))
-      (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
-            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym :seon.test/source] [:seon.test/sym reference]))
+          :else (with-inner {:seon.ref/name reference :seon.ref/schema-form form}
+                  (inner database #{reference} (:description properties "") #{}))))
+      (let [function (db/pull database [:seon.fn/sym :seon.fn/source :seon.fn/arglists :seon.fn/spec :seon.fn/doc :seon.fn/calls]
+                              [:seon.fn/sym reference])
+            test-entity (when-not (:seon.fn/sym function)
+                          (db/pull database [:seon.test/sym :seon.test/source :seon.fn/calls] [:seon.test/sym reference]))
             task (when-not (or (:seon.fn/sym function) (:seon.test/sym test-entity))
-                   (db/pull database [:seon.task/sym :seon.task/intent] [:seon.task/sym reference]))
-            subject {:seon.program/subject (list 'quote reference)}]
+                   (db/pull database [:seon.task/sym :seon.task/intent] [:seon.task/sym reference]))]
         (cond
           (:seon.error/at function) function
           (:seon.fn/sym function)
-          (cond-> {:seon.ref/name reference}
-            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
-            (:seon.fn/arglists function) (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
-            (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
-            true (assoc :seon.render/operations [source (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
+          (with-inner
+            (cond-> {:seon.ref/name reference}
+              (:seon.fn/source function) (assoc :seon.fn/source (:seon.fn/source function))
+              ;; a declaration with no stored source shows what it declares
+              (and (nil? (:seon.fn/source function)) (:seon.fn/doc function))
+              (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
+              (and (nil? (:seon.fn/source function)) (:seon.fn/arglists function))
+              (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
+              (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
+              true (assoc :seon.render/operations [(list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
+            (inner database #{reference} (:seon.fn/doc function "") (set (:seon.fn/calls function))))
           (:seon.error/at test-entity) test-entity
-          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.test/source (:seon.test/source test-entity)}
+          (:seon.test/sym test-entity)
+          (with-inner (cond-> {:seon.ref/name reference}
+                        (:seon.test/source test-entity) (assoc :seon.test/source (:seon.test/source test-entity)))
+            (inner database #{reference} "" (set (:seon.fn/calls test-entity))))
           (:seon.error/at task) task
-          (:seon.task/sym task) {:seon.ref/name reference :seon.task/intent (:seon.task/intent task)}
+          (:seon.task/sym task) (with-inner {:seon.ref/name reference :seon.task/intent (:seon.task/intent task)}
+                                  (inner database #{reference} (:seon.task/intent task) #{}))
           :else (library-name reference))))))
 
 (declare resolve-path)
@@ -240,7 +301,7 @@
   (cond
     reference (resolve-name database reference)
     problem-kind (assoc found :seon.ref/message (problem-messages problem-kind))
-    :else (resolve-path found)))
+    :else (resolve-path database found)))
 
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem.
@@ -362,9 +423,10 @@
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
 
 (defn- resolve-path
-  "A based path with an optional anchor as its document entry: heading, pin and its one read, or a problem."
-  {:malli/schema [:=> [:cat :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem]]}
-  [{:seon.ref/keys [path anchor]}]
+  "A based path with an optional anchor as its document entry: heading, pin, its one read and the names its text
+  cites, one level; or a problem."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem :seon.error/value]]}
+  [database {:seon.ref/keys [path anchor]}]
   (let [reference (cond-> path anchor (str "#" anchor))
         found (section reference)]
     (case (:seon.ref/section-missing found)
@@ -373,5 +435,6 @@
                 :seon.ref/message (problem-messages :anchor-missing)}
       (-> found
           (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
-          (assoc :seon.render/operations [(list 'my.fs/section reference)])))))
+          (assoc :seon.render/operations [(list 'my.fs/section reference)])
+          (with-inner (inner database #{} (:seon.ref/text found) #{}))))))
 

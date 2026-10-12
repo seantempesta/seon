@@ -134,10 +134,9 @@
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[names operations] (shown running agent-id
-                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
+                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (string? (:seon.fn/source (second reads)))])")]
          (is (= ['seon.task/agent-task 'seon.task/agent-attempt :seon.task/intent] names))
-         (is (= ['(my.program/source 'seon.task/agent-attempt)] (filterv #(= 'my.program/source (first %)) operations))
-             "a must-read offers the form that reads its body"))))))
+         (is (true? operations) "a referenced function shows its body"))))))
 
 (deftest every-task-attribute-brings-its-references-into-the-block
   (test-support/with-running-agent
