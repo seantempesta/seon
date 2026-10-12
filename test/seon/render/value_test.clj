@@ -1280,7 +1280,7 @@
    (fn [connection]
      ;; The agent's own turn fork retains result objects; bind-result! is
      ;; the evaluation's writer of that binding.
-     (let [value {:rows (vec (range 5000))}
+     (let [value {:rows (vec (range 20000))}
            ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                                            :seon.db/db (db/db connection)
@@ -1297,9 +1297,9 @@
            next-cut (first (tree-cuts next-page))
            gone ((requiring-resolve 'seon.render.walk/continue) (request 'result/eabsent [] 0))]
        (let [k (:seon.render.data/next-offset cut) k2 (:seon.render.data/next-offset next-cut)]
-         (is (= [[:rows] 5000] ((juxt :seon.render.data/path :seon.render.data/total) cut)))
+         (is (= [[:rows] 20000] ((juxt :seon.render.data/path :seon.render.data/total) cut)))
          (is (str/starts-with? (value/render-ai-data next-page) (str "[" k " " (inc k) " ")))
-         (is (= [[:rows] (- 5000 k2)] ((juxt :seon.render.data/path :seon.print/omitted) next-cut)))
+         (is (= [[:rows] (- 20000 k2)] ((juxt :seon.render.data/path :seon.print/omitted) next-cut)))
          (is (< k k2) "every expansion shows new members and keeps absolute coordinates"))
        (is (= :gone (:seon.render.walk/continuation-reason gone)))))))
 
@@ -1489,7 +1489,7 @@
       (is (= value (edn/read-string (:seon.render.value/text projection))) label))))
 
 (deftest a-long-string-fills-the-budget-and-is-cut-at-a-line-end
-  (let [source (str/join "\n" (for [i (range 400)] (str "  (line " i " (with \"text\" and more))")))
+  (let [source (str/join "\n" (for [i (range 2000)] (str "  (line " i " (with \"text\" and more))")))
         projection (value/prepare (agent-unit source))
         [cut :as cuts] (tree-cuts projection)
         budget (tokens/estimate-chars (:seon.render.profile/token-budget (render/agent-render-profile config/defaults)))]

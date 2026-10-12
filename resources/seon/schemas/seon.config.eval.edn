@@ -16,7 +16,7 @@
                       :seon.repl/finding :large-value
                       :seon.repl/with [:seon.eval/shown-tokens]
                       :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}
-                     [:<= 1000]]
+                     [:<= 4096]]
                     [:seon.eval/allocated-bytes
                      {:optional true
                       :seon.repl/finding :large-allocation

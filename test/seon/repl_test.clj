@@ -476,9 +476,9 @@
                :seon.eval/allocated-bytes]))
   (is (not-any? #(= "seon.repl" (namespace %)) (repl/cost-attributes))
       "a measure the reply derives itself is not pulled")
-  (let [text (repl/render-ai {:db/id 7 :seon.cluster.eval/id "eb53" :seon.cluster.eval/source "(vec (range 3000))"
-                              :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
-                              :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
+  (let [text (repl/render-ai {:db/id 7 :seon.cluster.eval/id "eb53" :seon.cluster.eval/source "(vec (range 9000))"
+                              :seon.eval/shown "[0 1 2 …8997 (drop 3 result/eeb53)]"
+                              :seon.eval/value-tokens 5604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
         reply (one-map (subs text (str/index-of text "#:seon.repl{")))]
     (is (= :large-value (get-in reply [:seon.repl/findings 0 :seon.repl/finding])))))
 
