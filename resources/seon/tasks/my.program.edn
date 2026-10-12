@@ -65,7 +65,7 @@
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "accept-cannot-retire-a-hosted-proposers-branch"
              :kind :function
-             :intent "accept-merge!'s detached retire of the proposing branch fails while the proposer's hosted agent holds a connection ('branch :agent-099e88cb509c still has a connection in this process'), recorded as an open fault produced by `seon.cluster.source/accept-merge!` (2026-10-08); the branch stays in the roster. Done when accepting a hosted agent's proposal releases its acquisition and retires its branch, regression through MCP SCI."
+             :intent "accept-merge!'s detached retire of the proposing branch fails while the proposer's hosted agent holds a connection ('branch :agent-099e88cb509c still has a connection in this process'), recorded as an open fault produced by `seon.cluster.source/accept-merge!` (2026-10-08); the branch stays in the registry. Done when accepting a hosted agent's proposal releases its acquisition and retires its branch, regression through MCP SCI."
              :must-read #{seon.task/delete-branch! my.agent/retire-branch!}
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "breaks-on-a-namespace-subject-takes-five-seconds"

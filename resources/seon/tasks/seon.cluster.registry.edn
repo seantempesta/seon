@@ -1,6 +1,6 @@
 [#:seon.task{:name "branch-creation-is-serialized-store-wide"
              :kind :function
-             :intent "Every branch! takes Datahike's store-wide :roster reachability permit (gc_guard.cljc:99, exclusive among roster publishers) for the read-modify-write of :branches; each test member creates a branch. `seon.cluster.registry/branch!` averaged 23 ms serial and 66 ms at six concurrent requests (105 calls). Done when member branch creation does not serialize concurrent requests: batch roster publication per request, or a compare-and-set roster update in the fork, measured by the same N=6 probe."
+             :intent "Every branch! takes Datahike's store-wide :roster reachability permit (gc_guard.cljc:99, exclusive among roster publishers) for the read-modify-write of :branches; each test member creates a branch. `seon.cluster.registry/branch!` averaged 23 ms serial and 66 ms at six concurrent requests (105 calls). Done when member branch creation does not serialize concurrent requests: batch registry publication per request, or a compare-and-set roster update in the fork, measured by the same N=6 probe."
              :must-read #{seon.cluster.registry/branch! seon.cluster.registry/retire-branch!}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "a-status-read-pays-a-store-read-for-the-current-source-commit"
@@ -35,5 +35,5 @@
              :kind :function
              :intent "(hybrid-done-and-merge M17, reused U4) Retention: the Datahike fork gains `:datahike.gc/roots` (a set of commit ids kept by `datahike.gc/gc-storage!`) and `seon.cluster.registry/collect!` hands the open assignments' `:seon.task/merge-base` commits as roots. Delete the `:base/<branch>` ref, `seon.cluster.registry/advance-base!` and `base-commit-id`'s readers (`seon.turn/fork-commit`'s fallback, `seon.cluster.source/merge-base` reading the assignment's base, `seon.cluster.registry/fork!`'s nested-base clause, `squash_test` 263, 331, 360). Red proof: `seon.cluster.registry-test/a-merged-base-older-than-the-window-survives-collection` (`datahike.api/commit-as-db` of the base answers after `gc-storage!` with a 0 ms window; a commit no base names is reclaimed). Cost: GC within 10 % of today. Platform slice (`--test`) with a fork bump in `reference-code/datahike`. After M13 and M6."
              :must-read #{seon.cluster.registry/collect! seon.cluster.registry/retention-cutoff seon.cluster.registry/base-commit-id seon.cluster.registry/advance-base! seon.cluster.registry/fork! seon.cluster.source/merge-base datahike.api/commit-as-db datahike.gc/gc-storage!}
-             :needs #{[:seon.task/sym my.root/a-merge-is-keyed-by-the-assignment]}
+             :needs #{[:seon.task/sym my.root/a-merge-is-keyed-by-the-assignment] [:seon.task/sym seon.turn/a-held-task-opens-no-model-turn]}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}]
