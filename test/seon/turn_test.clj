@@ -2123,7 +2123,7 @@
            :seon.test/long-ms 30000}
   a-branch-judges-its-step-at-its-merge-base
   ;; `seon.task/attempt-tx` writes the merge base with the assignment on main (the commit the branch forked at);
-  ;; `assign!` copies the row onto the branch, so `fork-commit` reads it there
+  ;; the branch reads the same commit from its own base ref (`fork-commit`)
   (support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "base-" (id/id))
@@ -2142,5 +2142,5 @@
            on-main (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base]
                                                    [:seon.task/assignment (:seon.task/assignment assignment)]))]
        (is (uuid? on-main) "the assignment on main carries the commit its branch forked at")
-       (is (= on-main (turn/fork-commit (db/db target) agent-id))
+       (is (= on-main (turn/fork-commit (db/db target)))
            "the branch judges its step at the merge base its assignment row carries")))))

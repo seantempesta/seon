@@ -293,13 +293,13 @@
       [])))
 
 (defn- base-results
-  "Each of `proofs` with a known result at the fork point of `agent-id`'s branch `database` (`seon.turn/fork-commit`):
+  "Each of `proofs` with a known result at the fork point of the agent's branch `database` (`seon.turn/fork-commit`):
   the run the branch already holds at the reach digest the proof has in that commit (`seon.test.runner/result-at-reach`),
   true when red, false when green. A proof with no run there, or absent there, is absent: unknown, never green."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:set :seon.test/sym]]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]]
                   [:or :seon.context/fork-point :seon.error/value]]}
-  [database agent-id proofs]
-  (let [commit (when (seq proofs) (turn/fork-commit database agent-id))
+  [database proofs]
+  (let [commit (when (seq proofs) (turn/fork-commit database))
         base (when commit (db/commit-database database commit))
         names (when base (into [] (filter #(seq (db/datoms base :avet :seon.test/sym %))) (sort proofs)))
         digests (when (seq names) (runner/reach-digests base names))
@@ -325,7 +325,7 @@
         head (when-not (:seon.error/at owed)
                (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))
         base (when (and (not judged) (map? head) (not (:seon.error/at head)))
-               (base-results database agent-id (set (filter head (:seon.task/proofs owed)))))]
+               (base-results database (set (filter head (:seon.task/proofs owed)))))]
     (or (some #(when (:seon.error/at %) %) [owed head base])
         (assoc owed :seon.context/head head
                     :seon.context/fork-point (merge (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))

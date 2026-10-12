@@ -426,7 +426,6 @@
        (is (= {:green 1} (:seon.task/proof-counts from-branch)) "the task's one proof is green")))))
 
 (deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main
-                         'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
                          'seon.context/a-proof-green-before-the-work-is-not-done}}
   each-step-kind-is-done-by-its-one-rule
   ;; head: each test's status at the step's branch head; fork point: the tests it held, true when red there

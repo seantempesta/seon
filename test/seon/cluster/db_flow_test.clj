@@ -884,8 +884,7 @@
 ;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
 ;;; is a red proof for its successor, written on its own branch.
 
-(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
-  a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
+(deftest a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
   ;; p is a :prove step: its own proof is green once a deftest tagged i exists, and that deftest, i's red proof,
   ;; is its product. The one model reply writes it, red as it must be: new at p's fork point, so p broke nothing
   ;; and ends :done.
@@ -1022,26 +1021,36 @@
                                                                  (mapv seon.program/row-identity entities))))
     root))
 
+(defn- rows-source
+  "The Prove step's work in the checkout's namespace `<space>-rows`: the contracted stub `twice` with body `stub`
+  and i's red proof `twice-doubles`, as a Prove step adds a row beside an existing table test."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [stub]
+  (str "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] " stub ")\n"
+       "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} twice-doubles (clojure.test/is (= 4 (twice 2))))"))
+
+(defn- rows-checkout!
+  "The chain world's checkout holding the namespace `<space>-rows` with one green table test (`checkout!`)."
+  {:malli/schema [:=> [:cat :seon.db/connection] :string]}
+  [connection]
+  (let [rows (str *space* "-rows")]
+    (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                           (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                "(deftest rows (is (= 1 1)))\n")})))
+
 (defn- proved!
-  "Start the chain world's Prove step `p`, whose successor is `i`; on p's branch define the contracted stub
-  `<space>-rows/twice` with body `stub` and i's red proof `<space>-rows/twice-doubles` in the checkout's
-  namespace `<space>-rows`; end p :done at
-  that commit on main and pass once. p's assignment key."
+  "Start the chain world's Prove step `p`, whose successor is `i`; on p's branch define `rows-source` with body
+  `stub`; end p :done at that commit on main and pass once, so the merge gate alone judges its red. p's
+  assignment key."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :string] :seon.task/assignment]}
   [handle connection stub]
   (let [routing (:seon.agent/routing handle)
-        rows (str *space* "-rows")
-        _ (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
-                                 (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
-                                      "(deftest rows (is (= 1 1)))\n")})
+        _ (rows-checkout! connection)
         _ (pass! handle routing)
         [[key-p branch-p]] (seq (attempts connection "p"))
         p-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                          :seon.store/branch branch-p})]
-    ;; in the checkout's namespace main holds, as a Prove step adds a row beside an existing table test
-    (define-on! p-connection (symbol rows)
-                (str "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] " stub ")\n"
-                     "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} twice-doubles (clojure.test/is (= 4 (twice 2))))"))
+    (define-on! p-connection (symbol (str *space* "-rows")) (rows-source stub))
     (test-support/transacted! connection
                               [[:db/add [:seon.task/assignment key-p] :seon.task.attempt/end :done]
                                [:db/add [:seon.task/assignment key-p] :seon.task.attempt/commit (db/commit-id (db/db p-connection))]])
@@ -1080,6 +1089,11 @@
   (binding [*space* "tq.twostep"]
     (test-support/with-database
      (fn [connection]
+      (test-support/with-provider
+       (atom []) (test-support/reply-queue
+                  [(str "(in-ns '" *space* "-rows)\n"
+                        (rows-source "(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))"))])
+       (fn [server]
        (chain-world
         connection {"p" [#{} nil :prove] "i" [#{"p"} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
         (fn [handle]
@@ -1087,12 +1101,22 @@
                 store (agent/handle-store handle)
                 rows (str *space* "-rows")
                 outcome #(:seon.task/outcome (db/pull (db/db connection) [:seon.task/outcome] [:seon.task/assignment %]))
-                key-p (proved! handle connection "(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))")
+                _ (rows-checkout! connection)
+                _ (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                  :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+                _ (pass! handle routing)
+                [[key-p]] (seq (attempts connection "p"))
+                ;; the Prove step's one reply wrote its product; its step derives done and ends it, and one pass merges it
+                p-end (landed! handle connection "p" ::p-ended)
+                ;; the Implement step's work below is written by hand: no model turn answers it
+                _ (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                  :seon.config/manifest {:seon.config.ai/no-provider true}})
                 _ (pass! handle routing)
                 [[key-i branch-i agent-i] :as assigned] (seq (attempts connection "i"))
                 main (db/db connection)
                 base (:seon.task/merge-base (db/pull main [:seon.task/merge-base] [:seon.task/assignment key-i]))
                 i-connection (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-i})]
+            (is (= :done p-end) "the Prove step ended itself: its product is red by design")
             (is (= :merged (outcome key-p)) "the Prove step's designed reds merge as its product")
             (is (= 1 (count assigned)) "its successor is assigned once it merged")
             (is (= (registry/base-commit-id main branch-i) base) "forked from main, its merge base")
@@ -1111,4 +1135,4 @@
             (is (= :merged (outcome key-i)) "its green proof merges the Implement step")
             (is (task/done? (db/db connection) (chain-handle "i")) "and the chain is done")
             (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
-                "with no fault recorded"))))))))
+                "with no fault recorded"))))))))))

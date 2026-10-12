@@ -5399,15 +5399,13 @@
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
 (defn fork-commit
-  "The commit the agent's step is judged against, read on `database`, its branch: its open assignment's merge base
-  (`:seon.task/merge-base`, copied onto the branch with the row by `seon.task/attempt-rows-tx`); the commit its
-  branch was forked at for a branch with no assignment; nil on main itself."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.source/commit-id]]}
-  [database agent-id]
-  (let [attempt (task/agent-attempt database agent-id)]
-    (if (int? attempt)
-      (:seon.task/merge-base (db/pull database [:seon.task/merge-base] attempt))
-      (registry/base-commit-id database (get-in database [:config :branch])))))
+  "The commit a step is judged against, read on `database`, the agent's branch: the branch's merge base, its
+  retained base ref (`seon.cluster.registry/base-commit-id`), the commit it forked at until a merge advances it;
+  nil on main itself. The branch's copy of its assignment row predates the merge base main records for it
+  (`seon.cluster.agent/start-attempt!` forks, then writes it), so the base ref is the one place the branch holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.source/commit-id]]}
+  [database]
+  (registry/base-commit-id database (get-in database [:config :branch])))
 
 (defn- record-broken!
   "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point
@@ -5433,7 +5431,7 @@
                (@context-step-observation database agent-id sym {:seon.context/broken #{} :seon.context/new-red (set reached)}))
         reds (when (map? head)
                (into [] (comp (filter #(= :red (:seon.context/proof-status (val %)))) (map key)) (:seon.context/head head)))
-        commit (when (seq reds) (fork-commit database agent-id))
+        commit (when (seq reds) (fork-commit database))
         fork-point (cond (empty? reds) {}
                          commit (@test-fork-point-red execution commit reds limit-ms)
                          ;; no fork: the head is its own fork point
