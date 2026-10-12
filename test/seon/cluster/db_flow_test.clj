@@ -585,7 +585,7 @@
             (pass! handle routing)
             (let [[key branch agent-id] (end-on-branch! handle connection "e" :done)]
               (db/with-branch {:seon.db/connection connection}
-                              #(merge/merge! {:seon.db/connection connection :seon.store/store store} key nil))
+                              #(merge/merge! {:seon.db/connection connection :seon.store/store store} key))
               (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
               (pass! handle routing)
               (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
@@ -624,7 +624,7 @@
               (is (= 1 (count (copies (db/db connection) branch))) "a second pass writes nothing")
               (testing "root's by-hand merge lands what the success path would"
                 (let [merge! #(db/with-branch {:seon.db/connection connection}
-                                              (fn [] (merge/merge! {:seon.db/connection connection :seon.store/store store} key nil)))
+                                              (fn [] (merge/merge! {:seon.db/connection connection :seon.store/store store} key)))
                       merged (merge!)]
                   (is (uuid? (:seon.task/merge-commit merged)))
                   (is (= "Refined on the branch." (intent)))
