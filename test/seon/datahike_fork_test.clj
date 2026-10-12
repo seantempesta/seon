@@ -11,13 +11,48 @@
    [datahike.index.persistent-set]
    [datahike.query :as query]
    [datahike.writer]
+   [konserve.core :as k]
    [konserve.protocols :as store]
    [konserve.serializers :as serializers]
+   [org.replikativ.persistent-sorted-set.fressian :as pss-fress]
+   [seon.cluster.registry :as registry]
+   [seon.cluster.store]
    [seon.db]
    [seon.profile :as profile]
    [seon.schema]
    [seon.test-support]
    [seon.turn]))
+
+(deftest ^{:seon/tasks #{'seon.mcp/a-fresh-agents-first-eval-request-acquires-its-branch-cheaply}}
+  a-branch-serializes-only-its-commit-pointer
+  (seon.test-support/with-database
+   (fn [connection]
+     (let [database (seon.db/db connection)
+           physical (:seon.store/store (seon.test-support/execution-handle connection))
+           branch (keyword (str "cost-acquire-" (random-uuid)))
+           commit (seon.db/commit-id database)
+           serializer (serializers/fressian-serializer
+                       {} (merge pss-fress/write-handlers pss-fress/root-write-handlers
+                                 @#'datahike.index.persistent-set/datom-write-handler))
+           handlers (atom {})]
+       (try
+         (registry/branch! {:seon.store/store physical :seon.store/branch branch
+                            :seon.cluster.registry/from commit})
+         (let [head (k/get (:store database) branch nil {:sync? true})
+               measured (profile/measure
+                         #(let [out (java.io.ByteArrayOutputStream.)]
+                            (store/-serialize serializer out handlers head)
+                            (.size out)))
+               reopened (seon.cluster.store/open-branch! physical branch)]
+           (try
+             (is (= commit (seon.db/commit-id @reopened)))
+             (is (= (:max-tx database) (:max-tx @reopened)))
+             (is (= branch (get-in @reopened [:config :branch])))
+             (is (= #{:meta} (set (keys head))))
+             (is (< (:seon.profile/alloc-bytes measured) 64000))
+             (finally (seon.cluster.store/release-branch! reopened))))
+         (finally
+           (registry/retire-branch! {:seon.store/store physical :seon.store/branch branch})))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.store/each-commit-serializes-hundreds-of-times-the-bytes-it-writes}}
   datom-serialization-writes-fields-without-sequence-copies
