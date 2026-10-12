@@ -1424,19 +1424,13 @@
             (if (= :seon.program/schema-row-properties owned-attributes)
               (into [] (filter qualified-keyword?) (keys entity))
               owned-attributes)]
+        ;; an empty collection is absence: Datahike stores nothing for it
         (into {}
-              (remove (fn [[attribute value]]
-                        (or (nil? value)
-                            (and (contains? #{:seon.ns/requires
-                                              :seon.ns/aliases
-                                              :seon.ns/imports
-                                              :seon.ns/refers}
-                                            attribute)
-                                 (empty? value)))))
+              (remove (fn [[_ value]] (or (nil? value) (and (coll? value) (empty? value)))))
               (select-keys entity owned-attributes))))))
 
 (defn canonical-row
-  "The exact non-nil attributes owned by one declaration row.
+  "The exact non-nil, non-empty attributes owned by one declaration row.
 
   Ownership comes from the family's declared entity map (see [[shapes-in]]),
   so an attribute declared there is kept without any code change here. The

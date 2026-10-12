@@ -954,6 +954,22 @@
                    (dissoc (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)
                            :seon.program/definition-digest)))))))))
 
+(deftest an-empty-collection-is-absence-in-the-canonical-row-and-its-digest
+  ;; Datahike stores nothing for an empty cardinality-many value, so a row
+  ;; carrying one must digest as the stored entity does (chain 6, N3: an
+  ;; agent's unchanged `ns` form re-recorded its namespace under a new digest).
+  (let [stored {:seon.ns/name 'sample
+                :seon.ns/source "(ns sample (:require [clojure.string :as str]))"
+                :seon.ns/requires #{[:seon.ns/name 'clojure.string]}
+                :seon.ns/aliases #{{:seon.ns.alias/local 'str :seon.ns.alias/target-ns 'clojure.string}}
+                :seon.schema.admission/source :agent}]
+    (doseq [attribute [:seon.ns/fixtures :seon.ns/imports :seon.ns/refers]]
+      (testing (str attribute)
+        (let [row (assoc stored attribute #{})]
+          (is (= (program/canonical-row stored) (program/canonical-row row)))
+          (is (= (program/definition-digest (program/canonical-row stored))
+                 (program/definition-digest (program/canonical-row row)))))))))
+
 (deftest every-declaration-entity-satisfies-its-own-output-contract
   ;; The class: `declaration-row` emitting an entity its own declared output
   ;; refuses. Every family REQUIRES `:seon.schema.admission/source`, and

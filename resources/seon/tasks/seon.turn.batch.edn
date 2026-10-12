@@ -1,4 +1,8 @@
-[#:seon.task{:name "tests-read-forms-through-a-stage-no-entrant-uses",
+[#:seon.task{:name "a-stored-namespace-replacement-keeps-removed-components"
+             :kind :function
+             :intent "`seon.turn.batch/namespace-facts` selects the stored namespace by the keys of the context row from `seon.sci.eval/namespace-context-row`; `seon.program/canonical-row` drops an empty component collection (absence), so a namespace whose agent removed its last require, alias, import, refer or fixture keeps the stored ones. Select the stored entity by the resolver-context attributes `seon.sci.eval/binding-rows` owns, so `seon.program/exact-replacement-tx` retracts what the context no longer holds, and re-creates no unchanged alias component."
+             :must-read #{seon.turn.batch/namespace-facts seon.sci.eval/binding-rows seon.program/exact-replacement-tx seon.program/canonical-row}}
+ #:seon.task{:name "tests-read-forms-through-a-stage-no-entrant-uses",
             :kind :function,
             :intent
             "`seon.test-support/evaluate` and code-request read a source through `seon.turn.batch/code-request` (`seon.sci.forgive/read-state` plus `seon.sci.batch/read-next`: one live read over the whole text), while every production SCI entrant (MCP eval_clj via `seon.cluster.agent/submit-source!` and `seon.turn/code-sources`, and model replies via `seon.turn/planned-sources`) segments first (`seon.sci.forgive/segments`, structural reads) and then reads each row again (`seon.turn/read-row`). `seon.turn.batch/turn-request` and seon.sci.batch/read-code have no caller. Tests therefore prove a read stage no entrant runs. Correct: one read stage, used by tests and every entrant; the uncalled ones deleted.",
