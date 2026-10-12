@@ -128,7 +128,7 @@
 (def ^:private backslash-proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2))))")
 
-(deftest ^{:seon/tasks #{'seon.context/failure-printed-once}} a-failure-claim-shows-its-saved-printed-value-once
+(deftest a-failure-claim-shows-its-saved-printed-value-once
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task running connection agent-id)
