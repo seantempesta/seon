@@ -4,6 +4,10 @@
   "Recurring proof for the one recursive filesystem deletion owner."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [seon.test-support :as test-support]
             [seon.fs :as fs])
   (:import [java.nio.file Files LinkOption Path]
            [java.util.concurrent CountDownLatch TimeUnit]))
@@ -134,6 +138,21 @@
                                           ["/a/b" "/a/b/c" true]
                                           ["/a/b" "/a/b" true]
                                           ["/a/b" "/a/bc" false]
-                                          ["/a" "/a/b" false]]]
+                                          ["/a/b" "/a" false]]]
     (testing (str (pr-str descendant) " under " (pr-str ancestor))
       (is (= expected (#'seon.fs/under-path? ancestor descendant))))))
+
+(def ^:private segment-generator
+  (gen/fmap #(apply str %) (gen/vector (gen/elements (seq "abcxyz019")) 1 4)))
+
+(deftest ^{:seon/tasks #{'seon.fs/implement-a-path-under-a-root-answers-true}}
+    a-path-lies-under-exactly-the-roots-it-extends-by-a-component
+  (test-support/assert-check!
+   (tc/quick-check
+    200
+    (prop/for-all [root-components (gen/vector segment-generator 1 4)
+                   segment segment-generator]
+      (let [root (apply str (map #(str "/" %) root-components))]
+        (and (true? (#'seon.fs/under-path? root (str root "/" segment)))
+             (false? (#'seon.fs/under-path? root (str root segment "x"))))))
+    :seed 2026101301)))
