@@ -145,8 +145,9 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
                   [:or :seon.source/commit-id :seon.cluster.registry/branch-missing-error]]}
   [{:keys [:seon.store/store :seon.store/branch]}]
-  (or (get-in (head-record (konserve-store store) branch)
-              [:meta :datahike/commit-id])
+  (or (when (contains? (branches store) branch)
+        (get-in (head-record (konserve-store store) branch)
+                [:meta :datahike/commit-id]))
       (error.refusal/diagnostic
        (java.util.Date.) :seon.store/branch 'seon.cluster.registry/branch-commit-id
        {:seon.error/message (str "The store at " (:seon.store/dir store)

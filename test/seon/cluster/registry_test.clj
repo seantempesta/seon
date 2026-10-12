@@ -863,3 +863,26 @@
            "the re-fork's merge base is the commit it forked at")
        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
        nil))))
+
+(deftest
+  a-deleted-branch-answers-the-branch-missing-error-and-a-re-fork-its-new-commit
+  ;; `datahike.api/delete-branch!` leaves a deleted branch's head record in the store until collection; the
+  ;; store's branches are the fact, so a deleted branch is missing and a re-fork answers the commit it made
+  (with-program-store
+   (fn [store connection]
+     (let [branch :attempt-deleted-head
+           request {:seon.store/store store :seon.store/branch branch}
+           fork! #(registry/fork! {:seon.store/store store :seon.store/branch branch
+                                   :seon.cluster.registry/from :db :seon.db/db (db/db connection)})
+           _ (is (:seon.cluster/created? (fork!)))
+           first-head (registry/branch-commit-id request)
+           _ (is (uuid? first-head) "a held branch answers its commit")
+           _ (d/transact connection [])]
+       (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+       (is (true? (:seon.cluster.registry/branch-missing (registry/branch-commit-id request)))
+           "a deleted branch is missing though its head record remains")
+       (is (:seon.cluster/created? (fork!)))
+       (is (and (uuid? (registry/branch-commit-id request)) (not= first-head (registry/branch-commit-id request)))
+           "the re-fork answers its own new commit, not the deleted branch's")
+       (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+       nil))))
