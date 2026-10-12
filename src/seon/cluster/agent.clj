@@ -2210,27 +2210,31 @@
   (into [] (mapcat #(if (:seon.task/assignment %) (assignment-actions %) (taskless-actions %))) held))
 
 (defn- ended-problem!
-  "Write root's problem task for the non-merged end of assignment `key`, named by it, so a repeat writes nothing."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action :seon.task.attempt/end [:maybe :seon.task.attempt/reason]] :nil]}
-  [connection {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} end reason]
+  "Write root's problem task for the non-merged end of assignment `key`, named by it, so a repeat writes nothing.
+  It offers a merge only when the branch holds `unmerged` declarations main lacks, else closing."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action :seon.task.attempt/end [:maybe :seon.task.attempt/reason] :seon.flow.plan/unmerged] :nil]}
+  [connection {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} end reason unmerged]
   (let [created (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'seon.task
                                :seon.task/name (str "attempt-ended-" key) :seon.task/kind :work
                                :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
                                                       (when reason (str ": " reason)) ". Nothing was merged to main;"
-                                                      " its branch " (name branch) " is kept. Merge it with"
-                                                      " (my.root/merge! {:seon.task/assignment \"" key "\"}), or delete it with"
-                                                      " my.agent/retire-branch!.")})]
+                                                      " its branch " (name branch) " is kept. "
+                                                      (if (pos? unmerged)
+                                                        (str "Merge it with (my.root/merge! {:seon.task/assignment \"" key "\"}), or delete it with"
+                                                             " my.agent/retire-branch!.")
+                                                        (str "Its program is unchanged from main: close it with (my.root/close! {:seon.task/assignment \""
+                                                             key "\" :seon.task/reason why}).")))})]
     (when (:seon.error/at created)
       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
     nil))
 
 (defn- close!
-  "Write a `:close` action's end on main through `connection` and merge nothing else.
+  "Write a `:close` action's end on main through `connection` (`store` holds the branch) and merge nothing else.
   Root's problem task first, then ONE transaction with the assignment's end facts its branch head holds,
   carrying the branch and commit they came from as transaction metadata. A `:cancelled` end is db<->flow's own:
   it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action] :nil]}
-  [connection {a :db/id key :seon.task/assignment branch :seon.task/branch end :seon.task.attempt/end :as action}]
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store :seon.flow.plan/action] :nil]}
+  [connection store {a :db/id key :seon.task/assignment branch :seon.task/branch end :seon.task.attempt/end :as action}]
   (let [head (db/branch-database (db/db connection) branch)]
     (try
       (let [cancelled? (= :cancelled end)
@@ -2243,7 +2247,8 @@
                                   head key)
                             :db/id))]
         (when-not cancelled?
-          (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts)))
+          (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts)
+                          (unmerged-count (db/db connection) store branch)))
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))
                             :tx-meta {:seon.squash/source-branch branch :seon.squash/source-commit (db/commit-id head)}}))
       (finally (source/release! [head])))
@@ -2280,7 +2285,7 @@
       :publish (let [published (merge/publish! handle (:seon.task/assignment action))]
                  (when (:seon.error/at published)
                    (throw (ex-info (:seon.error/message published "The publication was refused.") published))))
-      :close (close! connection action)
+      :close (close! connection (handle-store handle) action)
       ;; the stop lets the pass that wrote the end finish, then joins it
       :stop (do (when-let [registry (entry-registry routing agent-id)]
                   (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))

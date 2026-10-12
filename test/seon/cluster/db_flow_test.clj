@@ -640,6 +640,23 @@
                     (is (nil? (:seon.task/merge-commit (merge!))) "and a second merge transacts nothing")
                     (is (= main (db/commit-id (db/db connection)))))))))))))))
 
+(deftest
+  a-capped-attempt-whose-branch-changed-no-program-gets-a-problem-task-without-a-merge-offer
+  (binding [*space* "tq.endcapped"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)]
+            (pass! handle routing)
+            (let [[key] (end-on-branch! handle connection "e" :capped)
+                  intent #(str (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                                                           [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" key))])))]
+              (pass! handle routing)
+              (is (not (str/includes? (intent) "my.root/merge!")) "an empty diff offers no merge")
+              (is (str/includes? (intent) "my.root/close!") "it offers closing"))))))))) 
+
 ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
 
 (defn- row-ids
