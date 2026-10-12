@@ -45,7 +45,7 @@ there is no VAET index to assume.
 
 **Grounding:** `reference-code/datahike/src/datahike/db/transaction.cljc:641-715`
 upsert; `reference-code/datahike/src/datahike/db/utils.cljc:307-313` indexing;
-`src/seon/schema/datahike.clj:26-27,100-106,182` symbol/identity projection; §9 maps every declaration shape.
+`src/seon/schema/datahike.clj:26-27,100-106,182` symbol/identity database schema; §9 maps every declaration shape.
 
 ## 2. Retraction and lifecycle closure
 
@@ -72,7 +72,7 @@ validation so a new edge cannot escape merely because its target did not change.
 
 **Existing implementation:** calls/references and test reach already use symbol
 values; they are not pending ref-to-value migrations. Canonical arities store no
-schema entities: contract schemas are read from the projection's compiled Malli
+schema entities: contract schemas are read from the compiled Malli
 registry (`seon.call-preparation/contract-arities`); the old AST family is not a
 current model.
 **Grounding:** `reference-code/datahike/src/datahike/db/transaction.cljc:440-484`
@@ -84,7 +84,7 @@ history; `reference-code/datahike/src/datahike/gc.cljc:22-81,144-167` retained r
 Ask whether the fact states a relationship to a living entity or observes a token.
 A relationship is a ref. An observed name is a value, and whether it currently
 resolves is a separate query. Function namespace/file relations are refs; an
-analyzer's callee name and a test's past reach are values. A fault must retain the
+analyzer's callee name and a test's past reach are values. An error must retain the
 identity it observed even if the function is later deleted.
 
 | Choice | What deletion does | Declaration and use |
@@ -93,7 +93,7 @@ identity it observed even if the function is later deleted.
 | Optional peer ref | Target deletion sweeps the incoming ref datom | Choose when losing that relationship is intended |
 | Required peer ref | Seon's final validation refuses the sweep if the surviving owning value becomes invalid | Declare required presence and ensure complete validation selects the owner |
 | Identity value | Target deletion does not change the observation | Use when the observed token must remain queryable |
-| Settlement moves an edge | Application logic writes a durable successor relationship | Not a native deletion mode; prove the writer's transition |
+| Recording transaction moves an edge | Application logic writes a durable successor relationship | Not a native deletion mode; prove the writer's transition |
 
 Document the selected behavior on each relationship. There is no separate deletion
 policy property. Required presence is not a native foreign-key constraint: Datahike
@@ -155,7 +155,7 @@ Idempotent assertions can emit no effective datoms.
 Evidence proves only its writer's completed operation. Analysis does not prove test
 execution, a run admission does not prove completion, and an empty detector result
 is meaningful only when its declared subject was actually inspected. Missing test,
-subject, detector, arming or child-work observation is unknown. Submission-only checks
+subject, detector, instrumentation or child-work observation is unknown. Submission-only checks
 cannot recover an empty collection after the authority normalizes it away; the final
 validator sees resulting datoms. Keep attempted-write validation for constraints that
 must inspect a submitted operation even if its effective datoms are empty.
@@ -177,7 +177,7 @@ defines cumulative observation and lifetime semantics.
 Datahike cardinality-many is a set. Seon's bridge stores declared vectors and
 sequences in ordered cells, preserving order, duplicates and presence (§9;
 `src/seon/schema/datahike.clj:112-119,415-436`). Older database values whose
-projection lacks cells retain their original representation. A tuple is one fixed
+database schema lacks cells retain their original representation. A tuple is one fixed
 ordered observation; its complete value is the index key. Members do not become
 independently indexed attributes or live refs. A ref-shaped tuple member gets neither
 ref resolution nor incoming-ref sweep. Scalar qualified function identity stays scalar.
@@ -214,13 +214,13 @@ refusal/elision. Query-work bounds and the one value printer's presentation budg
 are separate decisions, for both AI and HTML.
 
 Temporal values retain the schema interpretation of their origin; a reader does
-not apply whichever cluster projection happens to be globally current. A1/A2 carry
-that projection through raw/materialized/temporal/branch constructors before removing
+not apply whichever cluster registry happens to be globally current. A1/A2 carry
+that registry through raw/materialized/temporal/branch constructors before removing
 fallback reconstruction. Branch transfer normalizes refs by installed identities and
 components through their owner, never by raw eid replay.
 
 **Grounding:** `reference-code/datahike/src/datahike/pull_api.cljc:16,238-243,315-351`;
-`src/seon/db.clj:1219` carried projection; [A1](../../prds/agent-platform/plan/lane-a1-projection-carried.md)
+`src/seon/db.clj:1219` carried registry; [A1](../../prds/agent-platform/plan/lane-a1-projection-carried.md)
 and [D1](../../prds/agent-platform/plan/lane-d1-isolation-merge-writeback.md).
 
 ## 8. Errors, tasks and facts readers can trust
@@ -229,9 +229,9 @@ B3's target error is a flat declared map, with base time/layer/operation and dom
 members. No kind/class stamp or general predicate replaces the callee's exact output
 union. Recording computes the complete set of satisfied schemas for recurrence
 identity; successful return validation does not perform that population scan.
-Preserve distinct cause/evidence values when removing duplicated diagnostic labels.
+Preserve distinct cause/evidence values when removing duplicated error labels.
 
-An evaluation's live result is never serialized for recovery. Saved shown text is
+An evaluation's live result is never serialized for recovery. Saved printed values are
 durable and the result handle is explicitly unavailable after restart. The proposed
 error payload simplification has a separate owner decision: complete-rendering-blob
 durability must be reconciled before deleting that evidence. Native path storage
@@ -239,7 +239,7 @@ also waits for A2's comparator proof. These are representation gates, not permis
 to lose information silently.
 
 The target task family uses one writer-owned identity and separate trigger/start/
-settlement operations. Test and function citations are observed symbol values;
+recording operations. Test and function citations are observed symbol values;
 missing targets remain visible obligations. Error roots are relationships where the
 declared optional sweep is appropriate. A plan step is a task related by parent,
 needs and position, without a separate plan family or stored task-kind switch.
@@ -275,8 +275,8 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 | `[:and {props} T]` | `T`'s storage with the `:and`'s properties (`:65`, `:108-109`) | Properties are authored where refinement is |
 | `[:maybe T]` | refused (`:137`, message `:168`) | Datahike stores no nil: absence is no datom, clearing is a retraction |
 | `:seon.db/ref` | `:db.type/ref`, cardinality one (`:90-91`); Datahike indexes refs (`utils.cljc:319`) | A statement about a living entity (§3). The fold stops at this named reference: the target's own shape is not consulted |
-| `[… {:seon.db/component true :seon.db/component-schema :child/key} :seon.db/ref]` | `:db/isComponent true` (`:185`) | The child is part of the parent's value: pull expands it and parent retraction cascades (§4). `:seon.db/component-schema` never reaches Datahike; the final writer reads it from the projection to validate the complete owned value (`src/seon/db.clj:3553-3562`, missing target refuses at `:3700`) and declaration requires it (`src/seon/schema.clj:3355-3380`). A component position also accepts the child's own entity map as transaction data (`:seon.db/component-entity`, `:116-120`) |
-| `[:set T]`, `[:vector T]`, `[:sequential T]` | The member attribute keeps `:db.cardinality/many`; vectors and sequences also use bridge cells (`src/seon/schema/datahike.clj:112-119,415-436`) | Sets stay unordered. Cells preserve a vector's order, duplicates and presence. Values older than the cells are read under their original projection; missing order cannot be recovered by changing the declaration. Do not encode order through transaction order or add another ordinal representation for a declared vector |
+| `[… {:seon.db/component true :seon.db/component-schema :child/key} :seon.db/ref]` | `:db/isComponent true` (`:185`) | The child is part of the parent's value: pull expands it and parent retraction cascades (§4). `:seon.db/component-schema` never reaches Datahike; the final writer reads it from the registry to validate the complete owned value (`src/seon/db.clj:3553-3562`, missing target refuses at `:3700`) and declaration requires it (`src/seon/schema.clj:3355-3380`). A component position also accepts the child's own entity map as transaction data (`:seon.db/component-entity`, `:116-120`) |
+| `[:set T]`, `[:vector T]`, `[:sequential T]` | The member attribute keeps `:db.cardinality/many`; vectors and sequences also use bridge cells (`src/seon/schema/datahike.clj:112-119,415-436`) | Sets stay unordered. Cells preserve a vector's order, duplicates and presence. Values older than the cells are read under their original registry; missing order cannot be recovered by changing the declaration. Do not encode order through transaction order or add another ordinal representation for a declared vector |
 | `[:tuple A B …]` | `:db.type/tuple` with `:db/tupleTypes` (`:138-141`, `:180`); a collection of tuples is cardinality-many of tuples | One fixed ordered observation; its whole value is the index key (§6). Collection or unstorable members refuse |
 | `{:db.secondary/only true}` on a float/double tuple | `:db.secondary/only` (`:173-181`) | The fork's secondary-index seam for embeddings; no attribute declares it today |
 | `{:seon.db/no-history? true}` | `:db/noHistory true` (`:186`) | Datahike writes no history datoms for the attribute (`reference-code/datahike/src/datahike/db/transaction.cljc:448`). Declared on three groups: large evaluation and reply text (`:seon.cluster.eval/source`, `output`, `diagnostics`, `comment`, `:seon.turn/reply`), so compaction's `retractEntity` of evaluations (`src/seon/turn.clj:2393-2423`) actually releases their text instead of keeping it in history; opaque payload strings (`:seon.effect/request-edn`, `result-edn`, `:seon.ai.attempt/usage-edn`, `settings-edn`, `:seon.test.accretion/report-edn`, `:seon.dev.mcp.artifact/digest`); and overwritten gauges (`:seon.error.occurrence/count`, `last-at`, `:seon.ai.model/last-*`). History/as-of cannot answer their past, and read evidence refuses to prove them unchanged through history (`src/seon/db.clj:1157`) |
@@ -285,7 +285,7 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 | `[:or …]` whose members share one native type | that type (`:122-127`) | e.g. `[:or [:= :a] [:= :b]]` is a keyword |
 | `[:or …]` of mixed or non-scalar members (maps, vectors, symbol-or-string, symbol-or-hiccup) | `:db.type/string` holding canonical EDN (`:128-129`); encoded at the transaction seam (`encode-transaction-in`, `:506-523`) and decoded, validated and canonical-checked on read (`decode-attribute-value-in`, `:559-575`) | A heterogeneous value has no native Datahike type; the codec keeps the logical value whole. Two-keyword many-values are split into `:db/add`s so Datahike does not read them as a lookup ref (`explicit-value-members`, `:440-468`) |
 | `[:map {:seon.db/attributes true} …]` (an entity schema) | no attribute of its own; each entry's attribute is selected for installation (`:229-240`) | The entity schema describes the entity; it stamps no kind. Required entries must be storable (`src/seon/schema/internal.cljc:290-299`) |
-| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`). A property whose attribute declares `:seon.fn/reference-to` (the render faces `:seon.render/ai`, `:html`, `:form`) is stored as its EFFECTIVE value along Malli's reference chain (`declared-reference`: own properties, a pointer's target, an `:and`'s later arm first) and as a ref to that function's entity, so inherited pairs are rows too, "which schemas render with f" is one AVET read, and the writer refuses by name a declaration whose function is absent (`write-render-target-error`, `src/seon/db.clj`) |
+| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled registry (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`). A property whose attribute declares `:seon.fn/reference-to` (the render faces `:seon.render/ai`, `:html`, `:form`) is stored as its EFFECTIVE value along Malli's reference chain (`declared-reference`: own properties, a pointer's target, an `:and`'s later arm first) and as a ref to that function's entity, so inherited pairs are entities too, "which schemas render with f" is one AVET read, and the writer refuses by name a declaration whose function is absent (`write-render-target-error`, `src/seon/db.clj`) |
 
 ### Open questions (accidental or contradicting mappings)
 
@@ -296,8 +296,8 @@ Each is evidence for an owner decision; the bridge is unchanged.
    the representation they were written with; any recovery of missing order needs
    actual evidence, not a guessed ordinal.
 2. **Render pairs are refs (resolved).** The faces are declared
-   `[:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]`; a schema row
-   stores each effective face as a ref to its function (row above), and a
+   `[:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]`; a schema entity
+   stores each effective face as a ref to its function (entry above), and a
    render function's output schemas are `:string` or `:seon.render/ai-data`
    (AI), `:seon.render/hiccup` (HTML) and `:seon.render/read-form` (form), never
    the face keys.
@@ -319,5 +319,5 @@ Each is evidence for an owner decision; the bridge is unchanged.
    attribute. AGENTS "add no hypothetical restrictions" asks each to name its
    caller or go.
 6. **Schema-entity copy of `:seon.render/units`.** The walker reads units from
-   the compiled projection, so live rendering keeps order; the stored copy on the
+   the compiled registry, so live rendering keeps order; the stored copy on the
    schema entity is an unordered set (question 1) and is not what renders.
