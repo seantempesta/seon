@@ -1925,10 +1925,11 @@
                              :seon.error/offending (vec (take 5 (sort absent)))}))
             :else (recur (into extra absent))))))))
 
-;;; A checkpoint is a shared branch named by the content it holds. The
-;;; registry's branches serialize its creation: exactly one `branch!` call is
-;;; `created?`, and only that caller writes it. Completion is a fact, the
-;;; source record written last; nothing else marks readiness.
+;;; A checkpoint is a shared branch named by the content it holds. A preparer
+;;; writes it on a branch of its own and names it only once complete, from that
+;;; commit: a checkpoint name never holds a preparation in progress, so a
+;;; request never waits on another's. Completion is a fact, the source record
+;;; written last; nothing else marks readiness.
 (defn- checkpoint-head
   "The checkpoint branch's head when its source record names `base`, else nil."
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name :seon.source/commit-id]
@@ -1976,8 +1977,8 @@
         (throw failure)))))
 
 (defn- prepare-checkpoint!
-  "Write boot's cluster facts, then the source record, onto the checkpoint
-  branch this caller created. A refusal retires it and throws."
+  "Write boot's cluster facts, then the source record, onto `branch`, the
+  preparation branch this caller created. A refusal retires it and throws."
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name
                        :seon.config/effective :seon.db.process/id :seon.source/commit-id
                        :seon.db/database-value]
@@ -2176,11 +2177,13 @@
   commit holds program rows only,
   so no agent, turn, message or error of the execution is inherited. Boot's
   facts live on a checkpoint branch named by the digest of their inputs (base,
-  cluster, effective config, process), prepared once by the one caller the
-  registry lets create it and read only once its source record exists, so every
-  request with equal inputs shares its preparation. A checkpoint another caller
-  is still preparing refuses this request. The request then owns a private
-  branch off the checkpoint's head, which roots that commit for its members,
+  cluster, effective config, process), so every request with equal inputs
+  shares one preparation. A request that finds none prepares its own on a
+  branch named for it alone and names the checkpoint from that complete commit
+  (`registry/branch!`: the first name stands and serves a later preparer too),
+  so a request never reads or waits on another's preparation, nested or
+  concurrent. The request then owns a private
+  branch off its checkpoint commit, which roots that commit for its members,
   and writes `program-overlay-tx`'s rows there: the candidate's changes since
   the loaded program it was built on (its adoption record), so a branch forked
   before a restart runs the loaded program, not the one it was forked at, with
@@ -2210,16 +2213,19 @@
         process (cluster.process/id (cluster.process/current-identity))
         branch (keyword (str "checkpoint-" cluster "-" (id/digest 24 [base cluster (sort effective) process])))
         at {:seon.store/store store :seon.store/branch branch}
-        head (or (checkpoint-head store branch cluster base)
-                 (when (:seon.cluster/created? (registry/branch! (assoc at :seon.cluster.registry/from base)))
-                   (prepare-checkpoint! store branch cluster effective process base candidate)
-                   (checkpoint-head store branch cluster base))
-                 ;; The name includes this process, so an incomplete checkpoint
-                 ;; is one a live caller here is still preparing: push back.
-                 (checkpoint-head store branch cluster base)
-                 (throw (ex-info "Another request is preparing this test world; retry once it completes."
-                                 {:seon.error/expected :seon.test/prepared-checkpoint
-                                  :seon.error/offending branch})))
+        shared (checkpoint-head store branch cluster base)
+        ;; No complete checkpoint: prepare one on this request's own branch and
+        ;; name the checkpoint from that commit. A name already standing came
+        ;; from another complete preparation, which serves as well; the
+        ;; checkpoint branch roots whichever commit it names.
+        head (or shared
+                 (let [own {:seon.store/store store
+                            :seon.store/branch (keyword (str "checkpoint-preparation-" (id/id)))}]
+                   (registry/branch! (assoc own :seon.cluster.registry/from base))
+                   (prepare-checkpoint! store (:seon.store/branch own) cluster effective process base candidate)
+                   (registry/branch! (assoc at :seon.cluster.registry/from (registry/branch-commit-id own)))
+                   (registry/retire-branch! own)
+                   (registry/branch-commit-id at)))
         ;; The request's writes — its branch, the program overlay and every
         ;; member branch acquired from this handle — stay in memory over the
         ;; shared store (`store/open-overlay!`), which they never write; the

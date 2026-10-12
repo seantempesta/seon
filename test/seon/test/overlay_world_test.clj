@@ -3,7 +3,8 @@
   that branch's differing program rows, never on a fork of the branch: the
   branch's operational rows and live default's agents stay out, a retracted
   declaration is absent and a changed callee runs its candidate definition.
-  The world is a checkpoint prepared once and read only when complete."
+  The world branches from a checkpoint each preparer writes on a branch of its
+  own and names only when complete, so no request waits on another's."
   (:require [seon.sci.eval]
             [seon.batch]
             [clojure.string :as str]
@@ -64,7 +65,7 @@
 
 (deftest ^{:seon.test/long "Two concurrent first preparations and acquisitions on a fixture branch: a first preparation measured 1.7-1.8 s (config apply) and a request 7.1 s on default's JVM (root run 99a231f41221, 2026-09-24)."
            :seon.test/long-ms 15000}
-  concurrent-first-preparation-yields-one-complete-checkpoint
+  concurrent-first-preparations-both-acquire-a-complete-world
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
@@ -76,23 +77,43 @@
            _ (support/seed-cluster! connection cluster)
            _ (support/transacted! connection [{:seon.cluster/name cluster :seon.source/commit-id base}])
            effective (config/effective (db/db connection) cluster)
+           ;; A refusal is kept as its data, so the other world is still released.
            prepare #(future (try (clean-request-handle handle connection cluster effective)
-                                 (catch clojure.lang.ExceptionInfo refusal refusal)))
+                                 (catch clojure.lang.ExceptionInfo refusal (ex-data refusal))))
            outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
            handles (filterv :seon.db/connection outcomes)
            checkpoints (filterv #(str/starts-with? (name %) (str "checkpoint-" cluster "-"))
                                 (registry/branches store))]
        (try
-         (is (seq handles))
+         ;; Handles hold whole worlds: assert on their kind, never print them.
+         (is (= [true true] (mapv #(some? (:seon.db/connection %)) outcomes))
+             "each request acquires its world; neither waits on the other's preparation")
          (is (= 1 (count checkpoints)))
          (is (some? (checkpoint-head store (first checkpoints) cluster base)) "the one checkpoint is complete")
-         ;; Handles hold whole worlds: assert on their kind, never print them.
-         (is (every? #{:handle :seon.test/prepared-checkpoint}
-                     (mapv #(if (:seon.db/connection %) :handle (:seon.error/expected (ex-data %))) outcomes))
-             "the other caller reuses the complete checkpoint or is pushed back by name")
          (finally
            (run! agent/release-context! handles)
            (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints)))))))
+
+(deftest a-request-made-inside-another-requests-world-acquires-its-own
+  ;; A merge's gate runs tests from inside a member's world: its store is that
+  ;; world's overlay and its connection that world's request branch.
+  (support/with-database
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           cluster (:seon.cluster/name handle)
+           effective (config/effective (db/db connection) cluster)
+           outer (clean-request-handle handle connection cluster effective)]
+       (try
+         (let [inner (try (clean-request-handle outer (:seon.db/connection outer) cluster effective)
+                          (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]
+           (try
+             (is (some? (:seon.db/connection inner)) "the nested request acquires its world")
+             (is (not= (:seon.agent/branch outer) (:seon.agent/branch inner)) "on a branch of its own")
+             (finally (when (:seon.db/connection inner)
+                        (try (agent/release-context! inner)
+                             (finally (store/release-store! (:seon.store/store inner))))))))
+         (finally (try (agent/release-context! outer)
+                       (finally (store/release-store! (:seon.store/store outer))))))))))
 
 (deftest a-checkpoint-without-its-source-record-is-never-read
   (let [member (support/execution-handle nil)
