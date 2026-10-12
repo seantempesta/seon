@@ -1,0 +1,145 @@
+diff --git a/resources/seon/tasks/seon.cluster.agent.edn b/resources/seon/tasks/seon.cluster.agent.edn
+index 74d1e3f2f..7026e597d 100644
+--- a/resources/seon/tasks/seon.cluster.agent.edn
++++ b/resources/seon/tasks/seon.cluster.agent.edn
+@@ -56,4 +56,14 @@
+              :kind :function
+              :intent "Phase E6 of hybrid-immutable-env.md (owner decision: a chain step forks its predecessor's end commit, reusing its SCI and db points; supersedes hybrid-agent-world.md's fork-from-main row and closes astra-overnight-review.md P1). `seon.cluster.agent/fork-attempt!` forks the predecessor's end commit persisted on the attempt (`:seon.task.attempt/fork-point`, H8), creates the successor's branch before `seon.task/delete-branch!` removes the predecessor's so Datahike retention owns the history, and the successor's program context is that commit's `seon.sci.eval/program-context` lookup: the predecessor's own value when its final recording changed no program row. The successor's private layer is fresh; a live value moves only by an explicit transfer. No missing-branch fallback to main and no row import. Proof: seon.cluster.agent-test/a-successor-starts-from-its-predecessors-program-context: the predecessor changes a function and ends, main advances differently, the successor executes the predecessor's definition and reads its end facts, none of the predecessor's private Vars is present, `seon.sci.eval/derive-base-ctx` and `seon.sci.eval/interpret-overlay!` are called zero times, environment leg under 2 ms through `seon.profile/measure`; repeated after emptying the kind on a disposable store. After H7, H8, phase E5 and lane p4-branch-writes' release. Files: src/seon/cluster/agent.clj, src/seon/task.clj, test/seon/cluster/agent_test.clj."
+              :must-read #{seon.cluster.agent/fork-attempt! seon.cluster.agent/start-flow! seon.task/delete-branch! seon.sci.eval/base-ctx seon.cluster.registry/fork! seon.profile/measure}
+-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-immutable-env.md" "docs/research/agent-platform/2026-10-11/hybrid-agent-world.md" "docs/research/agent-platform/2026-10-12/astra-overnight-review.md"}}]
++             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-immutable-env.md" "docs/research/agent-platform/2026-10-11/hybrid-agent-world.md" "docs/research/agent-platform/2026-10-12/astra-overnight-review.md"}}
++ #:seon.task{:name "a-successor-whose-proof-its-predecessor-wrote-starts"
++  :kind :function
++  :intent "A chain step whose proof its predecessor wrote cannot start: `seon.cluster.agent/plan-facts` judges a frontier leaf valid by `seon.task/task-edges` on main, but the predecessor's proof lives on its attempt branch (no end copy carries program facts), so the leaf is `:invalid`, `seon.cluster.agent/plan` writes the problem task `seon.task/invalid-task-<handle>` and never attempts it. Observed on default 2319152dc (chain experiment 1): trailing-prose-implement became ready when Design+Prove ended :done and was refused for want of a proof that its fork point (the need's end commit, which `fork-attempt!` uses) held. Correct: validity reads the program the leaf will fork from (main, or the done needs' end commits in `:seon.flow.plan/basis`), the same database its first pass proves on. Proof: `seon.cluster.db-flow-test/a-successor-whose-proof-its-predecessor-wrote-starts`."
++  :must-read #{seon.cluster.agent/plan-facts seon.cluster.agent/plan seon.task/task-edges}
++  :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-1.md" "docs/research/agent-platform/2026-10-12/chain-experiment-1-proofs.patch"}}
++ #:seon.task{:name "a-capped-attempt-has-no-relaunch"
++  :kind :function
++  :intent "A step whose attempt ended :capped, :stalled or :given-back leaves the chain stopped with no way on: `seon.task/frontier` excludes the leaf for good, root receives only an end message (no repair problem task, runtime-follows-db §5), and nothing starts attempt 2. Chain experiment 1 relaunched twice by hand: a new step task with the needs rewired, and an end rewritten from :capped to :sent-back so the reconciler counted one ended attempt and started number 2. Decide the relaunch (root's repair verb that records a new attempt intent on the same task, budget charged to the subject) and remove both workarounds' need."
++  :must-read #{seon.task/frontier seon.cluster.agent/plan seon.turn/end-task-call}
++  :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-1.md" "docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]
+diff --git a/resources/seon/tasks/seon.turn.edn b/resources/seon/tasks/seon.turn.edn
+index 7d8d9f650..ac147ef9f 100644
+--- a/resources/seon/tasks/seon.turn.edn
++++ b/resources/seon/tasks/seon.turn.edn
+@@ -239,4 +239,9 @@
+              :kind :function
+              :intent "Phase E4 of hybrid-immutable-env.md. Every eval request re-forks the agent's context today (`seon.sci.eval/fork-for-turn` with a carried agent context: 8.0 ms and 10.1 MB on an unchanged program, 2.3 ms and 5.3 MB of it `seon.sci.eval/base-bindings` walking 8435 Vars). `seon.turn/resume-turn` and `seon.cluster.agent/acquire-context!` compute the branch head's program-context key: equal, the agent's context as it is, no fork and no acquisition; moved, `fork-for-agent` forks the new value and carries the private layer (own Vars, own bindings, atoms, result objects, print session) compared against the held previous value's namespace map, and the new context is returned and installed by the owning Flow proc, never reset into the old `:env`. Deletes `base-bindings`, `::base-bindings`, `same-program-root?`. Proofs: seon.turn-test/an-eval-request-on-an-unchanged-program-forks-nothing (zero `sci.core/fork`, acquisition leg under 0.5 ms through `seon.profile/measure`); seon.turn-test/a-private-atom-survives-another-agents-program-change (A defs an atom, B commits a defn on A's branch, A's next request sees B's definition and swap!s the same atom); seon.sci.eval-test/database-provenance-regenerates-the-base-and-reverts-for-retained-forks gains rows: atom, closure and print state survive two advances and a return to an earlier commit; a published own Var, a deletion and an alias change. Files: src/seon/turn.clj, src/seon/cluster/agent.clj, src/seon/sci/eval.clj, test/seon/turn_test.clj, test/seon/sci/eval_test.clj (turn.clj, agent.clj and turn_test.clj are held by lane p4-branch-writes: a patch for root until released)."
+              :must-read #{seon.turn/resume-turn seon.sci.eval/fork-for-turn seon.sci.eval/regenerate-agent-context! seon.sci.eval/base-bindings seon.sci.eval/own-bindings seon.cluster.agent/acquire-context! seon.profile/measure}
+-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-immutable-env.md"}}]
++             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-immutable-env.md"}}
++ #:seon.task{:name "a-form-without-source-is-shown-as-a-fault"
++  :kind :function
++  :intent "`seon.turn/show-row` passes `(or source \"\")` as `:seon.cluster.eval/source` to `seon.sci.eval/shown-failure`, whose request schema `:seon.sci.eval/shown-request` requires a string of length at least 1, so showing a failed entry with no source records a fault instead of the failure: signature f7755aef71c0d6c2d3a531fd42b8fa7c013db6726fd9fd479e5caeb65c5fd166 on default 2319152dc, agent attempt/e95d4e90b70f, 2026-10-12T00:23:45Z (chain experiment 1). Find which entry reaches show-row without source (a reply that is only tool markup, or a step-run entry), and fix at the producer: the entry carries its source, or the request schema admits its absence as no key; never an empty string."
++  :must-read #{seon.turn/show-row seon.sci.eval/shown-failure}
++  :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-1.md"}}]
+diff --git a/test/seon/cluster/db_flow_test.clj b/test/seon/cluster/db_flow_test.clj
+index 3268cff24..b6ef0406a 100644
+--- a/test/seon/cluster/db_flow_test.clj
++++ b/test/seon/cluster/db_flow_test.clj
+@@ -12,6 +12,7 @@
+             [seon.cluster.squash :as squash]
+             [seon.batch]
+             [seon.config :as config]
++            [seon.context :as context]
+             [seon.context]
+             [seon.db :as db]
+             [seon.flow :as flow]
+@@ -221,8 +222,9 @@
+ 
+ (defn- chain-world
+   "Call `body` with the chain world's cluster handle over `connection` once `tasks` (name → needs, proof body) are
+-  ingested, each with its one proof, and set :running; every graph db<->flow started is released after."
+-  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string [:tuple [:set :string] :string]]
++  ingested, each with its one proof (none for a nil body: a predecessor writes it), and set :running; every graph
++  db<->flow started is released after."
++  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string [:tuple [:set :string] [:maybe :string]]]
+                        [:=> [:cat :seon.agent/context-source] :seon.schema/value]]
+                   :seon.schema/value]}
+   [connection tasks body]
+@@ -245,7 +247,7 @@
+                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                       :seon.agent/id "tq-chain-author"})
+                         (symbol (str *space* "-proofs"))
+-                        (apply str (for [[task-name [_ proof]] (sort tasks)]
++                        (apply str (for [[task-name [_ proof]] (sort tasks) :when proof]
+                                      (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/" task-name "}} proves-" task-name " "
+                                           proof ")\n"))))
+   (test-support/transacted! connection (mapv #(vector :db/add [:seon.task/id (chain-handle %)] :seon.task/execution :running)
+@@ -719,3 +721,76 @@
+                         (get-in (seon.context/current-state (db/db on-branch) agent-id) [:seon.context/unread :seon.context/items]))
+                   "and the recipient's context shows it")
+               (is (< elapsed-ms 30) "offer to write within 30 ms warm")))))))))
++
++;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
++;;; is a red proof for its successor, written on its own branch.
++
++(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
++  a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
++  ;; The step proof of p is green once a deftest tagged i exists; the one model reply writes that deftest, red as it
++  ;; must be. The red test belongs to i, the step that needs p, so p's change broke nothing: p ends :done.
++  (binding [*space* "tq.chainprove"]
++  (test-support/with-database
++   (fn [connection]
++     (let [ledger (atom [])]
++       (test-support/with-provider
++        ledger (test-support/reply-queue
++                [(str "(in-ns 'tq.chainprove-behavior)\n"
++                      "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))")])
++        (fn [server]
++          (chain-world
++           connection {"p" [#{} (str "(clojure.test/is (contains? (:seon.task/proofs (seon.task/task-edges (seon.db/db) '"
++                                     *space* "/i)) 'tq.chainprove-behavior/i-behaves))")]
++                       "i" [#{"p"} nil]}
++           (fn [handle]
++             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
++                             :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
++             (pass! handle (:seon.agent/routing handle))
++             (let [[[_ branch-p]] (seq (attempts connection "p"))
++                   p-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
++                                                                    :seon.store/branch branch-p})]
++               (is (= {:green 1} (await-on! p-connection
++                                            #(let [counts (:seon.context/counts (context/proofs (db/db p-connection) (symbol *space* "p")))]
++                                               (when (= {:green 1} counts) counts))
++                                            ::p-proof-green))
++                   "the model's reply turned p's step proof green on its branch"))
++             (is (= :done (landed! handle connection "p" ::p-ended))
++                 "its step proof is green and its only red test is its successor's proof")
++             (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
++
++(deftest ^{:seon/tasks #{'seon.cluster.agent/a-successor-whose-proof-its-predecessor-wrote-starts}}
++  a-successor-whose-proof-its-predecessor-wrote-starts
++  ;; i's only proof is written on a's branch before a ends :done at that commit; i forks from that commit, where its
++  ;; proof is, so i is startable there: it gets its attempt and no :invalid-task problem is written on main.
++  (binding [*space* "tq.chainsucc"]
++  (test-support/with-database
++   (fn [connection]
++     (chain-world
++      connection {"a" [#{} "(clojure.test/is (= 1 2))"] "i" [#{"a"} nil]}
++      (fn [handle]
++        (let [routing (:seon.agent/routing handle)]
++          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
++                          :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}})
++          (pass! handle routing)
++          (let [[[key-a branch-a]] (seq (attempts connection "a"))
++                a-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
++                                                                 :seon.store/branch branch-a})]
++            (await-on! a-connection #(not-empty (proof-runs (db/db a-connection) (proof "a"))) ::a-proved)
++            ;; a's work: i's red proof, defined on a's branch as a's agent would
++            (test-support/define! (world/world {:seon.db/connection a-connection :seon.boot/cluster-name "tq-chain"
++                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db a-connection))
++                                                                                              (db/db a-connection) a-connection)
++                                                :seon.batch/sink (seon.batch/sink)
++                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
++                                                :seon.agent/id "tq-chain-author"})
++                                  'tq.chainsucc-behavior
++                                  (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))"))
++            (test-support/transacted! connection
++                                      [[:db/add [:seon.task/assignment key-a] :seon.task.attempt/end :done]
++                                       [:db/add [:seon.task/assignment key-a] :seon.task.attempt/commit
++                                        (db/commit-id (db/db a-connection))]])
++            (pass! handle routing)
++            (is (= 1 (count (attempts connection "i"))) "a's green end starts i from a's commit")
++            (is (empty? (db/q '[:find ?t :where [?t :seon.task/name ?n] [(clojure.string/starts-with? ?n "invalid-task")]]
++                              (db/db connection)))
++                "and writes no :invalid-task problem for it")))))))))
