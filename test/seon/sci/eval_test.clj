@@ -2204,6 +2204,14 @@
     (is (= "A" (value "(parity-str/upper-case \"a\")")))
     (is (= #{1 2} (value "(do (require '[clojure.set :as parity-set]) (parity-set/union #{1} #{2}))")))))
 
+(deftest a-namespace-requiring-itself-with-as-gains-the-alias
+  ;; REPL parity (clojure.core/load-lib aliases whatever it loaded): after
+  ;; `(in-ns 'x)`, `(require '[x :as a])` makes `a` name `x` (run 10 F1)
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
+        value (fn [source] (:seon.sci.admit/value (run-in ctx source 2000)))]
+    (is (= 1 (value (str "(do (ns parity.self-alias) (defn f [] 1) (in-ns 'parity.self-alias)"
+                         " (require '[parity.self-alias :as a]) (a/f))"))))))
+
 (deftest a-required-librarys-private-var-resolves-by-var-quote
   ;; REPL parity: Clojure's `var` reaches a private Var of a loaded namespace,
   ;; required plainly or through an alias. A source namespace's tests use it
