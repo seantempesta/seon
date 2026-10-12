@@ -322,7 +322,8 @@
   (let [ignored (ignored-roots)
         entries (for [file (sort-by #(.getName ^java.io.File %) (.listFiles (io/file "resources/seon/tasks")))
                       entry (edn/read-string (slurp file))
-                      path (keep :seon.ref/span (:seon.ref/spans (ref/document (:seon.task/intent entry))))
+                      text (keep entry [:seon.task/intent :seon.task/instructions])
+                      path (keep :seon.ref/span (:seon.ref/spans (ref/document text)))
                       :when (str/includes? path "/")]
                   {:file (.getPath ^java.io.File file) :task (:seon.task/name entry) :path path})
         offending (filter (fn [{:keys [path]}] (some #(str/starts-with? path %) ignored)) entries)]
