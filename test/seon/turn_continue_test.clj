@@ -386,10 +386,9 @@
          (is (= [:capped] ends)
              "the proof went green but a reaching test went red: the task never ended done, and the cap ended it"))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-stalled-agent-ends-its-task-to-root}
-           :seon.test/long "An own-branch agent's setup and settings with their test steps and two fixture-model passes."
+(deftest ^{:seon.test/long "An own-branch agent's setup and settings with their test steps and three fixture-model passes."
            :seon.test/long-ms 60000}
-  an-agent-whose-loop-stops-before-its-proofs-pass-ends-stalled-to-root
+  two-prose-replies-then-a-form-continue-the-attempt
   (support/with-running-agent
    (fn [running _ connection]
      (let [member (get-in (db/db connection) [:config :branch])
@@ -409,9 +408,10 @@
                                                           :seon.task/agent [:seon.agent/id agent-id]
                                                           :seon.task/branch branch})))
            "root assigns the task to the agent's branch")
-       ;; two prose replies in a row: the loop gives the first one more call and then stops calling the agent
+       ;; two prose replies in a row: the call cap is the only bound, so the next call still happens
        (support/with-provider
-        (atom []) (support/reply-queue ["I think area should square its input." "Squaring is the fix."])
+        (atom []) (support/reply-queue ["I think area should square its input." "Squaring is the fix."
+                                        "(in-ns 'tq.ends)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"])
         (fn [server]
           (agent-eval running agent-id (str "(my.agent/settings! "
                                             (seon.id/printed (assoc (support/provider-config server)
@@ -421,8 +421,8 @@
           (until #(:seon.agent/admission-closed-tx
                    (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  400)))
-       (is (= [:stalled] (attempt-ends (db/db target) agent-id))
-           "the stopped loop ended the task once, on the agent's branch")))))
+       (is (= [:done] (attempt-ends (db/db target) agent-id))
+           "the form after two prose replies was evaluated and turned the proof green")))))
 
 (deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's merge-request run."
            :seon.test/long-ms 30000}

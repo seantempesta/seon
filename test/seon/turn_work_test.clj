@@ -811,7 +811,7 @@
          evaluations))
   (support/transacted! connection [[:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"]]))
 
-(deftest a-prose-only-reply-gets-one-more-call-and-a-second-waits
+(deftest a-reply-with-no-evaluated-form-continues-however-many-come-in-a-row
   ;; A fixture-model reply with no form settles one row whose read failed: an
   ;; error and no duration, as `seon.turn/read-row` settles it unrun.
   (with-database
@@ -821,11 +821,12 @@
                      [{:seon.cluster.eval/source "I will look at the task first."
                        :seon.cluster.eval/error "Your reply had no form; only comments/prose. Send a form."}])
       (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id} (turn/next-agent-work @connection request))
-          "a first prose-only reply gets one more call")
+          "a prose-only reply gets one more call")
       (closed-reply! connection "read-error-run"
                      [{:seon.cluster.eval/source "{:a}"
                        :seon.cluster.eval/error "The map literal starting with :a contains 1 form(s)."}])
-      (is (nil? (turn/next-agent-work @connection request)) "a second reply in a row with no evaluated form waits")
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id} (turn/next-agent-work @connection request))
+          "a second reply in a row with no evaluated form gets one more call: the turn cap is the one bound")
       (closed-reply! connection "form-run"
                      [{:seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3" :seon.eval/duration-ms 0}])
       (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}

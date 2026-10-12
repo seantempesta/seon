@@ -2071,19 +2071,10 @@
        :seon.turn/id run-id
        :seon.agent/id agent-id})))
 
-(defn- evaluated-form?
-  "True when the call row `turn` evaluated at least one form: a form whose read failed (a prose-only
-  reply is one) settles unrun, with no `:seon.eval/duration-ms`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] :boolean]}
-  [database turn]
-  (some? (db/q '[:find ?evaluation . :in $ ?turn
-                 :where [?evaluation :seon.cluster.eval/run ?turn] [?evaluation :seon.eval/duration-ms _]]
-               database turn)))
-
 (defn- continuing-reply?
-  "True when the latest closed provider reply ended no session and either evaluated a form or is the
-  first reply with no evaluated form after one that did: a reply of prose or only read errors gets one
-  more call, whose context shows its diagnostic, and a second such reply in a row waits."
+  "True when the latest closed provider reply ended no session: it had no provider error and chose no
+  disposition. A reply of prose or only read errors continues like any other, and the context shows its
+  diagnostic; the attempt's turn cap (`turns-left`) is the one bound on model calls."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
@@ -2091,37 +2082,19 @@
                          [?turn :seon.turn/agent ?agent]
                          [?turn :seon.turn/id _ ?t]
                          [?turn :seon.turn/closed-tx _]]
-                       database agent-id)
-        latest (when latest-t
-                 (db/q '[:find ?turn . :in $ ?agent-id ?latest-t
-                         :where [?agent :seon.agent/id ?agent-id]
-                         [?turn :seon.turn/agent ?agent]
-                         [?turn :seon.turn/id _ ?t]
-                         [(= ?t ?latest-t)]
-                         [?turn :seon.turn/closed-tx _]
-                         [?turn :seon.turn/reply-size _]
-                         [?turn :seon.turn/attempts ?attempt]
-                         (not [?attempt :seon.ai.attempt/error _])
-                         (not [?turn :seon.turn/disposition _])]
-                       database agent-id latest-t))
-        previous-t (when (and latest (not (evaluated-form? database latest)))
-                     (db/q '[:find (max ?t) . :in $ ?agent-id ?latest-t
-                             :where [?agent :seon.agent/id ?agent-id]
-                             [?turn :seon.turn/agent ?agent]
-                             [?turn :seon.turn/id _ ?t]
-                             [(< ?t ?latest-t)]
-                             [?turn :seon.turn/closed-tx _]
-                             [?turn :seon.turn/reply-size _]
-                             [?turn :seon.turn/attempts _]]
-                           database agent-id latest-t))]
-    (cond (nil? latest) false
-          (evaluated-form? database latest) true
-          (nil? previous-t) true
-          :else (some? (db/q '[:find ?turn . :in $ ?previous-t
-                               :where [?turn :seon.turn/id _ ?previous-t]
-                               [?evaluation :seon.cluster.eval/run ?turn]
-                               [?evaluation :seon.eval/duration-ms _]]
-                             database previous-t)))))
+                       database agent-id)]
+    (some? (when latest-t
+             (db/q '[:find ?turn . :in $ ?agent-id ?latest-t
+                     :where [?agent :seon.agent/id ?agent-id]
+                     [?turn :seon.turn/agent ?agent]
+                     [?turn :seon.turn/id _ ?t]
+                     [(= ?t ?latest-t)]
+                     [?turn :seon.turn/closed-tx _]
+                     [?turn :seon.turn/reply-size _]
+                     [?turn :seon.turn/attempts ?attempt]
+                     (not [?attempt :seon.ai.attempt/error _])
+                     (not [?turn :seon.turn/disposition _])]
+                   database agent-id latest-t)))))
 
 (defn- closed-on?
   "True when the agent `agent-id`'s row on `database` has its admission closed."
@@ -2324,8 +2297,7 @@
   opens the model turn that answers it (`proved-unanswered?`);
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
-  returned no completed/wait disposition and evaluated a form, or is the first
-  in a row that evaluated none (`continuing-reply?`), and never once the held
+  returned no completed/wait disposition (`continuing-reply?`), and never once the held
   task's step is done or satisfied (`seon.context/task-finished?`). An agent whose task
   ended (`task-end`, recorded by `end-task-call`) has its admission closed and
   is given no work, whatever wakes it.
