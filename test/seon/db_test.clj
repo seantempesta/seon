@@ -3293,3 +3293,31 @@
            (is (not= a b) "two forks of one commit allocate distinct entity ids"))
          (finally (doseq [request requests]
                     (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))))))
+
+(deftest a-store-without-the-write-time-limit-dial-refuses-a-write-by-its-name
+  ;; CLASS: `transact-call` dereferenced the dial's nil, so a store declaring
+  ;; a program but not the dial answered a NullPointerException refusal.
+  (let [root (java.io.File. "tmp" (str "db-test-undeclared-dial-" (random-uuid)))
+        opened (store/open-store! {:seon.store/dir (str root "/store")})]
+    (try
+      (let [connection (:seon.store/connection-object opened)
+            executing (:seon.db/connection (test-support/execution-handle nil))]
+        (test-support/transacted! connection
+                                  [{:db/ident :sample.undeclared/id
+                                    :db/valueType :db.type/string
+                                    :db/cardinality :db.cardinality/one
+                                    :db/unique :db.unique/identity}
+                                   {:db/ident :seon.schema/key :db/valueType :db.type/keyword
+                                    :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                   {:db/ident :seon.schema/form :db/valueType :db.type/string
+                                    :db/cardinality :db.cardinality/one}])
+        (test-support/transacted!
+         connection
+         (mapv #(db/pull (db/db executing) [:seon.schema/key :seon.schema/form] [:seon.schema/key %])
+               [:seon.blob/digest :seon.config.db/validation-node-limit]))
+        (let [refusal (db/transact! connection [{:sample.undeclared/id "x"}])]
+          (is (= :seon.config.db/write-time-limit-ms (:seon.error/expected refusal)))
+          (is (nil? (:seon.error/throwable refusal)))))
+      (finally
+        (store/release-store! opened)
+        (test-support/delete-recursively! root)))))

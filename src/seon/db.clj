@@ -6066,8 +6066,16 @@
           (let [;; Every write, system writes included, is bounded by the
                 ;; branch's dial (lane-flow-owns-running-machinery.md N3,
                 ;; R6): a synchronous fault writer must never park forever.
-                write-time-limit-ms (branch-dial database projection :seon.config.db/write-time-limit-ms)
-                request (prepared-write projection database
+                write-time-limit-ms (branch-dial database projection :seon.config.db/write-time-limit-ms)]
+            (if (nil? write-time-limit-ms)
+              (diagnostic
+               {:seon.error/message "seon.db/transact! needs the dial :seon.config.db/write-time-limit-ms, and this store declares none."
+                :seon.error/layer :database-write
+                :seon.error/operation 'seon.db/transact!
+                :seon.error/expected :seon.config.db/write-time-limit-ms
+                :seon.error/fix "Declare :seon.config.db/write-time-limit-ms in the store's schema facts before writing a program."
+                :seon.error/data {:seon.error/member :seon.config.db/write-time-limit-ms}})
+          (let [request (prepared-write projection database
                                         (stamp-transaction database projection transaction batch/*world*))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
@@ -6119,7 +6127,7 @@
               (do (when-let [meter (:seon.cost/writer-meter batch/*world*)]
                     (when (:db-after report) (charge-writer! meter report)))
                   (cond-> report
-                    (and (:db-after report) (not (:parents request))) hold-committed-projection!))))))
+                    (and (:db-after report) (not (:parents request))) hold-committed-projection!))))))))
     (catch Throwable throwable
       (write-refusal database transaction throwable))))
 
