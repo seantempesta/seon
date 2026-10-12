@@ -6,13 +6,35 @@
    [clojure.test.check.generators :as gen]
    [clojure.test.check.properties :as prop]
    [clojure.walk :as walk]
+   [datahike.datom :as datom]
    [datahike.db :as db]
+   [datahike.index.persistent-set]
    [datahike.query :as query]
    [datahike.writer]
+   [konserve.protocols :as store]
+   [konserve.serializers :as serializers]
    [seon.db]
+   [seon.profile :as profile]
    [seon.schema]
    [seon.test-support]
    [seon.turn]))
+
+(deftest ^{:seon/tasks #{'seon.cluster.store/each-commit-serializes-hundreds-of-times-the-bytes-it-writes}}
+  datom-serialization-writes-fields-without-sequence-copies
+  (let [values (mapv #(datom/datom % :cost/value % (+ 536870912 %) (even? %)) (range 1000))
+        serializer (serializers/fressian-serializer
+                    @#'datahike.index.persistent-set/datom-read-handler
+                    @#'datahike.index.persistent-set/datom-write-handler)
+        handlers (atom {})
+        encode #(let [out (java.io.ByteArrayOutputStream.)]
+                  (store/-serialize serializer out handlers values)
+                  (.toByteArray out))
+        _ (encode)
+        measured (profile/measure encode)
+        decoded (store/-deserialize serializer handlers
+                                    (java.io.ByteArrayInputStream. (:seon.profile/value measured)))]
+    (is (= (mapv #(vec (seq %)) values) (mapv #(vec (seq %)) decoded)))
+    (is (< (:seon.profile/alloc-bytes measured) 1000000))))
 
 (def ^:private planner-database
   (db/empty-db {}))

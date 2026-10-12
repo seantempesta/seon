@@ -1,0 +1,22 @@
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -720,12 +720,13 @@
+       (refuse! `system-run-call ::starting-namespace-missing request))
+     {:seon.ns/name namespace-name
+      ::rows
+-     (into [(merge opened
+-                   (select-keys request [::reply ::reply-blob ::reply-size])
+-                   {::starting-ns (str "namespace:" namespace-name)
+-                    ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})]
+-           (concat (rest open-rows) (source-rows database id (:db/id opened) 0 namespace-name
+-                        :outside (current-transaction-instant database) sources)))}))
++     (into (source-rows database id (:db/id opened) 0 namespace-name
++                        :outside (current-transaction-instant database) sources)
++           (cons (merge opened
++                        (select-keys request [::reply ::reply-blob ::reply-size])
++                        {::starting-ns (str "namespace:" namespace-name)
++                         ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})
++                 (rest open-rows)))}))
+ 
+ (defn system-run-call
+   "Open a system-authored turn and freeze its sources at the writer."
