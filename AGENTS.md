@@ -295,7 +295,11 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   refinements, children, its end, delivered messages) reach main because root's `db<->flow` pushes them, woken by the
   branch's listen route; its code reaches main only through a merge request root works. Only root acts cluster-wide:
   its world is main, and it pushes, merges, starts and stops agents and loads code. Root and an agent differ only by
-  what their world holds. Within its compartment an agent may make serious changes, first-party code included: the
+  what their world holds. **Agents transact facts; root reacts.** An agent never performs an effect that reaches main
+  or another agent: it writes its end, refinements, outgoing messages and merge request as facts on its own branch,
+  and root's `db<->flow`, woken by that branch's listen route, executes everything that affects main or other agents
+  (push, message delivery, stopping it, starting its successors, problem tasks). Effects local to its compartment
+  (model calls, its own evaluation, its own tests in a fork of its environment) stay its own. Within its compartment an agent may make serious changes, first-party code included: the
   immutable database and rollback are the safety net. What each kind of entrant receives (database value, connection,
   branch, SCI fork, agent id, task, capabilities) and where its writes land is declared once in the owning spec,
   never implied.
