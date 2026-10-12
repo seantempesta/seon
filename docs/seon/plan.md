@@ -98,7 +98,7 @@ a NullPointerException instead of an error map; a fresh agent's first request sp
 printer renders plain integers as entity references when a map is keyed by attribute keywords
 (`seon.render.value`'s `reference-value`).
 
-**Build sequence (owner, 2026-10-11 evening, revised 2026-10-12).** One focus, at most two lanes on disjoint files, the
+**Build sequence (owner, 2026-10-11 evening; revised by root 2026-10-12 from the restart audit).** One focus, at most two build lanes on disjoint files plus design lanes, the
 start-a-flow benchmark rerun after each commit that moves it. Designs:
 [hybrid-start-a-flow](../research/agent-platform/2026-10-11/hybrid-start-a-flow.md),
 `docs/research/agent-platform/2026-10-11/hybrid-agent-world.md`,
@@ -112,15 +112,30 @@ narrow check (live claims reproduce on default; every deletion is committed with
 phase names a red proof that resolves) and then tasks. Conflicts on copy-back keep main's value and become root's
 problem task unless the entity schema declares a rule.
 
-1. **Immutable program context, E3–E7** (lane program-context): the request cost findings 1 and 3 (about 29 ms and 22 MB
-   per request), then the weight measurement. Proof: `seon.turn-test/an-eval-request-on-an-unchanged-program-forks-nothing`
-   as a measured-cost assertion through `seon.profile/measure`.
-2. **The recording transaction and the reads** (cost findings 2, 4, 5, 6), each at its owner, each with a before and after
-   number from the same probe.
-3. **Step semantics P3, P7–P10, P-final**, in the order of the document.
-4. **The merge-request redesign** replacing U0–U7: done is derived from green proofs; root merges (and
-   `seon.task/ready` replaces `seon.task/frontier` with it).
-5. **Phase numbering and task intents**: every filed phase task names its document (`AW`, `P`, `U`, `E`, `H`); 25 stale
+1. **Immutable program context, E3–E7** (lane program-context, Opus; running): the request cost findings 1 and 3
+   (about 29 ms and 22 MB per request), then the weight measurement. Proof:
+   `seon.turn-test/an-eval-request-on-an-unchanged-program-forks-nothing` as a measured-cost assertion through
+   `seon.profile/measure`.
+2. **Done and merge, one design round** (running: dig `docs/research/agent-platform/2026-10-12/dig-done-and-merge.md`;
+   Opus and Astra plans `plan-done-and-merge-{opus,astra}.md`; then the Fable hybrid and the narrow check). The owner,
+   2026-10-12: done is derived from green proofs with no verb, root merges from main, every edge case modeled, no
+   guards. It replaces U0–U7 and **absorbs P3's merge-gate conversion and P7–P10** (starters, per-action catches, stop
+   versus cancel, relaunch, held successors): those are the round's edge cases, so building them first would be
+   rebuilt after the hybrid. P-final (the real chain with zero nudges) follows its phases.
+3. **The recording transaction, the reads and configuration** (cost findings 2, 4, 5, 6; Astra, beside 1 on disjoint
+   files: `seon.db`, `seon.config`, `seon.profile`, the konserve and Datahike forks, never `seon.sci.eval` or
+   `seon.turn` while lane program-context holds them), each at its owner with a before and after number from the same
+   probe.
+4. **Library words in src** (ledger §3.18 CN entries, after lane program-context releases its files): CN-27 frontier →
+   ready, CN-15 custody → `with-branch`, CN-18 roster, CN-5 world → bindings, CN-6 receipt, CN-9 shown → printed value,
+   one commit each with every caller; code a plan deletes is not renamed
+   (`docs/research/agent-platform/2026-10-12/restart-audit/vocab-src-inventory.md`). Living prose is done (fede4d3d4,
+   5c339d69a, 976e3888a, 02cf34720, 39cdc0f7f, 27fb60c0d and the specs commits).
+5. **Findings filed with red proofs** (Sonnet): `seon.db/branch-connection` throwing on `:current-src` and `:base/*`
+   branches; the 165–178 ms first acquisition; integers printed as entity references; `seon.turn/planned-sources`
+   contradicting `seon.sci.forgive/forgive` on repair; `file:line` citations in `seon.render/call-reach-key` and
+   `seon.flow/fault-port` docstrings.
+6. **Phase numbering and task intents**: every filed phase task names its document (`AW`, `P`, `U`, `E`, `H`); 25 stale
    tags are retired or retargeted.
 
 **Older direction, still the plan unless a phase above replaces it** (statuses are the audit's where stated):
