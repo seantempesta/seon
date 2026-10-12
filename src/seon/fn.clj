@@ -1784,84 +1784,6 @@
 
 (def ^:private request-symbol 'seon.effect/request!)
 
-(defn- declared-reference-rules
-  "The `declared-edge` rules: a capability names its handler, and each
-  attribute that declares a function reference (`:seon.fn/reference-to
-  :seon.fn/sym`, or one a function `:seon.fn/invokes`) gets its own rule
-  naming that attribute.
-
-  Naming each attribute, never a variable attribute, keeps a query over
-  these rules a read of exactly those attributes (Datahike's dependency plan,
-  `d/dependency-plan-attributes`), so a derivation retained by its read
-  evidence (`seon.health/derived`) survives commits that touch none of them.
-  An attribute stores a function by reference (`:db.type/ref`, `:db.type/long`)
-  or by symbol (`:db.type/symbol`); one storing neither names no function.
-
-  ## Costs
-
-  Two indexed reads of the declaring attributes (eight on default,
-  2026-09-28)."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:sequential :seon.schema/value]]]}
-  [database]
-  (let [installed (:schema (db/schema-database database))
-        type-of #(get-in installed [% :db/valueType])
-        referring (db/q '[:find [?attribute ...]
-                          :where [?declaration :seon.fn/reference-to :seon.fn/sym]
-                                 [?declaration :seon.schema/key ?attribute]]
-                        database)
-        invoked (db/q '[:find [?attribute ...] :where [_ :seon.fn/invokes ?attribute]] database)
-        by-reference? #{:db.type/ref :db.type/long}]
-    (into '[[(declared-edge ?caller ?target)
-             [?caller :seon.fn/sym]
-             [?caller :seon.effect/capability ?symbol]
-             [?target :seon.fn/sym ?symbol]]]
-          (concat
-           (for [attribute (sort referring) :when (by-reference? (type-of attribute))]
-             (list '(declared-edge ?caller ?target)
-                   ['?caller attribute '?target] '[?caller :seon.fn/sym] '[?target :seon.fn/sym]))
-           (for [attribute (sort (filter keyword? invoked))
-                 :let [value-type (type-of attribute)]
-                 :when (or (by-reference? value-type) (= :db.type/symbol value-type))]
-             (if (= :db.type/symbol value-type)
-               (list '(declared-edge ?caller ?target)
-                     ['?caller :seon.fn/invokes attribute] ['?holder attribute '?symbol]
-                     '[?target :seon.fn/sym ?symbol])
-               (list '(declared-edge ?caller ?target)
-                     ['?caller :seon.fn/invokes attribute] ['?holder attribute '?target]
-                     '[?target :seon.fn/sym])))))))
-
-(def ^:private reach-rules
-  '[[(call-edge ?function ?target)
-     [?function :seon.fn/calls ?target-symbol]
-     [?target :seon.fn/sym ?target-symbol]]
-    [(call-edge ?function ?target)
-     (declared-edge ?function ?target)]
-    [(call-edge ?function ?target)
-     [?function :seon.fn/references ?target-symbol]
-     [?target :seon.fn/sym ?target-symbol]]
-    [(call-edge ?test ?target)
-     [?file :seon.fn/unresolved-references ?symbol]
-     [?target :seon.fn/sym ?symbol]
-     [?test :seon.fn/file ?file]
-     [?test :seon.test/sym]]
-    [(tested ?target)
-     [?test :seon.test/sym]
-     (call-edge ?test ?target)]
-    [(tested ?target)
-     [?test :seon.test/sym]
-     [?test :seon.test/subject ?target-symbol]
-     [?target :seon.fn/sym ?target-symbol]]
-    [(tested ?target)
-     (tested ?caller)
-     (call-edge ?caller ?target)]])
-
-(defn- test-reach-rules
-  "The call, declared-reference and test-reach rules over `database`'s
-  declaring attributes (`declared-reference-rules`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:sequential :seon.schema/value]]]}
-  [database]
-  (into (declared-reference-rules database) reach-rules))
-
 (defn- read-or-throw!
   "`value`, or a throw carrying it when it is a read refusal; a walk's reads
   stop at the first refusal and its catch answers that refusal."
@@ -2180,37 +2102,40 @@
 
 (defn functions-without-tests
   "Indexed public functions reached by no indexed test.
-
-  Coverage follows the same call and reference relation as `tests-reaching`.
-  Derive the union reached from tests directly, without all function pairs.
-
-  ## Costs
-
-  Armed, default 2026-09-28: about 220 ms uncached. Its reads name only the
-  call-graph and declaring attributes (`test-reach-rules`), so a retained
-  result (`seon.health/untested`) survives every commit that touches none of
-  them; with a variable attribute it read `:all` and was re-derived after
-  every commit."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:vector :seon.fn/sym]]}
+  Read each edge once through `seon.fn/declared-callers` and the stored call,
+  reference and subject attributes, then visit each reached entity once."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.fn/sym]]}
   [database]
-  (let [public-functions
-        (set (db/q '[:find [?function-symbol ...]
-                    :where
-                    [?function :seon.fn/sym ?function-symbol]
-                    [?function :seon.fn/private? false]]
-                  database))
-        tested-functions
-        (set (db/q '[:find [?function-symbol ...]
-                    :in $ %
-                    :where
-                    (tested ?function)
-                    [?function :seon.fn/sym ?function-symbol]
-                    [?function :seon.fn/private? false]]
-                  database (test-reach-rules database)))]
-    (->> (set/difference public-functions tested-functions)
-         sort
-         vec)))
+  (let [read! read-or-throw!
+        datoms (fn [attribute] (read! (db/datoms database :aevt attribute)))
+        functions (read! (db/q '[:find ?entity ?symbol :where [?entity :seon.fn/sym ?symbol]] database))
+        by-symbol (into {} (map (fn [[entity sym]] [sym entity])) functions)
+        public (into #{} (comp (filter #(false? (:v %))) (map :e)) (datoms :seon.fn/private?))
+        tests (into #{} (map :e) (datoms :seon.test/sym))
+        declared (declared-callers read! database)
+        file-references (read! (db/q '[:find ?test ?symbol
+                                       :where [?file :seon.fn/unresolved-references ?symbol]
+                                              [?test :seon.fn/file ?file]
+                                              [?test :seon.test/sym]] database))
+        edges (concat (map (juxt :e :v) (datoms :seon.fn/calls))
+                      (map (juxt :e :v) (datoms :seon.fn/references))
+                      (into [] (comp (filter #(contains? tests (:e %))) (map (juxt :e :v)))
+                            (datoms :seon.test/subject))
+                      (for [[sym callers] declared caller callers] [caller sym])
+                      file-references)
+        outgoing (reduce (fn [found [caller sym]]
+                           (if-let [target (get by-symbol sym)]
+                             (update found caller (fnil conj #{}) target)
+                             found)) {} edges)
+        reached (loop [pending (vec tests) seen #{}]
+                  (if-let [entity (peek pending)]
+                    (if (contains? seen entity)
+                      (recur (pop pending) seen)
+                      (recur (into (pop pending) (get outgoing entity)) (conj seen entity)))
+                    seen))]
+    (into [] (sort (keep (fn [[entity sym]]
+                          (when (and (contains? public entity) (not (contains? reached entity))) sym))
+                        functions)))))
 
 (defn contract-findings
   "Incomplete function contracts ranked by their number of current callers:

@@ -26,8 +26,8 @@
              :evidence #{"docs/research/agent-platform/landing/inv-agent-run-stability-opus-2026-09-26.md"}}
  #:seon.task{:name "mention-closure-survives-beside-call-reach"
              :kind :function
-             :intent "Selection is call reach (20a87b1d1), but the positional gate-sets arity and gate-sets-in's union mode still walk calls, references and file mentions to full depth, only because `seon.test/destructive-reach` reads them; the analyst's documented bulk positional gate-sets over all function symbols timed out at 60,265 ms. test-reach-rules (functions-without-tests) still reach through references transitively, so coverage and selection disagree. Move destructive-reach to reverse-closure, delete the positional arity and the union branch (about -15 lines), and align the coverage rules."
-             :must-read #{seon.fn/gate-sets seon.fn/gate-sets-in seon.fn/test-reach-rules seon.test/destructive-reach}
+             :intent "Selection is call reach (20a87b1d1), but the positional gate-sets arity and gate-sets-in's union mode still walk calls, references and file mentions to full depth, only because `seon.test/destructive-reach` reads them; the analyst's documented bulk positional gate-sets over all function symbols timed out at 60,265 ms. `seon.fn/functions-without-tests` still reaches through references transitively, so coverage and selection disagree. Move destructive-reach to reverse-closure, delete the positional arity and the union branch (about -15 lines), and align the coverage rules."
+             :must-read #{seon.fn/gate-sets seon.fn/gate-sets-in seon.fn/functions-without-tests seon.test/destructive-reach}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
                          "docs/seon/issues/gate-set-rederives-the-declared-reference-population-on-every-call.md"}}
@@ -56,11 +56,6 @@
              :intent "`seon.fn/build-artifact` is a second indexing path beside the production one. It analyzes with no cache root (`seon.fn.analyzer/analyze` turns the cache off outside the checkout, analyzer.clj:818-822) and takes a hand-written first-party list, while the production path `seon.fn/program-entities` and analyzed-artifacts read the checkout cache and derive first-party from the database's entities. It has no src caller. Its test callers (fn_test ~881, 2071, 2080, 2132, 2431, 2843; program_test 1348; reset_edges_test 188; adoption_entities_test 15; edit_test 261; test/runner_test 163) mostly pass an empty first-party list and carry the same latent 'no analysis of seon.db' refusal since a9449b7c3. Delete it and convert its callers to `seon.fn/program-entities` in the same commit."
              :must-read #{seon.fn/build-artifact seon.fn/program-entities}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
- #:seon.task{:name "functions-without-tests-is-the-last-datalog-reach"
-             :kind :function
-             :intent "`seon.fn/functions-without-tests` has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside `seon.fn/declared-callers` that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach. 2026-09-28: seon.health now calls it for the hot-and-untested warning (351-919 ms cold, retained by `seon.health/derived` per program version, 1 ms warm; 159 untested public functions); a replacement derived from call-reach must keep that caller."
-             :must-read #{seon.fn/functions-without-tests seon.fn/declared-callers}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-feedback-perf--proof.clj"}}
  #:seon.task{:name "cross-file-derivation-inputs-rely-on-dependent-relint"
              :kind :function
              :intent "A file's derived entities also read other files' facts: the symbols its calls resolve to, a callee's host-bound flag, an invoked attribute's targets, and clj-kondo findings over another namespace's signatures. The per-file derivation key (`seon.cluster/derivation-keys`) holds none of them; the dependent and caller re-lint selection must re-derive those files when the facts change. Prove the selection covers each class with a regression, or add the facts' digests to the key."

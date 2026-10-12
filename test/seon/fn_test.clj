@@ -1139,7 +1139,7 @@
         (test-support/transacted!
                      connection
                      [(test-support/namespace-entity @connection 'sample.reach)
-                      (function-entity (quote sample.reach/target) nil)
+                      (function-entity (quote sample.reach/target) #{(quote sample.reach/bridge)})
                       (function-entity (quote sample.reach/bridge)
                                     #{(quote sample.reach/target)})
                       (function-entity (quote sample.reach/direct)
@@ -2585,8 +2585,6 @@
         (let [database @connection
               owner (:db/id (db/pull database [:db/id]
                                      [:seon.fn/sym (quote sample.call-declarations/capability)]))
-              handler (:db/id (db/pull database [:db/id]
-                                       [:seon.fn/sym (symbol "sample.call-declarations" "handler")]))
               declared-only (:db-after (d/with database [[:db/retract owner :seon.fn/calls (symbol "sample.call-declarations" "handler")]]))]
           (is (contains? (get (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only)
                               (symbol "sample.call-declarations" "handler"))
@@ -2596,12 +2594,9 @@
                 callers (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only [target])]
             (is (= (select-keys (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only) [target]) callers)
                 "one requested target returns its callers without unrelated declarations"))
-          (is (= (into #{} (map vector)
-                       (get (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only)
-                            (symbol "sample.call-declarations" "handler")))
-                 (db/q '[:find ?caller :in $ % ?target
-                         :where (call-edge ?caller ?target)]
-                       declared-only (#'seon.fn/test-reach-rules declared-only) handler)))
+          (is (not (some #{(symbol "sample.call-declarations" "handler")}
+                         (seon.fn/functions-without-tests declared-only)))
+              "coverage follows the owning capability without a lexical call")
           (is (= [(quote sample.call-declarations/reaches-declarations)]
                  (filterv #(= "sample.call-declarations" (namespace %))
                           (seon.fn/tests-reaching declared-only (symbol "sample.call-declarations" "handler"))))))
