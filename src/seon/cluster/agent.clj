@@ -1667,7 +1667,7 @@
   attempts, so their writes are no-ops by identity."
   {:malli/schema [:=> [:cat :seon.flow.plan/facts :seon.flow.plan/registry :seon.config.agent/max-running]
                   :seon.flow.plan/actions]}
-  [{:seon.flow.plan/keys [startable invalid open ended created basis cluster]}
+  [{:seon.flow.plan/keys [startable invalid open ended created cluster]}
    {:seon.flow.plan/keys [started paused]} max-running]
   (let [running? (= :running cluster)
         intent (fn [{intent :seon.task/execution}]
@@ -1687,7 +1687,7 @@
                                                :seon.agent/id (str "attempt/" key)
                                                :seon.task/branch (keyword (str "attempt-" key))}]
                                       [(assoc row :seon.flow.plan/op :attempt :seon.task.attempt/number number
-                                              :seon.flow.plan/fork-point (or (not-empty (get basis handle)) :main))
+                                              :seon.flow.plan/fork-point :main)
                                        (assoc row :seon.flow.plan/op :start-flow :seon.task/execution :running)])))
                        fresh)
         problems (mapv (fn [handle] {:seon.flow.plan/op :problem :seon.flow.plan/class :invalid-task
@@ -1703,30 +1703,27 @@
   (some #(when (and (map? %) (:seon.error/at %)) %) reads))
 
 (defn- basis-valid?
-  "Whether `sym` has admission obligations at its fork `commit`, else the held main value."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :uuid] :seon.task/sym]
+  "Whether `sym` has admission obligations on main `database`, the value its attempt forks."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :boolean :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
-  [database commit sym]
-  (cache/lookup ::basis-valid [(or commit (db/commit-id database)) sym]
+  [database sym]
+  (cache/lookup ::basis-valid [(db/commit-id database) sym]
                 (constantly 1)
-                #(let [basis (if commit
-                               (db/commit-database database commit)
-                               database)
-                       owed (task/obligations basis sym)]
+                #(let [owed (task/obligations database sym)]
                    (cond
                      (:seon.error/at owed) owed
                      (seq (:seon.task/proofs owed)) true
                      (= :prove (:seon.task/step owed))
                      (let [successor (db/q '[:find ?next . :in $ ?s :where [?t :seon.task/sym ?s]
-                                            [?next :seon.task/needs ?t]] basis sym)]
+                                            [?next :seon.task/needs ?t]] database sym)]
                        (if (map? successor) successor (some? successor)))
                      :else false))
                 (fn [value] (not (and (map? value) (:seon.error/at value))))))
 
 (defn plan-facts
   "What db<->flow reads on main `database` before it plans.
-  The ready leaves split by obligations at their fork point, with open
-  attempts, ended counts, creation order and done needs' end commits."
+  The ready leaves (every need merged) split by obligations on main, which
+  their attempts fork, with open attempts, ended counts and creation order."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.flow.plan/facts :seon.db/invalid-read-error]]}
   [database]
   (let [ready (task/ready database)
@@ -1742,19 +1739,10 @@
                       [?t :seon.task/id ?h]]
                     database)
         created (when leaves (db/q '[:find ?h ?tx :in $ [?h ...] :where [_ :seon.task/id ?h ?tx]] database leaves))
-        basis (when leaves (db/q '[:find ?h ?c :in $ % [?h ...]
-                                   :where [?t :seon.task/id ?h] (needs* ?t ?n) (self-or-under ?n ?l)
-                                   [?a :seon.task/attempt-of ?l] [?a :seon.task.attempt/end :done]
-                                   [?a :seon.task.attempt/commit ?c]]
-                                 database task/ready-rules leaves))
-        basis-by-task (when-not (map? basis)
-                        (reduce (fn [m [h c]] (update m h (fnil conj #{}) c)) {} basis))
-        owed (when (and syms (not (map? syms)) basis-by-task)
-               (mapv (fn [[handle sym]]
-                       [handle (basis-valid? database (first (sort (get basis-by-task handle))) sym)])
-                     syms))
+        owed (when (and syms (not (map? syms)))
+               (mapv (fn [[handle sym]] [handle (basis-valid? database sym)]) syms))
         proved (into #{} (keep (fn [[handle valid?]] (when (true? valid?) handle))) owed)]
-    (or (read-failure (into [ready syms open ended created basis] (map second owed)))
+    (or (read-failure (into [ready syms open ended created] (map second owed)))
         {:seon.flow.plan/startable (into #{} (filter proved) leaves)
          :seon.flow.plan/invalid (into #{} (remove proved) leaves)
          :seon.flow.plan/open (mapv (fn [[h k id b i]] {:seon.task/assigned h :seon.task/assignment k :seon.agent/id id
@@ -1762,7 +1750,6 @@
                                     open)
          :seon.flow.plan/ended (into {} ended)
          :seon.flow.plan/created (into {} created)
-         :seon.flow.plan/basis basis-by-task
          :seon.flow.plan/cluster :running})))
 
 (defn- started-entries
@@ -1840,23 +1827,18 @@
 
 (defn- write-attempt!
   "Write an `:attempt` action on main before anything runs.
-  The agent's creation and the attempt row are ONE transaction, the row
-  recording its fork point when that is a predecessor's end commit
-  (`:seon.task.attempt/fork`), so a restart forks the same world; nothing is
-  written when the attempt already is. Several predecessors' end commits fork
-  the first: their octopus merge is not built."
+  The agent's creation and the attempt row are ONE transaction, so the branch
+  forked from main after it holds both; nothing is written when the attempt
+  already is."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
-  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch fork-point :seon.flow.plan/fork-point
-           :as action}]
+  [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.task/branch :as action}]
   (let [connection (:seon.db/connection handle)
         database (db/db connection)
         tx (task/attempt-tx database h agent-id branch)
-        known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)
-        fork (when (set? fork-point) (first (sort fork-point)))]
+        known? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] database agent-id)]
     (when (map? tx) (throw (ex-info (:seon.error/message tx "The attempt could not be derived.") tx)))
     (when (seq tx)
-      (write! connection (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle))))
-                               (cond-> tx fork (update 0 assoc :seon.task.attempt/fork fork)))))
+      (write! connection (into (if known? [] (creation-tx (attempt-agent action (:seon.cluster/name handle)))) tx)))
     nil))
 
 (defn handle-store
@@ -1867,35 +1849,22 @@
       (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))))))
 
 (defn- fork-attempt!
-  "Fork attempt `key`'s `branch` unless the store holds it: from the fork point its row on main records
-  (`:seon.task.attempt/fork`, a predecessor's end commit, a nested fork toward main from the predecessor's
-  branch, which db<->flow keeps while a successor waits on it), else from main's head. A predecessor whose
-  branch is gone refuses loudly: nothing falls back to main."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch :seon.task/assignment] :nil]}
-  [handle branch key]
+  "Fork an attempt's `branch` from main's head unless the store holds it; the commit it forked at, its merge
+  base (`seon.cluster.registry/base-commit-id`). Every need merged before the attempt was planned
+  (`seon.task/ready`), so main holds what they made."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch] :seon.source/commit-id]}
+  [handle branch]
   (let [database (db/db (:seon.db/connection handle))
         store (handle-store handle)
-        main-branch (get-in database [:config :branch])
-        commit (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] [:seon.task/assignment key]))
-        parent (when commit (db/q '[:find ?b . :in $ ?c :where [?a :seon.task.attempt/commit ?c] [?a :seon.task/branch ?b]]
-                                  database commit))
-        _ (when (and commit (not (and (keyword? parent) (contains? (registry/branches store) parent))))
-            (throw (ex-info "The attempt's predecessor branch is gone, so its fork point cannot be read."
-                            {:seon.error/message "The attempt's predecessor branch is gone, so its fork point cannot be read."
-                             :seon.task/assignment key :seon.task.attempt/fork commit :seon.store/branch parent})))
         result (when-not (contains? (registry/branches store) branch)
-                 (if commit
-                   (let [source (db/branch-database database parent)]
-                     (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db source
-                                      :seon.cluster.registry/from commit :seon.branch/target main-branch}))
-                   (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db database
-                                    :seon.cluster.registry/from main-branch})))]
+                 (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db database
+                                  :seon.cluster.registry/from (get-in database [:config :branch])}))]
     (when (:seon.error/at result) (throw (ex-info (:seon.error/message result "The attempt's fork was refused.") result)))
-    nil))
+    (registry/base-commit-id database branch)))
 
 (defn- seed-attempt!
   "Write attempt `key`'s agent and row onto the branch `connection` holds when its fork point predates them
-  (a predecessor's end commit), at fork: the agent under main's entity id (its identity first, then its
+  (a branch forked before its row was written), at fork: the agent under main's entity id (its identity first, then its
   creation upserts onto it) and the row (`seon.task/attempt-rows-tx`), naming its task by identity in the
   branch's world, so the agent reads its assignment there and its end names main's entities."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :seon.flow.plan/action] :nil]}
@@ -1912,27 +1881,26 @@
     nil))
 
 (defn- write-merge-base!
-  "Write on main attempt `key`'s merge base, the commit its `branch` forked at (`seon.cluster.registry/base-commit-id`),
+  "Write on main attempt `key`'s merge base, `commit`, the commit its branch forked at (`fork-attempt!`),
   unless main already holds one: `seon.merge/merge-tx` moves it from there."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch [:maybe :seon.task/assignment]] :nil]}
-  [handle branch key]
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.source/commit-id [:maybe :seon.task/assignment]] :nil]}
+  [handle commit key]
   (when key
     (let [connection (:seon.db/connection handle)
-          database (db/db connection)
-          row (db/pull database [:db/id :seon.task/merge-base] [:seon.task/assignment key])]
+          row (db/pull (db/db connection) [:db/id :seon.task/merge-base] [:seon.task/assignment key])]
       (when-not (:seon.task/merge-base row)
-        (write! connection [[:db/add (:db/id row) :seon.task/merge-base (registry/base-commit-id database branch)]]))))
+        (write! connection [[:db/add (:db/id row) :seon.task/merge-base commit]]))))
   nil)
 
 (defn- start-attempt!
   "Start a `:start-flow` action's graph under its intent.
-  Fork its branch, record its merge base on main (`write-merge-base!`), acquire the branch execution, write its
-  agent and attempt there when the fork point predates them (`seed-attempt!`), and start its flow.
+  Fork its branch from main, record the commit it forked at as its merge base on main (`write-merge-base!`),
+  acquire the branch execution, write its agent and attempt there when the fork point predates them
+  (`seed-attempt!`), and start its flow.
   A repeat finds the branch, its rows and the started graph and does nothing new."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
   [handle {agent-id :seon.agent/id branch :seon.task/branch intent :seon.task/execution :as action}]
-  (fork-attempt! handle branch (:seon.task/assignment action))
-  (write-merge-base! handle branch (:seon.task/assignment action))
+  (write-merge-base! handle (fork-attempt! handle branch) (:seon.task/assignment action))
   (let [execution (acquire-context! handle nil {:seon.agent/branch branch})]
     (seed-attempt! handle (:seon.db/connection execution) action)
     (start-branch-flow! handle execution agent-id (or intent :running))
@@ -2032,27 +2000,11 @@
   #{:done :sent-back})
 
 (defn- kept?
-  "Whether assignment `a`'s merged branch stays on main `database` with the `store`'s branches: its agent's cluster
-  keeps ended branches, or, ended :done, a leaf needing its task has no
-  assignment yet forked from its end commit on a branch the store holds (the end commit's branch is that fork
-  point's ref until `seon.cluster.agent/a-join-forks-main-after-both-needs-merge` forks main)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches :seon.db/entity-id :seon.agent/id
-                       :seon.task.attempt/end]
-                  :boolean]}
-  [database branches a agent-id end]
-  (let [read (fn [result] (if (map? result) (throw (ex-info (:seon.error/message result "db<->flow could not read.") result)) result))
-        commit (:seon.task.attempt/commit (db/pull database [:seon.task.attempt/commit] a))
-        waiting (when (and (= :done end) commit)
-                  (read (db/q '[:find [?t ...] :in $ % ?a
-                                :where [?a :seon.task/attempt-of ?l] [?t :seon.task/id _] (not [?t :seon.task/children _])
-                                (needs* ?t ?n) (self-or-under ?n ?l)]
-                              database task/ready-rules a)))
-        forked? (fn [t] (some #(contains? branches %)
-                              (read (db/q '[:find [?b ...] :in $ ?t ?c
-                                            :where [?s :seon.task/attempt-of ?t] [?s :seon.task.attempt/fork ?c] [?s :seon.task/branch ?b]]
-                                          database t commit))))]
-    (boolean (or (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?))
-                 (some (complement forked?) waiting)))))
+  "Whether `agent-id`'s merged branch stays on main `database`: its agent's cluster keeps ended branches. A
+  successor forks main, so no successor holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?)))
 
 (defn- publication-due?
   "Whether an assignment's publication is due, from its `row` on main: merged, its merge commit recorded,
@@ -2130,8 +2082,7 @@
                            (cond-> {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
                                     :seon.agent/id id :seon.flow.plan/head head
                                     :seon.flow.plan/started? (contains? started id)
-                                    :seon.flow.plan/kept? (boolean (and (merged-ends end)
-                                                                        (kept? database branches a id end)))}
+                                    :seon.flow.plan/kept? (boolean (and (merged-ends end) (kept? database id)))}
                              end (assoc :seon.task.attempt/end end)
                              publish? (assoc :seon.flow.plan/publish? true)
                              main-end (assoc :seon.flow.plan/main-end main-end)

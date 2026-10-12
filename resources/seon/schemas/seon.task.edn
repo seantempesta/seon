@@ -110,7 +110,6 @@
                   [:seon.task/attempt-of {:optional true} :seon.task/attempt-of] [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]
-                  [:seon.task.attempt/fork {:optional true} :seon.task.attempt/fork]
                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]
                   [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
                   [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]

@@ -2693,7 +2693,7 @@
                                     (map (comp symbol namespace)))
                           runnable))
             loaded (when (seq fresh) (loaded-program (:seon.sci.eval/ctx execution)))
-            ;; A request may name namespaces to interpret whoever asks (`change-reds`).
+            ;; A request may name namespaces to interpret whoever asks (`fork-point-red`).
             interpreted (into (set (:seon.test/interpreted-namespaces request))
                               (when (and (seq fresh) (not (:seon.error/at loaded)))
                                 (interpreted-namespaces database loaded fresh)))
@@ -3134,19 +3134,3 @@
                (into {} (keep #(when-let [test-symbol (:seon.test/sym %)] [test-symbol (runner/red-result? %)]))
                      (:seon.test/results ran))
                inherited))))
-
-(defn change-reds
-  "Of `tests`, those red on `branch` (a branch's database) whose same test is not red at `main`'s head (root's
-  world, the merge target): the reds the branch's change made, sorted. A test not red on the branch is not the
-  change's, and one main does not hold is not red there. Main's side is `fork-point-red` at main's head commit:
-  its recorded result, else one run on a branch forked there, recorded on main as root's own evidence at that key."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source [:sequential :seon.test/sym]]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [branch main tests]
-  (let [names (vec (sort (distinct tests)))
-        results (if (seq names) (runner/latest-results branch names) [])
-        red (when-not (:seon.error/at results)
-              (into [] (comp (filter runner/red-result?) (keep :seon.test/sym) (distinct)) results))
-        on-main (when (seq red) (fork-point-red main (db/commit-id (db/db (:seon.db/connection main))) red nil))]
-    (or (some #(when (:seon.error/at %) %) [results on-main])
-        (vec (sort (remove #(true? (get on-main %)) red))))))

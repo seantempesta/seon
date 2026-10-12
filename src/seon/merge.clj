@@ -204,12 +204,6 @@
   (db/q '[:find ?sym . :in $ ?a :where [?a :seon.task/assigned ?h] [?t :seon.task/id ?h] [?t :seon.task/sym ?sym]]
         database a))
 
-(defn- needed?
-  "Whether another task on `database` needs the task `sym`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] :boolean]}
-  [database sym]
-  (some? (db/q '[:find ?next . :in $ ?sym :where [?t :seon.task/sym ?sym] [?next :seon.task/needs ?t]] database sym)))
-
 (defn- assignment-row
   "Assignment `key`'s row on main `database`, with its merge base: the stored one, else the commit its branch
   forked at (`seon.cluster.registry/base-commit-id`), which the merge stores."
@@ -257,11 +251,10 @@
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
             target (db/db connection)
             ;; one comparison with main decides whether declarations merge; their proofs are the assignment's
-            ;; task's, read on the branch head. A sent-back source, or a step another task needs (its product's
-            ;; designed reds pass no gate before M7, `seon.merge/a-merge-whose-reached-definition-moved-writes-nothing`),
-            ;; merges its facts only.
+            ;; task's, read on the branch head, a Prove step's product beside them. A sent-back source merges
+            ;; its facts only.
             task-sym (assigned-task target a)
-            unmerged (when (and (uuid? commit) (not= base commit) (not (needed? target task-sym)))
+            unmerged (when (and (uuid? commit) (not= base commit))
                        (source/unmerged-count target store branch))
             owed (when (and unmerged (pos? unmerged))
                    (let [head (db/commit-database target commit)]
@@ -299,9 +292,12 @@
                 result)
               report))
           :else
-          (let [prepared (source/prepare-merge! context store branch (:seon.task/proofs owed) (cond-> {} root (assoc :root root)))
+          (let [product (when (= :prove (:seon.task/step owed)) (:seon.task/product owed))
+                prepared (source/prepare-merge! context store branch (into (:seon.task/proofs owed) product)
+                                                (cond-> {} root (assoc :root root)))
                 accepted (when (:seon.source/candidate prepared)
-                           (source/accept-merge! context store prepared {:tx-data merge-call :tx-meta meta}))
+                           (source/accept-merge! context store (cond-> prepared (seq product) (assoc :seon.task/product product))
+                                                 {:tx-data merge-call :tx-meta meta}))
                 _ (when (:seon.source/candidate prepared)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
                 result (when (:seon.source/commit-id accepted)
@@ -326,9 +322,10 @@
   the store it holds or its SCI context's environment holds) as ONE
   transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
   facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
-  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not
-  end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
-  proofs of the assignment's task on C (`seon.task/obligations`) and
+  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`) and its source did not
+  end `:sent-back`, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
+  proofs of the assignment's task on C (`seon.task/obligations`), a Prove step's product beside them (red by
+  design, `seon.cluster.source/accept-merge!` takes it), and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
   `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold
   are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside

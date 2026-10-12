@@ -715,13 +715,13 @@
   "The transaction data writing onto `branch-db` attempt `key`'s row as main `database` holds it, under
   main's entity id, naming its task and agent by identity, so the branch's agent reads its assignment in
   its own world and the end names main's entities; [] when `branch-db` holds the row. The branch's world
-  holds the task and the agent (it forked main, or a predecessor's end commit, after both existed): a
+  holds the task and the agent (it forked a commit after both existed): a
   task it lacks refuses `:unknown-task`, never imported."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.task/assignment]
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database branch-db key]
   (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
-                               :seon.task.attempt/number :seon.task.attempt/fork :seon.task/merge-base
+                               :seon.task.attempt/number :seon.task/merge-base
                                {:seon.task/agent [:seon.agent/id]}]
                      [:seon.task/assignment key])
         handle (:seon.task/assigned row)

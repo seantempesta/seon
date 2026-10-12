@@ -110,10 +110,11 @@
                [:seon.task/assignment :seon.task/assignment] [:seon.test.run/id {:optional true} :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
                [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]],
               :prepared
-              [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, the digest each merged declaration held on the destination, and the candidate's commit."}
+              [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, a Prove step's product (its tests that may stay red by design), the digest each merged declaration held on the destination, and the candidate's commit."}
                [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                [:seon.test/passed? :boolean] [:seon.source/tally :string]
                [:seon.task/proofs :seon.task/proofs]
+               [:seon.task/product {:optional true} :seon.task/product]
                [:seon.source/red {:optional true} :seon.source/red]
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:parents [:set :seon.source/commit-id]]

@@ -66,7 +66,7 @@
               before (digest h-conn "merge-callee")]
           (is (false? (:seon.test/passed? red)))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
-          ;; main may record its own side of the red (seon.test/change-reds); its program is unchanged
+          ;; main may record its own side of the red (seon.test/fork-point-red); its program is unchanged
           (is (= before (digest h-conn "merge-callee")))))
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
         (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
@@ -204,7 +204,7 @@
         prepare #(let [p (source/prepare-merge! target store c #{(sym "gate-proof")})]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
-        ;; main may record its own side of a red (seon.test/change-reds); its program stays as it was
+        ;; main may record its own side of a red (seon.test/fork-point-red); its program stays as it was
         callee-digest #(:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest]
                                                                  [:seon.fn/sym (sym "gate-callee")]))]
     (try
@@ -418,7 +418,7 @@
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
              (is (nil? (:seon.task/outcome (assignment-row connection request))) "the assignment stays open")
-             ;; main may record root's own run of the red at its head (seon.test/change-reds, hybrid-test-results Q2, R8)
+             ;; main may record root's own run of the red at its head (seon.test/fork-point-red, hybrid-test-results Q2, R8)
              (is (= #{} written) "main holds no program or cluster fact the refused merge wrote")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))

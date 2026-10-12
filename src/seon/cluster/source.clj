@@ -981,7 +981,7 @@
   "Each of `not-green` (test symbols of run `run-id` with no green member) with
   the run that recorded its result and its verdict: `:unknown` with no
   executed failure, `:red` when it is of `changed` (red on the tested branch
-  and not red on the target under the same evaluator, `seon.test/change-reds`),
+  and not red at the target's head under the same evaluator, `seon.test/fork-point-red`),
   else `:red-on-target`."
   {:malli/schema [:=> [:cat :seon.test.run/id :seon.test/results [:sequential :seon.test/sym] [:set :seon.test/sym]]
                   [:vector :seon.source/red-test]]}
@@ -1016,8 +1016,10 @@
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
   `source`: the named run on S complete, each of its `:seon.task/proofs` a
-  member, every member green (`red-test-refusal`), every added or replaced
-  function reached by a green member, and S's program unwritten since. The
+  member, every member green (`red-test-refusal`) except the prepared merge's
+  `:seon.task/product` red only by design (`seon.test.runner/designed-red?`),
+  every added or replaced function reached by a green member or a designed red,
+  and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the prepared merge's `:seon.source/expected-digests`; writes to
   other rows never stale it. The merge commit's parents add the candidate and
@@ -1037,7 +1039,7 @@
                    [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]]}
   ([source held-store prepared] (accept-merge! source held-store prepared {:tx-data []}))
   ([source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}
+                      proofs :seon.task/proofs product :seon.task/product merged :parents advanced :seon.source/advanced-base}
    {merging :tx-data meta :tx-meta}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
@@ -1060,12 +1062,21 @@
                 green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
                 green (set (vals (select-keys members green-ids)))
                 unproven (vec (sort (remove (set (vals members)) proofs)))
-                not-green (vec (remove green (vals members)))
+                by-symbol (when (vector? results) (into {} (map (juxt :seon.test/sym identity)) results))
+                ;; a Prove step's product red only by assertions or unimplemented stubs is its designed product,
+                ;; judged on its recorded reports (the run's totals carry none)
+                product-results (when-let [named (seq (filter (set product) (vals members)))]
+                                  ((requiring-resolve 'seon.test.runner/latest-results) tested (vec named)))
+                designed (into #{} (comp (filter #(and (map? %) ((requiring-resolve 'seon.test.runner/designed-red?) %)))
+                                         (map :seon.test/sym))
+                               (when (vector? product-results) product-results))
+                not-green (vec (remove (into green designed) (vals members)))
                 ;; one predicate: a red is the change's unless main is red under the same evaluator
-                changed (when (and (vector? results) (seq not-green))
-                          ((requiring-resolve 'seon.test/change-reds) tested source not-green))
-                red-tests (when (and (vector? results) (not (:seon.error/at changed)))
-                            (red-test-verdicts run-id results not-green (set changed)))
+                reds (filter #(some-> (by-symbol %) ((requiring-resolve 'seon.test.runner/red-result?))) not-green)
+                on-main (when (seq reds)
+                          ((requiring-resolve 'seon.test/fork-point-red) source (db/commit-id head) (vec reds) nil))
+                red-tests (when (and (vector? results) (not (:seon.error/at on-main)))
+                            (red-test-verdicts run-id results not-green (set (remove #(true? (get on-main %)) reds))))
                 ;; A retracted function has nothing to cover: its surviving
                 ;; callers are the writer's refs and the run's reaching tests.
                 ;; What an agent merges back is specified (owner 2026-09-27): the
@@ -1080,7 +1091,7 @@
                                               (not (:seon.fn/host-bound? entity)))] f)
                 uncovered (for [[a f] delta :when (= :seon.fn/sym a)
                                 :when (:db/id (db/pull tested [:db/id] [a f]))
-                                :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
+                                :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
                 tx (when (seq delta) (replacement tested head delta))
                 dangling ((requiring-resolve 'seon.task/candidate-dangling) tested head delta)]
             (cond
@@ -1091,7 +1102,8 @@
               (refuse "Every proof must be a member of the named run." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
-              (:seon.error/at changed) changed
+              (:seon.error/at product-results) product-results
+              (:seon.error/at on-main) on-main
               (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
               (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "

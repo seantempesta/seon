@@ -2479,6 +2479,19 @@
   (boolean (and (:seon.test/pass-count result)
                 (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))))))
 
+(defn designed-red?
+  "Whether `result` is a Prove step's designed red.
+  Red only by failing assertions or errors typed `:seon.error/unimplemented`,
+  never an unresolved symbol or a setup error."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [result]
+  (let [reports (:seon.test.failure/reports result)]
+    (boolean (and (red-result? result) (seq reports)
+                  (every? #(or (= :fail (:seon.test.failure/type %))
+                               (and (= :error (:seon.test.failure/type %))
+                                    (= :seon.error/unimplemented (:seon.error/type %))))
+                          reports)))))
+
 (defn red-at-current-reach?
   "Whether `test-symbol`'s latest admitted result on `database` is red for its
   current reach there: red on that branch as it stands, not only once."
