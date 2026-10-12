@@ -5,7 +5,7 @@
  #:seon.task{:name "an-agent-cannot-see-or-choose-its-change"
              :kind :function
              :intent "(my.program/overrides {}) answers [] on a branch with 21 changed identities; request-merge! takes only :seon.issue/id, sweeps in drift the branch inherits (my.plan-test/current-refuses-an-unknown-agent-by-name), omits deletions from `:seon.test/changed`, and sends its content as a pr-str string. Selection exists only in root's prepare-merge!."
-             :must-read #{my.program/overrides my.program/request-merge!}
+             :must-read #{seon.program/overrides my.program/request-merge!}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
  #:seon.task{:name "breaks-plans-a-contract-change-as-a-retraction"

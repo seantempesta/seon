@@ -34,8 +34,8 @@
 
  #:seon.task{:name "bounded-text-survives-in-the-render-namespace"
              :kind :function
-             :intent "Render dedup: seon.print.value/bounded-text and throwable-text are the survivors (6618eda17); `seon.render.value/bounded-text` and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when `seon.render.value/bounded-text` is deleted and every caller converted in the same commit, lint clean."
-             :must-read #{seon.print.value/bounded-text seon.render.value/bounded-text seon.repl/entity-emission}}
+             :intent "Render dedup: `seon.error/bounded-text` and `seon.render.value/bounded-text` are two private copies of one clip; the first stays as the survivor until the second and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when `seon.render.value/bounded-text` is deleted and every caller converted in the same commit, lint clean."
+             :must-read #{seon.error/bounded-text seon.render.value/bounded-text seon.repl/entity-emission}}
  #:seon.task{:name "cuts-cost-more-than-they-hide-across-siblings",
             :kind :function,
             :intent
