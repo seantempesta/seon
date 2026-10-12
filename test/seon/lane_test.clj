@@ -46,9 +46,10 @@
 
 (deftest the-last-holder-may-reclaim-a-dirty-file-and-others-may-not
   (let [dir (scratch)]
-    (is (= 2 (:exit (lane dir "claim" "one" "b.txt"))) "nobody's dirty file is refused")
-    (is (zero? (:exit (lane dir "claim" "one" "a.txt"))))
+    (is (zero? (:exit (lane dir "claim" "one" "b.txt"))) "an untracked file nobody holds is claimable")
     (spit (io/file dir "a.txt") "changed")
+    (is (= 2 (:exit (lane dir "claim" "one" "a.txt"))) "nobody's dirty tracked file is refused")
+    (is (zero? (:exit (let [r (sh dir "env" "LANE_ADOPT=1" "bin/lane" "claim" "one" "a.txt")] r))))
     (lane dir "release" "one" "a.txt")
     (is (= 2 (:exit (lane dir "claim" "two" "a.txt"))))
     (is (zero? (:exit (lane dir "claim" "one" "a.txt"))))))

@@ -37,7 +37,8 @@
 # carried lane commit-validation's paths under lane heap-retained's message).
 #
 # A released path remembers its last holder (tmp/orchestrator/lanes/released.holders):
-# only that lane may re-claim it while the file is still dirty and unclaimed.
+# only that lane may re-claim it while the file is still dirty and unclaimed. An untracked path
+# no lane holds and no released holder remembers is nobody's work yet: the lane naming it claims it.
 #
 # --branch-evidence AGENT asks the live root one question over its prepl
 # (`seon.cluster.branch-evidence/branch-evidence`): does AGENT's branch declare
@@ -142,7 +143,8 @@ claim() {
     if owner="$(owner_of "$path")" && [[ "$owner" != "$lane" ]]; then
       refuse "$path is claimed by lane $owner (one file, one owner)"
     fi
-    if [[ "${LANE_ADOPT:-}" != 1 ]] && dirty "$path" && ! owner_of "$path" >/dev/null && [[ "$(last_holder "$path")" != "$lane" ]]; then
+    if [[ "${LANE_ADOPT:-}" != 1 ]] && dirty "$path" && ! owner_of "$path" >/dev/null && [[ "$(last_holder "$path")" != "$lane" ]] \
+       && { [[ -n "$(git ls-files -- "$path")" ]] || [[ -n "$(last_holder "$path")" ]]; }; then
       refuse "$path already has uncommitted changes nobody claimed; root decides whose they are before anyone edits it"
     fi
   done
