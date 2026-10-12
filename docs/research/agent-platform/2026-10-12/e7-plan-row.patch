@@ -1,0 +1,5 @@
+--- a/docs/seon/plan.md
++++ b/docs/seon/plan.md
+@@
+-| E7 | immutable-env | partial | 35e906c38: a branch's definitions weigh only what they add; `script/seon/program_context_weight.clj` does not exist | measure one base, replace the 12,288 B per function constant |
++| E7 | immutable-env | done | lane e7: weights are measured retained bytes (`script/seon/program_context_weight.clj`); base 1,280 B × functions + source text (80.8 → 14.5 MB), overlay 51,200 + 3,712 × interpreted + 112 × own namespace entries; default's program-context kind 165.5 → 31.0 MB | |

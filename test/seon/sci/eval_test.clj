@@ -47,6 +47,7 @@
             [seon.sci.eval :as eval]
             [seon.sci.lookup :as lookup]
             [seon.sci.kernel :as kernel]
+            [seon.program-context-weight :as weight]
             [seon.test-support :as test-support]
             [my.program]))
 
@@ -2841,6 +2842,30 @@
          (is (not (identical? base overlay)))
          (is (< (* 10 (#'eval/overlay-weight overlay)) (#'eval/context-weight base))
              "an overlay weighs what it adds, not the loaded context it shares"))))))
+
+(deftest a-program-context-weighs-its-own-declarations
+  ;; seon.cache's budget is retained bytes: each entry is charged what its
+  ;; eviction frees, measured against a second derivation of the same program
+  (test-support/with-database
+   (fn [connection]
+     (let [loaded (#'eval/loaded-program (db/db connection))
+           base (eval/program-context loaded)
+           base-measured (weight/retained-bytes (#'eval/derive-base-ctx loaded) [base])]
+       (is (<= (quot base-measured 2) (#'eval/context-weight base) (* 2 base-measured))
+           "the loaded program context is charged what it retains")
+       (test-support/transacted!
+        connection [(test-support/program-fn-entity (db/db connection) (symbol "my.program" "weighed")
+                                                    "(defn weighed [] 1)")])
+       (let [database (db/db connection)
+             overlay (eval/program-context database)
+             projection (or (db/carried-projection database) (schema/projection-from-database database))
+             plan (#'eval/program-changes database loaded projection)
+             measured (weight/retained-bytes (#'eval/derive-overlay-ctx base database loaded projection plan)
+                                             [base overlay])]
+         (is (<= (quot measured 2) (#'eval/overlay-weight overlay) (* 2 measured))
+             "a one-function overlay is charged what it retains beyond the loaded context")
+         (is (< (* 3 (#'eval/overlay-weight overlay)) (* 3 1024 1024))
+             "three one-function branches charge under 3 MB"))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-an-agent-requires-is-interpreted-not-host-loaded}}
   an-interpreted-test-namespace-resolves-the-core-names-sci-lacks

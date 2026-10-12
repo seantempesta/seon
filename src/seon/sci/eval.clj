@@ -3681,21 +3681,58 @@
                               ::loaded-commit-id (db/commit-id loaded))
                  recorder (assoc :seon.flow/commit-fault! recorder)))))
 
+(def ^:private function-bytes
+  "Retained bytes per function a loaded program context binds from its
+  loaded JVM Var, beyond its source text: the SCI Var, its namespace map entry,
+  metadata and program row. The compiled Var and its root are retained by the
+  JVM anyway. Calibrated by `seon.program-context-weight/report`."
+  1280)
+
+(def ^:private interpreted-function-bytes
+  "Retained bytes per function a program context interprets from source: its
+  analyzed body, SCI Var and row. Calibrated by
+  `seon.program-context-weight/report`."
+  3712)
+
+(def ^:private namespace-entry-bytes
+  "Retained bytes per entry of a namespace map an overlay binds anew. Calibrated
+  by `seon.program-context-weight/report`."
+  112)
+
+(def ^:private overlay-bytes
+  "Retained bytes of an overlay beyond its functions and namespace entries:
+  its kernel state and acquisition. Calibrated by
+  `seon.program-context-weight/report`."
+  51200)
+
 (defn- context-weight
-  "Estimated retained bytes of a loaded program context, including interpreted bindings."
+  "Retained bytes of a loaded program context, its functions' source text included: what its eviction frees."
   {:malli/schema [:=> [:cat :seon.sci.eval/program-context] nat-int?]}
   [value]
-  (* 12288 (count (:functions (::kernel/program-snapshot value)))))
+  (let [functions (:functions (::kernel/program-snapshot value))]
+    (+ (* function-bytes (count functions))
+       (reduce-kv (fn [total _ entry] (+ total (count (::function-source entry)))) 0 functions)
+       (* interpreted-function-bytes (or (::interpreted-count (::acquisition value)) 0)))))
 
 (defn- overlay-weight
-  "Estimated retained bytes an overlay adds to the loaded context it forks:
-  the rows its acquisition interpreted and installed. The fork shares the
-  loaded context's environment, so the loaded program is weighed once, under
-  its own key."
+  "Retained bytes an overlay adds to the loaded context it forks: its
+  interpreted functions, the namespace map entries it binds anew and its own
+  state. The fork shares the rest of the loaded context, so the loaded program
+  is weighed once, under its own key."
   {:malli/schema [:=> [:cat :seon.sci.eval/program-context] nat-int?]}
   [value]
-  (let [{::keys [interpreted-count installed]} (::acquisition value)]
-    (* 12288 (+ 1 (or interpreted-count 0) (or installed 0)))))
+  (let [{::keys [interpreted-count own-namespace-entries]} (::acquisition value)]
+    (+ overlay-bytes
+       (* interpreted-function-bytes (or interpreted-count 0))
+       (* namespace-entry-bytes (or own-namespace-entries 0)))))
+
+(defn- own-namespace-entries
+  "The entries of `value`'s namespace maps that are not `parent`'s own maps."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.sci.eval/program-context] nat-int?]}
+  [value parent]
+  (let [held (:namespaces (:env parent))]
+    (reduce-kv (fn [total name namespace] (if (identical? namespace (get held name)) total (+ total (count namespace))))
+               0 (:namespaces (:env value)))))
 
 (defn- derive-overlay-ctx
   "Interpret one program's `plan` on a builder forked from the loaded program
@@ -3705,8 +3742,9 @@
   [cluster database loaded projection plan]
   (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
                    ::custody {} :seon.schema/projection projection)
-        acquired (overlay! ctx database plan)]
-    (assoc (freeze-program ctx) ::acquisition acquired)))
+        acquired (overlay! ctx database plan)
+        value (freeze-program ctx)]
+    (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster)))))
 
 (defn- projection-delta
   "The digest of the schema forms and function contracts `database`'s

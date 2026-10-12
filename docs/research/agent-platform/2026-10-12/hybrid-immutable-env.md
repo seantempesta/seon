@@ -134,6 +134,16 @@ under 3 × 1 MB of weighted bytes (3 × 79 MB today) and the probe's number is w
 `src/seon/sci/eval.clj`, `test/seon/sci/eval_test.clj`, `script/seon/program_context_weight.clj`. Owner: Sonnet. Task
 `seon.sci.eval/a-program-context-weighs-its-own-declarations`.
 
+Status: done (lane e7). `script/seon/program_context_weight.clj` measures by an identity walk of a second derivation
+against the held one (`seon.program-context-weight/retained-bytes`, strings counted as the entry's own) and by heap
+after collection; plain JOL `GraphLayout` reaches 170-260 MB of the live heap from the base, so it cannot answer what
+eviction frees. Measured on an isolated root (6,583 functions): base 14.46 MB walked (4.62 MB by heap while Datahike's
+node cache still holds the 6.1 MB of source text), overlays of 1/5/20/60 fresh functions 68/84/142/292 KB, a function
+in `my.program` 283 KB (it rebinds 14 namespace maps, 2,014 entries). Charges: `context-weight` 1,280 B × functions +
+source characters; `overlay-weight` 51,200 + 3,712 × interpreted + 112 × `:seon.sci.eval/own-namespace-entries`
+(counted at derivation against the parent). On default's held values: 165.5 MB → 31.0 MB (bases 80.8 → 14.5 MB, a
+one-namespace overlay 319 KB → 62 KB). Proof `seon.sci.eval-test/a-program-context-weighs-its-own-declarations`.
+
 **Order.** E1 → E2 → E3 → E4 → E5; E7 after E2; E6 after E5, H7, H8 and the P4 lane releases `seon.cluster.agent`.
 Every slice is REPL-first on the lane's branch (`bin/lane commit --branch-evidence`), except E1 and the parts of E3/E4
 that touch the evaluator (`--test`). Root restarts default once per batch.

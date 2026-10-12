@@ -1,4 +1,6 @@
 #:seon.sci.eval{:interpreted-count [:int {:min 0}]
+ :own-namespace-entries
+ [:int {:min 0 :description "Entries of the namespace maps an overlay program context holds that are not its parent's: what it binds anew, which its weight charges."}]
  :loaded-identity
  [:fn {:error/message "must be the atom naming the JVM's loaded program"
        :gen/gen seon.flow/atom-reference-generator}
