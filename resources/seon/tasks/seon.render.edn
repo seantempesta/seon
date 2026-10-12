@@ -53,9 +53,4 @@
              :intent "Card Q3. A render pair on the subject task layers its steps by needs (layer n = steps whose needs lie in earlier layers; one layer reads as parallel, successive layers as the sequence; nesting as indentation) and annotates each from the reconciler's derivations: done, running, paused, held, waiting, problem; read-only, cached by what it read, nothing stored. Asserted on the AI face's data."
              :must-read #{seon.context/current-state seon.task/task-edges}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
- #:seon.task{:name "call-reach-key-cites-code-by-symbol"
-             :kind :function
-             :intent "`seon.render/call-reach-key`'s docstring cites `reference-code/datahike/src/datahike/query.cljc:3009-3029` and carries a measurement and date (\"x147, 3.6 s per cold prompt on default (2026-09-27)\"); AGENTS.md: living documents cite code by symbol (`datahike.query/...`), and source carries no dates, measurements or `file:line`. Replace the citation with the fully qualified symbol that owns `source-context-unchanged?` and drop the measurement (profile evidence holds it); same for `seon.render/call-reach` (\"~6.6 ms ... 2026-09-27\"). Proof: `seon.source-census-test/source-text-carries-no-date-or-file-line` no longer lists `seon.render/call-reach-key` or `seon.render/call-reach` (its existing red proof; no new test)."
-             :must-read #{seon.render/call-reach-key seon.render/call-reach}
-             :evidence #{"docs/research/agent-platform/2026-10-12/restart-audit/cache-hits.md"}}
 ]

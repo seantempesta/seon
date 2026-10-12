@@ -24,6 +24,13 @@
     (is (= [] (sites-of rows iso-date)) "each site is a comment or docstring carrying an ISO date")
     (is (= [] (sites-of rows file-line)) "each site is a comment or docstring citing a file and line")))
 
+(deftest the-render-and-flow-docstrings-once-citing-a-file-line-or-date-cite-by-symbol
+  (let [subjects '#{call-reach-key call-reach fault-port}
+        rows (filter #(contains? subjects (:in %)) (census/prose @source-files))]
+    (is (= 3 (count (distinct (map :in rows)))) "the census read the three docstrings")
+    (is (= [] (into (sites-of rows iso-date) (sites-of rows file-line)))
+        "each docstring cites code by symbol and carries no date, measurement or file and line")))
+
 (def ^:private policy-words
   "Name parts that make a numeric constant a timeout, size or limit, which belongs in a dial."
   #{"ms" "bytes" "limit" "seconds" "timeout" "threshold" "deadline" "budget" "bound"})

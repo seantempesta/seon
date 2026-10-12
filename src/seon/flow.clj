@@ -348,12 +348,12 @@
     (async/put! control #::flow{:command ::flow/stop :to ::flow/all})))
 
 (defn- fault-port
-  "The `::flow/error` output a proc's loop reports to (`impl.clj:312-319`),
-  disposed on the reporting thread: `>!!` commits the synchronous handler under
+  "The `::flow/error` output a proc's loop reports to (`clojure.core.async.flow.impl/proc`),
+  disposed on the reporting thread: `clojure.core.async/>!!` commits the synchronous handler under
   its lock and `dispose!` runs before the completed box returns
-  (`impl/protocols.clj:18-29`, `async.clj:200-211`). It replaces Flow's sliding
-  graph error channel (`impl.clj:102`), which drops faults and which `flow/stop`
-  closes before an unwinding proc reports (`impl.clj:179`). Only Flow's
+  (`clojure.core.async.impl.protocols/WritePort`). It replaces Flow's sliding
+  graph error channel (`clojure.core.async.flow.impl/create-flow`), which drops faults and which `flow/stop`
+  closes before an unwinding proc reports. Only Flow's
   synchronous `>!!` is served; an inactive handler is refused with nil."
   {:malli/schema [:=> [:cat :seon.instrument/callable] ::write-port]}
   [dispose!]

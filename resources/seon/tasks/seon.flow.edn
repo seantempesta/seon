@@ -41,9 +41,4 @@
              :intent "Attribute and remove the intermittent cold graph timing failure in `seon.start-flow-benchmark-test/commit-to-paused-flow-costs` through `start-flow-benchmark/sample!` and `seon.flow/start-graph!`, keeping its 5 ms bound. C3 check 690104c954d8 measured 9.86 ms; comparative cd59c9fa3 and e0bd37443 checks measured 1.97 and 1.61 ms, and the unchanged C3 producer in 5d7bc1f9d9ab measured 2.10 ms. Allocation and call counts remain bounded. This newly observed timing failure is not attributed to a source change; preserve the wall/CPU/JIT evidence and determine the causing work rather than widening the bound."
              :must-read #{start-flow-benchmark/sample! seon.flow/start-graph! seon.start-flow-benchmark-test/commit-to-paused-flow-costs seon.profile/measure}
              :evidence #{"docs/research/agent-platform/2026-10-12/astra-cost-handoff.md"}}
- #:seon.task{:name "fault-port-cites-code-by-symbol"
-             :kind :function
-             :intent "`seon.flow/fault-port`'s docstring cites Flow by `impl.clj:312-319`, `impl/protocols.clj:18-29`, `async.clj:200-211`, `impl.clj:102` and `impl.clj:179`. Not slated for deletion (docs/seon/specs/errors.md keeps Flow procs as an entrant boundary, `seon.flow/var-process`). Cite `clojure.core.async.flow.impl` by symbol and the Flow behavior in words. Proof: `seon.source-census-test/source-text-carries-no-date-or-file-line` no longer lists `seon.flow/fault-port` (its existing red proof; no new test)."
-             :must-read #{seon.flow/fault-port}
-             :evidence #{"docs/seon/specs/errors.md"}}
 ]

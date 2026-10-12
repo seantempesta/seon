@@ -839,13 +839,12 @@
 (defn- call-reach-key
   "The content identity of `database`'s `:seon.fn/sym` and `:seon.fn/calls`,
   or nil. A committed value keys by the two attributes' Datahike revisions
-  (`source-context-unchanged?`, `reference-code/datahike/src/datahike/query.cljc:3009-3029`),
+  (`datahike.query/source-context-unchanged?`),
   so unrelated writes keep the key. An as-of value over a committed origin at
   a time point the origin has reached is a fixed point: its connection,
   generation and time point name its content (the rule `seon.db` keys retained
   reads on). A turn renders its history at its opening basis, an as-of value,
-  so without this key every rendered evaluation re-derived the reach: x147,
-  3.6 s per cold prompt on default (2026-09-27)."
+  so without this key every rendered evaluation re-derived the reach."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:maybe [:or [:tuple :seon.db/connection-id :uuid :int]
                            [:tuple :seon.db/connection-id :uuid [:maybe :uuid]
@@ -868,12 +867,7 @@
 (defn- call-reach
   "`db/stored-call-reach` of `selected`, derived once per content identity of
   the two attributes it reads (`call-reach-key`). A value with no content
-  identity is derived directly.
-
-  ## Costs
-
-  Unarmed miss ~6.6 ms for a 795-symbol reach, armed ~24 ms (default,
-  2026-09-27); a hit is one cache lookup."
+  identity is derived directly."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym] [:set :symbol]]}
   [database selected]
   (if-let [content (call-reach-key database)]
