@@ -289,14 +289,16 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   missing render is not a fix. Choose each relationship deliberately: component, optional or required peer ref, identity
   value, or a settlement-moved edge; a statement about a living entity is a ref, an observed name is a value; a component
   is validated as its whole owning value on each write, so size trees by what each write owns.
-- **Custody is the default world, not a wall.** Agents are cooperative; nothing is isolated for security. An
-  evaluation's custody (its branch connection) is where its calls read and write by default, so each agent works in
-  its own scratch space (branch and SCI fork) and only what root deliberately merges reaches the cluster. Root's own
-  context is its cluster. Reaching another branch, any program function or any context on purpose is allowed; what a
-  prompt shows neither grants nor limits execution, and consumer domains stay downstream. Agents may make serious
-  changes, first-party code included: the immutable database and rollback are the safety net. What each kind of
-  entrant receives (database value, connection, branch, SCI fork, agent id, task, capabilities) and where its writes
-  land is declared once in the owning spec, never implied.
+- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent's world is its own
+  branch and its own SCI fork, and nothing else: it writes only its branch, never main or another branch, and never
+  loads code into the platform JVM. That is what lets many agents run at once safely. Its tracked facts (task
+  refinements, children, its end, delivered messages) reach main because root's `db<->flow` pushes them, woken by the
+  branch's listen route; its code reaches main only through a merge request root works. Only root acts cluster-wide:
+  its world is main, and it pushes, merges, starts and stops agents and loads code. Root and an agent differ only by
+  what their world holds. Within its compartment an agent may make serious changes, first-party code included: the
+  immutable database and rollback are the safety net. What each kind of entrant receives (database value, connection,
+  branch, SCI fork, agent id, task, capabilities) and where its writes land is declared once in the owning spec,
+  never implied.
 - **Pass the world explicitly.** Carry database/connection, projection, environment, render profile, proc and
   settlement inputs, including profiling and test ownership. Custody elides only the agent's db/conn; it authorizes
   no other ambient service.
