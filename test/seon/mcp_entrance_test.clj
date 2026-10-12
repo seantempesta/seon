@@ -379,6 +379,36 @@
        (is (empty? (:seon.cluster.eval/executed stored)) "a form stores no executed set")
        (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))
 
+(deftest ^{:seon/tasks #{'seon.db/a-contract-property-with-a-qualified-key-is-refused-by-its-digest}}
+  a-defn-whose-contract-has-a-qualified-property-key-is-admitted
+  ;; Chain experiment 4: a Seon agent copied a shipped contract shape
+  ;; ([:any {:gen/elements ...}]) and the writer refused its own REPL's entity.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [namespace-name (symbol (str "qualified.property" (id/id)))
+           subject (symbol (str namespace-name) "probe")
+           result (answer "eval_clj" {"code" (str "(ns " namespace-name ")"
+                                                  " (defn probe {:malli/schema [:=> [:cat [:int {:gen/elements [1 2]}]] :boolean]} [x] (some? x))")
+                                      "agent" agent-id "cluster" running})]
+       (is (false? (get result "isError")))
+       (is (some? (db/q '[:find ?e . :in $ ?s :where [?e :seon.fn/sym ?s]] (db/db connection) subject))
+           "the defn is a program entity")))))
+
+(deftest ^{:seon/tasks #{'seon.schema/a-fn-schema-over-a-branch-predicate-is-refused}}
+  a-fn-schema-over-a-predicate-the-agent-defined-is-registered
+  ;; Chain experiment 4: an agent could not give its new descriptor key a
+  ;; predicate schema; malli-form? resolves the predicate as a host Var.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [namespace-name (str "branch.predicate" (id/id))
+           schema-key (keyword namespace-name "thing")
+           _ (answer "eval_clj" {"code" (str "(ns " namespace-name ")"
+                                             " (defn thing? {:malli/schema [:=> [:cat :int] :boolean]} [x] (pos? x))"
+                                             " (seon.schema/register! " schema-key " '[:fn " namespace-name "/thing?])")
+                                 "agent" agent-id "cluster" running})]
+       (is (some? (db/q '[:find ?e . :in $ ?k :where [?e :seon.schema/key ?k]] (db/db connection) schema-key))
+           "the schema is registered on the agent's branch")))))
+
 (deftest a-thrown-call-carries-its-whole-request
   ;; The value printer shows the request; nothing before it clips the text.
   (let [request (json/write-str {"name" "eval_clj" "arguments" {"code" (apply str (repeat 500 "(+ 1 2) "))}})

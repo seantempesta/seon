@@ -255,4 +255,9 @@
                           seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current
                           seon.read-evidence-test/a-fresh-connection-keeps-an-unrelated-read-current}
              :evidence #{"docs/research/agent-platform/2026-10-12/astra-cost-handoff-evidence/c5-parent.txt"}}
+ #:seon.task{:name "a-contract-property-with-a-qualified-key-is-refused-by-its-digest"
+             :kind :function
+             :intent "A `defn` at an agent's REPL whose contract holds a schema property with a qualified key (`[:=> [:cat [:int {:gen/elements [1 2]}]] :boolean]`, or the shipped `[:any {:seon.schema.admission/exemption ...}]` shape of `seon.schema/malli-form?` and `seon.render.web/server?`) is refused by `seon.db/transact!`: \"The stored definition digest of [:seon.fn/sym ...] is not the one its definition produces\". The same defn with `[:int {:min 1}]` or `[:any {:description \"x\"}]` is admitted. The REPL path's entity producer and `seon.db/definition-digest-of` (through `seon.program/canonical-row`) digest the contract differently. Chain experiment 4 met it twice (attempt 2's two `executor?` defns) and it reproduced on five probe contracts. Correct: the producer digests through the writer's one digest owner, so the stored and produced digests agree."
+             :must-read #{seon.db/definition-digest-of seon.program/canonical-row}
+             :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-4.md"}}
 ]
