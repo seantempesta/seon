@@ -26,7 +26,7 @@ definitions and schemas. The whole-block size is the reply's `:large-value` find
 |---|---|---|
 | `seon.sci.forgive/forgiving-forgiven-text-changes-nothing` | 3,755 | 3,125 |
 | `seon.ai/contract-output-observed?` | 1,370 | 1,033 |
-| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 2,618 |
+| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 3,469 |
 
 Every block is under the 4,096-token `:large-value` bound after. The merge task's must-reads were 398 reaching tests of
 `seon.db/vector-query-call` by name. What remains of the forgive block is mostly its three proofs' sources, the task's
@@ -43,7 +43,9 @@ reading more is an operation.
   reaching tests. `:seon.ref/callers` and `:seon.ref/tests` are no longer pulled in (they came in with 7fc0ebb2a).
 - Schema-key must-reads carry their form and no operation; `:seon.ref/line` and a doc section's `:seon.ref/tokens`
   are gone.
-- The task's own proofs are not repeated as must-reads (the proofs section shows them).
+- One resolution rule for every reference: a name that resolves to a test shows that test's source, like any other
+  referent (the merge task's intent names its proof, so its source shows there too: 2,618 -> 3,469). A test enters
+  the block only as a required proof (`:seon.context/proofs`) or as a referent.
 - A problem carries `:seon.ref/message`: what failed and what to do.
 - `:seon.context/start` is `{:seon.render/operations [(in-ns 'the.ns)]}`: a form to run. The old
   `(my.program/source 'task/sym)` read the task's symbol, which names no definition.

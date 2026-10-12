@@ -196,7 +196,7 @@
 (defn- resolve-name
   "One referenced name resolved to its current definition on `database`: a program function's own content (its
   docstring's summary, arglists and contract as the agent writes it) with the forms that read its source, callers
-  and reaching tests; a schema key's form; a test with its source form; or a problem."
+  and reaching tests; a schema key's form; a test's source; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
@@ -212,7 +212,7 @@
           (:seon.error/at found) found
           :else {:seon.ref/name reference :seon.ref/schema-form (:form found)}))
       (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
-            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym reference]))
+            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym :seon.test/source] [:seon.test/sym reference]))
             subject {:seon.program/subject (list 'quote reference)}]
         (cond
           (:seon.error/at function) function
@@ -223,7 +223,7 @@
             (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
             true (assoc :seon.render/operations [source (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
           (:seon.error/at test-entity) test-entity
-          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations [source]}
+          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.test/source (:seon.test/source test-entity)}
           :else (library-name reference))))))
 
 (declare resolve-path)

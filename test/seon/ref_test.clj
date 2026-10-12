@@ -149,6 +149,11 @@
     (is (= #{:seon.ref/name :doc :arglists :malli/schema :seon.render/operations} (set (keys entry)))
         "its own content only: no callers or tests pulled in")))
 
+(deftest a-referenced-test-shows-its-own-source
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
+    (is (= #{:seon.ref/name :seon.test/source} (set (keys entry))) "a test resolves to its own content, like any reference")
+    (is (re-find #"a-span-of-a-name-and-more-words-is-prose" (:seon.test/source entry)))))
+
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
     (is (= [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]] (:malli/schema entry))

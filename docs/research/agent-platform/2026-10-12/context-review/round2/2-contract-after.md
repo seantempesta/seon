@@ -14,7 +14,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
   :seon.eval/value-tokens 1033,
   :seon.eval/shown-tokens 963,
   :seon.repl/fix
-    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/ed83ea7023873, :ms 152, :alloc-mb 316.8, :value #:seon.context{:turns
+    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/ef59c2d05b769, :ms 141, :alloc-mb 304.2, :value #:seon.context{:turns
    {:my.agent/turns-left 100,
     :seon.task/status :working,
     :seon.context/namespace seon.ai},
@@ -59,7 +59,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
           :seon.fn.contract/finding-row
           [:map
           [:seon.fn/sym :seon.fn/sym]
-          […2 (get-in result/ed83ea7023873 [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
+          […2 (get-in result/ef59c2d05b769 [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
          :seon.error/value
          :seon.db/invalid-read-error
          :seon.schema/validation-refusal]],

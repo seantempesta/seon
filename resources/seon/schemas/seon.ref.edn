@@ -39,7 +39,7 @@
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
-           :resolved-name [:map {:description "A name resolved to its own content (a function's docstring summary, arglists and contract as the agent writes it, :malli/schema; a schema key's form), with the forms that read more: its source, callers and reaching tests."}
+           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's docstring summary, arglists and contract as the agent writes it (:malli/schema), with the forms that read its source, callers and reaching tests; a schema key's form; a test's source."}
                            [:seon.ref/name :seon.ref/name]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]
@@ -47,6 +47,7 @@
                            [:doc {:optional true} :string]
                            [:seon.ref/pin {:optional true} :seon.ref/pin]
                            [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
+                           [:seon.test/source {:optional true} :seon.test/source]
                            [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin and the one read operation, never its text."}
                           [:seon.ref/path :seon.ref/path]

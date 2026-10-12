@@ -11,14 +11,14 @@ The current-state block value as the agent's REPL reply shows it (display budget
 
 ```clojure
 #:seon.repl{:findings [{:seon.repl/finding :large-value,
-  :seon.eval/value-tokens 2618,
+  :seon.eval/value-tokens 3469,
   :seon.eval/shown-tokens 1888,
   :seon.repl/fix
     "A value this big usually means a query or function returns more than it should: select what you need."}
  {:seon.repl/finding :large-allocation,
-  :seon.eval/allocated-bytes 539394168,
+  :seon.eval/allocated-bytes 537938288,
   :seon.repl/fix
-    "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}], :result result/e30c1134eb77a, :ms 258, :alloc-mb 539.4, :value #:seon.context{:turns
+    "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}], :result result/e67abbc4abc8c, :ms 238, :alloc-mb 537.9, :value #:seon.context{:turns
    {:my.agent/turns-left 100,
     :seon.task/status :working,
     :seon.context/namespace seon.merge},
@@ -38,7 +38,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
         :seon.test/source
           "(deftest ^{:seon/tasks #{'seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts}}
   a-jvms-first-facts-merge-follows-the-changed-facts
-  ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 "…+2167 (subs (get-in result/e30c1134eb77a [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 256)}]},
+  ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 "…+2167 (subs (get-in result/e67abbc4abc8c [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 256)}]},
  :step
    {:seon.task/step :implement,
     :seon.task/status :working,
@@ -76,7 +76,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
          {:seon.program/subject 'seon.db/vector-query-call})]}
     {:seon.ref/name seon.merge/merge!,
      :doc
-       "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and the store it holds or its SCI context's environment holds) as ONE transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and, when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task on C (`seon.task/obligations`) and the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries `merge-tx` and `:seon.task/"…+168 (subs (get-in result/e30c1134eb77a [:seon.context/must-reads 2 :doc]) 827),
+       "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and the store it holds or its SCI context's environment holds) as ONE transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and, when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task on C (`seon.task/obligations`) an"…+298 (subs (get-in result/e67abbc4abc8c [:seon.context/must-reads 2 :doc]) 697),
      :arglists ([execution key root]),
      :malli/schema
        [:=>
@@ -93,7 +93,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
          {:seon.program/subject 'seon.merge/merge!})]}
     {:seon.ref/name seon.profile/measure,
      :doc
-       "Call `f` once and return its value beside what the call cost, read from JVM counters, so compiled work inside it counts: wall ms, allocated bytes, GC collections and their accumulated time, the armed definitions ranked by self time and by calls (host and SCI wrappers' outermost entries, at most `hot-limit` each), every entered definition's entries (`calls-of` reads one) and the count of reads among them (`read-entrances`).",
+       "Call `f` once and return its value beside what the call cost, read from JVM counters, so compiled work inside it counts: wall ms"…+298 (subs (get-in result/e67abbc4abc8c [:seon.context/must-reads 3 :doc]) 128),
      :arglists ([f]),
      :malli/schema
        [:=> [:cat :seon.profile/thunk] :seon.profile/measured-call],
@@ -103,6 +103,11 @@ The current-state block value as the agent's REPL reply shows it (display budget
          {:seon.program/subject 'seon.profile/measure})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.profile/measure})]}
+    {:seon.ref/name
+       my.root-test/a-jvms-first-facts-merge-follows-the-changed-facts,
+     :seon.test/source
+       "(deftest ^{:seon/tasks #{'seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts}}
+  a-jvms-first-facts-merge-follows-the"…+2295 (subs (get-in result/e67abbc4abc8c [:seon.context/must-reads 4 :seon.test/source]) 128)}
     #:seon.ref{:problem-kind :unresolved,
      :path "bin/seon check",
      :message

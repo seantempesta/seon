@@ -516,11 +516,8 @@
                        (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
         namespace (agent-namespace database agent-id held)
-        proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
-        ;; the task's own proofs are shown in its proofs section, never again as must-reads
-        reads (when held (into [] (remove #(proof-names (:seon.ref/name %)))
-                               (ref/references database {:seon.ref/text (:seon.task/intent held)
-                                                         :seon.ref/names (:seon.task/must-read held #{})})))]
+        reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
+                                                   :seon.ref/names (:seon.task/must-read held #{})}))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)
