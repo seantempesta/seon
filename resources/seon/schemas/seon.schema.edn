@@ -129,6 +129,7 @@
                 :seon.db.id/generator]],
               :cyclic-reference :seon.schema/key
               :unresolved-predicate :qualified-symbol
+              :function-reference [:qualified-symbol {:description "A function a registered form named as a schema (seon.schema/register!); a predicate is [:fn sym]."}]
               :unloadable-predicate :qualified-symbol
               :unloadable-predicate-error [:and {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
               :noncanonical-definition :seon.schema/key

@@ -1719,6 +1719,29 @@
         (registration-refusal k v refused)
         (throw refused)))))
 
+(defn- function-references
+  "The qualified symbols `form` names as schemas. In a projection carrying
+  function contracts one resolves to that function's contract; in the
+  schema-only projection a writer validates with it is unresolvable, so the
+  form's meaning would depend on which projection compiles it."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:set :qualified-symbol]]}
+  [form]
+  (let [named (volatile! #{})
+        ;; Every name resolves, so only how `form` names its references is
+        ;; judged; a predicate is a callable, never a reference.
+        registry (mr/lazy-registry
+                  (m/default-schemas)
+                  (fn [identity _]
+                    (cond (qualified-symbol? identity) (do (vswap! named conj identity) (m/schema :any))
+                          (qualified-keyword? identity) (m/schema :any))))
+        predicates-as-any (walk/postwalk
+                           #(if (and (vector? %) (= :fn (first %)))
+                              (conj (if (map? (second %)) [:fn (second %)] [:fn]) any?)
+                              %)
+                           form)]
+    (m/schema predicates-as-any {:registry registry})
+    @named))
+
 (defn- register-candidate!
   "The body of [[register!]]: admit `v` as `k`, or throw the population's
   refusal, which [[register!]] returns as its error value."
@@ -1763,6 +1786,15 @@
       ;; the population's refusal value, raised to register!, which answers it
       (when (:seon.error/at admitted)
         (throw (ex-info (:seon.error/message admitted) admitted)))))
+  (when-let [function (first (sort (function-references v)))]
+    (throw
+      (ex-info
+        (str "schema/register! " k ": " function " is a function, not a schema;"
+             " a predicate is named as [:fn " function "]")
+        {:seon.schema/error :seon.schema/function-reference
+         :seon.schema/key k
+         :seon.schema/definition v
+         :seon.schema/function-reference function})))
   (update-candidate-forms! assoc k v)
   ;; The stored-data check runs here, once, in the registering evaluation
   ;; (never in its render): `seon.db` is resolved without loading it, as

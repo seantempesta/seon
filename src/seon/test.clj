@@ -1859,21 +1859,23 @@
     [(into #{} (remove same) offered) (into #{} (remove same) held)]))
 
 (defn- program-overlay-tx
-  "Transaction data putting `candidate`'s differing program rows onto `world`.
+  "Transaction data putting `candidate`'s program changes, its
+  `digest-differences` from `since` (the loaded program it was built on), onto
+  `world`.
 
-  Only the `digest-differences` identities are read and replaced
-  (`seon.fn/reconcile-tx`) with their program-partition attributes, an
-  identity absent from the candidate retracting, and with any row they name
-  by lookup that the world lacks (a new file). Callers of a changed
-  definition interpret it at acquisition. Attributes the candidate installed
-  and the world lacks come first. Equal programs and attributes answer `[]`;
-  a refused read answers its refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+  Only those identities are read and replaced (`seon.fn/reconcile-tx`) with
+  their program-partition attributes, an identity absent from the candidate
+  retracting, and with any row they name by lookup that the world lacks (a new
+  file); what the candidate holds as `since` held it stays the world's. Callers of
+  a changed definition interpret it at acquisition. Attributes the candidate
+  installed and the world lacks come first. No change and equal attributes
+  answer `[]`; a refused read answers its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/tx-data :seon.error/value]]}
-  [world candidate]
+  [world since candidate]
   (let [families (vec (:seon.program/compared-families
                        (program/declaration-families (db/carried-projection candidate))))
-        differences (digest-differences world candidate families)
+        differences (digest-differences since candidate families)
         [present changed] (when (vector? differences) differences)
         ;; Attributes the candidate installed that the world lacks (an agent's
         ;; or fixture's new schema): schema-on-write needs them installed before
@@ -2000,15 +2002,24 @@
     nil))
 
 (defn- world-base
-  "The source commit `cluster`'s adoption record on `recording` names: the
-  published program this JVM loaded, which every test world starts from."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name] :seon.source/commit-id]}
-  [recording cluster]
-  (or (:seon.source/commit-id
-       (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
-      (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
-                      {:seon.error/expected :seon.source/commit-id
-                       :seon.error/offending cluster}))))
+  "The published program this JVM loaded, which every test world starts from:
+  the commit `seon.sci.eval/loaded-identity` names when `store` holds it, else
+  (a store that never held it) the one `cluster`'s adoption record on
+  `recording` names. A branch's own record is its fork point's and stays behind
+  a later adoption."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.db/connection :seon.cluster/name] :seon.source/commit-id]}
+  [store recording cluster]
+  (let [loaded (:seon.source/commit-id @sci.eval/loaded-identity)
+        recorded (:seon.source/commit-id
+                  (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
+        held? #(when-let [database (source/commit-database store loaded)]
+                 (source/release! [database])
+                 true)]
+    (cond (and loaded (or (= loaded recorded) (held?))) loaded
+          recorded recorded
+          :else (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
+                                {:seon.error/expected :seon.source/commit-id
+                                 :seon.error/offending cluster})))))
 
 (declare request-refusal)
 
@@ -2158,11 +2169,10 @@
 
 (defn- clean-request-handle
   "Acquire the request's world: the loaded published program, boot's facts and
-  the execution's differing program rows.
+  the execution's own program changes.
 
-  The base is the source commit the recording cluster's adoption record names:
-  the program this JVM loaded, which admission records as the run's
-  `:seon.test.run/loaded-commit-id`. A published commit holds program rows only,
+  The base is the source commit this JVM loaded (`world-base`). A published
+  commit holds program rows only,
   so no agent, turn, message or error of the execution is inherited. Boot's
   facts live on a checkpoint branch named by the digest of their inputs (base,
   cluster, effective config, process), prepared once by the one caller the
@@ -2170,22 +2180,31 @@
   request with equal inputs shares its preparation. A checkpoint another caller
   is still preparing refuses this request. The request then owns a private
   branch off the checkpoint's head, which roots that commit for its members,
-  and writes `program-overlay-tx`'s rows there. Its context interprets the
-  candidate's definitions over the cluster base (`seon.sci.eval/base-ctx`),
-  so a test the branch inherits calls the branch's callee. Checkpoints of every base in
-  use coexist (an agent branch records the commit it was forked at); boot
-  retires them all (`registry/retire-unclaimed!`), as the name holds the process."
-  {:seon/tasks #{'seon.test/a-test-world-has-no-agent 'seon.test/a-changed-check-builds-a-world-per-request}
+  and writes `program-overlay-tx`'s rows there: the candidate's changes since
+  the loaded program it was built on (its adoption record), so a branch forked
+  before a restart runs the loaded program, not the one it was forked at, with
+  its own and its source branch's changes. Its context interprets
+  those definitions over the loaded program (`seon.sci.eval/base-ctx`), so a test
+  the branch inherits calls the branch's callee. Boot retires every checkpoint
+  (`registry/retire-unclaimed!`), as the name holds the process."
+  {:seon/tasks #{'seon.test/a-test-world-has-no-agent 'seon.test/a-changed-check-builds-a-world-per-request
+                 'seon.test/a-branch-test-world-runs-the-jvm-loaded-program-not-its-fork-point-record}
    :malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
                   :seon.agent/execution-handle]}
   [execution recording cluster effective]
   (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-        base (world-base recording cluster)
+        base (world-base store recording cluster)
         candidate (db/db (:seon.db/connection execution))
         ;; Branching shares the base's entity ids, so entities reconciled against
         ;; the base apply unchanged on its checkpoint's descendants.
-        overlay (program-overlay-tx (source/database store base) candidate)
+        ;; The program the candidate was built on: its own adoption record,
+        ;; which a branch keeps from its fork point.
+        built-on (or (:seon.source/commit-id
+                      (db/pull candidate [:seon.source/commit-id] [:seon.cluster/name cluster]))
+                     base)
+        world (source/database store base)
+        overlay (program-overlay-tx world (if (= built-on base) world (source/database store built-on)) candidate)
         _ (when (:seon.error/at overlay) (throw (world-refusal "program overlay read" overlay)))
         process (cluster.process/id (cluster.process/current-identity))
         branch (keyword (str "checkpoint-" cluster "-" (id/digest 24 [base cluster (sort effective) process])))
@@ -2232,25 +2251,24 @@
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
                        [#(store/release-branch! connection) retire! drop!])))
     (let [database (db/db connection)
-          ;; The candidate's program: the execution's program-only base when it
-          ;; already acquired the candidate, else the cluster base with the
-          ;; candidate's changes interpreted on a fork (`sci.eval/base-ctx`).
+          ;; The world's program: the loaded program with the candidate's
+          ;; changes interpreted on a fork (`sci.eval/base-ctx`). Built on that
+          ;; loaded program, the candidate holds the world's program, so the
+          ;; execution's acquisition of it serves; else the world's is acquired.
           ;; Never the agent's live context, whose inherited bodies may call a
           ;; Var its fork replaced (interim until context-owned SCI Var bindings:
           ;; `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`).
           held (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution))
-          source (if (and held (sci.eval/acquired-database? held candidate))
-                   held
-                   (sci.eval/base-ctx candidate))
+          source (cond (not= built-on base) (sci.eval/base-ctx database)
+                       (and held (sci.eval/acquired-database? held candidate)) held
+                       :else (sci.eval/base-ctx candidate))
           environment (or (env/of execution)
                           (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))
           ;; Acquired once on a fork, never on the execution's own context:
           ;; each member forks this and finds its program by commit. The fork
           ;; acquires `database` itself and refuses when its refusals cannot be
-          ;; recorded (`seon.sci.eval/fork-cluster-ctx`).
-          ;; The overlay makes the world's program the candidate's, so the
-          ;; source's acquisition of the candidate serves the world: no
-          ;; whole-program acquisition per request (`sci.eval/program-equal`).
+          ;; recorded (`seon.sci.eval/fork-cluster-ctx`). The source holds the
+          ;; world's program, so the fork does not acquire it again (`sci.eval/program-equal`).
           ctx (try (sci.eval/fork-cluster-ctx source database connection
                                               (:seon.sci.eval/projection-state (meta connection))
                                               (assoc (sci.eval/program-equal database)

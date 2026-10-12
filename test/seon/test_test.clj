@@ -388,6 +388,52 @@
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
 
+(deftest ^{:seon/tasks #{'seon.test/a-branch-test-world-runs-the-jvm-loaded-program-not-its-fork-point-record}
+           :seon.test/long "Two forks and one nested seon.test/run of one member on the second."
+           :seon.test/long-ms 15000}
+  a-branch-test-world-runs-the-jvm-loaded-program-not-its-fork-point-record
+  ;; After a restart onto a commit without a contracted function, a branch
+  ;; forked before it still recorded the old commit and built its test world
+  ;; on it, so every test step re-installed the function and refused.
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        main (db/db (:seon.db/connection target))
+        gone 'seon.test-test/gone-at-the-fork-point
+        probe 'seon.test-test/the-world-lacks-what-the-loaded-program-lost
+        fork! (fn [branch database]
+                (registry/fork! {:seon.store/store store :seon.store/branch branch
+                                 :seon.cluster.registry/from (db/commit-id database) :seon.db/db database})
+                (cluster.agent/acquire-context! target nil {:seon.agent/branch branch}))
+        old (keyword (str "fork-point-" (id/id)))
+        branch (keyword (str "forked-before-" (id/id)))
+        old-handle (fork! old main)
+        old-conn (:seon.db/connection old-handle)
+        _ (test-support/transacted! old-conn [(test-support/program-fn-entity
+                                                (db/db old-conn) gone "(defn gone-at-the-fork-point {:malli/schema [:=> [:cat :int] :int]} [x] x)")])
+        fork-point (db/db old-conn)
+        handle (fork! branch fork-point)
+        conn (:seon.db/connection handle)
+        cluster (:seon.cluster/name target)]
+    (try
+      ;; The branch records the program it was forked at, as a branch forked before the restart does.
+      (test-support/transacted! conn [{:seon.cluster/name cluster :seon.source/commit-id (db/commit-id fork-point)}])
+      (test-support/transacted! conn [(test-support/program-entity
+                                       (db/db conn) [:seon.test/sym probe]
+                                       (str "(clojure.test/deftest the-world-lacks-what-the-loaded-program-lost"
+                                            " (clojure.test/is (nil? (seon.db/q '[:find ?e . :where [?e :seon.fn/sym " gone "]] (seon.db/db)))))"))])
+      (is (some? (db/q '[:find ?e . :in $ ?s :where [?e :seon.fn/sym ?s]] (db/db conn) gone))
+          "the branch holds the function its fork point had")
+      (let [ran (db/with-branch {:seon.db/connection conn}
+                  #(sut/run {:seon.test/policy :named :seon.test/execution handle
+                             :seon.test/recording-connection conn :seon.test/identities #{probe}}))]
+        (is (= [{:seon.test/fail-count 0 :seon.test/error-count 0}]
+               (mapv #(select-keys % [:seon.test/fail-count :seon.test/error-count]) (:seon.test/results ran)))
+            "the branch's test world is the loaded program plus the branch's own change"))
+      (finally
+        (doseq [[h b] [[handle branch] [old-handle old]]]
+          (cluster.agent/release-context! h)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
 (deftest ^{:seon/tasks #{'seon.test/a-members-reads-stay-out-of-its-callers-evidence}
            :seon.test/long "Two member runs, one of them a canonical problems fixture (measured 1,572 ms run on default)."
            :seon.test/long-ms 15000}

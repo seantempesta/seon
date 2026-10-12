@@ -43,3 +43,24 @@
                                 "(select-keys (my.test/check {:seon.test/identities #{'stale.area/recorded-test} :seon.test/rerun? true}) [:seon.test/passed? :seon.test/executed-count])")]
        (is (= 1 (:seon.test/executed-count checked)))
        (is (true? (:seon.test/passed? checked)) "the run recorded its evaluator on the branch")))))
+
+(deftest ^{:seon/tasks #{'seon.schema/a-schema-naming-a-branch-predicate-breaks-the-test-step}
+           :seon.test/long "Four eval requests of an own-branch agent, each with its automatic test step, and one check."
+           :seon.test/long-ms 20000}
+  a-schema-naming-a-branch-function-is-refused-and-the-test-step-still-reads
+  ;; A bare function symbol resolved as that function's contract where the
+  ;; branch registered it, but not in the writer's schema-only projection, so
+  ;; every later eval request on the branch refused :malli.core/invalid-schema.
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "function-schema-" (random-uuid))
+           value #(agent-value running agent-id %)]
+       (support/own-branch-agent! running agent-id "(ns fn-schema.area)")
+       (value "(defn ok? {:malli/schema [:=> [:cat :any] :boolean]} [x] (int? x))")
+       (is (= :seon.schema/function-reference
+              (:seon.error/member (value "(seon.schema/register! :fn-schema.area/bare '[:map [:fn-schema.area/x fn-schema.area/ok?]])")))
+           "a function named as a schema is refused")
+       (value "(clojure.test/deftest reads-test (clojure.test/is (ok? 1)))")
+       (is (= {:seon.test/passed? true :seon.test/executed-count 1}
+              (value "(select-keys (my.test/check {:seon.test/identities #{'fn-schema.area/reads-test} :seon.test/rerun? true}) [:seon.test/passed? :seon.test/executed-count])"))
+           "the branch's test step reads it")))))
