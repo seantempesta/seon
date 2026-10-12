@@ -494,18 +494,6 @@
                [?p :seon.task/merge-request ?request]]
              home agent-id)))
 
-(defn- ended-request
-  "How `agent-id`'s attempt ended in `database`, its world, with the merge task its merge request names."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :map]}
-  [database agent-id]
-  (let [[end merge] (db/q '[:find [?end ?merge] :in $ ?agent-id
-                            :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?a :seon.task.attempt/end ?end]
-                            [?p :seon.task/of-assignment ?a] [?p :seon.task/merge ?merge]]
-                          database agent-id)]
-    (cond-> {}
-      end (assoc :seon.task/end end)
-      merge (assoc :seon.task/merge merge))))
-
 (defn- root-home!
   "Make the running member's branch root's home, so tasks, merges and end messages stay inside the fixture."
   {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
@@ -538,92 +526,6 @@
        (let [mine (db/db (:seon.db/connection execution))]
          (is (= 1 (count (answering mine agent-id))) "the end requested the merge once, on the agent's branch")
          (is (= [:done] (attempt-ends mine agent-id)) "and the end is written once"))))))
-
-(defn- git!
-  "Run git in `root`; its trimmed output, thrown when it fails."
-  {:malli/schema [:=> [:cat :string [:* :string]] :string]}
-  [root & args]
-  (let [{:keys [exit out err]} (apply shell/sh "git" "-C" root args)]
-    (when-not (zero? exit) (throw (ex-info err {:git args})))
-    (str/trim out)))
-
-(defn- declare-file!
-  "Write `text` at `path` under the checkout `root`, commit it and declare it at the cluster head unrun, as
-  publication declares a checkout's file."
-  {:malli/schema [:=> [:cat :seon.db/connection :string :string :string] :nil]}
-  [connection root path text]
-  (io/make-parents (io/file root path))
-  (spit (io/file root path) text)
-  (git! root "add" path)
-  (git! root "commit" "-q" "-m" (str "declare " path))
-  (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})]
-    (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities))))
-  nil)
-
-(def ^:private landing-source
-  (str "(ns tq.endl\n  (:require [clojure.test :refer [deftest is]]))\n\n"
-       "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)\n\n"
-       "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)\n\n"
-       "(deftest ^{:seon/tasks #{'tq.endl/area}} area-test (is (= 25 (area 5))))\n\n"
-       "(deftest ^{:seon/tasks #{'tq.endl/side}} side-test (is (= 4 (side 2))))\n"))
-
-(deftest ^{:seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two merge-request runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
-           :seon.test/long-ms 240000}
-  a-green-end-lands-its-merge-without-root
-  (support/with-running-agent
-   (fn [running _ connection]
-     (root-home! connection)
-     (let [path "test/tq/endl.clj"
-           root (support/temp-root "end-land")
-           merge-row #(dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed :seon.task/landed-git
-                                                          :seon.task/refusal :seon.task/refused-tests]
-                                       [:seon.task/id %]) :db/id)]
-       (try
-         (git! root "init" "-q")
-         (git! root "config" "user.email" "end@test.invalid")
-         (git! root "config" "user.name" "end-test")
-         (declare-file! connection root path landing-source)
-         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
-                                {:seon.config.root/land? true :seon.config.fs/working-root root})
-         (testing "a green end lands on main, on disk and in one git commit, and root's block shows it"
-           (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endl "area")
-                 fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-                 execution (fixed-end! running agent-id 'tq.endl fix)
-                 before (git! root "rev-parse" "HEAD")
-                 _ (end! running execution agent-id)
-                 message (ended-request (db/db (:seon.db/connection execution)) agent-id)
-                 landed (merge-row (:seon.task/merge message))
-                 shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) (:seon.task/ended %))
-                             (get-in (seon.context/current-state (db/db connection) "root") [:seon.context/unread :seon.context/items]))]
-             (is (= :done (:seon.task/end message)) "the task ended green")
-             (is (= :merged (:seon.task/outcome landed)) "the merge request is merged with no root")
-             (is (uuid? (:seon.task/landed landed)) "it names the main commit the landing made")
-             (is (= (git! root "rev-parse" "HEAD") (:seon.task/landed-git landed)) "and the checkout's new git commit")
-             (is (= before (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
-             (is (= fix (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'tq.endl/area])))
-                 "main holds the agent's definition")
-             (is (str/includes? (slurp (io/file root path)) fix) "the file holds it")
-             (is (= (select-keys landed [:seon.task/landed :seon.task/landed-git])
-                    (select-keys shown [:seon.task/landed :seon.task/landed-git]))
-                 "root's block shows the landing")))
-         (testing "a red gate leaves the merge task undecided with its refusal, and lands nothing"
-           (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endl "side")
-                 ;; a test reaching side lands on main after the agent's branch forked, so only the gate sees it
-                 _ (declare-file! connection root path
-                                  (str (slurp (io/file root path))
-                                       "\n(deftest side-identity-test (is (= 3 (side 3))))\n"))
-                 head (git! root "rev-parse" "HEAD")
-                 execution (fixed-end! running agent-id 'tq.endl
-                                       "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-                 _ (end! running execution agent-id)
-                 message (ended-request (db/db (:seon.db/connection execution)) agent-id)
-                 refused (merge-row (:seon.task/merge message))]
-             (is (= :done (:seon.task/end message)) "the task ended green on its branch")
-             (is (= {:seon.task/refusal :seon.source/red-test-error :seon.task/refused-tests #{'tq.endl/side-identity-test}}
-                    (update refused :seon.task/refused-tests set))
-                 "the merge task carries the refusal and stays undecided")
-             (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
-         (finally (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done}
            :seon.test/long "An own-branch agent's setup and settings with their test steps, one run on main and one fixture-model pass with its test step."
@@ -673,16 +575,3 @@
        (let [[end] (attempt-ends (db/db target) agent-id)]
          (is (= :done end)
              "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))
-
-(deftest
-  root-without-a-branch-row-lands-in-the-clusters-world
-  ;; Root's own context is its cluster: a root row with no home branch (this world's) is the cluster's live
-  ;; branch, never a nil branch handed to `seon.cluster.agent/acquire-context!`.
-  (support/with-running-agent
-   (fn [running _ connection]
-     (let [live (get-in (db/db connection) [:config :branch])
-           cluster-handle (support/running-cluster running)]
-       (is (nil? (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "root"])))
-           "root holds no branch row here")
-       (is (= live (get-in (db/db (:seon.db/connection (#'turn/root-execution cluster-handle))) [:config :branch]))
-           "root's world is the cluster's live branch")))))

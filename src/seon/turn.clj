@@ -9,7 +9,6 @@
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.ai :as ai]
             [seon.blob :as blob]
@@ -72,8 +71,6 @@
   (delay (requiring-resolve 'my.program/request-merge!)))
 (defonce ^:private context-end-summary-tx
   (delay (requiring-resolve 'seon.context/end-summary-tx)))
-(defonce ^:private source-land!
-  (delay (requiring-resolve 'seon.cluster.source/land!)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
@@ -2240,70 +2237,6 @@
     (when request
       (merge request (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge request)])
                              :db/id)))))
-
-(defn- landing-tx
-  "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
-  or the refusal's error type and the tests whose red verdict refused it."
-  {:malli/schema [:=> [:cat :seon.task/merge :map] :seon.store/transaction-data]}
-  [merge-task landed]
-  ;; a write-back or commit refusal after acceptance carries the accepted merge: main holds it
-  (let [main (or (:seon.source/commit-id landed) (get-in landed [:seon.source/accepted :seon.source/commit-id]))
-        git (:seon.git/commit landed)
-        red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))]
-    [(cond-> {:seon.task/id merge-task}
-       main (assoc :seon.task/landed main)
-       (string? git) (assoc :seon.task/landed-git git)
-       (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
-       (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]))
-
-(defn- root-execution
-  "Root's world in `cluster`, as the MCP entrance names it (no isolation, no new branch): its home branch, or the
-  cluster's live branch when root holds none, since root's own context is its cluster."
-  {:malli/schema [:=> [:cat :map] :seon.agent/execution-handle]}
-  [cluster]
-  (let [database (db/db (:seon.db/connection cluster))]
-    (@cluster-agent-acquire-context!
-     cluster "root" {:seon.agent/branch (or (:seon.agent/branch (db/pull database [:seon.agent/branch] [:seon.agent/id "root"]))
-                                            (get-in database [:config :branch]))})))
-
-(defn- land-end!
-  "Merge the green end's `request` with no root when the dial `:seon.config.root/land?` is on and its merge task
-  is open and unrefused: `seon.cluster.source/land!` into the checkout `:seon.config.fs/working-root` through
-  root's world, then record its result on the merge task at main (`landing-tx`). Answers the landing, or
-  nil when nothing was landed."
-  {:malli/schema [:=> [:cat :map :seon.agent/id :map] [:maybe :map]]}
-  [cluster agent-id request]
-  (let [database (db/db (:seon.db/connection cluster))
-        land? (agent-dial database cluster agent-id :seon.config.root/land?)]
-    (when (and (true? land?) (:seon.task/merge request)
-               (not (:seon.task/outcome request)) (not (:seon.task/refusal request)))
-      (let [root (str (.getCanonicalPath (io/file (str (agent-dial database cluster agent-id :seon.config.fs/working-root)))))
-            execution (root-execution cluster)
-            home (:seon.db/connection execution)
-            ;; the landing is root's work on root's branch: its writes run in that branch's custody
-            [landed recorded]
-            (db/with-branch
-             {:seon.db/connection home}
-             #(let [landed (@source-land! execution (select-keys request [:seon.task/merge-request :seon.task/merge :seon.task/branch
-                                                                          :seon.task/commit :seon.task/proved :seon.task/run-id
-                                                                          :seon.task/program])
-                                          root)]
-                [landed (db/transact! home (landing-tx (:seon.task/merge request) landed))]))]
-        (if (:db-after recorded) landed recorded)))))
-
-(defn land-ended!
-  "Merge the merge request the green end of `agent-id`'s task recorded at main `cluster` with no root when the dial
-  `:seon.config.root/land?` says so (`land-end!`); db<->flow's work once the end is landed on main. A refused
-  landing is a fault recorded beside it. nil."
-  {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
-  [cluster agent-id]
-  (when-let [request (end-merge-request (db/db (:seon.db/connection cluster)) agent-id)]
-    (let [landed (land-end! cluster agent-id request)]
-      (when (and (:seon.error/at landed) (not (:seon.error/message landed)))
-        (fault/fault! (env/of cluster) (ex-info "The task's end was refused." landed)
-                      {:seon.error/layer :seon.turn/task-end :seon.error/operation `land-end!
-                       :seon.db.process/id (:seon.db.process/id cluster) :seon.agent/id agent-id}))))
-  nil)
 
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`), all in the agent's

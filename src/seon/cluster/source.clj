@@ -1826,15 +1826,3 @@
   [root lane]
   (Files/deleteIfExists (.toPath (io/file (ledger-file root lane))))
   nil)
-
-(defn land!
-  "Root's merge of the assignment the merge request `merge-request` answers (`seon.merge/merge!`), into the
-  checkout `root`: the one merge, called here until `seon.turn/land-end!` goes (hybrid-done-and-merge M8)."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/merge-request-view :seon.fn/root]
-                  [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
-  [execution merge-request root]
-  ((requiring-resolve 'seon.merge/merge!)
-   execution
-   (db/q '[:find ?k . :in $ ?r :where [?m :seon.task/merge-request ?r] [?m :seon.task/of-assignment ?a] [?a :seon.task/assignment ?k]]
-         (db/db (:seon.db/connection execution)) (:seon.task/merge-request merge-request))
-   root))
