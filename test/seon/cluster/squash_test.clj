@@ -345,13 +345,13 @@
         branch :squash-retention
         cutoff (java.util.Date. (+ (System/currentTimeMillis) 60000))]
     (try
-      ;; Exercise the same two roster refs without a schema population: GC
+      ;; Exercise the same two branches refs without a schema population: GC
       ;; owns native commits, independently of Seon's entity validation.
       (doseq [ref [branch (registry/base-branch branch)]]
         (registry/branch! {:seon.store/store opened :seon.store/branch ref
                            :seon.cluster.registry/from commit}))
       (registry/retire-unclaimed! opened #{branch})
-      (is (contains? (registry/roster opened) (registry/base-branch branch)))
+      (is (contains? (registry/branches opened) (registry/base-branch branch)))
       (d/transact connection [])
       @(d/gc-storage connection cutoff)
       (let [retained (d/commit-as-db connection commit)]
@@ -361,8 +361,8 @@
           (finally (source/release! [retained]))))
       (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch})
       @(d/gc-storage connection cutoff)
-      (is (not (contains? (registry/roster opened) branch)))
-      (is (not (contains? (registry/roster opened) (registry/base-branch branch))))
+      (is (not (contains? (registry/branches opened) branch)))
+      (is (not (contains? (registry/branches opened) (registry/base-branch branch))))
       (is (nil? (k/get (:store @connection) commit nil {:sync? true})))
       (is (nil? (d/commit-as-db connection commit)))
       (finally

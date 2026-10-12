@@ -219,7 +219,7 @@
          (is (not (str/includes? config-ai
                                  "https://api.deepseek.com")))
          (is (not (str/includes? config-ai "Available models"))
-             "the recurring config face does not inline the model roster")
+             "the recurring config face does not inline the model list")
          (is (str/includes? model-ai
                             (str "Model " (:seon.config.ai/model config-value)))
              "the configured model remains reachable through its own face"))

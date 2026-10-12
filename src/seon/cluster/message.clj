@@ -862,13 +862,13 @@
       (merge value (select-keys request [:seon.message/id :my.message/assignment :my.message/reason :seon.task/end :seon.task/merge])))))
 
 (defn- inbox-port
-  "The recipient's inbox in the execution roster's tree: its root and every branch child below it, at any depth."
+  "The recipient's inbox in the execution registry's tree: its root and every branch child below it, at any depth."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.agent/id]
                   [:maybe :seon.flow/channel]]}
   [routing recipient]
   (when routing
-    (let [root (loop [roster routing]
-                 (if-let [parent (:seon.agent/parent @roster)] (recur parent) roster))]
+    (let [root (loop [registry routing]
+                 (if-let [parent (:seon.agent/parent @registry)] (recur parent) registry))]
       (some #(get-in @% [:seon.agent/started recipient :seon.agent/inbox])
             (tree-seq (constantly true) #(vals (:seon.agent/children @%)) root)))))
 

@@ -711,8 +711,8 @@
 (defn own-pending!
   "Hold the owned-work count of a recorded evaluation whose futures had not
   exited when it was recorded, under the evaluation's id: the one process
-  roster the refresh asks before running that unit again. A count that reaches
-  zero is released by the next `pending?`. A restart forgets the roster, and
+  registry the refresh asks before running that unit again. A count that reaches
+  zero is released by the next `pending?`. A restart forgets the registry, and
   with it the work."
   {:malli/schema [:=> [:cat :seon.cluster.eval/id :seon.batch/owned] :nil]}
   [evaluation-id ^AtomicLong owned]

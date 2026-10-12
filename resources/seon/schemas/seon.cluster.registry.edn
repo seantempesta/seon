@@ -27,7 +27,7 @@
                         [:map
                          [:seon.store/store :seon.store/store]
                          [:seon.store/branch :seon.store/branch]],
-                        :roster [:set :keyword],
+                        :branches [:set :keyword],
                         :retired [:set :seon.store/branch],
                         :swept [:int {:min 0}],
                         :key-count [:int {:min 0}],
@@ -45,7 +45,7 @@
                         :source-absent :seon.cluster/name
                         :refused :seon.cluster.registry/rule
  :seon.cluster.registry/branch-missing [:= true]
- :seon.cluster.registry/branch-missing-error [:and {:error/message "must name the store and the branch its roster does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
+ :seon.cluster.registry/branch-missing-error [:and {:error/message "must name the store and a branch the store does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
  :seon.cluster.registry/candidate-file-absent [:= true]
  :seon.cluster.registry/dry-run-barrier-absent [:= true]
  :seon.cluster.registry/dry-run-complete [:= true]

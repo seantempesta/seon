@@ -1,6 +1,6 @@
 (ns seon.cluster.db-flow-test
   "db<->flow's decision, `seon.cluster.agent/plan`, as a table: facts read on
-  main and the roster's live graphs in, the actions db<->flow applies out."
+  main and the registry's live graphs in, the actions db<->flow applies out."
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -31,11 +31,11 @@
           :seon.flow.plan/cluster :running}
          overrides))
 
-(defn- roster
-  "A roster holding `started` graphs, `paused` among them."
-  {:malli/schema [:function [:=> [:cat] :seon.flow.plan/roster]
-                  [:=> [:cat :seon.flow.plan/started :seon.flow.plan/paused] :seon.flow.plan/roster]]}
-  ([] (roster #{} #{}))
+(defn- plan-registry
+  "A registry holding `started` graphs, `paused` among them."
+  {:malli/schema [:function [:=> [:cat] :seon.flow.plan/registry]
+                  [:=> [:cat :seon.flow.plan/started :seon.flow.plan/paused] :seon.flow.plan/registry]]}
+  ([] (plan-registry #{} #{}))
   ([started paused] {:seon.flow.plan/started started :seon.flow.plan/paused paused}))
 
 (def ^:private a "aaaaaaaaaaaa")
@@ -59,7 +59,7 @@
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   plan-writes-the-attempt-first-and-makes-flow-follow
   (testing "a fresh leaf: its attempt, then its flow, in one pass"
-    (let [[attempt start :as actions] (agent/plan (facts {:seon.flow.plan/startable #{a}}) (roster) 4)]
+    (let [[attempt start :as actions] (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4)]
       (is (= [[:attempt a] [:start-flow a]] (ops actions)))
       (is (= {:seon.task/assignment key-a :seon.task.attempt/number 1 :seon.agent/id agent-a
               :seon.task/branch (keyword (str "attempt-" key-a)) :seon.flow.plan/fork-point :main}
@@ -67,42 +67,42 @@
                                    :seon.task/branch :seon.flow.plan/fork-point])))
       (is (= :running (:seon.task/execution start)))))
   (testing "two passes over the same facts plan the same attempt, so the second write is a no-op"
-    (is (= (agent/plan (facts {:seon.flow.plan/startable #{a}}) (roster) 4)
-           (agent/plan (facts {:seon.flow.plan/startable #{a}}) (roster) 4))))
+    (is (= (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4)
+           (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4))))
   (testing "once written and started, nothing"
     (is (= [] (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/open [(open :running)]})
-                          (roster #{agent-a} #{}) 4))))
+                          (plan-registry #{agent-a} #{}) 4))))
   (testing "a restart: the open attempt with no graph is started again, never attempted again"
     (is (= [[:start-flow a]]
            (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/open [(open :running)]})
-                            (roster) 4)))))
+                            (plan-registry) 4)))))
   (testing "an attempt after ended ones is numbered after them"
     (is (= (id/id [a 3])
            (:seon.task/assignment (first (agent/plan (facts {:seon.flow.plan/startable #{a}
                                                              :seon.flow.plan/ended {a 2}})
-                                                     (roster) 4))))))
+                                                     (plan-registry) 4))))))
   (testing "a successor forks from its predecessor's end commit"
     (let [commit #uuid "00000000-0000-0000-0000-00000000000a"]
       (is (= #{commit}
              (:seon.flow.plan/fork-point
               (first (agent/plan (facts {:seon.flow.plan/startable #{b} :seon.flow.plan/basis {b #{commit}}})
-                                 (roster) 4)))))))
+                                 (plan-registry) 4)))))))
   (testing "max-running counts open attempts: ten ready under four start the four oldest"
     (let [handles (mapv #(format "%012d" %) (range 10))
           created (zipmap handles (range 100 0 -10))
           attempts (filter (comp #{:attempt} :seon.flow.plan/op)
                            (agent/plan (facts {:seon.flow.plan/startable (set handles) :seon.flow.plan/created created})
-                                       (roster) 4))]
+                                       (plan-registry) 4))]
       (is (= (take 4 (reverse handles)) (map :seon.task/assigned attempts)))
       (is (= [] (filter (comp #{:attempt} :seon.flow.plan/op)
                         (agent/plan (facts {:seon.flow.plan/startable (set handles)
                                             :seon.flow.plan/open (mapv #(assoc (open :running) :seon.task/assigned %
                                                                                :seon.agent/id (str "attempt/" %))
                                                                        (take 4 handles))})
-                                    (roster (set (map #(str "attempt/" %) (take 4 handles))) #{}) 4))))))
+                                    (plan-registry (set (map #(str "attempt/" %) (take 4 handles))) #{}) 4))))))
   (testing "an invalid running leaf is a problem, never an attempt"
     (is (= [[:problem b] [:attempt a] [:start-flow a]]
-           (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/invalid #{b}}) (roster) 4))))))
+           (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/invalid #{b}}) (plan-registry) 4))))))
 
 (deftest
   each-intent-is-one-flow-action
@@ -119,8 +119,8 @@
            [:cancelled #{agent-a} #{} :running [[:cancel nil]]]]]
     (is (= expected (mapv (juxt :seon.flow.plan/op :seon.task/execution)
                           (agent/plan (facts {:seon.flow.plan/open [(open intent)] :seon.flow.plan/cluster cluster})
-                                      (roster started paused) 4)))
-        "each intent and roster state plans exactly its Flow verb")))
+                                      (plan-registry started paused) 4)))
+        "each intent and registry state plans exactly its Flow verb")))
 
 ;;; The two-step chain through the real db<->flow pass on a fixture branch.
 
@@ -159,7 +159,7 @@
 
 (defn- release!
   "Stop every graph db<->flow started on an attempt branch under `routing` and release those branch
-  executions, as a process exit drops its roster; the fixture's own execution stays."
+  executions, as a process exit drops its registry; the fixture's own execution stays."
   {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
   [routing]
   (doseq [[branch child] (:seon.agent/children @routing)
@@ -321,7 +321,7 @@
                                               :where [?agent :seon.agent/id ?id] [?work :seon.task/agent ?agent]
                                               [?request :seon.task/of-assignment ?work] [?request :seon.task/merge ?merge]]
                                             (db/db connection) agent-id))
-                    _ (is (contains? (registry/roster store) branch) "landing keeps the branch for its open merge request")
+                    _ (is (contains? (registry/branches store) branch) "landing keeps the branch for its open merge request")
                     closed (task/close! {:seon.db/connection connection :seon.store/store store
                                          :seon.agent/routing (if from-attempt? child routing)}
                                         merge-task :closed "The lifecycle proof closes this request.")]
@@ -331,7 +331,7 @@
                 (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "the actual graph exited")
                 (is (= :released @(:wrapped-atom branch-connection)))
                 (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
-                (is (not (contains? (registry/roster store) branch)))
+                (is (not (contains? (registry/branches store) branch)))
                 (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
@@ -343,7 +343,7 @@
       connection {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
       (fn [handle]
      (let [routing (:seon.agent/routing handle)
-           started (fn [routing] (:seon.flow.plan/started (agent/roster-facts routing)))]
+           started (fn [routing] (:seon.flow.plan/started (agent/registry-facts routing)))]
        ;; A's hand-written end has no merge request, so landing it would delete A's branch before B forks from
        ;; its end commit: the dial keeps it, as an open merge request does in the real chain
        (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
@@ -380,7 +380,7 @@
                                                                     :seon.store/branch branch-b})]
                (await-on! b-connection #(not-empty (proof-runs (db/db b-connection) (proof "b"))) ::b-proved))
              (release! routing)
-             (is (empty? (started routing)) "a restart drops the roster")
+             (is (empty? (started routing)) "a restart drops the registry")
              (pass! handle routing)
              (is (= 1 (count (attempts connection "b"))) "the restart writes no attempt")
              (is (contains? (started routing) agent-b) "and starts the open attempt on its branch")
@@ -510,13 +510,13 @@
                   (is (empty? (db/q '[:find ?m :where [?m :seon.message/content "Only on my branch."]] database))
                       "and no message")
                   (is (= "Refined on the branch." (intent)))
-                  (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id))
+                  (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
                       "its graph is stopped"))
                 (pass! handle routing)
                 (is (= 1 (count (copies (db/db connection) a))) "a second pass copies nothing")
                 (if keep?
-                  (is (contains? (registry/roster store) branch) "the dial keeps the ended branch for audit")
-                  (is (eventually #(not (contains? (registry/roster store) branch)))
+                  (is (contains? (registry/branches store) branch) "the dial keeps the ended branch for audit")
+                  (is (eventually #(not (contains? (registry/branches store) branch)))
                       "with no merge request the branch is deleted"))
                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                     "with no fault recorded"))))))))))
@@ -539,7 +539,7 @@
               (pass! handle routing)
               (is (= #{[key branch (str "attempt/" key) :given-back]} (attempts connection "e")) "main holds the end")
               (is (= "Do e." (intent)) "and no refinement")
-              (is (contains? (registry/roster store) branch) "the branch stays")
+              (is (contains? (registry/branches store) branch) "the branch stays")
               (is (str/includes? (str (:seon.task/intent (problem))) (name branch))
                   "root's problem task names the branch")
               (is (str/includes? (str (:seon.task/intent (problem))) "The proof asks the impossible.")
@@ -761,7 +761,7 @@
                                  (db/branch-database (db/db connection) branch-b)))
                     "and B's branch forked from it, not from main")
                 (pass! handle routing)
-                (is (eventually #(not (contains? (registry/roster store) branch-a)))
+                (is (eventually #(not (contains? (registry/branches store) branch-a)))
                     "once B forked, A's kept branch is deleted")
                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                     "with no fault recorded"))))))))))
@@ -796,7 +796,7 @@
             (pass! handle routing)
             (let [[[_ branch agent-id]] (seq (attempts connection "s"))
                   database (db/branch-database (db/db connection) branch)]
-              (is (not (contains? (:seon.flow.plan/started (agent/roster-facts routing)) agent-id)) "the graph is stopped")
+              (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id)) "the graph is stopped")
               (is (seq (proof-runs database (proof "s"))) "after its pass recorded its proof run")
               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
                   "with nothing interrupted")))))))))

@@ -297,7 +297,7 @@
                            (config/default-population))
                      "registered-model")
                (into #{} (map :seon.ai.model/id) (ai/models @connection)))
-            "the roster is every shipped declared model row plus what this
+            "the list is every shipped declared model row plus what this
              test seeded — DERIVED from the same initialization document, so
              adding or dropping a shipped model is caught without any list
              here to update")

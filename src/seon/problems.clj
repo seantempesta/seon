@@ -214,7 +214,7 @@
   agents hit, grouped by pattern (`error-groups`). An agent's own mistake stays
   delivered to it (`seon.error`); a pattern many agents hit is a defect in Seon's
   reader, context or tools, and health must see it. Derived from the evaluations on
-  each roster agent's branch head, never copied; the cluster head's own
+  each agent's branch head, never copied; the cluster head's own
   errors are excluded as inherited.
 
   ## Costs

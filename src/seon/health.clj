@@ -546,7 +546,7 @@
   "Everything wrong with cluster `:seon.boot/cluster-name` now: each owner's
   value whole, and every finding schema's matches ranked.
 
-  Reads the running instance from the process roster and one database value
+  Reads the running instance from the process registry and one database value
   (the request's, else the cluster's current one). The problems unit waits at
   most `:seon.health/deadline-ms` (default 900: under the one-second bound),
   then shows `:pending` and runs `:seon.health/wake` when it completes. Never

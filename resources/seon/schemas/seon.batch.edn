@@ -19,7 +19,7 @@
          [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
          [:seon.turn/id {:optional true} :seon.turn/id]
          [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
-         [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its roster."} :seon.store/store]
+         [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its branches."} :seon.store/store]
          [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]
          [:seon.agent/context-source {:optional true :description "The running cluster's own handle with its store, never a hosted agent's branch handle: my.message/send hosts a stopped recipient through it."} :seon.agent/context-source]
          [:seon.batch/defined {:optional true} :seon.batch/defined]]

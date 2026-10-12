@@ -359,12 +359,12 @@
 
 (deftest a-place-in-an-error-is-named-never-printed-through
   ;; Default OOMed (2026-09-26, heap dump java_pid12212): an instrument
-  ;; refusal's offending web request held the agent roster atom, whose state
+  ;; refusal's offending web request held the agent registry atom, whose state
   ;; is every context's projection; http-kit printed the ex-data to 2 GB.
   (let [state (vec (range 100000))
-        roster (atom {:seon.agent/contexts {"a" state}})
+        registry (atom {:seon.agent/contexts {"a" state}})
         realized (doto (delay state) deref)
-        carrier {:seon.agent/routing roster :seon.probe/memo realized
+        carrier {:seon.agent/routing registry :seon.probe/memo realized
                  :seon.probe/var #'error.refusal/diagnostic}
         error (error.refusal/diagnostic
                (assoc base :seon.error/offending carrier
@@ -397,13 +397,13 @@
         "the large argument is the actual value, not a copy or a name")))
 
 (deftest the-chain-still-names-places
-  ;; A place's state is never evidence: the roster atom printed 2 GB
+  ;; A place's state is never evidence: the registry atom printed 2 GB
   ;; (a-place-in-an-error-is-named-never-printed-through).
-  (let [roster (atom (vec (range 100000)))
+  (let [registry (atom (vec (range 100000)))
         small {:seon.probe/n 1}
-        failure (ex-info "refused" {:seon.probe/roster roster :seon.probe/small small})
+        failure (ex-info "refused" {:seon.probe/registry registry :seon.probe/small small})
         links (error.refusal/chain failure nil)]
-    (is (str/starts-with? (get-in links [0 :seon.error/data :seon.probe/roster]) "#object[clojure.lang.Atom"))
+    (is (str/starts-with? (get-in links [0 :seon.error/data :seon.probe/registry]) "#object[clojure.lang.Atom"))
     (is (identical? small (get-in links [0 :seon.error/data :seon.probe/small])) "small data stays identical")))
 
 (deftest constructor-output-keeps-the-producing-contract

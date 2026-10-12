@@ -639,25 +639,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn routing
-  "A fresh roster: the one process-local atom of one execution's live objects.
+  "A fresh registry: the one process-local atom of one execution's live objects.
   `:seon.agent/started` by agent id (the management view); `:seon.agent/channels` by
   recipient ENTITY id (the wake handler's one-lookup delivery);
   `:seon.agent/contexts` the execution handles acquired on this execution's branch,
-  by `[branch agent-id]`; `:seon.agent/children` the roster of each other branch
+  by `[branch agent-id]`; `:seon.agent/children` the registry of each other branch
   acquired through it, by branch; `:seon.flow/graph` the cluster graph, joined
   before it resumes."
   {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
   (atom {:seon.agent/started {} :seon.agent/channels {} :seon.agent/contexts {}}))
 
-(defn- child-roster!
-  "The roster `roster` records for `branch`, recorded when absent or released.
+(defn- child-registry!
+  "The registry `registry` records for `branch`, recorded when absent or released.
   The child names its parent, so the release that owns its branch removes the
   record; a released child still recorded is replaced, never reused."
   {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/branch] :seon.agent/routing]}
-  [roster branch]
-  (let [fresh (doto (routing) (swap! assoc :seon.agent/parent roster))]
-    (get-in (swap! roster update-in [:seon.agent/children branch]
+  [registry branch]
+  (let [fresh (doto (routing) (swap! assoc :seon.agent/parent registry))]
+    (get-in (swap! registry update-in [:seon.agent/children branch]
                    #(if (and % (not (:seon.agent/released? @%))) % fresh))
             [:seon.agent/children branch])))
 
@@ -962,12 +962,12 @@
 
   An owning handle first stops and joins every graph started in its routing
   (`stop-owned-graphs!`, which marks it released and settles its in-flight
-  acquisitions), then releases every owning handle of each child roster it
+  acquisitions), then releases every owning handle of each child registry it
   records, through this same function; a failed join or a failed descendant
   throws before anything closes, so the subtree stays reachable for a retry.
   Live handles own nothing; borrowed branches persist. Then the connection release,
   the branch unlink, the removal of the handle's own context entry and of its
-  roster from the parent's children are
+  registry from the parent's children are
   each attempted even when an earlier one throws; the first cause is then
   rethrown whole, carrying every later cause as suppressed."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
@@ -976,13 +976,13 @@
         owns-branch? (:seon.agent/owns-branch? handle)
         attempt (fn [step] (try (step) nil (catch Throwable cause cause)))
         _ (when (or owns-connection? owns-branch?)
-            (let [roster (:seon.agent/routing handle)]
+            (let [registry (:seon.agent/routing handle)]
               (wake/unlisten! {:seon.cluster.wake/connection (:seon.db/connection handle)
                                :seon.cluster.wake/key (branch-route-key (:seon.agent/branch handle))})
-              (stop-owned-graphs! roster)
+              (stop-owned-graphs! registry)
               (throw-causes!
                (into [] (keep (fn [execution] (attempt #(release-context! execution))))
-                     (for [child (vals (:seon.agent/children @roster))
+                     (for [child (vals (:seon.agent/children @registry))
                            execution (vals (:seon.agent/contexts @child))
                            :when (or (:seon.agent/owns-connection? execution)
                                      (:seon.agent/owns-branch? execution))]
@@ -996,52 +996,52 @@
                   (registry/retire-branch!
                    {:seon.store/store (:seon.store/store handle)
                     :seon.store/branch (:seon.agent/branch handle)}))
-               ;; the handle's own context entry leaves the roster it was
+               ;; the handle's own context entry leaves the registry it was
                ;; acquired in, borrowed handles included: a released handle
                ;; that stayed recorded held its branch for every later
                ;; retire (reds-triage, 2026-09-28)
                #(swap! (:seon.agent/routing handle) update :seon.agent/contexts dissoc
                        [(:seon.agent/branch handle) (:seon.agent/id handle)])
-               #(let [roster (:seon.agent/routing handle)]
+               #(let [registry (:seon.agent/routing handle)]
                   (when-let [parent (and (or owns-connection? owns-branch?)
-                                         (:seon.agent/parent @roster))]
+                                         (:seon.agent/parent @registry))]
                     (swap! parent update :seon.agent/children
                            (fn [children]
                              (cond-> children
-                               (identical? roster (get children (:seon.agent/branch handle)))
+                               (identical? registry (get children (:seon.agent/branch handle)))
                                (dissoc (:seon.agent/branch handle)))))))])]
     (throw-causes! causes))
   nil)
 
 (defn- acquire-once!
-  "Acquire `key` in `roster`'s contexts once per concurrent demand, holding no monitor.
+  "Acquire `key` in `registry`'s contexts once per concurrent demand, holding no monitor.
   `swap-vals!` reserves the key with a delay of `(acquire previous)`; a caller
   finding one in flight derefs it, so same-key callers share one handle and
-  other keys run in parallel. A released roster claims nothing: the
-  reservation refuses by name (`::roster-released`), and `release-context!`
+  other keys run in parallel. A released registry claims nothing: the
+  reservation refuses by name (`::registry-released`), and `release-context!`
   settles every claim made before its mark. Settling (the handle, or previous
   on failure) applies only while this reservation holds the key."
   {:malli/schema [:=> [:cat :seon.agent/routing
                        [:tuple :seon.agent/branch [:maybe :seon.agent/id]]
                        [:fn clojure.core/ifn?]]
                   :seon.agent/execution-handle]}
-  [roster key acquire]
+  [registry key acquire]
   (let [path [:seon.agent/contexts key]
         reserve (fn [held]
                   (let [entry (get-in held path)]
                     (when (:seon.agent/released? held)
-                      (throw (ex-info "This execution's roster is released; acquire through a live one."
-                                      {::refused ::roster-released :seon.agent/branch (first key)
-                                       :seon.error/message "This execution's roster is released; acquire through a live one."
+                      (throw (ex-info "This execution's registry is released; acquire through a live one."
+                                      {::refused ::registry-released :seon.agent/branch (first key)
+                                       :seon.error/message "This execution's registry is released; acquire through a live one."
                                        :seon.error/expected :seon.agent/routing})))
                     (if (::acquiring entry)
                       held
                       (assoc-in held path (assoc entry ::acquiring (delay (acquire entry)))))))
-        entry (get-in (second (swap-vals! roster reserve)) path)
+        entry (get-in (second (swap-vals! registry reserve)) path)
         pending (::acquiring entry)
         previous (not-empty (dissoc entry ::acquiring))
         settle! (fn [value]
-                  (swap! roster
+                  (swap! registry
                          (fn [held]
                            (cond (not (identical? pending (::acquiring (get-in held path)))) held
                                  value (assoc-in held path value)
@@ -1081,9 +1081,9 @@
   connection value the handle carries, never re-derived from a cluster name.
   An isolation request allocates a fresh branch off the captured commit (or
   current head); a named branch without isolation selects an existing branch,
-  as the MCP tool does. One roster per execution retains the handles and
+  as the MCP tool does. One registry per execution retains the handles and
   private SCI objects across evaluation boundaries: the handle's own for its
-  live branch, and for any other branch the child roster the handle's records,
+  live branch, and for any other branch the child registry the handle's records,
   so a branch execution's contexts, graphs and release are its own."
   {:malli/schema
    [:function
@@ -1094,16 +1094,16 @@
      :seon.agent/execution-handle]]}
   ([handle agent-id] (acquire-context! handle agent-id {}))
   ([handle agent-id options]
-   (let [parent-roster (:seon.agent/routing handle)
+   (let [parent-registry (:seon.agent/routing handle)
          parent (:seon.db/connection handle)
          ;; A released execution claims nothing, refused by name before its
          ;; released connection is read (Datahike refuses that read as
-         ;; "Connection has been released.", which named no roster).
-         _ (when (some-> parent-roster deref :seon.agent/released?)
+         ;; "Connection has been released.", which named no registry).
+         _ (when (some-> parent-registry deref :seon.agent/released?)
              ;; the released routing names itself as `start-flow!`'s own refusal does
-             (throw (ex-info "This execution's roster is released; acquire through a live one."
-                             {::refused ::roster-released :seon.agent/id agent-id
-                              :seon.error/message "This execution's roster is released; acquire through a live one."
+             (throw (ex-info "This execution's registry is released; acquire through a live one."
+                             {::refused ::registry-released :seon.agent/id agent-id
+                              :seon.error/message "This execution's registry is released; acquire through a live one."
                               :seon.error/expected :seon.agent/routing})))
          database (db/db parent)
          ;; The handle carries its world: the branch its connection holds is live.
@@ -1122,20 +1122,20 @@
          ;; file store never sees. Options name no store, so the calling
          ;; evaluation's world cannot supply one over it.
          held-store (or (:seon.store/store handle) (:seon.store/store (env/of source-ctx)))]
-     (when-not (and parent-roster branch)
-       (throw (ex-info "Acquisition requires the handle's roster and an explicit agent branch."
+     (when-not (and parent-registry branch)
+       (throw (ex-info "Acquisition requires the handle's registry and an explicit agent branch."
                        {:seon.agent/id agent-id :seon.agent/branch branch})))
      (when (and (:seon.agent/isolate? options) (= branch live-branch))
        (throw (ex-info "Isolation cannot borrow the live cluster branch."
                        {:seon.agent/branch branch})))
      (let [isolated? (not= branch live-branch)
            acquire-in
-           (fn [roster]
+           (fn [registry]
      (try
-     (acquire-once! roster [branch agent-id] (fn [previous]
+     (acquire-once! registry [branch agent-id] (fn [previous]
        (let [;; An entry still acquiring its first handle holds no connection yet.
              branch-owner (some (fn [[_ execution]] (when (:seon.db/connection execution) execution))
-                                (:seon.agent/contexts @roster))
+                                (:seon.agent/contexts @registry))
              create? (and isolated? (nil? previous)
                           (or (:seon.agent/isolate? options)
                               (nil? (:seon.agent/branch options))))
@@ -1211,7 +1211,7 @@
                                      {:seon.sci.eval/acquisition-recording-error failure})))
                  _ (env/replace-environment!
                     (:seon.sci.eval/projection-state base)
-                    (cond-> (assoc (env/of base) :seon.agent/routing roster)
+                    (cond-> (assoc (env/of base) :seon.agent/routing registry)
                       held-store (assoc :seon.store/store held-store)))
                  forked (when agent-id
                           (sci.eval/fork-for-turn
@@ -1237,9 +1237,9 @@
                             :seon.sci.eval/ctx ctx
                             :seon.sci.eval/base-ctx base
                             :seon.env/environment (env/of ctx)
-                            ;; The execution owns the roster its graphs start in, so
+                            ;; The execution owns the registry its graphs start in, so
                             ;; its release can stop and join them before closing.
-                            :seon.agent/routing roster
+                            :seon.agent/routing registry
                             :seon.agent/branch branch
                             ;; Reacquiring an isolated handle through itself keeps its mode.
                             :seon.agent/mode (or (:seon.agent/mode previous) (if isolated? :isolated :live))
@@ -1262,23 +1262,23 @@
        ;; A failed first acquisition leaves no empty child recorded. Emptiness is
        ;; decided in the child's own swap, which marks it released, so a
        ;; concurrent acquisition either reserved first (the child stays) or is
-       ;; refused and retries through `child-roster!`, which replaces it.
+       ;; refused and retries through `child-registry!`, which replaces it.
        (catch Throwable failure
          (when (and isolated?
                     (:seon.agent/released?
-                     (swap! roster #(cond-> % (empty? (:seon.agent/contexts %))
+                     (swap! registry #(cond-> % (empty? (:seon.agent/contexts %))
                                       (assoc :seon.agent/released? true)))))
-           (swap! parent-roster update :seon.agent/children
-                  #(cond-> % (identical? roster (get % branch)) (dissoc branch))))
+           (swap! parent-registry update :seon.agent/children
+                  #(cond-> % (identical? registry (get % branch)) (dissoc branch))))
          (throw failure))))]
        (if-not isolated?
-         (acquire-in parent-roster)
-         ;; A child released between `child-roster!` and the reservation is
+         (acquire-in parent-registry)
+         ;; A child released between `child-registry!` and the reservation is
          ;; replaced once; a released parent refuses the retry by name too.
-         (try (acquire-in (child-roster! parent-roster branch))
+         (try (acquire-in (child-registry! parent-registry branch))
               (catch clojure.lang.ExceptionInfo refusal
-                (if (= ::roster-released (::refused (ex-data refusal)))
-                  (acquire-in (child-roster! parent-roster branch))
+                (if (= ::registry-released (::refused (ex-data refusal)))
+                  (acquire-in (child-registry! parent-registry branch))
                   (throw refusal)))))))))
 
 (defn start-flow!
@@ -1390,7 +1390,7 @@
                               (or (:seon.agent/context-source handle)
                                   (merge (select-keys execution [:seon.store/store]) handle))
                               ;; The execution owner's stop request, read from
-                              ;; the roster when a fault fires: interrupt the
+                              ;; the registry when a fault fires: interrupt the
                               ;; transform and request the graph's stop off
                               ;; the calling thread. A request, never a join.
                               :seon.fault/stop-request!
@@ -1636,12 +1636,12 @@
 ;;; ---------------------------------------------------------------------------
 
 ;;; ---------------------------------------------------------------------------
-;;; plan: facts and roster in, actions out (R1)
+;;; plan: facts and registry in, actions out (R1)
 ;;; ---------------------------------------------------------------------------
 
 (defn- follow
   "The actions that make `open`'s graph follow its intent `intent` (the
-  cluster's :paused wins), given whether the roster holds it and has paused it."
+  cluster's :paused wins), given whether the registry holds it and has paused it."
   {:malli/schema [:=> [:cat :seon.flow.plan/open-attempt :seon.task/execution :boolean :boolean]
                   :seon.flow.plan/actions]}
   [open intent started? paused?]
@@ -1658,14 +1658,14 @@
 
 (defn plan
   "The actions db<->flow takes next, as a vector.
-  From `facts` read on main and the `roster`'s live
+  From `facts` read on main and the `registry`'s live
   graphs: each open attempt's graph follows its task's intent (`:held` and a
   paused cluster read as `:paused`); each startable leaf with no open attempt,
   oldest first, gets its next attempt and its flow while the open attempts that
   count (running, paused or held) are fewer than `max-running`; an invalid
   leaf gets a problem. Pure; a second pass over the same facts plans the same
   attempts, so their writes are no-ops by identity."
-  {:malli/schema [:=> [:cat :seon.flow.plan/facts :seon.flow.plan/roster :seon.config.agent/max-running]
+  {:malli/schema [:=> [:cat :seon.flow.plan/facts :seon.flow.plan/registry :seon.config.agent/max-running]
                   :seon.flow.plan/actions]}
   [{:seon.flow.plan/keys [startable invalid open ended created basis cluster]}
    {:seon.flow.plan/keys [started paused]} max-running]
@@ -1772,11 +1772,11 @@
   (concat (vals (:seon.agent/started @routing))
           (mapcat #(vals (:seon.agent/started @%)) (vals (:seon.agent/children @routing)))))
 
-(defn roster-facts
+(defn registry-facts
   "What db<->flow reads of `routing` before it plans.
   The started graphs by agent, its own and its branch children's, and the
   paused among them."
-  {:malli/schema [:=> [:cat :seon.agent/routing] :seon.flow.plan/roster]}
+  {:malli/schema [:=> [:cat :seon.agent/routing] :seon.flow.plan/registry]}
   [routing]
   (let [entries (started-entries routing)]
     {:seon.flow.plan/started (into #{} (map :seon.agent/id) entries)
@@ -1784,7 +1784,7 @@
 
 (defn branch-handle
   "The cluster handle `cluster-handle` seen from the branch `execution`.
-  Its connection, contexts and roster are the branch's, while wakes for
+  Its connection, contexts and registry are the branch's, while wakes for
   db<->flow still go to the cluster's plan channel."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/execution-handle] :seon.agent/context-source]}
   [cluster-handle execution]
@@ -1811,16 +1811,16 @@
                        :seon.task/execution]
                   :seon.agent/started]}
   [cluster-handle execution agent-id intent]
-  (let [roster (:seon.agent/routing execution)
+  (let [registry (:seon.agent/routing execution)
         route (wake/route! {:seon.cluster.wake/connection (:seon.db/connection execution)
-                            :seon.cluster.wake/channels (fn [] (channels roster))
-                            :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? roster eid channel))
+                            :seon.cluster.wake/channels (fn [] (channels registry))
+                            :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? registry eid channel))
                             :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
                             :seon.cluster.wake/key (branch-route-key (:seon.agent/branch execution))})]
     (when (map? route)
       (throw (ex-info (:seon.error/message route "The branch's wake declarations cannot route.") route)))
     (start-flow! {:seon.turn.loop/cluster (branch-handle cluster-handle execution)
-                  :seon.agent/id agent-id :seon.agent/routing roster :seon.task/execution intent})))
+                  :seon.agent/id agent-id :seon.agent/routing registry :seon.task/execution intent})))
 
 (defn- write!
   "Transact `tx` on `connection` under its own custody; throws the writer's refusal."
@@ -1879,11 +1879,11 @@
         commit (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] [:seon.task/assignment key]))
         parent (when commit (db/q '[:find ?b . :in $ ?c :where [?a :seon.task.attempt/commit ?c] [?a :seon.task/branch ?b]]
                                   database commit))
-        _ (when (and commit (not (and (keyword? parent) (contains? (registry/roster store) parent))))
+        _ (when (and commit (not (and (keyword? parent) (contains? (registry/branches store) parent))))
             (throw (ex-info "The attempt's predecessor branch is gone, so its fork point cannot be read."
                             {:seon.error/message "The attempt's predecessor branch is gone, so its fork point cannot be read."
                              :seon.task/assignment key :seon.task.attempt/fork commit :seon.store/branch parent})))
-        result (when-not (contains? (registry/roster store) branch)
+        result (when-not (contains? (registry/branches store) branch)
                  (if commit
                    (let [source (db/branch-database database parent)]
                      (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db source
@@ -1924,8 +1924,8 @@
     (start-branch-flow! handle execution agent-id (or intent :running))
     nil))
 
-(defn- entry-roster
-  "The roster, `routing` or one of its branch children, holding `agent-id`'s started entry."
+(defn- entry-registry
+  "The registry, `routing` or one of its branch children, holding `agent-id`'s started entry."
   {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/id] [:maybe :seon.agent/routing]]}
   [routing agent-id]
   (some #(when (get-in @% [:seon.agent/started agent-id]) %)
@@ -1937,15 +1937,15 @@
   its current pass finish, or interrupt and stop it and end its open attempt `:cancelled`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/action] :nil]}
   [handle routing {op :seon.flow.plan/op agent-id :seon.agent/id key :seon.task/assignment}]
-  (when-let [roster (entry-roster routing agent-id)]
+  (when-let [registry (entry-registry routing agent-id)]
     (case op
-      :pause (do (flow/pause (:seon.flow/graph (started roster agent-id)))
-                 (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] true))
-      :resume (do (flow/resume (:seon.flow/graph (started roster agent-id)))
-                  (swap! roster assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] false))
+      :pause (do (flow/pause (:seon.flow/graph (started registry agent-id)))
+                 (swap! registry assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] true))
+      :resume (do (flow/resume (:seon.flow/graph (started registry agent-id)))
+                  (swap! registry assoc-in [:seon.agent/started agent-id :seon.flow.plan/paused?] false))
       ;; a stop lets the current pass finish; only a cancel interrupts it
-      :stop (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster :seon.agent/finish? true})
-      :cancel (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster})))
+      :stop (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true})
+      :cancel (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry})))
   (when (= :cancel op)
     (write! (:seon.db/connection handle)
             [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :cancelled]
@@ -2006,9 +2006,9 @@
                      [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] (not [_ :seon.squash/attempt ?a])]
                    database)
         _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the attempts.") rows)))
-        roster (registry/roster store)]
+        branches (registry/branches store)]
     (into [] (keep (fn [[a k h b id]]
-                     (when (contains? roster b)
+                     (when (contains? branches b)
                        (when-let [end (or (:seon.task.attempt/end (db/pull database [:seon.task.attempt/end] a))
                                           (branch-end database b k))]
                          {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
@@ -2107,14 +2107,14 @@
   from its end commit on a branch the `store` holds: the predecessor's branch is its fork point's ref."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.db/entity-id] :boolean]}
   [database store a]
-  (let [roster (registry/roster store)
+  (let [branches (registry/branches store)
         commit (:seon.task.attempt/commit (db/pull database [:seon.task.attempt/commit] a))
         successors (when commit
                      (db/q '[:find [?t ...] :in $ % ?a
                              :where [?a :seon.task/attempt-of ?l] [?t :seon.task/id _] (not [?t :seon.task/children _])
                              (needs* ?t ?n) (self-or-under ?n ?l)]
                            database task/ready-rules a))
-        forked? (fn [t] (some #(contains? roster %)
+        forked? (fn [t] (some #(contains? branches %)
                               (db/q '[:find [?b ...] :in $ ?t ?c
                                       :where [?s :seon.task/attempt-of ?t] [?s :seon.task.attempt/fork ?c] [?s :seon.task/branch ?b]]
                                     database t commit)))]
@@ -2129,13 +2129,13 @@
   (let [connection (:seon.db/connection handle)
         database (db/db connection)
         store (handle-store handle)
-        roster (registry/roster store)
+        branches (registry/branches store)
         landed (db/q '[:find ?a ?b ?id :where [_ :seon.squash/attempt ?a] [?a :seon.task.attempt/end :done]
                        [?a :seon.task/branch ?b] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
                      database)]
     (when (map? landed) (throw (ex-info (:seon.error/message landed "The landed attempts could not be read.") landed)))
     (doseq [[a branch agent-id] landed
-            :when (and (contains? roster branch) (not (open-merge-request? database a))
+            :when (and (contains? branches branch) (not (open-merge-request? database a))
                        (not (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?)))
                        (not (successor-waits? database store a)))]
       (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
@@ -2164,8 +2164,8 @@
             (db/with-branch {:seon.db/connection connection}
                                   #(squash/copy! connection branch nil {:seon.squash/attempt a}))
             (record-error-end! connection ended))
-          (when-let [roster (entry-roster routing agent-id)]
-            (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster :seon.agent/finish? true}))
+          (when-let [registry (entry-registry routing agent-id)]
+            (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))
           (let [database (db/db connection)
                 keep? (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?))]
             (cond
@@ -2326,5 +2326,5 @@
                                   (if (:seon.error/at facts) facts {:seon.config.agent/max-running max-running}))
                          {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
                           :seon.db.process/id (:seon.db.process/id handle)})
-           (apply-plan! handle routing facts (plan facts (roster-facts routing) max-running))))
+           (apply-plan! handle routing facts (plan facts (registry-facts routing) max-running))))
        [state nil]))))

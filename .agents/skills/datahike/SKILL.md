@@ -393,7 +393,7 @@ two encodings, which the next writer can put out of step. Do not add one.
 For fixture operations use `seon.test-support/with-database`, which
 runs the body on an isolated branch of the executing test's database,
 and write through `seon.test-support/transacted!` so a refused write fails the test instead of
-reading as absence. Do not build a small hand-rostered schema to
+reading as absence. Do not build a small hand-listed schema to
 impersonate production.
 
 ## What `listen!` delivers

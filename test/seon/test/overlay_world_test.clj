@@ -81,7 +81,7 @@
            outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
            handles (filterv :seon.db/connection outcomes)
            checkpoints (filterv #(str/starts-with? (name %) (str "checkpoint-" cluster "-"))
-                                (registry/roster store))]
+                                (registry/branches store))]
        (try
          (is (seq handles))
          (is (= 1 (count checkpoints)))

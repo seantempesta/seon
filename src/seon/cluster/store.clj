@@ -8,7 +8,7 @@
   held until `release-store!`. A live holder is refused rather than
   displaced.
 
-  `open-branch!` opens one existing roster branch and refuses a second
+  `open-branch!` opens one existing branch and refuses a second
   connection to that branch in the process. Datahike's `:self` writer
   owns transaction serialization; `seon.db/transact!` owns transaction
   admission and failure values."
@@ -415,17 +415,17 @@
   nil)
 
 ;;; Genesis writes the immutable commit, then the mutable `:db` branch
-;;; head, then the `:branches` roster LAST. `database-exists?` reads only
+;;; head, then the `:branches` set LAST. `database-exists?` reads only
 ;;; `:db`, so `:branches` presence is the one fact that separates a
 ;;; complete store from the first-create kill window.
 (defn- genesis-complete?
-  "True when the store's `:branches` roster was written."
+  "True when the store's `:branches` set was written."
   [store-dir]
   (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})]
     (some? (k/get konserve :branches nil {:sync? true}))))
 
 (defn- complete-store?
-  "True when `store-dir` holds a store whose `:branches` roster is written."
+  "True when `store-dir` holds a store whose `:branches` set is written."
   [store-dir]
   (let [dir (io/file store-dir)]
     (boolean
@@ -433,7 +433,7 @@
           (seq (.list dir))
           ;; konserve writes each key to a `.new` file and moves it with
           ;; ATOMIC_MOVE (reference-code/konserve/src/konserve/filestore.clj:307,
-          ;; `:in-place? false` at :901), so a kill leaves the roster absent,
+          ;; `:in-place? false` at :901), so a kill leaves the store's branches absent,
           ;; never half-written; absence reads as nil. A read that fails is
           ;; damage, not incompleteness, and propagates.
           (genesis-complete? (str store-dir))))))
@@ -445,7 +445,7 @@
   recorded by `log-deletion!` before it runs: an absolute target under a
   declared disposable root, never the working directory's own `data/` unless
   this JVM was launched to operate it. The authority also RE-DECIDES at the
-  seam — a store whose `:branches` roster is present is complete and is never
+  seam — a store whose `:branches` set is present is complete and is never
   deleted here, whatever existence read the caller made earlier."
   [store-dir configuration]
   (let [target (admit-destructive-path!
@@ -455,7 +455,7 @@
     (when (complete-store? target)
       (refuse! ::complete-store-not-recreated
                (str "refusing to recreate the store at " target
-                    ": its branch roster is present, so creation would "
+                    ": its branches is present, so creation would "
                     "delete durable branches")
                {::dir target}))
     (log-deletion!
@@ -468,7 +468,7 @@
   (when-not (genesis-complete? store-dir)
     (refuse! ::initialization-incomplete
              (str "the store at " store-dir
-                  " has no branch roster after creation")
+                  " has no branches after creation")
              {::dir store-dir}))
   nil)
 
@@ -707,9 +707,9 @@
 
 (defn open-branch!
   "A connection to one branch of this already-open, flock-held store.
-  The branch must exist in the roster — creation belongs to the one
+  The branch must exist in the store's branches — creation belongs to the one
   branch-lifecycle owner (seon.cluster.registry, B2). Refuses
-  `::branch-absent` (not in the roster) and `::branch-already-open`
+  `::branch-absent` (not in the store's branches) and `::branch-already-open`
   (this process already holds a connection to that branch — Datahike
   would reference-count a second connect into the SAME connection,
   silently giving two cluster instances one writer)."
@@ -725,7 +725,7 @@
           connection-id (datahike.store/connection-id configuration)]
       (when-not (contains? (d/branches main-connection) branch)
         (refuse! ::branch-absent
-                 (str "branch " branch " is absent from the store roster")
+                 (str "branch " branch " is absent from the store's branches")
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
       (when (contains? @connections/*connections* connection-id)
@@ -738,7 +738,7 @@
       (db/call-with-root-bindings #(d/connect configuration)))))
 
 (defn release-branch!
-  "Release one proof branch connection before its roster branch is retired.
+  "Release one proof branch connection before its branch is retired.
 
   Datahike keeps a released Connection's metadata (`connections.cljc:124-127`),
   where `seon.db/carry-connection-projection-state!` put the cluster's state; a

@@ -55,7 +55,7 @@
 
   THE ONE DECLARATION of destructiveness. Everything else derives: a test's
   host is `seon.test/host`, which walks `:seon.fn/calls` from the test to a
-  function carrying this attribute, so no roster of destructive owners or
+  function carrying this attribute, so no list of destructive owners or
   destructive tests exists in code or in the database. A function that deletes
   only what it created carries nothing — `seon.cluster.store/create-store!`
   deletes its own incomplete genesis and refuses a complete store, so it is

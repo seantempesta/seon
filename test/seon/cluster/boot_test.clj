@@ -340,7 +340,7 @@
                          (client/request! (assoc (request root :init) :seon.boot/cluster-name "old-data")))]
           (is (= (registry/cluster-branch "old-data") old-branch))
           (is (true? (evaluate! root
-                       (pr-str `(contains? (~'seon.cluster.registry/roster
+                       (pr-str `(contains? (~'seon.cluster.registry/branches
                                              (:seon.store/store (get @~'seon.operator.runtime/running-instances "default")))
                                            ~old-branch)))))
         (spit marker "old data")
@@ -366,7 +366,7 @@
           (is (= inode (Files/getAttribute (.toPath lock-file) "unix:ino" (make-array LinkOption 0))))
           (is (= 2 (evaluate! root "(+ 1 1)")))
           (is (false? (evaluate! root
-                        (pr-str `(contains? (~'seon.cluster.registry/roster
+                        (pr-str `(contains? (~'seon.cluster.registry/branches
                                               (:seon.store/store (get @~'seon.operator.runtime/running-instances "default")))
                                             ~old-branch)))))
           (is (= #{(select-keys current [:seon.boot/pid :seon.boot/start-instant])}
@@ -589,10 +589,10 @@
         (is (every? :seon.health/cluster rows) "every row answers"))
       (finally (swap! runtime/running-instances dissoc cluster-name)))))
 
-(deftest status-answers-while-a-test-agent-stands-in-the-roster
+(deftest status-answers-while-a-test-agent-stands-in-the-registry
   ;; Default 2026-10-08T22:15Z: status during a test run refused whole —
   ;; `with-running-agent` registered a map with no `:seon.boot/config`, so
-  ;; `readiness` refused its row. Every roster value is a declared instance.
+  ;; `readiness` refused its row. Every registry value is a declared instance.
   (support/with-running-agent
    (fn [running _ _]
      (let [response (boot/request! (merge (process/current-identity)

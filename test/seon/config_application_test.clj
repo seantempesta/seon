@@ -231,7 +231,7 @@
 
 (deftest no-auth-is-consumed-as-the-credential-alternative
   ;; WANTED: credential selection is proved without starting a cluster,
-  ;; observed on the process roster `boot/start!` publishes into, never by
+  ;; observed on the process registry `boot/start!` publishes into, never by
   ;; redefining `boot/start!` (no Var redefinitions in tests).
   (let [cluster-name "application-no-auth"]
     (test-support/with-database

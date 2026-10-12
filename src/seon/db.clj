@@ -2107,7 +2107,7 @@
   The database is the authority on what can be a datom: a projection may
   map an attribute the bridge could store while this branch has never
   installed it, and transacting that attribute refuses. Callers deciding
-  what to record ask here, never a roster."
+  what to record ask here, never a list."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
                   :boolean]}
   [database attribute]

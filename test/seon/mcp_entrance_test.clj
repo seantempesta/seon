@@ -294,7 +294,7 @@
      (is (true? (get (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running}) "isError"))))))
 
 (deftest a-cluster-still-starting-or-stopping-refuses-by-name
-  ;; During a restart the roster holds the start's partial instance (its
+  ;; During a restart the registry holds the start's partial instance (its
   ;; first layers, no routing yet): an eval answered a bare
   ;; NullPointerException "Cannot invoke Future.get() because fut is null".
   ;; It refuses, saying the cluster is not ready.

@@ -54,7 +54,7 @@
 
   The branch is the one my supplied connection holds. The mode is the one my
   acquisition of that branch decided (seon.cluster.agent/acquire-context!),
-  read from its entry in my execution's roster; neither is derived from a cluster name.
+  read from its entry in my execution's registry; neither is derived from a cluster name.
 
   Example:
   (my.agent/branch)"
@@ -63,10 +63,10 @@
                   [:map [:seon.agent/branch :seon.agent/branch]
                    [:seon.agent/mode :seon.agent/mode]]]}
   [{agent-id :seon.agent/id
-    {connection :seon.db/connection roster :seon.agent/routing} :my.program/context}]
+    {connection :seon.db/connection registry :seon.agent/routing} :my.program/context}]
   ;; Mode is relative to the acquiring parent, so only this agent's own entry answers.
   (let [held (get-in (db/db connection) [:config :branch])
-        mode (:seon.agent/mode (get-in (some-> roster deref) [:seon.agent/contexts [held agent-id]]))]
+        mode (:seon.agent/mode (get-in (some-> registry deref) [:seon.agent/contexts [held agent-id]]))]
     (when-not (and held mode)
       (throw (ex-info "No acquisition of this agent holds its connection's branch."
                       {:seon.agent/id agent-id :seon.agent/branch held})))
@@ -90,7 +90,7 @@
   (get-in @connection [:config :branch]))
 
 (defn branches
-  "Read my cluster's own branch and the store's branch roster.
+  "Read my cluster's own branch and the store's branches.
 
   My context is supplied.
 
@@ -99,8 +99,8 @@
   {:malli/schema [:=> [:cat :my.agent/branch-context] [:or :my.agent/branches :seon.error/value]]}
   [{store :seon.store/store :as context}]
   (if-not store
-    (branch-refusal `branches "My context holds no store to read the roster from." {})
-    {:my.agent/own-branch (own-branch context) :my.agent/roster (registry/roster store)}))
+    (branch-refusal `branches "My context holds no store to read the branches from." {})
+    {:my.agent/own-branch (own-branch context) :my.agent/roster (registry/branches store)}))
 
 (defn create-branch!
   "Create a lane branch off my cluster head's current commit.
@@ -168,8 +168,8 @@
 
 (defn retire-branch!
   "Retire a lane branch after closing admission and joining its graphs.
-  its executions and owned connection, then delete its roster entry.
-  Works through the branch's own roster or its parent's. My cluster's shared
+  its executions and owned connection, then delete its branch.
+  Works through the branch's own registry or its parent's. My cluster's shared
   branch refuses. My own branch records its retirement now and unlinks once my
   run exits (`:my.agent/retiring?`). Its data goes when retention collects. My
   context is supplied.
@@ -186,12 +186,12 @@
     (branch-refusal `retire-branch! "The cluster's shared branch is never retired; name a lane branch or my own." {:seon.store/branch lane})
     (= lane (own-branch context)) (retire-own-branch! lane context)
     :else
-    (let [roster (if (some #(= lane (:seon.agent/branch %))
+    (let [registry (if (some #(= lane (:seon.agent/branch %))
                           (vals (:seon.agent/contexts (some-> routing deref))))
                    routing
                    (some-> routing deref (get-in [:seon.agent/children lane])))
-          retired (some-> (:seon.cluster.host/host (some-> roster deref)) deref host/retire!)
-          held (vec (:seon.agent/contexts (some-> roster deref)))
+          retired (some-> (:seon.cluster.host/host (some-> registry deref)) deref host/retire!)
+          held (vec (:seon.agent/contexts (some-> registry deref)))
           closed (when-not (:seon.error/at retired)
                    (host/close-admissions! (:seon.db/connection context) lane))]
       (cond

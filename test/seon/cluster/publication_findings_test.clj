@@ -6,7 +6,7 @@
             [seon.fn.analyzer :as analyzer]
             [seon.test-support :as support]))
 
-(deftest publication-reports-finding-count-and-delta-without-a-roster
+(deftest publication-reports-finding-count-and-delta-without-branches
   (let [root (str "tmp/publication-findings/" (random-uuid))
         file (io/file root "src/pub/sample.clj")
         request {:seon.fn/root root :seon.fn/roots ["src"]

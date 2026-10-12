@@ -377,7 +377,7 @@
               {:seon.config.run/max-episode-runs run-cap}})
             (catch Throwable failure
               ;; A boot that fails partway leaves its partial instance in the
-              ;; one instance roster; the failure references it by name.
+              ;; one instance registry; the failure references it by name.
               (some-> (get @operator.runtime/running-instances
                            (:seon.boot/cluster-name (ex-data failure)))
                       (release! nil))

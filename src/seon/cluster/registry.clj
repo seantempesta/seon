@@ -22,14 +22,14 @@
     cluster is `delete-branch!` + `branch!` from the ancestor; deleting
     the store is an operator-only whole-system action.
   - GC isolation is STRUCTURAL, not policy: the mark unions
-    `reachable-in-branch` over EVERY roster branch and seeds each head
+    `reachable-in-branch` over EVERY branch and seeds each head
     unconditionally
     (`reference-code/datahike/src/datahike/gc.cljc:26,60-70,136-143`),
     so collecting after one cluster is retired can never take a
     sibling's or the ancestor's data. Proven live (b2-plan §0.7: the
     doomed tail's 139 objects swept, survivor and ancestor whole, a
     second pass swept nothing).
-  - The roster read-modify-write race that made this unsafe is FIXED in
+  - The branches read-modify-write race that made this unsafe is FIXED in
     our fork (submodule `357ffc87`, \"Serialize branch roster mutations
     by store\"), applying the fork's own store-id-keyed guard idiom
     (`gc_guard.cljc:47-52`) to `versioning.cljc:255-257,289`. Before
@@ -43,12 +43,12 @@
   Crash walk (kill -9 at any point; the OS releases the store's flock,
   so the next boot always re-acquires it):
 
-  - mid cluster `branch!`, BEFORE the roster update: an orphan head
+  - mid cluster `branch!`, BEFORE the store's branches update: an orphan head
     blob nothing points at. The cluster branch is absent, so
     `ensure-cluster!` branches again and GC sweeps the orphan;
-  - after the cluster branch is in the roster, before its first
+  - after the cluster branch is in the store's branches, before its first
     connect: a complete branch — the resume path connects and goes.
-    The roster IS the fact; nothing is detected;
+    The store's branches ARE the fact; nothing is detected;
   - mid `delete-branch!` (`k/update … disj`): one key write that either
     happened or did not. `retire-branch!` re-runs; Datahike's
     `:branch-does-not-exist` reads as ALREADY DONE, never as an error;
@@ -105,15 +105,15 @@
   #'cluster.branch/cluster-branch)
 
 ;;; ---------------------------------------------------------------------------
-;;; The roster
+;;; The store's branches
 ;;; ---------------------------------------------------------------------------
 
-(defn roster
-  "The store's branch roster, read through its main connection.
-  The roster is the FACT: a branch in it exists, a branch absent from
+(defn branches
+  "The store's branches, read through its main connection.
+  The branches are the FACT: a branch in it exists, a branch absent from
   it does not, whatever blobs are on disk
   (`reference-code/datahike/src/datahike/versioning.cljc:182-189`)."
-  {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/roster]}
+  {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/branches]}
   [store]
   (set (d/branches (:seon.store/connection-object store))))
 
@@ -125,7 +125,7 @@
 
 ;;; The connection's own konserve store instance. Two connections to one
 ;;; physical store hold DIFFERENT instances (gc_guard.cljc:47-50), which
-;;; is exactly why the roster mutation is serialized by store id in the
+;;; is exactly why the store's branches mutation is serialized by store id in the
 ;;; fork; for plain reads either instance answers the same bytes.
 (defn- konserve-store [store]
   (:store @(:seon.store/connection-object store)))
@@ -218,7 +218,7 @@
   ancestor's commit.
   Returns `{:seon.store/branch b :seon.cluster/created? true}` when this
   call created it and `::created? false` when the branch was already in
-  the roster — including when Datahike's own
+  the store's branches — including when Datahike's own
   `:branch-already-exists` (`versioning.cljc:233-235`) refuses a lost
   race, which is idempotence, not a failure.
   Refuses `::source-absent` (`::from` names no branch or commit)."
@@ -227,7 +227,7 @@
   [{:keys [:seon.store/store :seon.store/branch]
     source :seon.cluster.registry/from
     reachability-permit :datahike.gc-guard/reachability-permit}]
-  (if (contains? (roster store) branch)
+  (if (contains? (branches store) branch)
     {:seon.store/branch branch :seon.cluster/created? false}
     (try
       (if reachability-permit
@@ -242,7 +242,7 @@
       (catch clojure.lang.ExceptionInfo failure
         (case (:type (ex-data failure))
           ; a lost race is idempotence, not a failure: the branch the
-          ; caller asked for is in the roster (versioning.cljc:233-235)
+          ; caller asked for is in the store's branches (versioning.cljc:233-235)
           :branch-already-exists
           {:seon.store/branch branch :seon.cluster/created? false}
 
@@ -351,7 +351,7 @@
         :seon.error/expected target :seon.error/offending parent :seon.store/branch branch}))))
 
 (defn base-branch
-  "The roster ref holding a work branch's immutable merge base."
+  "The branches entry holding a work branch's immutable merge base."
   {:malli/schema [:=> [:cat :seon.store/branch] :seon.store/branch]}
   [branch]
   (keyword "base" (str (when-let [space (namespace branch)] (str space "/")) (name branch))))
@@ -420,10 +420,10 @@
 
 (defn ensure-cluster!
   "Ensure `:cluster-<name>` exists at the requested source commit.
-  Idempotent by the roster: a second call returns
+  Idempotent by the store's branches: a second call returns
   `::created? false` and writes nothing. Concurrent calls from N
   threads produce N branches and zero orphans — the fork's serialized
-  roster mutation is what makes that true, and it is a standing
+  branches mutation is what makes that true, and it is a standing
   regression, not an assumption.
   The source is an exact immutable commit ID, so publication can advance
   while this operation still forks the database value its caller chose.
@@ -484,18 +484,18 @@
       {:seon.store/branch branch :seon.cluster/created? true})))
 
 (defn retire-branch!
-  "Remove a branch and its retained base ref from the roster. Data survives until GC.
-  `delete-branch!` removes the roster entry only
+  "Remove a branch and its retained base ref from the store's branches. Data survives until GC.
+  `delete-branch!` removes the branch entry only
   (`versioning.cljc:279-320`); the bytes go when `collect!` runs, and a
-  branch absent from the roster is ALREADY DONE — Datahike's
+  branch absent from the store's branches is ALREADY DONE — Datahike's
   `:branch-does-not-exist` is the success path for a re-run, not an
   error (the mid-delete crash row).
   Translates Datahike's `:branch-has-active-connection` to
   `::cluster-connected` and `:cannot-delete-main-db-branch` to
   `::cannot-retire-main`. Descendant branches do
-  not prevent retirement: each remaining roster branch independently
+  not prevent retirement: each remaining branch independently
   roots its head and parent commits during collection
-  (`gc.cljc:22-81`), so deleting an ancestor's roster name cannot make
+  (`gc.cljc:22-81`), so deleting an ancestor's branch name cannot make
   a descendant lose data."
   {:malli/schema [:=> [:cat :seon.cluster.registry/retire-request] :nil]}
   [{:keys [:seon.store/store :seon.store/branch]}]
@@ -503,7 +503,7 @@
     (d/delete-branch! (:seon.store/connection-object store) branch)
     (catch clojure.lang.ExceptionInfo failure
       (case (:type (ex-data failure))
-        ; the roster is the fact: a branch already gone is already done
+        ; the branches are the fact: a branch already gone is already done
         :branch-does-not-exist nil
         :cannot-delete-main-db-branch
         (refuse! ::cannot-retire-main
@@ -514,7 +514,7 @@
                  (str "branch " branch " still has a connection in this process")
                  {::dir (:seon.store/dir store) :seon.store/branch branch})
         (throw failure))))
-  (when (contains? (roster store) (base-branch branch))
+  (when (contains? (branches store) (base-branch branch))
     (retire-branch! {:seon.store/store store :seon.store/branch (base-branch branch)}))
   nil)
 
@@ -541,7 +541,7 @@
       (finally (d/release-materialized-db db)))))
 
 (defn retire-unclaimed!
-  "Retire every roster branch no fact claims and no connection here holds.
+  "Retire every branch no fact claims and no connection here holds.
 
   Answers the retired set.
 
@@ -556,7 +556,7 @@
                   :seon.cluster.registry/retired]}
   [store claimed]
   (let [connection (:seon.store/connection-object store)
-        branches (roster store)
+        branches (branches store)
         claims (into (conj claimed :db) (mapcat #(cluster-claims connection %)) branches)
         held (into claims (filter #(branch-connected? store %)) branches)
         held (into held (map base-branch) held)
@@ -683,8 +683,8 @@
 
 (def plain-cutoff
   "The `remove-before` of the plain collection: the epoch, so Datahike marks
-  every roster branch's whole commit ancestry (`gc.cljc` `reachable-in-branch`
-  keeps every commit newer than it) and sweeps only what no roster branch
+  every branch's whole commit ancestry (`gc.cljc` `reachable-in-branch`
+  keeps every commit newer than it) and sweeps only what no branch
   reaches: an unlinked branch's commits and nodes. No commit a live branch, a
   held value on it or an adopted source commit names is pruned; retention
   pruning is a separate policy (`retention-cutoff`)."
@@ -724,7 +724,7 @@
   {:malli/schema [:=> [:cat :seon.store/store] :inst]}
   [store]
   (let [connection (:seon.store/connection-object store)
-        heads (branch-heads store (roster store))
+        heads (branch-heads store (branches store))
         observations
         (mapv
          (fn [{commit-id :seon.source/commit-id branch :seon.store/branch}]
@@ -749,7 +749,7 @@
                                                             (pr-str (:seon.config/cluster %)))
                                                       undeclared))
                                   ". Fix: apply a configuration declaring :seon.config.db/snapshot-window-ms to that cluster, or unlink its branch.")
-                             " No roster branch holds a cluster configuration."))
+                             " No branch holds a cluster configuration."))
                       {:seon.config/error-key :seon.config.db/snapshot-window-ms
                        :seon.config/rule :seon.config/required-absent
                        :seon.config/undeclared (mapv #(select-keys % [:seon.store/branch :seon.config/cluster])
@@ -763,7 +763,7 @@
   One owner per store — the process, never a cluster (§0.6 condition
   3) — and it runs where the writers are, which is this JVM
   (`gc.cljc:105-115`). Whole-store by nature: the mark is a union over
-  every roster branch, so the cost scales with total data and the
+  every branch, so the cost scales with total data and the
   isolation is structural.
 
   The one-and two-argument arities answer the swept count. The

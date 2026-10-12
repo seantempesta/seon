@@ -50,7 +50,7 @@
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "a-red-prepare-leaks-its-candidate-branch"
              :kind :function
-             :intent "A prepare whose proofs are red leaves its candidate branch (:merge-<id>) in the store roster; only a successful accept retires it, so each refused review leaks one branch. Done when the candidate's lifetime is the merge task's: retired when the task closes (accepted or declined) or when a new prepare replaces it."
+             :intent "A prepare whose proofs are red leaves its candidate branch (:merge-<id>) in the store's branches; only a successful accept retires it, so each refused review leaks one branch. Done when the candidate's lifetime is the merge task's: retired when the task closes (accepted or declined) or when a new prepare replaces it."
              :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/accept-merge!}
              :evidence #{"docs/seon/specs/merge.md"}}
  #:seon.task{:name "a-launch-option-change-in-deps-edn-refuses-every-check"
@@ -71,7 +71,7 @@
              :must-read #{my.program/write-branch! seon.cluster.source/write-back!}}
  #:seon.task{:name "merge-base-survives-collection"
              :kind :function
-             :intent "`seon.cluster.source/merge-base` reads the immutable commit held by `seon.cluster.registry/base-branch` through `datahike.api/commit-as-db`, preserving attributes without history. `seon.cluster.registry/fork!` creates that roster ref at the fork point (a nested fork inherits its parent's base toward the same target), `seon.cluster.registry/advance-base!` advances it to the accepted source value, and `seon.cluster.registry/retire-branch!` deletes it with its work branch. `datahike.gc/reachable-in-branch` always retains roster heads and their indexes; remove-before limits only parents. Missing fork entities or mismatched targets still refuse. Reused names receive fresh refs. Proofs: `seon.cluster.squash-test/a-base-ref-keeps-the-fork-commit-only-until-retirement`, `seon.cluster.squash-test/the-merge-base-retains-the-count-needed-by-add`, the existing registry retention and branch-name reuse tests, and nested merge comparison."
+             :intent "`seon.cluster.source/merge-base` reads the immutable commit held by `seon.cluster.registry/base-branch` through `datahike.api/commit-as-db`, preserving attributes without history. `seon.cluster.registry/fork!` creates that branches ref at the fork point (a nested fork inherits its parent's base toward the same target), `seon.cluster.registry/advance-base!` advances it to the accepted source value, and `seon.cluster.registry/retire-branch!` deletes it with its work branch. `datahike.gc/reachable-in-branch` always retains heads and their indexes; remove-before limits only parents. Missing fork entities or mismatched targets still refuse. Reused names receive fresh refs. Proofs: `seon.cluster.squash-test/a-base-ref-keeps-the-fork-commit-only-until-retirement`, `seon.cluster.squash-test/the-merge-base-retains-the-count-needed-by-add`, the existing registry retention and branch-name reuse tests, and nested merge comparison."
              :must-read #{seon.cluster.source/merge-base seon.cluster.source/compare-branch seon.cluster.source/accept-merge! seon.cluster.registry/fork! seon.cluster.registry/branch-fork-entity seon.cluster.registry/fork-of seon.cluster.registry/retention-cutoff}}
  #:seon.task{:name "write-back-of-a-new-require-analyses-the-published-snapshot"
              :kind :function

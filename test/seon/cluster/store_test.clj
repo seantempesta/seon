@@ -502,12 +502,12 @@
         (test-support/delete-recursively! (str (io/file dir-a) "/.."))
         (test-support/delete-recursively! (str (io/file dir-b) "/.."))))))
 
-(deftest an-overlay-roster-write-keeps-the-stores-branches
+(deftest an-overlay-branches-write-keeps-the-stores-branches
   ;; An overlay writes only its memory frontend. Its first :branches update ran
-  ;; before the frontend held the roster (a cold read warms it asynchronously),
+  ;; before the frontend held the store's branches (a cold read warms it asynchronously),
   ;; so it wrote only the new branch, and the late warm then replaced it with the
   ;; store's: a test world's request branch went missing ("branch :agent-… is
-  ;; absent from the store roster", task 8cc510a426f9). Fixed in konserve's
+  ;; absent from the store's branches", task 8cc510a426f9). Fixed in konserve's
   ;; tiered store (8700ca7).
   (let [dir (fresh-dir)]
     (try
@@ -518,7 +518,7 @@
             (try
               (k/update (:store @connection) :branches #(conj (set %) :agent-race) {:sync? true})
               (is (= #{:db :agent-race} (set (d/branches connection)))
-                  "an update of the uncached roster starts from the store's")
+                  "an update of the uncached branches starts from the store's")
               (finally (store/release-store! overlay))))
           (finally (store/release-store! held))))
       (finally
@@ -560,7 +560,7 @@
   ;; with a root inferred from the working directory
   ;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
   ;; The evidence is a scratch checkout this test BUILDS — a `data/store` with
-  ;; a real branch roster and a sentinel beside it. The pooled worker's own
+  ;; a real branches and a sentinel beside it. The pooled worker's own
   ;; checkout has no `data/store` at all, so asserting on it reads absence as
   ;; health; the scratch tree's bytes before and after are the observable.
   (let [dir (fresh-dir)
@@ -780,14 +780,14 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
-(deftest open-branch-refuses-what-the-roster-refutes
+(deftest open-branch-refuses-what-the-branches-refute
   (let [dir (fresh-dir)]
     (try
       (let [held (store/open-store! {:seon.store/dir dir})]
         (try
           (is (thrown? Exception
                        (store/open-branch! held :cluster-nowhere))
-              "a branch absent from the roster refuses")
+              "a branch absent from the store's branches refuses")
           (finally
             (store/release-store! held))))
       (finally

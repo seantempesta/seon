@@ -1,5 +1,5 @@
 (ns ^{:seon.test/platform
-       "Moving part: branch fork, roster publication, retirement, and reset."}
+       "Moving part: branch fork, branches publication, retirement, and reset."}
     seon.cluster.registry-test
   "Sealed acceptance for the branch-lifecycle registry (B2).
 
@@ -14,7 +14,7 @@
   ancestor is a real branch with real rows, the clusters are real
   branches with real writes, and the collection proof reads real
   on-disk bytes. `a-concurrent-create-wave-loses-nothing` is the
-  standing regression for the roster race the fork fixed (submodule
+  standing regression for the branches race the fork fixed (submodule
   `357ffc87`; before it, twelve concurrent creates reported eleven
   successes and landed nine — b2-plan §0.3)."
   (:require [clojure.java.io :as io]
@@ -239,21 +239,21 @@
             branch (registry/cluster-branch "alice")]
         (is (= branch (:seon.store/branch created)))
         (is (true? (:seon.cluster/created? created)))
-        (is (contains? (registry/roster opened) branch)
-            "the roster is the fact")
+        (is (contains? (registry/branches opened) branch)
+            "the store's branches is the fact")
         (testing "the cluster inherits every source entity"
           (let [connection (store/open-branch! opened branch)]
             (try
               (is (= #{"ancestral"} (markers connection)))
               (finally
                 (d/release connection)))))
-        (testing "a second ensure creates nothing and changes no roster"
-          (let [before (registry/roster opened)
+        (testing "a second ensure creates nothing and changes no branches"
+          (let [before (registry/branches opened)
                 again (registry/ensure-cluster!
                        (cluster-request opened "alice"))]
             (is (false? (:seon.cluster/created? again)))
             (is (= branch (:seon.store/branch again)))
-            (is (= before (registry/roster opened)))))))))
+            (is (= before (registry/branches opened)))))))))
 
 (deftest two-clusters-write-independently
   (with-source-store
@@ -281,7 +281,7 @@
 (deftest a-concurrent-create-wave-loses-nothing
   ;; The L6 scar at branch granularity: `branch!` used to read-modify-write
   ;; `:branches` unsynchronized, so a caller told :ok could find its cluster
-  ;; gone (b2-plan §0.3). The fork serializes roster mutation per store
+  ;; gone (b2-plan §0.3). The fork serializes branches mutation per store
   ;; (submodule 357ffc87); this is that fix's standing regression.
   (with-source-store
     (fn [opened]
@@ -295,11 +295,11 @@
                        names)
             _ (.countDown latch)
             results (mapv deref wave)
-            final (registry/roster opened)]
+            final (registry/branches opened)]
         (is (every? :seon.cluster/created? results)
             "every caller was told it created its cluster")
         (is (every? #(contains? final (registry/cluster-branch %)) names)
-            "and every cluster is in the roster — none silently lost")
+            "and every cluster is in the store's branches — none silently lost")
         (testing "each branch is genuinely usable, not an orphan head"
           (doseq [cluster-name names]
             (let [connection (store/open-branch!
@@ -361,7 +361,7 @@
           (is (= before
                  (registry/branch-commit-id
                   {:seon.store/store opened :seon.store/branch branch})))
-          (is (contains? (registry/roster opened) branch))
+          (is (contains? (registry/branches opened) branch))
           (let [reopened (store/open-branch! opened branch)]
             (try
               (is (= #{"ancestral" "prior"} (markers reopened)))
@@ -381,7 +381,7 @@
       (is (nil? (registry/retire-branch!
                  {:seon.store/store opened
                   :seon.store/branch (registry/cluster-branch "quiet-a")})))
-      (is (contains? (registry/roster opened)
+      (is (contains? (registry/branches opened)
                      (registry/cluster-branch "quiet-b"))
           "the sibling is untouched")
       (is (true? (:seon.cluster/created?
@@ -417,7 +417,7 @@
           (is (zero? (:seon.cluster.registry/swept result)))
           (is (= before (set (map :key (k/keys konserve {:sync? true})))))
           (is (= bytes-before (store-bytes (:seon.store/dir opened))))
-          (is (= (sort-by str (registry/roster opened))
+          (is (= (sort-by str (registry/branches opened))
                  (mapv :seon.store/branch (:seon.cluster.registry/branches result)))))))))
 
 (deftest implicit-retention-requires-declared-cluster-windows
@@ -478,8 +478,8 @@
             doomed (registry/cluster-branch "doomed")]
         (is (nil? (registry/retire-branch! {:seon.store/store opened
                                             :seon.store/branch doomed})))
-        (is (not (contains? (registry/roster opened) doomed))
-            "the roster is the fact — the branch is gone before any sweep")
+        (is (not (contains? (registry/branches opened) doomed))
+            "the store's branches is the fact — the branch is gone before any sweep")
         (let [collected (registry/collect! opened (java.util.Date. 0) {})
               swept (:seon.cluster.registry/swept collected)]
           (is (pos? swept) "the doomed tail was reclaimed")
@@ -517,7 +517,7 @@
   ;; The claim `:seon.config.maintenance/collect?` waited on: a collection
   ;; loses no node an open branch, a held database value or an in-flight
   ;; transaction reads. The plain collection (`registry/plain-cutoff`) keeps
-  ;; every roster branch's whole ancestry, so a held value and a non-head
+  ;; every branch's whole ancestry, so a held value and a non-head
   ;; commit named as an adopted source stay whole while a retired branch goes.
   (with-source-store
     (fn [opened]
@@ -606,7 +606,7 @@
                                           :seon.store/branch source-branch})]
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch source-branch})))
-          (is (not (contains? (registry/roster opened) source-branch)))
+          (is (not (contains? (registry/branches opened) source-branch)))
           (is (pos? (registry/collect! opened (java.util.Date. 0))))
           (let [connection (store/open-branch!
                             opened (registry/cluster-branch "alice"))]
@@ -634,7 +634,7 @@
 
 (deftest boot-retires-only-branches-no-fact-claims
   ;; A dead process's branches have no owner left to release them, so each
-  ;; would root its data forever (90 of 99 roster branches, 2026-09-26). The
+  ;; would root its data forever (90 of 99 branches, 2026-09-26). The
   ;; claims are facts: the cluster branch, each open agent entity's branch on it,
   ;; and the caller's declared branches. A fork inherits the cluster's name
   ;; entity, so it must not read as a cluster; a connected branch is never taken.
@@ -657,7 +657,7 @@
           (is (= #{:agent-closed :agent-orphan}
                  (registry/retire-unclaimed! opened #{source-branch})))
           (is (= #{:db source-branch cluster :agent-open :agent-held}
-                 (registry/roster opened)))
+                 (registry/branches opened)))
           (is (= #{} (registry/retire-unclaimed! opened #{source-branch}))
               "a second pass finds nothing")
           (finally
@@ -796,7 +796,7 @@
 
 (deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
   a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
-  ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every roster head; an end copy is a plain
+  ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every head; an end copy is a plain
   ;; transaction with no parent link, so a deleted attempt's commits and nodes reach nothing and are swept.
   (with-program-store
    (fn [store connection]

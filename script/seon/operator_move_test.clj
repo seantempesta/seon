@@ -185,7 +185,7 @@
                                          (second (second %)))
                                       (tree-seq coll? seq form)))]
     (is (contains? (symbols with-capture) 'seon.cluster.registry/branch-commit-id)
-        "the child reads every head from the roster")
+        "the child reads every head from the store's branches")
     (is (not (contains? (symbols without) 'seon.cluster.registry/branch-commit-id))
         "a start or nuke reads none")
     (is (= "default" (:seon.boot/cluster-name (boot-request with-capture))))

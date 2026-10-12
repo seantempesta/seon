@@ -2,7 +2,7 @@
                           [:boolean
                            {:seon.config/optional true,
                             :seon.config/dial true,
-                            :description "Whole-store collection runs only when true; absent means off. The shipped decision (config/default.edn) is true: the plain collection keeps every roster branch's whole ancestry and sweeps only what no roster branch reaches, proven against a held value, a non-head adopted commit and a concurrent writer."}],
+                            :description "Whole-store collection runs only when true; absent means off. The shipped decision (config/default.edn) is true: the plain collection keeps every branch's whole ancestry and sweeps only what no branch reaches, proven against a held value, a non-head adopted commit and a concurrent writer."}],
                           :log-max-bytes
                           [:int {:min 1, :seon.config/dial true}],
                           :log-retained-files

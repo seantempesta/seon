@@ -317,7 +317,7 @@
 (defn- collection-evidence
   {:malli/schema [:=> [:cat :seon.store/store] [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]]]}
   [operation-store]
-  (let [branches (sort-by str (registry/roster operation-store))]
+  (let [branches (sort-by str (registry/branches operation-store))]
     {:seon.operator.collect/branches
      (mapv (fn [branch]
              {:seon.store/branch branch
@@ -375,7 +375,7 @@
   "Verify every recorded root and NAME the first one that fails.
 
   This is the collection's completeness criterion, and the only one: a
-  collection is complete when every roster branch reopens at its recorded
+  collection is complete when every branch reopens at its recorded
   commit ID and every referenced blob this store HELD BEFORE the sweep still
   reads physically. It answers a value rather than a bare boolean so the
   refusal can say WHICH root — the branch, or the digest — was not preserved.

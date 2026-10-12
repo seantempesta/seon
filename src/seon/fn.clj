@@ -861,7 +861,7 @@
         ;; ONE declaration of destructiveness, at the definition: what this
         ;; function deletes that it did not create. Every consumer derives
         ;; from it by `:seon.fn/calls` reach (`seon.test/host`), so no
-        ;; roster of destructive owners or destructive tests exists.
+        ;; list of destructive owners or destructive tests exists.
         (and (string? destroys) (not (str/blank? destroys)))
         (assoc :seon.fn/destroys destroys)
         capability-declared?

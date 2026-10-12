@@ -270,7 +270,7 @@
   "The execution handle the agent entrance retains for `connection`, or nil.
 
   `seon.cluster.agent/acquire-context!` keeps every handle it acquires in the
-  roster its environment carries; the connection's carried projection
+  registry its environment carries; the connection's carried projection
   state is that environment. No registry beside it is consulted."
   {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]]
                   [:or :nil :seon.agent/execution-handle]]}
@@ -332,7 +332,7 @@
 (defn fork-cluster-ctx
   "Fork the executing handle's context onto `connection` through the production fork.
   Custody, projection and environment repointing belong to sci.eval; a named
-  cluster environment keeps the entrance's roster and held store."
+  cluster environment keeps the entrance's registry and held store."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/connection] :seon.sci.eval/ctx]
                   [:=> [:cat :seon.db/connection [:maybe :seon.boot/cluster-name]]
@@ -969,7 +969,7 @@
 
 (defn- with-fresh-database
   "Run `body` on an independent, empty in-memory store carrying the executing
-  program's installed attribute schema. Blob keys, roster and GC are
+  program's installed attribute schema. Blob keys, branches and GC are
   store-global, so a subject over them needs a store, not a branch; its
   program facts are the test's own writes."
   {:malli/schema [:=> [:cat [:or :nil :uuid :string] [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
@@ -1357,7 +1357,7 @@
                      :seon.db.process/id cluster/boot-process-identity})
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (transacted! connection (agent-tx @connection agent-id))
-        ;; The roster holds declared instances only (`:seon.boot/instance`),
+        ;; The registry holds declared instances only (`:seon.boot/instance`),
         ;; read by status and the MCP entrance: boot's own constructor builds
         ;; this one over its own listener, so stopping it closes no live one.
         (swap! operator.runtime/running-instances assoc running

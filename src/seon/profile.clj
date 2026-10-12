@@ -115,13 +115,13 @@
   (reify java.util.function.Function
     (apply [_ _] (LongAdder.))))
 
-;; The roster of live cells, keyed by executed definition `[sym digest]` (a
+;; The registry of live cells, keyed by executed definition `[sym digest]` (a
 ;; nil digest is unknown), each key's cells held weakly: a cell is reachable
 ;; from its wrapper's metadata, so a replaced wrapper or a released SCI
 ;; context releases its cell. One key has one cell per scope and context
 ;; (2,563 live cells over 2,560 keys, 2026-09-28). Written at installation
 ;; only; read by `cells` and `cells-of`.
-(defonce ^:private roster (ConcurrentHashMap.))
+(defonce ^:private cells-by-key (ConcurrentHashMap.))
 
 (def ^:private ^java.util.function.Function new-member-set
   (reify java.util.function.Function
@@ -146,7 +146,7 @@
                         :seon.profile/entry-counter (LongAdder.)
                         :seon.profile/throw-counts (ConcurrentHashMap.)
                         :seon.profile/entered (ThreadLocal.)})]
-    (.add ^java.util.Set (.computeIfAbsent ^ConcurrentHashMap roster
+    (.add ^java.util.Set (.computeIfAbsent ^ConcurrentHashMap cells-by-key
                                            [(:seon.profile/sym created) (:seon.profile/digest created)]
                                            new-member-set)
           created)
@@ -352,13 +352,13 @@
   []
   ;; a synchronized set's toArray holds its own lock
   (into [] (mapcat (fn [^java.util.Set members] (.toArray members)))
-        (.values ^ConcurrentHashMap roster)))
+        (.values ^ConcurrentHashMap cells-by-key)))
 
 (defn cells-of
   "The live cells of the executed definition `[sym digest]`."
   {:malli/schema [:=> [:cat :seon.batch/executed-key] [:vector :seon.profile/cell]]}
   [executed-key]
-  (if-let [^java.util.Set members (.get ^ConcurrentHashMap roster executed-key)]
+  (if-let [^java.util.Set members (.get ^ConcurrentHashMap cells-by-key executed-key)]
     (vec (.toArray members))
     []))
 
@@ -449,7 +449,7 @@
   "The scope of an executed definition's live cells."
   {:malli/schema [:=> [:cat :seon.batch/executed-key] :seon.profile/scope]}
   [executed-key]
-  (let [^java.util.Set members (.get ^ConcurrentHashMap roster executed-key)]
+  (let [^java.util.Set members (.get ^ConcurrentHashMap cells-by-key executed-key)]
     (if (and members
              (some #(= :seon.profile/context (:seon.profile/scope %)) (.toArray members)))
       :seon.profile/context
@@ -668,7 +668,7 @@
                                                 (assoc! m sym [(+ n n0) (+ self0 (.sum ^LongAdder (:seon.profile/self-counter held)))])
                                                 m)))
                                           m (.toArray members)))
-                                (transient {}) (.values ^ConcurrentHashMap roster))))
+                                (transient {}) (.values ^ConcurrentHashMap cells-by-key))))
         window-before (seon.batch/jvm-counters)
         entries-before (entries)
         [gc-before gc-ms-before] (collected)

@@ -168,7 +168,7 @@
         (is (nil? (:db/id (db/pull (db/db connection) [:db/id] probe))) "the parent never sees the entity")
         (is (identical? (:seon.agent/routing hosted)
                         (get-in @(:seon.agent/routing handle) [:seon.agent/children branch]))
-            "the host lives in the child roster the parent records")))))
+            "the host lives in the child registry the parent records")))))
 
 (deftest a-definition-whose-body-expands-macros-persists
   ;; Before (2026-09-28 dogfood loop), a defn whose body used cond-> or case
@@ -198,7 +198,7 @@
         (is (nil? (host/retire! hosted)))
         (is (some? (:seon.agent/admission-closed-tx
                     (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
-        (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
+        (is (nil? (host/hosted handle branch)) "the parent registry no longer records the host")))))
 
 (deftest stopping-the-cluster-releases-every-host-connection
   ;; A reset stops the instance in this JVM: a host left running kept its
@@ -712,7 +712,7 @@
               resumed (host/hosted handle branch)
               branch-connection (get-in resumed [:seon.turn.loop/cluster :seon.db/connection])]
           (is (:seon.message/id sent) "the message was written")
-          (is (some? resumed) "the send hosted the agent on the cluster roster")
+          (is (some? resumed) "the send hosted the agent on the cluster registry")
           (when branch-connection
             (support/await-event! branch-connection ::resumed
                                   (fn [_] (< 1 (closed-runs-of @branch-connection "mcp/sleeper"))))
@@ -771,7 +771,7 @@
       (let [_ (sender! connection "orphan-sender")
             branch (branch!)]
         (is (nil? (host/stop! (host-on! handle branch "mcp/orphan"))))
-        ;; the roster deletion alone, as root's retirements before the fix left it
+        ;; the branches deletion alone, as root's retirements before the fix left it
         (registry/retire-branch! {:seon.store/store (:seon.store/store handle) :seon.store/branch branch})
         (is (= branch (:seon.cluster.store/branch-absent
                        (send-from-cluster! handle connection "orphan-sender"

@@ -14,7 +14,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "a-firing-to-a-live-agent-is-a-wake-and-to-none-an-attempt"
              :kind :function
-             :intent "Card C2. A firing of a cron task without a function: when the task's agent has a graph in the roster the firing is a listened fact (`:seon.task.fire/to`) and its wake; otherwise an attempt child by identity [task fire-at] that the reconciler launches; a refused delivery (`seon.cluster.wake/delivery`) writes the problem task."
+             :intent "Card C2. A firing of a cron task without a function: when the task's agent has a graph in the registry the firing is a listened fact (`:seon.task.fire/to`) and its wake; otherwise an attempt child by identity [task fire-at] that the reconciler launches; a refused delivery (`seon.cluster.wake/delivery`) writes the problem task."
              :must-read #{seon.cluster.wake/route! seon.cluster.wake/delivery seon.schedule/fire-due!}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
  #:seon.task{:name "the-per-agent-schedule-proc-is-deleted"

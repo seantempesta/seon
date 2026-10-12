@@ -213,7 +213,7 @@
                     [?collection :seon.operator.collect/swept-objects ?swept]
                     [?collection :seon.operator.collect/complete? ?complete]]
                   @connection))))
-        (testing "the collection's retained roster rides the same component"
+        (testing "the collection's retained branches ride the same component"
           (is (= #{[:cluster-retired
                     (UUID/fromString
                      "00000000-0000-0000-0000-000000000102")]}

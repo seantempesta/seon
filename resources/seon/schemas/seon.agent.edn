@@ -20,7 +20,7 @@
   [:seon.agent/mode :seon.agent/mode]
   [:seon.agent/owns-connection? :boolean]
   [:seon.agent/owns-branch? :boolean]
-  [:seon.agent/routing {:description "The roster this execution's contexts are held in and its graphs arm in; release stops and joins them before it closes."} :seon.agent/routing]
+  [:seon.agent/routing {:description "The registry this execution's contexts are held in and its graphs arm in; release stops and joins them before it closes."} :seon.agent/routing]
   [:seon.store/store {:optional true} :seon.store/store]]
  :acquisition-options [:map
   [:seon.agent/branch {:optional true} :seon.agent/branch]
@@ -151,7 +151,7 @@
                       :seon.db/ref],
                      :routing
                      [:fn
-                      {:description "One execution's roster: armed graphs and mailboxes, held contexts by [branch agent-id], and the rosters of branches acquired through it."
+                      {:description "One execution's registry: armed graphs and mailboxes, held contexts by [branch agent-id], and the registries of branches acquired through it."
                        :error/message
                        "must be a process-local atom containing agent routing state"
                        :gen/gen seon.flow/atom-reference-generator}

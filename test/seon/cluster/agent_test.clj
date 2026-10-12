@@ -1002,7 +1002,7 @@
                 (is (some? (agent/started routing "stuck")) "the refusing graph keeps its routing")
                 (is (string? (:seon.agent/id (db/pull @child [:seon.agent/id] [:seon.agent/id "stuck"])))
                     "the branch connection stays open for diagnosis")
-                (is (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt)))
+                (is (contains? (registry/branches (:seon.store/store attempt)) (:seon.agent/branch attempt)))
                 (is (= :seon.agent/routing
                        (:seon.error/expected (test-support/refusal-data #(start "idle"))))
                     "a releasing attempt starts no new graph"))
@@ -1011,11 +1011,11 @@
                                      5000 java.util.concurrent.TimeUnit/MILLISECONDS))
               (is (nil? (agent/release-context! attempt)) "a later release finishes")
               (is (nil? (agent/started routing "stuck")))
-              (is (not (contains? (registry/roster (:seon.store/store attempt))
+              (is (not (contains? (registry/branches (:seon.store/store attempt))
                                   (:seon.agent/branch attempt))))))
           (finally
             (.release release-provider 1000)
-            (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
+            (when (contains? (registry/branches (:seon.store/store attempt)) (:seon.agent/branch attempt))
               (agent/release-context! attempt))))))))
 
 (deftest ^{:seon.test/long "Two isolated-attempt starts as the release test above (starting measured 1,495 ms there), then a release that joins both idle graphs."
@@ -1060,15 +1060,15 @@
           (is (= {} (:seon.agent/started @routing)))
           (is (= :seon.agent/routing (:seon.error/expected (test-support/refusal-data #(start "racer-b"))))
               "a late start refuses the released routing by name")
-          (is (not (contains? (registry/roster (:seon.store/store attempt))
+          (is (not (contains? (registry/branches (:seon.store/store attempt))
                               (:seon.agent/branch attempt)))))
           (finally
-            (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
+            (when (contains? (registry/branches (:seon.store/store attempt)) (:seon.agent/branch attempt))
               (agent/release-context! attempt))))))))
 
 (deftest releasing-an-execution-releases-the-executions-acquired-through-it
-  ;; Astra roster E2: release detached A's roster while B, acquired through A,
-  ;; kept its connection and branch outside every reachable roster.
+  ;; Astra registry E2: release detached A's registry while B, acquired through A,
+  ;; kept its connection and branch outside every reachable registry.
   (test-support/with-database
    (fn [connection]
      (let [parent (test-support/execution-handle connection)
@@ -1081,17 +1081,17 @@
          (is (identical? (:seon.agent/routing b)
                          (get-in @(:seon.agent/routing a) [:seon.agent/children (:seon.agent/branch b)])))
          (is (nil? (agent/release-context! a)))
-         (is (not-any? (registry/roster store) [(:seon.agent/branch a) (:seon.agent/branch b)])
+         (is (not-any? (registry/branches store) [(:seon.agent/branch a) (:seon.agent/branch b)])
              "both owned branches are retired")
          (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch (:seon.agent/branch b)}))
              "the descendant's connection is released")
-         (is (= ::agent/roster-released
+         (is (= ::agent/registry-released
                 (::agent/refused (test-support/refusal-data
                                   #(agent/acquire-context! a nil {:seon.agent/branch (:seon.agent/branch a)}))))
              "a released execution claims nothing more")
          (finally
            (doseq [execution [b a]
-                   :when (contains? (registry/roster store) (:seon.agent/branch execution))]
+                   :when (contains? (registry/branches store) (:seon.agent/branch execution))]
              (agent/release-context! execution))))))))
 
 (deftest concurrent-acquisitions-of-one-key-build-once
@@ -1101,12 +1101,12 @@
    (fn [connection]
      (test-support/transacted! connection (created-agent-tx connection "shared-acquisition" "shared"))
      (let [parent (test-support/execution-handle connection)
-           roster (:seon.agent/routing parent)
+           registry (:seon.agent/routing parent)
            key [(live-branch connection) "shared"]
            reservations (atom 0)
            both-reserved (CountDownLatch. 1)
            watch-key (Object.)
-           _ (add-watch roster watch-key
+           _ (add-watch registry watch-key
                         (fn [_ _ _ held]
                           (when (:seon.cluster.agent/acquiring (get-in held [:seon.agent/contexts key]))
                             (case (swap! reservations inc)
@@ -1115,10 +1115,10 @@
                               nil))))
            acquisitions (try (mapv deref (mapv (fn [_] (future (agent/acquire-context! parent "shared")))
                                                (range 2)))
-                             (finally (remove-watch roster watch-key)))]
+                             (finally (remove-watch registry watch-key)))]
        (is (identical? (first acquisitions) (second acquisitions))
            "same-key callers share one acquisition")
-       (is (identical? (first acquisitions) (get-in @roster [:seon.agent/contexts key]))
+       (is (identical? (first acquisitions) (get-in @registry [:seon.agent/contexts key]))
            "the settled entry is the shared handle, with no reservation left")))))
 
 (deftest turn-start-has-the-same-declared-loud-completion-backstop

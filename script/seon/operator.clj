@@ -370,8 +370,8 @@
 
 (defn- head-capture-form
   "The child's read of every branch head of the store at `store-dir`, before
-  its boot writes anything: `{branch commit-id}` from the roster
-  (`seon.cluster.registry/roster`, `branch-commit-id`), or the full cause. On
+  its boot writes anything: `{branch commit-id}` from the store's branches
+  (`seon.cluster.registry/branches`, `branch-commit-id`), or the full cause. On
   success the store stays held (`seon.cluster/acquire-root-store!` counts
   holders), so the boot's own acquisition reuses it instead of opening it a
   second time; the launch form releases this holder once boot answers."
@@ -385,7 +385,7 @@
           (into {} (map (fn [branch#]
                           [branch# ((resolve '~'seon.cluster.registry/branch-commit-id)
                                     {:seon.store/store store# :seon.store/branch branch#})]))
-                ((resolve '~'seon.cluster.registry/roster) store#))
+                ((resolve '~'seon.cluster.registry/branches) store#))
           :seon.operator/store-read-ms (quot (- (System/nanoTime) began#) 1000000)}
          (catch Throwable cause#
            ((resolve '~'seon.cluster/release-root-store!) ~store-dir)
@@ -1393,7 +1393,7 @@
                                            (= store-id# (get-in config# [:store :id])))]
                           (datahike.api/release held# true))
                         (datahike.api/delete-branch! connection# branch#))
-             now# (into {} (map (juxt identity head#)) (seon.cluster.registry/roster store#))
+             now# (into {} (map (juxt identity head#)) (seon.cluster.registry/branches store#))
              restored#
              (into []
                    (keep (fn [[branch# commit#]]
@@ -1408,7 +1408,7 @@
          (run! unlink!# unlinked#)
          {:seon.operator/restored restored# :seon.operator/unlinked unlinked#
           :seon.operator/heads-after (into {} (map (juxt identity head#))
-                                           (seon.cluster.registry/roster store#))})
+                                           (seon.cluster.registry/branches store#))})
        (finally (seon.cluster/release-root-store! ~store-dir)))))
 
 (defn- restore-heads!

@@ -19,8 +19,8 @@
     (is (true? (:seon.agent/owns-branch? handle)))
     (is (identical? (:seon.db/connection handle) db/*conn*)
         "a host test body runs under its own member branch's custody, never an inherited one")
-    (is (contains? (registry/roster store) (:seon.agent/branch handle))
-        "the member's branch is on the store roster while its body runs")))
+    (is (contains? (registry/branches store) (:seon.agent/branch handle))
+        "the member's branch is on the store's branches while its body runs")))
 
 (defn- define-agent-test!
   "Evaluate one deftest as an agent does and write its canonical declaration entity."
@@ -84,7 +84,7 @@
            (is (= 1 (count (set (map :seon.test.member/completed-tx (:seon.test/results result)))))
                "the request records its two executed members in one batch transaction")
            (is (= 2 (count (set branches))))
-           (is (not-any? (set (registry/roster store)) branches)
+           (is (not-any? (set (registry/branches store)) branches)
                "every member branch is unlinked once its body exits")
            (is (empty? (db/q '[:find [?m ...] :where [_ :seon.test.one-request-test/marker ?m]]
                              (db/db connection)))
@@ -260,7 +260,7 @@
          (is (pos? (:seon.test/error-count (first (:seon.test/results result)) 0)))
          ;; Only this request's own branches: other lanes acquire on the same store.
          (is (= 1 (count branches)))
-         (is (not-any? (set (registry/roster store)) branches)
+         (is (not-any? (set (registry/branches store)) branches)
              "the member branch is unlinked after its resolution failed"))))))
 
 (deftest ^{:seon.test/long "One request over three indexed members in batches of two: 24.0 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed config-transaction and per-connection projection costs."

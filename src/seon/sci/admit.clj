@@ -326,7 +326,7 @@
       (string? value)
       {::node (string-leaf! state value)}
 
-      ;; A registry predicate, not a class roster, decides which reference
+      ;; A registry predicate, not a class list, decides which reference
       ;; values are identities in data. The identity itself re-enters this
       ;; walk; the reference's structural fields never do.
       @identity-projection

@@ -112,7 +112,7 @@
                 "Publication and branch-head races require a private physical store."})
          (let [opened (store/open-store! {:seon.store/dir dir})]
            (try
-             (doseq [branch (remove #{:db source/current-branch} (registry/roster opened))]
+             (doseq [branch (remove #{:db source/current-branch} (registry/branches opened))]
                (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch}))
              (let [connection (store/open-branch! opened source/current-branch)]
                (try
@@ -177,7 +177,7 @@
 (defn- scratch-branches
   [opened]
   (filter #(str/starts-with? (name %) "building-source-")
-          (registry/roster opened)))
+          (registry/branches opened)))
 
 (defn- refusal
   [thunk]
@@ -236,7 +236,7 @@
                (get-in result [:seon.source/transaction-result :seon.error/offending
                                :tx-data 0 :seon.source/digest]))
             "the refused write is the seal of this publication")
-        (is (= #{:db :current-src} (set (registry/roster opened))))
+        (is (= #{:db :current-src} (set (registry/branches opened))))
         (is (empty? (scratch-branches opened)))))))
 
 (deftest ^{:seon.test/fixture-observation

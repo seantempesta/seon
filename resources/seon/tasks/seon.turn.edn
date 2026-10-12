@@ -232,7 +232,7 @@
              :must-read #{my.task/send-back! seon.turn/task-end seon.turn/end-task-call seon.turn/sent-back-to seon.task/ready}}
  #:seon.task{:name "a-closed-attempt-releases-its-connection-before-branch-deletion"
              :kind :function
-             :intent "`seon.task/close!` closes an attempt's merge request through `seon.task/delete-branch!` and `my.agent/retire-branch!`: stop its graph, await actual exit through `seon.cluster.agent/stop-flow!`, release its owned connection through `seon.cluster.agent/release-context!`, then `seon.cluster.registry/retire-branch!` deletes its branch. R1 attempts run without a host; retirement finds the branch's own roster as well as a child roster. No branch, open connection or recorded error remains after closure."
+             :intent "`seon.task/close!` closes an attempt's merge request through `seon.task/delete-branch!` and `my.agent/retire-branch!`: stop its graph, await actual exit through `seon.cluster.agent/stop-flow!`, release its owned connection through `seon.cluster.agent/release-context!`, then `seon.cluster.registry/retire-branch!` deletes its branch. R1 attempts run without a host; retirement finds the branch's own registry as well as a child registry. No branch, open connection or recorded error remains after closure."
              :must-read #{seon.task/close! seon.task/delete-branch! my.agent/retire-branch! seon.cluster.agent/stop-flow! seon.cluster.agent/release-context! seon.cluster.registry/retire-branch!}
              :evidence #{"docs/research/agent-platform/2026-10-11/hybrid-agent-world.md"}}
  #:seon.task{:name "an-eval-request-on-an-unchanged-program-forks-nothing"

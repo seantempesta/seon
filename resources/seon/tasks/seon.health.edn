@@ -4,6 +4,6 @@
              :must-read #{seon.health/report}}
  #:seon.task{:name "a-stale-heartbeat-reads-unknown"
              :kind :function
-             :intent "Card C3. The heartbeat is a cron task with a function: ping every graph in the roster and its child rosters, write `:seon.agent/observed` only when it changed, write `:seon.cluster/heartbeat-t` per period; health reads an observation or heartbeat older than two periods as unknown; the reconciler never reads it. Period a dial `:seon.config.cluster/heartbeat-ms`, never under 10 s."
+             :intent "Card C3. The heartbeat is a cron task with a function: ping every graph in the registry and its child registries, write `:seon.agent/observed` only when it changed, write `:seon.cluster/heartbeat-t` per period; health reads an observation or heartbeat older than two periods as unknown; the reconciler never reads it. Period a dial `:seon.config.cluster/heartbeat-ms`, never under 10 s."
              :must-read #{seon.health/report seon.cluster.status/snapshot}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]

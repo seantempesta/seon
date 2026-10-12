@@ -57,7 +57,7 @@
         (:seon.store/connection-object opened)
         source/current-branch)))
      "published history follows prior current-src, not scratch")
-    (is (= #{:db :current-src} (registry/roster opened)))
+    (is (= #{:db :current-src} (registry/branches opened)))
     (is (empty? ((deref #'source-test/scratch-branches) opened)))
     (is
      (=

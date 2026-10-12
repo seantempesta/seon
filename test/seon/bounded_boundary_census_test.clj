@@ -5,7 +5,7 @@
             [clojure.test :refer [deftest is testing]]
             [rewrite-clj.zip :as z]))
 
-;; These are ownership roots, not a maintained member roster. Every boundary
+;; These are ownership roots, not a maintained member list. Every boundary
 ;; form beneath them is derived from syntax on each run.
 (def ^:private production-roots
   ["resources/seon/operator"

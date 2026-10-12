@@ -51,7 +51,7 @@
   [:seon.profile/ordinal :seon.profile/ordinal]
   [:seon.profile/cold-calls {:optional true} :seon.profile/cold-calls]]
  :seon.profile/held-cell
- [:map {:description "A live roster member as a read answers it. seon.profile/cell, the roster's only writer, checked its counters when it made the cell, so a read checks the cell's identity only."}
+ [:map {:description "A live registry member as a read answers it. seon.profile/cell, the registry's only writer, checked its counters when it made the cell, so a read checks the cell's identity only."}
   [:seon.profile/sym :seon.profile/sym]
   [:seon.profile/digest {:optional true} :seon.profile/digest]
   [:seon.profile/scope :seon.profile/scope]

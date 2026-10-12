@@ -354,7 +354,7 @@
         (is (= 19
                (:seon.config.flow.io/queue-depth
                 (config/default-decisions)))
-            "a packaged resource wins without copying the decision roster"))
+            "a packaged resource wins without copying the decision list"))
       (finally
         (.delete packaged-file)
         (.delete directory)))))

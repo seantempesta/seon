@@ -28,9 +28,9 @@
   suite's roots and bounds over it.
 
   `seon.fs.jvm`'s handlers take `:seon.config/effective` — the whole compiled
-  decision set — so a hand-rostered map of the eight `:seon.config.fs/*` dials
+  decision set — so a hand-listed map of the eight `:seon.config.fs/*` dials
   this suite happens to read is a shape the declared contract forbids
-  (AGENTS §5: never hand-roster; hand what production hands). The shipped
+  (AGENTS §5: never hand-list; hand what production hands). The shipped
   defaults are compiled here and only the dials this suite varies are
   changed, so a new config member never silently drops out of coverage."
   [root]

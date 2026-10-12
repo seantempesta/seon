@@ -2701,7 +2701,7 @@
         ms #(/ (- (System/nanoTime) %) 1000000.0)
         target {:seon.store/store held-store :seon.store/branch branch}
         head (db/commit-id (db/db (:seon.db/connection source)))
-        held? (contains? (registry/roster held-store) branch)]
+        held? (contains? (registry/branches held-store) branch)]
     (when-not (and held? (= head (registry/branch-commit-id target)))
       (when held? (registry/retire-branch! target))
       (registry/branch! (assoc target :seon.cluster.registry/from head)))

@@ -62,7 +62,7 @@
                 :flow [:or [:enum :unknown] :map],
                 :advertisements [:vector :seon.boot/advertisement],
                 :exception-class :symbol,
-                :branches :seon.cluster.registry/roster,
+                :branches :seon.cluster.registry/branches,
                 :command
                 [:enum
                  :start

@@ -498,7 +498,7 @@
               connection {"a" [#{} source]}
               (fn [handle]
                 (let [facts (cluster.agent/plan-facts (db/db connection))
-                      actions (cluster.agent/plan facts (cluster.agent/roster-facts (:seon.agent/routing handle)) 1)
+                      actions (cluster.agent/plan facts (cluster.agent/registry-facts (:seon.agent/routing handle)) 1)
                       _ (cluster.agent/apply-plan! handle (:seon.agent/routing handle) facts
                                                    (mapv #(cond-> % (= :start-flow (:seon.flow.plan/op %))
                                                             (assoc :seon.task/execution :paused)) actions))

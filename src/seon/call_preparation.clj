@@ -9,7 +9,7 @@
   runtime hands to a call for an argument the callee's contract DECLARES and
   the caller OMITTED. The function's own `:malli/schema` is the complete
   request; there is no function-side injection metadata, no annotation, and
-  no roster.
+  no list.
 
   Three facts make a value suppliable, and they live in the database as
   ordinary initialization rows: `:seon.call-preparation/key`,

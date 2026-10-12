@@ -789,7 +789,7 @@
           :else view)))
 
 (defonce ^:private retire-branch!
-  ;; my.agent closes a branch's agent before its roster entry goes; a my namespace is never required here
+  ;; my.agent closes a branch's agent before its branch is deleted; a my namespace is never required here
   (delay (requiring-resolve 'my.agent/retire-branch!)))
 
 (defonce ^:private submit-work!
@@ -888,7 +888,7 @@
   intent never appears and nothing launches by being read here), not done, without a terminal end other
   than :done, minus those a need blocks.
   Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
-  hundred times more. A leaf with an open attempt stays in it; the roster tells running from launch."
+  hundred times more. A leaf with an open attempt stays in it; the registry tells running from launch."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
   [database]
   (let [eligible (db/q '[:find ?t ?h :in $ % :where [?t :seon.task/execution :running]

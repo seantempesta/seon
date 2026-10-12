@@ -67,7 +67,7 @@
   "A projection carrying the canonical declaration population PLUS this
   suite's synthetic keys.
 
-  AGENTS §5.1: never hand-roster schema. A projection built from a bare
+  AGENTS §5.1: never hand-list schema. A projection built from a bare
   `{probe-key form}` map is not a smaller world, it is a BROKEN one — every
   instrumented `seon.schema` call made against it has to compile its OWN
   contract (`:seon.schema/registry-key` and friends) out of a population that
@@ -174,7 +174,7 @@
   (let [projection (probe-projection {base-key :int})
         ;; The invariant is that STAGING does not mutate the source
         ;; projection — not that the source happens to hold one key. Comparing
-        ;; against a literal one-key map asserted the hand-rostered population
+        ;; against a literal one-key map asserted the hand-listed population
         ;; instead, which is the thing the probe projection stopped being.
         entering (:seon.schema.projection/forms projection)
         delta (schema/begin-registration-delta projection)]

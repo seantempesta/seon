@@ -15,7 +15,7 @@
 
 (defn- policy
   "The COMPLETE effective config `seon.edit.jvm/edit` declares, with this
-  suite's roots and bounds over it. A hand-rostered map of the three dials
+  suite's roots and bounds over it. A hand-listed map of the three dials
   this suite reads is a shape the declared contract forbids."
   [root]
   (assoc config/defaults

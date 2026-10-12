@@ -1886,7 +1886,7 @@
                      :seon.batch/text "(my.agent/branches)"})
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
        (is (contains? (:seon.batch/value entry) :my.agent/roster)
-           "the one-argument call answers the store's roster")))))
+           "the one-argument call answers the store's branches")))))
 
 (deftest a-call-omitting-its-database-sees-the-forms-own-write
   ;; Owner ruling 2026-09-28: no world holds a database value. A call that

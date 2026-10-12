@@ -275,7 +275,7 @@
                  (throw failure)))))))]
     (try
       (testing "retiring the origin branch keeps the cluster copy"
-        (is (not (contains? (registry/roster store) origin)))
+        (is (not (contains? (registry/branches store) origin)))
         (is (= [#{origin}] (branches-seen cluster since))))
       (finally
         (store/release-branch! cluster)

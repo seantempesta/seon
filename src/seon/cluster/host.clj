@@ -2,11 +2,11 @@
   "A branch agent hosted in its branch's own execution.
 
   `host!` composes existing owners: `acquire-context!` acquires the named
-  branch into the child roster the cluster's roster records, `creation-tx`
+  branch into the child registry the cluster's registry records, `creation-tx`
   creates the agent on the cluster (naming its home branch) and on that
   branch, and `seon.cluster.agent/start-branch-flow!` registers the branch's
   `wake/route!` listener and starts the agent's graph on the execution's
-  roster. The roster holds the live objects under `::host`; admission is the
+  registry. The registry holds the live objects under `::host`; admission is the
   agent row's `:seon.agent/admission-closed-tx`, which the run writer checks.
   `retire!` closes admission on both rows and stops through `stop!`."
   (:require [seon.cluster.agent :as agent]
@@ -77,7 +77,7 @@
    execution]
   (let [connection (:seon.db/connection execution)
         branch (:seon.agent/branch execution)
-        roster (:seon.agent/routing execution)
+        registry (:seon.agent/routing execution)
         ;; The agent is an entity of the cluster naming its home branch, and of that
         ;; branch: a message to or from it resolves on either, and root lists it.
         ;; The first writer's refusal is the answer; nothing starts.
@@ -90,7 +90,7 @@
    (if refused
     refused
     (do (agent/start-branch-flow! cluster-handle execution agent-id :running)
-        {:seon.turn.loop/cluster (agent/branch-handle cluster-handle execution) :seon.agent/routing roster
+        {:seon.turn.loop/cluster (agent/branch-handle cluster-handle execution) :seon.agent/routing registry
          :seon.agent/id agent-id ::execution execution ::parent (:seon.db/connection cluster-handle)}))))
 
 (defn hosted
@@ -103,7 +103,7 @@
 (defn host!
   "Host `agent-id` on the existing `branch`, once per branch execution.
 
-  Concurrent callers share one start: the execution's roster reserves `::host`
+  Concurrent callers share one start: the execution's registry reserves `::host`
   with a delay, as `start-flow!` reserves an starting. A failed start clears its claim
   and rethrows whole; a refused admission clears its claim and answers the
   writer's refusal. A branch hosts one agent: a request naming another agent
@@ -113,16 +113,16 @@
   {:malli/schema [:=> [:cat ::request]
                   [:or ::host ::refused-error :seon.db/transaction-refused-error]]}
   [{cluster-handle :seon.turn.loop/cluster branch :seon.agent/branch agent-id :seon.agent/id :as request}]
-  ;; A running host answers from the roster; reacquiring the branch per call
+  ;; A running host answers from the registry; reacquiring the branch per call
   ;; measured 409 ms warm against 240 ms for the first host (default, 2026-09-26).
   (let [host (or (hosted cluster-handle branch)
                  (let [execution (agent/acquire-context! cluster-handle nil {:seon.agent/branch branch})
-                       roster (:seon.agent/routing execution)
-                       claim (::host (swap! roster update ::host #(or % (delay (start! request execution)))))]
+                       registry (:seon.agent/routing execution)
+                       claim (::host (swap! registry update ::host #(or % (delay (start! request execution)))))]
                    ;; A refused start holds nothing: its claim goes, and so does the
                    ;; execution acquired for it (a retired agent's branch otherwise
                    ;; keeps a connection its retirement cannot see).
-                   (letfn [(unclaim! [] (identical? claim (::host (first (swap-vals! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))))))]
+                   (letfn [(unclaim! [] (identical? claim (::host (first (swap-vals! registry (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))))))]
                      (try (let [started @claim]
                             (when (and (:seon.error/at started) (unclaim!))
                               (agent/release-context! execution))
@@ -142,12 +142,12 @@
   "Stop a host without closing its admission: nil once its agent's graph has exited,
   its branch route is removed and its execution is released."
   {:malli/schema [:=> [:cat ::host] [:or :nil :seon.await/timeout-error]]}
-  [{roster :seon.agent/routing execution ::execution}]
+  [{registry :seon.agent/routing execution ::execution}]
   (wake/unlisten! {:seon.cluster.wake/connection (:seon.db/connection execution)
                    :seon.cluster.wake/key (agent/branch-route-key (:seon.agent/branch execution))})
-  (doseq [agent-id (sort (keys (:seon.agent/started @roster)))]
-    (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster}))
-  (swap! roster dissoc ::host)
+  (doseq [agent-id (sort (keys (:seon.agent/started @registry)))]
+    (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry}))
+  (swap! registry dissoc ::host)
   (agent/release-context! execution)
   nil)
 

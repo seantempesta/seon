@@ -106,7 +106,7 @@
                b (agent/acquire-context! handle "acquisition-b")
                c (agent/acquire-context! handle "acquisition-c")
                owned (:seon.agent/branch a)
-               before (registry/roster held)]
+               before (registry/branches held)]
            (println "C2-ACQUIRE" (:seon.proof/ms acquisition) "ms"
                     (:seon.proof/heap-delta-bytes acquisition) "observed heap delta bytes")
            (is (= {:seon.agent/branch owned :seon.agent/mode :isolated}
@@ -141,11 +141,11 @@
            (let [release (measured #(agent/release-context! a))]
              (println "C2-RELEASE" (:seon.proof/ms release) "ms"))
            (reset! handles [])
-           (is (not (contains? (registry/roster held) owned)))
+           (is (not (contains? (registry/branches held) owned)))
            (is (some? (db/pull (db/db connection) '[:seon.agent/id] [:seon.agent/id "acquisition-b"])))
            (agent/release-context! b)
            (is (some? (db/commit-id (db/db connection))))
-           (let [roster (registry/roster held)
+           (let [branches (registry/branches held)
                  failure-start (System/nanoTime)
                  failure (try
                            (with-redefs [store/open-branch!
@@ -154,7 +154,7 @@
                            (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
              (println "C2-FAILURE-UNWIND" (/ (- (System/nanoTime) failure-start) 1e6) "ms")
              (is (:seon.proof/forced failure))
-             (is (= roster (registry/roster held)))))
+             (is (= branches (registry/branches held)))))
          (finally
            (doseq [handle @handles] (agent/release-context! handle))
            nil))))))))

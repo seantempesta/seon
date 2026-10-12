@@ -11,7 +11,7 @@
 
  #:seon.task{:name "request-failure-message-is-a-printed-cause-chain"
   :kind :function
-  :intent "`seon.cluster.boot/request!`'s catch builds an unrefused failure's `:seon.error/message` from `seon.render.value/core-text` of the cause: the message is a printed vector of the whole cause chain (ex-data, problems, frames), so `bin/seon status` and the operator log show a multi-kilobyte string instead of short fixed text with the cause's members as data. Seen 2026-10-09 when `seon.cluster.boot/readiness` refused a roster row. Done when the message is the cause's own `:seon.error/message` (or short fixed text) and the cause's error map rides as data."
+  :intent "`seon.cluster.boot/request!`'s catch builds an unrefused failure's `:seon.error/message` from `seon.render.value/core-text` of the cause: the message is a printed vector of the whole cause chain (ex-data, problems, frames), so `bin/seon status` and the operator log show a multi-kilobyte string instead of short fixed text with the cause's members as data. Seen 2026-10-09 when `seon.cluster.boot/readiness` refused an instance row. Done when the message is the cause's own `:seon.error/message` (or short fixed text) and the cause's error map rides as data."
   :must-read #{seon.cluster.boot/request! seon.cluster.boot/diagnostic seon.render.value/core-text}}
  #:seon.task{:name "a-paused-boot-arms-every-open-attempt-and-runs-nothing"
              :kind :function

@@ -203,7 +203,7 @@
         store-id (get-in @(:seon.store/connection-object store)
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)
-        existing-cluster? (contains? (registry/roster store) cluster-branch)
+        existing-cluster? (contains? (registry/branches store) cluster-branch)
         source-base (when-not existing-cluster? (cluster/source-base! store cluster-name))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
         _ (when (:seon.error/retryable? start-permit)
@@ -476,7 +476,7 @@
                   (assoc :seon.config/manifest
                          (merge (when (:seon.boot/prepl-server request) (config/development-manifest))
                                 (:seon.config/manifest request))))
-        ;; A partial boot stays in the one instance roster under its name;
+        ;; A partial boot stays in the one instance registry under its name;
         ;; the failure references it (name, reached layers, process), never
         ;; carries the live instance — its connection, context and graphs.
         failed (fn [cause instance]
@@ -565,7 +565,7 @@
 
   - A join `seon.cluster.host/release-children!` or `seon.cluster/stop-flows!` misses is answered (the await
     owner's timeout naming the missing exit) with the instance restored in
-    the roster: nothing after the join is released."
+    the registry: nothing after the join is released."
   {:malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
   [instance]
   (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
@@ -773,7 +773,7 @@
             (try
               (let [base (cluster/source-base! held name)
                     branch (registry/cluster-branch name)
-                    _ (when (and (contains? (registry/roster held) branch)
+                    _ (when (and (contains? (registry/branches held) branch)
                                  (not (:seon.operator/force? request)))
                         (refuse! "Branch already exists; explicit --force is required." request))
                     result ((if (:seon.operator/force? request) registry/reset-cluster! registry/ensure-cluster!)

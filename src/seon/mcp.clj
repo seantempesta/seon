@@ -151,7 +151,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- instance
-  "The instance of the roster `running` (this JVM's running instances by
+  "The instance of the registry `running` (this JVM's running instances by
   name) that `cluster-name` names (default: the only one, else
   \"default\"), or a refusal naming the running ones, or one saying it is
   still starting or already stopping (not ready to evaluate). Its
@@ -170,7 +170,7 @@
                     (:seon.error/message (:seon.boot/failure found))
                     " Fix the cause, then run bin/seon start --head.")
                :seon.boot/ready-ms :seon.boot/ready-ms chosen)
-      ;; the roster holds a start's partial instance from its first layer and
+      ;; the registry holds a start's partial instance from its first layer and
       ;; a stopping one until its exit: neither can evaluate yet or still
       (or (:seon.boot/stopping found) (not (contains? found :seon.boot/ready-ms)))
       (refused (str "Cluster " chosen " is not ready: it is "

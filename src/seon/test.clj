@@ -420,7 +420,7 @@
 
   THE ONE DERIVATION on this side, over `:seon.fn/destroys` — the declaration
   each owner carries in its own metadata at its definition, indexed as a
-  program fact. There is no roster of owners in code: the cold gate's tier
+  program fact. There is no list of owners in code: the cold gate's tier
   checker derives the same set from the same attribute over manifest rows
   (`seon.test.runner/destructive-owner-rows`), so the two halves of the rule
   read one declaration and can never disagree.
@@ -1917,7 +1917,7 @@
             :else (recur (into extra absent))))))))
 
 ;;; A checkpoint is a shared branch named by the content it holds. The
-;;; registry's roster serializes its creation: exactly one `branch!` call is
+;;; registry's branches serialize its creation: exactly one `branch!` call is
 ;;; `created?`, and only that caller writes it. Completion is a fact, the
 ;;; source record written last; nothing else marks readiness.
 (defn- checkpoint-head
@@ -2137,7 +2137,7 @@
   so no agent, turn, message or error of the execution is inherited. Boot's
   facts live on a checkpoint branch named by the digest of their inputs (base,
   cluster, effective config, process), prepared once by the one caller the
-  roster lets create it and read only once its source record exists, so every
+  registry lets create it and read only once its source record exists, so every
   request with equal inputs shares its preparation. A checkpoint another caller
   is still preparing refuses this request. The request then owns a private
   branch off the checkpoint's head, which roots that commit for its members,
@@ -2228,7 +2228,7 @@
                                                      :seon.env/environment environment))
                    (catch Throwable failure
                      (throw (release! failure [#(store/release-branch! connection) retire! drop!]))))]
-      ;; The execution's value with this request's own world: a fresh roster,
+      ;; The execution's value with this request's own world: a fresh registry,
       ;; so member contexts and graphs stay the request's.
       (assoc execution
              :seon.agent/routing (@routing)

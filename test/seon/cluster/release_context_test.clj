@@ -24,11 +24,11 @@
        (catch Throwable failure failure)))
 
 (defn- retains-branch?
-  "Whether the parent roster still records `handle`'s roster for its branch."
+  "Whether the parent registry still records `handle`'s registry for its branch."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :boolean]}
   [handle]
-  (let [roster (:seon.agent/routing handle)]
-    (identical? roster (get-in @(:seon.agent/parent @roster)
+  (let [registry (:seon.agent/routing handle)]
+    (identical? registry (get-in @(:seon.agent/parent @registry)
                                [:seon.agent/children (:seon.agent/branch handle)]))))
 
 (deftest a-failing-connection-release-still-unlinks-and-forgets-the-context
@@ -39,7 +39,7 @@
         held (:seon.store/store handle)
         branch (:seon.agent/branch handle)
         release store/release-branch!
-        _ (is (contains? (registry/roster held) branch))
+        _ (is (contains? (registry/branches held) branch))
         _ (is (retains-branch? handle))
         failure (with-redefs [store/release-branch!
                               (fn [connection]
@@ -49,8 +49,8 @@
                   (release-failure handle))]
     (is (= :connection (:seon.proof/forced (ex-data failure))))
     (is (empty? (.getSuppressed ^Throwable failure)))
-    (is (not (contains? (registry/roster held) branch)) "the branch is still unlinked")
-    (is (not (retains-branch? handle)) "the parent roster no longer records the branch")))
+    (is (not (contains? (registry/branches held) branch)) "the branch is still unlinked")
+    (is (not (retains-branch? handle)) "the parent registry no longer records the branch")))
 
 (deftest every-release-failure-surfaces-with-the-later-ones-suppressed
   (let [handle (isolated-handle)
@@ -71,7 +71,7 @@
         (is (= :connection (:seon.proof/forced (ex-data failure))))
         (is (= [:unlink] (mapv #(:seon.proof/forced (ex-data %)) (.getSuppressed ^Throwable failure)))
             "the unlink failure rides the first cause as suppressed")
-        (is (not (retains-branch? handle)) "the parent roster drops the branch after both failures"))
+        (is (not (retains-branch? handle)) "the parent registry drops the branch after both failures"))
       (finally
         (registry/retire-branch! {:seon.store/store held :seon.store/branch branch})))
-    (is (not (contains? (registry/roster held) branch)))))
+    (is (not (contains? (registry/branches held) branch)))))

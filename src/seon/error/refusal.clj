@@ -224,7 +224,7 @@
       (some #(first (first-party-in authored %)) stacks))))
 
 ;;; WORLDS ARE REFERENCED, NEVER COPIED (owner 2026-09-26). Which values are
-;;; worlds is the registry's answer, not a class roster: every schema declared
+;;; worlds is the registry's answer, not a class list: every schema declared
 ;;; `:seon.schema/identity-only` (a database value, a connection, a schema
 ;;; projection, an environment, an SCI context) names the projection of its
 ;;; value to identity data — exactly what value admission stores in its place

@@ -912,7 +912,7 @@
              "the face names the target and the key, never a dynamic var")
          (testing "and a refusing supplier short-circuits the whole call"
            (reset! entered 0)
-           ;; the plan is COMPILED, not hand-rostered: a declared plan carries
+           ;; the plan is COMPILED, not hand-listed: a declared plan carries
            ;; its identity, arities and count index, and a stand-in missing them
            ;; is refused by `prepare`'s own contract before the subject is
            ;; reached. Only the one thing under test — a slot whose supplier

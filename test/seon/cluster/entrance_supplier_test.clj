@@ -27,7 +27,7 @@
                    context nil {:seon.agent/isolate? true
                                 :seon.cluster.registry/from captured})
         branch (:seon.agent/branch execution)
-        before (contains? (registry/roster held) branch)
+        before (contains? (registry/branches held) branch)
         result
         (try
           (let [evaluation
@@ -43,17 +43,17 @@
                                      {:my.program/executing-ctx (:seon.sci.eval/ctx execution)}))]
             {:seon.proof/value (:seon.sci.admit/value evaluation)
              :seon.proof/captured? (= captured (:seon.source/commit-id execution))
-             :seon.proof/rostered? before
+             :seon.proof/registered? before
              :seon.proof/isolated? (not (identical? connection (:seon.db/connection execution)))
              :seon.proof/carried? (and (identical? held (:seon.store/store supplied))
-                                      ;; the isolated execution's own roster, recorded by the caller's
+                                      ;; the isolated execution's own registry, recorded by the caller's
                                       (identical? (:seon.agent/routing supplied)
                                                   (get-in @(:seon.agent/routing context)
                                                           [:seon.agent/children branch]))
                                       (identical? (:seon.db/connection execution)
                                                   (:seon.db/connection supplied)))})
           (finally (agent/release-context! execution)))]
-    (assoc result :seon.proof/unlinked? (not (contains? (registry/roster held) branch)))))
+    (assoc result :seon.proof/unlinked? (not (contains? (registry/branches held) branch)))))
 
 (deftest supplied-context-acquires-and-releases-an-isolated-evaluation
   (#'acquisition-test/with-published-store
@@ -82,7 +82,7 @@
                result (supplied-acquisition-proof context)]
            (println "SUPPLIED-ACQUISITION-MS" (/ (- (System/nanoTime) started) 1e6))
            (is (= {:seon.proof/value 42 :seon.proof/captured? true
-                   :seon.proof/rostered? true :seon.proof/isolated? true
+                   :seon.proof/registered? true :seon.proof/isolated? true
                    :seon.proof/carried? true :seon.proof/unlinked? true}
                   result)))
          (finally (agent/release-context! live)))

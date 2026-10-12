@@ -23,7 +23,7 @@
                       (let [handle (support/execution-handle connection)]
                         (swap! observed conj
                                {:branch (:seon.agent/branch handle)
-                                :listed? (contains? (registry/roster store) (:seon.agent/branch handle))
+                                :listed? (contains? (registry/branches store) (:seon.agent/branch handle))
                                 :commit (:seon.source/commit-id handle)
                                 :projection? (identical? projection
                                                          (db/carried-projection (db/db connection)))}))))))
@@ -33,8 +33,8 @@
     (println "FIXTURE ACQUISITION" {:first-ms first-ms :later-p50-ms later-p50-ms
                                    :later-samples-ms later-ms})
     (is (= 11 (count (set (map :branch @observed)))) "every fixture owns a fresh branch")
-    (is (every? :listed? @observed) "each fixture branch is on the roster during its body")
-    (is (not-any? (set (registry/roster store)) (map :branch @observed))
+    (is (every? :listed? @observed) "each fixture branch is on the store's branches during its body")
+    (is (not-any? (set (registry/branches store)) (map :branch @observed))
         "each fixture branch is unlinked after its body")
     (is (every? #(= (:seon.source/commit-id parent) (:commit %)) @observed)
         "every fixture branches off the executing handle's commit")

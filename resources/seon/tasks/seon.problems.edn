@@ -10,7 +10,7 @@
              :must-read #{seon.problems/ai-prose seon.render.value/render-ai}
              :evidence #{"test/seon/problems_test.clj"}} #:seon.task{:name "an-error-many-agents-hit-is-a-seon-defect"
              :kind :function
-             :intent "Errors delivered to agents are never recorded, so health misses a reader or tool defect that many agents hit (chain run 2: `Unable to resolve symbol: </invoke>` three times, 21 agent errors, 0 platform errors). `seon.problems/problems` derives `:seon.problems/agent-error-signatures` from each roster agent's branch evaluation errors (`:seon.cluster.eval/error`): one pattern with its distinct agents, occurrences, values and latest example, once `:seon.config.error/agent-error-agents` agents hit it, as the finding schema `:seon.problems/agent-error`. Reads undecoded through `seon.db/undecoded-datoms`."
+             :intent "Errors delivered to agents are never recorded, so health misses a reader or tool defect that many agents hit (chain run 2: `Unable to resolve symbol: </invoke>` three times, 21 agent errors, 0 platform errors). `seon.problems/problems` derives `:seon.problems/agent-error-signatures` from each agent's branch evaluation errors (`:seon.cluster.eval/error`): one pattern with its distinct agents, occurrences, values and latest example, once `:seon.config.error/agent-error-agents` agents hit it, as the finding schema `:seon.problems/agent-error`. Reads undecoded through `seon.db/undecoded-datoms`."
              :must-read #{seon.problems/problems seon.problems/open-faults seon.db/branch-database seon.db/undecoded-datoms}
              :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}
  #:seon.task{:name "problems-prose-carries-no-date-or-file-line"

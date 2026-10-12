@@ -11,11 +11,11 @@
                            [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]
                            [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.db/basis-t :seon.db/basis-t]]
  :my.agent/retired? :boolean
- :my.agent/retired-branch [:map {:description "A lane branch removed from the store's roster; its data goes when retention collects."}
+ :my.agent/retired-branch [:map {:description "A lane branch removed from the store's branches; its data goes when retention collects."}
                            [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?] [:my.agent/retiring? {:optional true} :boolean]]
  :my.agent/own-branch [:and {:description "The branch my cluster's connection holds; shared, never a lane's."} :seon.store/branch]
  :my.agent/branches [:map [:my.agent/own-branch :my.agent/own-branch] [:my.agent/roster :my.agent/roster]]
- :my.agent/roster [:and {:description "Every branch in the store's roster."} :seon.cluster.registry/roster]
- :my.agent/branch-context [:map {:description "What a branch operation reads: the store's roster and its main connection, my cluster's connection (whose branch is mine) and, to retire a hosted agent, the routing."}
+ :my.agent/roster [:and {:description "Every branch in the store."} :seon.cluster.registry/branches]
+ :my.agent/branch-context [:map {:description "What a branch operation reads: the store's branches and its main connection, my cluster's connection (whose branch is mine) and, to retire a hosted agent, the routing."}
                            [:seon.store/store :seon.store/store] [:seon.db/connection :seon.db/connection]
                            [:seon.agent/routing {:optional true} :seon.agent/routing]]}
