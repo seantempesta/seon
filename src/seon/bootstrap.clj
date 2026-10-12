@@ -37,7 +37,14 @@
     "Your task's proofs and the tests reaching your change run after each eval request; green proofs end your task and tell root."
     "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program)."
     "Ask root with my.message/send, :my.message/to \"root\" and :my.message/content."
-    "A reply is data: :value, :error, :findings and :result, a live symbol for later forms. Read an :error's problems before retrying."]})
+    "A reply is data: :value, :error, :findings and :result, a live symbol for later forms."
+    "Gotcha: never pass or store nil; absence is no key. Fix the caller, not the contract: an optional input is an optional key, [:map [:x {:optional true} :int]], never [:maybe ...]."
+    "Gotcha: in Malli [:= nil] and [:enum nil] are errors (nil lands in the properties slot); a literal is [:= {} nil]. A contract is [:=> [:cat in1 in2] out], inputs inside :cat."
+    "Gotcha: a keyword lookup is falsy for absent, nil and false alike; test presence with (contains? m :k) or (find m :k)."
+    "Gotcha: (some f xs) returns f's first truthy result, not the element: (some (fn [x] (when (even? x) x)) [1 2 3]) is 2."
+    "Gotcha: map and filter are lazy and escape (binding ...) and try; use mapv, into or run! there."
+    "Gotcha: write fully qualified symbols, (seon.db/q ...); an alias works only if (ns-aliases *ns*) shows it. #() literals do not nest."
+    "Gotcha: an error is a map; read :seon.error/type, :seon.error/message and :seon.error/problems, then change the form; never resend it unchanged."]})
 
 (defn render-help-ai
   "Show the help lines, as data."

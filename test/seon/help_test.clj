@@ -94,7 +94,7 @@
        (is (not (re-find #"my\.task|my\.agent/|my\.test/check|turns-left|NEXT turn" text))
            "no shelved, deleted or self-running lesson")
        (is (not (str/includes? text ":large-value")) "help raises no misuse finding")
-       (is (<= (tokens/estimate text) 400) "help stays small")))))
+       (is (<= (tokens/estimate text) 800) "help stays small")))))
 
 (deftest help-teaches-defn-in-the-namespace-that-owns-the-function
   (with-help-agent
@@ -153,3 +153,18 @@
        (is (some #(str/includes? % ":seon.context/namespace") lines) "help says the block names the agent's namespace")
        (is (some #(and (str/includes? % "locals") (str/includes? % "binding")) lines)
            "help states that a body's locals exist only inside their binding")))))
+
+(deftest help-teaches-the-common-gotchas-and-names-only-symbols-that-exist
+  (with-help-agent
+   (fn [connection]
+     (let [lines (:seon.help/lines (bootstrap/help-value @connection "help"))
+           text (str/join "\n" lines)
+           gotchas (filter #(str/starts-with? % "Gotcha:") lines)
+           symbols (distinct (map second (re-seq #"(?<![:\w./'])([a-z][\w.-]*\.[\w.-]*/[\w!?*<>=-]+)" text)))]
+       (is (= 7 (count gotchas)) "help carries its seven gotcha lines")
+       (is (every? #(str/includes? text %) ["[:= {} nil]" "[:cat in1 in2]" "contains? m :k" "(some f xs)" "mapv" "ns-aliases" ":seon.error/problems"])
+           "each gotcha names its remedy")
+       (is (not (re-find #"\[:maybe :" text)) "no line advises [:maybe ...]")
+       (is (seq symbols) "help names qualified symbols")
+       (is (empty? (remove #(requiring-resolve (symbol %)) symbols))
+           "every qualified symbol help names resolves")))))
