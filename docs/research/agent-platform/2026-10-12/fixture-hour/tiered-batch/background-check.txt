@@ -1,0 +1,24 @@
+SEON check FAILED (exit 1): The candidate a7f2f085b38d55f66c6bad0a148ccace608ab9fa is red: run c6833baf0761 / executed 3 / reused 0 / pass 18 / fail 6 / error 0 / 11321 ms / passed? false (2 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T203035.337.edn
+run c6833baf0761 / executed 3 / reused 0 / pass 18 / fail 6 / error 0 / 11321 ms / passed? false (2 red)
+red seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold: fail test/seon/background_blob_test.clj:128
+7 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))
+
+fail test/seon/background_blob_test.clj:128
+9 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))
+red seon.effect-test/settlement-records-only-successful-handler-result-attributes: fail test/seon/effect_test.clj:730
+expected: (=
+ "refused-fixture-directory"
+ (get-in result [:seon.effect-test/nested :my.shell/refused-cwd]))
+actual: (not (= "refused-fixture-directory" nil))
+
+fail test/seon/effect_test.clj:721
+expected: (inst? (:seon.effect/settled-at receipt))
+actual: (not (inst? nil))
+
+fail test/seon/effect_test.clj:726
+expected: (= "refused-fixture-directory" (:my.shell/refused-cwd result))
+actual: (not (= "refused-fixture-directory" nil))

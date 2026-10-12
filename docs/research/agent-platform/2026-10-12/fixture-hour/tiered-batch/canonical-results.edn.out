@@ -1,0 +1,64 @@
+2026-10-12T13:48:59.379Z seans-m5-macbook-pro WARN [seon.fs:212] - seon recursive deletion of 1 targets (0 bytes) under /Users/sean/src/seon/data/check/slot-1/data/source/88b8cf8bdf7d5a957fc5f46d6a9f839f22899dc6/tmp/blob-test/d414f59b-6b0d-4b3a-be48-1375c73d5688/store by seon.cluster.store/create-store! from seon.blob_test$fn__2599206.invokeStatic(blob_test.clj:222), pid 33822
+{:sample 0,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.17, :alloc-bytes 20016}}
+{:sample 0,
+ :stage :connect,
+ :cost #:seon.profile{:ms 32297.06, :alloc-bytes 1380246608}}
+{:sample 0,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.1, :alloc-bytes 8784}}
+{:sample 0,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.23, :alloc-bytes 1258088}}
+{:sample 0,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.39, :alloc-bytes 43504}}
+{:sample 0,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.47, :alloc-bytes 15336}}
+{:sample 0,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 32325.45, :alloc-bytes 1389574832}}
+{:sample 1,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.19, :alloc-bytes 18920}}
+{:sample 1,
+ :stage :connect,
+ :cost #:seon.profile{:ms 30135.4, :alloc-bytes 1380565160}}
+{:sample 1,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.12, :alloc-bytes 7248}}
+{:sample 1,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.08, :alloc-bytes 1253272}}
+{:sample 1,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.34, :alloc-bytes 43184}}
+{:sample 1,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.41, :alloc-bytes 14888}}
+{:sample 1,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 30157.08, :alloc-bytes 1389435976}}
+{:sample 2,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.21, :alloc-bytes 18928}}
+{:sample 2,
+ :stage :connect,
+ :cost #:seon.profile{:ms 28830.41, :alloc-bytes 1380892712}}
+{:sample 2,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.08, :alloc-bytes 7248}}
+{:sample 2,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.25, :alloc-bytes 1253352}}
+{:sample 2,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.37, :alloc-bytes 43184}}
+{:sample 2,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.4, :alloc-bytes 14888}}
+{:sample 2,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 28852.99, :alloc-bytes 1389764040}}

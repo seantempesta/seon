@@ -1,0 +1,61 @@
+SEON check FAILED (exit 1): The candidate 1614ecdde56adc7e92ce2dfef82de7e3e525fcfa is red: run 01f7aa6ff633 / executed 18 / reused 0 / pass 80 / fail 8 / error 0 / 179547 ms / passed? false (2 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T204132.837.edn
+run 01f7aa6ff633 / executed 18 / reused 0 / pass 80 / fail 8 / error 0 / 179547 ms / passed? false (2 red)
+red seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold: fail test/seon/background_blob_test.clj:132
+9 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))
+
+fail test/seon/background_blob_test.clj:130
+9 invalid UTF-8 bytes
+expected: (nil? (:seon.error/message result-ref))
+actual: (not (nil? "Load the declared capability handler before dispatch."))
+
+fail test/seon/background_blob_test.clj:130
+7 invalid UTF-8 bytes
+expected: (nil? (:seon.error/message result-ref))
+actual: (not (nil? "Load the declared capability handler before dispatch."))
+
+fail test/seon/background_blob_test.clj:132
+7 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))
+
+fail test/seon/background_blob_test.clj:131
+7 invalid UTF-8 bytes
+expected: (nil? (:seon.error/data result-ref))
+actual: (not
+ (nil?
+  {:seon.fn/sym seon.background-blob-test/binary-handler,
+   :type :sci/error,
+   :line 1,
+   :column 1,
+   :file nil,
+   :phase "analysis",
+   :sci.impl/symbol invalid-utf8}))
+
+fail test/seon/background_blob_test.clj:131
+9 invalid UTF-8 bytes
+expected: (nil? (:seon.error/data result-ref))
+actual: (not
+ (nil?
+  {:seon.fn/sym seon.background-blob-test/binary-handler,
+   :type :sci/error,
+   :line 1,
+   :column 1,
+   :file nil,
+   :phase "analysis",
+   :sci.impl/symbol invalid-utf8}))
+red seon.blob-test/published-blob-is-compressed-and-deferred: fail test/seon/blob_test.clj:206
+a compressible blob is stored compressed and reads back unchanged
+expected: (< (file-bytes digest) 10240)
+actual: (not (< 55593 10240))
+
+fail test/seon/blob_test.clj:204
+a compressible blob is stored compressed and reads back unchanged
+expected: (=
+ {:immutable? true, :compressed? true, :size size}
+ (select-keys stored-meta [:immutable? :compressed? :size]))
+actual: (not
+ (=
+  {:immutable? true, :compressed? true, :size 55440}
+  {:immutable? true}))

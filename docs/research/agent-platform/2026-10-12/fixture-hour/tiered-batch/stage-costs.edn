@@ -1,0 +1,65 @@
+[
+{:sample 0,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.18, :alloc-bytes 23520}}
+{:sample 0,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11278.3, :alloc-bytes 165995264}}
+{:sample 0,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.07, :alloc-bytes 8784}}
+{:sample 0,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.08, :alloc-bytes 743720}}
+{:sample 0,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.42, :alloc-bytes 43688}}
+{:sample 0,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.61, :alloc-bytes 17992}}
+{:sample 0,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11305.76, :alloc-bytes 174784560}}
+{:sample 1,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.2, :alloc-bytes 22056}}
+{:sample 1,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11193.73, :alloc-bytes 166048720}}
+{:sample 1,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.09, :alloc-bytes 7248}}
+{:sample 1,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.05, :alloc-bytes 737288}}
+{:sample 1,
+ :stage :release,
+ :cost #:seon.profile{:ms 1.39, :alloc-bytes 43000}}
+{:sample 1,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.16, :alloc-bytes 17544}}
+{:sample 1,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11217.07, :alloc-bytes 174375328}}
+{:sample 2,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.18, :alloc-bytes 22056}}
+{:sample 2,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11804.24, :alloc-bytes 166107072}}
+{:sample 2,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.05, :alloc-bytes 7248}}
+{:sample 2,
+ :stage :body,
+ :cost #:seon.profile{:ms 0.89, :alloc-bytes 736904}}
+{:sample 2,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.44, :alloc-bytes 43144}}
+{:sample 2,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.2, :alloc-bytes 17600}}
+{:sample 2,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11820.26, :alloc-bytes 174433408}}
+]

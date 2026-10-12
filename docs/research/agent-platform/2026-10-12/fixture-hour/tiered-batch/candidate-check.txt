@@ -1,0 +1,2 @@
+check: queue position 3 of 3; 2 throwaway JVMs run, held by pids 11740 13548
+SEON check FAILED (exit 1): JVM RESTART NEEDED: loaded dependencies changed (deps.edn, reference-code/konserve). Run `bin/seon down` then `bin/seon start` on the same store; the store and its database survive, no reset. DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T202135.101.edn

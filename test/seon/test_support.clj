@@ -129,43 +129,56 @@
    (cluster/refresh-source! (str (io/file root "data" "clusters")))
    (str root)))
 
-(defn with-published-file-database
-  "Run `body` on a private file-store branch of a root the checkout is published into.
+(declare execution-handle)
 
-  The connection CARRIES the branch's own program projection, exactly as the
-  canonical in-memory base and a live cluster's boot do. A branch connection
-  opened straight off a store carries none, so every `db/db` on it fell back
-  to the thread's projection -- in a worker, the PACKAGED projection, which
-  declares schema forms and no function contracts at all. Every seam that asks
-  the carried projection about a FUNCTION then answered from an empty map:
-  `seon.effect/accepts-request?` refused every capability request alike with
-  :seon.effect/invalid-request (measured on batch 85's published base: 0
-  function contracts carried, 1118 derived)."
-  [root branch body]
-  (let [root (str root)]
-    (populate-published-root! root)
-    (let [store-dir
-          (:seon.boot/store-dir
-           (cluster/resolve-bootstrap {:seon.boot/root root}))
-          opened (store/open-store! {:seon.store/dir store-dir})]
+(defn with-published-file-database
+  "Run `body` on the executing program with a private file frontend.
+  Datahike shares inherited indexes; Konserve writes only under `root`."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.schema/value :seon.store/branch [:fn clojure.core/ifn?]] :seon.profile/value]
+    [:=> [:cat :seon.schema/value :seon.store/branch [:fn clojure.core/ifn?]
+          [:=> [:cat :keyword :seon.profile/thunk] :seon.profile/value]] :seon.profile/value]]}
+  ([root branch body]
+   (with-published-file-database root branch body (fn [_ f] (f))))
+  ([root branch body call]
+  (let [parent (execution-handle db/*conn*)
+        opened (:seon.store/store parent)
+        private-branch (keyword (name branch) (str (random-uuid)))
+        parent-config (:config @(:seon.db/connection parent))
+        backend (:store parent-config)
+        configuration (assoc parent-config :branch private-branch
+                             :store {:backend :tiered :id (:id backend)
+                                     :frontend-config
+                                     (assoc (:store (store/datahike-configuration
+                                                     (str (io/file (str root) "store"))))
+                                            :id (:id backend))
+                                     :backend-config backend
+                                     :write-policy :frontend-only
+                                     :read-policy :frontend-first})]
+    (call :branch-create
+          #(registry/branch! {:seon.store/store opened
+                             :seon.cluster.registry/from (:seon.source/commit-id parent)
+                             :seon.store/branch private-branch}))
     (try
-      (registry/branch! {:seon.store/store opened
-                         :seon.cluster.registry/from source/current-branch
-                         :seon.store/branch branch})
-      (let [connection (store/open-branch! opened branch)]
+      (let [connection (call :connect #(db/call-with-root-bindings (fn [] (d/connect configuration))))]
         (try
           (let [database @connection
-                projection (schema/projection-from-database database)
-                ;; the private branch is this fixture's cluster: a published
-                ;; program root holds no cluster row, so the world must name it
+                projection (:seon.schema/projection parent)
+                ;; The private branch names the fixture's cluster because
+                ;; the published source contains no cluster entity.
                 ;; (seon.sci.eval/carried-cluster-name refuses to guess one)
-                state (sci.eval/projection-state database projection (name branch))]
+                state (call :projection #(sci.eval/projection-state database projection (name branch)))]
             (db/carry-connection-projection-state! connection state)
-            (schema/call-with-projection-state state #(body connection)))
+            (call :body
+                  #(db/with-branch
+                    {:seon.db/connection connection}
+                    (fn [] (schema/call-with-projection-state state (fn [] (body connection)))))))
           (finally
-            (d/release connection))))
+            (call :release #(store/release-branch! connection)))))
       (finally
-        (store/release-store! opened))))))
+        (call :branch-delete
+              #(registry/retire-branch! {:seon.store/store opened :seon.store/branch private-branch})))))))
 
 (def committed
   "Returned when a boundary expected to refuse instead commits."

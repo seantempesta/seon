@@ -18,7 +18,6 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [seon.db :as db]
-            [seon.error :as error]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]

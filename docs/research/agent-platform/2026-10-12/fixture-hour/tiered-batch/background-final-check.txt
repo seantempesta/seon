@@ -1,0 +1,21 @@
+SEON check FAILED (exit 1): The candidate a1ea6f2f83c769620969e8751689fb8de29f2e87 is red: run c6bff46515b1 / executed 1 / reused 0 / pass 0 / fail 4 / error 0 / 10658 ms / passed? false (1 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T203342.613.edn
+run c6bff46515b1 / executed 1 / reused 0 / pass 0 / fail 4 / error 0 / 10658 ms / passed? false (1 red)
+red seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold: fail test/seon/background_blob_test.clj:130
+9 invalid UTF-8 bytes
+expected: (nil? (:seon.error/message result-ref))
+actual: (not (nil? "Load the declared capability handler before dispatch."))
+
+fail test/seon/background_blob_test.clj:131
+9 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))
+
+fail test/seon/background_blob_test.clj:130
+7 invalid UTF-8 bytes
+expected: (nil? (:seon.error/message result-ref))
+actual: (not (nil? "Load the declared capability handler before dispatch."))
+
+fail test/seon/background_blob_test.clj:131
+7 invalid UTF-8 bytes
+expected: (string? effect-id)
+actual: (not (string? nil))

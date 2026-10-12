@@ -1,8 +1,64 @@
 # File backed fixture experiment
 
-Konserve range reads are implemented and pushed on `seon/tiered-range-reads`, commit `26444d372bf97de219d55c06d5d23bd6f5cfc634`. The fork batch stops at the Datahike file-frontend slice: its three overlay errors still reproduce, and a smaller probe exposes the earlier empty-file read hidden by cleanup. No Datahike implementation, Seon fixture conversion, dependency bump or default restart was accepted.
+The owner resumed this restart batch with Konserve `26444d372bf97de219d55c06d5d23bd6f5cfc634` and explicitly deferred the Datahike file overlay. The `:tiered` fixture candidate now shares the executing published source and its projection, with a private file frontend. With Seon's canonical file configuration, its complete fixture median is **30.16 seconds / 1.39 GB allocated**, versus the parent sample **48.05 seconds / 31.43 GB**: **37% faster and 22.6× less allocation**. Connection synchronization remains almost the entire cost. Default has not been restarted.
 
-## Fork batch result, 2026-10-12
+## Resumed tiered fixture batch, 2026-10-12
+
+`seon.test-support/with-published-file-database` uses `datahike.versioning/branch!` through the existing registry, connects a `:tiered` store with `:frontend-only` writes and `:frontend-first` reads, carries the executing handle's projection and binds the resulting connection through the body. Release and branch deletion use their existing owners. It removes per-fixture `seon.test-support/populate-published-root!` and `seon.cluster/refresh-source!`; it adds no fixture cache. An isolation proof reads the inherited declaration, writes a private cluster, verifies the supplied file root and verifies absence from the source connection.
+
+`seon.blob/binary-threshold` now reads `seon.config/effective` for the cluster carried by its connection. Shell, web and effect callers pass the threshold they already selected. Compression likewise pulls the carried cluster's configuration; its old query mixed every inherited cluster's settings. The compression regression also exposed that the first frontend lacked the normal LZ4 compressor: it now uses `seon.cluster.store/datahike-configuration`, preserving both compression and deferred immutable synchronization. Staging finds the file directory through that frontend. The unused configuration dependency on `seon.error` is removed to keep this dependency direction acyclic. The two-cluster regression uses thresholds 8 and 16 against the same 12-byte input and checks both binary staging and text storage.
+
+### Cost proof and remaining work
+
+The same complete fixture operation is measured through `seon.profile/measure`; the candidate additionally measures its actual operations through an optional call function. The default three-argument entrance simply calls each operation. No library Vars are redefined. `bin/test-check` retains per-test elapsed time, allocation and profile totals in its requested result file and saves test output beside it with an `.out` suffix, allowing the stage measurements to survive the check without displacing its summary.
+
+| Sample | Entire fixture ms | Connect ms | Entire fixture allocated bytes |
+|---|---:|---:|---:|
+| Parent | 48,051.87 | Not separately measured | 31,429,717,192 |
+| Canonical frontend 0 | 32,325.45 | 32,297.06 | 1,389,574,832 |
+| Canonical frontend 1 | 30,157.08 | 30,135.40 | 1,389,435,976 |
+| Canonical frontend 2 | 28,852.99 | 28,830.41 | 1,389,764,040 |
+
+The accepted candidate median is **1.59× faster**, with **22.6× less body-thread allocation**. Each branch-create, projection, body, release and branch-delete measurement is below 1.3 ms. `datahike.store/ready-store :tiered` still calls `konserve.tiered/sync-on-connect`, which enumerates backend keys and populates the file frontend. This is whole-backend work, not a constant-time branch acquisition. The stage probe measures the enclosing connection operation. Two thread samples locate the synchronization inside Fressian serialization and file flushing; they are supporting observations, not a CPU attribution percentage. [Exact stage data](fixture-hour/tiered-batch/canonical-stage-costs.edn), [thread evidence](fixture-hour/tiered-batch/connection-threads.json), [check output](fixture-hour/tiered-batch/canonical-check.txt).
+
+The earlier frontend, before restoring the canonical compressor configuration, had median 11.31 seconds / 174.43 MB. Those figures are retained as intermediate evidence, not the final claim: its compression test failed. [Earlier stage data](fixture-hour/tiered-batch/stage-costs.edn). The final shell binary test passes in **31.56 seconds / 1.53 GB**, versus **42.86 seconds / 30.27 GB** on the parent. The compression test has seven passing assertions with the canonical frontend.
+
+The fixture proof allows **60 seconds and 3 GB per acquisition**, and 180 seconds for its three samples. These bounds cover the measured whole-store synchronization: 28.85–32.33 seconds and 1.39 GB per sample. The allocation limit rounds roughly twice that measurement upward; the time limit retains nearly twice the maximum observed duration. They replace the unsupported one-second / 128-MB limits; they do not claim synchronization is cheap. Parent allocation still exceeds the new allocation bound by 10.5×. Root authorized this measured intermediate improvement and the remaining synchronization cost. The first canonical check failed only the older 800-MB allocation assertions in this proof; the updated bound is rerun by the commit check.
+
+These are sequential throwaway checks, with no overlapping test JVMs owned by this lane. Other lanes ran concurrently through the shared two-slot check queue. The archive parents advanced between checks, so these are not quiet, identical-revision causal timings. Exact candidate and parent revisions are retained beside the results. The repeated candidate measurements and allocation difference support the accepted gain; no whole-process memory reduction or exact production latency ratio is claimed.
+
+### Paired heavy selection
+
+The initial parent and range-enabled candidate ran the same six named tests. Counts below are failures/errors, including declared-duration failures. [Parent results](fixture-hour/tiered-batch/parent-results.edn), [candidate results](fixture-hour/tiered-batch/candidate-results.edn).
+
+| Test in its existing namespace | Parent seconds / GB allocated | Candidate seconds / GB allocated | Parent → candidate failures/errors |
+|---|---:|---:|---:|
+| background-blob / background-binary-results-remain-exact-across-the-inline-threshold | 51.401 / 32.826 | 9.307 / 0.321 | 1/1 → 0/1 |
+| cluster.fault-storage / lossy-subthreshold-fault-evidence-says-it-is-capped | 47.542 / 31.698 | 52.969 / 34.652 | 1/1 → 1/1 |
+| cluster.fault-storage / oversized-fault-evidence-is-bounded-and-retrievable | 62.208 / 39.618 | 60.072 / 39.408 | 3/0 → 3/0 |
+| cluster.publication-adoption / freshly-forked-host-already-has-its-published-source | 47.480 / 33.853 | 50.151 / 35.102 | 0/0 → 0/0 |
+| shell.jvm / binary-output-is-byte-exact-on-both-sides-of-the-inline-ceiling | 42.857 / 30.273 | 13.970 / 0.370 | 0/0 → 0/0 |
+| test-support / a-file-backed-fixture-costs-a-branch | 49.508 / 31.468 | 16.180 / 0.210 | 3/0 → 0/0 |
+
+Fault-storage and publication-adoption create their own published roots and do not call the changed file fixture; their large publication cost remains. The lossy test fails `seon.error/prepare` validation against `:seon.flow/exception-error`. The oversized test still sees three occurrences instead of one and a count of one instead of 500. Both also exceed their five-second duration. These are parent reds, excluded by var from the commit's green selection. No fault-storage improvement or successful heavy-suite total is claimed.
+
+The background parent fails before binary assertions because its agent has no seeded cluster. With the inherited program, its hand-authored schema then fails the required definition digest. A disposable repair seeded the cluster, carried its environment/projection state and used `seon.test-support/revision` for the capability's handler attributes. It then exposed the next independent error: `seon.effect/context-handler` cannot install `seon.background-blob-test/binary-handler`, with SCI analysis reporting unresolved `invalid-utf8`. The attempted repairs are preserved in [a patch](fixture-hour/tiered-batch/background-fixture-candidate.patch); the background file is restored and excluded from the commit. [Exact reports](fixture-hour/tiered-batch/reaching-results.edn). The early failed durations above do not prove successful background execution became faster.
+
+The additional `seon.effect-test/settlement-records-only-successful-handler-result-attributes` check has the same four failures on the parent and candidate: no settled time and missing refused-directory data. [Parent evidence](fixture-hour/tiered-batch/effect-parent-results.edn). It is also excluded by var. All **eight web tests pass**, including public fetch and search through real effect settlement; the changed effect path therefore has positive reaching evidence independently of that red fixture.
+
+### Verification and boundaries
+
+The nine-test stage check has **54 passes, zero assertion failures and one background fixture error**. All required slice proofs pass: shell bytes (10 assertions), two-cluster threshold (6), fixture cost (9) and file isolation (4). Binary round trips (10), staged-write/range allocation (6), stalled input (3) and web spill (6) also pass. [Results](fixture-hour/tiered-batch/measured-results.edn). The allocation test now measures real `seon.blob/stage-binary!`, publishes through `seon.blob/with-publication!`, then measures the range read; it no longer replaces the threshold or stored verification Vars. Publication allocation is outside its staging assertion and remains part of the test's total. The 20 generated blob cases share one acquired fixture; the generated proof and interrupted staging both pass.
+
+The canonical frontend check has **77 passes, three failures at the superseded allocation bound, and two path-coercion errors**. The fixture now coerces its root to a string as its parent did; both Java-Path shell tests then pass, **14 assertions, zero failures/errors**. [Path-root check](fixture-hour/tiered-batch/paths-results.edn). The final commit runs [35 individually named reaching tests](fixture-hour/tiered-batch/commit-tests.txt): every blob and web test, every shell test, all threshold tests, the fixture cost/isolation proofs and stalled input. Parent-red background, the two fault-storage vars and the additional effect-settlement var remain outside that green selection; root owns the broad tiers.
+
+Latest full `clj-kondo --lint src script test --cache false --parallel`: **6,750 ms, zero errors**, 1,627 warnings. [Output](fixture-hour/tiered-batch/final-lint.txt). The commit repeats validation on HEAD plus the exact claimed paths. Konserve's own 92-test / 1,397-assertion result is retained below. Datahike stays at `c9e57c6fb65365d5ce92b59854fb02ea59054fe7`.
+
+The first candidate's live rehearsal reports restart-needed for the changed dependency coordinates, while its parallel throwaway test run produces the results above. Subsequent checks use `--at` candidate archives; the combined commit uses `--at-candidate --restart-batch`. This is the installed dependency-check path and never loads the fork into default. The source edit hook also reported unresolved SCI aliases/arity during partial edits and a timed-out entrance; those are not positive installed proof. Complete archive checks are the evidence for this host-bound slice.
+
+The foreign boundary is other lanes' uncommitted cluster, schema, error, program, merge, task and test-runner changes. They are excluded from this lane's candidate archives. No foreign file or session was edited or contacted. No worktree was created and default was never stopped, reset or restarted. The deferred file-overlay defect is filed as `seon.test-support/overlay-file-frontend-read-during-warming`, with the exact candidate, probe and empty-file observation below. No further Datahike overlay implementation was attempted after the owner's deferral. The retained background fixture experiment is filed as `seon.test-support/background-binary-fixture-reaches-its-handler`. The source work exceeded the approximate 25-minute slice allowance while checks queued and the reaching tests exposed configuration and Path-root defects; the commit contains the proven branch/configuration changes, with the unresolved background work left as evidence.
+
+## Earlier fork batch result, 2026-10-12
 
 `konserve.tiered/TieredStore` now implements `konserve.protocols/PBinaryRangeStore` by selecting the frontend or backend exactly as its binary read method does and delegating the bounded read. The authoritative checkout is `reference-code/konserve`, whose origin is `https://github.com/seantempesta/konserve.git`; its parent was the pinned `e4334756413917305968333bf305e658c177765d`. The public range API is synchronous. Inherited reads do not populate the frontend or materialize the entire binary value.
 

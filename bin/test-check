@@ -51,13 +51,16 @@
       ;; :seon.test.runner/captured-result's keys, the member as recorded.
       captured-keys [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
                      :seon.test/failure-message :seon.test/failing-assertions
-                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?]]
+                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?
+                     :seon.test.member/run-ms :seon.test.member/alloc-bytes :seon.test.member/top]]
   (try
     (let [request (parse args)
           handle-form (list :seon.turn.loop/cluster
                             (list 'get (list 'deref 'seon.operator.runtime/running-instances)
                                   cluster))
-          eval! (fn [form timeout-ms] (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
+          eval! (fn [form timeout-ms]
+                  (#'operator/prepl-value! advertisement (pr-str form) timeout-ms
+                   (when result-file #(spit (str result-file ".out") % :append true))))
           _ (when-not advertisement
               (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
           request (if-not (::isolated? request)

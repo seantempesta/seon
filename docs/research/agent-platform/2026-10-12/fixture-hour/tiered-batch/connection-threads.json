@@ -1,0 +1,67 @@
+[
+  {
+    "source": "canonical-threads.json",
+    "thread": "seon-test-body",
+    "top": [
+      "java.base/java.util.zip.Adler32.update(Native Method)",
+      "java.base/java.util.zip.Adler32.update(Adler32.java:62)",
+      "java.base/java.util.zip.CheckedOutputStream.write(CheckedOutputStream.java:61)"
+    ],
+    "path": [
+      "konserve.tiered$sync_keys_to_frontend.invokeStatic(tiered.cljc:83)",
+      "konserve.tiered$sync_keys_to_frontend.invoke(tiered.cljc:64)",
+      "konserve.tiered$perform_sync.invokeStatic(tiered.cljc:105)",
+      "konserve.tiered$perform_sync.invoke(tiered.cljc:86)",
+      "konserve.tiered$sync_on_connect.invokeStatic(tiered.cljc:114)",
+      "konserve.tiered$sync_on_connect.invoke(tiered.cljc:111)",
+      "datahike.store$fn__37912.invokeStatic(store.cljc:116)",
+      "datahike.store$fn__37912.invoke(store.cljc:104)",
+      "datahike.connector$_connect_impl_STAR_.invokeStatic(connector.cljc:351)",
+      "datahike.connector$_connect_impl_STAR_.invoke(connector.cljc:294)",
+      "datahike.connector$fn__61072.invokeStatic(connector.cljc:464)",
+      "datahike.connector$fn__61072.invoke(connector.cljc:463)",
+      "datahike.connector$connect.invokeStatic(connector.cljc:483)",
+      "datahike.connector$connect.invoke(connector.cljc:468)",
+      "datahike.connector$connect.invokeStatic(connector.cljc:474)",
+      "datahike.connector$connect.invoke(connector.cljc:468)",
+      "seon.test_support$with_published_file_database$fn__2598533$fn__2598534.invoke(test_support.clj:164)",
+      "seon.test_support$with_published_file_database$fn__2598533.invoke(test_support.clj:164)",
+      "seon.test_support$with_published_file_database$fn__2598529.invoke(test_support.clj:143)",
+      "seon.test_support$with_published_file_database.invokeStatic(test_support.clj:164)",
+      "seon.test_support$with_published_file_database.invoke(test_support.clj:134)",
+      "seon.test_support$with_published_file_database.invokeStatic(test_support.clj:143)",
+      "seon.test_support$with_published_file_database.invoke(test_support.clj:134)"
+    ]
+  },
+  {
+    "source": "canonical-threads-2.json",
+    "thread": "seon-test-body",
+    "top": [
+      "java.base/sun.nio.ch.FileDispatcherImpl.force0(Native Method)",
+      "java.base/sun.nio.ch.FileDispatcherImpl.force(FileDispatcherImpl.java:37)",
+      "java.base/sun.nio.ch.FileChannelImpl.implForce(FileChannelImpl.java:624)"
+    ],
+    "path": [
+      "konserve.tiered$sync_keys_to_frontend.invokeStatic(tiered.cljc:83)",
+      "konserve.tiered$sync_keys_to_frontend.invoke(tiered.cljc:64)",
+      "konserve.tiered$perform_sync.invokeStatic(tiered.cljc:105)",
+      "konserve.tiered$perform_sync.invoke(tiered.cljc:86)",
+      "konserve.tiered$sync_on_connect.invokeStatic(tiered.cljc:114)",
+      "konserve.tiered$sync_on_connect.invoke(tiered.cljc:111)",
+      "datahike.store$fn__37912.invokeStatic(store.cljc:116)",
+      "datahike.store$fn__37912.invoke(store.cljc:104)",
+      "datahike.connector$_connect_impl_STAR_.invokeStatic(connector.cljc:351)",
+      "datahike.connector$_connect_impl_STAR_.invoke(connector.cljc:294)",
+      "datahike.connector$fn__61072.invokeStatic(connector.cljc:464)",
+      "datahike.connector$fn__61072.invoke(connector.cljc:463)",
+      "datahike.connector$connect.invokeStatic(connector.cljc:483)",
+      "datahike.connector$connect.invoke(connector.cljc:468)",
+      "datahike.connector$connect.invokeStatic(connector.cljc:474)",
+      "datahike.connector$connect.invoke(connector.cljc:468)",
+      "seon.test_support$with_published_file_database$fn__2598533$fn__2598534.invoke(test_support.clj:164)",
+      "seon.test_support$with_published_file_database$fn__2598533.invoke(test_support.clj:164)",
+      "seon.test_support$with_published_file_database.invokeStatic(test_support.clj:164)",
+      "seon.test_support$with_published_file_database.invoke(test_support.clj:134)"
+    ]
+  }
+]

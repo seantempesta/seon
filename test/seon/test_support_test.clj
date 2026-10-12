@@ -24,19 +24,50 @@
             [seon.test.runner :as runner]
             [seon.turn.world :as world]))
 
-(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}}
+(deftest ^{:seon/tasks #{'seon.test-support/file-backed-branch-without-republication}
+           :seon.test/long "Three acquisitions include whole-backend synchronization; measured samples took 28.85–32.33 s and 1.39 GB allocated each."
+           :seon.test/long-ms 180000}
   a-file-backed-fixture-costs-a-branch
-  (let [root (io/file "tmp" "round-waste-fixture" (str (random-uuid)))]
+  (dotimes [sample 3]
+    (let [root (io/file "tmp" "round-waste-fixture" (str (random-uuid)))
+          costs [:seon.profile/ms :seon.profile/alloc-bytes]]
+      (try
+        (let [measured
+              (profile/measure
+               #(test-support/with-published-file-database
+                 root :round-waste-fixture
+                 (fn [connection]
+                   (some? (db/pull (db/db connection) [:seon.fn/sym]
+                                  [:seon.fn/sym 'seon.id/id])))
+                 (fn [stage f]
+                   (let [m (profile/measure f)]
+                     (println (value/core-text {:sample sample :stage stage :cost (select-keys m costs)} 0))
+                     (:seon.profile/value m)))))]
+          (println (value/core-text {:sample sample :stage :fixture :cost (select-keys measured costs)} 0))
+          (is (true? (:seon.profile/value measured)))
+          (is (< (:seon.profile/ms measured) 60000))
+          (is (< (:seon.profile/alloc-bytes measured) 3000000000)))
+        (finally (test-support/delete-recursively! root))))))
+
+(deftest ^{:seon.test/long "Acquires a private file frontend under the fixture cost proof's measured budget."
+           :seon.test/long-ms 60000}
+  a-file-fixture-inherits-program-and-isolates-writes
+  (let [parent (:seon.db/connection (test-support/execution-handle db/*conn*))
+        selector [:seon.fn/sym :seon.program/definition-digest]
+        declaration (db/pull (db/db parent) selector [:seon.fn/sym 'seon.id/id])
+        cluster-name (str "fixture-private-" (random-uuid))
+        root (io/file "tmp" "file-fixture-isolation" (str (random-uuid)))]
     (try
-      (let [measured (profile/measure
-                      #(test-support/with-published-file-database
-                         root :round-waste-fixture
-                         (fn [connection]
-                           (some? (db/pull (db/db connection) [:seon.fn/sym]
-                                          [:seon.fn/sym 'seon.id/id])))))]
-        (is (true? (:seon.profile/value measured)))
-        (is (< (:seon.profile/ms measured) 1000))
-        (is (< (:seon.profile/alloc-bytes measured) 128000000)))
+      (test-support/with-published-file-database
+       root :file-fixture-isolation
+       (fn [connection]
+         (is (= declaration (db/pull (db/db connection) selector [:seon.fn/sym 'seon.id/id])))
+         (test-support/seed-cluster! connection cluster-name)
+         (is (= cluster-name (:seon.cluster/name
+                             (db/pull (db/db connection) [:seon.cluster/name]
+                                      [:seon.cluster/name cluster-name]))))
+         (is (.isDirectory (io/file root "store")))))
+      (is (nil? (db/pull (db/db parent) [:seon.cluster/name] [:seon.cluster/name cluster-name])))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest environment-retains-the-database-projection

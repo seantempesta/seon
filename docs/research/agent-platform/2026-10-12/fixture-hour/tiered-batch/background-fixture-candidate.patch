@@ -1,0 +1,118 @@
+diff --git a/test/seon/background_blob_test.clj b/test/seon/background_blob_test.clj
+index 4e3a1cc26..f529b7a66 100644
+--- a/test/seon/background_blob_test.clj
++++ b/test/seon/background_blob_test.clj
+@@ -7,17 +7,12 @@
+             [seon.config :as config]
+             [seon.db :as db]
+             [seon.effect :as effect]
++            [seon.env :as env]
+             [seon.flow :as flow]
+             [seon.test-support :as support])
+   (:import [java.io ByteArrayOutputStream]
+            [java.util Arrays]))
+ 
+-(def ^:private test-environment
+-  ;; The subset environment (store layer only) every crossing this
+-  ;; namespace constructs names; boot's own constructor, fewer layers.
+-  (delay (support/environment "seon.background-blob-test")))
+-
+-
+ (defn- with-file-effect-store
+   [body]
+   (let [root (io/file "tmp/background-effect-binary-test")]
+@@ -51,22 +46,15 @@
+   request)
+ 
+ (defn- install-capability!
++  "The transaction attaching the handler to the published capability."
++  {:malli/schema [:=> [:cat :seon.db/connection] :seon.db/transaction-report]}
+   [connection]
+-  (let [handler-meta (meta #'binary-handler)]
+-    (support/transacted!
+-            connection
+-            [{:seon.schema/key :seon.background-blob-test/request
+-              :seon.schema.admission/source :core
+-              :seon.schema/form
+-              (pr-str [:map [:seon.background-blob-test/size :int]])}
+-             (merge (support/program-fn-entity 'seon.background-blob-test/binary-capability)
+-                    {:seon.fn/spec
+-                     (pr-str [:=> [:cat :seon.background-blob-test/request]
+-                              :seon.blob/octet-array])
+-                     :seon.fn/workload :io
+-                     :seon.effect/capability
+-                     (symbol (str (ns-name (:ns handler-meta)))
+-                             (str (:name handler-meta)))})])))
++  (support/transacted!
++   connection
++   [(support/revision
++     (db/db connection) [:seon.fn/sym 'seon.background-blob-test/binary-capability]
++     {:seon.fn/workload :io
++      :seon.effect/capability 'seon.background-blob-test/binary-handler})]))
+ 
+ (defn- exact-bytes
+   [connection digest size chunk-size]
+@@ -78,10 +66,12 @@
+           (recur (+ offset (alength ^bytes octets))))))
+     (.toByteArray output)))
+ 
+-(deftest ^{:seon.test/fixture-observation "Background binary results must round-trip through the physical blob backend on both sides of the inline threshold."} background-binary-results-remain-exact-across-the-inline-threshold
++(deftest ^{:seon.test/long "The parent file fixture and background result took 51.40 s in the paired baseline."
++           :seon.test/long-ms 120000
++           :seon.test/fixture-observation "Background binary results must round-trip through the physical blob backend on both sides of the inline threshold."} background-binary-results-remain-exact-across-the-inline-threshold
+   (with-file-effect-store
+     (fn [connection]
+-      (support/apply-config!
++      (support/seed-cluster!
+        connection "default" {:seon.config.eval.result/blob-threshold 8})
+       (support/transacted!
+               connection
+@@ -91,11 +81,9 @@
+                   [:seon.agent/id "binary-agent"]
+                   :seon.turn/opened-tx "datomic.tx"}]))
+       (install-capability! connection)
+-      (let [threshold
+-            (db/q '[:find ?threshold .
+-                    :where
+-                    [_ :seon.config.eval.result/blob-threshold ?threshold]]
+-                  @connection)
++      (let [threshold (:seon.config.eval.result/blob-threshold
++                       (config/effective (db/db connection) "default"))
++            environment (support/environment "default" connection)
+             sizes [(dec threshold) (inc threshold)]
+             events (async/chan 8)
+             listener-key (random-uuid)
+@@ -103,7 +91,7 @@
+                                 #(async/put! events %))
+             launcher
+             (flow/start-work-launcher!
+-             {:seon.env/environment @test-environment
++             {:seon.env/environment environment
+               ::flow/configuration
+               (assoc (select-keys (support/effective-config)
+                                   flow/flow-workload-attributes)
+@@ -113,13 +101,14 @@
+             context
+             ;; the request's world holds this scenario's launcher, where the
+             ;; background work runs
+-            {:seon.env/environment (assoc @test-environment :seon.flow/work-launcher launcher)
++            {:seon.env/environment (assoc environment :seon.flow/work-launcher launcher)
+              :seon.db/connection connection
+              :seon.agent/id "binary-agent"
+              :seon.turn/id "binary-run"
+              :seon.cluster.eval/ordinal 0
+              :seon.boot/cluster-name "default"
+              :seon.sci.admit/caps (config/result-caps config/defaults)
++             :seon.sci.eval/projection-state (env/environment-state environment)
+              :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle connection))
+              :seon.effect/counter (atom -1)}]
+         (try
+@@ -138,6 +127,8 @@
+                     effect-id (when (and (vector? result-ref)
+                                          (= :seon.effect/id (first result-ref)))
+                                 (second result-ref))]
++                (is (nil? (:seon.error/message result-ref)))
++                (is (nil? (:seon.error/data result-ref)))
+                 (is (string? effect-id))
+                 (when effect-id
+                   (support/await-event!

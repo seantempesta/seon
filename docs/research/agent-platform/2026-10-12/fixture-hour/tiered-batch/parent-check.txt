@@ -1,0 +1,205 @@
+check: queue position 3 of 3; 2 throwaway JVMs run, held by pids 3062 4263
+SEON check FAILED (exit 1): The candidate 00b8b1f94576641bb8c4d99c5bb9ae6a7aafa2c7 is red: run ddff7d3582ba / executed 6 / reused 0 / pass 26 / fail 8 / error 2 / 306686 ms / passed? false (4 red) DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T201331.297.edn
+run ddff7d3582ba / executed 6 / reused 0 / pass 26 / fail 8 / error 2 / 306686 ms / passed? false (4 red)
+red seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message
+    "A fixture agent needs the one cluster its fixture seeded, or its handle's own.",
+  :data
+    #:seon.error{:operation seon.test-support/agent-tx,
+     :expected :seon.cluster/name,
+     :offending []},
+  :frames
+    [[seon.test_support$agent_tx invokeStatic "test_support.clj" 1104]
+     [seon.test_support$agent_tx invoke "test_support.clj" 1086]
+     [seon.test_support$agent_tx invokeStatic "test_support.clj" 1097]
+     [seon.test_support$agent_tx invoke "test_support.clj" 1086]
+     [seon.background_blob_test$fn__154156$fn__154157 invoke
+      "background_blob_test.clj" 88]
+     [seon.test_support$with_published_file_database$fn__153723 invoke
+      "test_support.clj" 164]
+     [seon.schema$call_with_projection_state$fn__1390 invoke
+      "schema.clj" 1162]
+     [seon.schema$call_with_projection_state invokeStatic "schema.clj"
+      1161]
+     [seon.schema$call_with_projection_state invoke "schema.clj" 1157]
+     [seon.test_support$with_published_file_database invokeStatic
+      "test_support.clj" 164]
+     [seon.test_support$with_published_file_database invoke
+      "test_support.clj" 132]
+     [seon.background_blob_test$with_file_effect_store invokeStatic
+      "background_blob_test.clj" 27]
+     [seon.background_blob_test$with_file_effect_store invoke
+      "background_blob_test.clj" 21]
+     [seon.background_blob_test$fn__154156 invokeStatic
+      "background_blob_test.clj" 82]
+     [seon.background_blob_test$fn__154156 invoke
+      "background_blob_test.clj" 81]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 514]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 483]
+     [seon.test.runner$run_vars_BANG_$fn__15915$fn__15920$fn__15921
+      invoke "runner.clj" 433]
+     [seon.db$with_branch invokeStatic "db.clj" 479]
+     [seon.db$with_branch invoke "db.clj" 450]
+     [seon.test.runner$run_vars_BANG_$fn__15915$fn__15920 invoke
+      "runner.clj" 432]
+     [seon.test.runner$run_vars_BANG_$fn__15915 invoke "runner.clj" 424]
+     [seon.test.runner$run_vars_BANG_ invokeStatic "runner.clj" 407]
+     [seon.test.runner$run_vars_BANG_ invoke "runner.clj" 397]
+     [seon.test.runner$run_var_BANG_ invokeStatic "runner.clj" 480]
+     [seon.test.runner$run_var_BANG_ invoke "runner.clj" 445]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969$fn__19971$fn__19972
+      invoke "test.clj" 342]
+     [seon.test$with_test_loader$fn__19927 invoke "test.clj" 120]
+     [seon.test$with_test_loader invokeStatic "test.clj" 120]
+     [seon.test$with_test_loader invoke "test.clj" 113]
+     [seon.test$with_test_loader invokeStatic "test.clj" 114]
+     [seon.test$with_test_loader invoke "test.clj" 113]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969$fn__19971
+      invoke "test.clj" 330]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969
+      invoke "test.clj" 327]
+     [seon.test$measured_body$fn__19957 invoke "test.clj" 240]
+     [seon.test$measured_body invokeStatic "test.clj" 240]
+     [seon.test$measured_body invoke "test.clj" 227]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968 invoke
+      "test.clj" 321]
+     [seon.sci.eval$call_detecting_program_change$fn__17074 invoke
+      "eval.clj" 1216]
+     [seon.sci.eval$call_detecting_program_change invokeStatic
+      "eval.clj" 1215]
+     [seon.sci.eval$call_detecting_program_change invoke "eval.clj" 1178]
+     [seon.test$bounded_result$fn__19965$fn__19967 invoke "test.clj" 305]
+     [seon.db$with_branch invokeStatic "db.clj" 479]
+     [seon.db$with_branch invoke "db.clj" 450]
+     [seon.test$bounded_result$fn__19965 invoke "test.clj" 303]]}]
+
+fail
+Test seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold exceeded its declared duration: 51372.157583 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 51372.157583}
+red seon.cluster.fault-storage-test/lossy-subthreshold-fault-evidence-says-it-is-capped: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message "SEON CORE FAULT (not recorded): diagnostic content",
+  :data
+    {:seon.fault/recorded
+       {:seon.error/layer :seon.cluster.fault-storage-test/storm,
+        :seon.error/operation
+          seon.cluster.fault-storage-test/lossy-subthreshold-fault-evidence-says-it-is-capped,
+        :seon.fault/committed? false,
+        :seon.boot/cluster-name
+          "fault-storage-lossy-a3a8df7c-c751-4c0d-b6e5-e964b2ef2a35"},
+     :seon.error/base
+       #:seon.error{:at #inst "2026-10-12T13:10:02.233Z",
+        :layer :seon.cluster.fault-storage-test/storm,
+        :operation seon.cluster.fault-storage-test/lossy-fault-source,
+        :message "diagnostic content",
+        :data
+          {:fault-message
+             "diagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-co"…+34799}}},
+  :frames
+    [[seon.fault$fault_BANG_ invokeStatic "fault.clj" 443]
+     [seon.fault$fault_BANG_ invoke "fault.clj" 358]
+     [seon.cluster.fault_storage_test$fn__154303 invokeStatic
+      "fault_storage_test.clj" 197]
+     [seon.cluster.fault_storage_test$fn__154303 invoke
+      "fault_storage_test.clj" 186]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 514]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 483]
+     [seon.test.runner$run_vars_BANG_$fn__15915$fn__15920$fn__15921
+      invoke "runner.clj" 433]
+     [seon.db$with_branch invokeStatic "db.clj" 479]
+     [seon.db$with_branch invoke "db.clj" 450]
+     [seon.test.runner$run_vars_BANG_$fn__15915$fn__15920 invoke
+      "runner.clj" 432]
+     [seon.test.runner$run_vars_BANG_$fn__15915 invoke "runner.clj" 424]
+     [seon.test.runner$run_vars_BANG_ invokeStatic "runner.clj" 407]
+     [seon.test.runner$run_vars_BANG_ invoke "runner.clj" 397]
+     [seon.test.runner$run_var_BANG_ invokeStatic "runner.clj" 480]
+     [seon.test.runner$run_var_BANG_ invoke "runner.clj" 445]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969$fn__19971$fn__19972
+      invoke "test.clj" 342]
+     [seon.test$with_test_loader$fn__19927 invoke "test.clj" 120]
+     [seon.test$with_test_loader invokeStatic "test.clj" 120]
+     [seon.test$with_test_loader invoke "test.clj" 113]
+     [seon.test$with_test_loader invokeStatic "test.clj" 114]
+     [seon.test$with_test_loader invoke "test.clj" 113]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969$fn__19971
+      invoke "test.clj" 330]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968$fn__19969
+      invoke "test.clj" 327]
+     [seon.test$measured_body$fn__19957 invoke "test.clj" 240]
+     [seon.test$measured_body invokeStatic "test.clj" 240]
+     [seon.test$measured_body invoke "test.clj" 227]
+     [seon.test$bounded_result$fn__19965$fn__19967$fn__19968 invoke
+      "test.clj" 321]
+     [seon.sci.eval$call_detecting_program_change$fn__17074 invoke
+      "eval.clj" 1216]
+     [seon.sci.eval$call_detecting_program_change invokeStatic
+      "eval.clj" 1215]
+     [seon.sci.eval$call_detecting_program_change invoke "eval.clj" 1178]
+     [seon.test$bounded_result$fn__19965$fn__19967 invoke "test.clj" 305]
+     [seon.db$with_branch invokeStatic "db.clj" 479]
+     [seon.db$with_branch invoke "db.clj" 450]
+     [seon.test$bounded_result$fn__19965 invoke "test.clj" 303]]}
+ #:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :suppressed-by 0,
+  :message
+    "The supplied error declaration does not validate its observation.",
+  :data
+    #:seon.error{:at #inst "2026-10-12T13:10:02.403Z",
+     :layer :seon.error/recording,
+     :operation seon.error/prepare,
+     :member :seon.error/declared-schema,
+     :refused-schema :seon.flow/exception-error,
+     :expected :seon.flow/exception-error,
+     :offending
+       #:seon.error{:at #inst "2026-10-12T13:10:02.233Z",
+        :layer :seon.cluster.fault-storage-test/storm,
+        :operation seon.cluster.fault-storage-test/lossy-fault-source,
+        :message "diagnostic content",
+        :data
+          {:fault-message
+             "diagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnostic-contentdiagnost"…+35488},
+        :producer seon.cluster.fault-storage-test/lossy-fault-source}},
+  :frames
+    [[seon.fault$record_BANG_ invokeStatic "fault.clj" 220]
+     [seon.fault$record_BANG_ invoke "fault.clj" 138]
+     [seon.fault$fault_BANG_ invokeStatic "fault.clj" 414]]}]
+
+fail
+Test seon.cluster.fault-storage-test/lossy-subthreshold-fault-evidence-says-it-is-capped exceeded its declared duration: 47515.450084 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 47515.450084}
+red seon.cluster.fault-storage-test/oversized-fault-evidence-is-bounded-and-retrievable: fail
+Test seon.cluster.fault-storage-test/oversized-fault-evidence-is-bounded-and-retrievable exceeded its declared duration: 62185.306125 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 62185.306125}
+
+fail test/seon/cluster/fault_storage_test.clj:172
+repeated identical faults aggregate on one bounded occurrence
+every fault of the class is counted on that occurrence
+expected: (= 500 occurrence-count)
+actual: (not (= 500 1))
+
+fail test/seon/cluster/fault_storage_test.clj:170
+repeated identical faults aggregate on one bounded occurrence
+500 identical faults are one failure class, one occurrence
+expected: (= 1 (count occurrences))
+actual: (not (= 1 3))
+red seon.test-support-test/a-file-backed-fixture-costs-a-branch: fail test/seon/test_support_test.clj:38
+expected: (< (:seon.profile/ms measured) 1000)
+actual: (not (< 48051.87 1000))
+
+fail test/seon/test_support_test.clj:39
+expected: (< (:seon.profile/alloc-bytes measured) 128000000)
+actual: (not (< 31429717192 128000000))
+
+fail
+Test seon.test-support-test/a-file-backed-fixture-costs-a-branch exceeded its declared duration: 49490.11575 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 49490.11575}

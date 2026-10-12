@@ -535,6 +535,14 @@
 (def ^:private byte-array-class (class (byte-array 0)))
 
 (defn- staged-result
+  "The admitted result's stored attributes and staged binary content."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.config.eval.result/blob-threshold
+                       :seon.schema/value :seon.sci.admit/value]
+                  [:map
+                   [:seon.effect/stored-result
+                    [:map :seon.effect/result-edn :seon.effect/result-size
+                     [:seon.effect/result-blob {:optional true}]]]
+                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
   [connection threshold raw-value admitted-result]
   (let [result-edn (admit/canonical-edn admitted-result)
         octets
@@ -547,7 +555,7 @@
         staged
         (when blob-backed?
           (blob/stage-binary!
-           connection (ByteArrayInputStream. ^bytes octets)))]
+           connection (ByteArrayInputStream. ^bytes octets) threshold))]
     {:seon.effect/stored-result
      (cond->
       {:seon.effect/result-edn result-edn

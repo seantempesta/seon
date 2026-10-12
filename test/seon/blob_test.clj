@@ -1,5 +1,7 @@
 (ns seon.blob-test
   "Content-addressed blob behavior on Seon's real file store."
+  {:seon.test/long "Acquires a private file frontend; the retained fixture sample took 29.21 s before range support."
+   :seon.test/long-ms 60000}
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -28,50 +30,22 @@
                          (.update octets)))))
 
 (defn- with-file-blob-store
+  "Run the body with a configured file frontend and its root."
+  {:malli/schema [:=> [:cat :seon.store/dir
+                       [:=> [:cat :seon.db/connection :seon.store/dir] :seon.schema/value]]
+                  :seon.schema/value]}
   [root f]
-  (let [root-file (io/file root)]
-    (when (.exists root-file)
-      (support/delete-recursively! root-file))
-    (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
-      (try
-        (support/transacted!
-                (:seon.store/connection-object opened)
-                ;; An identity-less entity must have an owner, so the dial is
-                ;; written under an identity the store also installs.
-                [{:db/ident :blob-test/id
-                  :db/valueType :db.type/string
-                  :db/cardinality :db.cardinality/one
-                  :db/unique :db.unique/identity}
-                 {:db/ident :seon.config.eval.result/blob-threshold
-                  :db/valueType :db.type/long
-                  :db/cardinality :db.cardinality/one}
-                 {:db/ident :seon.config.blob/compress?
-                  :db/valueType :db.type/boolean
-                  :db/cardinality :db.cardinality/one}
-                 {:db/ident :seon.config.blob/compress-min-bytes
-                  :db/valueType :db.type/long
-                  :db/cardinality :db.cardinality/one}
-                 {:db/ident :seon.config.blob/compress-max-bytes
-                  :db/valueType :db.type/long
-                  :db/cardinality :db.cardinality/one}])
-        (registry/branch! {:seon.store/store opened
-                           :seon.cluster.registry/from :db
-                           :seon.store/branch :blob-binary-test})
-        (let [connection (store/open-branch! opened :blob-binary-test)]
-          (try
-            (support/transacted!
-                    connection
-                    [{:blob-test/id "dial"
-                      :seon.config.eval.result/blob-threshold binary-threshold
-                      :seon.config.blob/compress? true
-                      :seon.config.blob/compress-min-bytes 1024
-                      :seon.config.blob/compress-max-bytes (* 16 1024 1024)}])
-            (f connection root)
-            (finally
-              (d/release connection))))
-        (finally
-          (store/release-store! opened)
-          (support/delete-recursively! root-file))))))
+  (try
+    (support/with-published-file-database
+     root :blob-binary-test
+     (fn [connection]
+       (support/seed-cluster! connection "blob-binary-test"
+                              {:seon.config.eval.result/blob-threshold binary-threshold
+                               :seon.config.blob/compress? true
+                               :seon.config.blob/compress-min-bytes 1024
+                               :seon.config.blob/compress-max-bytes (* 16 1024 1024)})
+       (f connection root)))
+    (finally (support/delete-recursively! root))))
 
 (defn- reconstruct
   [connection digest chunk-size]
@@ -127,14 +101,14 @@
      (gen/vector (gen/choose 0 255) size))))
 
 (deftest generated-binary-values-round-trip-through-staging-and-chunks
-  (let [check
+  (with-file-blob-store
+   "tmp/blob-binary-property-test"
+   (fn [connection _root]
+    (let [check
         (tc/quick-check
          20
          (prop/for-all
           [octet-values binary-payload-generator]
-          (with-file-blob-store
-            "tmp/blob-binary-property-test"
-            (fn [connection _root]
               (let [payload (byte-array (map unchecked-byte octet-values))
                     expected-digest (independent-digest payload)
                     result (blob/put-binary!
@@ -142,9 +116,9 @@
                     reconstructed (reconstruct connection expected-digest 113)]
                 (and (= expected-digest (:seon.blob/digest result))
                      (= (alength payload) (:seon.blob/size result))
-                     (Arrays/equals payload reconstructed))))))
+                     (Arrays/equals payload reconstructed))))
          :seed 1785772983)]
-    (is (:result check))))
+      (is (:result check))))))
 
 (deftest interrupted-staging-leaves-the-store-unchanged
   (with-file-blob-store
@@ -189,15 +163,11 @@
         (.setThreadAllocatedMemoryEnabled allocation-bean true)
         (let [write-before (.getThreadAllocatedBytes allocation-bean thread-id)
               result
-              (with-redefs-fn
-                {(ns-resolve 'seon.blob 'binary-threshold)
-                 (constantly binary-threshold)
-                 (ns-resolve 'seon.blob 'verify-stored!)
-                 (constantly nil)}
-                #(with-open [input (FileInputStream. payload-file)]
-                   (blob/put-binary! connection input)))
+              (with-open [input (FileInputStream. payload-file)]
+                (blob/stage-binary! connection input))
               write-allocation (- (.getThreadAllocatedBytes allocation-bean thread-id)
                                   write-before)
+              _ (blob/with-publication! connection [result] (fn [] nil))
               read-before (.getThreadAllocatedBytes allocation-bean thread-id)
               range-bytes (blob/read-chunk
                            connection (:seon.blob/digest result) 1048579 4096)
@@ -221,7 +191,7 @@
     (str "tmp/blob-compress-test/" (random-uuid))
     (fn [connection root]
       (let [store (:store @connection)
-            file-store (or (:backend-store store) store)
+            file-store (:frontend-store store)
             file-bytes (fn [digest]
                          (.length (io/file root "store" (defaults/key->store-key digest))))
             text (apply str (repeat 880 "#:seon.print{:face :seon.print/keyword, :value :seon.agent/id}\n"))

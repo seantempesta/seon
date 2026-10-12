@@ -131,12 +131,17 @@
         (:seon.shell.jvm/value terminal)))))
 
 (defn- capture-task
-  [connection thread-name ^InputStream input]
+  "The virtual task capturing one process stream at its selected inline threshold."
+  {:malli/schema [:=> [:cat :seon.db/connection :string :seon.blob/input-stream
+                       :seon.config.eval.result/blob-threshold]
+                  [:map [:seon.shell.jvm/thread :seon.schema/value]
+                   [:seon.shell.jvm/result :seon.await/blocking-deref]]]}
+  [connection thread-name ^InputStream input threshold]
   (virtual-task
      thread-name
    (fn []
      (with-open [stream input]
-       (blob/stage-binary! connection stream)))))
+       (blob/stage-binary! connection stream threshold)))))
 
 (defn- write-array!
   [^OutputStream output ^bytes octets limit]
@@ -378,8 +383,8 @@
         captured (volatile! [])
         grace-ms (:seon.config.shell/termination-grace-ms effective)
         tasks
-        [[::stdout (capture-task connection "seon-shell-stdout-" (:out process-record))]
-         [::stderr (capture-task connection "seon-shell-stderr-" (:err process-record))]
+        [[::stdout (capture-task connection "seon-shell-stdout-" (:out process-record) (:seon.config.eval.result/blob-threshold effective))]
+         [::stderr (capture-task connection "seon-shell-stderr-" (:err process-record) (:seon.config.eval.result/blob-threshold effective))]
          [::stdin (stdin-task connection (:in process-record) (:my.shell/stdin request)
                               (:seon.config.shell/stdin-max-bytes effective))]]]
     (try

@@ -1,0 +1,193 @@
+check: queue position 1 of 1; 2 throwaway JVMs run, held by pids 20878 21059
+SEON check FAILED (exit 1): The candidate 00dd7dd043141402fdd360ccf08d992fd03db539 is red: {:sample 0, DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261012T202744.242.edn
+{:sample 0,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.18, :alloc-bytes 23520}}
+{:sample 0,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11278.3, :alloc-bytes 165995264}}
+{:sample 0,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.07, :alloc-bytes 8784}}
+{:sample 0,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.08, :alloc-bytes 743720}}
+{:sample 0,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.42, :alloc-bytes 43688}}
+{:sample 0,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.61, :alloc-bytes 17992}}
+{:sample 0,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11305.76, :alloc-bytes 174784560}}
+{:sample 1,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.2, :alloc-bytes 22056}}
+{:sample 1,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11193.73, :alloc-bytes 166048720}}
+{:sample 1,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.09, :alloc-bytes 7248}}
+{:sample 1,
+ :stage :body,
+ :cost #:seon.profile{:ms 1.05, :alloc-bytes 737288}}
+{:sample 1,
+ :stage :release,
+ :cost #:seon.profile{:ms 1.39, :alloc-bytes 43000}}
+{:sample 1,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.16, :alloc-bytes 17544}}
+{:sample 1,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11217.07, :alloc-bytes 174375328}}
+{:sample 2,
+ :stage :branch-create,
+ :cost #:seon.profile{:ms 0.18, :alloc-bytes 22056}}
+{:sample 2,
+ :stage :connect,
+ :cost #:seon.profile{:ms 11804.24, :alloc-bytes 166107072}}
+{:sample 2,
+ :stage :projection,
+ :cost #:seon.profile{:ms 0.05, :alloc-bytes 7248}}
+{:sample 2,
+ :stage :body,
+ :cost #:seon.profile{:ms 0.89, :alloc-bytes 736904}}
+{:sample 2,
+ :stage :release,
+ :cost #:seon.profile{:ms 0.44, :alloc-bytes 43144}}
+{:sample 2,
+ :stage :branch-delete,
+ :cost #:seon.profile{:ms 0.2, :alloc-bytes 17600}}
+{:sample 2,
+ :stage :fixture,
+ :cost #:seon.profile{:ms 11820.26, :alloc-bytes 174433408}}
+run 1dea36e111f0 / executed 9 / reused 0 / pass 54 / fail 0 / error 1 / 118971 ms / passed? false (1 red)
+red seon.background-blob-test/background-binary-results-remain-exact-across-the-inline-threshold: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message
+    "Fixture write was refused at the write: The stored definition digest of [:seon.fn/sym seon.background-blob-test/binary-capability] is not the one its definition produces. Write the entity its canonical writer produced.",
+  :data
+    {:seon.db/transaction-refused true,
+     :seon.db.write.attempt/request-id "b8ee810a24df",
+     :seon.error/at #inst "2026-10-12T13:25:51.479Z",
+     :seon.error/layer :seon.db/database-write,
+     :seon.error/member :seon.program/definition-digest,
+     :seon.error/operation seon.db/transact!,
+     :seon.error/type :seon.db.write/validation-refusal,
+     :seon.error/expected
+       "28eb637a30184a4e3ce378fd050c8022b3a5907b56ae290aaff947a991906ea3",
+     :seon.error/message
+       "The stored definition digest of [:seon.fn/sym seon.background-blob-test/binary-capability] is not the one its definition produces. Write the entity its canonical writer produced.",
+     :seon.error/offending
+       "f9f2441a55b475e28edf968fe8cd3125d00061faa55b67ad8e507d241bab31af",
+     :seon.db/tx-data
+       [{:seon.fn/sym seon.background-blob-test/binary-capability,
+         :seon.effect/capability
+           seon.background-blob-test/binary-handler,
+         :seon.fn/arglists "([request])",
+         :seon.fn/calls #{clojure.core/defn},
+         :seon.fn/defined-by clojure.core/defn,
+         :seon.fn/file
+           [:seon.fn.file/relative-path
+            "test/seon/background_blob_test.clj"],
+         :seon.fn/form-span [1237 1424],
+         :seon.fn/host-bound? false,
+         :seon.fn/inline? false,
+         :seon.fn/ns [:seon.ns/name seon.background-blob-test],
+         :seon.fn/private? false,
+         :seon.fn/workload :io,
+         :seon.schema.admission/source :core,
+         :seon.fn/source
+           "(defn binary-capability
+  {:malli/schema [:=> [:cat
+                       [:"…+110,
+         :seon.fn/spec
+           "[:=> [:cat [:map [:seon.background-blob-test/size :int]]] :seon.blob/octet-array]",
+         :seon.program/analyzed-source-digest
+           "ad044a3c63db321eba969716ecdb8c4f4ba6f566d87d99039e9f1c3e6491f09e",
+         :seon.program/definition-digest
+           "f9f2441a55b475e28edf968fe8cd3125d00061faa55b67ad8e507d241bab31af",
+         :seon.fn/call-arities #{[clojure.core/defn 4]}}],
+     :seon.error/basis
+       #:seon.error.basis{:store
+          #uuid "8dd2a7cb-adf3-34b9-bd0d-ec6d8b3a058e",
+        :branch
+          :background-effect-binary-test/3f8259c5-149a-4c55-aa58-0cfa3e7d649f,
+        :commit #uuid "6accdfdf-9fd6-5adb-8606-7f01198c6ad3",
+        :t 536870933},
+     :seon.error/data
+       {:seon.db/entity
+          {:seon.fn/sym seon.background-blob-test/binary-capability},
+        :seon.db.write.attempt/transaction
+          [{:seon.fn/sym seon.background-blob-test/binary-capability,
+            :seon.effect/capability
+              seon.background-blob-test/binary-handler,
+            :seon.fn/arglists "([request])",
+            :seon.fn/calls #{clojure.core/defn},
+            :seon.fn/defined-by clojure.core/defn,
+            :seon.fn/file
+              [:seon.fn.file/relative-path
+              "test/seon/background_blob_test.clj"],
+            :seon.fn/form-span [1237 1424],
+            :seon.fn/host-bound? false,
+            :seon.fn/inline? false,
+            :seon.fn/ns [:seon.ns/name seon.background-blob-test],
+            :seon.fn/private? false,
+            :seon.fn/workload :io,
+            :seon.schema.admission/source :core,
+            :seon.fn/source "(defn binary-capability
+  {:mall"…+155,
+            :seon.fn/spec "[:=> [:cat [:map [:seon.backgrou"…+49,
+            :seon.program/analyzed-source-digest
+              "ad044a3c63db321eba969716ecdb8c4f"…+32,
+            :seon.program/definition-digest
+              "f9f2441a55b475e28edf968fe8cd3125"…+32,
+            :seon.fn/call-arities #{[clojure.core/defn 4]}}]}},
+  :frames
+    [[seon.test_support$transacted_BANG_ invokeStatic "test_support.clj"
+      270]
+     [seon.test_support$transacted_BANG_ invoke "test_support.clj" 246]
+     [seon.background_blob_test$install_capability_BANG_ invokeStatic
+      "background_blob_test.clj" 51]
+     [seon.background_blob_test$install_capability_BANG_ invoke
+      "background_blob_test.clj" 47]
+     [seon.background_blob_test$fn__2406310$fn__2406311 invoke
+      "background_blob_test.clj" 81]
+     [seon.test_support$with_published_file_database$fn__2405823$fn__2405824$fn__2405825
+      invoke "test_support.clj" 174]
+     [seon.schema$call_with_projection_state$fn__1390 invoke
+      "schema.clj" 1162]
+     [seon.schema$call_with_projection_state invokeStatic "schema.clj"
+      1161]
+     [seon.schema$call_with_projection_state invoke "schema.clj" 1157]
+     [seon.test_support$with_published_file_database$fn__2405823$fn__2405824
+      invoke "test_support.clj" 174]
+     [seon.db$with_branch invokeStatic "db.clj" 479]
+     [seon.db$with_branch invoke "db.clj" 450]
+     [seon.test_support$with_published_file_database$fn__2405823 invoke
+      "test_support.clj" 172]
+     [seon.test_support$with_published_file_database$fn__2405813 invoke
+      "test_support.clj" 143]
+     [seon.test_support$with_published_file_database invokeStatic
+      "test_support.clj" 171]
+     [seon.test_support$with_published_file_database invoke
+      "test_support.clj" 134]
+     [seon.test_support$with_published_file_database invokeStatic
+      "test_support.clj" 143]
+     [seon.test_support$with_published_file_database invoke
+      "test_support.clj" 134]
+     [seon.background_blob_test$with_file_effect_store invokeStatic
+      "background_blob_test.clj" 21]
+     [seon.background_blob_test$with_file_effect_store invoke
+      "background_blob_test.clj" 15]
+     [seon.background_blob_test$fn__2406310 invokeStatic
+      "background_blob_test.clj" 70]
+     [seon.background_blob_test$fn__2406310 invoke
+      "background_blob_test.clj" 67]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 514]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 483]
+     …28]}]

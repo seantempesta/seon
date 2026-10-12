@@ -43,7 +43,7 @@
                       org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
-         :git/sha "e4334756413917305968333bf305e658c177765d"
+         :git/sha "26444d372bf97de219d55c06d5d23bd6f5cfc634"
          :exclusions [org.clojure/clojurescript
                       org.clojars.mmb90/cljs-cache
                       com.github.pkpkpk/cljs-node-io

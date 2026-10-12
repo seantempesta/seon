@@ -198,9 +198,17 @@
              (mapv #(bit-and 0xff %) ^bytes octets)))))
 
 (defn- capture-body!
-  [connection ^InputStream input max-response url content-type force-blob?]
+  "The response body and its captured octets or staged blob."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.blob/input-stream
+                       :seon.config.web/max-response-bytes :my.web/url
+                       [:maybe :my.web/content-type] :boolean
+                       :seon.config.eval.result/blob-threshold]
+                  [:map [:seon.web.jvm/body :my.web.body/value]
+                   [:seon.web.jvm/octet-array {:optional true} :seon.blob/octet-array]
+                   [:seon.blob/staged-write {:optional true} :seon.blob/staged-write]]]}
+  [connection ^InputStream input max-response url content-type force-blob? threshold]
   (with-open [^InputStream bounded (bounded-input input max-response url)]
-    (let [stored (blob/stage-binary! connection bounded)
+    (let [stored (blob/stage-binary! connection bounded threshold)
           octets (:seon.blob/staged-octets stored)]
       (if (and octets (not force-blob?))
         {:seon.web.jvm/body (inline-body octets content-type)
@@ -330,7 +338,7 @@
                   (ensure-declared-length! response max-response final-url)
                   (let [captured
                         (capture-body! db/*conn* body max-response
-                                       final-url content-type false)
+                                       final-url content-type false (:seon.config.eval.result/blob-threshold effective))
                         octets (captured-octets db/*conn* captured)
                         base
                         (cond->
@@ -419,7 +427,7 @@
               (capture-body!
                db/*conn* (.body ^HttpResponse response)
                (:seon.config.web/max-response-bytes effective)
-               final-url content-type true)
+               final-url content-type true (:seon.config.eval.result/blob-threshold effective))
               body (:seon.web.jvm/body captured)
               raw (captured-octets db/*conn* captured)]
           (if-not (<= 200 status 299)

@@ -5,7 +5,9 @@
             [clojure.test.check.generators :as gen]
             [datahike.gc-guard :as gc-guard]
             [konserve.core :as k]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.error.refusal :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -40,44 +42,32 @@
 (schema.edn/load! {})
 
 (defn- binary-threshold
+  "The inline threshold of the cluster carried by the connection."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.config.eval.result/blob-threshold]}
   [connection]
-  (let [threshold
-        (db/q
-         (db/db connection)
-         '[:find ?threshold .
-           :where
-           [_ :seon.config.eval.result/blob-threshold ?threshold]])]
-    (when-not (and (integer? threshold) (pos? threshold))
-      (throw
-       (ex-info
-        "Blob threshold is not a positive integer."
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/binary-threshold
-         {:seon.error/offending threshold
-          :seon.blob/threshold-attribute :seon.config.eval.result/blob-threshold
-          :seon.error/message "Blob threshold is not a positive integer."
-          :seon.error/expected :pos-int}))))
-    (Math/toIntExact (long threshold))))
+  (let [database (db/db connection)
+        cluster-name (:seon.boot/cluster-name (env/of (meta database)))
+        effective (config/effective database cluster-name)]
+    (:seon.config.eval.result/blob-threshold effective)))
+
+(defn- file-store-directory
+  "The directory of the file store receiving writes, through tiered frontends."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.store/dir]}
+  [store]
+  (loop [store store]
+    (if-let [frontend (:frontend-store store)]
+      (recur frontend)
+      (get-in store [:backing :base]))))
 
 (defn- stage-file!
+  "A staging file beside the file store receiving this write."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
   ^File [store]
-  (let [store-base (some-> store :backing :base io/file .getAbsoluteFile)
-        process-root (some-> store-base .getParentFile)]
-    (when-not process-root
-      (throw
-       (ex-info
-        "The file-backed blob store has no process root."
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.blob/storage
-          :seon.error/operation 'seon.blob/stage-file!
-          :seon.error/offending store-base
-          :seon.blob/store-root-absent (str store-base)
-          :seon.error/message "The file-backed blob store has no process root."
-          :seon.blob/store-base store-base
-          :seon.error/expected "a store directory with a process-root parent"})))
-    (let [directory (io/file process-root "blob-staging")]
-      (Files/createDirectories (.toPath directory)
-                               (make-array java.nio.file.attribute.FileAttribute 0))
-      (File/createTempFile "blob-" ".stage" directory))))
+  (let [process-root (.getParentFile (.getAbsoluteFile (io/file (file-store-directory store))))
+        directory (io/file process-root "blob-staging")]
+    (Files/createDirectories (.toPath directory)
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (File/createTempFile "blob-" ".stage" directory)))
 
 (defn- digest-string
   [^MessageDigest digest]
@@ -170,12 +160,10 @@
   "The connection's blob compression dials, read once per publication."
   {:malli/schema [:=> [:cat :seon.db/connection] :seon.blob/compression]}
   [connection]
-  (into {}
-        (db/q (db/db connection)
-              '[:find ?dial ?value
-                :in $ [?dial ...]
-                :where [_ ?dial ?value]]
-              compression-dials)))
+  (let [database (db/db connection)
+        cluster-name (:seon.boot/cluster-name (env/of (meta database)))]
+    (select-keys (db/pull database compression-dials [:seon.config/cluster cluster-name])
+                 compression-dials)))
 
 (defn- compressed-size?
   "True when the dials compress a blob of `size` bytes; absent dials, as on a
@@ -257,12 +245,9 @@
      [:seon.blob/fact :map]
      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
   [connection text inline-key size-key blob-key]
-  (let [threshold (db/q (db/db connection)
-                        '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]])
-        _ (when (error/error? threshold)
-            (throw (ex-info "Cannot read the blob threshold." threshold)))
+  (let [threshold (binary-threshold connection)
         size (utf8-size text)]
-    (if (and threshold (> size threshold))
+    (if (> size threshold)
       (let [write (stage! connection text)]
         {:seon.blob/fact {size-key size, blob-key (:seon.blob/digest write)}
          :seon.blob/staged-writes [write]})
@@ -275,12 +260,14 @@
   Retains only the configured inline prefix. Content beyond that prefix is
   written to one staging file under the process root."
   {:malli/schema
-   [:=>
-    [:cat :seon.db/connection :seon.blob/input-stream]
-    :seon.blob/staged-write]}
-  [connection ^InputStream input]
+   [:function
+    [:=> [:cat :seon.db/connection :seon.blob/input-stream] :seon.blob/staged-write]
+    [:=> [:cat :seon.db/connection :seon.blob/input-stream :seon.config.eval.result/blob-threshold]
+     :seon.blob/staged-write]]}
+  ([connection input]
+   (stage-binary! connection input (binary-threshold connection)))
+  ([connection ^InputStream input threshold]
   (let [store (konserve-store connection)
-        threshold (binary-threshold connection)
         prefix (byte-array threshold)
         buffer (byte-array threshold)
         digester (MessageDigest/getInstance "SHA-256")]
@@ -331,7 +318,7 @@
                     ;; The staging file is the observable artifact of an
                     ;; interrupted oversized write. It remains under the
                     ;; process root for inspection until explicit cleanup.
-                    (throw error)))))))))))
+                    (throw error))))))))))))
 
 (defn with-publication!
   "Publish staged blobs and commit their direct roots under one permit."
