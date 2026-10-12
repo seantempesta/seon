@@ -306,7 +306,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   their listed order. The writer checks the touched entities' digests; only root's merge advances main, and the
   agent's branch is deleted when its merge request closes. Local green never implies shared acceptance.
 - **Write-back** uses the same checks, checks file bases, stages exact-span changes and reindexes to prove equivalent
-  declarations before installation.
+  declarations before installation, task entries included: a merged task is written into its task file.
 
 ## Data and contracts
 

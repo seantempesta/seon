@@ -263,7 +263,7 @@
            "a task whose proof has not run is assigned")
        (is (= id (:seon.task/assigned (assigned))) "the assignment answers before the revision")
        (is (:seon.task/changed? (task/create! (assoc declaration :seon.task/intent "Second."
-                                                     :seon.task/basis {id (#'task/declared (db/carried-projection @connection)
+                                                     :seon.task/basis {id (task/declaration (db/carried-projection @connection)
                                                                                            (db/pull @connection '[*] [:seon.task/id id]))}))))
        (is (= "Second." (intent)) "the task shows its revised declaration")
        (is (= id (:seon.task/assigned (assigned))) "the assignment is current without a new assign!")

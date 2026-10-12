@@ -2056,8 +2056,8 @@
 
 (defn- publication-due?
   "Whether an assignment's publication is due, from its `row` on main: merged, its merge commit recorded,
-  its merge moved declarations (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes in the
-  merge's own transaction), and no git commit and no refusal recorded. A merge of facts alone is never due."
+  its merge moved declarations or tasks (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes
+  beside its merge commit), and no git commit and no refusal recorded. A merge moving no declaration is never due."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [{outcome :seon.task/outcome commit :seon.task/merge-commit moved :seon.task/merged-declarations
     git :seon.task/git-commit refused :seon.task/refusal}]

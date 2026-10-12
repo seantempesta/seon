@@ -29,7 +29,8 @@
             [rewrite-clj.zip :as z]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.task :as task])
   (:import [java.nio.file Files]))
 
 (schema.edn/load! {})
@@ -788,15 +789,18 @@
         (into #{} (filter (fn [[_ value]] (reached value))) selection)))))
 
 (defn- held-digests
-  "The definition digest `database` holds for each of `identities`,
+  "The definition digest `database` holds for each of `identities` (a task's
+  revision, `seon.task/task-revision`, for `[:seon.task/sym ns/name]`),
   `:seon.program/absent` where it declares none: what a merge or write-back
   compares, so writes to other rows never stale it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.source/expected-digests]}
   [database identities]
   (into {} (map (fn [[attribute value :as identity]]
-                  [identity (or (db/q '[:find ?digest . :in $ ?a ?v
-                                        :where [?e ?a ?v] [?e :seon.program/definition-digest ?digest]]
-                                      database attribute value)
+                  [identity (or (if (= :seon.task/sym attribute)
+                                  (task/task-revision database (task/task-handle (symbol (namespace value)) (name value)))
+                                  (db/q '[:find ?digest . :in $ ?a ?v
+                                          :where [?e ?a ?v] [?e :seon.program/definition-digest ?digest]]
+                                        database attribute value))
                                 :seon.program/absent)]))
         identities))
 
@@ -1496,22 +1500,130 @@
           :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
                  :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
 
+(defn- task-path
+  "The task file the task `sym` is declared in: its namespace's file under `resources/seon/tasks/`."
+  {:malli/schema [:=> [:cat :seon.task/sym] :seon.source/path]}
+  [sym]
+  (str "resources/seon/tasks/" (namespace sym) ".edn"))
+
+(defn- task-entry-node
+  "`declaration` as a task file entry in the layout of `old`, the entry it
+  replaces or the neighbour it follows (`relaid`): members in `old`'s order,
+  then the declaration's own, and namespaced as `old` is."
+  {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] :seon.task/declaration] [:fn rewrite-clj.node/node?]]}
+  [old declaration]
+  (let [[qualifier inner] (if (= :namespaced-map (node/tag old)) (node/children old) [nil old])
+        prefix (some-> qualifier node/string (subs 1))
+        members (dissoc declaration :seon.task/ns)
+        order (distinct (concat (keep #(when (keyword? %) %) (map node/sexpr (remove node/whitespace-or-comment? (node/children inner))))
+                                [:seon.task/name :seon.task/step :seon.task/intent :seon.task/children :seon.task/needs]))
+        value (node/coerce (apply array-map (mapcat (fn [k] (when (contains? members k)
+                                                              [(if (= prefix (namespace k)) (keyword (name k)) k) (members k)]))
+                                                    order)))
+        laid (relaid inner value)]
+    (if qualifier (node/replace-children old [qualifier laid]) laid)))
+
+(defn- task-file-text
+  "`text`, one task file's vector of entries, with each `[name declaration]` of
+  `edits` applied by rewrite-clj: the entry named `name` replaced
+  (`task-entry-node`), removed with the whitespace before it when
+  `declaration` is nil, or appended after the last entry, separated as the
+  last two are. Every other node keeps its text."
+  {:malli/schema [:=> [:cat :string [:sequential [:tuple :seon.task/name [:maybe :seon.task/declaration]]]] :string]}
+  [text edits]
+  (let [outer (z/find (z/of-string text) z/right #(= :vector (z/tag %)))
+        edit (fn [children [task-name declaration]]
+               (let [significant (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
+                     at (some #(when (= task-name (:seon.task/name (node/sexpr (nth children %)))) %) significant)
+                     before (last (filter #(< % (or at 0)) significant))
+                     splice (fn [from to nodes] (into (into (subvec children 0 from) nodes) (subvec children to)))]
+                 (cond
+                   (and at declaration) (assoc children at (task-entry-node (nth children at) declaration))
+                   (and at before) (splice (inc before) (inc at) [])
+                   at (splice at (or (some #(when (> % at) %) significant) (count children)) [])
+                   (nil? declaration) children
+                   (empty? significant) (splice 0 0 [(node/coerce (dissoc declaration :seon.task/ns))])
+                   :else (let [end (peek significant)
+                               gap (if (< 1 (count significant))
+                                     (subvec children (inc (peek (pop significant))) end)
+                                     [(node/newlines 1) (node/spaces 1)])]
+                           (splice (inc end) (inc end) (conj gap (task-entry-node (nth children end) declaration)))))))
+        children (reduce edit (vec (node/children (z/node outer))) edits)]
+    (z/root-string (z/replace outer (node/replace-children (z/node outer) children)))))
+
+(defn- proven-task-file
+  "The candidate bytes of the task file `identities` (tasks `[:seon.task/sym
+  ns/name]` of one namespace) are declared in, under `root`, with each entry as
+  `after` declares it: replaced, removed or appended by `task-file-text`. A file
+  entry declaring neither `before`'s nor `after`'s value is a `:conflict`.
+  Proven by reading the candidate back through ingestion's reader
+  (`seon.task/file-declarations`): each written entry declares `after`'s value
+  or is absent with it, and every other entry reads as it did."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
+                  [:or :seon.source/proof :seon.source/write-back-error]]}
+  [before after identities root]
+  (let [path (task-path (second (first identities)))
+        file (io/file root path)
+        base-bytes (when (.isFile file) (Files/readAllBytes (.toPath file)))
+        base-text (some-> ^bytes base-bytes (String. "UTF-8"))
+        projection (db/carried-projection after)
+        held (fn [database sym] (task/task-declaration database (task/task-handle (symbol (namespace sym)) (name sym))))
+        rows (vec (for [[_ sym :as identity] (sort-by str identities)] [identity (held before sym) (held after sym)]))
+        ;; the file's declarations by symbol, as ingestion reads them; nil when it refuses the text
+        read-file #(try (into {} (map (juxt :seon.task/sym (partial task/declaration projection)))
+                              (task/file-declarations projection path %))
+                        (catch clojure.lang.ExceptionInfo failure
+                          (if (:seon.task/refused (ex-data failure)) nil (throw failure))))
+        digest-of #(if % (id/digest 64 [%]) :seon.program/absent)
+        ours (some-> base-text read-file)
+        refuse (fn [reason message evidence] (write-back-refusal reason message (assoc evidence :seon.source/path path)))]
+    (cond
+      (nil? base-bytes) (refuse :file-absent "The changed tasks' file is absent under the root." {})
+      (nil? ours) (refuse :not-analyzable "The task file as it is now does not read as task declarations." {})
+      :else
+      (let [conflicting (into {} (keep (fn [[[_ sym :as identity] was now]]
+                                         (let [file-held (get ours sym)]
+                                           (when-not (#{was now} file-held)
+                                             [identity {:seon.program/base-digest (digest-of was)
+                                                        :seon.program/branch-digest (digest-of now)
+                                                        :seon.program/head-digest (digest-of file-held)}]))))
+                              rows)
+            written (map (comp second first) rows)
+            candidate (when (empty? conflicting)
+                        (task-file-text base-text (mapv (fn [[[_ sym] _ now]] [(name sym) now]) rows)))
+            read (some-> candidate read-file)
+            differing (when read
+                        (into (vec (keep (fn [[[_ sym :as identity] _ now]] (when-not (= now (get read sym)) identity)) rows))
+                              (when (not= (apply dissoc ours written) (apply dissoc read written)) [:seon.source/other-entries])))]
+        (cond
+          (seq conflicting)
+          (refuse :conflict "The file changed these tasks since your branch's base, and your branch changed them too."
+                  {:seon.program/conflict-digests conflicting})
+          (nil? read) (refuse :not-analyzable "The candidate task file does not read as task declarations." {})
+          (seq differing)
+          (refuse :not-equivalent "The candidate task file does not declare exactly the merged tasks."
+                  {:seon.error/offending differing})
+          :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
+                 :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
+
 (defn- change-path
   "The relative path of the one file `identity`'s change is written into: a
-  schema's resource (`schema-path`), the declaration's own file as `before`
+  task's file (`task-path`), a schema's resource (`schema-path`), the declaration's own file as `before`
   recorded it, else (an addition) its namespace's file; nil when neither is
   recorded."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :seon.source/path]]}
   [before [attribute declared :as identity]]
-  (if (= :seon.schema/key attribute)
-    (schema-path declared)
+  (case attribute
+    :seon.task/sym (task-path declared)
+    :seon.schema/key (schema-path declared)
     (or (get-in (db/pull before [{:seon.fn/file [:seon.fn.file/relative-path]}] identity)
                 [:seon.fn/file :seon.fn.file/relative-path])
         (when (qualified-symbol? declared)
           (:seon.fn.file/relative-path (namespace-path before (symbol (namespace declared))))))))
 
 (defn- proven-files
-  "`proven-file` (`proven-schema-file` for schemas) for each file the changes
+  "`proven-file` (`proven-schema-file` for schemas, `proven-task-file` for
+  tasks) for each file the changes
   of `identities` are written into, by path: a function, its schema and the
   test proving it are three files of one merge. The first refusal answers; a
   change naming no file refuses `:one-file`."
@@ -1525,7 +1637,7 @@
       (write-back-refusal :one-file "Each change needs its source and one file."
                           {:seon.error/offending (vec (sort-by str (get groups nil)))})
       :else (reduce (fn [proofs [_ group]]
-                      (let [prove (if (= :seon.schema/key (ffirst group)) proven-schema-file proven-file)
+                      (let [prove (case (ffirst group) :seon.task/sym proven-task-file :seon.schema/key proven-schema-file proven-file)
                             proof (prove before after (set group) root)]
                         (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
                     [] (sort-by key groups)))))
@@ -1596,7 +1708,8 @@
 (defn merge-accepted
   "The accepted merge main's merge `commit` made, as `write-back!` takes it.
   Derived from the commits on `connection`'s store alone: the declarations whose
-  definition digest the merge changed, the main commit it was transacted onto and
+  definition digest the merge changed and the tasks whose revision it changed
+  (`[:seon.task/sym ns/name]`), the main commit it was transacted onto and
   the merge commit; else the `:commit-absent` refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/commit-id]
                   [:or :seon.source/accepted :seon.source/write-back-error]]}
@@ -1610,11 +1723,16 @@
     (try
       (if-not before
         parent
-        (let [touched (fn/report-identities before after
-                                            (vec (d/datoms (d/since (d/history after) (db/basis-t before)) :eavt))
-                                            (vec program/identity-attributes))]
-          (when (:seon.db/invalid-read touched) (throw (ex-info (:seon.error/message touched) touched)))
-          (let [[was now] (map #(held-digests % (set touched)) [before after])]
+        (let [datoms (vec (d/datoms (d/since (d/history after) (db/basis-t before)) :eavt))
+              declared (fn/report-identities before after datoms (vec program/identity-attributes))
+              ;; a task is a declaration too: each entity whose task facts moved, by its symbol
+              sym-of (fn [e] (some #(:v (first (d/datoms % :eavt e :seon.task/sym))) [after before]))
+              tasks (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct) (keep sym-of)
+                                    (map #(vector :seon.task/sym %)))
+                          datoms)]
+          (when (:seon.db/invalid-read declared) (throw (ex-info (:seon.error/message declared) declared)))
+          (let [touched (into (set declared) tasks)
+                [was now] (map #(held-digests % touched) [before after])]
             {:seon.program/identities (into #{} (filter #(not= (was %) (now %))) touched)
              :seon.source/base-commit-id parent :seon.source/commit-id commit})))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
@@ -1635,7 +1753,8 @@
   `root`, each change into its one file: a replaced declaration's recorded byte span takes its accepted
   source, a retracted one's span (and the blank lines before it) goes, and an
   added one is appended to its namespace's file. A namespace row is its `ns`
-  form: its span takes the merged form.
+  form: its span takes the merged form. A task's change is its entry in its
+  task file (`proven-task-file`), a schema's its entry in its resource.
 
   Proven before installation. Refuses by reason unless each written
   declaration still holds, on the branch head, the digest the merge commit gave

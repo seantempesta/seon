@@ -760,7 +760,7 @@
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
                 h (chain-handle "r")
-                declaration (fn [database] (#'task/declared (db/carried-projection database) (db/pull database '[*] [:seon.task/id h])))
+                declaration (fn [database] (task/declaration (db/carried-projection database) (db/pull database '[*] [:seon.task/id h])))
                 refine! (fn [conn agent-id intent]
                           (task/create! {:seon.db/connection conn :seon.agent/id agent-id :seon.task/ns (symbol *space*)
                                          :seon.task/name "r" :seon.task/intent intent

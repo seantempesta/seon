@@ -95,7 +95,7 @@
   [result]
   (when (refusal/error? result) result))
 
-(defn- declared
+(defn declaration
   "A stored or proposed task's `:seon.task/declaration`: its declared members, sets as sets."
   {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :map]] [:maybe :seon.task/declaration]]}
   [projection task]
@@ -116,7 +116,7 @@
       (let [form (edn/read {:eof eof} reader)]
         (if (identical? eof form) forms (recur (conj forms form)))))))
 
-(defn- file-declarations
+(defn file-declarations
   "Read one task file's EDN forms with `clojure.edn` (nothing evaluated), require one
   vector of valid entries with empty sets absent and symbol names, and derive each handle and symbol."
   {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
@@ -186,7 +186,7 @@
     (cache/lookup ::task-basis [(:seon.schema.projection/forms projection) content names]
                   task-basis-weight
                   #(let [stored (stored-tasks database :seon.task/ns names)]
-                     (or (read-error stored) (update-vals stored (partial declared projection))))
+                     (or (read-error stored) (update-vals stored (partial declaration projection))))
                   #(not (read-error %)))))
 
 (defn- refs-last
@@ -273,18 +273,18 @@
   (let [owned (conj (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))
                     :seon.task/references)
         ;; what the writer holds for a task: its declaration and the references derived from its intent
-        held (fn [task] (when task (cond-> (declared projection task)
+        held (fn [task] (when task (cond-> (declaration projection task)
                                      (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task))))))]
     (refs-last
      (into []
           (mapcat (fn [id]
                     (let [proposed (some-> (by-id id) with-references)
-                          current (declared projection (stored id)) wanted (declared projection proposed)]
+                          current (declaration projection (stored id)) wanted (declaration projection proposed)]
                       (cond
                         (= (held (stored id)) (held proposed)) []
                         ;; the basis was declared under the reader's projection; compare it under the writer's,
                         ;; so a member a schema change retired is no revision
-                        (not= (declared projection (get basis id)) current)
+                        (not= (declaration projection (get basis id)) current)
                         (functions/task-refused! 'seon.task/tasks-tx :revision-conflict (:seon.task/ns (or (by-id id) (stored id))) id
                                                  (cond-> {} (get basis id) (assoc :seon.task/base (get basis id))
                                                    current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
@@ -363,14 +363,21 @@
                   tasks-tx-weight
                   #(tasks-tx-in database files basis))))
 
+(defn task-declaration
+  "The declaration `database` holds for the task `handle`, its tree members as lookup refs; nil when absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/declaration :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [stored (stored-tasks database :seon.task/id #{handle})]
+    (or (read-error stored) (some->> (stored handle) (declaration (db/carried-projection database))))))
+
 (defn task-revision
   "The reviewed revision of the task `handle` in `database`: seon.id/digest over its declaration; nil when absent."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/revision :seon.db/invalid-read-error]]}
   [database handle]
-  (let [stored (stored-tasks database :seon.task/id #{handle})]
-    (or (read-error stored)
-        (some->> (stored handle) (declared (db/carried-projection database)) vector (id/digest 64)))))
+  (let [held (task-declaration database handle)]
+    (if (read-error held) held (some->> held vector (id/digest 64)))))
 
 (defn adopt-tasks-tx
   "Reconcile the selected `handles` into a development database from the `rows` the
@@ -415,7 +422,7 @@
         basis (when handles (stored-tasks destination :seon.task/id handles))]
     (or failure (read-error entities) (read-error basis)
         (let [entities (vec (vals entities))
-              basis (update-vals basis #(declared (db/carried-projection destination) %))]
+              basis (update-vals basis #(declaration (db/carried-projection destination) %))]
           (if (empty? (adopt-tasks-tx destination entities handles basis)) [] [[:db.fn/call #'adopt-tasks-tx entities handles basis]])))))
 
 (defn index-tasks!
@@ -530,7 +537,7 @@
   Invoke as `[:db.fn/call seon.task/advance-assignments-tx entity]`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task] :seon.db/tx-data]}
   [database entity]
-  (let [revision (->> entity (declared (db/carried-projection database)) vector (id/digest 64))
+  (let [revision (->> entity (declaration (db/carried-projection database)) vector (id/digest 64))
         assigned (db/q '[:find ?a ?revision :in $ ?handle
                          :where [?a :seon.task/assigned ?handle] [?a :seon.task/revision ?revision]]
                        database (:seon.task/id entity))]

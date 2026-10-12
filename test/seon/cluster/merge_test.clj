@@ -298,6 +298,21 @@
     (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
     {:seon.task/assignment (:seon.task/assignment assigned) :seon.agent/id agent-id :seon.db/connection on-branch}))
 
+(defn- assigned-held!
+  "An own-branch agent, forked after the task `handle` is on main, assigned that task, that evaluates `code`
+  on its branch: the assignment's key, the agent and its branch's connection."
+  {:malli/schema [:=> [:cat :string :seon.db/connection :seon.task/handle :string]
+                  [:map [:seon.task/assignment :seon.task/assignment] [:seon.agent/id :seon.agent/id]
+                   [:seon.db/connection :seon.db/connection]]]}
+  [running connection handle code]
+  (let [agent-id (str "refine-" (id/id))
+        {branch :seon.store/branch on-branch :seon.db/connection} (support/own-branch-agent! running agent-id "nil")
+        assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                                :seon.task/assigned handle :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
+    (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
+    (agent-eval running agent-id code)
+    {:seon.task/assignment (:seon.task/assignment assigned) :seon.agent/id agent-id :seon.db/connection on-branch}))
+
 (defn- merge!
   "Root's merge of `assignment` (`my.root/merge!`) through the cluster `execution`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/assignment]
@@ -407,6 +422,67 @@
              (is (= #{} written) "main holds no program or cluster fact the refused merge wrote")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+         (finally (support/delete-root! root)))))))
+
+(def ^:private refine-tasks
+  ;; two entries, each over two lines; a namespace no other test of this JVM creates tasks in
+  (str "[#:seon.task{:name \"area\"\n             :intent \"Fix.\"}\n"
+       " #:seon.task{:name \"side\"\n             :intent \"Other.\"}]\n"))
+
+(def ^:private refine-proof
+  ;; the proof that lets root assign tq.written/area
+  (str "(ns tq.written\n  (:require [clojure.test :refer [deftest is]]\n            [tq.land]))\n\n"
+       "(deftest ^{:seon/tasks #{'tq.written/area}} area-squares (is (= 25 (tq.land/area 5))))\n"))
+
+(deftest ^{:seon.test/long "One own-branch agent's first request, assignment and request, one facts merge and two db<->flow passes."
+           :seon.test/long-ms 120000}
+  a-refined-task-is-written-to-its-task-file-and-survives-re-ingestion
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "resources/seon/tasks/tq.written.edn"
+           root (checkout! "refine-test" {"test/tq/land.clj" land-source path refine-tasks
+                                           "test/tq/written.clj" refine-proof})
+           _ (checkout-dial! connection root)
+           ingested (task/index-tasks! {:seon.db/connection connection :seon.task/files (task/task-files root nil)})
+           ;; the checkout's files declared at the cluster head unrun, as publication declares them
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           handle (task/task-handle 'tq.written "area")
+           intent "Make `tq.land/area` square its side."
+           {key :seon.task/assignment}
+           (assigned-held! running connection handle (str "(my.task/refine! {:seon.task/intent \"" intent "\"})"))
+           execution (support/running-cluster running)
+           before (git! root "rev-parse" "HEAD")
+           file (io/file root path)
+           declared #(into {} (map (juxt :seon.task/name :seon.task/intent))
+                           (task/file-declarations (db/carried-projection (db/db connection)) path %))]
+       (try
+         (is (true? (:seon.task/changed? ingested)) "main holds the file's two tasks")
+         (let [merged (merge! execution key)]
+           (is (nil? (:seon.error/message merged)) "the facts merge answers no refusal"))
+         (is (= intent (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle])))
+             "main holds the refined intent")
+         (is (= 1 (:seon.task/merged-declarations (assignment-row connection key)))
+             "the merge counts the one declaration it moved, so its publication is due")
+         (pass! running)
+         (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection key)
+               text (slurp file)]
+           (is (nil? refused) "the publication answers no refusal")
+           (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
+           (is (= before (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
+           (is (= [path] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit)))
+               "carrying exactly the task file")
+           (is (= {"area" intent "side" "Other."} (declared text)) "the file declares the refined intent")
+           (is (= (str/replace refine-tasks "\"Fix.\"" (str "\"" intent "\"")) text)
+               "only the intent's string changed; the other entry and the layout are byte-identical")
+           (let [files (task/task-files root nil)]
+             (is (= [] (task/tasks-tx (db/db connection) files (task/task-basis (db/db connection) files)))
+                 "re-ingesting the files changes nothing: a fresh install holds the refined intent"))
+           (pass! running)
+           (is (= [text git-commit] [(slurp file) (git! root "rev-parse" "HEAD")]) "a second pass changes nothing"))
          (finally (support/delete-root! root)))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/a-requested-green-end-merges-and-publishes-with-no-hand-act}

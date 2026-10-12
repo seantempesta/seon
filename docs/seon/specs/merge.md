@@ -182,6 +182,14 @@ One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
    branch and the source commit. Afterwards the merge branch is deleted. The source branch is deleted once its task
    is done or given back, its merge request is closed (merged or closed with a reason) and its agent has actually
    exited, so its history and blobs can be collected (owner 2026-10-08; ledger SR-BRANCH, MA-15).
+6. **Publication.** A merge commit that moved declarations is due work for the next pass
+   (`seon.cluster.agent/publication-due?`): `:seon.task/merged-declarations`, written once beside
+   `:seon.task/merge-commit` on both paths (facts only and gated), counts the identities
+   `seon.cluster.source/merge-accepted` derives, program declarations and tasks alike. A task entry is a declaration
+   whose task file is its write-back: `seon.merge/publish!` writes a merged task (`[:seon.task/sym ns/name]`) into
+   `resources/seon/tasks/<ns>.edn` by rewrite-clj (`seon.cluster.source/proven-task-file`), every other entry
+   byte-identical, proven by reading it back through `seon.task/file-declarations`, and commits it with the merge's
+   other paths.
 
 **Norms** (Datahike's concept: `reference-code/datahike/src/datahike/norm/norm.clj` at e5453d96, `ensure-norms!`
 :204, recorded as `:tx/norm` :142-158, never twice :31). A branch carries program, never the target's data: an agent

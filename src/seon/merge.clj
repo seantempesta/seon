@@ -271,10 +271,17 @@
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]
+            ;; one producer counts what publication reads: the declarations and tasks the merge commit moved
             answer (fn [before after]
-                     (let [recorded (db/transact! connection [[:db/add a :seon.task/merge-commit (db/commit-id after)]])]
-                       (if-not (:db-after recorded)
-                         recorded
+                     (let [accepted (source/merge-accepted connection (db/commit-id after))
+                           moved (count (:seon.program/identities accepted))
+                           recorded (when-not (:seon.error/at accepted)
+                                      (db/transact! connection (cond-> [[:db/add a :seon.task/merge-commit (db/commit-id after)]]
+                                                                 (pos? moved) (conj [:db/add a :seon.task/merged-declarations moved]))))]
+                       (cond
+                         (:seon.error/at accepted) accepted
+                         (not (:db-after recorded)) recorded
+                         :else
                          (let [outcome (:seon.task/outcome (db/pull after [:seon.task/outcome] a))]
                            (cond-> {:seon.task/assignment key :seon.task/merge-base commit
                                     :seon.task/merge-commit (db/commit-id after)
@@ -293,10 +300,8 @@
               report))
           :else
           (let [prepared (source/prepare-merge! context store branch (:seon.task/proofs owed) (cond-> {} root (assoc :root root)))
-                ;; the merge records, in its own transaction, how many declarations it moved: what publication reads
-                moved [:db/add a :seon.task/merged-declarations (count (:seon.source/expected-digests prepared))]
                 accepted (when (:seon.source/candidate prepared)
-                           (source/accept-merge! context store prepared {:tx-data (conj merge-call moved) :tx-meta meta}))
+                           (source/accept-merge! context store prepared {:tx-data merge-call :tx-meta meta}))
                 _ (when (:seon.source/candidate prepared)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
                 result (when (:seon.source/commit-id accepted)
@@ -325,9 +330,10 @@
   end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
   proofs of the assignment's task on C (`seon.task/obligations`) and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
-  `merge-tx` and `:seon.task/merged-declarations` (how many it moved) in its transaction, then the merge
-  branch is deleted; the files the checkout `root` would hold
-  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`; publishing the
+  `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold
+  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
+  `:seon.task/merged-declarations`, how many declarations and tasks it moved
+  (`seon.cluster.source/merge-accepted`) when any, on either path; publishing the
   merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
   A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
   with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
@@ -358,7 +364,7 @@
                             :seon.source/write-back-refused :root-refused :seon.error/offending cluster-name}))))
 
 (defn publish!
-  "Publish assignment `key`'s merged declarations into the cluster's checkout (`checkout`) through
+  "Publish assignment `key`'s merged declarations, task entries included, into the cluster's checkout (`checkout`) through
   `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
   (`seon.cluster.source/merge-accepted` of its `:seon.task/merge-commit`), written back
   (`seon.cluster.source/write-back!`, which proves and reindexes each file) and committed as one git

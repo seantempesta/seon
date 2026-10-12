@@ -63,7 +63,7 @@
        (is (= :working (:seon.task/status (:seon.context/turns (block running agent-id)))))
        (is (int? (:my.agent/turns-left (:seon.context/turns (block running agent-id)))))
        (task/create! (assoc declaration :seon.task/intent "Second."
-                            :seon.task/basis {id (#'task/declared (db/carried-projection @connection)
+                            :seon.task/basis {id (task/declaration (db/carried-projection @connection)
                                                                   (db/pull @connection '[*] [:seon.task/id id]))}))
        (is (= "Second." (:seon.task/intent (task-section))) "the revision shows without a reassignment")))))
 
