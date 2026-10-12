@@ -276,7 +276,12 @@
                                    (do (prefix! 1) (recur j copied after))
                                    (recur j copied (or (item! (+ o (- j i)) line) after)))))
                           (let [j (token-end text (inc i) le)] (recur j copied (or (item! (+ o (- j i)) line) after))))))))))))
-        prose! (fn [ls le] (.append out "; ") (.append out text (int ls) (int le)))
+        ;; a prose line that is tool markup stays a comment and is reported dropped
+        prose! (fn [ls le line]
+                 (let [s (non-blank text ls le)
+                       j (when (and (< s le) (= \< (.charAt text (int s)))) (markup-end text s le false))]
+                   (when j (repair! line (.length out) :seon.batch/dropped (subs text s j)))
+                   (.append out "; ") (.append out text (int ls) (int le))))
         line!
         (fn line! [^long ls ^long le ^long line]
           (let [s (non-blank text ls le)
@@ -300,12 +305,12 @@
                 (cond (nil? kind) (vreset! fence [(cond (code-tags tag) :code (= "" tag) :lines :else :prose) t])
                       (and (= "" tag) (>= t ticks)) (vreset! fence nil)
                       (= :code kind) (code-line! ls le line false)
-                      :else (prose! ls le))
+                      :else (prose! ls le line))
                 (cond (= :code kind) (code-line! ls le line false)
-                      (= :prose kind) (prose! ls le)
+                      (= :prose kind) (prose! ls le line)
                       (= \; (.charAt text (int s))) (.append out text (int ls) (int le))
                       (or (form-start? text s le) (literal-line? text s le)) (code-line! ls le line true)
-                      :else (prose! ls le))))))]
+                      :else (prose! ls le line))))))]
     (let [last-line (loop [ls 0 line 1]
                       (if (< ls n)
                         (let [le (line-end text ls)]

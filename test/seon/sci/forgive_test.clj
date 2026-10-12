@@ -95,7 +95,8 @@
 
 (deftest tool-markup-in-a-reply-is-prose
   ;; A tag line cannot start a Clojure form: it is a comment held by the next form, never a source.
-  (are [text segments] (= segments (:seon.batch/segments (forgive/segments text :reply)))
+  ;; (its markup lines are also reported as dropped repairs, beside the segments)
+  (are [text segments] (= segments (mapv #(dissoc % :seon.batch/repairs) (:seon.batch/segments (forgive/segments text :reply))))
     "(+ 1 2)\n</invoke>\n(+ 3 4)"
     [{:seon.batch/source "(+ 1 2)"} {:seon.batch/source "(+ 3 4)" :seon.batch/comment "; </invoke>"}]
     "<invoke name=\"eval\">\n<parameter name=\"code\">\n(+ 1 2)\n</parameter>\n</invoke>\n(+ 3 4)"

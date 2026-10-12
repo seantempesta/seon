@@ -2611,9 +2611,9 @@
                   [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
   [text namespace-name mode max-source no-form-message]
   (let [commented (when (and (= :reply mode) (<= (count text) max-source)) (commented-forms text))
-        segments (if (> (count text) max-source)
-                   [{:seon.batch/source text}]
-                   (:seon.batch/segments (forgive/segments text mode)))
+        segmented (when (<= (count text) max-source) (forgive/segments text mode))
+        segments (if segmented (:seon.batch/segments segmented) [{:seon.batch/source text}])
+        dropped (some->> (:seon.batch/repairs segmented) (keep :seon.batch/dropped) seq vec)
         sources (mapv (fn [{source :seon.batch/source c :seon.batch/comment repairs :seon.batch/repairs}]
                         (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
                           c (assoc :seon.cluster.eval/comment c)
@@ -2624,11 +2624,15 @@
       (assoc (cond-> {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
                   :seon.error/at (Date.) :seon.error/layer :seon.cluster.reply/source
                   :seon.error/operation `segmented-sources
-                  :seon.error/message (if (seq commented)
+                  :seon.error/message (cond
+                                        (seq commented)
                                         (str "Your reply had no form: its code is inside ; comments, so nothing ran. Send it without the leading ;, starting with " (first commented))
-                                        no-form-message)
+                                        dropped
+                                        "Your reply had no form: its tool-call markup was ignored. Write each call as a Clojure form at column zero."
+                                        :else no-form-message)
                   :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources}
-                  (seq commented) (assoc :seon.cluster.reply/commented-forms commented)) :seon.error/type :seon.cluster.reply/no-forms-error))))
+                  (seq commented) (assoc :seon.cluster.reply/commented-forms commented)
+                  dropped (assoc :seon.cluster.reply/dropped-markup dropped)) :seon.error/type :seon.cluster.reply/no-forms-error))))
 
 (defn planned-sources
   "The ordered forms one ordinary source run executes from a model reply.

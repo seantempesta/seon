@@ -1994,6 +1994,15 @@
     (is (= true (:seon.cluster.reply/no-forms r)))
     (is (not (contains? r :seon.cluster.reply/commented-forms)) "prose is not a form")))
 
+(deftest a-reply-of-tool-call-markup-names-the-dropped-markup
+  (doseq [[text dropped] [["<\uFF5C\uFF5CDSML\uFF5C\uFF5C calls>\n<\uFF5C\uFF5CDSML\uFF5C\uFF5C invoke name=\"eval\">\n</invoke>\n</\uFF5C\uFF5CDSML\uFF5C\uFF5C calls>"
+                           ["<\uFF5C\uFF5CDSML\uFF5C\uFF5C calls>" "<\uFF5C\uFF5CDSML\uFF5C\uFF5C invoke name=\"eval\">" "</invoke>" "</\uFF5C\uFF5CDSML\uFF5C\uFF5C"]]]]
+    (let [r (turn/planned-sources text 'user 100000)]
+      (is (= true (:seon.cluster.reply/no-forms r)))
+      (is (= dropped (:seon.cluster.reply/dropped-markup r)))
+      (is (str/includes? (:seon.error/message r) "tool-call markup was ignored"))))
+  (is (not (contains? (turn/planned-sources "just prose" 'user 100000) :seon.cluster.reply/dropped-markup))))
+
 (deftest ^{:seon/tasks #{'seon.turn/an-end-is-written-on-the-attempt}} an-end-is-written-on-the-attempt
   (support/with-database
    (fn [connection]
