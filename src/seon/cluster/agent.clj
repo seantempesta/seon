@@ -1710,7 +1710,7 @@
   (cache/lookup ::basis-valid [(or commit (db/commit-id database)) sym]
                 (constantly 1)
                 #(let [basis (if commit
-                               (d/commit-as-db (db/schema-database database) commit {:secondary-indices? false})
+                               (db/commit-database database commit)
                                database)
                        owed (task/obligations basis sym)]
                    (cond
