@@ -1,0 +1,30 @@
+diff --git a/src/sci/impl/load.cljc b/src/sci/impl/load.cljc
+index 277d4e72..f278891c 100644
+--- a/src/sci/impl/load.cljc
++++ b/src/sci/impl/load.cljc
+@@ -201,8 +201,10 @@
+                          loading (replace {lib lib-emphasized} loading)]
+                      (str "Cyclic load dependency: " (str/join "->" loading)))
+                    lib)
+-                  (when-not (= lib cnn)
+-                    (reset! env* (handle-require-libspec-env ctx env cnn the-loaded-ns lib opts)))))
++                  ;; a self-require still aliases, as Clojure's does; a
++                  ;; namespace's own vars are already its own mappings
++                  (reset! env* (handle-require-libspec-env ctx env cnn the-loaded-ns lib
++                                                           (if (= lib cnn) (select-keys opts [:as]) opts)))))
+               (if-let [load-fn (:load-fn env)]
+                 (let [curr-ns @utils/current-ns]
+                   (if-let [{:keys [file source handled]}
+--- a/test/sci/namespaces_test.cljc
++++ b/test/sci/namespaces_test.cljc
+@@ -443,7 +443,9 @@
+   (is (= 1 (sci/eval-string "(require 'foo) foo/x"
+                             {:load-fn (fn [{:keys [:namespace]}]
+                                         (case namespace
+-                                          foo {:source "(ns foo (:require foo)) (def x 1)"}))}))))
++                                          foo {:source "(ns foo (:require foo)) (def x 1)"}))})))
++  ;; as in Clojure, a namespace requiring itself with :as gains the alias
++  (is (= 1 (sci/eval-string "(ns foo) (defn f [] 1) (in-ns 'foo) (require '[foo :as a]) (a/f)"))))
+ 
+ (deftest as-alias-test
+   (is (= :dude/bar (sci/eval-string "(ns my-ns (:require [dude :as-alias foo])) ::foo/bar")))
