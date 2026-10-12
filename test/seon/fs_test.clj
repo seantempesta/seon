@@ -126,3 +126,14 @@
       (finally
         (.countDown release-first)
         (fs/delete-recursively! base base)))))
+
+(deftest ^{:seon/tasks #{'seon.fs/implement-a-path-under-a-root-answers-true}}
+    under-path-tells-what-lies-under-a-root
+  (doseq [[ancestor descendant expected] [["/" "/x" true]
+                                          ["/a/b/" "/a/b/c" true]
+                                          ["/a/b" "/a/b/c" true]
+                                          ["/a/b" "/a/b" true]
+                                          ["/a/b" "/a/bc" false]
+                                          ["/a" "/a/b" false]]]
+    (testing (str (pr-str descendant) " under " (pr-str ancestor))
+      (is (= expected (#'seon.fs/under-path? ancestor descendant))))))
