@@ -1017,19 +1017,42 @@
                             "A test of the named run is not green; a merge commits only when every test is.")
       :seon.source/red-tests red-tests :seon.source/refused-test-run run-id :seon.test.run/branch s})))
 
+(def ^:private incomplete-findings
+  "The `seon.fn/contract-findings` a merge refuses: no contract, or a slot accepting anything that records no
+  polymorphic-boundary justification."
+  #{:seon.fn.contract.finding/missing-spec :seon.fn.contract.finding/any :seon.fn.contract.finding/some})
+
+(defn contract-gaps
+  "What keeps the functions among `identities` that `database` holds from a complete `:malli/schema`, private ones
+  included, judged by the one function-contract rule (`seon.fn/contract-findings`): each missing contract and each
+  unjustified `:any` or `:some` slot, with its position. Macros and host-bound declarations carry no arity
+  contract. Throws a refused read."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:vector :seon.fn.contract/finding-row]]}
+  [database identities]
+  (let [judged (into #{} (keep (fn [[a f]]
+                                 (when (= :seon.fn/sym a)
+                                   (let [entity (db/pull database [:db/id :seon.fn/macro? :seon.fn/host-bound?] [a f])]
+                                     (when (and (:db/id entity) (not (:seon.fn/macro? entity))
+                                                (not (:seon.fn/host-bound? entity)))
+                                       f)))))
+                     identities)
+        findings (if (seq judged) (fn/contract-findings database {:seon.fn.contract/selected judged}) [])]
+    (when-not (vector? findings) (throw (ex-info (str (:seon.error/message findings)) findings)))
+    (filterv (comp incomplete-findings :seon.fn.contract/finding) findings)))
+
+(defn- gap-symbols
+  "The functions `gaps` (`contract-gaps`) names, once each, ordered by symbol."
+  {:malli/schema [:=> [:cat [:vector :seon.fn.contract/finding-row]] [:vector :seon.fn/sym]]}
+  [gaps]
+  (into [] (comp (map :seon.fn/sym) (distinct)) (sort-by (comp str :seon.fn/sym) gaps)))
+
 (defn uncontracted
-  "The functions among `identities` that `database` holds with no complete `:malli/schema`, private ones
-  included, by symbol: what a merge refuses (`accept-merge!`) and what keeps an implement step from done
-  (`seon.context/step-status`). Macros and host-bound declarations carry no arity contract."
+  "The functions among `identities` that `database` holds with no complete `:malli/schema` (`contract-gaps`), by
+  symbol: what a merge refuses (`accept-merge!`) and what keeps an implement step from done
+  (`seon.context/step-status`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:vector :seon.fn/sym]]}
   [database identities]
-  (into [] (keep (fn [[a f]]
-                   (when (= :seon.fn/sym a)
-                     (let [entity (db/pull database [:db/id :seon.fn/spec :seon.fn/macro? :seon.fn/host-bound?] [a f])]
-                       (when (and (:db/id entity) (not (:seon.fn/spec entity))
-                                  (not (:seon.fn/macro? entity)) (not (:seon.fn/host-bound? entity)))
-                         f)))))
-        (sort-by (comp str second) identities)))
+  (gap-symbols (contract-gaps database identities)))
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
@@ -1101,7 +1124,8 @@
                 ;; REPL admits an uncontracted sketch with a warning; merge is
                 ;; where the contract becomes required. Macros and host-bound
                 ;; declarations carry no arity contract (sci/eval.clj:1005-1011).
-                uncontracted (uncontracted tested delta)
+                gaps (contract-gaps tested delta)
+                uncontracted (gap-symbols gaps)
                 uncovered (for [[a f] delta :when (= :seon.fn/sym a)
                                 :when (:db/id (db/pull tested [:db/id] [a f]))
                                 :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
@@ -1121,10 +1145,12 @@
               (seq uncontracted)
               (seon.error.refusal/error :seon.source/uncontracted-error
                {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
-                :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included; these do not: "
-                                         uncontracted ". Declare their data shapes as registered schemas, "
-                                         "contract them on the candidate branch, run their tests and request the merge again.")
-                :seon.error/offending uncontracted :seon.source/uncontracted uncontracted
+                :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
+                                         "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
+                                         ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
+                                         "schemas or named predicates, contract them on the candidate branch, run their tests and "
+                                         "request the merge again.")
+                :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps
                 :seon.source/refused-test-run run-id :seon.test.run/branch s})
               (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
               (:seon.error/at tx) tx

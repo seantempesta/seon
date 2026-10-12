@@ -275,18 +275,25 @@
   ^Path [path]
   (.normalize (.toAbsolutePath (.toPath (io/file path)))))
 
+(defn path?
+  "True for a `java.nio.file.Path`."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? Path value))
+
 (defn- intermediate-paths
-  {:malli/schema [:=> [:cat :any :any] [:sequential :any]]}
+  "The paths from `root` down to, not including, `target`: none when they are equal."
+  {:malli/schema [:=> [:cat [:fn seon.fs/path?] [:fn seon.fs/path?]] [:vector [:fn seon.fs/path?]]]}
   [^Path root ^Path target]
   (let [rel (.relativize root target)]
     (if (zero? (count (str rel)))
       []
-      (butlast
-       (reductions
-        (fn [^Path parent segment]
-          (.resolve parent ^Path segment))
-        root
-        (iterator-seq (.iterator rel)))))))
+      (vec (butlast
+            (reductions
+             (fn [^Path parent segment]
+               (.resolve parent ^Path segment))
+             root
+             (iterator-seq (.iterator rel))))))))
 
 (defn- attributes
   ^BasicFileAttributes [^Path path]
@@ -334,12 +341,6 @@
   (cond (.isSymbolicLink attribute) ::symlinks
         (.isDirectory attribute) ::directories
         :else ::files))
-
-(defn path?
-  "True for a `java.nio.file.Path`."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (instance? Path value))
 
 (defn file-attributes?
   "True for one observation of a path's basic attributes."

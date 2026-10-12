@@ -411,3 +411,27 @@
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store held-store :seon.store/branch b}))))))
+
+(deftest an-undefined-slot-is-not-a-complete-contract
+  ;; a merge's changed functions are judged by the one function-contract rule: no contract and an unjustified
+  ;; :any or :some slot are both incomplete, each position named; a justified boundary and a full contract pass
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.any
+      (str "(ns tq.any)\n"
+           "(defn whole {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+           "(defn bare [x] x)\n"
+           "(defn loose {:malli/schema [:=> [:cat :any :int] [:sequential :some]]} [x y] [x y])\n"
+           "(defn boundary {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary"
+           " :seon.schema.admission/reason \"A total predicate.\" :gen/elements [nil 0]}]] :boolean]} [x] (some? x))\n"))
+     (let [database (db/db connection)
+           identities (into #{} (map #(vector :seon.fn/sym (symbol "tq.any" %))) ["whole" "bare" "loose" "boundary"])]
+       (is (= '[tq.any/bare tq.any/loose] (source/uncontracted database identities))
+           "the function with no contract and the one with undefined slots are uncontracted")
+       (is (= #{['tq.any/bare :seon.fn.contract.position/contract :seon.fn.contract.finding/missing-spec]
+                ['tq.any/loose [:seon.fn.contract.position/input 0] :seon.fn.contract.finding/any]
+                ['tq.any/loose :seon.fn.contract.position/output :seon.fn.contract.finding/some]}
+              (into #{} (map (juxt :seon.fn/sym :seon.fn.contract/position :seon.fn.contract/finding))
+                    (source/contract-gaps database identities)))
+           "each gap names its function, position and finding")))))
