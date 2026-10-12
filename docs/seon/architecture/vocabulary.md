@@ -70,6 +70,7 @@ Words no library names. Each has one meaning.
 
 | Term | Meaning | Retired words |
 |---|---|---|
+| program context | the SCI context holding exactly the program one commit holds, frozen as a value (`seon.sci.eval/program-context`): keyed by program content in `seon.cache`, forked once per agent, never written; an agent's context is its fork plus custody and its private layer | base context, overlay context, branch program copy, "environment" for the SCI context |
 | task | the one family for work an agent does: an intent, linked facts, optional agent; a merge request is a task | issue, work packet |
 | `:seon.cluster` | the entity-schema partition for facts copied onto main at an attempt's successful end, with conflict rules declared on the schema or its entries (`seon.program/cluster-attributes`); messages remain `:seon.data` | mergeable data roster |
 | end copy | one transaction copying a successful attempt's cluster facts onto main, with source branch and commit as transaction metadata; an error end copies nothing | live relay |
