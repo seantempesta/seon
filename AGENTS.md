@@ -564,8 +564,11 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   "expected" and "known cost" are not reasons; reject reports lacking these numbers.
 - **Make cost follow changed inputs.** Eliminate whole-program work per change and per-call work that belongs once
   per evaluation. Branch creation is not full context construction. Hash admitted source inputs; compare commit
-  identities for an unchanged reload. Hot-path commits time the same probe on parent and change and report every
-  regression with its numbers. Judge cost against what the work must do (what it is proportional to), never an invented
+  identities for an unchanged reload. A performance commit is proven by the cost it targets: a
+  `seon.profile/measure` assertion on the end-to-end probe (the request or stage it claims to make cheaper), timed on
+  parent and change with the same probe on a quiet JVM; a count of calls, reads or allocations is supporting evidence,
+  never the proof. A measured regression, or no measured gain, is not committed, and a change to a stored encoding
+  needs a measured win (owner, 2026-10-12, after f18ab95e3 committed a measured regression). Judge cost against what the work must do (what it is proportional to), never an invented
   target: 10× over that expectation means wrong work to find and fix. Every policy number is a config dial sized for a
   16 GB machine.
 - **Reuse content-valid work; derive without stamps.** Key derivations by what they read: content digests or the
@@ -612,7 +615,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   turns hypothetical failures into fences. A clear slice needs one plan and the narrow check. Root runs this shape
   by hand until the scheduler runs it as a task tree.
 - **Restart in batches.** A restart or reset is a batch: root commits every ready dependency or fork bump and pending fix
-  just before it. Nothing is ever left staged in the shared index (it blocks every lane's commit).
+  just before it. A dependency or fork bump, or a rename touching most files, is committed only inside a scheduled
+  restart batch that root opens, never mid-day by a lane: each one refuses every lane's commit until default restarts
+  (owner, 2026-10-12: thirteen restarts in one day, five forced by fork bumps). Nothing is ever left staged in the
+  shared index (it blocks every lane's commit).
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
   nuke, never deleted internals. Every JVM runs a committed archive, submodules at their pinned revisions, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
