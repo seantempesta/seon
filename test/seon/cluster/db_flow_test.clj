@@ -388,8 +388,7 @@
                  "with no fault recorded")))
          (finally (release! routing))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt
-                        'seon.turn/a-merge-request-comes-only-from-a-step-no-task-needs}}
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
   (binding [*space* "tq.chain"]
   (test-support/with-database
@@ -805,8 +804,7 @@
 ;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
 ;;; is a red proof for its successor, written on its own branch.
 
-(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
-                        'seon.turn/a-merge-request-comes-only-from-a-step-no-task-needs}}
+(deftest ^{:seon/tasks #{'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
   a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
   ;; p is a :prove step: its own proof is green once a deftest tagged i exists, and that deftest, i's red proof,
   ;; is its product. The one model reply writes it, red as it must be: new at p's fork point, so p broke nothing
