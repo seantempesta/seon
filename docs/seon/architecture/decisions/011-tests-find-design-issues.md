@@ -23,7 +23,7 @@ switched off per tier were each a class, not a bug list.
 A test's primary product is a design issue. When a class of failure appears,
 the response is to move its invariant to one choke point — codec totality at
 the frame writer, registration and pull admission against the committed
-projection, computed discovery with a completeness assertion, provenance
+registry, computed discovery with a completeness assertion, provenance
 derived from the asserting transaction — and then retain exactly one
 regression per dissolved class. The design question a new test must answer
 first: which class is this, and what choke point dissolves it?
@@ -44,9 +44,9 @@ Supporting rules:
 - Localized tests belong to lanes; full suites run only at frozen-tree
   integration checkpoints, where the suite tests the integrated system rather
   than an in-flight shared tree.
-- Assertions target facts, transitions, envelopes, and Datahike transaction
+- Assertions target facts, transitions, replies, and Datahike transaction
   outcomes — never exact prose renderings. Run transition tests assert
-  eligibility from the mid-transaction database value and custody presence;
+  eligibility from the mid-transaction database value and checkout presence;
   there is no claim epoch.
 - Tests for a mechanism scheduled for deletion are not written, including
   regressions that would "protect" behavior the architecture has already

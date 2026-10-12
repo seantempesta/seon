@@ -21,9 +21,9 @@ until those proofs pass. A source citation is not fresh runtime evidence.
 
 ## 1. Values, facts and execution
 
-A computation receives its database, projection, environment and execution inputs
+A computation receives its database, registry, environment and execution inputs
 as values. Derived objects belong to the value they derive from: validators on
-the projection, custody on the connection, program identity on the admitted
+the registry, the checked-out branch on the connection, program identity on the admitted
 execution. Running code does not reconstruct those inputs from a global registry.
 
 Durable identities, messages, evaluations, errors, tasks and test results are
@@ -53,7 +53,7 @@ Malli validation and the database reconcile of `seon.config` unchanged. It opens
 failure can be inspected. The process root owns the store under a lifetime lock;
 Datahike's connection writer serializes transactions, but does not prevent another
 process from opening the same store. A cluster receives one environment value
-with explicit custody and the process's bounded compute and IO executors.
+with its checked-out branch explicit and the process's bounded compute and IO executors.
 
 Boot constructs dependencies in order and publishes readiness at each owning
 layer. Flow graphs then run independently. A ping reports responding procs; a
@@ -66,7 +66,7 @@ The running JVM owns ordinary program operations. External supervision remains
 necessary to start a JVM, observe process exit, stop an unresponsive process and
 recover a disposable root. A reset destroys database history, turns, tasks and
 results as well as private in-memory objects; preserve evidence and reconstruction
-inputs first. A schema change never needs a reset: every branch adopts it in place as it
+inputs first. A schema change never needs a reset: every branch transacts it in place as it
 opens (`seon.cluster/declaration-changes`), dropping the data behind a replaced or retired
 attribute rather than migrating it (README §7 "Schema change and reset").
 
@@ -109,25 +109,25 @@ changing its body; publication and test selection retain those dependencies.
 The target publication path is: capture admitted inputs, analyze changed files,
 transact into an unpublished branch, use its report to identify affected callers,
 lint them against the resulting program, record findings in a second transaction,
-then move the published head under exclusive publication custody. Refusal leaves
+then move the published head while holding exclusive publication access. Refusal leaves
 the published program unchanged. It must also leave analyzer cache state usable
 for the next request; clj-kondo can write its cache before reporting findings.
 
 Explicit no-change source requests still observe their admitted inputs. Pathless
 requests discover new/deleted inputs as well as stored ones. Missed-publication
 recovery remains until its replacement covers those cases. Only unchanged
-*adoption* is the simple comparison of published and adopted commit ids.
+*reload* is the simple comparison of published and loaded commit ids.
 Changed schema references, resolver context, macros and external inputs affect
-analysis, caller selection, validation or arming where their meaning requires it.
+analysis, caller selection, validation or instrumentation where their meaning requires it.
 
-Publication produces facts. Development adoption copies admitted facts into the
+Publication produces facts. Development reload copies admitted facts into the
 selected cluster, reloads affected definitions, installs the matching program and
-arms contracts before recording its adopted commit. Ordinary clusters keep their
+instruments contracts before recording its loaded commit. Ordinary clusters keep their
 older program. The publication report, loaded behavior and browser paint are
 three separate observations; success at one cannot stand in for the others.
 
 Datahike `force-branch!` accepts an expected current commit but is not a general
-cross-process compare-and-swap. Its use requires exclusive store-write custody and
+cross-process compare-and-swap. Its use requires exclusive store-write access and
 coherent connection refresh. A branch pointer does not make a concurrent whole-store
 copy consistent. Rejected/overlapping analysis and stale-head publication are
 proof gates before redundant scans or exclusion mechanisms disappear.
@@ -136,9 +136,9 @@ proof gates before redundant scans or exclusion mechanisms disappear.
 `reference-code/clj-kondo/src/clj_kondo/core.clj:242-270` cache processing.
 **Target owner:** [B1](../../prds/agent-platform/plan/lane-b1-one-publication-path.md).
 
-## 5. Projection and final write admission
+## 5. Registry and final write admission
 
-A projection carries compiled schema nodes, contracts and read/write interpretation
+A registry carries compiled schema nodes, contracts and read/write interpretation
 for one program. A1 acquires it once, retains unaffected compiled nodes on change,
 and passes it to validators, wrappers, SCI and rendering. A2/B1 establish carriage
 on raw, materialized, temporal and forked values before reconstruction fallbacks
@@ -173,10 +173,10 @@ The [modeling guide](data-modeling-guide.md) explains the stored guarantees.
 Every function, private included, has a complete input/output contract. The wrapper
 uses validators acquired with the callable. Input failure prevents entry; output
 failure refuses the returned value. Malli's report callback must not return into
-execution on invalid input. Supplied defaults match declared argument names,
+execution on invalid input. Defaults fill omitted inputs by declared argument names,
 caller-supplied values win, and unavailable required values produce a named error.
 
-An old cluster, a newly adopted cluster and an existing candidate must keep their
+An old cluster, a newly reloaded cluster and an existing candidate must keep their
 own definitions and contracts. A shared JVM Var changes when reloaded; capturing
 its old root still does not freeze the Vars called indirectly by that root. SCI
 copy-on-write isolates SCI Var updates, not arbitrary shared JVM behavior.
@@ -203,10 +203,10 @@ schemas for the existing recurrence signature and preserves declared evidence.
 The recorder retains one root per signature and occurrence components. A repeat
 reads its occurrence and existence of prior evidence rather than summing every
 occurrence. Evaluation-owned offending objects use the existing result handle and
-shown text; after restart the object is unavailable. **Error payload durability is
-an explicit decision gate:** B3's proposed shown-text/no-blob representation conflicts
+printed value; after restart the object is unavailable. **Error payload durability is
+an explicit decision gate:** B3's proposed printed-value/no-blob representation conflicts
 with the complete-rendering-blob requirement. Do not delete durable payload evidence
-until the owner settles that contract; do not serialize arbitrary live results as
+until the owner decides that contract; do not serialize arbitrary live results as
 a workaround. Error rendering composes the base and satisfied domain schemas.
 
 The target `seon.task` is the one work family. Trigger resolves identity at the
@@ -219,7 +219,7 @@ assignment and the REPL's current namespace.
 Repair completion requires every declared test obligation and any subject-local
 detector obligation. Missing test, subject or detector is unknown, never done.
 Conversation completion is the accepted reply answering its triggering message.
-A parent requires a nonempty complete child set. Settlement alone writes closure
+A parent requires a nonempty complete child set. The recording transaction alone writes closure
 and budget exhaustion. Parent/needs deletion cannot silently erase an obligation.
 Candidate-local completion supplies evidence; explicit shared acceptance resolves
 the shared repair task.
@@ -232,13 +232,13 @@ the shared repair task.
 ## 8. One test request, explicit evidence
 
 The target `seon.test/run` captures an immutable execution database/commit with its
-matching projection/context and an explicit durable recording connection. Policies
+matching registry/context and an explicit durable recording connection. Policies
 select eligibility; they do not promise every selected body executes. Fixtures fork
 the supplied execution commit, including D1's combined proposal, never implicitly
 current-src. JVM resolution independently proves the loaded definitions match.
 
 Selection uses conservative current calls, references, declared subjects and
-schema/input dependencies. Past observed reach is diagnostic. An unobserved branch
+schema/input dependencies. Past observed reach is a finding. An unobserved branch
 of an earlier execution cannot exclude a required test. Each member compares against
 its own previous green basis, own digest, reachable content and inputs. A later green
 for another test proves nothing about an older untested change. Missing graph/input
@@ -269,7 +269,7 @@ clock/counter operations record completed calls, including throws, without datab
 reads, hashing or transactions per call. Elapsed wall time is inclusive and includes
 waits. Static call totals cannot be subtracted to infer self time.
 
-Existing completion/settlement events hand immutable cumulative observations to the
+Existing completion and recording events hand immutable cumulative observations to the
 writer. Live `LongAdder` reads are approximate; independent counters do not form an
 atomic tuple. Exact member observations require that execution and its children to
 quiesce. Never drain active counters with `sumThenReset`. Refusal keeps cumulative
@@ -279,7 +279,7 @@ cumulative observations yield interval count/total; maximum remains lifetime max
 
 Open/background work uses an existing completion or schedule with a declared bound.
 Missing/unattributed evidence is explicit; crashes lose uncommitted samples. Profiling
-failure does not invalidate turn settlement. Automatic findings need a meaningful
+failure does not invalidate the turn's recording transaction. Automatic findings need a meaningful
 evidence predicate and positive completion condition. No self-time ranking, invented
 window threshold or top-N task policy follows from inclusive totals.
 
@@ -291,7 +291,7 @@ B4's member observation and B3's task writer.
 
 A source branch records its immutable fork basis and runs only its assigned task.
 Inherited agents, open turns and schedules must not execute accidentally. Its
-branch/context/custody and cluster-qualified message address remain explicit.
+branch, context, checkout and cluster-qualified message address remain explicit.
 Branch creation alone is not this lifecycle proof.
 
 An explicit merge captures merge base B, source branch C and main H. Canonical net changes
@@ -315,7 +315,7 @@ using existing digest-fenced UTF-8 splices. B1's canonical file analyzer checks 
 context, intended deletions, unchanged neighbors and definition digests. Compare exact
 source bytes separately. The proposed callable must load and execute through B4's
 existing isolated host; fallback behavior is not proof. Controlled integration then
-publishes/adopts the complete loadable set without exposing partial file edits.
+publishes and reloads the complete loadable set without exposing partial file edits.
 
 Interrupted export resumes from staged bytes, commits and publication facts. Unexpected
 checkout bytes refuse; no unrelated edit is restored. Automatic path-limited commit

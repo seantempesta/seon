@@ -19,13 +19,13 @@ A runtime owner implements `flow.spi/ProcLauncher` when it must select over a
 database interest or another non-Flow source alongside Flow control. Each
 workload class has a bounded input channel and uses core.async's
 `executor-for :io` or `executor-for :compute`. The eval seam additionally
-arms the one `:interrupt-fn` and retains its execution bound until completion.
+sets the one `:interrupt-fn` and retains its execution bound until completion.
 
 Flow channels are process-local control, scheduling, backpressure, report, and
 error state. Turns, evaluations, program facts, and transaction reports
 remain database authority. A channel wake can prompt a query; it is never the
 only record of durable work. Private defs, atoms, and result objects remain
-in each agent's persistent SCI context, while evaluations store shown text
+in each agent's persistent SCI context, while evaluations store printed values
 under [turn PRD §14–§15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
 
 ## Consequences

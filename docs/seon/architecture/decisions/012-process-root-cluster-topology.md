@@ -17,7 +17,7 @@ routing state, web service, and lifecycle independent.
 
 The owner replaced one store and JVM per cluster on 2026-07-27 with a single
 process-root store and branch-per-cluster databases. The same day's CLJ-only
-ruling removed the pod and Shadow build. The 2026-07-28 custody ruling removed
+ruling removed the pod and Shadow build. The 2026-07-28 checkout ruling removed
 claim epochs, and rulings 2026-08-01 #27 and #29 established one live program
 graph per cluster.
 
@@ -40,13 +40,13 @@ mutation owner exists.
 Turns are open while their closing fact is absent. Transition functions
 decide inside Datahike transactions, including the refusal of a second
 open turn for one agent. Boot closes open turns and marks unfinished
-evaluations interrupted without re-executing work. No process-custody
+evaluations interrupted without re-executing work. No process-checkout
 stamp, claim epoch, or lease clock belongs to the turn.
 
 The [turn PRD §14–§15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
 governs context lifetime: agent contexts receive accepted base diffs while
 retaining private objects across turns. Restart loses those objects and
-retains evaluation shown text.
+retains evaluation printed values.
 
 ## Consequences
 

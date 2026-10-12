@@ -13,7 +13,7 @@ A hidden or routinely reached bound becomes an accidental scheduling
 mechanism: it
 silently throttles normal work, obscures capacity defects, and makes behavior
 depend on literals scattered through runtime code. SCI has one `time-limit`;
-bounded projections, queues, heap ceilings, connection counts, and body sizes
+bounded registries, queues, heap ceilings, connection counts, and body sizes
 are explicit data or capacity boundaries.
 
 ## Decision

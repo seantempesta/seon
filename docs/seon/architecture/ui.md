@@ -8,7 +8,7 @@ tags: [architecture, ui, datastar, rendering]
 # Web UI
 
 The web UI renders the same database facts and evaluation history the agent uses.
-Entity schemas select their render pairs; routes select the subject and custody.
+Entity schemas select their render pairs; routes select the subject and the checked-out branch.
 [B2](../../prds/agent-platform/plan/lane-b2-walk-flow-fork.md) owns the target walk and
 whole-view delivery change. Existing package/revision delivery remains until its
 replacement proves first paint, freshness, slow-consumer behavior and cleanup.
@@ -21,13 +21,13 @@ When no pair exists, the default attribute-map printer is total. Renderer select
 comes from the program facts and contracts, not a surface-specific registry.
 
 The walk takes a requested output. Evaluation history uses `seon.repl`'s pair:
-AI renders saved shown text; HTML renders a retained live result or saved text when
+AI renders saved printed values; HTML renders a retained live result or saved text when
 the object is unavailable. The current history walk requests AI at
 `src/seon/render/walk.clj:1005`; B2 makes that choice explicit and removes the
 parallel history composition only after equivalence is proven.
 
 Render functions return data or hiccup; the one value printer applies presentation
-limits for both AI and HTML. Historical shown text is never clipped again. A
+limits for both AI and HTML. Historical printed values are never clipped again. A
 query-work bound remains separate and yields an explicit elision/refusal naming
 that bound. The pinned Datahike fork's many-pull default is unlimited
 (`reference-code/datahike/src/datahike/pull_api.cljc:16,315-323`); an explicit
@@ -70,7 +70,7 @@ supported fallback choices.
 ## 3. Routes and task context
 
 The existing route owner is `src/seon/render/route.clj`. Namespace and agent views
-receive explicit cluster custody, render profile and subject. The namespace page
+receive the explicit cluster checked-out branch, render profile and subject. The namespace page
 shows its declarations and responsible agents; B3's target `:seon.ns/agents` is
 many-to-many, independent of an agent's current REPL namespace. Assignment comes
 from tasks, so responsibility does not imply a separate dispatcher.
@@ -89,9 +89,9 @@ green resolved the shared task or merged source.
 
 ## 4. Controls and proof
 
-Debug controls submit through the ordinary turn/evaluation owner with explicit
-custody and the same serial permit. A preview can render an as-of value or stored
-shown text; it does not replay historical writes/effects. Result handles refer to
+Debug controls submit through the ordinary turn/evaluation owner with the explicit
+checked-out branch and the same serial permit. A preview can render an as-of value or stored
+printed value; it does not replay historical writes/effects. Result handles refer to
 actual in-memory objects, and report unavailability after restart.
 
 Acceptance requires observed initial paint, two tabs converging after a burst,
