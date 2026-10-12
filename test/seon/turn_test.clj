@@ -2110,3 +2110,30 @@
               (set (:seon.agent/broken (db/pull (db/db target) [:seon.agent/broken] [:seon.agent/id agent-id]))))
            "the step recorded what the change broke on the agent's branch")
        (is (= before (db/commit-id (db/db connection))) "and main's head did not move")))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup and one assignment."
+           :seon.test/long-ms 30000}
+  a-branch-judges-its-step-at-its-merge-base
+  ;; `seon.task/attempt-tx` writes the merge base with the assignment on main (the commit the branch forked at);
+  ;; `assign!` copies the row onto the branch, so `fork-commit` reads it there
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "base-" (id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (support/execution-handle nil))]])
+           _ (support/declare-source! connection 'tq.base
+                                      (str "(ns tq.base (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.base/area}} area-test (is (= 5 (area 5))))\n")
+                                      "test")
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.base)")
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.base :seon.task/name "area" :seon.task/kind :function
+                                            :seon.task/intent "Square."}))
+           assignment (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                                     :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+           on-main (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base]
+                                                   [:seon.task/assignment (:seon.task/assignment assignment)]))]
+       (is (uuid? on-main) "the assignment on main carries the commit its branch forked at")
+       (is (= on-main (turn/fork-commit (db/db target) agent-id))
+           "the branch judges its step at the merge base its assignment row carries")))))

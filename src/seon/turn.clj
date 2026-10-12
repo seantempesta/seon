@@ -5514,14 +5514,15 @@
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
 (defn fork-commit
-  "The commit the agent's step is judged against, read on `database`, its branch: its open attempt's fork point
-  (`:seon.task.attempt/fork`, a predecessor's end commit), else the commit its branch was forked at; nil on a
-  branch with no fork (main itself)."
+  "The commit the agent's step is judged against, read on `database`, its branch: its open assignment's merge base
+  (`:seon.task/merge-base`, copied onto the branch with the row by `seon.task/attempt-rows-tx`); the commit its
+  branch was forked at for a branch with no assignment; nil on main itself."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.source/commit-id]]}
   [database agent-id]
   (let [attempt (task/agent-attempt database agent-id)]
-    (or (when (int? attempt) (:seon.task.attempt/fork (db/pull database [:seon.task.attempt/fork] attempt)))
-        (registry/base-commit-id database (get-in database [:config :branch])))))
+    (if (int? attempt)
+      (:seon.task/merge-base (db/pull database [:seon.task/merge-base] attempt))
+      (registry/base-commit-id database (get-in database [:config :branch])))))
 
 (defn- record-broken!
   "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point

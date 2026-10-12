@@ -9,6 +9,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.registry :as mr]
+            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
@@ -607,21 +608,24 @@
 (defn attempt-tx
   "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main
   `database`: its row, numbered one more than the task's ended attempts and identified by
-  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value; [] when that
+  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value and the merge base, the
+  commit the branch forked at, when the branch exists; [] when that
   attempt is already written. The agent it names may be created in the same transaction. An unknown
   task refuses `:unknown-task`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id :seon.store/branch]
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database handle agent-id branch]
   (let [[number attempt :as next] (next-attempt database handle)
-        revision (task-revision database handle)]
+        revision (task-revision database handle)
+        base (registry/base-commit-id database branch)]
     (cond (read-error next) next
           (read-error revision) revision
           (nil? revision) (refused 'seon.task/attempt-tx :unknown-task 'seon.task handle)
           (:db/id (db/pull database [:db/id] [:seon.task/assignment attempt])) []
-          :else [{:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
-                  :seon.task.attempt/number number :seon.task/revision revision
-                  :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}])))
+          :else [(cond-> {:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
+                          :seon.task.attempt/number number :seon.task/revision revision
+                          :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}
+                   base (assoc :seon.task/merge-base base))])))
 
 (defn attempt-rows-tx
   "The transaction data writing onto `branch-db` attempt `key`'s row as main `database` holds it, under
@@ -633,7 +637,8 @@
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database branch-db key]
   (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
-                               :seon.task.attempt/number :seon.task.attempt/fork {:seon.task/agent [:seon.agent/id]}]
+                               :seon.task.attempt/number :seon.task.attempt/fork :seon.task/merge-base
+                               {:seon.task/agent [:seon.agent/id]}]
                      [:seon.task/assignment key])
         handle (:seon.task/assigned row)
         present? (fn [lookup] (:db/id (db/pull branch-db [:db/id] lookup)))]
