@@ -26,4 +26,9 @@
              :kind :function
              :intent "Card D1. Delete `seon.test-support/own-branch-agent!`'s setup evaluation and `seon.test-support/outside-wake-on-branch!` (the \"Work your task.\" wake): the bench writes a subject with step tasks and the reconciler launches them; the bench test is green through that path."
              :must-read #{seon.test-support/own-branch-agent! seon.test-support/outside-wake-on-branch!}
-             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
+ #:seon.task{:name "a-published-root-costs-a-template-clone-not-a-publication"
+             :kind :function
+             :intent "`seon.test-support/populate-published-root!` publishes the whole checkout into each test's own store (`seon.cluster/refresh-source!`): 44,846 ms of a 61,207 ms body in `seon.blob-publication-test` before it stopped using it (one check JVM, 2026-10-12), and each of the 19 callers pays it again, so every `seon.cluster.armed-test` member exceeds its 5,000 ms bound before its own work starts and the central round abandons it. The operator already clones a published template store per commit for its check JVMs (`seeded-store!` in script/seon/operator.clj). Done when a published root costs a copy-on-write clone of one template published once per program content, the root's store then behaving as a freshly published one, and an armed-test member's setup is measured under its bound."
+             :must-read #{seon.test-support/populate-published-root! seon.cluster/refresh-source!}
+             :evidence #{"docs/research/agent-platform/2026-10-12/agent-hangs.md" "script/seon/operator.clj"}}]

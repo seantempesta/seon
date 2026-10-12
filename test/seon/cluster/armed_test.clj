@@ -246,7 +246,9 @@
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
 
-(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot starting, which an already-populated branch never executes."} a-message-committed-during-boot-start-is-conserved
+(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot starting, which an already-populated branch never executes."
+           :seon/tasks #{'seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake}}
+  a-message-committed-during-boot-start-is-conserved
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)

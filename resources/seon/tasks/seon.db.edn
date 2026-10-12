@@ -260,4 +260,8 @@
              :intent "A `defn` at an agent's REPL whose contract holds a schema property with a qualified key (`[:=> [:cat [:int {:gen/elements [1 2]}]] :boolean]`, or the shipped `[:any {:seon.schema.admission/exemption ...}]` shape of `seon.schema/malli-form?` and `seon.render.web/server?`) is refused by `seon.db/transact!`: \"The stored definition digest of [:seon.fn/sym ...] is not the one its definition produces\". The same defn with `[:int {:min 1}]` or `[:any {:description \"x\"}]` is admitted. The REPL path's entity producer and `seon.db/definition-digest-of` (through `seon.program/canonical-row`) digest the contract differently. Chain experiment 4 met it twice (attempt 2's two `executor?` defns) and it reproduced on five probe contracts. Correct: the producer digests through the writer's one digest owner, so the stored and produced digests agree."
              :must-read #{seon.db/definition-digest-of seon.program/canonical-row}
              :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-4.md"}}
-]
+ #:seon.task{:name "an-undeclared-write-time-limit-refuses-by-name"
+             :kind :function
+             :intent "On a store whose schema facts declare a program but not the dial `:seon.config.db/write-time-limit-ms` (a fresh `seon.cluster.store/open-store!` store given `:seon.blob/digest` and `:seon.config.db/validation-node-limit` declarations), `seon.db/transact!` answers a validation refusal whose cause is a NullPointerException thrown in `seon.db/transact-call` (`branch-dial` answers nil and the deadline arithmetic dereferences it), with `:seon.db/transaction-outcome-unknown true`. A missing dial is a named refusal, never a panic: the write refuses by the dial's name before it reaches the writer."
+             :must-read #{seon.db/transact! seon.db/branch-dial}
+             :evidence #{"docs/research/agent-platform/2026-10-12/agent-hangs.md"}}]

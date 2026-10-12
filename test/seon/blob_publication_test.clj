@@ -7,7 +7,6 @@
             [konserve.core :as k]
             [konserve.impl.defaults :as konserve.defaults]
             [seon.blob :as blob]
-            [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -19,29 +18,38 @@
   [latch event]
   (support/await-event! latch event))
 
-(defn- ensure-test-cluster!
-  [opened]
-  (registry/ensure-cluster!
-   {:seon.store/store opened
-    :seon.boot/cluster-name "blob-publication"
-    :seon.source/commit-id
-    (registry/branch-commit-id
-     {:seon.store/store opened
-      :seon.store/branch :current-src})}))
+(def ^:private blob-schema
+  "What collection reads to root a blob, and nothing else: one synthetic attribute whose declared schema is
+  `:seon.blob/digest` (`seon.cluster.registry/referenced-blobs`), beside the registry attributes declaring it."
+  [{:db/ident :seon.schema/key :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.schema/form :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+   {:db/ident ::root :db/valueType :db.type/string :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident ::blob :db/valueType :db.type/string :db/cardinality :db.cardinality/one}])
+
+(defn- declare-blob-attribute!
+  "Install `blob-schema` and declare `::blob` a digest on `opened`'s main branch, beside the executing program's
+  own declarations of `:seon.blob/digest` and of the writer's two bounds, then fork `branch` from it."
+  [opened branch]
+  (support/transacted! (:seon.store/connection-object opened) blob-schema)
+  (support/transacted! (:seon.store/connection-object opened)
+                       (conj (mapv #(db/pull (db/db (:seon.db/connection (support/execution-handle nil)))
+                                             [:seon.schema/key :seon.schema/form] [:seon.schema/key %])
+                                   [:seon.blob/digest :seon.config.db/validation-node-limit :seon.config.db/write-time-limit-ms])
+                             {:seon.schema/key ::blob :seon.schema/form ":seon.blob/digest"}))
+  (registry/branch! {:seon.store/store opened :seon.cluster.registry/from :db :seon.store/branch branch}))
 
 (defn- blob-root!
-  "Reference `digest` the way error evidence does: as a fact's shown-text blob."
+  "Reference `digest` from a fact whose attribute is declared a digest, as error evidence references its shown text."
   [connection digest]
-  (support/transacted!
-          connection
-          [{:seon.error/id digest
-            :seon.error/shown-blob digest}]))
+  (support/transacted! connection [{::root digest ::blob digest}]))
 
 (defn- rooted-digests
   [connection]
   (set
    (db/q '[:find [?digest ...]
-           :where [_ :seon.error/shown-blob ?digest]]
+           :where [_ ::blob ?digest]]
          @connection)))
 
 (defn- leave-orphan!
@@ -56,19 +64,17 @@
 
 (deftest ^{:seon.test/fixture-observation "Publication and collection contend over physical store-global blob keys, which an ordinary branch does not isolate."} publication-and-collection-are-exclusive-in-both-orderings
   (let [root (str "tmp/blob-publication-test/" (random-uuid))
-        directory (:seon.boot/store-dir
-                   (cluster/resolve-bootstrap {:seon.boot/root root}))
-        branch (registry/cluster-branch "blob-publication")
+        directory (str root "/store")
+        branch :blob-publication
         first-content "reused orphan fixed in a delete batch"
         second-content "publisher admitted before sweep"
         crash-content "published without a committed root"
         first-digest (blob/digest first-content)
         second-digest (blob/digest second-content)
         crash-digest (blob/digest crash-content)
-        _ (support/populate-published-root! root)
         opened (store/open-store! {:seon.store/dir directory})]
     (try
-      (ensure-test-cluster! opened)
+      (declare-blob-attribute! opened branch)
       (let [connection (store/open-branch! opened branch)]
         (try
           (testing "a batch-contained orphan cannot overlap publication"
