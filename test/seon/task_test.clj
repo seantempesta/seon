@@ -119,7 +119,7 @@
          (is (= {:seon.task.fire/at #inst "2026-10-11T00:00:00Z" :seon.task.fire/of 'tq.tree/a}
                 (update (db/pull database [:seon.task.fire/at :seon.task.fire/of] [:seon.task.fire/id firing]) :seon.task.fire/of sym-of))))))))
 
-;;; THE FRONTIER: P1's tree of fifty leaves (design-probes.md): subject → design; prove needs design;
+;;; READY: P1's tree of fifty leaves (design-probes.md): subject → design; prove needs design;
 ;;; N fan-out leaves need prove; b needs prove and holds schema, then M bodies needing schema;
 ;;; integrate needs every fan-out leaf and b; merge needs integrate and is held.
 
@@ -191,10 +191,10 @@
 (def ^:private all-but-integrate
   (conj done-through-prove (mapv #(vector % :done) (concat fan-out ["schema"] bodies))))
 
-(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} the-frontier-is-the-leaves-whose-needs-are-done
+(deftest ^{:seon/tasks #{'seon.task/the-ready-leaves-are-those-whose-needs-are-done}} the-ready-leaves-are-those-whose-needs-are-done
   (with-tree
    (fn [database]
-     (are [txs expected] (= (set (map handle expected)) (task/frontier (after database txs)))
+     (are [txs expected] (= (set (map handle expected)) (task/ready (after database txs)))
        [] ["design"]
        [[["design" :done]]] ["prove"]
        done-through-prove (conj fan-out "schema")
@@ -210,23 +210,23 @@
      (is (task/done? (after database all-but-integrate) (handle "b")) "a parent is done when its leaves are")
      (is (= {:seon.task/closed-by :seon.task/children} (task/resolution (after database all-but-integrate) (handle "b")))))))
 
-(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} an-ingested-task-is-held-and-not-in-the-frontier
+(deftest ^{:seon/tasks #{'seon.task/the-ready-leaves-are-those-whose-needs-are-done}} an-ingested-task-is-held-and-not-ready
   (test-support/with-database
    (fn [connection]
      (ingest! connection (entry "a" "") (entry "b" (needs "a")))
      (let [intent #(:seon.task/execution (db/pull (db/db connection) [:seon.task/execution] [:seon.task/id (handle %)]))
            set-running (fn [n] (db/with (db/db connection) [[:db/add [:seon.task/id (handle n)] :seon.task/execution :running]]))]
        (is (= :held (intent "a")) "ingestion writes the intent")
-       (is (= #{} (task/frontier (db/db connection))) "a held task is no work")
-       (is (= #{(handle "a")} (task/frontier (set-running "a"))) "setting :running puts it in")
-       (is (= #{} (task/frontier (set-running "b"))) "unless a need blocks it")))))
+       (is (= #{} (task/ready (db/db connection))) "a held task is no work")
+       (is (= #{(handle "a")} (task/ready (set-running "a"))) "setting :running puts it in")
+       (is (= #{} (task/ready (set-running "b"))) "unless a need blocks it")))))
 
-(deftest ^{:seon/tasks #{'seon.task/the-frontier-is-the-leaves-whose-needs-are-done}} the-frontier-answers-in-under-10-ms-for-fifty-leaves
+(deftest ^{:seon/tasks #{'seon.task/the-ready-leaves-are-those-whose-needs-are-done}} ready-answers-in-under-10-ms-for-fifty-leaves
   (with-tree
    (fn [database]
      (let [value (after database (conj done-through-prove [["schema" :done] ["f1" :done]]))
-           acquired (profile/measure #(task/frontier value))
-           measured (profile/measure #(task/frontier value))]
+           acquired (profile/measure #(task/ready value))
+           measured (profile/measure #(task/ready value))]
        (is (= (:seon.profile/value acquired) (:seon.profile/value measured)))
        (is (= 44 (count (:seon.profile/value measured))))
        ;; The first call in a fresh JVM also plans the two queries; the budget is the warm read.

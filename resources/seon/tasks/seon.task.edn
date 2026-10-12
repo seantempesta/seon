@@ -55,10 +55,10 @@
              :intent "Card S1. Schema: `:seon.task/children` (component ref set of child tasks), `:seon.task/needs` (indexed ref set), `:seon.task/instructions`, `:seon.task/execution` (`:seon.wake/starts true`), `:seon.task/cron`, `:seon.task/zone`, `:seon.task/function`, the attempt facts on the assignment row (`:seon.task/attempt-of`, `:seon.task.attempt/end`, `:seon.task.attempt/target`, `:seon.task.attempt/reason`, `:seon.task.attempt/commit`) and the firing (`:seon.task.fire/id`, `:seon.task.fire/at`, `:seon.task.fire/of`, `:seon.task.fire/to`); task EDN authors children and needs as lookup refs; the writer refuses a needs cycle (`seon.task/refuse-needs-cycle`, called by `seon.task/create!` and `seon.task/index-tasks!`); adoption proven on a branch of the live store."
              :must-read #{seon.task/create! seon.task/index-tasks! seon.cluster.wake/starting-attributes}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md"}}
- #:seon.task{:name "the-frontier-is-the-leaves-whose-needs-are-done"
+ #:seon.task{:name "the-ready-leaves-are-those-whose-needs-are-done"
              :kind :function
-             :intent "Card S2. `seon.task/frontier` answers the handles that should run now over a database value as two `seon.db/q` reads with `seon.task/frontier-rules` (the eligible leaves minus `blocked`, evaluated unbound); `seon.task/done?` (a leaf by an attempt's :done end with no later :sent-back targeting it, a parent when no leaf under it is open); `seon.task/resolution` answers `:seon.task/children` for a done parent. Proof: P1's twelve scenarios on the fifty-leaf tree, and the frontier under 10 ms through `seon.profile/measure`."
-             :must-read #{seon.task/frontier seon.task/done? seon.task/resolution seon.db/q seon.profile/measure}
+             :intent "Card S2. `seon.task/ready` answers the handles that should run now over a database value as two `seon.db/q` reads with `seon.task/ready-rules` (the eligible leaves minus `blocked`, evaluated unbound); `seon.task/done?` (a leaf by an attempt's :done end with no later :sent-back targeting it, a parent when no leaf under it is open); `seon.task/resolution` answers `:seon.task/children` for a done parent. Proof: P1's twelve scenarios on the fifty-leaf tree, and the frontier under 10 ms through `seon.profile/measure`."
+             :must-read #{seon.task/ready seon.task/done? seon.task/resolution seon.db/q seon.profile/measure}
              :evidence #{"docs/research/agent-platform/2026-10-11/runtime-follows-db.md" "docs/research/agent-platform/2026-10-11/design-probes.md"}}
  #:seon.task{:name "an-attempt-is-written-once-with-its-agent"
              :kind :function

@@ -1,5 +1,5 @@
 #:seon.flow.plan
-{:startable [:set {:description "The frontier's leaves that validate (seon.task/frontier ∩ valid): what db<->flow may start."} :seon.task/handle]
+{:startable [:set {:description "The ready leaves that validate (seon.task/ready ∩ valid): what db<->flow may start."} :seon.task/handle]
  :invalid [:set {:description "The :running leaves that do not validate: each becomes a problem task, never an attempt."} :seon.task/handle]
  :open-attempt [:map {:description "One attempt with no end, as db<->flow plans over it: its task, key, agent, branch and the task's intent now."}
                 [:seon.task/assigned :seon.task/assigned]

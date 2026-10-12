@@ -864,12 +864,12 @@
                     reason (assoc :seon.task/reason reason)
                     (seq refused) (assoc :seon.task/delete-refusals refused))))))
 
-;;; THE FRONTIER (runtime-follows-db §2): the leaves that should run now, derived from the tree,
+;;; READY (runtime-follows-db §2): the leaves that should run now, derived from the tree,
 ;;; the intents and the attempts' ends, with no scheduler state. Recursion is positive (`under`,
 ;;; `needs*`) and negation applies only to finished relations, which Datahike evaluates.
 
-(def frontier-rules
-  "The stratified rules the frontier reads: `leaf-done` (an attempt ended :done with no later
+(def ready-rules
+  "The stratified rules `ready` reads: `leaf-done` (an attempt ended :done with no later
   :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and inherited needs) and
   `blocked` (a need with an open leaf at or under it)."
   '[[(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end :done ?tx]
@@ -882,7 +882,7 @@
     [(needs* ?t ?n) [?p :seon.task/children ?t] (needs* ?p ?n)]
     [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]])
 
-(defn frontier
+(defn ready
   "The handles of every task that should be running now in `database` (main's): the leaves whose own
   intent is :running (no inheritance: ingestion and `create!` write :held on every task, so an absent
   intent never appears and nothing launches by being read here), not done, without a terminal end other
@@ -895,8 +895,8 @@
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
                                    [(contains? #{:given-back :capped :stalled :cancelled} ?e)])]
-                       database frontier-rules)
-        blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database frontier-rules))]
+                       database ready-rules)
+        blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database ready-rules))]
     (or (read-error eligible) (read-error blocked)
         (let [blocked (set blocked)] (into #{} (keep (fn [[t h]] (when-not (blocked t) h))) eligible)))))
 
@@ -906,10 +906,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
   (let [task (db/q '[:find ?n . :in $ ?h :where [?n :seon.task/id ?h]] database handle)
-        below (when (int? task) (db/q '[:find [?l ...] :in $ % ?n :where (under ?n ?l)] database frontier-rules task))
+        below (when (int? task) (db/q '[:find [?l ...] :in $ % ?n :where (under ?n ?l)] database ready-rules task))
         open (when (and (int? task) (not (read-error below)))
                (db/q '[:find [?l ...] :in $ % [?l ...] :where (not [?l :seon.task/children _]) (not (leaf-done ?l))]
-                     database frontier-rules (conj (vec below) task)))]
+                     database ready-rules (conj (vec below) task)))]
     (when-let [failure (some read-error [task below open])] (throw (ex-info (:seon.error/message failure) failure)))
     (and (int? task) (empty? open))))
 

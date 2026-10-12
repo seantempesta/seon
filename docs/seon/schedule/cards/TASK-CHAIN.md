@@ -73,7 +73,7 @@ status and failing data, decisions, offered operations), `my.task/refine!` (edit
 decision), `my.task/send-back!` (reason, target step, counterexample; it writes the `:send-back` decision and ends the
 attempt `:sent-back`), `my.task/create!` (steps with needs and instructions). Success has no verb: green proofs end the
 step. `my.message/send` and `my.turn/wait` stay. Root side, `my.root`: `instructions`, `merge-requests`, `merge!`,
-`close!`, `ended`; root launches nothing by hand (the reconciler launches ready steps). Platform: `seon.task/frontier`,
+`close!`, `ended`; root launches nothing by hand (the reconciler launches ready steps). Platform: `seon.task/ready`,
 `request-merge!`, `close!`; `seon.turn/end-task-call` records every end.
 
 ## 3. The stages (pipeline A)

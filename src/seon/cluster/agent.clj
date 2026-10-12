@@ -1725,12 +1725,12 @@
 
 (defn plan-facts
   "What db<->flow reads on main `database` before it plans.
-  The frontier's leaves split by obligations at their fork point, with open
+  The ready leaves split by obligations at their fork point, with open
   attempts, ended counts, creation order and done needs' end commits."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.flow.plan/facts :seon.db/invalid-read-error]]}
   [database]
-  (let [frontier (task/frontier database)
-        leaves (when (set? frontier) (vec frontier))
+  (let [ready (task/ready database)
+        leaves (when (set? ready) (vec ready))
         syms (when leaves (db/q '[:find ?h ?s :in $ [?h ...] :where [?t :seon.task/id ?h] [?t :seon.task/sym ?s]]
                                 database leaves))
         open (db/q '[:find ?h ?k ?id ?b ?i
@@ -1746,7 +1746,7 @@
                                    :where [?t :seon.task/id ?h] (needs* ?t ?n) (self-or-under ?n ?l)
                                    [?a :seon.task/attempt-of ?l] [?a :seon.task.attempt/end :done]
                                    [?a :seon.task.attempt/commit ?c]]
-                                 database task/frontier-rules leaves))
+                                 database task/ready-rules leaves))
         basis-by-task (when-not (map? basis)
                         (reduce (fn [m [h c]] (update m h (fnil conj #{}) c)) {} basis))
         owed (when (and syms (not (map? syms)) basis-by-task)
@@ -1754,7 +1754,7 @@
                        [handle (basis-valid? database (first (sort (get basis-by-task handle))) sym)])
                      syms))
         proved (into #{} (keep (fn [[handle valid?]] (when (true? valid?) handle))) owed)]
-    (or (read-failure (into [frontier syms open ended created basis] (map second owed)))
+    (or (read-failure (into [ready syms open ended created basis] (map second owed)))
         {:seon.flow.plan/startable (into #{} (filter proved) leaves)
          :seon.flow.plan/invalid (into #{} (remove proved) leaves)
          :seon.flow.plan/open (mapv (fn [[h k id b i]] {:seon.task/assigned h :seon.task/assignment k :seon.agent/id id
@@ -2113,7 +2113,7 @@
                      (db/q '[:find [?t ...] :in $ % ?a
                              :where [?a :seon.task/attempt-of ?l] [?t :seon.task/id _] (not [?t :seon.task/children _])
                              (needs* ?t ?n) (self-or-under ?n ?l)]
-                           database task/frontier-rules a))
+                           database task/ready-rules a))
         forked? (fn [t] (some #(contains? roster %)
                               (db/q '[:find [?b ...] :in $ ?t ?c
                                       :where [?s :seon.task/attempt-of ?t] [?s :seon.task.attempt/fork ?c] [?s :seon.task/branch ?b]]
