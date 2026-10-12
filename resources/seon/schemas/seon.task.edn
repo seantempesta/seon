@@ -100,7 +100,7 @@
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
-                  [:seon.task/revision :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
+                  [:seon.task/revision {:seon.cluster/conflict :ours :description "Derived from the task's declaration by the writer that revises it (seon.task/advance-assignments-tx), so main's own advance wins a concurrent one: the conflict that matters is the task's, reported once."} :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
                   [:seon.task/attempt-of {:optional true} :seon.task/attempt-of] [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]]
@@ -134,7 +134,7 @@
  :merge-request-view [:map [:seon.task/merge-request :seon.task/merge-request] [:seon.task/merge :seon.task/merge]
                  [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
                  [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]
- :merge-request-row [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+ :merge-request-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                 [:seon.task/merge-request :seon.task/merge-request] [:seon.task/merge :seon.task/merge] [:seon.task/of-assignment :seon.task/of-assignment]
                 [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
                 [:seon.task/red-first {:optional true} :seon.task/red-first]

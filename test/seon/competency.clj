@@ -203,7 +203,7 @@
     (if-not branch
       (merge run (failed agent-id :setup first-request))
       (let [task-id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
-                          (db/db (task/main-connection connection)) task-sym)
+                          (db/db connection) task-sym)
             assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection :seon.task/assigned task-id
                                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
         (if (:seon.error/at assigned)
@@ -213,21 +213,20 @@
 
 (defn- run-state
   "Where the run of `agent-id` stands on its branch `database`: `:running` while a model call or a test member
-  is open; once the task's end closed the agent, how it ended (`:done`, `:capped`, `:given-back`), as its end
-  message to root at main says; `:waiting` once its last reply leaves the turn loop nothing to continue
+  is open; once the task's end closed the agent, how it ended (`:done`, `:capped`, `:given-back`), as its
+  attempt on its branch says; `:waiting` once its last reply leaves the turn loop nothing to continue
   (`seon.turn`'s own rule: no evaluated form, a disposition or a failed attempt); else `:running`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:enum :running :done :waiting :capped :given-back :stalled]]}
   [database agent-id]
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
                        database)
-        home (or (some-> (task/main database) db/db) database)
-        ;; a task's end closes the agent at main, with its end message
-        closed? (:seon.agent/admission-closed-tx (db/pull home [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+        ;; a task's end closes the agent on its branch and writes the end on its attempt there
+        closed? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
         ended (when closed?
                 (db/q '[:find ?end . :in $ ?agent-id
-                        :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
-                      home agent-id))]
+                        :where [?agent :seon.agent/id ?agent-id] [?a :seon.task/agent ?agent] [?a :seon.task.attempt/end ?end]]
+                      database agent-id))]
     (cond (or (empty? calls) (some #(nil? (:seon.turn/closed-tx %)) calls) testing?) :running
           ended ended
           (not (@#'turn/continuing-reply? database agent-id)) :waiting

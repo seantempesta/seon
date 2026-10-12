@@ -1510,7 +1510,8 @@
 
 (defn stop-flow!
   "Orderly stop of one agent's graph, idempotent.
-  Request stop, INTERRUPT the in-flight turn transform, and join the graph's
+  Request stop, INTERRUPT the in-flight turn transform (`:seon.agent/finish?` lets
+  it finish instead: an ended attempt's own pass wrote its end), and join the graph's
   executor (every proc loop exited) before dropping its routing entry or
   closing channels. Interrupted execution never resumes: an in-flight provider call,
   evaluation wait or transaction wait unwinds instead of running to its end,
@@ -1552,12 +1553,13 @@
   nil)
 
 (defn- stop-graph!
-  "Stop, interrupt and join one started graph under the stopping claim `stop-flow!`
-  reserved, then drop its route before closing it. The claim is cleared on
+  "Stop, interrupt (unless the request says `:seon.agent/finish?`) and join one started graph under
+  the stopping claim `stop-flow!` reserved, then drop its route before closing it. The claim is cleared on
   exit; a graph that missed its bound keeps its entry."
   {:malli/schema [:=> [:cat :seon.agent/stop-request] :nil]}
   [{agent-id :seon.agent/id
     routing :seon.agent/routing
+    finish? :seon.agent/finish?
     deadline-nanos :seon.await/deadline-nanos}]
   (try
     (let [entry (started routing agent-id)]
@@ -1565,7 +1567,8 @@
              timeout-ms :seon.config.agent/turn-completion-backstop-ms}
             (:seon.turn.loop/cluster entry)]
         (flow/stop (:seon.flow/graph entry))
-        (interrupt-turn! entry)
+        ;; an ended attempt's stop lets its pass finish: that pass wrote the end
+        (when-not finish? (interrupt-turn! entry))
         (when (seon.flow/join-graph!
                (into
                 (select-keys entry [:seon.flow/executor])
@@ -2034,6 +2037,7 @@
   "Land each of `ends` on main, then stop its graph and settle its branch (P2).
   A :done or :sent-back end is copied by `seon.cluster.squash/copy!` (ONE main
   transaction); an error end copies nothing and becomes root's problem task.
+  The graph stops without interrupting the pass that wrote the end, and is joined.
   A merge request still open keeps the branch until it closes (`seon.task/close!`),
   landing it with no root when `:seon.config.root/land?` says so; else a successful
   end deletes its branch unless `:seon.config.agent/keep-ended-branches?` keeps it;
@@ -2049,7 +2053,7 @@
                                   #(squash/copy! connection branch nil {:seon.squash/attempt a}))
             (record-error-end! connection ended))
           (when-let [roster (entry-roster routing agent-id)]
-            (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster}))
+            (stop-flow! {:seon.agent/id agent-id :seon.agent/routing roster :seon.agent/finish? true}))
           (let [database (db/db connection)
                 keep? (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?))]
             (cond

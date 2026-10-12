@@ -133,17 +133,16 @@
        [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
 
 ;;; The agent's held task (`:seon.task/of-agent`, a derived attachment of the agent): read from the
-;;; main, where its assignment is written while the agent works on its own branch.
+;;; agent's own world, whose branch holds its assignment.
 
 (defn- held-task
-  "The task `unit`'s agent holds, read at main seen from the unit's database: its name and
+  "The task `unit`'s agent holds, read on the unit's database: its name and
   intent with the read of its proofs offered; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [{database :seon.db/db value :seon.render/value}]
-  (let [home (if-let [connection (task/main database)] (db/db connection) database)
-        handle (task/agent-task home (:seon.agent/id value))]
+  (let [handle (task/agent-task database (:seon.agent/id value))]
     (if (string? handle)
-      (let [task (db/pull home [:seon.task/name :seon.task/intent] [:seon.task/id handle])]
+      (let [task (db/pull database [:seon.task/name :seon.task/intent] [:seon.task/id handle])]
         (if (:seon.error/at task)
           task
           (assoc (select-keys task [:seon.task/name :seon.task/intent])
@@ -155,7 +154,7 @@
 
   ## Costs
 
-  One query for the root row naming the home, one for my assignment, one pull of the task."
+  One query for my assignment and one pull of the task, both on my branch."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [unit]
   (held-task unit))

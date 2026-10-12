@@ -473,29 +473,12 @@
         (update-vals (group-by first (remove (comp (set admitted) first) (filter touched? mine)))
                      #(set (map (fn [[_ _ holder]] holder) %))))))
 
-(defn main
-  "The connection tasks live on, seen from `database`: root's home branch (root's
-  row names it, as a message to root is delivered there) through this process's
-  connection to it; nil when `database` is that branch or no root row names another."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/connection]]}
-  [database]
-  (let [branch (db/q '[:find ?branch . :where [?root :seon.agent/id "root"] [?root :seon.agent/branch ?branch]] database)]
-    (when (and (keyword? branch) (not= branch (get-in database [:config :branch])))
-      (db/branch-connection database branch))))
-
-(defn main-connection
-  "The connection a task write from `connection` goes through: main's, else `connection`."
-  {:malli/schema [:=> [:cat :seon.db/connection] :seon.db/connection]}
-  [connection]
-  (or (main (db/db connection)) connection))
-
 (defn- written
-  "Write `tx` on main of `connection` under that home's custody."
+  "Write `tx` on `connection` under its own custody: the world's branch, main for root."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.db/tx-data]
                   [:or :seon.db/transaction-report :seon.error/value]]}
   [connection tx]
-  (let [target (main-connection connection)]
-    (db/call-with-custody {:seon.db/connection target} #(db/transact! target tx))))
+  (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))
 
 (defn- task-entity
   "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
@@ -517,14 +500,14 @@
     (into [] (keep (fn [[a current]] (when (not= current revision) [:db/add a :seon.task/revision revision]))) assigned)))
 
 (defn- task-call
-  "The task writer's call for `row` against `basis` on main of
-  `connection`, or [] when that home already holds its declaration; a revision
+  "The task writer's call for `row` against `basis` on `connection`'s branch,
+  or [] when that branch already holds its declaration; a revision
   also advances the task's assignments. A revised declaration throws the writer's
   conflict with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/task :seon.task/basis] :seon.db/tx-data]}
   [connection entity basis]
   (let [handles #{(:seon.task/id entity)}]
-    (if (empty? (adopt-tasks-tx (db/db (main-connection connection)) [entity] handles basis))
+    (if (empty? (adopt-tasks-tx (db/db connection) [entity] handles basis))
       []
       [[:db.fn/call #'adopt-tasks-tx [entity] handles basis]
        [:db.fn/call #'advance-assignments-tx entity]])))
@@ -537,7 +520,8 @@
              (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))
 
 (defn create!
-  "Create a runtime task on the cluster from its declaration (7.8). Its handle is
+  "Create a runtime task in my world (`connection`: my branch, main for root; an agent's tasks
+  reach main with its successful end, `seon.cluster.squash/copy!`) from its declaration (7.8). Its handle is
   the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
   changes nothing; a different one refuses with base, current and proposed unless
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
@@ -764,7 +748,8 @@
               members)))))
 
 (defn request-merge!
-  "Record on the cluster the merge request for the assigned `work`: its merge task and one merge request
+  "Record on `connection`'s branch (the agent's world; its successful end copies it to main) the merge
+  request for the assigned `work`: its merge task and one merge request
   of the commit `view` names on its branch, with its proofs at their definition digests, the run and its
   tested program, and each proof observed red on the branch before the change (`:seon.task/red-first`, read
   from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a
@@ -809,7 +794,7 @@
   deleted. nil, or the inline refusal."
   {:malli/schema [:=> [:cat :seon.task/close-context :seon.store/branch] [:or :nil :seon.error/value]]}
   [{environment :seon.env/environment connection :seon.db/connection :as context} branch]
-  (let [main? (= branch (get-in (db/db (main-connection connection)) [:config :branch]))
+  (let [main? (= branch (get-in (db/db connection) [:config :branch]))
         retire! #(@retire-branch! {:seon.store/branch branch} context)
         launcher (:seon.flow/work-launcher environment)
         submitted (when (and launcher (not main?))

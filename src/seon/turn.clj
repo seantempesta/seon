@@ -2126,12 +2126,11 @@
   (some? (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))))
 
 (defn- admission-closed?
-  "True when the agent `agent-id`'s admission is closed on `database`, where it retires, or at main seen
-  from it (`seon.task/main`), where its task's end is written (`end-task-call`)."
+  "True when the agent `agent-id`'s admission is closed on `database`, its world, where its task's end is
+  written (`end-task-call`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (or (closed-on? database agent-id)
-      (boolean (some-> (task/main database) db/db (closed-on? agent-id)))))
+  (closed-on? database agent-id))
 
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
@@ -2169,7 +2168,7 @@
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
   [database agent-id]
-  (let [held (task/agent-task (or (some-> (task/main database) db/db) database) agent-id)]
+  (let [held (task/agent-task database agent-id)]
     (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
       (cond (@context-task-done? database agent-id) :done
             (sent-back-to database agent-id) :sent-back
@@ -2181,40 +2180,29 @@
             (stalled? database agent-id) :stalled))))
 
 (defn end-task-call
-  "Record the end of the task `agent-id` holds at the writer on main `database`: the end message `candidate`
-  to root (`seon.cluster.message/send-call`), the agent's admission closed and, on its open attempt
-  (`seon.task/agent-attempt`), `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back,
-  `:seon.task.attempt/target` the task `target` names, as one transaction; nothing when the admission is
-  already closed, so a task's end is recorded once."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end :my.message/message
+  "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
+  branch): the agent's admission closed and, on its open attempt (`seon.task/agent-attempt`),
+  `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back, `:seon.task.attempt/target`
+  the task `target` names, as one transaction; nothing when the admission is already closed, so a task's
+  end is recorded once. No message: root learns of the end when db<->flow copies it to main
+  (`seon.cluster.agent/land-ends!`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
                        :seon.task.attempt/commit [:maybe :seon.task/sym]]
                   :seon.store/transaction-data]}
-  [database agent-id end candidate commit target]
+  [database agent-id end commit target]
   (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))]
     (cond (closed-on? database agent-id) []
           ;; a transaction function's throw is its writer's refusal
           (:seon.error/at attempt) (throw (ex-info (:seon.error/message attempt) attempt))
-          :else (cond-> (conj (vec (message/send-call database candidate agent-id))
-                              [:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"])
+          :else (cond-> [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]
                   attempt (into [[:db/add attempt :seon.task.attempt/end end]
                                  [:db/add attempt :seon.task.attempt/commit commit]])
                   (and attempt (= :sent-back end) target)
                   (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])))))
 
-(defn- end-message
-  "The one message telling root the task `agent-id` holds ended `end`: references only, the task's id as its
-  subject and, ended green, the merge task its merge request recorded (`merge`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end [:maybe :seon.task/merge]]
-                  :my.message/message]}
-  [database agent-id end merge]
-  (let [held (task/agent-task (or (some-> (task/main database) db/db) database) agent-id)]
-    (cond-> {:my.message/to "root" :my.message/about held :seon.task/end end
-             :my.message/content (str "My task ended: " (name end) "."
-                                      (when merge " Its merge request is the merge task this message names."))}
-      merge (assoc :seon.task/merge merge))))
-
 (defn- end-merge-request
-  "The merge request the end of the task `agent-id` holds already recorded at main `home`, with its merge
+  "The merge request the end of the task `agent-id` holds already recorded on `home` (its branch, or main
+  once copied), with its merge
   task's outcome and landing refusal: the latest merge request answering the agent's assignment of that task; nil
   when none was recorded, so one end requests the merge at most once whatever interrupted it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
@@ -2298,12 +2286,14 @@
   nil)
 
 (defn- end-task!
-  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): request the merge of its
-  change when it ended green (`my.program/request-merge!`, the agent's own act; a merge request this end already
-  recorded is reused, `end-merge-request`), record the agent's outcome at main (`seon.context/end-summary-tx`),
-  then send root the one end message and close the agent in one transaction at main (`end-task-call`), so
-  whoever sees the agent closed finds its message. Landing the end, stopping the agent's graph and settling its
-  branch are db<->flow's (`seon.cluster.agent/land-ends!`): an agent never retires itself from its own graph.
+  "Record the end of the task `agent-id` holds when this pass observed one (`task-end`), all in the agent's
+  own world (its branch, custody): request the merge of its change when it ended green
+  (`my.program/request-merge!`, the agent's own act; a merge request this end already recorded is reused,
+  `end-merge-request`), record the agent's outcome (`seon.context/end-summary-tx`), then close the agent and
+  write the end on its attempt in one transaction (`end-task-call`). Nothing reaches main here: the end
+  datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which copies the end, refinements,
+  children and merge request to main in one transaction, stops the graph and settles the branch
+  (`seon.cluster.agent/land-ends!`); root learns of the end from that landed end on main.
   nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
@@ -2313,10 +2303,10 @@
                                {:seon.error/layer :seon.turn/task-end
                                 :seon.error/operation operation
                                 :seon.db.process/id (:seon.db.process/id cluster)
-                                :seon.agent/id agent-id}))]
+                                :seon.agent/id agent-id}))
+        write! (fn [tx] (db/call-with-custody {:seon.db/connection connection} #(db/transact! connection tx)))]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [home (task/main-connection connection)
-            recorded (when (= :done end) (end-merge-request (db/db home) agent-id))
+      (let [recorded (when (= :done end) (end-merge-request (db/db connection) agent-id))
             execution (when (and (= :done end) (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
             request (or recorded
                         (when execution
@@ -2325,34 +2315,27 @@
                                                     :seon.db/connection (:seon.db/connection execution)
                                                     :seon.agent/id agent-id})))
             _ (when (:seon.error/at request) (fault! 'my.program/request-merge! request))
-            ;; the outcome is written at main before the message, so whoever reads the message finds it
             end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
-            kept (when (seq end-summary-tx)
-                   (if (identical? home connection)
-                     (db/transact! home end-summary-tx)
-                     (db/call-with-custody {:seon.db/connection home} #(db/transact! home end-summary-tx))))
+            kept (when (seq end-summary-tx) (write! end-summary-tx))
             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
-            candidate (message/candidate (end-message (db/db connection) agent-id end (:seon.task/merge request)))
             ;; the branch commit the attempt ended at: its successor's fork basis
             commit (db/commit-id (db/db connection))
             target (when (= :sent-back end) (sent-back-to (db/db connection) agent-id))
-            write! #(db/transact! home {:tx-data [[:db.fn/call #'end-task-call agent-id end candidate commit target]]
-                                        :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
-            outcome (cond (:seon.error/at candidate) candidate
-                          (not (uuid? commit)) commit
-                          (identical? home connection) (write!)
-                          :else (db/call-with-custody {:seon.db/connection home} write!))]
+            outcome (if (uuid? commit)
+                      (write! {:tx-data [[:db.fn/call #'end-task-call agent-id end commit target]]
+                               :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
+                      commit)]
         (when-not (:db-after outcome) (fault! `end-task-call outcome))))
     nil))
 
 (declare first-proof-run-t latest-answering-turn-t proof-run-recorded? prove-turn step-limit-ms)
 
 (defn- attempt-running?
-  "True when the task `handle` an agent holds has intent :running at main, seen from `database`, its branch."
+  "True when the task `handle` an agent holds has intent :running on `database`, its branch (forked from
+  the main commit db<->flow wrote its attempt in)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
-  (let [home (or (some-> (task/main database) db/db) database)]
-    (= :running (:seon.task/execution (db/pull home [:seon.task/execution] [:seon.task/id handle])))))
+  (= :running (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id handle]))))
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose first proof run on `database`, its branch, came
@@ -2376,7 +2359,7 @@
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
   turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
-  read at main (`seon.task/main`) where assignments are written;
+  read in its own world (its branch holds its attempt row);
   a held task whose intent is :running (db<->flow started the attempt) and
   whose proofs have no run recorded on the agent's branch is `:prove` first
   (`prove-turn`: proofs only, no model call), and a red first run is its work: the next pass
@@ -2422,7 +2405,7 @@
       ;; is about to answer. Handling claims are recorded at settlement.
       ;; A MODEL TURN NEEDS AN ASSIGNMENT: with none held, wakes stay
       ;; unanswered until a task is assigned.
-      (let [held (task/agent-task (or (some-> (task/main db) db/db) db) agent-id)
+      (let [held (task/agent-task db agent-id)
             deferred (when (string? held) (opening-deferred? db agent-id))]
         (cond
           ;; AN ENDED TASK CLOSED THE AGENT: no wake reopens it
@@ -5271,17 +5254,15 @@
   (pos? (:seon.turn.loop/forms-run report)))
 
 (defn- task-proofs
-  "The proofs of the task `agent-id` holds, read at main and on the agent's branch; empty when it holds none."
+  "The proofs of the task `agent-id` holds, read on `database`, the agent's branch; empty when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
   [database agent-id]
-  (let [home (or (some-> (task/main database) db/db) database)
-        handle (task/agent-task home agent-id)
+  (let [handle (task/agent-task database agent-id)
         sym (when (string? handle)
-              (:seon.task/sym (db/pull home [:seon.task/sym] [:seon.task/id handle])))
-        edges #(:seon.task/proofs (task/task-edges % sym))]
+              (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))]
     (cond (:seon.error/at handle) handle
           (nil? sym) #{}
-          :else (into (set (edges home)) (edges database)))))
+          :else (set (:seon.task/proofs (task/task-edges database sym))))))
 
 (defn- run-proofs
   "Run the proofs of the task `agent-id` holds, but those in `excluded`, on `execution` as one test request bounded by `limit-ms`; nil when none is left."

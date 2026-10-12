@@ -244,6 +244,14 @@
     (let [answer (ready?)]
       (if (or answer (zero? n)) answer (do (Thread/sleep 50) (recur (dec n)))))))
 
+(defn- attempt-ends
+  "The ends written on the attempts `agent-id` holds in `database`, its world (an own-branch agent's branch)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :seon.task.attempt/end]]}
+  [database agent-id]
+  (vec (db/q '[:find [?end ...] :in $ ?agent-id
+               :where [?agent :seon.agent/id ?agent-id] [?a :seon.task/agent ?agent] [?a :seon.task.attempt/end ?end]]
+             database agent-id)))
+
 (defn- green-task!
   "Assign `agent-id` the task `tq.end/area` whose proof is red, then let the model define the fix through
   `replies` until the agent's admission closes; answers the provider's request documents."
@@ -295,7 +303,7 @@
 (deftest ^{:seon/tasks #{'seon.turn/a-task-end-never-reaches-root}
            :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass, its merge request's proof run."
            :seon.test/long-ms 60000}
-  a-task-that-ends-green-sends-root-one-merge-request
+  a-task-that-ends-green-records-one-merge-request-on-its-branch
   (support/with-running-agent
    (fn [running _ connection]
      (let [member (get-in (db/db connection) [:config :branch])
@@ -324,28 +332,17 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
-       (let [home (db/db connection)
-             ended (db/q '[:find [(pull ?m [:seon.message/about :seon.task/end :seon.task/merge]) ...] :in $ ?agent-id
-                           :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent]
-                           [?root :seon.agent/id "root"] [?m :seon.message/to ?root]]
-                         home agent-id)
-             [message] ended
+       (let [mine (db/db target)
              proposed (db/q '[:find ?merge . :in $ ?branch :where [?p :seon.task/branch ?branch] [?p :seon.task/merge ?merge]]
-                            home branch)
-             open (mapv :seon.task/merge (my.root/merge-requests {:seon.db/db home}))]
+                            mine branch)]
          (is (= 1 (count @ledger)) "one model call turned the proof green")
-         (is (= 1 (count ended)) "root received exactly one message from the agent")
-         (is (= {:seon.message/about id :seon.task/end :done} (select-keys message [:seon.message/about :seon.task/end]))
-             "it names the task and how it ended")
-         (is (and (some? proposed) (= proposed (:seon.task/merge message))) "it names the merge request's merge task")
-         (is (= [(:seon.task/merge message)] open) "root's merge-requests lists it")
-         (let [shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) %)
-                           (get-in (seon.context/current-state home "root") [:seon.context/unread :seon.context/items]))]
-           (is (= {:seon.task/end :done :seon.task/proof-counts {:green 1} :seon.task/calls 1}
-                  (select-keys (:seon.task/ended shown) [:seon.task/end :seon.task/proof-counts :seon.task/calls]))
-               "root's block shows the ended value derived from the agent's branch")))))))
+         (is (= [:done] (attempt-ends mine agent-id)) "the end is written once, on the agent's own branch")
+         (is (string? proposed) "with its merge request beside it")
+         (is (empty? (db/q '[:find ?m :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent]]
+                           (db/db connection) agent-id))
+             "and the agent wrote nothing on main: db<->flow lands its end there (seon.cluster.agent/land-ends!)"))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-reached-red-test-keeps-a-task-from-ending-done}
            :seon.test/long "An own-branch agent's setup and settings with their test steps and one fixture-model pass with its test step."
@@ -383,11 +380,9 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
-       (let [ends (db/q '[:find [?end ...] :in $ ?agent-id
-                          :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
-                        (db/db connection) agent-id)]
+       (let [ends (attempt-ends (db/db target) agent-id)]
          (is (= [:capped] ends)
              "the proof went green but a reaching test went red: the task never ended done, and the cap ended it"))))))
 
@@ -424,16 +419,14 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  400)))
-       (is (= [:stalled] (db/q '[:find [?end ...] :in $ ?agent-id
-                                 :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end ?end]]
-                               (db/db connection) agent-id))
-           "the stopped loop ended the task, and root heard it once")))))
+       (is (= [:stalled] (attempt-ends (db/db target) agent-id))
+           "the stopped loop ended the task once, on the agent's branch")))))
 
 (deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's merge-request run."
            :seon.test/long-ms 30000}
-  a-task-end-is-its-message-and-the-agents-close-in-one-transaction
+  a-task-end-and-the-agents-close-are-one-transaction
   (support/with-running-agent
    (fn [running agent-id connection]
      ;; root's home is this member's branch, so the end message stays inside the fixture
@@ -450,7 +443,7 @@
                             :seon.task/branch (get-in (db/db connection) [:config :branch])})
            _ (agent-eval running agent-id "(in-ns 'tq.endo)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
            ends #(db/q '[:find [?tx ...] :in $ ?agent-id
-                         :where [?a :seon.agent/id ?agent-id] [?m :seon.message/from ?a] [?m :seon.task/end _ ?tx]]
+                         :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?a :seon.task.attempt/end _ ?tx]]
                        (db/db connection) agent-id)]
        (is (= :done (turn/task-end (db/db connection) agent-id)) "the fix turned the proof green")
        (#'turn/end-task! (support/running-cluster running) agent-id)
@@ -458,7 +451,7 @@
        (is (= [(:db/id (:seon.agent/admission-closed-tx
                         (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))]
               (ends))
-           "root holds the end's message once, written by the transaction that closed the agent")))))
+           "the attempt holds the end once, written by the transaction that closed the agent")))))
 
 ;;; A green end observed without a model call: the agent's fix arrives through its own MCP entrance, then the
 ;;; end is observed on the agent's own execution handle as its loop observes it.
@@ -501,13 +494,17 @@
                [?p :seon.task/merge-request ?request]]
              home agent-id)))
 
-(defn- end-messages
-  "The end messages `agent-id` sent root, as stored at `home`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :map]]}
-  [home agent-id]
-  (vec (db/q '[:find [(pull ?m [:seon.message/id :seon.task/end :seon.task/merge]) ...] :in $ ?agent-id
-               :where [?a :seon.agent/id ?agent-id] [?m :seon.message/from ?a] [?m :seon.task/end _]]
-             home agent-id)))
+(defn- ended-request
+  "How `agent-id`'s attempt ended in `database`, its world, with the merge task its merge request names."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :map]}
+  [database agent-id]
+  (let [[end merge] (db/q '[:find [?end ?merge] :in $ ?agent-id
+                            :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?a :seon.task.attempt/end ?end]
+                            [?p :seon.task/of-assignment ?a] [?p :seon.task/merge ?merge]]
+                          database agent-id)]
+    (cond-> {}
+      end (assoc :seon.task/end end)
+      merge (assoc :seon.task/merge merge))))
 
 (defn- root-home!
   "Make the running member's branch root's home, so tasks, merges and end messages stay inside the fixture."
@@ -539,14 +536,9 @@
        ;; the branch moves on before the end is observed again
        (agent-eval running agent-id "(+ 1 2)")
        (end! running execution agent-id)
-       (let [home (db/db connection)
-             requests (answering home agent-id)
-             [message :as messages] (end-messages home agent-id)]
-         (is (= 1 (count requests)) "the end requested the merge once")
-         (is (= 1 (count messages)) "root heard the end once")
-         (is (= (db/q '[:find ?m . :in $ ?p :where [?x :seon.task/merge-request ?p] [?x :seon.task/merge ?m]] home (first requests))
-                (:seon.task/merge message))
-             "the message names the one merge request's merge task"))))))
+       (let [mine (db/db (:seon.db/connection execution))]
+         (is (= 1 (count (answering mine agent-id))) "the end requested the merge once, on the agent's branch")
+         (is (= [:done] (attempt-ends mine agent-id)) "and the end is written once"))))))
 
 (defn- git!
   "Run git in `root`; its trimmed output, thrown when it fails."
@@ -601,7 +593,7 @@
                  execution (fixed-end! running agent-id 'tq.endl fix)
                  before (git! root "rev-parse" "HEAD")
                  _ (end! running execution agent-id)
-                 [message] (end-messages (db/db connection) agent-id)
+                 message (ended-request (db/db (:seon.db/connection execution)) agent-id)
                  landed (merge-row (:seon.task/merge message))
                  shown (some #(when (= (:seon.task/merge message) (:seon.task/merge %)) (:seon.task/ended %))
                              (get-in (seon.context/current-state (db/db connection) "root") [:seon.context/unread :seon.context/items]))]
@@ -626,7 +618,7 @@
                  execution (fixed-end! running agent-id 'tq.endl
                                        "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
                  _ (end! running execution agent-id)
-                 [message] (end-messages (db/db connection) agent-id)
+                 message (ended-request (db/db (:seon.db/connection execution)) agent-id)
                  refused (merge-row (:seon.task/merge message))]
              (is (= :done (:seon.task/end message)) "the task ended green on its branch")
              (is (= {:seon.task/refusal :seon.source/red-test-error :seon.task/refused-tests #{'tq.endl/side-identity-test}}
@@ -678,12 +670,10 @@
                                             ")"))
           (support/outside-wake-on-branch! running agent-id target "Work your task.")
           (until #(:seon.agent/admission-closed-tx
-                   (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
+                   (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
-       (let [message (db/q '[:find (pull ?m [:seon.task/end]) . :in $ ?agent-id
-                             :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent] [?m :seon.task/end _]]
-                           (db/db connection) agent-id)]
-         (is (= :done (:seon.task/end message))
+       (let [[end] (attempt-ends (db/db target) agent-id)]
+         (is (= :done end)
              "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row}}

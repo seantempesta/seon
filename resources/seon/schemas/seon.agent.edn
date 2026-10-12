@@ -123,7 +123,11 @@
                      [:map
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/routing
-                       :seon.agent/routing]],
+                       :seon.agent/routing]
+                      [:seon.agent/finish?
+                       {:optional true}
+                       :seon.agent/finish?]],
+                     :finish? [:boolean {:description "A stop that lets the agent's in-flight pass finish instead of interrupting it, then joins the graph: db<->flow's stop of an ended attempt, whose own pass wrote the end (seon.cluster.agent/land-ends!)."}],
                      :eid :int,
                      :id
                      [:string

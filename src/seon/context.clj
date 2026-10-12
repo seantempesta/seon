@@ -149,15 +149,15 @@
   (= #{:green} (set (keys (:seon.context/counts proven)))))
 
 (defn held-task
-  "The declaration of the task `agent-id` holds, read at main seen from `database`; nil when it holds none."
+  "The declaration of the task `agent-id` holds, read on `database`, its world (its branch holds its
+  assignment); nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :nil :seon.context/task :seon.error/value]]}
   [database agent-id]
-  (let [home (if-let [connection (task/main database)] (db/db connection) database)
-        handle (task/agent-task home agent-id)]
+  (let [handle (task/agent-task database agent-id)]
     (cond (:seon.error/at handle) handle
           (string? handle)
-          (let [pulled (db/pull home task-selector [:seon.task/id handle])]
+          (let [pulled (db/pull database task-selector [:seon.task/id handle])]
             ;; a cardinality-many pull is a vector; the declaration holds a set
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
@@ -187,17 +187,27 @@
       handled
       (into [] (remove (comp (set handled) :my.message/id)) items))))
 
+(defn- main-database
+  "Main's head seen from the branch `database`, for comparing the branch's stored costs with it:
+  root's home branch (root's row names it) through this process's connection to it; nil on main
+  itself or when no root row names another branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/database-value]]}
+  [database]
+  (let [branch (db/q '[:find ?branch . :where [?root :seon.agent/id "root"] [?root :seon.agent/branch ?branch]] database)]
+    (when (and (keyword? branch) (not= branch (get-in database [:config :branch])))
+      (some-> (db/branch-connection database branch) db/db))))
+
 (defn- branch-cost
   "The branch's stored cost entities (`:seon.fn.cost/entity`) that differ from
   main's (a sample digest main does not hold, or main stores none for that
   symbol and scope), as `seon.batch/cost-diff` comparisons, like with like
   only: the most self time spent first, at most `:seon.config.test.cost/top`,
-  the dials of the branch's effective configuration. Main is read through
-  `seon.task/main`. Nil on main itself, the branch stores none, its program
+  the dials of the branch's effective configuration. Main is read, for this
+  comparison only, as root's home branch (`main-database`). Nil on main itself, the branch stores none, its program
   declares no cost entities or its configuration is refused."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cost/diff]]}
   [database]
-  (let [main (some-> (task/main database) db/db)
+  (let [main (main-database database)
         cluster (when main (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database))
         effective (when cluster (config/effective database cluster))
         cost-keys (when (and effective (not (:seon.error/at effective)))
@@ -287,9 +297,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.store/transaction-data]}
   [database agent-id]
   (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
-        home (if-let [connection (task/main database)] (db/db connection) database)
-        handle (task/agent-task home agent-id)
-        sym (when (string? handle) (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home handle))
+        handle (task/agent-task database agent-id)
+        sym (when (string? handle) (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] database handle))
         branch-db (when (keyword? branch) (db/branch-database database branch))
         outcome (when branch-db (branch-end-summary branch-db agent-id sym))]
     (if (or (nil? outcome) (:seon.error/at outcome))
@@ -305,13 +314,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :my.message/inbox-entry] [:or :seon.task/ended :seon.error/value]]}
   [database {agent-id :my.message/from task-id :seon.message/about end :seon.task/end merge :seon.task/merge}]
   (let [branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]] database agent-id)
-        home (if-let [connection (task/main database)] (db/db connection) database)
-        sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] home task-id)
+        sym (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/sym ?s]] database task-id)
         recorded (recorded-end-summary database agent-id)
         branch-db (when (keyword? branch) (db/branch-database database branch))
         outcome (or recorded (when branch-db (branch-end-summary branch-db agent-id sym)))
         landing (when merge
-                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
+                  (let [row (db/pull database [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
                                      [:seon.task/id merge])]
                     (when (map? row) (cond-> (dissoc row :db/id)
                                        (:seon.task/refused-tests row) (update :seon.task/refused-tests set)))))]

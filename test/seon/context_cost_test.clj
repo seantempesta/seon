@@ -13,7 +13,7 @@
    (fn [running agent-id connection]
      (support/declare-proof! connection 'context.cost-proof 'pending 'context.cost/read)
      (let [references #{'seon.ref/references 'seon.ref/resolve-path 'seon.context/current-state
-                        'seon.task/main 'seon.task/agent-task 'seon.db/pull 'seon.db/q}
+                        'seon.task/agent-attempt 'seon.task/agent-task 'seon.db/pull 'seon.db/q}
            id (:seon.task/id
                (task/create! {:seon.db/connection connection :seon.agent/id agent-id
                               :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/kind :function

@@ -116,14 +116,14 @@
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'names 'tq.cs/names)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "names" :seon.task/kind :function
-                                            :seon.task/intent "Use `seon.task/main` and `:seon.task/intent`."
+                                            :seon.task/intent "Use `seon.task/agent-attempt` and `:seon.task/intent`."
                                             :seon.task/must-read #{'seon.task/agent-task}}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [[names operations] (shown running agent-id
                                        "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
-         (is (= ['seon.task/agent-task 'seon.task/main :seon.task/intent] names))
-         (is (some #{'(doc seon.task/main)} operations)))))))
+         (is (= ['seon.task/agent-task 'seon.task/agent-attempt :seon.task/intent] names))
+         (is (some #{'(doc seon.task/agent-attempt)} operations)))))))
 
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
