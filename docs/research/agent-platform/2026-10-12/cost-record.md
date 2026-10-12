@@ -157,3 +157,46 @@ does not collapse those values into one cluster-wide value.
 Query commit `2eafd5a28`: candidate run `f41fa4abeafe`, 21 tests and 169
 assertions, all green; check 42.025 s, test bodies 10.339 s total. No individual
 red remains in the selected read tests. Full lint again reported zero errors.
+
+## Cost selection
+
+On default, 700 host definitions below the floor return no costs but call
+`seon.profile/cost-entity` 700 times: 3.62 ms and 6,715,672 allocated bytes.
+The measured zero-construction assertion was false before the change.
+The existing ranking test now covers floor exclusion, limit-before-construction,
+transaction samples, and cheap context definitions remaining visible.
+
+`seon.profile/selected` sums counters and chooses the same most-called digest,
+then decides each sample once, ranks the selected counter values and constructs
+only the limited result. The transaction path retains separate warm/cold floors;
+the live path retains the combined host floor and context priority. There is no
+entity construction followed by a second live-cost filter. `cost-scope` reads
+only scope from the existing roster's synchronized array snapshot, instead of
+returning and validating every field of every cell just to obtain its scope.
+This removes the full-cell vector and its unrelated predicate calls; no state
+or cache is added. The work is linear in executed definitions plus sorting the
+qualifying definitions, with entity construction proportional to the result.
+
+Candidate `ac4d8f2949bce039c4b1b4361f63048702fe5fbe`, run `76c7b02b00cd`:
+six tests, 55 assertions, all green. Full check 46.688 s; test bodies 6.353 s.
+Same warm second MCP probe: 176.42 -> 181.18 ms; caller allocation
+8,916,128 -> 8,430,408 bytes; cost-entity calls 797 -> 17. Again these are
+check windows with concurrent work, so the observed wall-time increase is
+reported, not hidden or presented as a speedup. Deterministic regression
+counts prove zero constructions below the floor and one for a one-entry limit.
+Raw replies are `cost-record-costs-before.txt` and `cost-record-costs-after.txt`.
+The driver now also repeats the 700-definition measurement after the two
+MCP request probes. Full lint: zero errors, 1,575 warnings, 7.247 s.
+
+## Remaining work for root
+
+The recording target remains unmet. LZ4 buffer reuse needs an actual reusable
+frame-stream dependency seam; the installed Java API has none. The namespace
+transaction-order change and configuration change are supplied as an unapplied
+patch for the protected owner. Root must prove that integrated patch, restart
+the committed batch, and repeat the quiet warm request probe before accepting
+an end-to-end latency claim. Other read-wrapper overhead remains, though query
+pattern and attribute derivation no longer repeat. Default was left running;
+its loaded Datahike dependency predates these commits (**RESET NEEDED**, a
+batched restart retaining its store). No protected source or other lane's
+working changes were edited.

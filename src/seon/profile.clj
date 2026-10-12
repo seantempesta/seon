@@ -446,33 +446,26 @@
   20)
 
 (defn- cost-scope
-  "The scope of the executed definition `executed-key`: an interpreted SCI
-  definition's when any of its live cells is a context cell, else the host's."
+  "The scope of an executed definition's live cells."
   {:malli/schema [:=> [:cat :seon.batch/executed-key] :seon.profile/scope]}
   [executed-key]
-  (if (some #(= :seon.profile/context (:seon.profile/scope %)) (cells-of executed-key))
-    :seon.profile/context
-    :seon.profile/host))
+  (let [^java.util.Set members (.get ^ConcurrentHashMap roster executed-key)]
+    (if (and members
+             (some #(= :seon.profile/context (:seon.profile/scope %)) (.toArray members)))
+      :seon.profile/context
+      :seon.profile/host)))
 
 (defn- cost-entity
-  "One executed definition's cost entity from its row (calls, nanoseconds and
-  self nanoseconds of all its calls, then of its cold calls alone) and scope:
-  its warm sample (the calls that were not cold) and its cold sample, each
-  per-call means in microseconds, each present when `qualifies?` it (its
-  half, calls and self nanoseconds); nil when neither does."
+  "The selected warm and cold samples of one executed definition."
   {:malli/schema [:=> [:cat [:tuple :seon.batch/executed-key :int :int :int :int :int :int]
-                       :seon.profile/scope [:=> [:cat [:enum :warm :cold] :int :int] :boolean]]
-                  [:maybe :seon.fn.cost/entity]]}
-  [[[sym digest] calls nanos self cold-calls cold-nanos cold-self] scope qualifies?]
+                       :seon.profile/scope :boolean :boolean]
+                  :seon.fn.cost/entity]}
+  [[[sym digest] calls nanos self cold-calls cold-nanos cold-self] scope warm? cold?]
   (let [mean (fn [n total self] [digest n (/ (double self) n 1000.0) (/ (double total) n 1000.0)])
-        warm-calls (- calls cold-calls)
-        warm (when (qualifies? :warm warm-calls (- self cold-self))
-               (mean warm-calls (- nanos cold-nanos) (- self cold-self)))
-        cold (when (qualifies? :cold cold-calls cold-self) (mean cold-calls cold-nanos cold-self))]
-    (when (or warm cold)
-      (cond-> {:seon.fn.cost/key [sym scope]}
-        warm (seon.batch/with-sample :warm warm)
-        cold (seon.batch/with-sample :cold cold)))))
+        warm-calls (- calls cold-calls)]
+    (cond-> {:seon.fn.cost/key [sym scope]}
+      warm? (seon.batch/with-sample :warm (mean warm-calls (- nanos cold-nanos) (- self cold-self)))
+      cold? (seon.batch/with-sample :cold (mean cold-calls cold-nanos cold-self)))))
 
 (defn undigested
   "The symbols `sink` counted under no definition digest: interpreted
@@ -483,58 +476,59 @@
   (into [] (keep (fn [[sym digest]] (when (nil? digest) sym))) (.keySet ^ConcurrentHashMap sink)))
 
 (defn- selected
-  "`worked` (`[[sym digest] calls nanos self-nanos cold-calls cold-nanos
-  cold-self-nanos]` rows) as cost entities, one per symbol and scope: a row
-  without a digest takes its symbol's from `digests` (else is dropped), rows
-  of one executed definition are summed, one digest per symbol and scope (its
-  most called). A warm sample needs at least `min-calls` warm calls, a cold
-  sample one cold call, and each at least `min-total-us` microseconds of self
-  time; the `limit` most self time spent first (ties by symbol): the same work
-  selects the same definitions, and cheap predicates called often never
-  qualify."
+  "Cost entities for selected counter samples, ranked before construction.
+  Sum each executed definition, select its most called digest per scope,
+  then apply the sample thresholds. Live replies keep every context sample
+  and select host definitions by combined self time; transactions select
+  warm and cold samples separately. Only the first `limit` become entities."
   {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int :int :int :int]]
                        [:map-of :qualified-symbol :seon.program/definition-digest]
-                       :int :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
+                       :int :seon.config.fn.cost/min-total-us :seon.config.test.cost/top :boolean]
                   [:vector :seon.fn.cost/entity]]}
-  [worked digests min-calls min-total-us limit]
-  (let [qualifies? (fn [half calls self]
-                     (and (pos? calls) (<= (if (= :warm half) min-calls 1) calls) (<= (* 1000 min-total-us) self)))]
+  [worked digests min-calls min-total-us limit live?]
+  (let [floor (* 1000 min-total-us)]
     (->> worked
-         (keep (fn [[[sym digest :as k] & row]]
+         (keep (fn [[[sym digest :as k] & counters]]
                  (when-let [digest (or digest (get digests sym))]
-                   [[sym digest] (vec row) (cost-scope k)])))
-         (reduce (fn [m [k row scope]]
+                   [[sym digest] (vec counters) (cost-scope k)])))
+         (reduce (fn [m [k counters scope]]
                    (update m k (fn [[_ summed sc]]
-                                 [k (if summed (mapv + summed row) row)
+                                 [k (if summed (mapv + summed counters) counters)
                                   (if (= :seon.profile/context sc) sc scope)])))
                  {})
          vals
          (group-by (fn [[[sym] _ scope]] [sym scope]))
-         (keep (fn [[_ rows]]
-                 (let [[k row scope] (apply max-key #(first (second %)) rows)]
-                   (cost-entity (into [k] row) scope qualifies?))))
-         (map (fn [e] [[(- (seon.batch/spent e)) (first (:seon.fn.cost/key e))] e]))
+         (keep (fn [[_ samples]]
+                 (let [[k [calls _ self cold-calls _ cold-self :as counters] scope]
+                       (apply max-key #(first (second %)) samples)
+                       context? (= :seon.profile/context scope)
+                       warm-calls (- calls cold-calls)
+                       warm-self (- self cold-self)
+                       warm? (and (pos? warm-calls)
+                                  (or live? (and (<= min-calls warm-calls) (<= floor warm-self))))
+                       cold? (and (pos? cold-calls) (or live? (<= floor cold-self)))]
+                   (when (and (or warm? cold?)
+                              (or (not live?) context? (<= floor self)))
+                     [[(if (and live? context?) 0 1)
+                       (- (+ (if warm? warm-self 0) (if cold? cold-self 0))) (first k)]
+                      (into [k] counters) scope warm? cold?]))))
          (sort-by first)
-         (into [] (comp (take limit) (map second))))))
+         (take limit)
+         (mapv (fn [[_ counters scope warm? cold?]]
+                 (cost-entity counters scope warm? cold?))))))
 
 (defn live-costs
-  "The request's own per-definition values from its sink, as cost entities:
-  what a reply compares with main. The agent's interpreted definitions first,
-  every one, then the host's spending at least `min-total-us` of self time,
-  each by total self time (`selected`, any call count), at most `limit`. A
-  definition counted under no digest takes its symbol's from `digests`.
-  Reads only the sink's counters."
+  "Selected request costs: every context definition first, then host
+  definitions meeting the combined self-time floor, at most `limit`.
+  A definition without a digest takes its symbol's from `digests`."
   {:malli/schema [:=> [:cat :seon.batch/sink [:map-of :qualified-symbol :seon.program/definition-digest]
                        :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
                   :seon.cost/live]}
   [sink digests min-total-us limit]
-  (let [entities (selected (into [] (map (fn [[k ^AtomicLongArray c]]
-                                           [k (.get c 0) (.get c 1) (.get c 2) (.get c 6) (.get c 7) (.get c 8)]))
-                                 ^ConcurrentHashMap sink)
-                           digests 1 0 Integer/MAX_VALUE)
-        [own host] ((juxt filter remove) #(= :seon.profile/context (second (:seon.fn.cost/key %))) entities)]
-    (into [] (take limit)
-          (concat own (filter #(<= min-total-us (seon.batch/spent %)) host)))))
+  (selected (into [] (map (fn [[k ^AtomicLongArray c]]
+                           [k (.get c 0) (.get c 1) (.get c 2) (.get c 6) (.get c 7) (.get c 8)]))
+                  ^ConcurrentHashMap sink)
+            digests 1 min-total-us limit true))
 
 (defn transaction-observation
   "The cost entities of the work `world` did since its previous transaction:
@@ -575,7 +569,7 @@
                          (when (pos? made)
                            (into (into [k] all) cold))))))
              ^ConcurrentHashMap sink)
-       digests min-calls min-total-us limit))))
+       digests min-calls min-total-us limit false))))
 
 (defn moved?
   "True when the `live` sample should replace the `stored` one of the same

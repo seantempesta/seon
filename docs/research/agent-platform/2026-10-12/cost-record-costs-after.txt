@@ -1,0 +1,150 @@
+#:seon.repl{:result result/e75035eae8026, :ms 506, :value {:seon.profile/ms 493.25,
+ :seon.profile/alloc-bytes 59949712,
+ :seon.profile/reads 603,
+ :calls
+   {seon.db/q 80,
+    seon.db/pull 512,
+    seon.config/effective 20,
+    seon.turn/agent-dial 7,
+    seon.profile/cost-entity 19},
+ :reply
+   [["#:seon.repl{:result result/e0b8acb970ba9, :ms 6, :alloc-mb 1.3, :value 3}"
+     "{:seon.repl/request
+   #:seon.cost{:alloc-mb 1.3,
+    :calls 7417,
+    :cpu-ms 5.4,
+    :entrance #:seon.cost{:alloc-mb 53.8, :cpu-ms 99.5},
+    :ms 470.3,
+    :reads 51,
+    :step #:seon.cost{:alloc-mb 85.5, :cpu-ms 148.3},
+    :transactions 1,
+    :commit #:seon.cost{:alloc-mb 5.8813, :cpu-ms 5.65, :batch-size 1},
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 944.805936,
+       :cpu-ms 2164.509},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 789.1,
+       :cpu-ms 1891.8,
+       :gc-ms 0.3,
+       :jit-ms 1460.0},
+    :stages
+      {:custody 243.4,
+       :derive 1.2,
+       :evaluate 26.4,
+       :fork 23.7,
+       :print 19.2,
+       :read 0.8,
+       :settle 45.6,
+       :test-step 73.2,
+       :unattributed 36.8},
+    :writer
+      #:seon.cost{:alloc-mb 10.547, :cpu-ms 19.23, :transactions 1}}}"]
+    false]}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 65.1,
+    :calls 12790,
+    :cpu-ms 125.2,
+    :entrance #:seon.cost{:alloc-mb 85.7, :cpu-ms 188.1},
+    :ms 629.7,
+    :reads 43,
+    :transactions 4,
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1276.7262,
+       :cpu-ms 3102.552},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 1191.0,
+       :cpu-ms 2914.5,
+       :gc-ms 0.5,
+       :jit-ms 2213.0},
+    :stages
+      {:custody 2.0,
+       :read 0.6,
+       :evaluate 526.2,
+       :settle 53.7,
+       :print 5.0,
+       :unattributed 42.2}}}
+#:seon.repl{:result result/e7adbdea0d02f, :ms 186, :value {:seon.profile/ms 181.18,
+ :seon.profile/alloc-bytes 8430408,
+ :seon.profile/reads 144,
+ :calls
+   {seon.db/q 40,
+    seon.db/pull 104,
+    seon.config/effective 12,
+    seon.turn/agent-dial 6,
+    seon.profile/cost-entity 17},
+ :reply
+   [["#:seon.repl{:result result/e2482aae2f3c9, :ms 1, :alloc-mb 0.9, :value 3}"
+     "{:seon.repl/request
+   #:seon.cost{:alloc-mb 0.9,
+    :calls 31054,
+    :cpu-ms 0.9,
+    :entrance #:seon.cost{:alloc-mb 3.7, :cpu-ms 12.3},
+    :ms 153.9,
+    :reads 47,
+    :step #:seon.cost{:alloc-mb 45.3, :cpu-ms 85.6},
+    :transactions 1,
+    :commit #:seon.cost{:alloc-mb 6.1855, :cpu-ms 7.08, :batch-size 1},
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 264.417424,
+       :cpu-ms 882.826},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 199.1,
+       :cpu-ms 761.4,
+       :gc-ms 151.5,
+       :jit-ms 739.0},
+    :stages
+      {:custody 0.4,
+       :derive 0.0,
+       :evaluate 2.9,
+       :fork 23.4,
+       :print 3.8,
+       :read 0.2,
+       :settle 83.8,
+       :test-step 23.3,
+       :unattributed 16.1},
+    :writer
+      #:seon.cost{:alloc-mb 10.0845, :cpu-ms 16.47, :transactions 1}}}"]
+    false]}}
+{:seon.repl/request
+   #:seon.cost{:alloc-mb 10.0,
+    :calls 7569,
+    :cpu-ms 26.8,
+    :entrance #:seon.cost{:alloc-mb 44.9, :cpu-ms 80.8},
+    :ms 1113.7,
+    :reads 12,
+    :transactions 1,
+    :jvm-window
+      #:seon.cost{:scope :jvm-window,
+       :attribution :includes-unrelated-work,
+       :alloc-accuracy :approximate-counter,
+       :cpu-accuracy :os-counter,
+       :alloc-mb 1661.67904,
+       :cpu-ms 3618.079},
+    :shared
+      #:seon.cost{:attribution :shared-never-apportioned,
+       :alloc-mb 1616.8,
+       :cpu-ms 3537.3,
+       :gc-ms 152.0,
+       :jit-ms 3000.0},
+    :stages
+      {:custody 0.5,
+       :read 0.1,
+       :evaluate 192.7,
+       :settle 873.9,
+       :print 1.0,
+       :unattributed 45.5}}}

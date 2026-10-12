@@ -171,21 +171,43 @@
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
 
-(deftest ranking-costs-computes-each-definitions-spending-once
+(deftest ^{:seon/tasks #{'seon.profile/cost-entities-are-built-only-for-selected-counters}}
+  ranking-costs-computes-each-definitions-spending-once
   (doseq [n [1 10 100]]
     (let [sink (batch/sink)
-          symbols (mapv #(symbol "cost.rank" (str "f" %)) (range n))]
+          prefix (str "cost.rank." (random-uuid))
+          symbols (mapv #(symbol prefix (str "f" %)) (range n))]
       (doseq [[index sym] (map-indexed vector symbols)]
         (let [^java.util.concurrent.atomic.AtomicLongArray counter
               (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink [sym digest-a] profile/new-adder)]
           (.set counter 0 10)
           (.set counter 1 (* 10000 (inc index)))
           (.set counter 2 (* 10000 (inc index)))))
+      (let [measured (profile/measure #(profile/live-costs sink {} 100000 n))]
+        (is (empty? (:seon.profile/value measured)))
+        (is (zero? (profile/calls-of measured 'seon.profile/cost-entity))
+            "definitions below the floor construct no cost entities"))
+      (let [measured (profile/measure #(profile/live-costs sink {} 0 1))]
+        (is (= [(last symbols)] (mapv (comp first :seon.fn.cost/key) (:seon.profile/value measured))))
+        (is (= 1 (profile/calls-of measured 'seon.profile/cost-entity))
+            "the limit is applied before construction"))
       (let [[costs calls] (test-support/armed-calls
                           '#{seon.batch/spent}
                           #(profile/transaction-observation {:seon.batch/sink sink} {} 1 0 n))]
         (is (= (vec (reverse symbols)) (mapv (comp first :seon.fn.cost/key) costs)))
-        (is (<= (get calls 'seon.batch/spent 0) n))))))
+        (is (<= (get calls 'seon.batch/spent 0) n)))
+      (doseq [^java.util.concurrent.atomic.AtomicLongArray counter (.values sink)]
+        (.addAndGet counter 0 1)
+        (.addAndGet counter 1 1)
+        (.addAndGet counter 2 1))
+      (let [measured (profile/measure #(profile/transaction-observation {:seon.batch/sink sink} {} 1 100000 n))]
+        (is (empty? (:seon.profile/value measured)))
+        (is (zero? (profile/calls-of measured 'seon.profile/cost-entity))))
+      (let [cell (profile/cell {:seon.profile/sym (first symbols) :seon.profile/digest digest-a
+                                :seon.profile/scope :seon.profile/context})
+            costs (profile/live-costs sink {} 100000 n)]
+        (is (= [[(first symbols) (:seon.profile/scope cell)]] (mapv :seon.fn.cost/key costs))
+            "a context definition remains visible below the host floor")))))
 
 (defn- stamping-world
   "A world over `connection` whose work is set by hand: `(step! warm-calls
