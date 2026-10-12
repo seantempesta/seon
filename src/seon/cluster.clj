@@ -837,6 +837,12 @@
        projection [::declarations-by-attribute]
        #(into {} (map (juxt :db/ident identity)) declarations))))))
 
+(defn- branch-attribute-changes-weight
+  "The retained bytes of the attributes a branch differs on: an ident each."
+  {:malli/schema [:=> [:cat [:vector :keyword]] nat-int?]}
+  [changed]
+  (+ 48 (* 80 (count changed))))
+
 (defn branch-declaration-changes
   "Transaction data adopting the cluster's declarations on a work branch.
 
@@ -854,8 +860,7 @@
         declarations (declared-attributes projection)
         changed (cache/lookup
                  ::branch-attribute-changes [installed declarations]
-                 (fn [_] (* schema/declaration-projection-bytes-per-form
-                            (+ (count installed) (count declarations))))
+                 branch-attribute-changes-weight
                  #(into []
                         (comp (remove (fn [declaration]
                                         (= :converged (attribute-adoption

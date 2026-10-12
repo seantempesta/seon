@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.cache :as cache]
             [seon.cluster]
+            [seon.fn]
             [seon.task])
   (:import [java.util.concurrent CountDownLatch Executors TimeUnit]
            [java.util.concurrent.atomic AtomicLong]))
@@ -163,7 +164,11 @@
                :seon.cluster/shapes (set (map #(keyword "k" (str %)) (range 100)))}]
     (doseq [[kind weigh value] [[:seon.task/task-basis @#'seon.task/task-basis-weight declarations]
                                 [:seon.task/tasks-tx @#'seon.task/tasks-tx-weight tx]
-                                [:seon.cluster/derivation-world @#'seon.cluster/derivation-world-weight world]]]
+                                [:seon.cluster/derivation-world @#'seon.cluster/derivation-world-weight world]
+                                [:seon.cluster/branch-attribute-changes @#'seon.cluster/branch-attribute-changes-weight
+                                 (mapv #(keyword "a" (str %)) (range 300))]
+                                [:seon.fn/population-targets @#'seon.fn/population-targets-weight
+                                 (into {} (map (fn [i] [(keyword "a" (str i)) (set (map #(symbol "n" (str %)) (range 5)))])) (range 50))]]]
       (testing kind
         (let [ratio (/ (double (weigh value)) (value-bytes value))]
           (is (<= 0.5 ratio 2.0) "the charge is within 2x of the value's size, whatever the projection"))))

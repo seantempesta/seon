@@ -1460,6 +1460,12 @@
   [analysis]
   (into #{} (mapcat val) (invocations-by-definition analysis)))
 
+(defn- population-targets-weight
+  "The retained bytes of the targets: a symbol per target and an entry per attribute."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword [:set :qualified-symbol]]] nat-int?]}
+  [targets]
+  (+ 48 (* 128 (count targets)) (* 128 (reduce + 0 (map count (vals targets))))))
+
 (defn- population-targets
   "Declared targets of `attributes` in `projection`'s declaration population.
 
@@ -1471,7 +1477,7 @@
     {}
     (let [forms (:seon.schema.projection/forms projection)]
       (cache/lookup ::population-targets [forms attributes]
-                    #(+ (* schema/declaration-projection-bytes-per-form (count forms)) (* 128 (reduce + 0 (map count (vals %)))))
+                    population-targets-weight
                     #(declared-function-targets attributes (vals forms) qualified-symbol?)))))
 
 (defn- program-targets
