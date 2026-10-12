@@ -74,6 +74,33 @@
         (is (= [newer older] (#'operator/heap-dumps (str root)))))
       (finally (test-support/delete-recursively! root)))))
 
+(deftest a-changed-test-tree-keys-its-own-class-directory
+  ;; 2026-10-12: boot compiles seon.test-support (test/) into the class
+  ;; directory, which was keyed by src and script only, so a check of a changed
+  ;; test-support loaded its predecessor's classes (stamped newer than any source).
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-classes-key" (make-array java.nio.file.attribute.FileAttribute 0)))
+        git (fn [& args] (#'operator/command! (into ["git" "-c" "user.name=t" "-c" "user.email=t@t"] args) repository 30000))
+        write! (fn [path text] (let [file (java.io.File. repository ^String path)]
+                                 (.mkdirs (.getParentFile file))
+                                 (spit file text)))
+        commit! (fn [] (git "add" "-A") (git "commit" "-q" "-m" "c") (str/trim (git "rev-parse" "HEAD")))
+        classes {:seon.dev-cache/status :hit :seon.dev-cache/digest "d"}
+        directory (fn [sha] (#'operator/program-classes repository (str "/archives/" sha) classes))]
+    (try
+      (git "init" "-q")
+      (doseq [path ["src/a.clj" "script/b.clj" "deps.edn" "reference-code/c" "test/d.clj" "docs/e.md"]]
+        (write! path path))
+      (let [base (commit!)
+            _ (write! "docs/e.md" "changed")
+            docs (commit!)
+            _ (write! "test/d.clj" "changed")
+            tests (commit!)]
+        (is (= (directory base) (directory docs)) "a docs change shares its predecessor's classes")
+        (is (not= (directory docs) (directory tests)) "a test change compiles its own"))
+      (finally
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
 (deftest a-class-directory-a-live-process-names-is-never-pruned
   ;; Two roots starting at once (2026-09-28): one start's prune deleted the
   ;; class directory the other JVM was loading from (NoSuchFileException).

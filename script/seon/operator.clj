@@ -617,19 +617,20 @@
 
 (defn- program-classes
   "The directory of our compiled classes for the archive `source`: keyed by
-  what compiles into them (the Git trees of `src` and `script`, which holds `seon.operator` that tests load; `deps.edn` and the pinned
+  what compiles into them (the Git trees of `src`, `script`, which holds `seon.operator` that tests load, and `test`, which
+  holds `seon.test-support` that boot loads; `deps.edn` and the pinned
   `reference-code` gitlinks, whose namespaces boot compiles when the
   dependency classes miss them; that dependency cache's identity), so a commit
-  changing docs, tests, resources or tasks shares its predecessor's. No macro
+  changing docs, resources or tasks shares its predecessor's. No macro
   reads a resource at expansion, and a namespace's top-level reads run at
   load. Nil for a source that is no commit archive."
   {:malli/schema [:=> [:cat :string :string :map] [:maybe :string]]}
   [repository source classes]
   (let [sha (.getName (io/file source))
-        trees (try (str/split-lines (command! ["git" "rev-parse" (str sha ":src") (str sha ":script") (str sha ":deps.edn") (str sha ":reference-code")]
+        trees (try (str/split-lines (command! ["git" "rev-parse" (str sha ":src") (str sha ":script") (str sha ":test") (str sha ":deps.edn") (str sha ":reference-code")]
                                               repository runtime-probe-bound-ms))
                    (catch clojure.lang.ExceptionInfo _ nil))]
-    (when (= 4 (count trees))
+    (when (= 5 (count trees))
       (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
                             (.getBytes (pr-str [trees (select-keys classes [:seon.dev-cache/status
                                                                             :seon.dev-cache/digest])])
