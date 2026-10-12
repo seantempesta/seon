@@ -944,35 +944,28 @@
           (or found unknown-refusal))))))
 
 (defn assert-check!
-  "Assert a nonempty test.check result while retaining its complete shrink data."
+  "Report a test.check result as clojure.test events: a pass when it ran trials and held; else a failure whose
+  `:actual` is the shrunk smallest input itself (a value the value printer prints once) and whose message is
+  prose with the seed, trial count and shrink depth. A property that threw adds the thrown cause as an error."
   ([check]
    (assert-check! check "Generative check failed."))
   ([check message]
-   (letfn [(without-duplicate-error [result]
-             (let [error (get-in result
-                                 [:result-data
-                                  :clojure.test.check.properties/error])
-                   result-data
-                   (when-let [data (:result-data result)]
-                     (if (identical? (:result result) error)
-                       (not-empty
-                        (dissoc data
-                                :clojure.test.check.properties/error))
-                       data))]
-               (cond-> (if result-data
-                         (assoc result :result-data result-data)
-                         (dissoc result :result-data))
-                 (and (map? (:shrunk result))
-                      (instance? Throwable (:result result)))
-                 (assoc :result false)
-
-                 (map? (:shrunk result))
-                 (update :shrunk without-duplicate-error))))]
-     (let [passed? (and (pos-int? (:num-tests check))
-                        (true? (:result check)))]
-       ;; The failing check is the value the report prints, shrink data included.
-       (test/testing message
-         (test/is (nil? (when-not passed? (without-duplicate-error check)))))))))
+   (let [{:keys [shrunk fail seed num-tests]} check
+         cause (:result shrunk)]
+     (if (and (pos-int? num-tests) (true? (:result check)))
+       (test/do-report {:type :pass :message message})
+       (do
+         (test/do-report
+          {:type :fail
+           :message (str message " Seed " seed ", " num-tests " trials"
+                         (when shrunk (str ", shrunk in " (:total-nodes-visited shrunk) " nodes visited"))
+                         ".")
+           :expected :property-holds
+           :actual (cond shrunk (:smallest shrunk)
+                         fail fail
+                         :else (dissoc check :result-data))})
+         (when (instance? Throwable cause)
+           (test/do-report {:type :error :message message :expected :property-holds :actual cause})))))))
 
 (defn- run-database-body
   "Call `body` with `connection` as its custody, under the projection the

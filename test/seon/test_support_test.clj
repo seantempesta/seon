@@ -371,11 +371,21 @@
     (is (= [:pass :fail :fail] (mapv :type @reports))
         "zero trials and a falsified property both fail the shared proof boundary")
     (is (= [3] (get-in failed [:shrunk :smallest])))
-    (is (str/includes? (:message (last @reports))
-                       ":smallest [3]")
-        "the reported failure retains the smallest failing input")
-    (is (str/includes? (:message (last @reports)) ":seed 20260728")
-        "the report retains the seed needed to replay the counterexample")))
+    (is (= [3] (:actual (last @reports)))
+        "the reported failure's actual is the smallest failing input itself, a value")
+    (is (str/includes? (:message (last @reports)) "Seed 20260728")
+        "the message is prose naming the seed needed to replay the counterexample")))
+
+(deftest ^{:seon.test/platform
+           "Moving part: the one test bracket every other test forks through."}
+  a-falsified-property-reports-its-smallest-input-as-the-actual-value
+  (let [input "a\\b"
+        failed (tc/quick-check 5 (prop/for-all [value (gen/return input)] (not= value input)) :seed 1)
+        reports (atom [])]
+    (binding [test/report #(swap! reports conj %)]
+      (test-support/assert-check! failed))
+    (is (= [input] (:actual (last @reports)))
+        "the actual is the generated value itself, so the value printer prints its backslash once")))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
