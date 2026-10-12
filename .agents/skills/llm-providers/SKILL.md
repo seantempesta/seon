@@ -8,8 +8,7 @@ description: Verify or plan Seon's LLM provider request construction, prompt cac
 ## Overview
 
 Keep one `seon.ai` HTTP owner and represent hosted targets as provider descriptor
-entities, resolved by `resolved-target` and `targets` (`src/seon/ai.clj:384-419`,
-`:444`). Re-open the linked primary source before editing an entity or wire shape.
+entities, resolved by `resolved-target` and `seon.ai/targets`. Re-open the linked primary source before editing an entity or wire shape.
 The maintained reference is `docs/seon/reference/llm-adapters.md`. The
 2026-08-03 verified baseline and source inventory were deleted with the retired
 program; read them with
@@ -17,24 +16,17 @@ program; read them with
 
 ## Working rules
 
-- Read `resolved-target` (`src/seon/ai.clj:384-419`), `retry-strategy` and
-  `delays` (`:496-560`), `wire-settings` (`:599-633`), `request-body`
-  (`:677`), `stream-fold` (`:841`), the capture handoff in `call-turn`
-  (`src/seon/turn.clj:4653-5001`), and `resources/seon/schemas/seon.ai.edn`
+- Read `seon.ai/resolved-target`, `seon.ai/wire-settings`, `seon.ai/request-body`,
+  `seon.ai/stream-fold`, the handoff in `seon.turn/call-turn`, and `resources/seon/schemas/seon.ai.edn`
   plus `resources/seon/schemas/seon.config.ai.edn` before changing the provider
   seam.
 - Keep credentials outside the database. Descriptor entities name the environment
   variable; `seon.ai/credential` reads it only at the HTTP leaf
-  (`src/seon/ai.clj:1043-1058`; `config/default.edn:454-456`).
-- Keep retries and failover in Seon's attempt/disposition mechanism. The HTTP
-  leaf performs one call (`send-request`, `src/seon/ai.clj:1317`; `complete`,
-  `:1468`; `disposition`, `:1092`); do not add an SDK retry,
-  circuit breaker, or second model registry.
-- Normalize provider token counts with `seon.ai/normalize-usage`
-  (`src/seon/ai.clj:997`). The attempt writer stores its namespaced count
-  attributes; readers query those facts rather than decoding usage EDN again.
-  The retained provider document also contains fields without declared count
-  equivalents, such as reported cost.
+  (`:seon.config.ai/api-key-variable` in `config/default.edn`).
+- Nothing in `seon.ai` retries (owner ruling 2026-07-27, in the docstring of `seon.ai/truncated-completion`): the HTTP leaf performs one call (`seon.ai/send-request`, `seon.ai/complete`) and a
+  re-request is never issued; do not add an SDK retry, circuit breaker, or second model registry.
+- Normalize provider token counts with `seon.ai/normalize-usage`, which answers
+  `:seon.ai.usage/*` count attributes; readers query stored attempt facts rather than decoding usage EDN again.
 - The prompt is the rendered `seon.context/current-state` block, built when the
   model call is made and passed as `:seon.ai/prompt` (`seon.context/model-context`);
   no capture is stored, so the provider call and its attempt facts are the record.
@@ -44,22 +36,21 @@ program; read them with
 ## Shipped provider and model entities
 
 The default manifest declares provider entities for DeepSeek, Moonshot, Meta and
-OpenRouter (`config/default.edn:558-583`). Each entity owns its endpoint,
+OpenRouter (the `:seon.ai.model/provider-id` entries of `config/default.edn`). Each entity owns its endpoint,
 credential-variable name, OpenAI-compatible chat fact, and output-token wire
 key. Model entities connect `deepseek-flash`, `deepseek-v4-pro`, `kimi-k3`,
 `muse-spark-1.1` and OpenRouter's pinned
 `deepseek/deepseek-v4-flash-20260731` to those providers
-(`config/default.edn:545-653`). `deepseek-flash` is the cluster default by
-the 2026-09-10 owner ruling (`config/default.edn:407-411`), with a
-65,536-token completion budget (`:418`) and thinking disabled (`:440`).
+(the `:seon.ai.model/id` entries). `deepseek-flash` is the cluster default by
+the 2026-09-10 owner ruling (`:seon.config.ai/model`), with a
+65,536-token completion budget (`:seon.config.ai/max-tokens`) and thinking disabled (`:seon.config.ai/thinking`).
 
-`resolved-target` derives endpoint, credential-variable name, provider-specific
+`seon.ai/resolved-target` derives endpoint, credential-variable name, provider-specific
 output-token wire key, output cap, and admitted thinking setting from those
-database entities (`src/seon/ai.clj:384-419`). `wire-settings` reads each config
+database entities. `seon.ai/wire-settings` reads each config
 schema's `:seon.ai/wire` declarations and substitutes the resolved provider's
 output-token key for the default `max_tokens` key
-(`resources/seon/schemas/seon.config.ai.edn:43-50`;
-`src/seon/ai.clj:599-633`, substitution at `:622`). Do not recreate either provider or request-field
+(`resources/seon/schemas/seon.config.ai.edn`). Do not recreate either provider or request-field
 selection as a conditional or hand-maintained model list.
 
 ## Anthropic — cache-contract reference
@@ -69,8 +60,7 @@ Direct API-key calls require `x-api-key`, `anthropic-version`, and
 `content-type`; `system` is top-level rather than a system-role message
 ([Claude API overview](https://platform.claude.com/docs/en/api/overview)).
 Current Seon emits Bearer authentication and OpenAI-style messages, so a native
-Anthropic entity is not representable (`request-headers` and `request-body`,
-`src/seon/ai.clj:672-718`).
+Anthropic entity is not representable (`seon.ai/request-headers` and `seon.ai/request-body`).
 
 Anthropic caching is opt-in through `cache_control`: either one top-level field
 for automatic breakpoint movement or explicit `cache_control` on content

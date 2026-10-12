@@ -14,17 +14,17 @@ render contract and the seon-flow-architecture skill for proc changes.
 
 Discover the endpoint through `bin/seon status`; this wave verifies
 default at the assigned endpoint. An HTTP success proves reachability,
-not layout or adoption.
+not layout or reload.
 
 The canonical route data and compiled Reitit router live in
-`src/seon/render/route.clj:5` and `:32`; handler binding lives in
-`bind-handlers` and `handler` (`src/seon/render/web.clj:3743`, `:3765`).
+`seon.render.route/routes` and `seon.render.route/router`; handler binding lives in
+`bind-handlers` and `handler` (`seon.render.web/handler`).
 Read that table instead of carrying another route list. A route name
 or retained manual context handler does not authorize preserving an
-obsolete behavior from before §14.
+obsolete behavior.
 
 Stable DOM ids derive through `seon.render.block/surface-id`
-(`src/seon/render/block.clj:61`). Reuse that owner for morph targets.
+(`seon.render.block/surface-id`). Reuse that owner for morph targets.
 
 ## Entity rendering — target
 
@@ -41,48 +41,39 @@ There is no separate teaching-prose mechanism.
 
 The evaluation schema declares `seon.repl/render-ai` and
 `seon.repl/render-html`; the walk renders evaluations in order
-through that pair (`resources/seon/schemas/seon.cluster.eval.edn:30`). The current
-entry points are `render-ai` and `render-html` (`src/seon/repl.clj:449`,
-`:474`); `text` at `:264` owns the REPL grammar. Do not mistake these existing entry points
-for proof that §15 storage has landed.
+through that pair (`resources/seon/schemas/seon.cluster.eval.edn`). The current
+entry points are `seon.repl/render-ai` and `seon.repl/render-html`; `seon.repl/text` owns the REPL grammar.
 
 History is chronological, oldest first, with all turns shown by
 default. Do not hand-assemble entry kinds or format evaluations
 outside that pair.
 
-## Shown text and previews — target
+## Printed values and previews — target
 
 The value renderer applies the profile once at evaluation time.
-The evaluation stores shown text, out, and error. History reuses
+The evaluation stores the printed value, out, and error. History reuses
 those bytes; it never reruns a form or adds a history-wide clip.
 HTML renders actual live result objects without presentation
-clipping and falls back to shown text after restart.
-
-Generated reads are stored in system turns. Before each agent turn,
-the since-query diff selects changed reads from every distinct
-read form's latest evaluation, including agent-written reads.
-Writes and effects never rerun. Passive browser render work cannot
-append evaluations.
+clipping and falls back to the printed value after restart.
 
 The agent debug page shows the agent's context through the turn's own context
 function, on demand, via the value printer's HTML face (`sent-context-html`). Debug text wraps in CSS; AI bytes do not
-acquire display-width breaks (`prepare`, `src/seon/render/value.clj:986`).
-Compaction wipes evaluations and regenerates
-the opening. Do not preserve manual Add/remove/curation controls
+acquire display-width breaks (`seon.render.value/prepare`).
+Do not preserve manual Add/remove/curation controls
 as a second context mechanism.
 
 ## Preserve delivery and input
 
 The render proc owns serialized revisioned packages.
 `join-package` returns retained bytes without deriving or serializing
-again (`src/seon/render/web.clj:1800`).
+again (`seon.render.web/join-package`).
 The feed writer's `write-package!` waits for drain or close while
 the sliding-one tap retains the newest complete package
-(`src/seon/render/web.clj:2725`).
+(`seon.render.web/write-package!`).
 
 The dependency's `write-state` returns pending bytes and a
 drain-or-close completion
-(`reference-code/http-kit/src/org/httpkit/server.clj:345`).
+(`org.httpkit.server/write-state`).
 A successful send alone is not a drain event. Revision gaps use
 the complete keyframe; never put delta-only values in a lossy buffer.
 

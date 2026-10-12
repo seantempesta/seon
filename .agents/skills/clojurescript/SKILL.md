@@ -1,19 +1,18 @@
 ---
 name: clojurescript
-description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:42-43). Load this only when intentionally reconstructing a deleted pod behavior or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
+description: "Mine the deleted Seon CLJS pod through Git history. Load this only when intentionally reconstructing a deleted pod behavior or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
 ---
 
 # Historical CLJS pod quarry
 
 The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only:
-one JVM runs the CLJ system (`AGENTS.md:110`). Current agent
+one JVM runs the CLJ system (CLAUDE.md, "The system: one JVM, many realities"). Current agent
 evaluation belongs to `src/seon/sci/eval.clj`; current web rendering belongs to
 `src/seon/render/web.clj`.
 
 Use this skill only to understand a deleted behavior through `git show` or
 `git log` before designing a fresh replacement. The old source trees are not
-present in the working tree; earlier implementations are evidence, not
-baggage (`AGENTS.md:42-43`). Never:
+present in the working tree. Never:
 
 - add `.cljs` to fresh `src/`;
 - restore shadow-cljs, Bun, `cljs.js`, bootstrap compile state, or the pod;

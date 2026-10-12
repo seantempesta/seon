@@ -7,8 +7,8 @@ description: "Distinguish the agent reply reader, persistent agent SCI context, 
 
 Use [root instructions](../../../AGENTS.md) for lane verification and
 [agent-loop.md](../../../docs/seon/specs/agent-loop.md) for the target.
-The [ledger](../../../docs/seon/schedule/agent-loop-ledger.md) names what has
-landed. Context is a static prefix, the agent's own forms and results, and
+The [ledger](../../../docs/seon/schedule/agent-loop-ledger.md) names what is
+installed. Context is a static prefix, the agent's own forms and results, and
 one fresh current-state block; older turn PRDs are historical research.
 
 ## Name the surface before making a claim
@@ -24,19 +24,19 @@ one fresh current-state block; older turn PRDs are historical research.
   `seon.sci.forgive/segments` turns the scan's spans into ordered sources with
   preceding prose as each one's comment (`seon.turn/planned-sources` for a
   reply, `seon.turn/code-sources` for code). Repairs are delivered beside the
-  values as `:seon.repl/repairs` (`src/seon/repl.clj:227`). Each form's one semantic read happens when the one REPL
+  values as `:seon.repl/repairs` (`seon.repl/response-entries`). Each form's one semantic read happens when the one REPL
   path evaluates it (`seon.turn/read-row`).
 - An agent turn evaluates in its own SCI context, forked from the cluster
   base with its private layer carried over (see below); a host REPL
   expression proves nothing about it. SCI itself provides reusable contexts,
-  isolated forks, and interning (`init`, `fork`, `intern`:
-  `reference-code/sci/src/sci/core.cljc:320`, `:334`, `:260`).
+  isolated forks, and interning (`sci.core/init`, `sci.core/fork`,
+  `sci.core/intern` in `reference-code/sci/src/sci/core.cljc`).
 - MCP JVM mode evaluates with the host reader at the live `*ns*` and host
   `eval`: no SCI observation and no program facts, but its forms are recorded
   as an ordinary run of the named agent (`seon.turn.batch/jvm-request`). Read
-  the complete returned envelope and report that surface explicitly.
+  the complete returned reply and report that surface explicitly.
 - A raw JVM REPL has Clojure's ordinary reader and evaluation behavior:
-  `reference-code/clojure/src/clj/clojure/main.clj:368`.
+  `clojure.main/repl` (`reference-code/clojure/src/clj/clojure/main.clj`).
 
 For this wave verify cluster default through `bin/seon status` and MCP
 with its default root/cluster selection. The tool still requires the
@@ -45,66 +45,61 @@ use virtual replies through the ordinary proc (turn PRD §12).
 
 ## Context, private layer, and handles
 
-Installed: `seon.sci.eval/base-ctx` derives the program-only base from one
-database value, memoized by program identity. `seon.sci.eval/fork-for-turn`
+Installed: `seon.sci.eval/program-context` derives the frozen program context
+from one database value, one `seon.cache` entry of kind
+`:seon.sci.eval/program-context` per program content; `seon.sci.eval/base-ctx`
+forks it. `seon.sci.eval/fork-for-turn`
 forks the current base and, when the agent's previous context is held, carries
-the private layer in memory (`regenerate-agent-context!`), preserving its owned
+the private layer in memory (the private `regenerate-agent-context!`), preserving its owned
 Vars, atoms and result objects; inherited program bindings are replaced.
 **[TARGET]** the fork becomes the context, with no regeneration diff
 (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §1). SCI's
-generation-based isolation is supplied by `sci/fork`
-(`reference-code/sci/src/sci/core.cljc:334`). Private objects never enter the
+generation-based isolation is supplied by `sci.core/fork`
+(`reference-code/sci/src/sci/core.cljc`). Private objects never enter the
 base or another agent; a JVM restart loses them.
 Do not teach a serialization/restoration ladder.
 
 Accepted functions, schemas, and tests persist as program facts.
 The REPL admits a `defn` without a Malli contract (CLAUDE.md: it returns with
 a warning); the merge refuses it (`seon.cluster.source/accept-merge!`: every carried function declares a complete
-`:malli/schema`). A plain `def` gets the temporary-state note from `def-note`
-(`src/seon/repl.clj`).
+`:malli/schema`). A plain `def` gets the temporary-state note from the private `seon.repl/def-note`.
 
 Results bind actual objects in an evaluation-id map.
 `seon.id/evaluation` derives ids from branch, turn, and ordinal;
-`seon.id/symbol-in` builds `result/e<id>` handles (`src/seon/id.clj`). The evaluation stores shown text
+`seon.id/symbol-in` builds `result/e<id>` handles. The evaluation stores the printed value
 from the value renderer, plus out and error, not the result object.
 
 ## History and inspection
 
-Installed: `seon.turn/system-turn` projects the declared opening and every
-distinct retained read form before an agent turn, and a distinct read whose
-evidence is no longer current (`seon.db/read-evidence-current?`) is evaluated
-again; with `write?` it saves them as one closed system turn with no provider
-attempt. Generated and agent-written reads participate; writes and effects never
-rerun. `seon.turn/compact!` retracts an idle agent's evaluations; the next
-system walk is fresh.
+Read evidence is captured by `seon.db/read-evidence` and judged by
+`seon.db/read-evidence-current?`.
 
-The evaluation schema declares its AI/HTML pair; the walk renders
-evaluations in order through that pair. `seon.repl/text` is the one
-REPL grammar (`src/seon/repl.clj`); the render pair enters at
-`render-ai` and `render-html`, and saved shown text renders unchanged
+The evaluation schema declares its AI/HTML pair. `seon.repl/text` is the one
+REPL grammar; the render pair enters at
+`render-ai` and `render-html`, and the saved printed value renders unchanged
 through `value-text`.
 
-**[TARGET]** `my.turn/evals` and `my.turn/eval` (PRD §15; `src/my/turn.clj`
+**[TARGET]** `my.turn/evals` and `my.turn/eval` (PRD §15; the `my.turn` namespace
 defines neither):
-maps of source, shown text, `:t`, error, and full read evidence.
+maps of source, printed value, `:t`, error, and full read evidence.
 A missing live object is reported as gone while saved text remains.
 
 ## Probe and reload accurately
 
 Call a JVM private function through its Var, for example
 `(#'some.namespace/private-fn request)`. The real dependency probe
-uses this form at `test/seon/datahike_fork_test.clj:39`.
+uses this form in `create-plan` of `test/seon/datahike_fork_test.clj`
+(`(#'query/create-plan-via-ir ...)`).
 
-A file edit is not a live proof. Reload or adopt the changed definition,
+A file edit is not a live proof. Reload the changed definition,
 rerun the same form against the same inputs, and name the mechanism
 exercised. Re-evaluating a contracted Var replaces its wrapper;
-`seon.instrument/apply!` documents re-arming with the supplied projection
-(`src/seon/instrument.clj`). Without
-`:seon.instrument/changed-identities` it collects and re-arms the complete
+`seon.instrument/apply!` documents re-instrumenting with the supplied registry. Without
+`:seon.instrument/changed-identities` it collects and re-instruments the complete
 loaded program; name the changed identities when you have them.
 
 For the selected development cluster, the complete JVM form is below.
-Choose the namespace to reload; the database supplies both the projection
+Choose the namespace to reload; the database supplies both the registry
 and instrumentation mode (`seon.schema/projection-from-database`,
 `seon.config/effective`).
 
@@ -128,18 +123,18 @@ prove neither those behaviors nor browser repaint.
 
 ## An agent works on its own branch
 
-Forms and timings are in [the landing note](../../../docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md).
+Forms and timings are in the branch REPL note, `docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md`.
 
 1. **Name your agent; it gets a branch.** Call `eval_clj` with an `agent` id
    that is new: it gets its own branch off main on first use,
    recorded as its `:seon.agent/branch`. `my.agent/create-branch!`,
-   `my.agent/branches` and `my.agent/retire-branch!` (`src/my/agent.clj`)
+   `my.agent/branches` and `my.agent/retire-branch!`
    manage branches by name; main and an existing name
    refuse as `:seon.error` values.
 2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and that
    `agent`. The forms run as an ordinary run of that agent on its branch.
 3. **What the branch context is not, today.**
-   - Entities are written only by a turn's settlement (`seon.turn/settle!`).
+   - Entities are written only by the run's terminal writer (`seon.turn/settle!`).
    - A host-bound declaration SCI cannot interpret keeps its compiled Var, and
      with none it refuses by name when called (`seon.sci.eval`, the
      interpretation-failure branch of acquisition).
@@ -159,12 +154,12 @@ Forms and timings are in [the landing note](../../../docs/prds/agent-platform/la
    into their one file; it refuses `:not-analyzable` when a declaration names a
    namespace its file does not require (fully qualify only required namespaces).
    Host-bound declarations always go through the files.
-6. **Delete the branch.** Call `my.agent/retire-branch!` (`src/my/agent.clj`). It
+6. **Delete the branch.** Call `my.agent/retire-branch!`. It
    releases the retained contexts (`seon.cluster.agent/release-context!`), then
    deletes the branch (`seon.cluster.registry/retire-branch!`). If an agent
    still holds the branch, it refuses; your own branch records its
    retirement now and is deleted once your run exits.
 
-A branch evaluation that persists entities needs an armed agent whose custody is
+A branch evaluation that persists entities needs an instrumented agent whose checked-out branch is
 the branch. The work then goes through `seon.cluster.agent/submit-source!`, the path a model reply uses. Root assigns
 the worker its task on that branch with `seon.task/assign!`.

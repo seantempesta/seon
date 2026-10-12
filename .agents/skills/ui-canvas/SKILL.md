@@ -12,11 +12,11 @@ owners.
 
 ## Inspect before inventing an API
 
-The current route authority is `src/seon/render/route.clj:5`.
+The current route authority is `seon.render.route/routes`.
 It includes namespace and agent/debug routes, the message action,
 context handler, feed, and data browser; it contains no generic
 `/call` route. A retained context handler does not make manual
-curation part of the §14 target.
+curation part of the target.
 
 Do not present proposed `my.canvas` constructors as installed APIs.
 First determine whether ordinary schema-declared HTML can represent
@@ -26,9 +26,9 @@ data shape and effect boundary before naming executable calls.
 Revisioned packages are already implemented, not a future canvas
 feature: `join-package` reuses retained serialized output and the
 socket writer waits for drain or close
-(`join-package`, `src/seon/render/web.clj:1800`; `write-package!`, `:2725`).
+(`seon.render.web/join-package`; `seon.render.web/write-package!`).
 Reuse that delivery path. Stable block ids come from
-`src/seon/render/block.clj:61`.
+`seon.render.block/surface-id`.
 
 ## Render the concern — target
 
@@ -44,8 +44,8 @@ never appends evaluations or repeats effects. There is no opening or input
 eval request and no compaction path that regenerates one (agent-loop.md §3.4).
 
 The value renderer applies the profile once at evaluation time.
-Stored shown text remains immutable; HTML can inspect actual live
-objects and uses shown text after restart. A canvas must not create
+The stored printed value remains immutable; HTML can inspect actual live
+objects and uses the printed value after restart. A canvas must not create
 another result serializer, clipping owner, history formatter, or
 effectful helper that owns browser transport.
 

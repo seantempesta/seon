@@ -19,15 +19,15 @@ redefinition; topology changes rebuild the graph.
 
 Core.async's step function arities are describe, init, transition,
 and transform. The transition hook owns cleanup at stop
-(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:234-243`).
+(`clojure.core.async.flow/process`, the transition arity in its docstring, `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`).
 Acquire process-local resources in that lifecycle and release them
 through its existing completion path.
 
 The dependency documents that `:io` should not do extended computation
-and `:compute` must not block (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:200-202`).
+and `:compute` must not block (the `:workload` entry of the same `clojure.core.async.flow/process` docstring).
 Its default I/O executor uses virtual threads when available; default
 compute and mixed executors are cached platform pools
-(`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`).
+(`clojure.core.async.impl.dispatch/create-default-executor` and `make-io-executor`, `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`).
 A bounded compute guarantee therefore requires the graph's actual
 supplied executor, not just the workload keyword.
 
@@ -36,12 +36,12 @@ supplied executor, not just the workload keyword.
 Flow already owns start, stop, pause, resume, ping, and injection.
 Its stop sends a command and closes report/error channels; it is not a
 join on proc exit
-(`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:174`).
+(the `stop` method of the flow `clojure.core.async.flow.impl/create-flow` returns, `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`).
 Require a proc-published completion when the caller needs an exit proof.
 
 The step description's `:ping-map-fn` defaults to identity
-(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:191`). Supply a deliberate
-data projection; never expose a whole context or connection by accident.
+(`clojure.core.async.flow/process` docstring). Supply a deliberate
+data selection; never expose a whole context or connection by accident.
 A missing ping response is unknown, not healthy.
 
 Pick buffers from loss semantics: a payload-free wake may use sliding-one
@@ -55,12 +55,13 @@ the event that failed to arrive.
 
 Installed: each turn forks the current base context
 (`seon.sci.eval/fork-for-turn`). When the agent's previous context is held,
-`regenerate-agent-context!` forks the new base and carries the agent's own
+the private `regenerate-agent-context!` in `seon.sci.eval` forks the new base and carries the agent's own
 private Vars over it as actual objects; inherited program bindings are
-replaced. A base context forks the one cluster base of the JVM's loaded
-program, the `seon.cache` kind `:seon.sci.eval/base-context` keyed by the
-loaded commit, and interprets the branch's own changes on that fork
-(`seon.sci.eval/base-ctx`, `overlay!`). The law is that a context
+replaced. A base context (`seon.sci.eval/base-ctx`) forks the frozen program context
+`seon.sci.eval/program-context`, one `seon.cache` entry of kind
+`:seon.sci.eval/program-context` per program content, which interprets the
+branch's own program changes (affected callers and overrides) on a fork of the
+JVM's loaded program. The law is that a context
 is reacquired from its branch head and private defs, atoms and result objects
 stay in memory (CLAUDE.md, "An agent's context"). Do not restore `:seon.def`
 entities or rebuild a private layer from the database.
@@ -71,21 +72,16 @@ diff and the kernel mirrors carried on a context leave; private objects are
 carried by not being replaced.
 
 SCI exposes reusable `init`, `fork`, and `intern` operations
-(`reference-code/sci/src/sci/core.cljc:320` (`init`), `:334` (`fork`), `:260` (`intern`)).
+(`sci.core/init`, `sci.core/fork`, `sci.core/intern` in `reference-code/sci/src/sci/core.cljc`).
 These are the dependency mechanisms to reuse.
 
 Private objects remain with the agent's live context and disappear on
 JVM restart. Program functions, schemas, and tests persist as facts.
-The result object map is process-local; stored shown text records what
+The result object map is process-local; the stored printed value records what
 the agent saw. Never transport those objects through an EDN restoration
 path.
 
 ## One turn mechanism
-
-Installed: before each model turn, `seon.turn/system-turn` projects the declared
-opening and every distinct retained read form into a closed system turn with no
-provider attempt; unchanged reads contribute no evaluation. It includes
-generated and agent-written reads, never writes or effects.
 
 Datahike evidence capture and validity live in `seon.db/read-evidence` and
 `seon.db/read-evidence-current?` (`src/seon/db.clj`).
@@ -94,30 +90,25 @@ dispatcher, block-specific refresh handlers, or another cache.
 
 A model turn opens in the writer before the provider call (`seon.turn/open-call`);
 opening while the agent already has an open turn is a no-op inside the writer.
-The settlement transaction stores the reply and its ordered evaluations
-(`plan-call`) and closes the turn (`close-tx`); a submitted source run is
-written in that one transaction (`with-submission`). At boot open turns close
-and unfinished evaluations become interrupted (`recover-call`); no interrupted
-execution resumes.
-
-The prompt is stored evaluations rendered through their entity pair.
-Old shown text remains unchanged. Compaction retracts evaluations and
-makes the next system walk fresh (`seon.turn/compact!`).
-The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
-show both additive sequences.
+One writer transaction stores the reply and its ordered evaluations
+(`seon.turn/plan-call`), and `seon.turn/close-tx` closes the turn; a submitted source run is
+written in the same transaction (`with-submission`). At boot open turns close
+and unfinished evaluations become interrupted (`seon.turn/recover-call`); no interrupted
+execution resumes. The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
+show the turn sequence.
 
 ## Rendering and verification
 
 One entity schema declares one AI/HTML pair; each block covers a concern,
 not one scalar. The value renderer applies the profile once at evaluation
-time. HTML renders the live object, or saved shown text after restart.
+time. HTML renders the live object, or the saved printed value after restart.
 
 Browser delivery stays in the cluster's existing render path.
 The socket writer waits for the dependency's drain-or-close completion:
-`reference-code/http-kit/src/org/httpkit/server.clj:345`.
+`org.httpkit.server/write-state` (`reference-code/http-kit/src/org/httpkit/server.clj`).
 Do not infer socket drain from a successful send.
 
 For this wave verify default using the operator and MCP defaults.
-Use virtual replies and the canonical fixture under armed contracts;
+Use virtual replies and the canonical fixture under instrumented contracts;
 a host eval or HTTP 200 does not prove graph behavior.
 Read the clojure-testing skill for the lane gate and bounded event waits.
