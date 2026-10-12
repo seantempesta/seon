@@ -354,6 +354,37 @@
                 (is (= 1 (count (d/datoms copied :avet :seon.error.occurrence/id (:v theirs))))))))))))))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
+  a-refused-write-recorded-on-the-branch-merges-as-its-occurrence-alone
+  ;; The occurrence is a cluster entity; the refused transaction's evidence is an identity-less
+  ;; component (`:seon.db.write/attempt`) that shares two attributes with it and stays on the branch.
+  (support/with-database
+   (fn [connection]
+     (let [base (db/db connection)]
+       (with-fork
+        connection
+        (fn [fork _]
+          (let [refused (db/transact! fork [[:db.fn/call (fn [_] (throw (ex-info "fixture refusal" {})))]])
+                recording (error/recording
+                           (db/db fork)
+                           {:seon.error/source refused
+                            :seon.error/declared-schema :seon.db.write/validation-refusal
+                            :seon.error/at #inst "2026-10-12T00:00:00Z"
+                            :seon.error/process "squash-fixture"
+                            :seon.error/id (str (random-uuid))
+                            :seon.sci.admit/caps (config/result-caps config/defaults)
+                            :seon.config.error/max-evidence-bytes (:seon.config.error/max-evidence-bytes config/defaults)})]
+            (support/transacted! fork (:seon.db/tx-data recording))
+            (let [branch (db/db fork)
+                  occurrence (:v (first (d/datoms branch :aevt :seon.error.occurrence/id)))
+                  main (db/db connection)
+                  squash (merge/squash-merge branch base main (schema/handed-projection))
+                  merged (checked-value main {:tx-data (:tx-data squash)})]
+              (is (seq (d/datoms branch :aevt :seon.db.write.attempt/operations))
+                  "the branch holds the refused write's evidence")
+              (is (= 1 (count (d/datoms merged :avet :seon.error.occurrence/id occurrence))))
+              (is (empty? (d/datoms merged :aevt :seon.db.write.attempt/operations)))))))))))
+
+(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
   the-merge-base-retains-the-count-needed-by-add
   (support/with-database
    (fn [connection]

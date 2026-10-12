@@ -30,6 +30,17 @@
                           (d/datoms source :eavt entity)))))
           entities)))
 
+(defn- cluster-entity?
+  "Whether `entity` holds, in `source` or `base`, the identity of a cluster entity schema: the
+  partition is declared per entity schema, and an identity-less entity sharing one of its attributes
+  (a component of a non-cluster value) is not one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :qualified-keyword]
+                       :seon.db/entity-id] :boolean]}
+  [source base identities entity]
+  (boolean (some (fn [attribute] (or (seq (d/datoms source :eavt entity attribute))
+                                     (seq (d/datoms base :eavt entity attribute))))
+                 identities)))
+
 (defn add-count
   "Transaction data adding the source delta to the writer's current count."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id
@@ -82,7 +93,9 @@
   [source base target projection]
   (let [rules (program/cluster-attributes projection)
         attributes (set (keys rules))
-        coordinates (program/changed-identities base source {} attributes)
+        identities (set/intersection attributes (set (db/identity-attributes source)))
+        coordinates (into #{} (filter #(cluster-entity? source base identities (second %)))
+                          (program/changed-identities base source {} attributes))
         remap (collision-remap source base target (into #{} (map second) coordinates))
         mapped (into #{} (map (fn [[attribute entity]] [attribute (get remap entity entity)])) coordinates)
         before (program/projected-values base coordinates {})

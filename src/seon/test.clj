@@ -3004,10 +3004,11 @@
        ;; The entrant answers its declared variants: an exception no part of the
        ;; request translated is the unknown outcome of this request, its cause kept.
        (catch Throwable failure
+         ;; a message-less exception states none: the diagnostic takes its cause chain's
          (assoc (seon.error.refusal/diagnostic
-                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
-                  :seon.error/operation 'seon.test/run :seon.error/message (ex-message failure)
-                  :seon.error/throwable failure})
+                 (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                          :seon.error/operation 'seon.test/run :seon.error/throwable failure}
+                   (ex-message failure) (assoc :seon.error/message (ex-message failure))))
                 :seon.test/unknown "The request ended in an exception."
                 :seon.test/next-tier :none))))
 

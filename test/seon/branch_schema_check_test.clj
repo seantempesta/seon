@@ -30,15 +30,20 @@
          (is (true? (:seon.test/passed? check))))))))
 
 (deftest a-request-that-throws-answers-an-unknown-error-with-its-cause
+  ;; A message-less exception included: default's recorded error 7ea039b9635f was the
+  ;; entrant's own diagnostic refusing the nil message it was handed.
   (support/with-running-agent
    (fn [_running _agent-id connection]
-     (let [result (test/run {:seon.test/execution (support/execution-handle connection)
-                             :seon.test/recording-connection connection
-                             :seon.test/policy :named
-                             :seon.test/identities #{'seon.competency-test/t1-area-is-contracted}
-                             :seon.db/writer (fn [_connection _transaction] (throw (ex-info "injected" {})))})]
-       (is (some? (:seon.test/unknown result)) "an unknown error, not a throw")
-       (is (= "injected" (-> result :seon.error/chain first :seon.error/message)) "the cause is kept")))))
+     (doseq [[thrown class-name] [[(ex-info "injected" {}) "clojure.lang.ExceptionInfo"]
+                                  [(IllegalStateException.) "java.lang.IllegalStateException"]]]
+       (let [result (test/run {:seon.test/execution (support/execution-handle connection)
+                               :seon.test/recording-connection connection
+                               :seon.test/policy :named
+                               :seon.test/identities #{'seon.competency-test/t1-area-is-contracted}
+                               :seon.db/writer (fn [_connection _transaction] (throw thrown))})]
+         (is (some? (:seon.test/unknown result)) "an unknown error, not a throw")
+         (is (= class-name (-> result :seon.error/chain first :seon.error/throwable-class)) "the cause is kept")
+         (is (= (ex-message thrown) (-> result :seon.error/chain first :seon.error/message))))))))
 
 (deftest a-failing-check-reply-carries-no-runner-report-in-out
   (support/with-running-agent
