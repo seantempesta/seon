@@ -498,7 +498,7 @@
               (fn [handle]
                 (let [facts (cluster.agent/plan-facts (db/db connection))
                       actions (cluster.agent/plan facts (cluster.agent/registry-facts (:seon.agent/routing handle)) 1)
-                      _ (cluster.agent/apply-plan! handle (:seon.agent/routing handle) facts
+                      _ (cluster.agent/apply-plan! handle (:seon.agent/routing handle)
                                                    (mapv #(cond-> % (= :start-flow (:seon.flow.plan/op %))
                                                             (assoc :seon.task/execution :paused)) actions))
                       attempt (cluster.agent/acquire-context! handle nil {:seon.agent/branch (:seon.task/branch (first actions))})

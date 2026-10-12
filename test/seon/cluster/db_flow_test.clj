@@ -15,9 +15,9 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
-            [seon.env :as env]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
             [seon.test-support :as test-support]
@@ -123,6 +123,33 @@
                           (agent/plan (facts {:seon.flow.plan/open [(open intent)] :seon.flow.plan/cluster cluster})
                                       (plan-registry started paused) 4)))
         "each intent and registry state plans exactly its Flow verb")))
+
+(deftest
+  each-ended-assignment-derives-its-lifecycle-from-its-facts
+  (let [c1 (random-uuid) c2 (random-uuid)
+        held (fn [facts] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
+                                 :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
+                                 :seon.flow.plan/head c1 :seon.flow.plan/started? false :seon.flow.plan/kept? false}
+                                facts))]
+    (doseq [[facts expected why]
+            [[{:seon.flow.plan/head c2 :seon.flow.plan/started? true} [] "running: no end anywhere"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :merge]
+              "ended on its branch: the graph stops, then the branch merges"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/kept? true} [] "merged and kept"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c2} [:merge]
+              "written after its merge: merged again"]
+             [{:seon.task.attempt/end :sent-back :seon.task/merge-base nil :seon.flow.plan/head c2} [:merge-base :merge]
+              "no merge base yet: written first"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.task/merge-base nil :seon.flow.plan/head c2}
+              [:delete-branch] "copied to main before merge bases existed"]
+             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :close]
+              "an end that merges nothing: written on main"]
+             [{:seon.task.attempt/end :capped :seon.flow.plan/main-end :capped :seon.flow.plan/head c2} [] "and kept"]
+             [{:seon.task.attempt/end :error :seon.flow.plan/main-end :error :seon.flow.plan/head c2} []
+              "a failed merge's :error end stops the lifecycle"]]]
+      (is (= expected (mapv :seon.flow.plan/op (agent/next-actions [(into {} (remove (comp nil? val)) (held facts))])))
+          why))))
 
 ;;; The two-step chain through the real db<->flow pass on a fixture branch.
 
@@ -500,12 +527,12 @@
     [key branch agent-id (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))]))
 
 (defn- copies
-  "The end copies on main `database` naming attempt `a`, as transaction ids."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:set :int]]}
-  [database a]
-  (set (db/q '[:find [?tx ...] :in $ ?a :where [?tx :seon.squash/attempt ?a]] database a)))
+  "The transactions on main `database` that merged `branch`'s facts or wrote its end, as transaction ids."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:set :int]]}
+  [database branch]
+  (set (db/q '[:find [?tx ...] :in $ ?b :where [?tx :seon.squash/source-branch ?b]] database branch)))
 
-(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+(deftest
   an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted
   (doseq [keep? [false true]]
     (binding [*space* (if keep? "tq.endkeep" "tq.endcopy")]
@@ -525,7 +552,7 @@
                 (is (= #{[key branch agent-id :open]} (attempts connection "e")) "before the pass main lacks the end")
                 (pass! handle routing)
                 (let [database (db/db connection)
-                      [tx :as txs] (seq (copies database a))]
+                      [tx :as txs] (seq (copies database branch))]
                   (is (= 1 (count txs)) "one end copy")
                   (is (= tx (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
                       "carrying the end")
@@ -540,7 +567,7 @@
                   (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
                       "its graph is stopped"))
                 (pass! handle routing)
-                (is (= 1 (count (copies (db/db connection) a))) "a second pass copies nothing")
+                (is (= 1 (count (copies (db/db connection) branch))) "a second pass merges nothing")
                 (if keep?
                   (is (contains? (registry/branches store) branch) "the dial keeps the ended branch for audit")
                   (is (eventually #(not (contains? (registry/branches store) branch)))
@@ -548,7 +575,33 @@
                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                     "with no fault recorded"))))))))))
 
-(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+(deftest
+  a-merged-assignment-whose-graph-survived-a-crash-is-stopped-and-deleted
+  ;; root merged the end (its merge base is the branch head) and the process went down before the graph stopped:
+  ;; the next pass derives the stop and the deletion from the facts alone
+  (binding [*space* "tq.crashmerged"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)]
+            (pass! handle routing)
+            (let [[_ branch agent-id a] (end-on-branch! handle connection "e" :done)]
+              (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
+              (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
+              (pass! handle routing)
+              (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
+                  "one pass stops it")
+              (is (eventually #(not (contains? (registry/branches store) branch))) "and deletes its branch")
+              (is (= "Refined on the branch." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                                                                          [:seon.task/id (chain-handle "e")])))
+                  "while main keeps what merged")
+              (let [measured (profile/measure #(pass! handle routing))]
+                (is (< (:seon.profile/ms measured) 50) "and a pass with nothing left to derive stays under 50 ms"))))))))))
+
+(deftest
   an-error-end-copies-nothing-and-writes-roots-problem-task
   (binding [*space* "tq.enderror"]
     (test-support/with-database
@@ -572,7 +625,7 @@
               (is (str/includes? (str (:seon.task/intent (problem))) "The proof asks the impossible.")
                   "and the reason")
               (pass! handle routing)
-              (is (= 1 (count (copies (db/db connection) a))) "a second pass writes nothing")
+              (is (= 1 (count (copies (db/db connection) branch))) "a second pass writes nothing")
               (testing "root's by-hand merge lands what the success path would"
                 (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (squash/merge! connection a branch {})))
                       merged (merge!)]
@@ -668,7 +721,7 @@
                   child (get-in @routing [:seon.agent/children branch])
                   graph (get-in @child [:seon.agent/started agent-id :seon.flow/executor])
                   _ (landed! handle connection "g" ::g-ended)
-                  copy (first (copies (db/db connection) a))
+                  copy (first (copies (db/db connection) branch))
                   database (db/db connection)]
               (is (= copy (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
                   "the end reached main in its copy, never written there by the agent")
@@ -793,21 +846,6 @@
                     "once B forked, A's kept branch is deleted")
                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                     "with no fault recorded"))))))))))
-
-(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
-  detached-work-without-a-launcher-refuses-and-never-runs-inline
-  (binding [*space* "tq.detached"]
-    (test-support/with-database
-     (fn [connection]
-       (chain-world
-        connection {"d" [#{} "(clojure.test/is (= 1 2))"]}
-        (fn [handle]
-          (let [bare (-> handle (dissoc env/state-carrier) (env/carry (dissoc (env/of handle) :seon.flow/work-launcher)))
-                ran (promise)
-                refused (try (#'agent/detached! bare "tq-detached" #(do (deliver ran true) nil)) nil
-                             (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-            (is (= "tq-detached" (:seon.flow/submission-id refused)) "a handle with no launcher refuses the work by name")
-            (is (not (realized? ran)) "and never runs it inline"))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-stopped-attempt-finishes-its-current-pass

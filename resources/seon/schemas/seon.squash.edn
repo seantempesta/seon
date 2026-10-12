@@ -1,8 +1,5 @@
 #:seon.squash
-{:attempt [:and {:seon.db/index true
-                 :description "Transaction metadata of an end copy: the attempt whose end it landed on main. Its presence on a main transaction is how db<->flow knows that end is landed (`seon.cluster.agent/landed-ends`)."}
-           :seon.db/ref]
- :source-branch [:and {:seon.db/index true
+{:source-branch [:and {:seon.db/index true
                        :description "Transaction metadata of an end copy: the branch whose facts it copied."}
                  :seon.store/branch]
  :source-commit [:and {:seon.db/index true

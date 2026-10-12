@@ -26,8 +26,8 @@
  :registry [:map {:description "What db<->flow reads of the registry before it plans: the live graphs by agent."}
           [:seon.flow.plan/started :seon.flow.plan/started]
           [:seon.flow.plan/paused :seon.flow.plan/paused]]
- :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, or make a graph follow its intent."}
-      :attempt :start-flow :problem :pause :resume :stop :cancel]
+ :op [:enum {:description "One effect db<->flow applies: write an attempt, start its flow, write a problem task, make a graph follow its intent; or, for an ended assignment (seon.cluster.agent/next-actions), write its missing merge base, squash-merge its branch, write its non-merged end on main, stop its graph, delete its branch."}
+      :attempt :start-flow :problem :pause :resume :stop :cancel :merge-base :merge :close :delete-branch]
  :fork-point [:or {:description "Where an attempt's branch forks: main's head, or the end commits of the task's done needs."}
               [:= :main] [:set {:min 1} :uuid]]
  :class [:enum {:description "Which problem a :problem action records."} :invalid-task]
@@ -40,13 +40,23 @@
           [:seon.task/branch {:optional true} :seon.task/branch]
           [:seon.task/execution {:optional true} :seon.task/execution]
           [:seon.flow.plan/fork-point {:optional true} :seon.flow.plan/fork-point]
-          [:seon.flow.plan/class {:optional true} :seon.flow.plan/class]]
+          [:seon.flow.plan/class {:optional true} :seon.flow.plan/class]
+          [:db/id {:optional true} :seon.db/entity-id]]
  :actions [:vector :seon.flow.plan/action]
- :ended-attempt [:map {:description "An ended attempt db<->flow has not yet landed on main: its end read on main, else on its branch's head, which the store still holds."}
-                 [:db/id :seon.db/entity-id]
-                 [:seon.task/assignment :seon.task/assignment]
-                 [:seon.task/assigned :seon.task/assigned]
-                 [:seon.agent/id :seon.agent/id]
-                 [:seon.task/branch :seon.task/branch]
-                 [:seon.task.attempt/end :seon.task.attempt/end]]
- :ends [:vector {:description "Every ended attempt db<->flow lands this pass, by key."} :seon.flow.plan/ended-attempt]}
+ :main-end [:and {:description "The end main holds on an assignment, beside the end its branch holds."} :seon.task.attempt/end]
+ :head [:and {:description "The commit an assignment's branch head names now."} :seon.source/commit-id]
+ :started? [:boolean {:description "Whether the registry holds the assignment's agent's graph."}]
+ :kept? [:boolean {:description "Whether a merged branch stays: an open merge request answers it, its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?), or a successor still forks from its end commit."}]
+ :held-assignment [:map {:description "One assignment whose branch the store holds, as db<->flow derives its lifecycle from it (seon.cluster.agent/lifecycle-facts): its end (main's, else its branch head's), its merge base and head, whether its graph runs and whether its branch stays once merged."}
+                   [:db/id :seon.db/entity-id]
+                   [:seon.task/assignment :seon.task/assignment]
+                   [:seon.task/assigned :seon.task/assigned]
+                   [:seon.agent/id :seon.agent/id]
+                   [:seon.task/branch :seon.task/branch]
+                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                   [:seon.flow.plan/main-end {:optional true} :seon.flow.plan/main-end]
+                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+                   [:seon.flow.plan/head :seon.flow.plan/head]
+                   [:seon.flow.plan/started? :seon.flow.plan/started?]
+                   [:seon.flow.plan/kept? :seon.flow.plan/kept?]]
+ :held [:vector {:description "Every assignment whose branch the store holds, by key."} :seon.flow.plan/held-assignment]}

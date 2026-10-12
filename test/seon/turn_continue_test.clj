@@ -342,7 +342,7 @@
          (is (string? proposed) "with its merge request beside it")
          (is (empty? (db/q '[:find ?m :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent]]
                            (db/db connection) agent-id))
-             "and the agent wrote nothing on main: db<->flow lands its end there (seon.cluster.agent/land-ends!)"))))))
+             "and the agent wrote nothing on main: db<->flow merges its end there (seon.cluster.agent/next-actions)"))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-reached-red-test-keeps-a-task-from-ending-done}
            :seon.test/long "An own-branch agent's setup and settings with their test steps and one fixture-model pass with its test step."

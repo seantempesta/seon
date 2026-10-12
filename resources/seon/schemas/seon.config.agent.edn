@@ -13,7 +13,7 @@
                     [:boolean
                      {:seon.config/display-label "Keep ended branches"
                       :description
-                      "Keep an attempt's branch after its end for audit instead of deleting it: a successful end's branch is deleted once its merge request closes, or at once when it has none (seon.cluster.agent/land-ends!, seon.task/close!); with this true it stays until root retires it (my.agent/retire-branch!). An error end's branch is always kept.",
+                      "Keep an attempt's branch after its end for audit instead of deleting it: a successful end's branch is deleted once its merge request closes, or at once when it has none (seon.cluster.agent/next-actions, seon.task/close!); with this true it stays until root retires it (my.agent/retire-branch!). An error end's branch is always kept.",
                       :seon.config/dial true}],
                     :max-running
                     [:int

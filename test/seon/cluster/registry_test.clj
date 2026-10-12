@@ -794,7 +794,7 @@
   (registry/collect! store registry/plain-cutoff {})
   (:seon.cluster.registry/key-count (registry/collect! store registry/plain-cutoff {})))
 
-(deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
+(deftest
   a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
   ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every head; an end copy is a plain
   ;; transaction with no parent link (`seon.cluster.squash/merge!`), so a deleted attempt's commits and nodes reach
