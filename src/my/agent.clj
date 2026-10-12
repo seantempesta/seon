@@ -145,14 +145,12 @@
                  (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] @connection))))
 
 (defn- retire-own-branch!
-  "Record the retirement of my own branch now and unlink it after my run exits.
+  "Write my end: close admission on the agent rows my own branch holds.
 
-  Admission closes on the agent rows my branch holds (the fact `retire-unclaimed!`
-  and the run writer read); the owner's release of the execution (`release-context!`, or boot's
-  `retire-unclaimed!`) unlinks the branch, so the run asking is never the one
-  released. The close is written in my connection's custody, so the asking
-  run's open rides it and that run settles; a refused close is the answer.
-  Answers `:my.agent/retiring?`."
+  The close is written in my connection's custody, so the asking run's open
+  rides it and that run settles; a refused close is the answer. Root's next
+  db<->flow pass reads the end and deletes my branch when it holds nothing main
+  lacks (`seon.cluster.agent/next-actions`). Answers `:my.agent/retiring?`."
   {:malli/schema [:=> [:cat :seon.store/branch :my.agent/branch-context]
                   [:or :my.agent/retired-branch :seon.error/value]]}
   [lane {connection :seon.db/connection}]
@@ -170,9 +168,9 @@
   "Retire a lane branch after closing admission and joining its graphs.
   its executions and owned connection, then delete its branch.
   Works through the branch's own registry or its parent's. My cluster's shared
-  branch refuses. My own branch records its retirement now and unlinks once my
-  run exits (`:my.agent/retiring?`). Its data goes when retention collects. My
-  context is supplied.
+  branch refuses. My own branch records my end (`:my.agent/retiring?`), and root
+  deletes it once nothing on it is unmerged. Its data goes when retention
+  collects. My context is supplied.
 
   Example:
   (my.agent/retire-branch! {:seon.store/branch :my-lane})"

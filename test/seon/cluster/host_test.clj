@@ -763,6 +763,42 @@
                     (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiree"])))
             "the agent whose home was retired is no longer admitted")))))
 
+(deftest an-ended-taskless-agent-with-nothing-unmerged-has-its-branch-deleted
+  ;; two MCP agents, each forked from main as `my.agent/create-branch!` forks, write their own end; only the
+  ;; one whose branch holds nothing main lacks has its branch deleted by root's next db<->flow pass
+  (with-host-world {}
+    (fn [{:keys [handle connection]}]
+      (let [store (:seon.store/store handle)
+            routing (:seon.agent/routing handle)
+            fork! (fn [] (:seon.store/branch (registry/fork! {:seon.store/store store :seon.store/branch (keyword (str "host-test-" (id/id)))
+                                                              :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                                              :seon.db/db (db/db connection)})))
+            ended (fork!)
+            unmerged (fork!)
+            end! #(hosted-run! % (str "(:my.agent/retiring? (my.agent/retire-branch! {:seon.store/branch "
+                                      (get-in % [:seon.turn.loop/cluster :seon.agent/branch]) "}))"))]
+        (try
+          (let [first-agent (host-on! handle ended "mcp/ended")
+                second-agent (host-on! handle unmerged "mcp/unmerged")]
+            (is (= ["true"] (end! first-agent)) "the first agent writes its end on its own branch")
+            (hosted-run! second-agent "(defn kept-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+            (is (= ["true"] (end! second-agent)) "the second writes its end after one definition")
+            (agent/db<->flow {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing) :seon.agent/routing routing}
+                             :seon.flow/plan :seon.agent/test-wake)
+            (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection))) "the pass recorded no fault")
+            (is (not (contains? (registry/branches store) ended)) "the branch holding nothing unmerged is deleted")
+            (is (some? (:seon.agent/admission-closed-tx
+                        (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/ended"])))
+                "main's row holds its end")
+            (is (contains? (registry/branches store) unmerged) "the branch holding a definition main lacks is kept")
+            (is (= [] (filterv #(and (= unmerged (:seon.task/branch %)) (= :delete-branch (:seon.flow.plan/op %)))
+                               (agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))))
+                "and no :delete-branch is derived for it"))
+          (finally
+            (doseq [branch [ended unmerged]]
+              (some-> (host/hosted handle branch) host/retire!)
+              (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.host/a-message-to-an-agent-whose-branch-is-gone-refuses-by-name}}
   a-message-to-an-admitted-agent-whose-branch-was-deleted-refuses-branch-absent
   (with-host-world {}

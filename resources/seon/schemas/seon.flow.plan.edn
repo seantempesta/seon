@@ -31,9 +31,9 @@
  :fork-point [:or {:description "Where an attempt's branch forks: main's head, or the end commits of the task's done needs."}
               [:= :main] [:set {:min 1} :uuid]]
  :class [:enum {:description "Which problem a :problem action records."} :invalid-task]
- :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under."}
+ :action [:map {:description "One planned effect. :attempt carries the next attempt's number and fork point; :start-flow the intent its graph starts under; a taskless agent's :stop and :delete-branch name no task."}
           [:seon.flow.plan/op :seon.flow.plan/op]
-          [:seon.task/assigned :seon.task/assigned]
+          [:seon.task/assigned {:optional true} :seon.task/assigned]
           [:seon.task/assignment {:optional true} :seon.task/assignment]
           [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
           [:seon.agent/id {:optional true} :seon.agent/id]
@@ -62,4 +62,13 @@
                    [:seon.flow.plan/started? :seon.flow.plan/started?]
                    [:seon.flow.plan/kept? :seon.flow.plan/kept?]
                    [:seon.flow.plan/publish? {:optional true} :seon.flow.plan/publish?]]
- :held [:vector {:description "Every assignment whose branch the store holds, by key."} :seon.flow.plan/held-assignment]}
+ :unmerged [:int {:min 0 :description "How many declarations an ended taskless agent's branch changed that main lacks: the count of seon.cluster.source/compare-branch's added, changed-on-branch, retracted and conflict sets."}]
+ :held-agent [:map {:description "One agent on main with a branch the store holds and no assignment (an MCP or schedule entrant), as db<->flow derives its end from it (seon.cluster.agent/lifecycle-facts): its end, main's row's else its branch head's, whether its graph runs and, once ended, what its branch holds unmerged."}
+              [:db/id :seon.db/entity-id]
+              [:seon.agent/id :seon.agent/id]
+              [:seon.task/branch :seon.task/branch]
+              [:seon.agent/admission-closed-tx {:optional true} :seon.agent/admission-closed-tx]
+              [:seon.flow.plan/started? :seon.flow.plan/started?]
+              [:seon.flow.plan/unmerged {:optional true} :seon.flow.plan/unmerged]]
+ :held [:vector {:description "Every assignment whose branch the store holds, by key, then every taskless agent's, by id."}
+        [:or :seon.flow.plan/held-assignment :seon.flow.plan/held-agent]]}

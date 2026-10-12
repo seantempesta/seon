@@ -160,7 +160,7 @@ Source: about **−640 deleted, +363 added, net about −277**; schemas net abou
 
 ## 6. Phases (about fifteen minutes each; HEAD boots after every one; every deletion in the commit converting its last caller; each proof red before its phase; cost through `seon.profile/measure`)
 
-Status per phase: **filed as** the task named in its row (2026-10-12); M1 is done, M2 is done (3eca1a962), M3 is done (767551c7b), M5 is done (1b09d8043, c74ef3437); no other phase is started. Tasks name the earlier phases they wait for in `:seon.task/needs` where both entries are filed; `merge-tasks-patches.md` holds the entries and needs for the files another lane holds. `src/seon/turn.clj` is held by lane program-context: M1, M8, M10, M13 and M17 hand it a patch or wait for its release.
+Status per phase: **filed as** the task named in its row (2026-10-12); M1 is done, M2 is done (3eca1a962), M3 is done (767551c7b), M5 is done (1b09d8043, c74ef3437); M13's taskless-agent end is done (lane m13-end; its proof `seon.cluster.host-test/an-ended-taskless-agent-with-nothing-unmerged-has-its-branch-deleted`), its one-starter part is not started; no other phase is started. Tasks name the earlier phases they wait for in `:seon.task/needs` where both entries are filed; `merge-tasks-patches.md` holds the entries and needs for the files another lane holds. `src/seon/turn.clj` is held by lane program-context: M1, M8, M10, M13 and M17 hand it a patch or wait for its release.
 
 | # | Slice and owned files | Red proof (deftest: assertion on data) | Cost bound | Status |
 |---|---|---|---|---|

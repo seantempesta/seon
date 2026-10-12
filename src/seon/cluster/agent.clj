@@ -2064,12 +2064,62 @@
                 (seq (db/q '[:find [?r ...] :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
                            database a)))))
 
+(defn- branch-admission-end
+  "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on `branch`'s head, read from main
+  `database`'s store; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.agent/id] [:maybe :seon.agent/admission-closed-tx]]}
+  [database branch agent-id]
+  (when-let [head (db/branch-database database branch)]
+    (try (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]] head agent-id)
+         (finally (source/release! [head])))))
+
+(def ^:private unmerged-sets
+  "The `seon.program/three-way` sets a branch holds that main lacks."
+  [:seon.program/added :seon.program/changed-on-branch :seon.program/retracted :seon.program/conflict])
+
+(defn- unmerged-count
+  "How many declarations `branch` changed that main `database` lacks (`seon.cluster.source/compare-branch`
+  against main's head); a refused comparison is thrown."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.plan/unmerged]}
+  [database store branch]
+  (let [{three :three :as compared} (source/compare-branch store branch database (get-in database [:config :branch]))]
+    (try (if three
+           (reduce + (map #(count (get three %)) unmerged-sets))
+           (let [refusal (some #(when (:seon.error/at %) %)
+                               (concat [(:c-id compared) (:base compared) (:changed compared)] (:maps compared)))]
+             (throw (ex-info (:seon.error/message refusal "db<->flow could not compare the agent's branch with main.")
+                             refusal))))
+         (finally (source/release! [(:base compared) (:branch compared)])))))
+
+(defn- taskless-agents
+  "Every agent on main `database` whose branch the store's `branches` holds, is not main's and that no assignment
+  names: its end, main's row's else its branch head's, whether `started` runs its graph and, once ended, how
+  many declarations its branch holds unmerged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.cluster.registry/branches :seon.flow.plan/started]
+                  [:vector :seon.flow.plan/held-agent]]}
+  [database store branches started]
+  (let [rows (db/q '[:find ?g ?id ?b :in $ ?main
+                     :where [?g :seon.agent/id ?id] [?g :seon.agent/branch ?b] [(not= ?b ?main)]
+                     (not [_ :seon.task/agent ?g])]
+                   database (get-in database [:config :branch]))
+        _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the taskless agents.") rows)))]
+    (into [] (keep (fn [[g id b]]
+                     (when (contains? branches b)
+                       (let [end (or (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] g))
+                                     (branch-admission-end database b id))]
+                         (cond-> {:db/id g :seon.agent/id id :seon.task/branch b
+                                  :seon.flow.plan/started? (contains? started id)}
+                           end (assoc :seon.agent/admission-closed-tx end
+                                      :seon.flow.plan/unmerged (unmerged-count database store b)))))))
+          (sort-by second rows))))
+
 (defn lifecycle-facts
-  "What db<->flow reads before it derives the ended assignments' actions (`next-actions`).
+  "What db<->flow reads before it derives the ended assignments' and taskless agents' actions (`next-actions`).
   Every assignment on main `database` whose branch the `store` holds: its end on main, else on its branch head
   (one branch read per assignment main holds no end for or whose head is not merged), its merge base and branch head commit, whether
   `registry` runs its graph, whether its publication is due, and, ended to merge, whether its branch stays once
-  merged (`kept?`)."
+  merged (`kept?`); then every taskless agent's end and unmerged change (`taskless-agents`), so an ended one
+  holding an unmerged change is listed here for root."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.flow.plan/registry] :seon.flow.plan/held]}
   [database store {started :seon.flow.plan/started}]
   (let [rows (db/q '[:find ?a ?k ?h ?b ?id
@@ -2078,7 +2128,7 @@
                    database)
         _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the assignments.") rows)))
         branches (registry/branches store)]
-    (into [] (keep (fn [[a k h b id]]
+    (into (into [] (keep (fn [[a k h b id]]
                      (when (contains? branches b)
                        (let [{main-end :seon.task.attempt/end base :seon.task/merge-base :as row}
                              ;; an assignment holding none of these yet pulls as nil
@@ -2104,11 +2154,46 @@
                              publish? (assoc :seon.flow.plan/publish? true)
                              main-end (assoc :seon.flow.plan/main-end main-end)
                              base (assoc :seon.task/merge-base base)))))))
-          (sort-by second rows))))
+          (sort-by second rows))
+          (taskless-agents database store branches started))))
+
+(defn- assignment-actions
+  "The actions that carry ended assignment `row` through its lifecycle, in order (`next-actions`)."
+  {:malli/schema [:=> [:cat :seon.flow.plan/held-assignment] :seon.flow.plan/actions]}
+  [{end :seon.task.attempt/end main-end :seon.flow.plan/main-end base :seon.task/merge-base
+    head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
+    publish? :seon.flow.plan/publish? :as row}]
+  (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
+                                         :seon.task/branch :seon.task.attempt/end])
+                       :seon.flow.plan/op %)
+        ;; an end main holds with no merge base was copied before merge bases existed
+        copied? (and main-end (nil? base))
+        merge? (and (merged-ends end) (or (nil? main-end) (merged-ends main-end)))]
+    (cond-> []
+      ;; the graph stops first, so the merge takes the head its last pass left
+      (and end started?) (conj (action :stop))
+      (and merge? (nil? base) (not copied?)) (conj (action :merge-base))
+      (and merge? (not copied?) (not= head base)) (conj (action :merge))
+      (and end (nil? main-end) (not (merged-ends end))) (conj (action :close))
+      ;; publication reads main alone: the merge commit, then the checkout
+      publish? (conj (action :publish))
+      ;; deletion reads main after the merge and its publication: their own writes wake the next pass
+      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch)))))
+
+(defn- taskless-actions
+  "The actions that carry taskless agent `row` through its end, in order (`next-actions`): ended, its graph
+  stops (`:stop`), then, nothing unmerged, its branch is deleted (`:delete-branch`); ended with an unmerged
+  change, or not ended, none."
+  {:malli/schema [:=> [:cat :seon.flow.plan/held-agent] :seon.flow.plan/actions]}
+  [{end :seon.agent/admission-closed-tx started? :seon.flow.plan/started? unmerged :seon.flow.plan/unmerged :as row}]
+  (let [action #(assoc (select-keys row [:db/id :seon.agent/id :seon.task/branch]) :seon.flow.plan/op %)]
+    (cond-> []
+      (and end started?) (conj (action :stop))
+      (and end (zero? unmerged)) (conj (action :delete-branch)))))
 
 (defn next-actions
-  "The actions that carry each ended assignment in `held` through its lifecycle, as a vector, in order.
-  Derived from the facts alone, never from a marker, so a pass after any crash derives what is left: an
+  "The actions that carry each ended assignment and taskless agent in `held` through its lifecycle, as a vector,
+  in order. Derived from the facts alone, never from a marker, so a pass after any crash derives what is left: an
   ended assignment's graph stops first, letting its last pass finish (`:stop`); an end to merge (:done,
   :sent-back) with no merge base gets one (`:merge-base`) and merges while its branch head differs from its
   merge base and main holds no other end (`:merge`: its facts, and the declarations the agent's merge request
@@ -2117,29 +2202,12 @@
   whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
   a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
   (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
+  A taskless agent (a row naming no `:seon.task/assignment`) follows the same rule with merged read as nothing
+  unmerged (`taskless-actions`).
   Pure; each action is idempotent by identity, by head = merge base or by the git commit main records."
   {:malli/schema [:=> [:cat :seon.flow.plan/held] :seon.flow.plan/actions]}
   [held]
-  (into [] (mapcat (fn [{end :seon.task.attempt/end main-end :seon.flow.plan/main-end base :seon.task/merge-base
-                         head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
-                         publish? :seon.flow.plan/publish? :as row}]
-                     (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
-                                                            :seon.task/branch :seon.task.attempt/end])
-                                          :seon.flow.plan/op %)
-                           ;; an end main holds with no merge base was copied before merge bases existed
-                           copied? (and main-end (nil? base))
-                           merge? (and (merged-ends end) (or (nil? main-end) (merged-ends main-end)))]
-                       (cond-> []
-                         ;; the graph stops first, so the merge takes the head its last pass left
-                         (and end started?) (conj (action :stop))
-                         (and merge? (nil? base) (not copied?)) (conj (action :merge-base))
-                         (and merge? (not copied?) (not= head base)) (conj (action :merge))
-                         (and end (nil? main-end) (not (merged-ends end))) (conj (action :close))
-                         ;; publication reads main alone: the merge commit, then the checkout
-                         publish? (conj (action :publish))
-                         ;; deletion reads main after the merge and its publication: their own writes wake the next pass
-                         (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch))))))
-        held))
+  (into [] (mapcat #(if (:seon.task/assignment %) (assignment-actions %) (taskless-actions %))) held))
 
 (defn- ended-problem!
   "Write root's problem task for the non-merged end of assignment `key`, named by it, so a repeat writes nothing."
