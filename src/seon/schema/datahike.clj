@@ -235,9 +235,14 @@
                  :seon.schema/member attribute})))))
 
 (defn- compiled-attribute-selection
-  "Select core and storable property attributes from retained canonical roots."
+  "Core and storable property attributes retained for this registry and form selection."
   {:malli/schema [:=> [:cat :map] :map]}
   [projection]
+  (schema/projection-cache-value
+   projection [::compiled-attribute-selection
+               (:seon.schema.projection/registry projection)
+               (:seon.schema.projection/forms projection)]
+   (fn []
   (let [registry (:seon.schema.projection/registry projection)
         roots (mapv #(mr/schema registry %) (keys (:seon.schema.projection/forms projection)))
         storage-properties #{:seon.db/identity :seon.db/unique :seon.db/index
@@ -266,7 +271,7 @@
               roots)]
     {::core (vec (sort-by str core))
      ::properties properties
-     ::attributes (vec (sort-by str (into core properties)))}))
+     ::attributes (vec (sort-by str (into core properties)))}))))
 
 (defn malli->datahike-schema-in
   "Derive ordered Datahike declarations from one projection."

@@ -63,8 +63,39 @@ A subsequent request on `cost-acquire-fresh-a` measures 51.92 ms overall,
 not reproduce in this warm request. Further evidence must distinguish
 first use of a declaration registry from repeated use.
 
+The repeated whole-schema operation is independently reproducible at
+`seon.schema/canonical-database-attributes`. The same held immutable value
+selects 1,160 attributes; a second call makes 6,475
+`seon.schema.datahike/declared-storable?` calls, 6,347
+`seon.schema.datahike/compiled-storage` calls and 6,423
+`seon.schema.internal/reference-id` calls. It costs 12.22 ms and
+18,749,640 calling-thread bytes. The explicit zero-call proof returns
+false (6,475 calls; 11.24 ms; the same allocation).
+
+`seon.cluster/declared-attributes` already retains its outer result, which
+explains why the ordinary warm probe need not reach this repeated work.
+Other callers reach `seon.schema.datahike/database-attributes-in`,
+`seon.schema.datahike/database-attributes-core-in` and
+`seon.schema.datahike/database-attributes-for-in` directly. The selection
+owner now uses the existing `seon.schema/projection-cache-value`, keyed by
+registry and selected forms, so a subset cannot replace the complete
+population. The first derivation remains proportional to the declarations;
+unchanged calls retrieve the held value. Malli's `malli.core/-cached`
+already retains each compiled schema's storage facts; it does not retain
+this population selection. No new cache or invalidation is introduced.
+
 ## Verification
 
 The edit hook cannot install the changed dependency acceptance namespace in
 the lane's SCI context: acquisition reports errors, as the preceding cost
 lane observed. This dependency slice uses the candidate JVM path.
+
+First commit `189cb6dae` points Datahike to `c9e57c6f`. The dependency's
+archived test passed 15 assertions. Candidate `c8cb0ac4` passed three tests,
+22 assertions, run `2a7b220129c8`; its check took 84.887 seconds, including
+27.869 seconds filling compiled classes and 24.428 seconds boot readiness.
+The proof was red before the change: 547,408 allocated bytes and a full
+head, run `c792bcfa689b`. Full lint: zero errors, 1,575 warnings.
+The dependency hook now analyzes `superv.async/go-loop-try` by its actual
+supervisor expression and ordinary loop; refreshing dependency analysis
+alone did not resolve the prospective-edit errors.

@@ -432,7 +432,8 @@
        (is (= error (ex-data thrown)))
        (is (= "first cause" (ex-message thrown)))))))
 
-(deftest compiled-storage-navigation-reuses-retained-roots
+(deftest ^{:seon/tasks #{'seon.schema.datahike/attribute-selection-reuses-its-immutable-inputs}}
+  compiled-storage-navigation-reuses-retained-roots
   ;; Navigation reads the projection's retained compiled roots: every lookup
   ;; answers the same compiled object, so selecting and deriving the storable
   ;; attributes again compiles nothing new and answers the same declarations.
@@ -450,8 +451,15 @@
                        (remove #(identical? (mr/schema registry %) (mr/schema registry %)))
                        (keys (:seon.schema.projection/forms projection))))
            "every declaration's root is one retained compiled object")
+       (let [forms (select-keys (:seon.schema.projection/forms projection) [:seon.agent/id])
+             subset (schema.datahike/database-attributes-for-in projection forms)]
+         (is (not= attributes subset))
+         (is (= attributes (schema/canonical-database-attributes projection)))
+         (is (= subset (schema.datahike/database-attributes-for-in projection forms))))
        (dotimes [_ 3]
-         (is (= attributes (::schema.datahike/attributes (select-attributes))))
+         (let [measured (profile/measure #(schema/canonical-database-attributes projection))]
+           (is (= attributes (:seon.profile/value measured)))
+           (is (zero? (profile/calls-of measured 'seon.schema.datahike/declared-storable?))))
          (is (= expected (derive-native))))))))
 
 (def ^:private refused-form-generator
