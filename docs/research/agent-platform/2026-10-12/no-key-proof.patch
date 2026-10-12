@@ -1,0 +1,29 @@
+diff --git a/test/seon/test/redefined_callee_test.clj b/test/seon/test/redefined_callee_test.clj
+index 96a049a2b..f43731e00 100644
+--- a/test/seon/test/redefined_callee_test.clj
++++ b/test/seon/test/redefined_callee_test.clj
+@@ -59,3 +59,24 @@
+        (is (true? (:seon.test/passed? green)) "the test is green against the first definition")
+        (is (= 1 (:seon.test/executed-count checked)) "a changed function the body called by a computed name re-executes the test")
+        (is (false? (:seon.test/passed? checked)) "the test is red against the redefinition")))))
++
++(deftest ^{:seon/tasks #{'seon.test/an-interpreted-callable-holds-its-definition-digest}
++           :seon.test/long "Five eval requests of an own-branch agent, each with its automatic test step: about 4 s measured on default's JVM."
++           :seon.test/long-ms 15000}
++  a-test-that-ran-a-callable-with-no-definition-digest-reruns
++  (support/with-running-agent
++   (fn [running _ _]
++     (let [agent-id (str "method-callee-" (random-uuid))
++           _ (support/own-branch-agent!
++              running agent-id
++              (str "(ns rc.method (:require [clojure.test :refer [deftest is]]))\n"
++                   "(defmulti area :shape)"))
++           _ (agent-value running agent-id "(defmethod area :sq [{:keys [s]}] (* s s))")
++           _ (agent-value running agent-id "(deftest method-test (is (= 4 (area {:shape :sq :s 2}))))")
++           check "(select-keys (my.test/check {:seon.test/identities #{'rc.method/method-test}}) [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"
++           green (agent-value running agent-id check)
++           _ (agent-value running agent-id "(defmethod area :sq [{:keys [s]}] (* 3 s))")
++           checked (agent-value running agent-id check)]
++       (is (true? (:seon.test/passed? green)) "the test is green against the first method")
++       (is (= 1 (:seon.test/executed-count checked)) "a body that ran a callable with no digest is executed again, never reused")
++       (is (false? (:seon.test/passed? checked)) "the test is red against the changed method")))))
