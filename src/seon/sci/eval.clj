@@ -153,9 +153,18 @@
   from another."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
-  (and (map? value) (contains? value :env)))
+  (and (map? value) (instance? clojure.lang.IDeref (:env value))))
 
 (schema/register-core-predicate! 'seon.sci.eval/ctx? ctx?)
+
+(defn program-context?
+  "True for a program context: a frozen SCI context (`sci.core/freeze`), whose
+  environment and kernel state are values. Only its forks evaluate."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (and (map? value) (map? (:env value))))
+
+(schema/register-core-predicate! 'seon.sci.eval/program-context? program-context?)
 
 (defn sci-var?
   "True for an SCI Var, the interned value of an SCI namespace map."
@@ -191,6 +200,10 @@
   "A real ctx, honest by constructing a fresh one per sample (0.04 ms): no
   Var holds a live context, and no sample's mutation reaches the next."
   (gen/fmap (fn [_] (sci/init {})) (gen/return nil)))
+
+(def program-context-generator
+  "A real program context: a frozen fresh ctx."
+  (gen/fmap (fn [_] (sci/freeze (sci/init {}))) (gen/return nil)))
 
 (schema.edn/load! {})
 
@@ -3512,10 +3525,22 @@
       revisions (assoc ::program-revisions revisions)
       (uuid? commit) (assoc :seon.source/commit-id commit))))
 
+(defn- freeze-program
+  "The builder `ctx` as a program context: SCI's environment, the kernel's
+  program snapshot and installed functions as their values, and no custody.
+  The builder's later writes never reach it (`sci.core/freeze`)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/program-context]}
+  [ctx]
+  (-> (sci/freeze ctx)
+      (dissoc ::custody)
+      (update ::kernel/installed-functions deref)
+      (update ::kernel/program-snapshot deref)))
+
 (defn- derive-base-ctx
-  "Derive the cluster base: load the loaded program's JVM namespaces, build the
-  interpreter under its projection and acquire the `loaded` program."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]}
+  "Derive the loaded program's context: load its JVM namespaces, build the
+  interpreter under its projection on a builder, acquire the `loaded` program
+  and freeze it."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/program-context]}
   [loaded]
   ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
   ;; its loaded program's namespaces loaded.
@@ -3533,17 +3558,19 @@
              _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-commit-id (db/commit-id loaded))
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                          :seon.db/db loaded
-                                         :seon.schema/projection projection})]
-         ;; The shared base holds program data only. Each fork carries its own
-         ;; acquired basis and loaded commit.
-         (swap! (::kernel/program-snapshot ctx)
-                #(-> (dissoc % ::loaded-commit-id)
-                     (assoc ::acquisition acquired
-                            ::program-namespaces
-                            {::generation (:sci/generation @(:env ctx))
-                             ::namespaces (sci/namespace-state ctx)}
-                            :seon.test/class-loader (clojure.lang.RT/baseLoader))))
-         (assoc ctx ::acquisition acquired))))))
+                                         :seon.schema/projection projection})
+             ;; read before the freeze renews the builder's generation
+             program-namespaces {::generation (:sci/generation @(:env ctx))
+                                 ::namespaces (sci/namespace-state ctx)}]
+         ;; The program context holds program data only. Each fork carries its
+         ;; own acquired basis and loaded commit.
+         (-> (freeze-program ctx)
+             (update ::kernel/program-snapshot
+                     #(-> (dissoc % ::loaded-commit-id)
+                          (assoc ::acquisition acquired
+                                 ::program-namespaces program-namespaces
+                                 :seon.test/class-loader (clojure.lang.RT/baseLoader))))
+             (assoc ::acquisition acquired)))))))
 
 (defn- cluster-base-key
   "The inputs the cluster base is a function of: the loaded program's store and
@@ -3555,47 +3582,113 @@
     [(store-identity loaded) commit]))
 
 (defn- copy-base-ctx
-  "Fork the cluster base with the caller's basis, connection and fault recorder."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
+  "Fork the program context `value` with the caller's basis, connection and fault recorder."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.db/database-value :seon.db/database-value
                        [:or :nil :seon.flow/commit-fault!]]
                   :seon.sci.eval/ctx]}
-  [cached database loaded recorder]
-  (assoc (inherit-var-bindings! (sci/fork cached))
+  [value database loaded recorder]
+  (assoc (inherit-var-bindings! (sci/fork value))
          ::custody (if-let [connection (db/branch-connection database (get-in database [:config :branch]))]
                      {:seon.db/connection connection}
                      {})
-         ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
+         ::kernel/installed-functions (atom (::kernel/installed-functions value))
          ::kernel/program-snapshot
-         (atom (cond-> (assoc @(::kernel/program-snapshot cached)
+         (atom (cond-> (assoc (::kernel/program-snapshot value)
                               ::acquired-basis (acquired-basis database)
                               ::loaded-commit-id (db/commit-id loaded))
                  recorder (assoc :seon.flow/commit-fault! recorder)))))
 
 (defn- context-weight
-  "Estimated retained bytes of a program fork source, including interpreted bindings."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] nat-int?]}
-  [ctx]
-  (* 12288 (count (:functions @(::kernel/program-snapshot ctx)))))
+  "Estimated retained bytes of a program context, including interpreted bindings."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context] nat-int?]}
+  [value]
+  (* 12288 (count (:functions (::kernel/program-snapshot value)))))
 
 (defn- derive-overlay-ctx
-  "Interpret one program's `plan` on a private fork source with no custody or recorder."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
-                       :seon.schema/projection :map] :seon.sci.eval/ctx]}
+  "Interpret one program's `plan` on a builder forked from the loaded program
+  context `cluster`, with no custody or recorder, and freeze it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.db/database-value :seon.db/database-value
+                       :seon.schema/projection :map] :seon.sci.eval/program-context]}
   [cluster database loaded projection plan]
   (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
-                   ::custody {} :seon.schema/projection projection)]
-    (assoc ctx ::acquisition (overlay! ctx database plan))))
+                   ::custody {} :seon.schema/projection projection)
+        acquired (overlay! ctx database plan)]
+    (assoc (freeze-program ctx) ::acquisition acquired)))
+
+(defn- program-content-key
+  "The key a program context is kept under: the loaded program's [store
+  loaded-commit], a changed program's with its plan's digest, projection
+  revisions and armed dials. Nil when `loaded` is uncommitted."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+                  [:or :nil [:vector :seon.schema/value]]]}
+  [database loaded projection]
+  (when-let [base-key (cluster-base-key loaded)]
+    (if-let [plan (program-changes database loaded projection)]
+      (conj base-key (::digest plan)
+            ;; the declarations its wrappers arm under
+            (db/content-revisions database schema/projection-attributes)
+            (armed-dials database))
+      base-key)))
+
+(defn- derive-program-context
+  "Derive `database`'s program context: the loaded program's, and for a changed
+  program its plan interpreted on a builder forked from the loaded one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
+                  :seon.sci.eval/program-context]}
+  [database loaded projection]
+  (let [base-key (cluster-base-key loaded)
+        derive-base #(derive-base-ctx loaded)
+        cluster (if base-key
+                  (seon.cache/lookup ::program-context base-key context-weight derive-base)
+                  (derive-base))]
+    (if-let [plan (program-changes database loaded projection)]
+      (derive-overlay-ctx cluster database loaded projection plan)
+      cluster)))
+
+(defn program-context
+  "The program context of `database`'s program: a frozen SCI context holding
+  exactly the program it holds, never written; only its forks evaluate.
+
+  Matching definitions copy the loaded JVM Var root; overrides and affected
+  callers interpret their admitted source. One `seon.cache` entry per program
+  content (`program-content-key`), so equal programs on many branches and
+  commits answer the identical value; a commit's key is read once per program
+  and dial revisions. Acquisition refusals are data on it (`::acquisition`).
+  `loaded` defaults to the loaded program `database`'s adoption record names."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value] :seon.sci.eval/program-context]
+    [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value]] :seon.sci.eval/program-context]]}
+  ([database] (program-context database nil))
+  ([database supplied-loaded]
+   (let [projection (or (db/carried-projection database) (schema/projection-from-database database))
+         loaded #(or supplied-loaded (loaded-program database))
+         revisions (program-revisions database projection)
+         content-key #(program-content-key database (loaded) projection)
+         ;; program revisions cover the adoption record and the projection;
+         ;; dial revisions cover what the wrappers arm with
+         program-key (if revisions
+               (seon.cache/lookup ::program-key
+                                  [(store-identity database) revisions
+                                   (db/content-revisions database (vec (sort (config/dial-attributes projection))))
+                                   (some-> supplied-loaded db/commit-id)]
+                                  (constantly 1024) content-key)
+               (content-key))
+         derive-value #(derive-program-context database (loaded) projection)
+         value (if program-key
+                 (seon.cache/lookup ::program-context program-key context-weight derive-value)
+                 (derive-value))]
+     (if (identical? projection (:seon.schema/projection value))
+       value
+       (assoc value :seon.schema/projection projection)))))
 
 (defn base-ctx
-  "Derive the program-only SCI context from one database value.
+  "A fork of `database`'s program context (`program-context`) with the
+  caller's custody, basis and fault recorder.
 
-  Matching definitions copy the loaded JVM Var root. Overrides and affected
-  callers interpret their admitted source. Acquisition refusals remain values on the context;
-  the caller records them in its custody and restores no private state.
-  The cluster base is the fork source of every value that changes nothing of
-  the loaded program; a changed program's interpretation is keyed by its plan's
-  content, so equal changes on many branches share one entry. Every caller
-  receives its own SCI and kernel atoms."
+  Acquisition refusals remain values on the context; the caller records them
+  in its custody and restores no private state. Every caller receives its own
+  SCI and kernel atoms."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
@@ -3604,25 +3697,10 @@
      :seon.sci.eval/ctx]]}
   ([database] (base-ctx database {}))
   ([database arm-request]
-   (let [loaded (or (::loaded-database arm-request) (loaded-program database))
-         base-key (cluster-base-key loaded)
-         derive-base #(derive-base-ctx loaded)
-         cluster (if base-key
-                   (seon.cache/lookup ::base-context base-key context-weight derive-base)
-                   (derive-base))
-         projection (or (db/carried-projection database) (schema/projection-from-database database))
-         plan (program-changes database loaded projection)
+   (let [supplied (::loaded-database arm-request)
+         source (program-context database supplied)
+         loaded (or supplied (loaded-program database))
          dials (armed-dials database)
-         derive-overlay #(derive-overlay-ctx cluster database loaded projection plan)
-         source (cond
-                  (nil? plan) (assoc cluster :seon.schema/projection projection)
-                  base-key (seon.cache/lookup ::overlay-context
-                                              [base-key (::digest plan)
-                                               ;; the declarations its wrappers arm under
-                                               (db/content-revisions database schema/projection-attributes)
-                                               dials]
-                                              context-weight derive-overlay)
-                  :else (derive-overlay))
          recorder (:seon.flow/commit-fault! arm-request)
          ctx (copy-base-ctx source database loaded recorder)
          acquired (record-acquisition-refusals! ctx database (::acquisition source) recorder)]

@@ -75,6 +75,11 @@
         ;; coordinate needed): plain synchronous, virtual threads park.
         org.clojure/data.json {:mvn/version "2.5.1"}
 
+        ;; Retained size of a live value (GraphLayout): the cache charges a
+        ;; program context what it retains. Allocation counters cannot
+        ;; answer retention.
+        org.openjdk.jol/jol-core {:mvn/version "0.17"}
+
         ;; Five-field schedule parsing and validation. Seon owns nominal
         ;; instant identity and the ZoneRules correction for repeated local
         ;; minutes; it does not carry a second cron parser.

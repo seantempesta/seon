@@ -357,8 +357,8 @@
   (with-started-agent
    (fn [{:keys [connection code]}]
      (let [loaded (db/commit-id (#'sci.eval/loaded-program @connection))
-           cluster-bases #(into {} (filter (fn [[[_ commit]]] (= loaded commit)))
-                                (seon.cache/retained :seon.sci.eval/base-context))
+           cluster-bases #(into {} (filter (fn [[[_ commit :as key]]] (and (= 2 (count key)) (= loaded commit))))
+                                (seon.cache/retained :seon.sci.eval/program-context))
            before (cluster-bases)
            runs [(code "(+ 1 2)")
                  (code "(+ 1 2)")

@@ -47,7 +47,8 @@
             [seon.sci.eval :as eval]
             [seon.sci.lookup :as lookup]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [my.program]))
 
 (def ^:private caps
   (config/result-caps config/defaults))
@@ -2746,7 +2747,7 @@
   (test-support/with-database
    (fn [connection]
      (eval/base-ctx (db/db connection))
-     (let [overlay #(select-keys (get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/overlay-context])
+     (let [overlay #(select-keys (get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/program-context])
                                  [:seon.cache/misses :seon.cache/bytes])
            before (overlay)]
        (dotimes [_ 3]
@@ -2762,3 +2763,39 @@
        (is (= (:seon.cache/misses before 0) (:seon.cache/misses (overlay) 0))
            "an unchanged program forks the cluster base: no overlay is derived")
        (is (<= (:seon.cache/bytes (overlay) 0) (:seon.cache/bytes before 0)))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/the-program-context-is-a-value}}
+  no-agent-work-writes-a-program-context
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection [(test-support/program-fn-entity (db/db connection) (symbol "my.program" "disposable")
+                                                  "(defn disposable [] 42)")])
+     (let [database (db/db connection)
+           value (eval/program-context database)
+           held (select-keys value [:env ::kernel/program-snapshot ::kernel/installed-functions])
+           agent-ctx (eval/base-ctx database)
+           context {:seon.sci.eval/ctx agent-ctx :my.program/base-ctx agent-ctx :seon.db/connection connection}]
+       (is (eval/program-context? value))
+       (is (not (eval/ctx? value)) "only a fork of the value evaluates")
+       (test-support/transacted! connection [(test-support/task-row "frozenvalue1" "Advance only data.")])
+       (is (identical? value (eval/program-context (db/db connection)))
+           "a commit with equal program revisions answers the identical value")
+       (sci/eval-string* agent-ctx "(in-ns 'my.program)
+                                (defn disposable [] 43)
+                                (defn agent-probe [] 1)
+                                (def agent-atom (atom 0))
+                                (alter-var-root #'agent-probe (constantly (fn [] 2)))")
+       (is (= [43 2] (sci/eval-string* agent-ctx "[(my.program/disposable) (my.program/agent-probe)]")))
+       (is (not (:seon.error/type (my.program/ns-unmap! context (symbol "my.program" "disposable")))))
+       (is (nil? (sci/resolve agent-ctx (symbol "my.program" "disposable"))))
+       (is (every? (fn [[k v]] (identical? v (get value k))) held)
+           "the agent's definitions, rebinding, atom and unmap write nothing of the value")
+       (let [fresh (sci/fork value)]
+         (is (= 42 (sci/eval-string* fresh "(my.program/disposable)")))
+         (is (nil? (sci/resolve fresh (symbol "my.program" "agent-probe")))))
+       (eval/program-context database)
+       (let [warm (profile/measure #(eval/program-context database))]
+         (is (identical? value (:seon.profile/value warm)))
+         (is (< (:seon.profile/ms warm) 0.5) "a warm lookup is under half a millisecond")
+         (is (< (:seon.profile/alloc-bytes warm) 500000) "a warm lookup allocates under half a megabyte"))))))

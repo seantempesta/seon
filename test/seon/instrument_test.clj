@@ -1100,7 +1100,7 @@
   (let [connection (:seon.db/connection (test-support/execution-handle nil))
         database (db/db connection)
         projection (db/carried-projection database)
-        _ (cache/evict-kinds! #{:seon.sci.eval/base-context :seon.sci.eval/overlay-context})
+        _ (cache/evict-kinds! #{:seon.sci.eval/program-context})
         cold (profile/measure #(sci.eval/base-ctx database))
         delta (schema/begin-registration-delta projection)
         registration (profile/measure

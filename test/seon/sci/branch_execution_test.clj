@@ -237,8 +237,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [loaded (db/commit-id (#'eval/loaded-program database))]
-    (into {} (filter (fn [[[_ commit]]] (= loaded commit)))
-          (seon.cache/retained :seon.sci.eval/base-context))))
+    (into {} (filter (fn [[[_ commit :as key]]] (and (= 2 (count key)) (= loaded commit))))
+          (seon.cache/retained :seon.sci.eval/program-context))))
 
 (deftest ^{:seon.test/long "One complete base-context derivation of the canonical fixture program (measured 452-1,192 ms on default) and one memoized copy."
            :seon.test/long-ms 8000}

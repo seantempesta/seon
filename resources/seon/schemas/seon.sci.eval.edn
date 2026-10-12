@@ -181,6 +181,11 @@
                  {:error/message "must be an SCI evaluation context",
                   :gen/gen seon.sci.eval/ctx-generator}
                  seon.sci.eval/ctx?],
+                :program-context
+                [:fn
+                 {:error/message "must be a program context: a frozen SCI context, forked to evaluate",
+                  :gen/gen seon.sci.eval/program-context-generator}
+                 seon.sci.eval/program-context?],
                 :ctx-reference
                 [:fn
                  {:error/message "must be SCI's own context record",

@@ -44,15 +44,15 @@
                   (keys (seon.cache/retained :seon.sci.eval/refusal-recording)))
         "the refusal-recording cache keys on connection identity data")
     (is (not-any? (fn [base]
-                    (some #(contains? @(::kernel/program-snapshot base) %)
+                    (some #(contains? (::kernel/program-snapshot base) %)
                           [:seon.db/db :seon.sci.eval/loaded-database]))
-                  (vals (seon.cache/retained :seon.sci.eval/base-context)))
-        "a cluster base holds no database value")
+                  (vals (seon.cache/retained :seon.sci.eval/program-context)))
+        "a program context holds no database value")
     (is (not-any? (fn [base]
                     (some (fn [[_ bindings]]
                             (some #(and (instance? sci.lang.Var %)
                                         (instance? datahike.db.DB (.getRawRoot ^sci.lang.Var %)))
                                   (vals bindings)))
-                          (:namespaces @(:env base))))
-                  (vals (seon.cache/retained :seon.sci.eval/base-context)))
-        "no interpreter Var root in a memoized base is a database value")))
+                          (:namespaces (:env base))))
+                  (vals (seon.cache/retained :seon.sci.eval/program-context)))
+        "no interpreter Var root in a memoized program context is a database value")))

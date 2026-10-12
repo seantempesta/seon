@@ -73,7 +73,7 @@
      (let [loaded (#'evaluation/loaded-program (db/db connection))]
        (benchmark/empty-cache!)
        (let [cold (measured ::cold-base #(#'evaluation/derive-base-ctx loaded))]
-         (is (evaluation/ctx? (:seon.profile/value cold)))
+         (is (evaluation/program-context? (:seon.profile/value cold)))
          (is (< (:seon.profile/ms cold) 300))
          (is (< (:seon.profile/alloc-bytes cold) 300000000))
          (is (zero? (profile/calls-of cold 'seon.sci.eval/function-digests)))

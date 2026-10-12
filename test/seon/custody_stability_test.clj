@@ -53,13 +53,11 @@
     ;; connection Datahike's registry already holds for a branch, as
     ;; `active-branch-connection` does; it opens nothing.
     ['seon.db/branch-connection :seon.db/connection]
-    ;; The base-context owners: `derive-base-ctx` builds the interpreter and
-    ;; acquires the program, `base-ctx` memoizes it per database value and
-    ;; `copy-base-ctx` forks that memoized base. A base is program-only: it
-    ;; carries no connection custody until `fork-cluster-ctx` binds one.
+    ;; The program context's forks: `copy-base-ctx` forks the frozen program
+    ;; context (`program-context`, which holds no custody) with the caller's
+    ;; connection, and `base-ctx` answers that fork.
     ['seon.sci.eval/base-ctx :seon.sci.eval/ctx]
     ['seon.sci.eval/copy-base-ctx :seon.sci.eval/ctx]
-    ['seon.sci.eval/derive-base-ctx :seon.sci.eval/ctx]
     ;; Test-world owners, program entities like any other. The fixture fork is the
     ;; production fork onto the fixture's own connection; `open-world!` returns
     ;; the member branch connection it opened; the agent-custody test's private
