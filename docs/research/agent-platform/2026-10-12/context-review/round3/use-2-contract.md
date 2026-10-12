@@ -1,3 +1,10 @@
+---
+title: "Usefulness review, contract lens: round 3 first-call context for seon.ai/contract-output-observed?"
+type: research
+status: complete
+created: 2026-10-12
+---
+
 # Usefulness review, contract lens (round 3, use-2)
 
 Reviewed only `docs/research/agent-platform/2026-10-12/context-review/round3/2-contract-ai-output-observed.md`: the first-call context for `seon.ai/contract-output-observed?` (3019 estimated tokens). Token figures are my estimates, scaled to the file's stated section totals (system 1889, user 1130); rows are rounded.
