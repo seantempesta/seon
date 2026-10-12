@@ -23,7 +23,7 @@
              :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}
  #:seon.task{:name "the-dry-run-projects-seventy-minutes-for-a-three-minute-sweep"
              :kind :function
-             :intent "`seon.maintenance/dry-run-store!` projects `:seon.operator.collect/projected-duration-ms` as the mark plus a fixed five milliseconds per candidate (its private `projected-delete-ms-per-file`, an illustrative constant). Measured on a clone of default's 796,403-file store (docs/research/agent-platform/2026-10-09/store-gc.md): 740,671 candidates swept in about 150 s, 0.2 ms per file, so the dry run projected 4,227 s against a real 763 s collection. Derive the projection from a measured sweep rate (or drop it and report only the measured mark), and record the real wall time beside it on the `collect!` receipt."
+             :intent "`seon.maintenance/dry-run-store!` projects `:seon.operator.collect/projected-duration-ms` as the mark plus a fixed five milliseconds per candidate (its private `projected-delete-ms-per-file`, an illustrative constant). Measured on a clone of default's 796,403-file store: 740,671 candidates swept in about 150 s, 0.2 ms per file, so the dry run projected 4,227 s against a real 763 s collection. Derive the projection from a measured sweep rate (or drop it and report only the measured mark), and record the real wall time beside it on the `collect!` receipt."
              :must-read #{seon.maintenance/collect! seon.cluster.registry/collect!}
              :evidence #{"docs/research/agent-platform/2026-10-09/store-gc.md"}}
  #:seon.task{:name "a-commit-writes-forty-index-files-and-an-eval-request-commits-at-least-once"

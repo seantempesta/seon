@@ -1,12 +1,12 @@
 [#:seon.task{:name "a-development-cluster-boots-in-tens-of-seconds"
   :kind :function
-  :intent "`seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-builds-an-attempt-ready-prompt` boots one real development cluster with `seon.cluster.boot/start!` and ran 49.9 s (declared bound 5 s; throwaway JVM check on 7a9ceb44a with two other check JVMs running). Over ten seconds needs an issue: profile start! on an empty store, name the armed functions that dominate and fix them. Done when the same test measures under its declared bound."
+  :intent "`seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-builds-an-attempt-ready-prompt` boots one real development cluster with `seon.cluster.boot/start!` and ran 49.9 s (declared bound 5 s; throwaway JVM check on 7a9ceb44a with two other test runs running). Over ten seconds needs an issue: profile start! on an empty store, name the armed functions that dominate and fix them. Done when the same test measures under its declared bound."
   :must-read #{seon.cluster.boot/start!}
   :evidence #{"docs/research/agent-platform/2026-10-08/review/red-triage.md"}}
 
  #:seon.task{:name "reset-cli-stdout-is-not-one-edn-value"
   :kind :function
-  :intent "`seon.cluster.boot-test/reset-one-jvm` errors on HEAD a6231e1ad (throwaway check JVM, 2026-10-08): its `bin/seon --root R reset --force` child's stdout begins with an ISO timestamp (`Invalid number: 2026-10-08T11:06:39.608Z` from `clojure.edn/read-string` in the test's `completed!`), so the reset reply is no longer one EDN value on stdout. Find the producer of the timestamped line on the operator's stdout and send it to stderr or the start log, or make the reply the one value; the test is the proof."
+  :intent "`seon.cluster.boot-test/reset-one-jvm` errors on HEAD a6231e1ad (throwaway test run, 2026-10-08): its `bin/seon --root R reset --force` child's stdout begins with an ISO timestamp (`Invalid number: 2026-10-08T11:06:39.608Z` from `clojure.edn/read-string` in the test's `completed!`), so the reset reply is no longer one EDN value on stdout. Find the producer of the timestamped line on the operator's stdout and send it to stderr or the start log, or make the reply the one value; the test is the proof."
   :must-read #{seon.cluster.boot/request! seon.operator/request!}}
 
  #:seon.task{:name "request-failure-message-is-a-printed-cause-chain"

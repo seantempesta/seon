@@ -19,7 +19,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
  #:seon.task{:name "check-ignores-the-tests-key"
              :kind :function
-             :intent "(my.test/check {:seon.test/tests [sym]}) ignores the key and runs the tests reaching the named function instead (13 s) (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08). Done when a named test list runs exactly those tests, with a regression, or the request schema refuses the key."
+             :intent "(my.test/check {:seon.test/tests [sym]}) ignores the key and runs the tests reaching the named function instead (13 s) (default, 2026-10-08). Done when a named test list runs exactly those tests, with a regression, or the request schema refuses the key."
              :must-read #{my.test/check}}
  #:seon.task{:name "an-agent-cannot-run-one-test-by-hand"
              :kind :function
@@ -31,7 +31,7 @@
              :must-read #{my.test/check seon.test/run}}
  #:seon.task{:name "a-check-failure-shows-no-message"
              :kind :function
-             :intent "`my.test/check` rendered an errored test as only `{:seon.test/sym ...}` under `:seon.render.test/failures` (lane repl-only-a5, 2026-10-09); its message, \"The admitted identity has no executable test Var.\", was found three evaluations later under `:seon.test/results` `:seon.test.failure/reports`. Done when each listed failure shows its report message."
+             :intent "`my.test/check` rendered an errored test as only `{:seon.test/sym ...}` under `:seon.render.test/failures` (2026-10-09); its message, \"The admitted identity has no executable test Var.\", was found three evaluations later under `:seon.test/results` `:seon.test.failure/reports`. Done when each listed failure shows its report message."
              :must-read #{my.test/check}}
  #:seon.task{:name "a-green-check-answers-no-per-test-counts"
              :kind :function
