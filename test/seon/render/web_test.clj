@@ -2259,6 +2259,19 @@ handle))}}
       (fn [_connection server _context]
         (is (nil? (:seon.render.web/wanted-port server)))))))
 
+(deftest ^{:seon/tasks #{'seon.render.web/the-web-worker-executor-is-never-shut-down}}
+  a-stopped-server-has-shut-down-its-worker-executor
+  (with-server
+    (fn [connection _first-server _graph]
+      (let [service (service-request connection {})
+            served (web/start! service)
+            executor (:seon.render.web/executor served)]
+        (is (instance? java.util.concurrent.ExecutorService executor)
+            "the served descriptor keeps the worker executor it handed http-kit")
+        (web/stop! (merge served (select-keys service [:seon.render.web/registration :seon.config.eval/time-limit-ms])))
+        (is (and (some? executor) (.isShutdown ^java.util.concurrent.ExecutorService executor))
+            "stop! shut the executor down")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; A page that throws every pass is ONE fault, not one per pass
 ;;; ---------------------------------------------------------------------------
