@@ -91,9 +91,10 @@
         live (cluster.agent/acquire-context! parent "mode-live")
         isolated (cluster.agent/acquire-context! parent "mode-isolated" {:seon.agent/isolate? true})]
     (try
-      (is (= {:seon.agent/branch parent-branch :seon.agent/mode :live}
+      (is (= {:seon.agent/branch parent-branch :seon.store/branch parent-branch :seon.agent/mode :live}
              (held-branch live "mode-live")))
-      (is (= {:seon.agent/branch (:seon.agent/branch isolated) :seon.agent/mode :isolated}
+      (is (= {:seon.agent/branch (:seon.agent/branch isolated) :seon.store/branch (:seon.agent/branch isolated)
+              :seon.agent/mode :isolated}
              (held-branch isolated "mode-isolated")))
       (is (not= parent-branch (:seon.agent/branch isolated)))
       (finally (cluster.agent/release-context! isolated)))))
@@ -137,6 +138,19 @@
            retired (my.agent/retire-branch! {:seon.store/branch :held-lane} context)]
        (is (= :seon.store/branch (:seon.error/member refused)) "a held branch's retirement is refused by name")
        (is (true? (:my.agent/retired? retired)) "once released, the branch retires")))))
+
+(deftest retire-branch-accepts-what-branch-returns
+  (let [parent (support/execution-handle db/*conn*)
+        _ (support/transacted! (:seon.db/connection parent)
+                               (cluster.agent/creation-tx
+                                {:seon.agent/id "branch-compose" :seon.ns/name 'my.agents.branch-compose
+                                 :seon.cluster/name "default"}))
+        handle (cluster.agent/acquire-context! parent "branch-compose" {:seon.agent/isolate? true})]
+    (try
+      (is (true? (:my.agent/retiring?
+                  (agent-value handle "branch-compose"
+                               "(my.agent/retire-branch! (my.agent/branch {:seon.agent/id \"branch-compose\"}))"))))
+      (finally (cluster.agent/release-context! handle)))))
 
 (deftest an-agent-retires-its-own-branch-and-the-shared-one-refuses
   ;; The own branch was refused as "the cluster's own branch is shared". It now

@@ -52,7 +52,8 @@
 (defn branch
   "Read the branch my context holds and its live or isolated mode.
 
-  The branch is the one my supplied connection holds. The mode is the one my
+  The branch is the one my supplied connection holds, also named
+  `:seon.store/branch` so the map is a `:my.agent/branch-request`. The mode is the one my
   acquisition of that branch decided (seon.cluster.agent/acquire-context!),
   read from its entry in my execution's registry; neither is derived from a cluster name.
 
@@ -61,6 +62,7 @@
   {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]
                              [:my.program/context :my.program/context]]]
                   [:map [:seon.agent/branch :seon.agent/branch]
+                   [:seon.store/branch :seon.store/branch]
                    [:seon.agent/mode :seon.agent/mode]]]}
   [{agent-id :seon.agent/id
     {connection :seon.db/connection registry :seon.agent/routing} :my.program/context}]
@@ -70,7 +72,7 @@
     (when-not (and held mode)
       (throw (ex-info "No acquisition of this agent holds its connection's branch."
                       {:seon.agent/id agent-id :seon.agent/branch held})))
-    {:seon.agent/branch held :seon.agent/mode mode}))
+    {:seon.agent/branch held :seon.store/branch held :seon.agent/mode mode}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lane branches: the one entrance an agent and the MCP `branch` tool share
