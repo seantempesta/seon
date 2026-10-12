@@ -234,3 +234,51 @@ All phases as in the second check except: M6 clean (task files, vocabulary.md, t
 ### Q3. Red proofs
 
 M1 defect (failure A; its first two deftests are sound and red today: `result-at-reach` absent, and `{'a/t false}` answers `:done` today, expected `:satisfied`). M18 defect (failure B). Every other phase sound as in the second check; M6's proof is unchanged and red by absence.
+
+## Fourth check (85b8203a3), 2026-10-12
+
+Scope: M1 as redesigned (derived on read, no `:seon.agent/green-before`), every line `git diff 2b813c4ec 85b8203a3` changed (status, §1, §2, §3, §5, §6 M1/M8/M18, §7 P5), and confirmation that third-check failures B and C (f70c98ee8) are closed. Also read: commit 2ef43687f (`frontier` → `ready`), which landed in `src` between the checks. Reproduced on default with agents `narrow-check` and `narrow-check-4` (SCI on their own branches; jvm mode read-only); nothing loaded into default, no main write. Counts: Q1 17 claims, 12 hold, 5 false. Q2 19 phases, 19 clean on callers. Q3 19 phases, 18 sound, 1 defect (M18). Three failures remain, all MECHANICAL; the third-check DESIGN failure A is closed by the redesign.
+
+### Third-check failures
+
+| # | Status |
+|---|---|
+| A (DESIGN) no writer on the zero-form prove pass | closed by design: nothing is written; `step-observation` derives the base result on read. The mechanism reproduces (below) |
+| B (M18 row, §5 rows, self-referencing proof) | closed in f70c98ee8: §6 M18 row carries `the-merge-path-names-no-retired-identifier` and the build-from-parts wording; §5 frontier and P-final rows restored. A new staleness in the same rows, failure 3 |
+| C (M8 living docs) | closed: M8 now lists `docs/seon/plan.md` and `docs/seon/schedule/cards/TASK-CHAIN.md`; their lines (plan.md 22, 205; TASK-CHAIN.md 208) exist |
+
+### Remaining failures
+
+1. **M1: `seon.db/commit-database` is not new. MECHANICAL.** M1 and §1 add "`seon.db/commit-database`, new, over `datahike.api/commit-as-db`". `seon.cluster.source/commit-database [store commit-id]` already exists (source.clj 290, `d/commit-as-db`) and has callers in `cluster.clj`, `boot.clj`, `branch_evidence.clj`, `my.program` and a cost test. M1 must name it and say why a branch-value wrapper (`basis-valid?` already does `d/commit-as-db (db/schema-database database) commit …`) is not it.
+2. **M1: the cost numbers are for a toy closure. MECHANICAL.** §7 P5 and the M1 bound give `reach-digests` 0.02-0.08 ms and `step-verdict` ≤ 2 ms for three proofs. Measured on default for two real tests (`seon.context-test/each-step-kind-is-done-by-its-one-rule`, `seon.cluster.squash-test/a-copy-of-an-unchanged-branch-is-empty`): `commit-as-db` of main's head on the branch's database 0.72 ms; `reach-digests` there 1.6 ms first call, 1.0-1.1 ms repeated, also on a fresh value of the same commit; the first computation of those digests took 2.1 s and 4.0 GB. With `result-at-reach` at ≤ 0.5 ms per proof the components for three proofs are about 3.5-5 ms, above the stated bound. The digests themselves match (below), so the mechanism stands; the bound and the 0.02-0.08 ms figure do not.
+3. **Stale names after `frontier` → `ready` (2ef43687f). MECHANICAL.** `seon.task/frontier` and `frontier-rules` no longer exist (`ready`, `ready-rules`, task.clj 871-909), and the filed task is now `seon.task/the-ready-leaves-are-those-whose-needs-are-done`. The hybrid still names `frontier-rules` (§1 data row for `:seon.task/outcome`; M8 "`leaf-done` (`frontier-rules`)"), the task `seon.task/the-frontier-is-the-leaves-whose-needs-are-done` (§5 row, line 158), and M18's sweep and proof entries `seon.task/frontier`, `frontier-rules`, so the M18 proof is no longer "red today for every entry"; only `seon.task.attempt/`, `attempt-tx`, `retire-branch!` and `:root` remain red.
+
+### Q1. Claims
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| §7 P5: a branch's members for one test sit at two reach digests with different results, while `latest-results` answers only the newest | holds | agent `narrow-check-4`: `f-is-one` members `[… "276c7f" pass 1 fail 0]` and `[… "618050" pass 0 fail 1] ` after `(defn f [] 1)` then `(defn f [] 2)`; each eval request ran a test step (363-496 MB allocated, 238-301 ms) |
+| Main holds 0 test runs and 0 members | holds | datalog over `:seon.test.run/id`, `:seon.test.member/symbol` on default: 0 and 0 |
+| `seon.test.runner/result-at-reach` is new | holds | 0 hits |
+| `seon.db/commit-database` is new | **false** | `seon.cluster.source/commit-database` exists (failure 1); no `seon.db/commit-database` |
+| The reach digest in the merge-base value equals the digest the branch recorded for an untouched closure | holds | both tests: `reach-digests` on `commit-as-db` of main's head and on the branch database are equal (`274d6b…`, `8142ba…`) |
+| `commit-as-db` of the base 0.5-0.85 ms | holds | 0.72 ms |
+| `reach-digests` 0.02-0.08 ms warm | **false for real tests** | 1.0-1.6 ms for two (failure 2) |
+| `step-verdict` ≤ 2 ms for three proofs | **false by components** | failure 2 |
+| `seon.turn/fork-commit` is private and `seon.context` already requires `seon.turn` | holds | turn.clj 5465 `defn-`; context.clj 20 |
+| `prove-turn` runs no form, so `step-due?` is false and no test step runs on it | holds | turn.clj 5260, 5313-5326, 5782 |
+| `fork-point-red` records its fork run on a child it then releases; the runner already records `:seon.test.run/tested-branch` | holds | test.clj 3045-3075; runner.clj 1475, 1765 |
+| `reach-digests` over a set containing a test absent from the value does not refuse the whole answer | holds | returned a map for `[existing, nc4.scratch/f-is-one]` on main |
+| `seon.task/the-frontier-is-the-leaves-whose-needs-are-done` and `seon.task/frontier` exist | **false** | renamed (failure 3) |
+| M18 proof is red today for every entry | **false** | same |
+| Test files `test/seon/test/runner_test.clj`, `test_test.clj`, `context_test.clj`, `turn_test.clj` exist | holds | ls |
+| §5/§6 rows B (frontier, P-final, M18) restored | holds | lines 158-159, 184 |
+| M8 lists `plan.md` and `TASK-CHAIN.md` | holds | M8 row |
+
+### Q2. Deletions
+
+No phase deletes something with a remaining caller. M1 deletes nothing (no `green-before` attribute was ever added; `fork-commit` goes public). The stale `frontier` names in M8 and M18 are failure 3, not callers.
+
+### Q3. Red proofs
+
+M1's four deftests are sound: `seon.test.runner-test/a-result-at-the-base-reach-digest-survives-later-runs` (red, `result-at-reach` absent; the mechanism reproduced), `seon.context-test/a-proof-green-before-the-work-is-not-done` (red: `{'a/t false}` answers `:done` today), `seon.turn-test/a-task-satisfied-at-the-base-opens-no-model-turn` (red: `step-verdict` answers `:done` today, P1), `seon.test-test/a-fork-point-run-is-recorded-once-on-the-agents-branch` (red: the fork run is recorded on the released child). M18 has the defect of failure 3; every other phase is sound as before.
