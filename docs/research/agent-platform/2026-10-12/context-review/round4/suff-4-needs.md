@@ -1,3 +1,10 @@
+---
+title: "Sufficiency review (needs-task): suff-4 on root-offers-a-sent-message"
+type: research
+status: complete
+created: 2026-10-12
+---
+
 # Sufficiency review, lens needs-task (lane suff-4)
 
 Task: `seon.cluster.message/root-offers-a-sent-message-once-and-merges-its-record`. Read only the first-call context file `4-needs-root-offers-sent-message.md`. No Seon source or docs.
