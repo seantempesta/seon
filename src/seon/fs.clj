@@ -78,9 +78,18 @@
     (instance? java.io.File value) (.getPath ^java.io.File value)))
 
 (defn- under-path?
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
   [ancestor descendant]
-  (or (= ancestor descendant)
-      (str/starts-with? descendant (str ancestor java.io.File/separator))))
+  (let [sep java.io.File/separator
+        root (if (str/ends-with? ancestor sep)
+               (subs ancestor 0 (- (count ancestor) (count sep)))
+               ancestor)
+        root (if (str/blank? root) sep root)
+        base (if (str/ends-with? root sep) root (str root sep))
+        components (remove str/blank? (str/split root (re-pattern (java.util.regex.Pattern/quote sep))))]
+    (or (= ancestor descendant)
+        (and (or (= root sep) (>= (count components) 2))
+             (str/starts-with? (str descendant) base)))))
 
 (defn admit-destructive-path!
   "Admit one recursive deletion, or refuse BEFORE anything is deleted.
