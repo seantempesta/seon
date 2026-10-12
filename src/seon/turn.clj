@@ -4609,12 +4609,18 @@
 
 (defn- recording
   "What a run's recording transaction `outcome` changed, as its test step reads it: the database it was
-  written on, the one it left and the entities its datoms name."
+  written on, the one it left and the entities its datoms of program attributes name. The cost rows
+  (`:seon.fn.cost`) record what a run measured, not a change a test can reach."
   {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.turn.loop/recording]}
   [outcome]
-  {:seon.turn.loop/before (:db-before outcome)
-   :seon.turn.loop/after (:db-after outcome)
-   :seon.turn.loop/entities (into #{} (map :e) (:tx-data outcome))})
+  (let [after (:db-after outcome)
+        attributes (when-let [projection (db/carried-projection after)] (program/program-attributes projection))]
+    {:seon.turn.loop/before (:db-before outcome)
+     :seon.turn.loop/after after
+     :seon.turn.loop/entities (into #{} (comp (filter #(contains? attributes (:a %)))
+                                              (remove #(= "seon.fn.cost" (namespace (:a %))))
+                                              (map :e))
+                                    (:tx-data outcome))}))
 
 (defn- settled
   "`report` carrying the database value its terminal settlement left
@@ -5283,11 +5289,25 @@
                (async/close! failure-channel)))))))
     backstop))
 
+(defonce ^:private test-stale
+  (delay (requiring-resolve 'seon.test/stale)))
+
+(declare task-proofs)
+
 (defn- step-due?
-  "Whether the pass `report` evaluated at least one form, so the agent's tests may see a change."
-  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report] :boolean]}
-  [report]
-  (pos? (:seon.turn.loop/forms-run report)))
+  "Whether the pass `report` evaluated a form and the agent's tests may see it: its recording transaction wrote
+  program rows, or a proof of the task the agent holds has no result at its current reach
+  (`seon.test/stale`), read on `database`, the agent's branch."
+  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report :seon.db/database-value :seon.agent/id] :boolean]}
+  [report database agent-id]
+  (boolean
+   (and (pos? (:seon.turn.loop/forms-run report))
+        (or (seq (get-in report [:seon.turn.loop/recording :seon.turn.loop/entities]))
+            (let [proofs (task-proofs database agent-id)]
+              (or (:seon.error/at proofs)
+                  (and (seq proofs)
+                       (let [stale (@test-stale database (vec proofs))]
+                         (or (:seon.error/at stale) (seq stale))))))))))
 
 (defn- task-proofs
   "The proofs of the task `agent-id` holds, read on `database`, the agent's branch; empty when it holds none."
@@ -5827,7 +5847,7 @@
                           ;; THE TESTS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside the
                           ;; pass; their failure rides beside the values (test-step).
                           test-start (System/nanoTime)
-                          stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
+                          stepped? (and (step-due? (cond-> report run-change (assoc :seon.turn.loop/recording run-change)) (db/db connection) agent-id) (not (:seon.turn.loop/refusal report))
                                         (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
                           tests (when stepped? (test-step cluster agent-id run-change))
                           report (cond-> report
