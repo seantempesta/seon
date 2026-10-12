@@ -82,6 +82,33 @@
            (is (= (second lookup) (:seon.sci.eval/row-symbol stored)))
            (is (not (contains? stored :seon.sci.eval/requested-program))))))))))
 
+(deftest an-acquisition-refusal-names-its-row-and-cause-by-reference
+  ;; default 2026-10-12: evaluate's acquisition refusal was recorded as
+  ;; `:seon.sci.admit/remainder {:reason :over-bound}`, the row and its cause
+  ;; cut, because the refusal carried a copy of the cause's stack.
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           failure (try (sci.core/eval-string* (sci.core/init {}) "(fn [] (absent.lib/helper))")
+                        nil
+                        (catch Exception e e))
+           refusal (@#'sci.eval/acquisition-refusal {:seon.test/sym 'seon.probe-test/a-probe} failure)
+           ;; evaluate refuses each form with the first refusal as its data
+           recording (error/recording (db/db connection)
+                                      (commit-request (ex-info (:seon.error/message refusal) refusal)
+                                                      {:seon.error/declared-schema :seon.flow/exception-error}))
+           report (test-support/transacted! connection (:seon.db/tx-data recording))
+           stored (error/latest-fact (db/pull (:db-after report) (error/observation-selector projection)
+                                              (:seon.error/ref recording)))
+           kept (edn/read-string {:readers *data-readers* :default tagged-literal} (:seon.error/data-edn stored))]
+       (is (= 'seon.probe-test/a-probe (:seon.sci.eval/row-symbol refusal)))
+       (is (= #{:clojure.error/line :clojure.error/column}
+              (set (keys (get-in refusal [:seon.error/data :seon.sci.eval/cause-location])))))
+       (is (not (contains? refusal :seon.error/chain)) "the cause is referenced by message and location, never copied")
+       (is (false? (:seon.error/capped? stored)))
+       (is (= 'seon.probe-test/a-probe
+              (get-in kept [:seon.error/chain 0 :seon.error/data :seon.sci.eval/row-symbol])))))))
+
 (deftest error-identity-and-occurrences-are-owned-by-the-writer
   (test-support/with-database
     (fn [connection]

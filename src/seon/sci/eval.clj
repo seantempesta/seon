@@ -2264,7 +2264,9 @@
 (def ^:private acquisition-process "seon.sci.eval/acquire")
 
 (defn- acquisition-refusal
-  "A flat agent-mistake value naming one row that could not be installed."
+  "A flat agent-mistake value naming one row that could not be installed: the
+  row, the cause's message, its location in the row's source and its flags, by
+  reference; the cause's stack and data are never copied into it."
   {:malli/schema [:=> [:cat :map [:or :map :seon.error/throwable]]
                   [:or :seon.sci.eval/row-acquisition-error
                    :seon.sci.eval/interpretation-error]]}
@@ -2273,11 +2275,19 @@
         failure-data (if (map? failure) failure (error/refusal failure))
         cause-message (or (:seon.error/message failure-data)
                           (when (instance? Throwable failure) (ex-message failure))
-                          (.getName (class failure)))]
+                          (.getName (class failure)))
+        location (cond-> {}
+                   (:line failure-data) (assoc :clojure.error/line (:line failure-data))
+                   (:column failure-data) (assoc :clojure.error/column (:column failure-data))
+                   (:file failure-data) (assoc :clojure.error/source (:file failure-data)))
+        ;; the cause's flags (`:type`, `:seon.fn/namespace-unresolvable`):
+        ;; its strings and collections are the message, the location and
+        ;; copies of what the row and the program already name
+        classifying (into {} (filter (fn [[_ v]] (or (keyword? v) (symbol? v) (number? v) (boolean? v))))
+                          (dissoc failure-data :line :column))]
     (if (:seon.sci.eval/refused-function failure-data)
       failure-data
-      (cond->
-       (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/acquisition-refusal
+      (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/acquisition-refusal
         {(if (= :seon.schema/key (first identity)) :seon.sci.eval/row-schema-key :seon.sci.eval/row-symbol)
          (second identity)
       :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
@@ -2285,12 +2295,11 @@
       :seon.error/message "Program row could not be installed; correct the reported acquisition evidence."
       :seon.error/data (cond-> {::acquisition-row identity
                ::acquisition-cause-message cause-message}
-        failure-data (assoc ::acquisition-failure failure-data)
+        (seq classifying) (assoc ::acquisition-failure classifying)
+        (seq location) (assoc :seon.sci.eval/cause-location location)
         (instance? Throwable failure)
         (assoc ::acquisition-throwable-class (.getName (class failure))))
-      :seon.error/expected ::installed})
-       (instance? Throwable failure)
-       (assoc :seon.error/chain (error.refusal/chain failure))))))
+      :seon.error/expected ::installed}))))
 
 (defn- acquisition-refusal-id
   [refusal]

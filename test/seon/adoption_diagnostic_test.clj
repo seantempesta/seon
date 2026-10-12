@@ -24,7 +24,9 @@
         byte-count (alength (.getBytes shown "UTF-8"))]
     (is (str/includes? shown "adoption.probe/broken"))
     (is (str/includes? shown "The declared namespace is unavailable."))
-    (is (str/includes? shown ":seon.fn/namespace-unresolvable true"))
+    (is (true? (get-in (ex-data failure) [:seon.boot/offense :seon.sci.eval/acquisition-refusals 0 :seon.error/data
+                                          :seon.sci.eval/acquisition-failure :seon.fn/namespace-unresolvable]))
+        "the cause's flag is kept as data")
     (is (not (str/includes? shown "function-contracts")))
     (is (< byte-count 2048))
     (println "adoption diagnostic bytes=" byte-count)))
