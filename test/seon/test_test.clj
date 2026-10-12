@@ -359,8 +359,7 @@
     (is (true? (:seon.test/passed? result)) "the body finds its member's connection")))
 
 
-(deftest ^{:seon/tasks #{'seon.test/change-reds-judges-a-test-main-does-not-hold-as-not-red-there}
-           :seon.test/long "One fork, one nested seon.test/run of one red member on it and change-reds' read of main."
+(deftest ^{:seon.test/long "One fork, one nested seon.test/run of one red member on it and change-reds' read of main."
            :seon.test/long-ms 15000}
   a-red-test-only-the-branch-holds-is-the-changes
   ;; agent pv-probe's red deftests, defined only on its branch, answered select's

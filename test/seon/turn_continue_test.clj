@@ -514,8 +514,7 @@
                              (:seon.cluster/name (support/execution-handle nil))]])
   nil)
 
-(deftest ^{:seon/tasks #{'seon.turn/an-end-requests-a-merge-at-most-once}
-           :seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two merge-request runs."
+(deftest ^{:seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two merge-request runs."
            :seon.test/long-ms 60000}
   an-end-requests-a-merge-once-whatever-interrupted-it
   (support/with-running-agent
@@ -568,8 +567,7 @@
        "(deftest ^{:seon/tasks #{'tq.endl/area}} area-test (is (= 25 (area 5))))\n\n"
        "(deftest ^{:seon/tasks #{'tq.endl/side}} side-test (is (= 4 (side 2))))\n"))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-green-end-lands-its-merge}
-           :seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two merge-request runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
+(deftest ^{:seon.test/long "Two own-branch agents' first requests, assignment proof runs and fixes with their test steps, two merge-request runs and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit)."
            :seon.test/long-ms 240000}
   a-green-end-lands-its-merge-without-root
   (support/with-running-agent
@@ -676,7 +674,7 @@
          (is (= :done end)
              "the proof is green and the change broke no test: a test red on main and one never run do not block"))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-landing-acquires-roots-world-when-root-has-no-branch-row}}
+(deftest
   root-without-a-branch-row-lands-in-the-clusters-world
   ;; Root's own context is its cluster: a root row with no home branch (this world's) is the cluster's live
   ;; branch, never a nil branch handed to `seon.cluster.agent/acquire-context!`.
