@@ -74,3 +74,62 @@ add `seon.error-test/...` as a new `are` in the same commit. Root decides before
 - **Unverified.** Body line counts are hand counts; candidate 4 and 5 were not probed; default's health (degraded, five
   untested-hot warnings, `seon.print/node-child?` top) is a foreign condition noted from runtime_status, not checked further.
 - **Time.** About 30 minutes, the budget. The candidate pool is thin because most `are` tables sit on the lanes' edit list.
+
+## Second sweep (chain-subjects-2): more subjects
+
+Agent `subject-probe-2`, SCI mode, forms only, no def persisted. Scan: `scratchpad/subj2/scan.py` (every top-level `defn`/`defn-` of 4 to 30 body lines in `src/seon` and `src/my`, excluding evaluator, writer, printer, boot, instrumentation, profile and host `*.jvm` namespaces; test references by name; `are` or `doseq` mentions). Only 447 candidates before exclusion; 61 `defn` sites carry an `are` mention. Result: **one candidate with an observed wrong output that meets D10; one weaker candidate with an inferred expectation.** The brief asked for 3 to 5; the rest were probed and rejected below.
+
+### Candidates
+
+| # | Function | Body lines | Existing tests | Edge input | Wrong output (observed) | Right output | Status |
+|---|---|---|---|---|---|---|---|
+| 6 | `seon.fs/under-path?` (private, fs.clj:80) | 4 | none by name; reached through `seon.cluster.store/admit-destructive-path!` (store_test 599-614) and `seon.fs-test` deletion tests | `"/"` ancestor of `"/x"`; `"/a/b/"` ancestor of `"/a/b/c"` | `false`, `false` (observed) | `true`, `true` (per its own docstring-less intent: "descendant is the ancestor or lies under it"; inferred from the `=` and `starts-with?` branches) | Gap observed. The wrong answer refuses a legitimate target (over-refusal), not an unsafe deletion. Edges that already work: `"/a/b"`/`"/a/b"` true, `"/a/b"`/`"/a/b/c"` true, `"/a/b"`/`"/a/bc"` false |
+| 7 | `seon.fs/intermediate-paths` (private, fs.clj:276) | 7 | none by name | root `"/r"` with target `"/r"` | `["/r"]` (observed) | `[]` (inferred: intermediates strictly between root and target; no docstring) | Output observed; expectation inferred. Targets below root are correct: `"/r/a/b"` gives `["/r" "/r/a"]`. Weak: a Prove step must first decide the intent |
+
+Reaching-tests result for candidate 6, interpreted, on probe branch `subject-probe-2`: `(my.test/check {:seon.test/changed ['seon.fs/under-path?]})` ran 1 test, 9 pass, 0 fail, 0 error, `:seon.test/passed? true`, 2,831 ms, 4,270.9 MB allocated (findings `:slow` and `:large-allocation`, as F27 reports for other subjects). The 9 reaching assertions are green on the current code, so a Prove step adds its red rows to `seon.fs-test` (ns `seon.fs-test`, file `test/seon/fs_test.clj`).
+
+### Rejected after probe (no gap)
+
+- `seon.fs/canonical-relative-path`: `"/"`+`"/x/y"` gives `"x/y"`; `"/a/b/"`+`"/a/b/c"` gives `"c"`; `"/a/b"`+`"/a/b"` gives `""`.
+- `seon.fs/relative-path`: `"/"`+`"/x/y"` gives `"x/y"`; `"/a/b"`+`"/a/b"` gives `""`; `"/a/b"`+`"/a/b/"` gives `""`; `"/a/b"`+`"/a/c"` gives `"../c"`.
+- `seon.edit/line-at`, `seon.edit/line-range`, `seon.edit/line-starts` (`"ab\ncd\n"` gives starts `[0 3 6]`; indices `0 2 3 5 6` give lines `0 0 1 1 2`; `line-range` 0..3 gives lines 1 to 1, 3..3 gives 2 to 2): correct.
+- `seon.shell/stdin?`, `seon.shell/output?`: two keys give false, empty map false, nil false: correct.
+- `seon.profile/bucket`: `0 1 2 3 4 7 8 1000 1024 1025` give `0 1 2 2 3 3 4 10 11 11`, consistent with `bucket-at` (`[b-1, b)` is bucket `b`): correct.
+- `seon.profile/upper-us`: buckets `0 1 10 39` give `0 0 1 549755813`: consistent with the bucket edges.
+
+### Hazard found by reading, not a candidate
+
+- `seon.edit/occurrences` (private, edit.clj:350) loops forever when `sought` is `""`, because `indexOf` returns the same offset and the offset never advances. Not reachable through the public entrance `seon.edit/exact`, whose `:my.edit/old-string` schema is `[:string {:min 1}]` (resources/seon/schemas/my.edit.edn:19). The private helper has no contract of its own, so the schema is its only guard. Not probed in SCI, deliberately (a hang). Filing it is root's decision; a Prove step would need a red that calls the private var directly, which is a test of a path the schema already refuses.
+
+### Draft task entries for candidate 6 (not filed; root decides)
+
+    subject:  :seon.task/name  a-path-is-under-its-root-or-any-ancestor-directory
+              :seon.task/intent  "`seon.fs/under-path?` answers true when the descendant is the ancestor or lies under
+                                 it, including when the ancestor is `/` or ends in a separator."
+              :seon.task/must-read [seon.fs/under-path? seon.fs/admit-destructive-path!]
+              :seon.task/children [prove, implement]
+
+    prove:    :seon.task/step :prove
+              :seon.task/name  prove-under-path-edges
+              :seon.task/instructions  "In test/seon/fs_test.clj (ns seon.fs-test) add rows, in a new `are` or doseq
+                                 table, tagged ^{:seon/tasks #{'seon.fs/a-path-is-under-its-root-or-any-ancestor-directory}}
+                                 for the 'under' law: (under-path? \"/\" \"/x\") true, (under-path? \"/a/b/\" \"/a/b/c\") true,
+                                 (under-path? \"/a/b\" \"/a/b/c\") true, (under-path? \"/a/b\" \"/a/bc\") false. Run red on
+                                 the branch before the fix."
+              :seon.task/must-read [seon.fs/under-path?]
+
+    implement: :seon.task/step :implement
+              :seon.task/needs  prove-under-path-edges
+              :seon.task/instructions  "In seon.fs/under-path?, compare canonical prefixes: strip one trailing separator
+                                 from the ancestor (keeping `/` itself), then accept equality or a prefix of the
+                                 ancestor followed by a separator. Do not change admit-destructive-path!."
+              :seon.task/must-read [seon.fs/under-path?]
+
+Candidate 7 is not drafted: its expected output needs a decision the owner has not made.
+
+## Notes (second sweep)
+
+- **Shortfall.** The brief asked for 3 to 5 new subjects. This sweep produced one observed gap that meets the criteria (candidate 6) and one weaker one (7). The scan's exclusions (evaluator, writer, printer, boot, instrumentation, profile, `*.jvm`, MCP, env, repl) removed most of the 447 defns, and most of the rest were already probed correct. A third-round sweep of `seon.reconcile` (`.cljc`, pure, unprobed here) and `seon.schedule/next-nominal-after` (DST overlap twin) is the next place to look; both were read, not probed.
+- **Method limit.** The `doseq` detection is a file-level mention, not a table check, so the DOSEQ flags in the scan are not proof of a table. Candidates were checked by hand.
+- **Unverified.** Body line counts are from the scan script. The reaching-tests run is one run on `subject-probe-2`, not on default. Default was not queried for this sweep. The `seon.fs/under-path?` right answer is inferred from its branches, since it has no docstring.
+- **Surprise.** `seon.fs/under-path?` is the guard inside `admit-destructive-path!`: a `/` root refuses every target, which is conservative (fails closed), so the gap is over-refusal, not a safety hole.
