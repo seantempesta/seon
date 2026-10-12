@@ -100,8 +100,8 @@
        (proof-task running connection agent-id intent)
        (let [state (block running agent-id)]
          (is (= intent (:seon.task/intent (:seon.context/task state))) "the intent is shown whole")
-         (is (= 'tq.cs (:in-ns (:seon.context/start (:seon.context/step state)))) "the step names the owner namespace")
-         (is (= '(my.program/source 'tq.cs/shape) (:source (:seon.context/start (:seon.context/step state)))) "and the first form to read"))))))
+         (is (= {:seon.render/operations ['(in-ns 'tq.cs)]} (:seon.context/start (:seon.context/step state)))
+             "the step's start is the form that enters the owner namespace, a form to run, not data posing as a value"))))))
 
 (def ^:private proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\"))")
@@ -136,7 +136,8 @@
        (let [[names operations] (shown running agent-id
                                        "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
          (is (= ['seon.task/agent-task 'seon.task/agent-attempt :seon.task/intent] names))
-         (is (some #{'(doc seon.task/agent-attempt)} operations)))))))
+         (is (= ['(my.program/source 'seon.task/agent-attempt)] (filterv #(= 'my.program/source (first %)) operations))
+             "a must-read offers the form that reads its body"))))))
 
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
@@ -147,8 +148,10 @@
                                             :seon.task/intent "Fix `tq.cs/missing`."}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-       (is (= [{:seon.ref/name 'tq.cs/missing :seon.ref/problem-kind :unresolved :seon.ref/line 1}]
-              (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")))))))
+       (is (= [{:seon.ref/name 'tq.cs/missing :seon.ref/problem-kind :unresolved}]
+              (mapv #(dissoc % :seon.ref/message) (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
+       (is (string? (:seon.ref/message (first (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
+           "the problem says what failed and what to do")))))
 
 (deftest a-library-symbol-resolves-with-its-pinned-revision
   (test-support/with-running-agent

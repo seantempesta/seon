@@ -105,7 +105,7 @@
 
 (deftest a-resolved-function-offers-a-source-form-that-shows-its-source
   (let [database (db/db)
-        source-form (some #(when (= 'my.program/source (first %)) %) (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
+        source-form (some #(when (= 'my.program/source (first %)) %) (:seon.render/operations (#'ref/resolve-name database #{} 'seon.ref/references)))]
     (is (= '(my.program/source 'seon.ref/references) source-form))
     (is (string? (:source (program/source database (second (second source-form))))))))
 
@@ -132,7 +132,6 @@
     (is (= ["AGENTS.md" "Data and contracts" nil] [(:seon.ref/path agents) (:seon.ref/heading agents) (:seon.ref/pin agents)]))
     (is (= "docs/seon/architecture/vocabulary.md" (:seon.ref/path link)) "a relative Markdown link is a path reference")
     (doseq [entry [malli agents link]]
-      (is (pos? (:seon.ref/tokens entry)))
       (is (not (contains? entry :seon.ref/text)) "the block never carries the document's text")
       (let [[operation] (:seon.render/operations entry)]
         (is (= 'my.fs/section (first operation)))
@@ -141,13 +140,29 @@
     (is (= "no-such-heading" (:seon.ref/anchor missing-heading)))))
 
 (deftest a-referenced-function-shows-its-callers-and-reaching-tests
-  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})
-        operations (set (:seon.render/operations entry))]
+  (let [proof 'seon.ref-test/a-missing-anchor-names-the-closest-spelled-heading-first
+        [entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`" :seon.ref/proofs #{proof}})
+        [unlisted] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
     (is (some #{'my.fs/section} (:seon.ref/callers entry)) "its direct callers, as symbols")
-    (is (some #{'seon.ref-test/a-missing-anchor-names-the-closest-spelled-heading-first} (:seon.ref/tests entry))
-        "the tests reaching it, as symbols")
-    (is (operations '(my.program/callers {:seon.program/subject 'seon.ref/section})))
-    (is (operations '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})))))
+    (is (= [proof] (:seon.ref/tests entry)) "only the task's own proofs among the reaching tests are listed by name")
+    (is (< 1 (:seon.ref/test-count entry)) "the rest are counted")
+    (is (= ['(my.program/source 'seon.ref/section) '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})]
+           (:seon.render/operations entry))
+        "the forms that read its body and list every reaching test")
+    (is (not (contains? unlisted :seon.ref/tests)) "with no proofs, every reaching test is counted, none listed")
+    (is (= (:seon.ref/test-count entry) (:seon.ref/test-count unlisted)))))
+
+(deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
+    (is (= [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]] (:malli/schema entry))
+        "the contract is the :malli/schema form, as data")
+    (is (not (contains? entry :seon.fn/spec)))
+    (is (not (contains? entry :seon.ref/line)) "a reference carries no line in its text")))
+
+(deftest an-unresolved-reference-says-what-failed-and-what-to-do
+  (let [[problem] (ref/references (db/db) {:seon.ref/text "`:seon.nope/missing-key`"})]
+    (is (= :unresolved (:seon.ref/problem-kind problem)))
+    (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
 
 (deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
   a-reference-with-no-path-is-a-missing-file

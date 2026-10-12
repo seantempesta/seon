@@ -146,6 +146,12 @@
 ;;; Resolution
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private problem-messages
+  "What each problem kind means and what the agent does about it."
+  {:unresolved "Nothing of this name or path exists on your branch. If the task means one to create, create it; else tell root with my.message/send that the task names it."
+   :anchor-missing "The file has no heading with this anchor; (my.fs/section path) lists its headings. Tell root the task names it."
+   :line-reference "A path:N citation goes stale; the task should cite code by its symbol. Tell root the task names it."})
+
 (defn- pinned-revision
   "The reference-code project and pinned revision a loaded resource URL names, or nil when it is not under a pin."
   {:malli/schema [:=> [:cat :string] [:or :nil :seon.ref/pin]]}
@@ -173,12 +179,12 @@
         arglists (assoc :arglists arglists)
         doc (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts doc)))))
         pin (assoc :seon.ref/pin pin))
-      {:seon.ref/name reference :seon.ref/problem-kind :unresolved})))
+      {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
 
-(defn- stored-arglists
-  "A function's stored arglists text read as data in its own namespace: `::k` is
+(defn- stored-form
+  "A function's stored arglists or contract text read as data in its own namespace: `::k` is
   its namespace's keyword, `::alias/k` resolves through the loaded aliases."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.ref/arglists]}
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.schema/value]}
   [function text]
   ;; stored as source text until PR-25 stores the arglists as data
   (let [home (symbol (namespace function))
@@ -200,23 +206,37 @@
     (or (some #(when (db/read-refusal? %) %) [callers tests])
         {:seon.ref/callers (vec (sort callers)) :seon.ref/tests tests})))
 
+(defn- shown-tests
+  "The reaching `tests` a reference lists by name: those among `proofs`; the rest are counted, with the form that lists them."
+  {:malli/schema [:=> [:cat :seon.fn/sym :seon.ref/tests [:set :seon.test/sym]]
+                  [:map [:seon.ref/tests {:optional true} :seon.ref/tests]
+                   [:seon.ref/test-count {:optional true} :seon.ref/test-count]
+                   [:seon.render/operations [:vector :seon.render/read-form]]]]}
+  [function tests proofs]
+  (let [named (filterv proofs tests)]
+    (cond-> {:seon.render/operations []}
+      (seq named) (assoc :seon.ref/tests named)
+      (< (count named) (count tests))
+      (assoc :seon.ref/test-count (count tests)
+             :seon.render/operations [(list 'my.program/tests-reaching {:seon.program/subject (list 'quote function)})]))))
+
 (defn- resolve-name
-  "One referenced name resolved to its current definition on `database` (a program function with its direct callers
-  and reaching tests), or a problem."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
+  "One referenced name resolved to its current definition on `database` (a program function with its contract as
+  the agent writes it, its direct callers and the reaching tests among `proofs`, the rest counted), or a problem."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database reference]
-  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved}
+  [database proofs reference]
+  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
+                    :seon.ref/message (problem-messages :unresolved)}
         ;; a program declaration's source is answered by my.program/source, a value;
         ;; clojure.repl/source only prints and answers nil
-        operations [(list 'doc reference) (list 'my.program/source (list 'quote reference))]]
+        source (list 'my.program/source (list 'quote reference))]
     (if (qualified-keyword? reference)
       (let [found (lookup/schema-documentation database reference reference)]
         (cond
           (:seon.sci.eval/documentation-unavailable found) unresolved
           (:seon.error/at found) found
-          :else {:seon.ref/name reference :seon.ref/schema-form (:form found)
-                 :seon.render/operations [(list 'doc reference)]}))
+          :else {:seon.ref/name reference :seon.ref/schema-form (:form found)}))
       (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
             test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym reference]))]
         (cond
@@ -225,50 +245,48 @@
           (let [{:seon.ref/keys [callers tests] :as used} (uses database reference)]
             (if (db/read-refusal? used)
               used
-              (cond-> {:seon.ref/name reference
-                       :seon.render/operations (into operations
-                                                     [(list 'my.program/callers {:seon.program/subject (list 'quote reference)})
-                                                      (list 'my.program/tests-reaching {:seon.program/subject (list 'quote reference)})])}
-                (:seon.fn/arglists function) (assoc :arglists (stored-arglists reference (:seon.fn/arglists function)))
-                (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
-                (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
-                (seq callers) (assoc :seon.ref/callers callers)
-                (seq tests) (assoc :seon.ref/tests tests))))
+              (let [listed (shown-tests reference tests proofs)]
+                (merge (cond-> {:seon.ref/name reference}
+                         (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
+                         (:seon.fn/arglists function) (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
+                         (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
+                         (seq callers) (assoc :seon.ref/callers callers))
+                       listed
+                       {:seon.render/operations (into [source] (:seon.render/operations listed))}))))
           (:seon.error/at test-entity) test-entity
-          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations operations}
+          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations [source]}
           :else (library-name reference))))))
 
 (declare resolve-path)
 
 (defn- answer
-  "One candidate resolved on `database`, or its problem, at its line."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
+  "One candidate resolved on `database`, or its problem with what it means; the names among `proofs` are the
+  reaching tests a function lists by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.ref/candidate]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database {:seon.ref/keys [line problem-kind] reference :seon.ref/name :as found}]
-  (let [resolved (cond
-                   reference (resolve-name database reference)
-                   problem-kind found
-                   :else (resolve-path found))]
-    (cond-> resolved (and line (not (:seon.error/at resolved))) (assoc :seon.ref/line line))))
+  [database proofs {:seon.ref/keys [problem-kind] reference :seon.ref/name :as found}]
+  (cond
+    reference (resolve-name database proofs reference)
+    problem-kind (assoc found :seon.ref/message (problem-messages problem-kind))
+    :else (resolve-path found)))
 
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem.
 
-  Held names come first, sorted, then the text's in first-seen order."
+  Held names come first, sorted, then the text's in first-seen order. A function lists by name only its
+  reaching tests among `:seon.ref/proofs` and counts the rest."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.ref/keys [text names document-path]}]
+  [database {:seon.ref/keys [text names document-path proofs]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
         held (map (fn [reference] {:seon.ref/name reference}) (sort names))
-        found (keep (fn [entry] (some-> (candidate roots document-path entry)
-                                        (assoc :seon.ref/line (:seon.ref/line entry))))
-                    (:seon.ref/spans (document text)))
+        found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))
         identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)]
     (->> (concat held found)
          (reduce (fn [[seen kept] c] (if (seen (identity-of c)) [seen kept] [(conj seen (identity-of c)) (conj kept c)]))
                  [#{} []])
          second
-         (mapv #(answer database %)))))
+         (mapv #(answer database (set proofs) %)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A doc section
@@ -371,15 +389,16 @@
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
 
 (defn- resolve-path
-  "A based path with an optional anchor as its document entry: heading, size, pin and its one read, or a problem."
+  "A based path with an optional anchor as its document entry: heading, pin and its one read, or a problem."
   {:malli/schema [:=> [:cat :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem]]}
   [{:seon.ref/keys [path anchor]}]
   (let [reference (cond-> path anchor (str "#" anchor))
         found (section reference)]
     (case (:seon.ref/section-missing found)
-      :file {:seon.ref/problem-kind :unresolved :seon.ref/path path}
-      :heading {:seon.ref/problem-kind :anchor-missing :seon.ref/path path :seon.ref/anchor anchor}
+      :file {:seon.ref/problem-kind :unresolved :seon.ref/path path :seon.ref/message (problem-messages :unresolved)}
+      :heading {:seon.ref/problem-kind :anchor-missing :seon.ref/path path :seon.ref/anchor anchor
+                :seon.ref/message (problem-messages :anchor-missing)}
       (-> found
-          (dissoc :seon.ref/text :seon.ref/below)
+          (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
           (assoc :seon.render/operations [(list 'my.fs/section reference)])))))
 

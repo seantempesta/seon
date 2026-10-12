@@ -476,13 +476,11 @@
           branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
 (defn- step-start
-  "Where an :implement step begins: the namespace that owns the held task's subject and the form that reads
-  the subject's source. Nil for another step."
-  {:malli/schema [:=> [:cat :seon.task/step :seon.task/sym] [:maybe :seon.context/start]]}
-  [step sym]
-  (when (= :implement step)
-    {:in-ns (symbol (namespace sym))
-     :source (list 'my.program/source (list 'quote sym))}))
+  "Where an :implement step on the task `sym` begins: the form that enters the namespace owning it; each
+  must-read carries the form that reads its source."
+  {:malli/schema [:=> [:cat :seon.task/sym] :seon.context/start]}
+  [sym]
+  {:seon.render/operations [(list 'in-ns (list 'quote (symbol (namespace sym))))]})
 
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
@@ -518,8 +516,12 @@
                        (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
         namespace (agent-namespace database agent-id held)
-        reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
-                                                   :seon.ref/names (:seon.task/must-read held #{})}))]
+        proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
+        ;; the task's own proofs are shown in its proofs section, never again as must-reads
+        reads (when held (into [] (remove #(proof-names (:seon.ref/name %)))
+                               (ref/references database {:seon.ref/text (:seon.task/intent held)
+                                                         :seon.ref/names (:seon.task/must-read held #{})
+                                                         :seon.ref/proofs proof-names})))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)
@@ -530,8 +532,8 @@
           proven (assoc :seon.context/proofs proven)
           verdict (assoc :seon.context/step
                          (cond-> (step-section verdict)
-                           (step-start (:seon.task/step verdict) (:seon.task/sym held))
-                           (assoc :seon.context/start (step-start (:seon.task/step verdict) (:seon.task/sym held)))))
+                           (= :implement (:seon.task/step verdict))
+                           (assoc :seon.context/start (step-start (:seon.task/sym held)))))
           (seq sent-back) (assoc :seon.context/send-backs sent-back)
           (seq reads) (assoc :seon.context/must-reads reads)
           cost (assoc :seon.context/cost cost)
