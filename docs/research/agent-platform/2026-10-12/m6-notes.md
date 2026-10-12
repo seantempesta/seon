@@ -1,7 +1,7 @@
 ---
 title: "M6 notes: one merge, keyed by the assignment"
 type: research
-status: lane m6, 2026-10-12. M6 done in two commits (slice 1, the rename seon.cluster.squash → seon.merge, 7c3077b9e; slice 2, the fold, below). Root's ruling of 2026-10-12 applied: ONE engine, `seon.merge/merge!`, keyed by the assignment; `seon.cluster.source/land!`'s declaration merge folded into it; publication stays today's call after acceptance until M9.
+status: lane m6, 2026-10-12. M6 done in two commits (slice 1, the rename seon.cluster.squash → seon.merge, 7c3077b9e; slice 2, the fold, 3da1f6449). Root's ruling of 2026-10-12 applied: ONE engine, `seon.merge/merge!`, keyed by the assignment; `seon.cluster.source/land!`'s declaration merge folded into it; publication stays today's call after acceptance until M9.
 ---
 
 # M6 notes

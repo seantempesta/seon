@@ -19,8 +19,9 @@ f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; t
 **Where we are.** A DeepSeek-flash agent turns a small ordinary task red → green from the context Seon generates, and
 root has merged three such changes by hand (d3de85d72, 3c4f94227, a4b7e6261). The first chain experiment ran on
 2026-10-12 ([chain-experiment-1](../research/agent-platform/2026-10-12/chain-experiment-1.md)). The automatic merge
-path (`seon.cluster.source/land!` from a green end, dial `:seon.config.root/land?` false in `config/default.edn`) has merged
-nothing; merge requests are root's tasks (`my.root/merge-requests`, `my.root/merge!`, `my.root/close!`). The task
+of code (`seon.turn/land-end!`, dial `:seon.config.root/land?`) has no caller and has merged nothing; a merge request is
+the assignment, and root merges one with the one merge, `seon.merge/merge!` (`my.root/merge-requests`, `my.root/merge!`,
+`my.root/close!`, by `:seon.task/assignment`). The task
 database holds **783 tasks** in 94 files (`resources/seon/tasks/`). **155** of them have at least one deftest tagged
 `:seon/tasks` naming them; 180 distinct task symbols are tagged in `test/`, and **25 of those tags name no task** (stale
 proofs). **628 tasks have no tagged proof.** Agents have `my.task/current` and `my.task/send-back!`; `my.task/refine!`
@@ -50,7 +51,7 @@ Three documents number their phases. To end the collision, `hybrid-agent-world` 
 | P10 | step-semantics | absorbed into done-and-merge | three starters remain: `plan`, `agents-to-start`, `seon.cluster.host/start!`; no ROOT/AGENT declaration in `seon.mcp` | see M5, M7, M12, M13 |
 | P-final | step-semantics | not started | depends on P7–P10 and the merge-request redesign | |
 | U0–U7 | [push](../research/agent-platform/2026-10-12/hybrid-push.md) | superseded | replaced by M1–M18 of hybrid-done-and-merge; U0 and U2 tasks retired, U1/U3/U4/U5/U7 tasks reused there | |
-| M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | M1 done (3fe23b2c0, 346645d56), M2 done (3eca1a962), M3 done (767551c7b), M5 done (1b09d8043, c74ef3437), M4 and M6–M18 filed, not started; order M5 → M6 → M4 | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md`; M1 under the owner rule of 2026-10-12 in `m1-notes.md` | M6 next, then M4 |
+| M1–M18, M-final | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | M1 done (3fe23b2c0, 346645d56), M2 done (3eca1a962), M3 done (767551c7b), M5 done (1b09d8043, c74ef3437), M6 done (7c3077b9e, 3da1f6449; `m6-notes.md`), M4 and M7–M18 filed, not started; order M5 → M6 → M4 | dig, Opus and Astra plans, Fable hybrid, four narrow checks (`narrow-check-done-and-merge.md`), owner answers 2026-10-12 (auto-merge when green; everything merges at each step's end; successors fork main; live proposal in the current-state block; the branch is the proposal); tasks 82e56df7f, held-file entries in `merge-tasks-patches.md`; M1 under the owner rule of 2026-10-12 in `m1-notes.md` | M4 next (`m6-notes.md` names what it needs), then M7 |
 | G9 | [done-and-merge](../research/agent-platform/2026-10-12/hybrid-done-and-merge.md) | done | 98720b4eb: `seon.fn/closure-walk` continues past two levels until a walked level holds a test; task `my.program/a-function-called-through-its-callers-is-reached-by-their-tests` retired | |
 | R1–R12 | [test-results](../research/agent-platform/2026-10-12/hybrid-test-results.md) | R1 done (50ca41030), R2 done (474174b52); R3 replaced (owner, 2026-10-12: Seon has 0 defmulti, 1 defmethod, 0 protocols in src) by "a test that ran a callable with no definition digest gets no reuse key" (51a5e159e); R4–R12 filed, not started | R1: `seon.test/select` reuses a red at its key (on default after one unrelated `defn`, `my.test/check` of a green and a red: HEAD executed 1 / 222 ms / 169 MB, after executed 0); R2: a result is keyed by the declarations its body executed outside its static closure (`:seon.test.member/dynamic-calls`) and a stale-body result keys nothing | R4 (config digest) and the no-key replacement of R3 next; R5 → R6 → R7 |
 | E1 | [immutable-env](../research/agent-platform/2026-10-12/hybrid-immutable-env.md) | done | f424382cd: `reference-code/sci` bump, `sci.core/freeze` | |
@@ -127,7 +128,7 @@ owner's answers of 2026-10-12. Running now: lanes branch-repl, chain-2, cost-gb,
 2. **The goal probe in flight** (Opus, lane chain-2): chain experiment 2 on HEAD, merged by root by hand; numbers
    against experiment 1. Then the **first automatic merge** of one ordinary task as soon as M6 and M8 allow (owner:
    one ordinary task first, the chain after).
-3. **Done and merge, M3–M18 then M-final**, in the hybrid's order (M1 done: 3fe23b2c0, 346645d56; M2 done: 3eca1a962; M3 done: 767551c7b; M5 done: 1b09d8043, c74ef3437; order M5 → M6 → M4); split the
+3. **Done and merge, M3–M18 then M-final**, in the hybrid's order (M1 done: 3fe23b2c0, 346645d56; M2 done: 3eca1a962; M3 done: 767551c7b; M5 done: 1b09d8043, c74ef3437; M6 done: 7c3077b9e, 3da1f6449; order M5 → M6 → M4); split the
    collision points `seon.turn` and `seon.cluster.agent` before eleven phases queue on them.
 4. **Test results as Seon data** (R1, R2 done; R3 replaced; R4–R12 filed): which tests are red and which reds a change caused is
    a query over stored runs at equal reach digests, shown in the agent's reply and current-state block, and read by
