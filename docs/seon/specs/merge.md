@@ -189,7 +189,9 @@ One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
    whose task file is its write-back: `seon.merge/publish!` writes a merged task (`[:seon.task/sym ns/name]`) into
    `resources/seon/tasks/<ns>.edn` by rewrite-clj (`seon.cluster.source/proven-task-file`), every other entry
    byte-identical, proven by reading it back through `seon.task/file-declarations`, and commits it with the merge's
-   other paths.
+   other paths. Adoption merges tasks three-way from the prior adopted source commit
+   (`seon.task/adopt-tasks-call`): only the tasks the publication changed are reconciled, and one main revised too
+   (a merged refinement whose publication still waits) keeps main's value and writes root's problem task.
 
 **Norms** (Datahike's concept: `reference-code/datahike/src/datahike/norm/norm.clj` at e5453d96, `ensure-norms!`
 :204, recorded as `:tx/norm` :142-158, never twice :31). A branch carries program, never the target's data: an agent

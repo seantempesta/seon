@@ -258,3 +258,44 @@
              retried (db/with closed (task/attempt-tx closed h agent-id :tq-attempt-2))]
          (is (= 2 (:seon.task.attempt/number (row retried 2))) "after an end the next attempt is the next number")
          (is (= :tq-attempt-1 (:seon.task/branch (row retried 1))) "the ended attempt keeps its row"))))))
+
+(defn- adopted-file
+  "The tq.adopt task file declaring `area` and `side` with the intents given."
+  {:malli/schema [:=> [:cat :string :string] :seon.task/files]}
+  [area side]
+  {"resources/seon/tasks/tq.adopt.edn"
+   (str "[#:seon.task{:name \"area\" :intent \"" area "\"} #:seon.task{:name \"side\" :intent \"" side "\"}]")})
+
+(deftest an-adoption-keeps-a-merged-refinement-the-files-have-not-seen
+  ;; Before, adoption reconciled the whole set onto main with main's own value as the basis, so the
+  ;; next publication reverted a refinement merged onto main whose publication still waited.
+  (let [area (task/task-handle 'tq.adopt "area")
+        side (task/task-handle 'tq.adopt "side")
+        intents (fn [database] (mapv #(:seon.task/intent (db/pull database [:seon.task/intent] [:seon.task/id %])) [area side]))
+        problems (fn [database] (count (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
+                                                [(clojure.string/starts-with? ?n "adoption-conflict-")]] database)))]
+    (are [published adopted conflicts]
+         (test-support/with-database
+          (fn [source]
+            (test-support/with-database
+             (fn [main]
+               (let [file! (fn [connection files] (db/with-branch {:seon.db/connection connection}
+                                                    #(task/index-tasks! {:seon.db/connection connection :seon.task/files files})))
+                     _ (file! source (adopted-file "Fix." "Other."))
+                     base @source
+                     ;; root, who receives the problem task
+                     _ (test-support/transacted! main (test-support/agents-tx @main ["root"]))
+                     _ (file! main (adopted-file "Fix." "Other."))
+                     _ (file! main (adopted-file "Refined." "Other."))
+                     before (problems @main)
+                     _ (file! source published)
+                     call (task/adopt-tasks-call @source @main base)]
+                 (when (seq call) (test-support/transacted! main call))
+                 (and (is (= adopted (intents @main)))
+                      (is (= conflicts (- (problems @main) before)))))))))
+      ;; an unchanged republication adopts nothing
+      (adopted-file "Fix." "Other.") ["Refined." "Other."] 0
+      ;; a republication changing only side takes side and keeps main's area
+      (adopted-file "Fix." "Sides.") ["Refined." "Sides."] 0
+      ;; a republication changing area too keeps main's area and writes one problem task for root
+      (adopted-file "Squared." "Sides.") ["Refined." "Sides."] 1)))

@@ -2493,15 +2493,17 @@
 (defn- adopt-entities!
   "Write the schema, program and task rows among `identities` from
   `published-database` onto `connection` in ONE transaction, and answer the
-  program identities.
+  program identities. Tasks merge three-way from `prior-database`, the
+  published commit the cluster adopted before (`seon.task/adopt-tasks-call`);
+  nil for the first adoption.
 
   Schema declarations go first: the writer applies schema datoms before the
   operations after them (`datahike/db/transaction.cljc:466`). The write refuses once another
   publication moves `current-src` (`head-guard-tx`); refused, nothing lands."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/published
-                       :seon.reconcile/adopt-identities :seon.db/database-value]
+                       :seon.reconcile/adopt-identities :seon.db/database-value [:maybe :seon.db/database-value]]
                   :seon.reconcile/adopt-identities]}
-  [connection published identities published-database]
+  [connection published identities published-database prior-database]
   (let [projection (db/carried-projection published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         tx-data (into
@@ -2513,10 +2515,10 @@
                    (seq program-identities)
                    (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
                                              {:seon.boot/population :seon.fn/population})))
-                 ;; Tasks are data the publication admitted, never program entities;
-                 ;; the whole set reconciles, empty when the cluster agrees.
+                 ;; Tasks are data the publication admitted, never program entities:
+                 ;; the tasks it changed since the prior adoption merge, empty when the cluster agrees.
                  (require-committed! ((requiring-resolve 'seon.task/adopt-tasks-call)
-                                      published-database (db/db connection))
+                                      published-database (db/db connection) prior-database)
                                      {:seon.boot/population :seon.task/rows}))]
     (when (next tx-data)
       (report-source-progress! "development entities")
@@ -2588,7 +2590,9 @@
     ;; dependent never enters this JVM. The check after reload catches an
     ;; edit that lands during it.
     (verify-development-sources! published-database (fs/source-directory) namespaces)
-    (adopt-entities! connection published identities published-database)
+    (let [prior-database (when prior-commit (source/database held-store prior-commit))]
+      (try (adopt-entities! connection published identities published-database prior-database)
+           (finally (some-> prior-database d/release-materialized-db))))
     (report-source-progress! "development loaded definitions")
     ;; Unmap, reload and arm wait for no one: a member or evaluation spanning
     ;; them reads a changed loaded identity at its end and refuses its result.
@@ -2840,12 +2844,15 @@
         ;; `development-source-refresh!` answers it.
         (if (= prior-commit (:seon.source/commit-id published))
           0
-          (let [identities (published-changes held published prior-commit published-database)]
-            (db/with-branch {:seon.db/connection connection}
-                                  ;; `published` names only the head guard's
-                                  ;; commit: `current-src`'s, which stays put
-                                  #(adopt-entities! connection (merge published (source/current held))
-                                                    identities published-database))
+          (let [identities (published-changes held published prior-commit published-database)
+                prior-database (when prior-commit (source/database held prior-commit))]
+            (try
+              (db/with-branch {:seon.db/connection connection}
+                                    ;; `published` names only the head guard's
+                                    ;; commit: `current-src`'s, which stays put
+                                    #(adopt-entities! connection (merge published (source/current held))
+                                                      identities published-database prior-database))
+              (finally (some-> prior-database d/release-materialized-db)))
             (count identities))))
       (finally
         (d/release-materialized-db published-database)

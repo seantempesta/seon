@@ -166,4 +166,4 @@ the publication changed, not to all 808.
    one question ("did this merge move declarations?"). A second attribute would split it, and the
    identities that `merge-accepted` derives already say which kind each one is.
 
-Phase status: A — designed, red proof named, not started. B — designed, red proof named, not started.
+Phase status: A — merged in 7c87dfb8e (task identity is `[:seon.task/sym ns/name]`, not `[:seon.task/id handle]`: the declaration-identity schema admits a symbol value and the path derives from it). B — merged in the commit after it (three-way adoption from the prior adopted commit).

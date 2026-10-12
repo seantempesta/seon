@@ -406,24 +406,79 @@
       (or (read-error handles) (set handles)))
     #{}))
 
-(defn adopt-tasks-call
-  "Transaction data reconciling `destination`'s tasks to every task `source`, the
-  published database, holds: the whole set, since an adopted commit never proved its
-  tasks admitted. A held task the source's history retracted was published and is
-  deleted; one the source never held is the destination's own and stays. The basis
-  is `destination`, the value this call read. Empty when they agree."
+(declare task-entity)
+
+(defn- changed-handles
+  "The handles of the tasks whose facts `source` wrote after `base`, the commit
+  of its lineage it was adopted from: read from `source`'s history since
+  `base`'s basis, so the work follows the publication's change."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
-                  [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
-  [source destination]
-  (let [published (task-handles source false) retracted (task-handles source true) held (task-handles destination false)
-        failure (some read-error [published retracted held])
-        handles (when-not failure (into published (filter retracted) held))
-        entities (when handles (stored-tasks source :seon.task/id handles))
-        basis (when handles (stored-tasks destination :seon.task/id handles))]
-    (or failure (read-error entities) (read-error basis)
-        (let [entities (vec (vals entities))
-              basis (update-vals basis #(declaration (db/carried-projection destination) %))]
-          (if (empty? (adopt-tasks-tx destination entities handles basis)) [] [[:db.fn/call #'adopt-tasks-tx entities handles basis]])))))
+                  [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
+  [base source]
+  (let [since (db/since (db/history source) (db/basis-t base))
+        datoms (if (read-error since) since (db/datoms since :eavt))]
+    (or (read-error datoms)
+        (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct)
+                        (keep (fn [e] (some #(:v (first (db/datoms % :eavt e :seon.task/id))) [source base]))))
+              datoms))))
+
+(defn- adoption-conflict
+  "Root's problem task for the task `handle` that both the publication (from
+  `base` to `theirs`) and main (`ours`) revised: main kept its value. Named by
+  its identity, so a repeat writes nothing."
+  {:malli/schema [:=> [:cat :seon.task/handle [:maybe :seon.task/declaration] [:maybe :seon.task/declaration]
+                       [:maybe :seon.task/declaration]] :seon.task/task]}
+  [handle base theirs ours]
+  (let [{task-ns :seon.task/ns task-name :seon.task/name} (or ours theirs base)
+        revision #(if % (id/digest 64 [%]) :absent)]
+    (task-entity {:seon.task/ns 'seon.task
+                  :seon.task/name (str "adoption-conflict-" (id/id [:adoption-conflict handle (revision theirs) (revision ours)]))
+                  :seon.task/intent (str "The published task files and main both revised task `" (task-sym task-ns task-name) "`"
+                                         " since the adopted source commit; main kept its value."
+                                         " Read the three declarations with seon.task/task-declaration and decide.")}
+                 "root")))
+
+(defn adopt-tasks-call
+  "Transaction data reconciling `destination`'s tasks to `source`, the published
+  database. With `base`, the published commit `destination` adopted before (the
+  merge base), it is a three-way merge of only the tasks `source` changed since
+  `base` (`changed-handles`): one main still holds as `base` did takes
+  `source`'s value, one main revised too (a merged refinement whose publication
+  is due) keeps main's value and writes root's problem task
+  (`adoption-conflict`), as `seon.merge/squash-merge`'s `:root` rule does.
+  Without `base` (the first adoption) it reconciles the whole set: a held task
+  the source's history retracted was published and is deleted; one the source
+  never held is the destination's own and stays. The basis is `destination`,
+  the value this call read. Empty when they agree."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                   [:or :seon.db/tx-data :seon.db/invalid-read-error]]
+                  [:=> [:cat :seon.db/database-value :seon.db/database-value [:maybe :seon.db/database-value]]
+                   [:or :seon.db/tx-data :seon.db/invalid-read-error]]]}
+  ([source destination] (adopt-tasks-call source destination nil))
+  ([source destination base]
+   (let [published (when-not base (task-handles source false))
+         retracted (when-not base (task-handles source true))
+         held (when-not base (task-handles destination false))
+         changed (when base (changed-handles base source))
+         failure (some read-error [published retracted held changed])
+         handles (when-not failure (or changed (into published (filter retracted) held)))
+         read (fn [database] (when (and database handles) (stored-tasks database :seon.task/id handles)))
+         [theirs ours was] (map read [source destination base])]
+     (or failure (some read-error [theirs ours was])
+         (let [projection (db/carried-projection destination)
+               of (fn [stored h] (declaration projection (get stored h)))
+               ;; the three-way: main unchanged since the base takes theirs; both revised keeps ours
+               conflicts (when base (filterv (fn [h] (let [b (of was h) t (of theirs h) o (of ours h)]
+                                                       (and (not= b t) (not= o b) (not= o t))))
+                                             (sort handles)))
+               taken (if base (into #{} (filter (fn [h] (and (not= (of was h) (of theirs h)) (= (of ours h) (of was h))))) handles)
+                         handles)
+               problems (mapv #(adoption-conflict % (of was %) (of theirs %) (of ours %)) conflicts)
+               entities (into (vec (keep theirs taken)) problems)
+               handles (into taken (map :seon.task/id) problems)
+               basis (into {} (keep (fn [h] (when-let [d (of ours h)] [h d]))) handles)]
+           (if (empty? (adopt-tasks-tx destination entities handles basis)) [] [[:db.fn/call #'adopt-tasks-tx entities handles basis]]))))))
 
 (defn index-tasks!
   "Reconcile task files through the writer against the declarations the caller read
