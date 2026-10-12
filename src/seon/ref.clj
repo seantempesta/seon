@@ -196,7 +196,7 @@
 (defn- resolve-name
   "One referenced name resolved to its current definition on `database`: a program function's own content (its
   docstring's summary, arglists and contract as the agent writes it) with the forms that read its source, callers
-  and reaching tests; a schema key's form; a test's source; or a problem."
+  and reaching tests; a schema key's form; a test's source; a task's intent; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
@@ -213,6 +213,8 @@
           :else {:seon.ref/name reference :seon.ref/schema-form (:form found)}))
       (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
             test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym :seon.test/source] [:seon.test/sym reference]))
+            task (when-not (or (:seon.fn/sym function) (:seon.test/sym test-entity))
+                   (db/pull database [:seon.task/sym :seon.task/intent] [:seon.task/sym reference]))
             subject {:seon.program/subject (list 'quote reference)}]
         (cond
           (:seon.error/at function) function
@@ -224,6 +226,8 @@
             true (assoc :seon.render/operations [source (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
           (:seon.error/at test-entity) test-entity
           (:seon.test/sym test-entity) {:seon.ref/name reference :seon.test/source (:seon.test/source test-entity)}
+          (:seon.error/at task) task
+          (:seon.task/sym task) {:seon.ref/name reference :seon.task/intent (:seon.task/intent task)}
           :else (library-name reference))))))
 
 (declare resolve-path)
@@ -241,12 +245,14 @@
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem.
 
-  Held names come first, sorted, then the text's in first-seen order."
+  Held names come first, sorted, then the held paths (each read as a code span is), then the text's in first-seen
+  order."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.ref/keys [text names document-path]}]
+  [database {:seon.ref/keys [text names paths document-path]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
-        held (map (fn [reference] {:seon.ref/name reference}) (sort names))
+        held (concat (map (fn [reference] {:seon.ref/name reference}) (sort names))
+                     (keep #(span-candidate roots %) (sort paths)))
         found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))
         identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)]
     (->> (concat held found)

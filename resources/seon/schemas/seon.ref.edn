@@ -21,9 +21,10 @@
                        [:map [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
                         [:seon.ref/problem-kind {:optional true} [:enum :line-reference]]
                         [:seon.ref/line {:optional true} :seon.ref/line]]]
-           :source [:map {:description "Markdown text that can carry references: an intent or docstring alone, a doc with its path."}
+           :source [:map {:description "Markdown text that can carry references (an intent or docstring alone, a doc with its path), with the names and paths held beside it."}
                     [:seon.ref/text :string]
                     [:seon.ref/names {:optional true} [:set :seon.ref/name]]
+                    [:seon.ref/paths {:optional true :description "Held based paths with optional #anchors, each read as a code span is."} [:set [:string {:min 1}]]]
                     [:seon.ref/document-path {:optional true} :seon.ref/path]]
            :problem [:map {:description "A reference that does not resolve, and why."}
                      [:seon.ref/problem-kind :seon.ref/problem-kind]
@@ -39,7 +40,7 @@
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
-           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's docstring summary, arglists and contract as the agent writes it (:malli/schema), with the forms that read its source, callers and reaching tests; a schema key's form; a test's source."}
+           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's docstring summary, arglists and contract as the agent writes it (:malli/schema), with the forms that read its source, callers and reaching tests; a schema key's form; a test's source; a task's intent."}
                            [:seon.ref/name :seon.ref/name]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]
@@ -48,6 +49,7 @@
                            [:seon.ref/pin {:optional true} :seon.ref/pin]
                            [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
                            [:seon.test/source {:optional true} :seon.test/source]
+                           [:seon.task/intent {:optional true} :seon.task/intent]
                            [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin and the one read operation, never its text."}
                           [:seon.ref/path :seon.ref/path]

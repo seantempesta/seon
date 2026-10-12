@@ -24,9 +24,9 @@ definitions and schemas. The whole-block size is the reply's `:large-value` find
 
 | Task | Before | After |
 |---|---|---|
-| `seon.sci.forgive/forgiving-forgiven-text-changes-nothing` | 3,755 | 3,125 |
-| `seon.ai/contract-output-observed?` | 1,370 | 1,033 |
-| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 3,469 |
+| `seon.sci.forgive/forgiving-forgiven-text-changes-nothing` | 3,755 | 3,191 |
+| `seon.ai/contract-output-observed?` | 1,370 | 1,052 |
+| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 3,565 |
 
 Every block is under the 4,096-token `:large-value` bound after. The merge task's must-reads were 398 reaching tests of
 `seon.db/vector-query-call` by name. What remains of the forgive block is mostly its three proofs' sources, the task's
@@ -49,6 +49,19 @@ reading more is an operation.
 - A problem carries `:seon.ref/message`: what failed and what to do.
 - `:seon.context/start` is `{:seon.render/operations [(in-ns 'the.ns)]}`: a form to run. The old
   `(my.program/source 'task/sym)` read the task's symbol, which names no definition.
+
+- Every task attribute goes through the one resolver (`seon.context/task-references`): the names in the intent and
+  instructions, the must-read names, the tasks it needs (a task resolves to its intent) and the evidence paths (each
+  read as a code span is). Before, only the intent and must-read were resolved; evidence, needs and instructions were
+  not (no task on default holds instructions). The evidence document of each of the three tasks now shows as a
+  resolved doc (heading and its section read): about 66 to 96 tokens each.
+
+## Open decision: a doc reference's section text
+
+A resolved doc shows its heading and the `(my.fs/section ...)` read, never its text (`:seon.ref/resolved-doc`). Pulling
+the section text in whole would add the evidence documents' sizes (`seon.ref/section` `:seon.ref/tokens`):
+designed-task-examples.md 14,201, contracts-guide.md 3,228, m6-notes.md 2,425 (AGENTS.md whole 21,679). Every block
+would pass the 4,096 bound, and the forgive block would grow about fivefold.
 
 ## Not changed, with evidence
 

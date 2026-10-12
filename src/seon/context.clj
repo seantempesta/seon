@@ -85,7 +85,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private task-selector
-  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions :seon.task/must-read])
+  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions :seon.task/must-read :seon.task/evidence])
 
 ;; Every failing assertion of a red proof, in the order `seon.render.test` shows (file, line, report id)
 ;; so two passes show the same list. The
@@ -204,7 +204,23 @@
           (string? handle)
           (let [pulled (db/pull database task-selector [:seon.task/id handle])]
             ;; a cardinality-many pull is a vector; the declaration holds a set
-            (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
+            (cond-> pulled
+              (:seon.task/must-read pulled) (update :seon.task/must-read set)
+              (:seon.task/evidence pulled) (update :seon.task/evidence set))))))
+
+(defn- task-references
+  "Every reference the held task's attributes make, resolved on `database` by the one rule (`seon.ref/references`):
+  the names in its intent and instructions, its must-read names, the tasks it needs, its evidence paths."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task]
+                  [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
+  [database {:seon.task/keys [id intent instructions must-read evidence]}]
+  (let [needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
+                    database id)]
+    (if (db/read-refusal? needs)
+      [needs]
+      (ref/references database (cond-> {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
+                                        :seon.ref/names (into (set must-read) needs)}
+                                 (seq evidence) (assoc :seon.ref/paths evidence))))))
 
 (defn send-backs
   "The latest send-back to the task `handle` on `database`: the attempt of another step that ended
@@ -516,8 +532,7 @@
                        (mapv #(if (:seon.task/end %) (assoc % :seon.task/ended (ended database %)) %) items)))))
         cost (branch-cost database)
         namespace (agent-namespace database agent-id held)
-        reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
-                                                   :seon.ref/names (:seon.task/must-read held #{})}))]
+        reads (when held (task-references database held))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)

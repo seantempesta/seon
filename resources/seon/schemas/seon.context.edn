@@ -4,7 +4,8 @@
                 [:seon.task/sym :seon.task/sym]
                 [:seon.task/intent :seon.task/intent]
                 [:seon.task/instructions {:optional true} :seon.task/instructions]
-                [:seon.task/must-read {:optional true} :seon.task/must-read]],
+                [:seon.task/must-read {:optional true} :seon.task/must-read]
+                [:seon.task/evidence {:optional true} :seon.task/evidence]],
                :send-backs [:vector {:description "The latest send-back to the held task: the step that sent it back and the reason its attempt recorded (seon.context/send-backs); absent when none was sent."}
                             [:map [:seon.task/sym :seon.task/sym] [:seon.task.attempt/reason :seon.task.attempt/reason]]]
                :turns
@@ -13,7 +14,7 @@
                 [:seon.task/status {:optional true} :seon.task/status]
                 [:seon.context/namespace {:optional true} :seon.context/namespace]],
                :namespace [:and {:description "The namespace the agent is in: where its latest evaluation ended, else its held task's namespace. Producer: seon.context/current-state."} :seon.ns/name],
-               :must-reads [:vector {:description "Each reference the held task makes, resolved or as its problem."} [:or :seon.ref/resolved :seon.ref/problem]]
+               :must-reads [:vector {:description "Each reference the held task's attributes make (intent, instructions, must-read, needs, evidence), resolved by one rule or as its problem."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
                :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner as text."}
                                [:seon.error/type {:optional true} :seon.error/type]
@@ -88,7 +89,8 @@
                 [:seon.context/task {:optional true}
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
                   [:seon.task/instructions {:optional true} :seon.task/instructions]
-                  [:seon.task/must-read {:optional true} :seon.task/must-read]]]
+                  [:seon.task/must-read {:optional true} :seon.task/must-read]
+                  [:seon.task/evidence {:optional true} :seon.task/evidence]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]

@@ -11,10 +11,10 @@ The current-state block value as the agent's REPL reply shows it (display budget
 
 ```clojure
 #:seon.repl{:findings [{:seon.repl/finding :large-value,
-  :seon.eval/value-tokens 1033,
-  :seon.eval/shown-tokens 963,
+  :seon.eval/value-tokens 1052,
+  :seon.eval/shown-tokens 983,
   :seon.repl/fix
-    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/ef59c2d05b769, :ms 141, :alloc-mb 304.2, :value #:seon.context{:turns
+    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/ecd943acf32aa, :ms 128, :alloc-mb 256.5, :value #:seon.context{:turns
    {:my.agent/turns-left 100,
     :seon.task/status :working,
     :seon.context/namespace seon.ai},
@@ -22,6 +22,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
    #:seon.task{:id "59cc831bfd08",
     :sym seon.ai/contract-output-observed?,
     :must-read #{seon.ai/output-observed? seon.contracts/gaps},
+    :evidence #{"docs/seon/architecture/contracts-guide.md"},
     :intent
       "Give `seon.ai/output-observed?` a complete Malli contract that checks what its boundary is for, with the cheapest schema that checks it (`docs/seon/architecture/contracts-guide.md`): registered names, every input and output, the error variants it returns. A contract that refuses a real value (a reaching test, a live call, your probe) is a finding, not friction: if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer emits a bad value, keep the contract, file a task on the producer naming `seon.ai/output-observed?` in its must-read with the exact form, the refused value's essence and the Malli explain, and say so in your reply. Never widen to :any, [:maybe ...] or :map to go green. Done when `seon.contracts/gaps` answers [] for it and its reaching tests stay green and no slower."},
  :proofs
@@ -59,7 +60,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
           :seon.fn.contract/finding-row
           [:map
           [:seon.fn/sym :seon.fn/sym]
-          […2 (get-in result/ef59c2d05b769 [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
+          […2 (get-in result/ecd943acf32aa [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
          :seon.error/value
          :seon.db/invalid-read-error
          :seon.schema/validation-refusal]],

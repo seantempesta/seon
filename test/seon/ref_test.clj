@@ -149,6 +149,16 @@
     (is (= #{:seon.ref/name :doc :arglists :malli/schema :seon.render/operations} (set (keys entry)))
         "its own content only: no callers or tests pulled in")))
 
+(deftest a-held-path-resolves-as-a-span-does
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "" :seon.ref/paths #{"AGENTS.md#data-and-contracts"}})]
+    (is (= ["AGENTS.md" "data-and-contracts" "Data and contracts"]
+           [(:seon.ref/path entry) (:seon.ref/anchor entry) (:seon.ref/heading entry)]))))
+
+(deftest a-referenced-task-shows-its-intent
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/a-reference-with-no-path-is-a-missing-file`"})]
+    (is (= 'seon.ref/a-reference-with-no-path-is-a-missing-file (:seon.ref/name entry)))
+    (is (string? (:seon.task/intent entry)) "a task resolves to its own content, its intent")))
+
 (deftest a-referenced-test-shows-its-own-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
     (is (= #{:seon.ref/name :seon.test/source} (set (keys entry))) "a test resolves to its own content, like any reference")

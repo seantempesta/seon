@@ -139,16 +139,35 @@
          (is (= ['(my.program/source 'seon.task/agent-attempt)] (filterv #(= 'my.program/source (first %)) operations))
              "a must-read offers the form that reads its body"))))))
 
+(deftest every-task-attribute-brings-its-references-into-the-block
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'attributes 'tq.cs/attributes)
+           base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs :seon.task/kind :function}
+           _ (task/create! (assoc base :seon.task/name "first" :seon.task/intent "Comes first."))
+           id (:seon.task/id (task/create! (assoc base :seon.task/name "attributes" :seon.task/intent "Use `seon.task/agent-task`."
+                                                  :seon.task/must-read #{'seon.task/agent-attempt}
+                                                  :seon.task/evidence #{"AGENTS.md#data-and-contracts"}
+                                                  :seon.task/needs #{[:seon.task/sym 'tq.cs/first]})))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+       (let [reads (shown running agent-id "(mapv #(select-keys % [:seon.ref/name :seon.ref/path :seon.task/intent]) (:seon.context/must-reads (seon.context/current-state)))")]
+         (is (some #{{:seon.ref/name 'seon.task/agent-task}} reads) "the intent's names")
+         (is (some #{{:seon.ref/name 'seon.task/agent-attempt}} reads) "the must-read names")
+         (is (some #{{:seon.ref/name 'tq.cs/first :seon.task/intent "Comes first."}} reads) "the tasks it needs, by their intent")
+         (is (some #{{:seon.ref/path "AGENTS.md"}} reads) "its evidence paths"))))))
+
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'missing 'tq.cs/missing)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "missing" :seon.task/kind :function
-                                            :seon.task/intent "Fix `tq.cs/missing`."}))]
+                                            :seon.task/intent "Fix `tq.cs/absent`."}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-       (is (= [{:seon.ref/name 'tq.cs/missing :seon.ref/problem-kind :unresolved}]
+       ;; the task itself is tq.cs/missing, a name that resolves to it; the intent names one that resolves to nothing
+       (is (= [{:seon.ref/name 'tq.cs/absent :seon.ref/problem-kind :unresolved}]
               (mapv #(dissoc % :seon.ref/message) (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
        (is (string? (:seon.ref/message (first (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
            "the problem says what failed and what to do")))))
