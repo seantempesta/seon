@@ -412,6 +412,20 @@
              (catch clojure.lang.ExceptionInfo failure
                (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))))
 
+(defn obligations
+  "The step kind, own proofs and successors' product tests for task `sym` at `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
+                  [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database sym]
+  (let [task (db/pull database [:seon.task/step] [:seon.task/sym sym])
+        proofs (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database sym)
+        product (db/q '[:find [?s ...] :in $ ?t :where [?task :seon.task/sym ?t]
+                        [?next :seon.task/needs ?task] [?next :seon.task/sym ?n]
+                        [?e :seon.task/tasks ?n] [?e :seon.test/sym ?s]] database sym)]
+    (or (some read-error [task proofs product])
+        {:seon.task/step (get task :seon.task/step :implement)
+         :seon.task/proofs (set proofs) :seon.task/product (set product)})))
+
 (defn task-edges
   "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
   namespaces and tasks whose must-read names one of its subjects, over one held value.
@@ -533,7 +547,7 @@
   (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\"
                       :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
+                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind] [:seon.task/step {:optional true} :seon.task/step]
                              [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
                              [:seon.task/evidence {:optional true} :seon.task/evidence]
                              [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
@@ -543,7 +557,7 @@
   [{connection :seon.db/connection agent-id :seon.agent/id task-name :seon.task/name :as request}]
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
-    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/step :seon.task/intent
                                                     :seon.task/must-read :seon.task/evidence
                                                     :seon.task/children :seon.task/needs]) agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
@@ -553,8 +567,8 @@
         {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))}))))
 
 (defn assignment-read
-  "What assigning task `handle` to `agent` reads at main `database`: the task's revision, the agent's
-  id and the task's proofs; refused when the task or agent is unknown or the task has no proof."
+  "What assigning task `handle` to `agent` reads at `database`: the task's revision, the agent's
+  id and the task's proofs; refused when the task or agent is unknown or the step has no obligations of its kind."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assigned :seon.task/agent]
                   [:or [:map [:seon.task/revision :seon.task/revision] [:seon.agent/id :seon.agent/id]
                         [:seon.task/proofs :seon.task/proofs]]
@@ -563,12 +577,12 @@
   (let [revision (task-revision database handle)
         agent-id (:seon.agent/id (db/pull database [:seon.agent/id] agent))
         edges (when (and (string? revision) (string? agent-id))
-                (task-edges database (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle]))))]
+                (obligations database (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle]))))]
     (cond (:seon.error/at revision) revision
           (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
           (not (string? agent-id)) (refused 'seon.task/assign! :unassigned 'seon.task agent)
           (:seon.error/at edges) edges
-          (empty? (:seon.task/proofs edges)) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
+          (empty? (get edges (if (= :prove (:seon.task/step edges)) :seon.task/product :seon.task/proofs))) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
           :else {:seon.task/revision revision :seon.agent/id agent-id :seon.task/proofs (:seon.task/proofs edges)})))
 
 (defn- next-attempt
@@ -692,7 +706,7 @@
         [[key handle revision]] (when-not (map? assigned) (seq assigned))
         current (when handle (task-revision database handle))
         task (when handle (db/pull database [:seon.task/ns :seon.task/sym] [:seon.task/id handle]))
-        edges (when (:seon.task/sym task) (task-edges database (:seon.task/sym task)))]
+        edges (when (:seon.task/sym task) (obligations database (:seon.task/sym task)))]
     (cond (some :seon.error/at [assigned current task edges]) (some #(when (:seon.error/at %) %) [assigned current task edges])
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})

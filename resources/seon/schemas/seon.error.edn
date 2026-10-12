@@ -1,4 +1,8 @@
-#:seon.error{:throwable
+#:seon.error{:unimplemented-function :qualified-symbol,
+             :unimplemented
+             [:and {:description "A contracted stub has no implementation; its error is a designed red product test."}
+              :seon.error/base [:map [:seon.error/unimplemented-function :seon.error/unimplemented-function]]],
+             :throwable
              [:fn {:error/message "must be a JVM Throwable"
                    :gen/gen seon.error/throwable-generator} seon.error/throwable?],
              :explain-request

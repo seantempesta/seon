@@ -4,6 +4,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is are]]
             [seon.db :as db]
+            [seon.error.refusal :as refusal]
             [seon.id :as id]
             [seon.profile :as profile]
             [seon.task :as task]
@@ -36,6 +37,29 @@
   (set (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/sym ?t] [?e :seon.task/needs ?n] [?n :seon.task/sym ?s]]
              (db/db connection) (symbol "tq.tree" task-name))))
 
+(deftest ^{:seon/tasks #{'seon.task/a-step-selects-its-obligations-by-its-kind}} obligations-select-by-step
+  (test-support/with-database
+   (fn [connection]
+     (ingest! connection (entry "ordinary" "") (entry "implement" ":step :implement")
+              (entry "prove" ":step :prove") (entry "prove-own" ":step :prove")
+              (entry "body" (needs "prove")) (entry "body-own" (needs "prove-own")))
+     (doseq [[name tag] [['ordinary 'ordinary] ['implementation 'implement]
+                       ['product 'body] ['own 'prove-own] ['product-own 'body-own]]]
+       (test-support/declare-proof! connection 'tq.obligations name (symbol "tq.tree" (str tag))))
+     (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-obligations-agent"))
+     (doseq [[name kind proofs product]
+             [["ordinary" :implement '#{tq.obligations/ordinary} #{}]
+              ["implement" :implement '#{tq.obligations/implementation} #{}]
+              ["prove" :prove #{} '#{tq.obligations/product}]
+              ["prove-own" :prove '#{tq.obligations/own} '#{tq.obligations/product-own}]]]
+       (is (= {:seon.task/step kind :seon.task/proofs proofs :seon.task/product product}
+              (task/obligations (db/db connection) (symbol "tq.tree" name))))
+       (is (= proofs (:seon.task/proofs
+                      (task/assignment-read (db/db connection) (task/task-handle 'tq.tree name :work)
+                                            [:seon.agent/id "tq-obligations-agent"])))))
+     (is (= {:seon.task/step :implement :seon.task/proofs #{} :seon.task/product #{}}
+            (task/obligations (db/db connection) 'tq.tree/missing))))))
+
 (deftest ^{:seon/tasks #{'seon.task/a-needs-cycle-is-refused-at-the-writer}} a-needs-cycle-is-refused-at-the-writer
   (test-support/with-database
    (fn [connection]
@@ -52,9 +76,12 @@
                                               (entry "a" "") (entry "b" (needs "a")) (entry "c" (needs "p")))))
          "a sibling that needs another and a task that needs the parent are no cycle"))))
 
-(deftest ^{:seon/tasks #{'seon.task/a-needs-cycle-is-refused-at-the-writer}} the-task-facts-adopt-on-a-branch-of-the-live-store
+(deftest ^{:seon/tasks #{'seon.task/a-needs-cycle-is-refused-at-the-writer 'seon.task/a-step-selects-its-obligations-by-its-kind}} the-task-facts-adopt-on-a-branch-of-the-live-store
   (test-support/with-database
    (fn [connection]
+     (is (= :seon.error/unimplemented
+            (:seon.error/type (refusal/error :seon.error/unimplemented
+                                            {:seon.error/unimplemented-function 'tq.tree/stub :seon.error/operation 'tq.tree/stub :seon.error/message "Not implemented."}))))
      (ingest! connection (entry "p" ":children #{[:seon.task/sym tq.tree/a]}") (entry "a" "") (entry "b" (needs "p")))
      (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-tree-agent"))
      (let [handle (task/task-handle 'tq.tree "a" :work)
@@ -63,11 +90,12 @@
            commit (random-uuid)]
        (test-support/transacted!
         connection
-        [{:db/id [:seon.task/id handle] :seon.task/execution :held :seon.task/instructions "Run these."
+        [{:db/id [:seon.task/id handle] :seon.task/step :prove :seon.task/execution :held :seon.task/instructions "Run these."
           :seon.task/cron "0 3 * * *" :seon.task/zone "UTC" :seon.task/function [:seon.fn/sym 'seon.task/create!]}
          {:seon.task/assignment assignment :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
           :seon.task/revision (task/task-revision (db/db connection) handle) :seon.task/agent [:seon.agent/id "tq-tree-agent"]
-          :seon.task/branch :tq-tree :seon.task.attempt/end :sent-back :seon.task.attempt/target [:seon.task/id handle]
+          :seon.task/branch :tq-tree :seon.task.attempt/end :error :seon.task.attempt/relaunch "The execution is repaired."
+          :seon.task.attempt/relaunch-fork commit :seon.task.attempt/target [:seon.task/id handle]
           :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit}
          {:seon.task.fire/id firing :seon.task.fire/at #inst "2026-10-11T00:00:00Z" :seon.task.fire/of [:seon.task/id handle]
           :seon.task.fire/to [:seon.agent/id "tq-tree-agent"]}])
@@ -77,13 +105,15 @@
                 (update-vals (db/pull database [:seon.task/children] [:seon.task/sym 'tq.tree/p]) #(set (map sym-of %)))))
          (is (= {:seon.task/needs #{'tq.tree/p}}
                 (update-vals (db/pull database [:seon.task/needs] [:seon.task/sym 'tq.tree/b]) #(set (map sym-of %)))))
-         (is (= {:seon.task/execution :held :seon.task/instructions "Run these." :seon.task/cron "0 3 * * *" :seon.task/zone "UTC"}
-                (db/pull database [:seon.task/execution :seon.task/instructions :seon.task/cron :seon.task/zone] [:seon.task/id handle])))
+         (is (= {:seon.task/step :prove :seon.task/execution :held :seon.task/instructions "Run these." :seon.task/cron "0 3 * * *" :seon.task/zone "UTC"}
+                (db/pull database [:seon.task/step :seon.task/execution :seon.task/instructions :seon.task/cron :seon.task/zone] [:seon.task/id handle])))
          (is (= 'seon.task/create!
                 (:seon.fn/sym (:seon.task/function (db/pull database [{:seon.task/function [:seon.fn/sym]}] [:seon.task/id handle])))))
-         (is (= {:seon.task.attempt/end :sent-back :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit
+         (is (= {:seon.task.attempt/end :error :seon.task.attempt/relaunch "The execution is repaired."
+                 :seon.task.attempt/relaunch-fork commit :seon.task.attempt/reason "The proof asserts the old shape." :seon.task.attempt/commit commit
                  :seon.task/attempt-of 'tq.tree/a :seon.task.attempt/target 'tq.tree/a}
-                (-> (db/pull database [:seon.task.attempt/end :seon.task.attempt/reason :seon.task.attempt/commit
+                (-> (db/pull database [:seon.task.attempt/end :seon.task.attempt/relaunch :seon.task.attempt/relaunch-fork
+                                       :seon.task.attempt/reason :seon.task.attempt/commit
                                        :seon.task/attempt-of :seon.task.attempt/target] [:seon.task/assignment assignment])
                     (update :seon.task/attempt-of sym-of) (update :seon.task.attempt/target sym-of))))
          (is (= {:seon.task.fire/at #inst "2026-10-11T00:00:00Z" :seon.task.fire/of 'tq.tree/a}

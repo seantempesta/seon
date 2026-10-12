@@ -75,7 +75,7 @@ Words no library names. Each has one meaning.
 | `:seon.cluster` | the entity-schema partition for facts copied onto main at an attempt's successful end, with conflict rules declared on the schema or its entries (`seon.program/cluster-attributes`); messages remain `:seon.data` | mergeable data roster |
 | end copy | one transaction copying a successful attempt's cluster facts onto main, with source branch and commit as transaction metadata; an error end copies nothing | live relay |
 | inbox | the Flow channel carrying message values to an agent; its recipient writes received messages on its own branch | stored transport |
-| proof | a deftest naming a task in `:seon/tasks`; a task completes when its proofs are green | gate (for a task's tests) |
+| proof | a deftest naming a task in `:seon/tasks`; an Implement step requires its proofs green, and a Prove step requires its optional proofs green | gate (for a task's tests) |
 | reaching test | a test whose current dependencies reach a changed definition (`my.program/tests-reaching`); differs from a test's recorded past `:seon.test/reach` | gate set, test closure |
 | turn | the unit a model call answers: an agent's ordered evaluations and provider attempts, open until closed (`seon.turn`) | run (meaning one turn), `seon.cluster.run` |
 | run | a budget of turns counted from a triggering message or task assignment to the reply or the cap; derived by query, never an entity (CN-19 retires "run" for one turn) | episode, session bound |
@@ -84,7 +84,9 @@ Words no library names. Each has one meaning.
 | write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`seon.cluster.source/write-back!`) | export, push |
 | wake | a listened event the agent has not yet answered (a message, a task change) | notification, trigger |
 | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
-| subject, step | a subject task owns its step tasks as components (`:seon.task/children`); a step is an ordinary task with its own assignment, proofs, instructions and end; a parent never runs and is done when its children are | stage (of one task), plan item, child task |
+| subject, step | a subject task owns its step tasks as components (`:seon.task/children`); a step is an ordinary task with its own assignment, obligations, instructions and end, whose `:seon.task/step` is `:prove` or `:implement` (absent means `:implement`); a parent never runs and is done when its children are | stage (of one task), plan item, child task |
+| product | the deftests tagged with tasks whose `:seon.task/needs` names a Prove step; the new red tests that step supplies to its successors | proof-product entity |
+| obligations | `seon.task/obligations` selects the step kind, its own tagged proofs and its successors' tagged product tests from one database value; Implement requires proofs, Prove requires product | duplicate proof selection |
 | needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
 | frontier | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (`seon.task/frontier`); never stored | ready list, queue, scheduler state |
 | attempt | one assignment row of a task to an agent on a branch, numbered within its task (`seon.id/id [handle number]`, `seon.task/attempt-tx`), ended once by its end fact | run (of a task), launch |
