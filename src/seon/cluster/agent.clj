@@ -1948,9 +1948,9 @@
 (defn- follow!
   "Make `agent-id`'s started graph follow the action's op.
   Pause or resume it in place (recorded on its entry), stop and join it letting
-  its current pass finish, or interrupt and stop it and end its open attempt `:cancelled`."
+  its current pass finish, or interrupt and stop it; the next pass closes a cancelled attempt (`close!`)."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/action] :nil]}
-  [handle routing {op :seon.flow.plan/op agent-id :seon.agent/id key :seon.task/assignment}]
+  [handle routing {op :seon.flow.plan/op agent-id :seon.agent/id}]
   (when-let [registry (entry-registry routing agent-id)]
     (case op
       :pause (do (flow/pause (:seon.flow/graph (started registry agent-id)))
@@ -1960,10 +1960,6 @@
       ;; a stop lets the current pass finish; only a cancel interrupts it
       :stop (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true})
       :cancel (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry})))
-  (when (= :cancel op)
-    (write! (:seon.db/connection handle)
-            [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :cancelled]
-             [:db/add [:seon.task/assignment key] :seon.task.attempt/reason "The task's intent is :cancelled."]]))
   nil)
 
 (defn- write-problem!
@@ -2093,7 +2089,10 @@
                              ;; the branch is read while it holds something unmerged
                              {on-branch :seon.task.attempt/end}
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
-                             end (or main-end on-branch)
+                             ;; a cancelled task's attempt holding no end of its own is closed :cancelled
+                             end (or main-end on-branch
+                                     (when (= :cancelled (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id h])))
+                                       :cancelled))
                              publish? (publication-due? database a row)]
                          (when (uuid? head)
                            (cond-> {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
@@ -2125,7 +2124,7 @@
                          head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
                          publish? :seon.flow.plan/publish? :as row}]
                      (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
-                                                            :seon.task/branch])
+                                                            :seon.task/branch :seon.task.attempt/end])
                                           :seon.flow.plan/op %)
                            ;; an end main holds with no merge base was copied before merge bases existed
                            copied? (and main-end (nil? base))
@@ -2160,17 +2159,23 @@
 (defn- close!
   "Write a `:close` action's end on main through `connection` and merge nothing else.
   Root's problem task first, then ONE transaction with the assignment's end facts its branch head holds,
-  carrying the branch and commit they came from as transaction metadata."
+  carrying the branch and commit they came from as transaction metadata. A `:cancelled` end is db<->flow's own:
+  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action] :nil]}
-  [connection {a :db/id key :seon.task/assignment branch :seon.task/branch :as action}]
+  [connection {a :db/id key :seon.task/assignment branch :seon.task/branch end :seon.task.attempt/end :as action}]
   (let [head (db/branch-database (db/db connection) branch)]
     (try
-      (let [facts (dissoc (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/commit
-                                                  :seon.task.attempt/reason]) .
-                                  :in $ ?k :where [?a :seon.task/assignment ?k]]
-                                head key)
-                          :db/id)]
-        (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts))
+      (let [cancelled? (= :cancelled end)
+            facts (if cancelled?
+                    {:seon.task.attempt/end :cancelled :seon.task.attempt/reason "The task's intent is :cancelled."
+                     :seon.task/outcome :closed}
+                    (dissoc (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/commit
+                                                    :seon.task.attempt/reason]) .
+                                    :in $ ?k :where [?a :seon.task/assignment ?k]]
+                                  head key)
+                            :db/id))]
+        (when-not cancelled?
+          (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts)))
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))
                             :tx-meta {:seon.squash/source-branch branch :seon.squash/source-commit (db/commit-id head)}}))
       (finally (source/release! [head])))

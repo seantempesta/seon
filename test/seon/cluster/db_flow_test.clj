@@ -874,6 +874,28 @@
               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
                   "with nothing interrupted")))))))))
 
+(deftest a-cancelled-assignment-closes-without-a-task-for-root
+  (binding [*space* "tq.cancelclose"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"c" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/sym ?s] [(namespace ?s) ?ns] [(= ?ns "seon.task")]
+                                       [(name ?s) ?n] [(clojure.string/starts-with? ?n "attempt-ended-")]]
+                                     (db/db connection)))]
+            (pass! handle routing)
+            (let [[[key branch]] (seq (attempts connection "c"))]
+              (test-support/transacted! connection [[:db/add [:seon.task/id (chain-handle "c")] :seon.task/execution :cancelled]])
+              (pass! handle routing)
+              (pass! handle routing)
+              (let [row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task/outcome] [:seon.task/assignment key])]
+                (is (= :cancelled (:seon.task.attempt/end row)) "the close writes the end on main")
+                (is (= :closed (:seon.task/outcome row)) "and closes the assignment")
+                (is (empty? (problems)) "with no problem task for root")
+                (is (contains? (registry/branches (agent/handle-store handle)) branch) "the branch stays"))))))))))
+
 (deftest a-failed-start-ends-its-attempt-and-the-next-plans
   ;; x forks its need a's end commit, whose branch is gone (chain experiment 3's G7): its start fails, and the
   ;; failure is x's assignment's end, so no pass starts it again while y, ready beside it, starts

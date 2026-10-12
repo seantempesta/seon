@@ -38,6 +38,7 @@
           [:seon.task.attempt/number {:optional true} :seon.task.attempt/number]
           [:seon.agent/id {:optional true} :seon.agent/id]
           [:seon.task/branch {:optional true} :seon.task/branch]
+          [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
           [:seon.task/execution {:optional true} :seon.task/execution]
           [:seon.flow.plan/fork-point {:optional true} :seon.flow.plan/fork-point]
           [:seon.flow.plan/class {:optional true} :seon.flow.plan/class]
