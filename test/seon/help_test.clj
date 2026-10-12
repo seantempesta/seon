@@ -196,8 +196,8 @@
               (mapv :seon.help/title groups))
            "help carries each orienting group, in reading order")
        (is (every? #(str/includes? text %)
-                   [":seon.context/proofs" ":pending" ":seon.ref/callers" ":seon.render/operations"
-                    "There is no done call" ":seon.fn/spec" "merge refuses it" "tool-call markup"
+                   [":seon.context/proofs" ":pending" ":seon.ref/message" ":seon.render/operations"
+                    "There is no done call" ":malli/schema you write" "merge refuses it" "tool-call markup"
                     "with-redefs" "(my.turn/wait" "(my.task/send-back!" "my.message/send"])
            "each group says what it is for: the block's parts, done, the contract form, the REPL, the don'ts and the way out")))))
 

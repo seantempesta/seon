@@ -24,8 +24,7 @@
            :source [:map {:description "Markdown text that can carry references: an intent or docstring alone, a doc with its path."}
                     [:seon.ref/text :string]
                     [:seon.ref/names {:optional true} [:set :seon.ref/name]]
-                    [:seon.ref/document-path {:optional true} :seon.ref/path]
-                    [:seon.ref/proofs {:optional true :description "The tests a function lists by name among those reaching it; the rest are counted."} [:set :seon.test/sym]]]
+                    [:seon.ref/document-path {:optional true} :seon.ref/path]]
            :problem [:map {:description "A reference that does not resolve, and why."}
                      [:seon.ref/problem-kind :seon.ref/problem-kind]
                      [:seon.ref/message :seon.ref/message]
@@ -34,16 +33,13 @@
                      [:seon.ref/path {:optional true} :seon.ref/path]
                      [:seon.ref/anchor {:optional true} :seon.ref/anchor]]
            :message [:string {:min 1 :description "What a problem kind means and what the agent does about it: short fixed text per kind."}]
-           :test-count [:int {:min 1 :description "How many tests reach a function when it lists only some by name; my.program/tests-reaching lists them all."}]
            :project [:string {:min 1}]
            :revision [:string {:min 40 :max 40}]
            :pin [:map {:description "The reference-code project and pinned revision a library definition loads from."}
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
-           :callers [:vector {:description "A function's direct callers, sorted."} :seon.fn/sym]
-           :tests [:vector {:description "The tests reaching a function, as `seon.fn/gate-set` selects them."} :seon.test/sym]
-           :resolved-name [:map {:description "A name resolved to its current definition, with the forms that read it; a program function also shows its contract as the agent writes it (:malli/schema), its direct callers, and its reaching tests among the task's proofs with the count of all of them."}
+           :resolved-name [:map {:description "A name resolved to its own content (a function's docstring summary, arglists and contract as the agent writes it, :malli/schema; a schema key's form), with the forms that read more: its source, callers and reaching tests."}
                            [:seon.ref/name :seon.ref/name]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]
@@ -51,9 +47,6 @@
                            [:doc {:optional true} :string]
                            [:seon.ref/pin {:optional true} :seon.ref/pin]
                            [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
-                           [:seon.ref/callers {:optional true} :seon.ref/callers]
-                           [:seon.ref/tests {:optional true} :seon.ref/tests]
-                           [:seon.ref/test-count {:optional true} :seon.ref/test-count]
                            [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin and the one read operation, never its text."}
                           [:seon.ref/path :seon.ref/path]

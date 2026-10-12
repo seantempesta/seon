@@ -520,8 +520,7 @@
         ;; the task's own proofs are shown in its proofs section, never again as must-reads
         reads (when held (into [] (remove #(proof-names (:seon.ref/name %)))
                                (ref/references database {:seon.ref/text (:seon.task/intent held)
-                                                         :seon.ref/names (:seon.task/must-read held #{})
-                                                         :seon.ref/proofs proof-names})))]
+                                                         :seon.ref/names (:seon.task/must-read held #{})})))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)

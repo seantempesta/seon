@@ -11,14 +11,14 @@ The current-state block value as the agent's REPL reply shows it (display budget
 
 ```clojure
 #:seon.repl{:findings [{:seon.repl/finding :large-value,
-  :seon.eval/value-tokens 2873,
-  :seon.eval/shown-tokens 1889,
+  :seon.eval/value-tokens 2618,
+  :seon.eval/shown-tokens 1888,
   :seon.repl/fix
     "A value this big usually means a query or function returns more than it should: select what you need."}
  {:seon.repl/finding :large-allocation,
-  :seon.eval/allocated-bytes 582152688,
+  :seon.eval/allocated-bytes 539394168,
   :seon.repl/fix
-    "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}], :result result/ea8e05123424d, :ms 268, :alloc-mb 582.2, :value #:seon.context{:turns
+    "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}], :result result/e30c1134eb77a, :ms 258, :alloc-mb 539.4, :value #:seon.context{:turns
    {:my.agent/turns-left 100,
     :seon.task/status :working,
     :seon.context/namespace seon.merge},
@@ -38,21 +38,13 @@ The current-state block value as the agent's REPL reply shows it (display budget
         :seon.test/source
           "(deftest ^{:seon/tasks #{'seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts}}
   a-jvms-first-facts-merge-follows-the-changed-facts
-  ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 MB; the same merge as a fresh JVM's first was 417 ms and 1.0 GB
-  (test-support/with-database
-   (fn [connection]
-     (let [handle (task/task-handle 'fixture.tasks \"first-merge\" :function)
-           agent-id \"first-merge-agent\"
-"…+1937 (subs (get-in result/ea8e05123424d [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 486)}]},
+  ;; red only as its JVM's first merge (run it alone through bin/seon check); a facts merge is warm 6.4 ms and 1 "…+2167 (subs (get-in result/e30c1134eb77a [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 256)}]},
  :step
    {:seon.task/step :implement,
     :seon.task/status :working,
     :seon.context/start {:seon.render/operations [(in-ns 'seon.merge)]}},
  :must-reads
    [{:seon.ref/name my.root/merge!,
-     :seon.ref/tests
-       [my.root-test/a-jvms-first-facts-merge-follows-the-changed-facts],
-     :seon.ref/test-count 3,
      :doc
        "Merge the open assignment `:seon.task/assignment` into my cluster (`seon.merge/merge!`): its branch's facts, and, when its agent requested the merge, its declarations, gated by the proofs and the tests reaching the change on a fresh merge branch of the head I hold, the files proven against the cluster's checkout (`:seon.config.fs/working-root`).",
      :arglists
@@ -64,11 +56,10 @@ The current-state block value as the agent's REPL reply shows it (display budget
          :seon.error/value]],
      :seon.render/operations
        [(my.program/source 'my.root/merge!)
+        (my.program/callers {:seon.program/subject 'my.root/merge!})
         (my.program/tests-reaching
          {:seon.program/subject 'my.root/merge!})]}
     {:seon.ref/name seon.db/vector-query-call,
-     :seon.ref/callers [seon.db/q seon.db/replay-read],
-     :seon.ref/test-count 398,
      :doc
        "Run one encoded Datalog `request`: lowered for vector storage once ([[lowered-query-request]]), executed with evidence, decoded once (`decode-query-result`).",
      :arglists
@@ -79,14 +70,13 @@ The current-state block value as the agent's REPL reply shows it (display budget
         [:or [:tuple :map :seon.schema/value] :seon.db/error-result]],
      :seon.render/operations
        [(my.program/source 'seon.db/vector-query-call)
+        (my.program/callers
+         {:seon.program/subject 'seon.db/vector-query-call})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.db/vector-query-call})]}
     {:seon.ref/name seon.merge/merge!,
-     :seon.ref/tests
-       [my.root-test/a-jvms-first-facts-merge-follows-the-changed-facts],
-     :seon.ref/test-count 11,
      :doc
-       "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and the store it holds or its SCI context's environment holds) as ONE transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): th"…+723 (subs (get-in result/ea8e05123424d [:seon.context/must-reads 2 :doc]) 272),
+       "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and the store it holds or its SCI context's environment holds) as ONE transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and, when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task on C (`seon.task/obligations`) and the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries `merge-tx` and `:seon.task/"…+168 (subs (get-in result/e30c1134eb77a [:seon.context/must-reads 2 :doc]) 827),
      :arglists ([execution key root]),
      :malli/schema
        [:=>
@@ -96,29 +86,21 @@ The current-state block value as the agent's REPL reply shows it (display budget
          [:maybe :seon.fn/root]]
         [:or :seon.merge/merged :seon.source/conflict-error
          :seon.error/value]],
-     :seon.ref/callers
-       [my.root/merge! seon.cluster.agent/apply-lifecycle!
-        seon.merge-test/merged!],
      :seon.render/operations
        [(my.program/source 'seon.merge/merge!)
+        (my.program/callers {:seon.program/subject 'seon.merge/merge!})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.merge/merge!})]}
     {:seon.ref/name seon.profile/measure,
-     :seon.ref/tests
-       [my.root-test/a-jvms-first-facts-merge-follows-the-changed-facts],
-     :seon.ref/test-count 61,
      :doc
-       "Call `f` once and return its value beside what the call cost, read from JVM counters, so compiled work inside it counts: wall ms"…+298 (subs (get-in result/ea8e05123424d [:seon.context/must-reads 3 :doc]) 128),
+       "Call `f` once and return its value beside what the call cost, read from JVM counters, so compiled work inside it counts: wall ms, allocated bytes, GC collections and their accumulated time, the armed definitions ranked by self time and by calls (host and SCI wrappers' outermost entries, at most `hot-limit` each), every entered definition's entries (`calls-of` reads one) and the count of reads among them (`read-entrances`).",
      :arglists ([f]),
      :malli/schema
        [:=> [:cat :seon.profile/thunk] :seon.profile/measured-call],
-     :seon.ref/callers
-       [astra-cost-handoff/preparation astra-cost-handoff/squash-costs
-        seon.cluster.store-test/measured-small-commit
-        seon.pass-probe/window
-        …6 (drop 4 (get-in result/ea8e05123424d [:seon.context/must-reads 3 :seon.ref/callers]))],
      :seon.render/operations
        [(my.program/source 'seon.profile/measure)
+        (my.program/callers
+         {:seon.program/subject 'seon.profile/measure})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.profile/measure})]}
     #:seon.ref{:problem-kind :unresolved,

@@ -105,7 +105,7 @@
 
 (deftest a-resolved-function-offers-a-source-form-that-shows-its-source
   (let [database (db/db)
-        source-form (some #(when (= 'my.program/source (first %)) %) (:seon.render/operations (#'ref/resolve-name database #{} 'seon.ref/references)))]
+        source-form (some #(when (= 'my.program/source (first %)) %) (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
     (is (= '(my.program/source 'seon.ref/references) source-form))
     (is (string? (:source (program/source database (second (second source-form))))))))
 
@@ -139,18 +139,15 @@
     (is (= [:unresolved :anchor-missing] (mapv :seon.ref/problem-kind [missing-file missing-heading])))
     (is (= "no-such-heading" (:seon.ref/anchor missing-heading)))))
 
-(deftest a-referenced-function-shows-its-callers-and-reaching-tests
-  (let [proof 'seon.ref-test/a-missing-anchor-names-the-closest-spelled-heading-first
-        [entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`" :seon.ref/proofs #{proof}})
-        [unlisted] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (some #{'my.fs/section} (:seon.ref/callers entry)) "its direct callers, as symbols")
-    (is (= [proof] (:seon.ref/tests entry)) "only the task's own proofs among the reaching tests are listed by name")
-    (is (< 1 (:seon.ref/test-count entry)) "the rest are counted")
-    (is (= ['(my.program/source 'seon.ref/section) '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})]
+(deftest a-referenced-function-offers-its-callers-and-reaching-tests-as-forms
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
+    (is (= ['(my.program/source 'seon.ref/section)
+            '(my.program/callers {:seon.program/subject 'seon.ref/section})
+            '(my.program/tests-reaching {:seon.program/subject 'seon.ref/section})]
            (:seon.render/operations entry))
-        "the forms that read its body and list every reaching test")
-    (is (not (contains? unlisted :seon.ref/tests)) "with no proofs, every reaching test is counted, none listed")
-    (is (= (:seon.ref/test-count entry) (:seon.ref/test-count unlisted)))))
+        "the forms that read its body, its callers and its reaching tests")
+    (is (= #{:seon.ref/name :doc :arglists :malli/schema :seon.render/operations} (set (keys entry)))
+        "its own content only: no callers or tests pulled in")))
 
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]

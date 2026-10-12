@@ -11,18 +11,18 @@ The current-state block value as the agent's REPL reply shows it (display budget
 
 ```clojure
 #:seon.repl{:findings [{:seon.repl/finding :large-value,
-  :seon.eval/value-tokens 3078,
-  :seon.eval/shown-tokens 1850,
+  :seon.eval/value-tokens 3125,
+  :seon.eval/shown-tokens 1854,
   :seon.repl/fix
-    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/e0f018874d629, :ms 127, :alloc-mb 247.0, :errors [{:seon.error/signature
+    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/edf478dade712, :ms 117, :alloc-mb 229.8, :errors [{:seon.error/signature
     "7c52d6ce256964e2e1bdc5b72c6eb450ac4bba47d1e27dcf3c47032b3643a91d",
   :seon.error/id
     "7c52d6ce256964e2e1bdc5b72c6eb450ac4bba47d1e27dcf3c47032b3643a91d",
-  :seon.error/at #inst "2026-10-12T14:25:13.713Z",
+  :seon.error/at #inst "2026-10-12T14:36:07.388Z",
   :seon.error/layer :seon.sci.eval/program,
   :seon.error/operation seon.sci.eval/install-row!,
-  :seon.error.occurrence/count 63,
-  :seon.error.occurrence/branch :agent-529952c72ad1,
+  :seon.error.occurrence/count 10,
+  :seon.error.occurrence/branch :agent-6d767a749750,
   :seon.error/message
     "Cannot interpret seon.ref/references: Unable to resolve symbol: answer"}], :value #:seon.context{:turns
    {:my.agent/turns-left 100,
@@ -32,7 +32,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
    #:seon.task{:id "90f6088b30d3",
     :sym seon.sci.forgive/forgiving-forgiven-text-changes-nothing,
     :intent
-      "`seon.sci.forgive/forgive` is idempotent: forgiving its `:seon.batch/text` again yields no `:seon.batch/repairs` and the same `:seon.batch/spans`. Today a dropped stray closer joins tokens (\"a]a\" -> \"aa\"), a quote before an inserted closer falls outside every span (\"('\"), and a closer inserted after a lone backslash becomes a character literal (\"(\\\\\"). Every change stays recorded as a `:seon.batch/repair` (a replaced closer carries both `:se"…+242 (subs (get-in result/e0f018874d629 [:seon.context/task :seon.task/intent]) 445),
+      "`seon.sci.forgive/forgive` is idempotent: forgiving its `:seon.batch/text` again yields no `:seon.batch/repairs` and the same `:seon.batch/spans`. Today a dropped stray closer joins tokens (\"a]a\" -> \"aa\"), a quote before an inserted closer falls outside every span (\"('\"), and a closer inserted after a lone backslash becomes a character literal (\"(\\\\\"). Every change stays recorded as a `:seon.batch/repair` (a replaced closer carries both `:seon.batch/dropped` and `:seon.batch/inserted`). The fix lands in `seon.sci.forgive/scan`, which `seon.sci.forgive/forgive` calls; the consumers `seon.sci.forgive/step` and `seon.sci.forgive/segments` read the `:seon.batch/forgi"…+16 (subs (get-in result/edf478dade712 [:seon.context/task :seon.task/intent]) 671),
     :must-read
       #{seon.sci.forgive/scan seon.sci.forgive/step
         seon.sci.forgive/forgive seon.sci.forgive/segments}},
@@ -43,19 +43,19 @@ The current-state block value as the agent's REPL reply shows it (display budget
           seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart,
         :seon.context/proof-status :pending,
         :seon.test/source
-          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-te"…+682 (subs (get-in result/e0f018874d629 [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 64)}
+          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-text-changes-nothing}}
+  a-stray-closer-keeps-tokens-apart
+  ;; A d"…+617 (subs (get-in result/edf478dade712 [:seon.context/proofs :seon.context/proof-list 0 :seon.test/source]) 129)}
        {:seon.test/sym
           seon.sci.forgive-test/forgiving-forgiven-text-changes-nothing,
         :seon.context/proof-status :pending,
         :seon.test/source
-          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-text-changes-nothing}}
-  forgiving-forgiven-text-changes-nothing
- "…+172 (subs (get-in result/e0f018874d629 [:seon.context/proofs :seon.context/proof-list 1 :seon.test/source]) 128)}
+          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-te"…+236 (subs (get-in result/edf478dade712 [:seon.context/proofs :seon.context/proof-list 1 :seon.test/source]) 64)}
        {:seon.test/sym
           seon.sci.forgive-test/the-repairs-account-for-every-change,
         :seon.context/proof-status :pending,
         :seon.test/source
-          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-te"…+339 (subs (get-in result/e0f018874d629 [:seon.context/proofs :seon.context/proof-list 2 :seon.test/source]) 64)}]},
+          "(deftest ^{:seon/tasks #{'seon.sci.forgive/forgiving-forgiven-te"…+339 (subs (get-in result/edf478dade712 [:seon.context/proofs :seon.context/proof-list 2 :seon.test/source]) 64)}]},
  :step
    {:seon.task/step :implement,
     :seon.task/status :working,
@@ -63,42 +63,31 @@ The current-state block value as the agent's REPL reply shows it (display budget
       {:seon.render/operations [(in-ns 'seon.sci.forgive)]}},
  :must-reads
    [{:seon.ref/name seon.sci.forgive/forgive,
-     :seon.ref/test-count 11,
      :doc
        "`text` forgiven in `mode`: its text, its top-level forms' spans, its repairs.",
      :arglists ([text mode]),
      :malli/schema
        [:=> [:cat :string :seon.batch/mode] :seon.batch/forgiven],
-     :seon.ref/callers
-       [seon.sci.forgive/segments seon.sci.forgive/step
-        seon.sci.forgive-test/forgiving-again-changes-nothing?],
      :seon.render/operations
        [(my.program/source 'seon.sci.forgive/forgive)
+        (my.program/callers
+         {:seon.program/subject 'seon.sci.forgive/forgive})
         (my.program/tests-reaching
-         {:seon.program/subject 'seon.sci.forgive/forgive})],
-     :seon.ref/tests
-       [seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart
-        seon.sci.forgive-test/forgiving-forgiven-text-changes-nothing
-        seon.sci.forgive-test/the-repairs-account-for-every-change]}
+         {:seon.program/subject 'seon.sci.forgive/forgive})]}
     {:seon.ref/name seon.sci.forgive/scan,
-     :seon.ref/callers
-       [seon.sci.forgive/failure-step seon.sci.forgive/forgive],
-     :seon.ref/tests
-       [seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart
-        seon.sci.forgive-test/the-repairs-account-for-every-change],
-     :seon.ref/test-count 3,
      :doc
-       "One pass over `text`: the forgiven text, each top-level form's s"…+94 (subs (get-in result/e0f018874d629 [:seon.context/must-reads 1 :doc]) 64),
+       "One pass over `text`: the forgiven text, each top-level form's span `[start end line column]` in it, the repairs, and whether `text`'s own delimiters balance.",
      :arglists ([text reply? repair?]),
      :malli/schema
        [:=>
         [:cat :string :boolean :boolean]
-        […5 (get-in result/e0f018874d629 [:seon.context/must-reads 1 :malli/schema 2])]],
+        […5 (get-in result/edf478dade712 [:seon.context/must-reads 1 :malli/schema 2])]],
      :seon.render/operations
        [(my.program/source 'seon.sci.forgive/scan)
-        (…2 (get-in result/e0f018874d629 [:seon.context/must-reads 1 :seon.render/operations 1]))]}
+        (my.program/callers
+         {:seon.program/subject 'seon.sci.forgive/scan})
+        (…2 (get-in result/edf478dade712 [:seon.context/must-reads 1 :seon.render/operations 2]))]}
     {:seon.ref/name seon.sci.forgive/segments,
-     :seon.ref/test-count 8,
      :doc
        "Each form's source in the forgiven text, the text above it as its comment.",
      :arglists ([text] [text mode]),
@@ -106,17 +95,10 @@ The current-state block value as the agent's REPL reply shows it (display budget
        [:function
         [:=> [:cat :string] :seon.batch/segmented]
         [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]],
-     :seon.ref/callers
-       [seon.sci.forgive/segments
-        seon.sci.forgive-test/allocated-reading
-        seon.turn/commented-forms seon.turn/segmented-sources],
      :seon.render/operations
        [(my.program/source 'seon.sci.forgive/segments)
-        (…2 (get-in result/e0f018874d629 [:seon.context/must-reads 2 :seon.render/operations 1]))]}
+        …2 (drop 1 (get-in result/edf478dade712 [:seon.context/must-reads 2 :seon.render/operations]))]}
     {:seon.ref/name seon.sci.forgive/step,
-     :seon.ref/callers
-       [seon.sci.forgive/next-form seon.sci.forgive-test/positions],
-     :seon.ref/test-count 1,
      :doc "The next read step at the cursor in `mode`.",
      :arglists ([stage mode {v :seon.batch/version}]),
      :malli/schema
@@ -126,8 +108,7 @@ The current-state block value as the agent's REPL reply shows it (display budget
         :seon.batch/read-step],
      :seon.render/operations
        [(my.program/source 'seon.sci.forgive/step)
-        (my.program/tests-reaching
-         {:seon.program/subject 'seon.sci.forgive/step})]}
+        …2 (drop 1 (get-in result/edf478dade712 [:seon.context/must-reads 3 :seon.render/operations]))]}
     #:seon.ref{:name :seon.batch/text,
      :schema-form
        [:string
@@ -139,7 +120,16 @@ The current-state block value as the agent's REPL reply shows it (display budget
      :schema-form [:vector :seon.batch/span]}
     #:seon.ref{:name :seon.batch/repair,
      :schema-form
-       [:map
-        …5 (drop 1 (get-in result/e0f018874d629 [:seon.context/must-reads 7 :seon.ref/schema-form]))]}
-    …3 (drop 8 (get-in result/e0f018874d629 [:seon.context/must-reads]))]}}
+       […6 (get-in result/edf478dade712 [:seon.context/must-reads 7 :seon.ref/schema-form])]}
+    #:seon.ref{:name :seon.batch/dropped,
+     :problem-kind :unresolved,
+     :message
+       "Nothing of this name or path exists on your branch. If the task means one to create, create it; else tell root with my.message/send that the task names it."}
+    #:seon.ref{:name :seon.batch/inserted,
+     :problem-kind :unresolved,
+     :message
+       "Nothing of this name or path exists on your branch. If the task means one to create, create it; else tell root with my.message/send that the task names it."}
+    #:seon.ref{:name :seon.batch/forgiven,
+     :schema-form
+       […5 (get-in result/edf478dade712 [:seon.context/must-reads 10 :seon.ref/schema-form])]}]}}
 ```

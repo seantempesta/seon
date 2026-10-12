@@ -10,7 +10,6 @@
             [seon.cache :as cache]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
-            [seon.fn :as fn]
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.schema :as schema]
@@ -194,38 +193,13 @@
                                                   home
                                                   (or (some-> (get aliases requested) ns-name) requested)))})))
 
-(defn- uses
-  "A program function's direct callers and the tests reaching it on `database`, or the refused read."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:map [:seon.ref/callers :seon.ref/callers] [:seon.ref/tests :seon.ref/tests]]
-                   :seon.db/invalid-read-error]]}
-  [database function]
-  (let [callers (db/q '[:find [?caller ...] :in $ ?f :where [?e :seon.fn/calls ?f] [?e :seon.fn/sym ?caller]]
-                      database function)
-        tests (fn/gate-set database function)]
-    (or (some #(when (db/read-refusal? %) %) [callers tests])
-        {:seon.ref/callers (vec (sort callers)) :seon.ref/tests tests})))
-
-(defn- shown-tests
-  "The reaching `tests` a reference lists by name: those among `proofs`; the rest are counted, with the form that lists them."
-  {:malli/schema [:=> [:cat :seon.fn/sym :seon.ref/tests [:set :seon.test/sym]]
-                  [:map [:seon.ref/tests {:optional true} :seon.ref/tests]
-                   [:seon.ref/test-count {:optional true} :seon.ref/test-count]
-                   [:seon.render/operations [:vector :seon.render/read-form]]]]}
-  [function tests proofs]
-  (let [named (filterv proofs tests)]
-    (cond-> {:seon.render/operations []}
-      (seq named) (assoc :seon.ref/tests named)
-      (< (count named) (count tests))
-      (assoc :seon.ref/test-count (count tests)
-             :seon.render/operations [(list 'my.program/tests-reaching {:seon.program/subject (list 'quote function)})]))))
-
 (defn- resolve-name
-  "One referenced name resolved to its current definition on `database` (a program function with its contract as
-  the agent writes it, its direct callers and the reaching tests among `proofs`, the rest counted), or a problem."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.ref/name]
+  "One referenced name resolved to its current definition on `database`: a program function's own content (its
+  docstring's summary, arglists and contract as the agent writes it) with the forms that read its source, callers
+  and reaching tests; a schema key's form; a test with its source form; or a problem."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database proofs reference]
+  [database reference]
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
                     :seon.ref/message (problem-messages :unresolved)}
         ;; a program declaration's source is answered by my.program/source, a value;
@@ -238,21 +212,16 @@
           (:seon.error/at found) found
           :else {:seon.ref/name reference :seon.ref/schema-form (:form found)}))
       (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
-            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym reference]))]
+            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym reference]))
+            subject {:seon.program/subject (list 'quote reference)}]
         (cond
           (:seon.error/at function) function
           (:seon.fn/sym function)
-          (let [{:seon.ref/keys [callers tests] :as used} (uses database reference)]
-            (if (db/read-refusal? used)
-              used
-              (let [listed (shown-tests reference tests proofs)]
-                (merge (cond-> {:seon.ref/name reference}
-                         (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
-                         (:seon.fn/arglists function) (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
-                         (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
-                         (seq callers) (assoc :seon.ref/callers callers))
-                       listed
-                       {:seon.render/operations (into [source] (:seon.render/operations listed))}))))
+          (cond-> {:seon.ref/name reference}
+            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
+            (:seon.fn/arglists function) (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
+            (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
+            true (assoc :seon.render/operations [source (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
           (:seon.error/at test-entity) test-entity
           (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations [source]}
           :else (library-name reference))))))
@@ -260,24 +229,22 @@
 (declare resolve-path)
 
 (defn- answer
-  "One candidate resolved on `database`, or its problem with what it means; the names among `proofs` are the
-  reaching tests a function lists by name."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.ref/candidate]
+  "One candidate resolved on `database`, or its problem with what it means."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database proofs {:seon.ref/keys [problem-kind] reference :seon.ref/name :as found}]
+  [database {:seon.ref/keys [problem-kind] reference :seon.ref/name :as found}]
   (cond
-    reference (resolve-name database proofs reference)
+    reference (resolve-name database reference)
     problem-kind (assoc found :seon.ref/message (problem-messages problem-kind))
     :else (resolve-path found)))
 
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem.
 
-  Held names come first, sorted, then the text's in first-seen order. A function lists by name only its
-  reaching tests among `:seon.ref/proofs` and counts the rest."
+  Held names come first, sorted, then the text's in first-seen order."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.ref/keys [text names document-path proofs]}]
+  [database {:seon.ref/keys [text names document-path]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
         held (map (fn [reference] {:seon.ref/name reference}) (sort names))
         found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))
@@ -286,7 +253,7 @@
          (reduce (fn [[seen kept] c] (if (seen (identity-of c)) [seen kept] [(conj seen (identity-of c)) (conj kept c)]))
                  [#{} []])
          second
-         (mapv #(answer database (set proofs) %)))))
+         (mapv #(answer database %)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A doc section

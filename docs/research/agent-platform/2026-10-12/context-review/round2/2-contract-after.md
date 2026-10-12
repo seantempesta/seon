@@ -11,10 +11,10 @@ The current-state block value as the agent's REPL reply shows it (display budget
 
 ```clojure
 #:seon.repl{:findings [{:seon.repl/finding :large-value,
-  :seon.eval/value-tokens 1063,
-  :seon.eval/shown-tokens 991,
+  :seon.eval/value-tokens 1033,
+  :seon.eval/shown-tokens 963,
   :seon.repl/fix
-    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/e05923792f89d, :ms 151, :alloc-mb 317.3, :value #:seon.context{:turns
+    "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/ed83ea7023873, :ms 152, :alloc-mb 316.8, :value #:seon.context{:turns
    {:my.agent/turns-left 100,
     :seon.task/status :working,
     :seon.context/namespace seon.ai},
@@ -39,18 +39,14 @@ The current-state block value as the agent's REPL reply shows it (display budget
     :seon.context/start {:seon.render/operations [(in-ns 'seon.ai)]}},
  :must-reads
    [{:seon.ref/name seon.ai/output-observed?,
-     :seon.ref/callers [seon.ai/send-request],
-     :seon.ref/test-count 4,
      :arglists ([evidence]),
      :seon.render/operations
        [(my.program/source 'seon.ai/output-observed?)
+        (my.program/callers
+         {:seon.program/subject 'seon.ai/output-observed?})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.ai/output-observed?})]}
     {:seon.ref/name seon.contracts/gaps,
-     :seon.ref/callers [seon.contract-coverage-test/contracted],
-     :seon.ref/tests
-       [seon.contract-coverage-test/output-observed-is-contracted],
-     :seon.ref/test-count 12,
      :doc
        "What keeps `function-symbol` from a complete contract in `database`.",
      :arglists ([database function-symbol]),
@@ -63,12 +59,14 @@ The current-state block value as the agent's REPL reply shows it (display budget
           :seon.fn.contract/finding-row
           [:map
           [:seon.fn/sym :seon.fn/sym]
-          […2 (get-in result/e05923792f89d [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
+          […2 (get-in result/ed83ea7023873 [:seon.context/must-reads 1 :malli/schema 2 1 1 2 2])]]]]
          :seon.error/value
          :seon.db/invalid-read-error
          :seon.schema/validation-refusal]],
      :seon.render/operations
        [(my.program/source 'seon.contracts/gaps)
+        (my.program/callers
+         {:seon.program/subject 'seon.contracts/gaps})
         (my.program/tests-reaching
          {:seon.program/subject 'seon.contracts/gaps})]}
     {:seon.ref/heading "Function contracts guide",

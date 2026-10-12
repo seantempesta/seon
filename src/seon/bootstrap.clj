@@ -35,9 +35,9 @@
     {:seon.help/title "Reading your context"
      :seon.help/lines
      ["Your current-state block is the last part of every request; it is already there, and (seon.context/current-state) reads it again."
-      ":seon.context/task is what must become true; its :seon.task/intent states the conditions. :seon.context/step is :implement, make the proofs green, or :prove, write red tests for the intent; its :seon.context/start names the owner's namespace and source."
+      ":seon.context/task is what must become true; its :seon.task/intent states the conditions. :seon.context/step is :implement, make the proofs green, or :prove, write red tests for the intent; its :seon.context/start holds the form that enters the owner's namespace."
       ":seon.context/proofs are the deftests that show the task done, each with a :seon.context/proof-status: :red fails, :pending has no result for your current code yet, :green passes."
-      ":seon.context/must-reads are your change's reach: each function it touches, whose :seon.ref/callers are what your change can break and whose :seon.ref/tests check it. One with a :seon.ref/problem-kind did not resolve: tell root."
+      ":seon.context/must-reads are what your task names: a function's doc, arglists and :malli/schema, a schema's form; their :seon.render/operations read its source, callers and reaching tests. One with a :seon.ref/problem-kind did not resolve; its :seon.ref/message says what to do."
       ":seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:intent ...}, its keys :seon.task/intent and so on."]}
     {:seon.help/title "Done"
      :seon.help/lines
@@ -51,7 +51,7 @@
       "3. Define a function in the namespace that owns it, its contract written on the defn: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). It replaces the definition on your branch."
       "4. Call it on real inputs and read the value. A body's locals exist only inside their binding: call the function, or redefine it with the probe inside."
       "5. A :prove step writes a deftest naming its task in :seon/tasks: (deftest ^{:seon/tasks #{'the.task.ns/name}} increments (is (= 3 (inc 2))))."
-      "A contract shown to you as :seon.fn/spec is the stored form of that :malli/schema. A defn without one is admitted with a warning in :findings, and merge refuses it."
+      "A must-read shows a function's contract as the :malli/schema you write. A defn without one is admitted with a warning in :findings, and merge refuses it."
       "A contract names registered schemas: (my.program/source :seon.task/intent) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept."
       "Change code at the REPL, never in files: no slurp, spit, clojure.java.io or shell. Root writes your definitions back to files when it merges. Delete one with (my.program/ns-unmap! 'the.owner.ns/increment)."]}
     {:seon.help/title "The REPL"

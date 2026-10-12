@@ -16,7 +16,7 @@ Default ran af0a94471 (JVM mode reads, no restart). Each block is the value of
 `(seon.context/current-state db agent-id)` evaluated in SCI mode through `seon.mcp/call`, where `db` is a
 `seon.db/with` of the agent's branch head holding a fixture agent `ctx-dump-<handle>` and an assignment of the task
 (task revision from `seon.task/task-revision`); nothing is committed. "Before" ran as agent `block-base`, which holds
-HEAD's definitions; "after" ran as agent `block-rework`, whose branch holds the changed `seon.ref` and `seon.context`
+HEAD's definitions; "after" ran as agent `block-r3`, whose branch holds the changed `seon.ref` and `seon.context`
 definitions and schemas. The whole-block size is the reply's `:large-value` finding, `:seon.eval/value-tokens`
 (`seon.ai.tokens/estimate`); the printed reply is cut at the running JVM's 2,000-token display budget.
 
@@ -24,19 +24,23 @@ definitions and schemas. The whole-block size is the reply's `:large-value` find
 
 | Task | Before | After |
 |---|---|---|
-| `seon.sci.forgive/forgiving-forgiven-text-changes-nothing` | 3,755 | 3,078 |
-| `seon.ai/contract-output-observed?` | 1,370 | 1,063 |
-| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 2,873 |
+| `seon.sci.forgive/forgiving-forgiven-text-changes-nothing` | 3,755 | 3,125 |
+| `seon.ai/contract-output-observed?` | 1,370 | 1,033 |
+| `seon.merge/a-jvms-first-facts-merge-follows-the-changed-facts` | 12,638 | 2,618 |
 
 Every block is under the 4,096-token `:large-value` bound after. The merge task's must-reads were 398 reaching tests of
-`seon.db/vector-query-call` by name; a function now lists by name only the task's own proofs among its reaching tests,
-counts the rest (`:seon.ref/test-count`) and offers `(my.program/tests-reaching ...)`.
+`seon.db/vector-query-call` by name. What remains of the forgive block is mostly its three proofs' sources, the task's
+own content.
 
 ## What changed in the data
 
-- A program function's must-read shows its contract as the agent writes it (`:malli/schema`, data), not the stored
-  `:seon.fn/spec` text; its operations are the source read, plus the reaching-tests list when tests are counted.
-- `(doc ...)` and `(my.program/callers ...)` operations are gone (the doc line and the whole caller list are shown).
+Owner ruling: context generation takes what is in the task and looks up the refs, docs and schema names it mentions; it
+does not pull in every test related to every symbol. A resolved must-read is the referenced thing's own content, and
+reading more is an operation.
+
+- A program function's must-read is its docstring summary, arglists and contract as the agent writes it
+  (`:malli/schema`, data, read from the stored `:seon.fn/spec` text); its operations read its source, callers and
+  reaching tests. `:seon.ref/callers` and `:seon.ref/tests` are no longer pulled in (they came in with 7fc0ebb2a).
 - Schema-key must-reads carry their form and no operation; `:seon.ref/line` and a doc section's `:seon.ref/tokens`
   are gone.
 - The task's own proofs are not repeated as must-reads (the proofs section shows them).
