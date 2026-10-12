@@ -246,62 +246,6 @@
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
 
-(deftest ^{:seon.test/fixture-observation "The observation is listener installation during real boot starting, which an already-populated branch never executes."
-           :seon/tasks #{'seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake}}
-  a-message-committed-during-boot-start-is-conserved
-  (let [name "arming-window"
-        root (str "tmp/armed-test/" name)
-        primed (CountDownLatch. 1)
-        next-agent-work turn/next-agent-work
-        start-flow! agent/start-flow!]
-    (test-support/delete-recursively! root)
-    (test-support/populate-published-root! root)
-    (with-redefs
-      [turn/next-agent-work
-       (fn [& arguments]
-         (let [result (apply next-agent-work arguments)]
-           (.countDown primed)
-           result))
-       agent/start-flow!
-       (fn [request]
-         (let [entry (start-flow! request)]
-           ;; This is the historical loss window: the start prime has
-           ;; completed, then a message commits before start-flow! returns.
-           ;; Boot must already have registered the routing listener.
-           (test-support/await-event! primed "boot start prime")
-           (test-support/assign-task! (:seon.db/connection (:seon.turn.loop/cluster request)) "root")
-           (test-support/transacted!
-                        (:seon.db/connection
-                         (:seon.turn.loop/cluster request))
-                        [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot"}])
-           entry))
-       ai/complete
-       (fn [_projection _request]
-         {:seon.ai/text "(seon.run/complete \"answered\")"})]
-      (let [instance (boot/start! {:seon.boot/cluster-name name
-                                      :seon.boot/root root})]
-        (try
-          (let [run
-                (await-fact
-                 (:seon.boot/cluster-connection instance)
-                 (fn [database]
-                   (db/q
-                    '[:find (pull ?run
-                                  [:seon.turn/id
-                                   {:seon.turn/trigger
-                                    [:seon.message/id]}]) .
-                      :in $ ?message-id
-                      :where
-                      [?message :seon.message/id ?message-id]
-                      [?run :seon.turn/trigger ?message]]
-                    database "boot-window-message")))]
-            (is (= "boot-window-message"
-                   (get-in run [:seon.turn/trigger
-                                :seon.message/id]))
-                "the committed message opened a run without a later wake"))
-          (finally
-            (boot/stop! instance)))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
 ;;; ---------------------------------------------------------------------------

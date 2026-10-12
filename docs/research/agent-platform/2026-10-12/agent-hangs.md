@@ -23,7 +23,7 @@ cluster ... its branch holds 2 cluster config rows") and the loop never opens a 
 | `agent-test/n-agent-parallel-turns-property` | no assignment; agents without cluster | (a) converted; (c) twelve trials are proportional work: `:seon.test/long` 12,000 ms, measured 8,001 ms | 120,561 ms, red | 9,691 ms, green |
 | `agent-test/wake-routing-conservation-property`, `routing-conservation-waits-for-terminal-evidence` (and their vacuity guard `routing-proof-rejects-an-empty-production-subject`) | see item R below | **deleted** with `routing-trial`, `create-generated-agent!` | 25,000 ms each | gone |
 | `blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings` | (c) `populate-published-root!` published the whole checkout (44,846 ms) and five `registry/collect!` marked it (about 3 s each) | fixture is a fresh file store holding only what collection reads: one synthetic digest attribute plus the program's own `:seon.blob/digest`, `:seon.config.db/validation-node-limit`, `:seon.config.db/write-time-limit-ms` declarations | 70,906 ms, red | 2,692 ms, green |
-| `armed-test/a-message-committed-during-boot-start-is-conserved` | item A below | not converted; tagged with its task | 73,228 ms | unchanged |
+| `armed-test/a-message-committed-during-boot-start-is-conserved` | item A below | **deleted (owner)** | 73,228 ms | gone |
 
 Same class, same file, fixed alongside: `stop-flow-has-a-declared-loud-turn-completion-backstop` (20,230 ms red →
 4,371 ms green, assigned), `wait-closes-in-terminal-tx-test` (20,168 ms red → 5,007 ms green, converted),
@@ -33,23 +33,21 @@ check: 25 members, 38,080 ms, no member unfinished.
 
 ## Remaining items (one short lane each)
 
-**R. Routing tests: deletion to confirm.** `routing-trial`'s subject is db<->flow starting a created agent
+**R. Routing tests: deletion confirmed by the owner.** `routing-trial`'s subject is db<->flow starting a created agent
 because it has a message (`seon.cluster.agent/agents-to-start`, creation as a `:seon.wake/starts` wake). Verified
 by run: without an assignment the agent has no work (CX-2, 7e39aeed3); with a hand `:held` assignment
 `next-agent-work` answers `:open` but `seon.cluster.agent/plan` (c15d1eace, R1 slice 2) plans `:start-flow` with
 `:seon.task/execution :paused` for that attempt, and db<->flow took only its prime (one plan message, no started
 graph). So no production path answers a newborn agent's message; M13 deletes the second starter. Message
-conservation to started agents stays proven by `n-agent-parallel-turns-property`. **Question for root:** accept the
+conservation to started agents stays proven by `n-agent-parallel-turns-property`. **Owner:** deletion accepted. The question was: accept the
 deletion (named commits 7e39aeed3, c15d1eace), or keep a version through `:running` task attempts, which would be a
 db_flow_test case, not a routing one. Side finding: db<->flow in that fixture saw no wake after its prime although
 `wake/route!` should offer `plan-channel` on `:seon.agent/id` assertion; not traced. File:
 `test/seon/cluster/agent_test.clj` (already deleted in this commit).
 
-**A. Armed boot-window message.** Task `seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake`.
-It awaits a model run root never opens (no assignment; a hand one is paused by `plan`); three `with-redefs`; its
-fixture alone exceeds 5 s. What's left: assert the delivered wake instead, no redefinition. **Question:** is the
-boot-window loss still a behavior once M13 removes `host/start!`'s start? File: `test/seon/cluster/armed_test.clj`.
-Blocked on item P for its bound.
+**A. Armed boot-window message: deleted (owner).** `armed-test/a-message-committed-during-boot-start-is-conserved` and its
+task `seon.cluster.armed-test/a-boot-window-message-is-observed-as-a-delivered-wake` are gone (owner 2026-10-12:
+boot-window delivery is covered by deriving work from facts after boot).
 
 **P. Published-root cost.** Task `seon.test-support/a-published-root-costs-a-template-clone-not-a-publication`:
 `populate-published-root!` costs about 45 s per call, 19 callers; every armed-test member is over its bound before
