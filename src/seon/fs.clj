@@ -331,8 +331,28 @@
         (.isDirectory attribute) ::directories
         :else ::files))
 
-(defn- delete-recursively-impl!
-  [root target progress! progress-backstop-ms]
+(defn path?
+  "True for a `java.nio.file.Path`."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? Path value))
+
+(defn file-attributes?
+  "True for one observation of a path's basic attributes."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? BasicFileAttributes value))
+
+(defn deletion-state
+  "The starting state of one recursive deletion of `target` beneath `root`:
+  both paths, zeroed counts and the first progress deadline. Refuses a target
+  outside `root` or reached through an intermediate symlink."
+  {:malli/schema
+   [:=> [:cat :string :string
+         [:map [::progress! {:optional true} [:fn clojure.core/ifn?]]
+          [::progress-backstop-ms {:optional true} [:int {:min 1}]]]]
+    [:map [::root-path [:fn seon.fs/path?]] [::target-path [:fn seon.fs/path?]] [::started-nanos :int] [::next-report :int] [::deleted :int] [::files :int] [::directories :int] [::symlinks :int] [::progress! {:optional true} [:fn clojure.core/ifn?]] [::interval-nanos {:optional true} :int]]]}
+  [root target {progress! ::progress! progress-backstop-ms ::progress-backstop-ms}]
   (let [root-path (normalized-path root)
         target-path (normalized-path target)
         started-nanos (System/nanoTime)
@@ -351,52 +371,72 @@
         "Recursive deletion target crosses an intermediate symlink."
         {::root (str root-path)
          ::target (str target-path)})))
-    ;; The walk is one fold over the tree: its state is the deletion counts and
-    ;; the next progress deadline, threaded through every entry it deletes.
-    (letfn [(under-root? [^Path candidate]
-              (.startsWith (.normalize (.toAbsolutePath candidate))
-                           root-path))
-            (reported [state ^Path entry ^BasicFileAttributes attribute]
-              (let [now (System/nanoTime)]
-                (if (and interval-nanos (<= ^long (::next-report state) now))
-                  (do (progress!
-                       (assoc (select-keys state [::deleted ::files ::directories ::symlinks])
-                              ::directory (str (if (.isDirectory attribute) entry (.getParent entry)))
-                              ::elapsed-ms (.toMillis TimeUnit/NANOSECONDS (- now started-nanos))))
-                      (assoc state ::next-report (+ now ^long interval-nanos)))
-                  state)))
-            (delete-one [state ^Path entry attribute]
-              (when-not (under-root? entry)
-                (throw
-                 (ex-info
-                  "Recursive deletion reached outside its explicit root."
-                  {::root (str root-path)
-                   ::target (str target-path)
-                   ::entry (str entry)})))
-              (if (Files/deleteIfExists entry)
-                (-> state
-                    (update ::deleted inc)
-                    (update (entry-kind attribute) inc)
-                    (reported entry attribute))
-                state))
-            (walk [state ^Path entry ^BasicFileAttributes attribute]
-              (try
-                (delete-one
-                 (if (.isDirectory attribute)
-                   (with-open [children (Files/newDirectoryStream entry)]
-                     (reduce (fn [state ^Path child]
-                               (if-let [child-attribute (attributes child)]
-                                 (walk state child child-attribute)
-                                 state))
-                             state children))
-                   state)
-                 entry attribute)
-                (catch NoSuchFileException _
-                  state)))]
-      (when-let [target-attribute (attributes target-path)]
-        (walk {::deleted 0 ::files 0 ::directories 0 ::symlinks 0
-               ::next-report (+ started-nanos (or interval-nanos 0))}
-              target-path target-attribute)))
+    (cond-> {::root-path root-path ::target-path target-path
+             ::started-nanos started-nanos
+             ::next-report (+ started-nanos (or interval-nanos 0))
+             ::deleted 0 ::files 0 ::directories 0 ::symlinks 0}
+      progress! (assoc ::progress! progress! ::interval-nanos interval-nanos))))
+
+(defn delete-observed!
+  "Delete `entry`, observed as `attribute`, and everything beneath it, folding
+  the counts into `state`. Symlinks are leaves; every entry is checked against
+  the state's root before it is deleted. An entry that vanished since it was
+  observed is already deleted and leaves `state` unchanged."
+  {:malli/schema
+   [:=> [:cat [:map [::root-path [:fn seon.fs/path?]] [::target-path [:fn seon.fs/path?]] [::started-nanos :int] [::next-report :int] [::deleted :int] [::files :int] [::directories :int] [::symlinks :int] [::progress! {:optional true} [:fn clojure.core/ifn?]] [::interval-nanos {:optional true} :int]] [:fn seon.fs/path?] [:fn seon.fs/file-attributes?]]
+    [:map [::root-path [:fn seon.fs/path?]] [::target-path [:fn seon.fs/path?]] [::started-nanos :int] [::next-report :int] [::deleted :int] [::files :int] [::directories :int] [::symlinks :int] [::progress! {:optional true} [:fn clojure.core/ifn?]] [::interval-nanos {:optional true} :int]]]}
+  [{root-path ::root-path target-path ::target-path progress! ::progress!
+    interval-nanos ::interval-nanos started-nanos ::started-nanos :as state}
+   entry attribute]
+  ;; The walk is one fold over the tree: its state is the deletion counts and
+  ;; the next progress deadline, threaded through every entry it deletes.
+  (letfn [(under-root? [^Path candidate]
+            (.startsWith (.normalize (.toAbsolutePath candidate))
+                         ^Path root-path))
+          (reported [state ^Path entry ^BasicFileAttributes attribute]
+            (let [now (System/nanoTime)]
+              (if (and interval-nanos (<= ^long (::next-report state) now))
+                (do (progress!
+                     (assoc (select-keys state [::deleted ::files ::directories ::symlinks])
+                            ::directory (str (if (.isDirectory attribute) entry (.getParent entry)))
+                            ::elapsed-ms (.toMillis TimeUnit/NANOSECONDS (- now ^long started-nanos))))
+                    (assoc state ::next-report (+ now ^long interval-nanos)))
+                state)))
+          (delete-one [state ^Path entry attribute]
+            (when-not (under-root? entry)
+              (throw
+               (ex-info
+                "Recursive deletion reached outside its explicit root."
+                {::root (str root-path)
+                 ::target (str target-path)
+                 ::entry (str entry)})))
+            (if (Files/deleteIfExists entry)
+              (-> state
+                  (update ::deleted inc)
+                  (update (entry-kind attribute) inc)
+                  (reported entry attribute))
+              state))
+          (walk [state ^Path entry ^BasicFileAttributes attribute]
+            (try
+              (delete-one
+               (if (.isDirectory attribute)
+                 (with-open [children (Files/newDirectoryStream entry)]
+                   (reduce (fn [state ^Path child]
+                             (if-let [child-attribute (attributes child)]
+                               (walk state child child-attribute)
+                               state))
+                           state children))
+                 state)
+               entry attribute)
+              (catch NoSuchFileException _
+                state)))]
+    (walk state entry attribute)))
+
+(defn- delete-recursively-impl!
+  [root target options]
+  (let [state (deletion-state root target options)]
+    (when-let [target-attribute (attributes (::target-path state))]
+      (delete-observed! state (::target-path state) target-attribute))
     nil))
 
 (defn delete-recursively!
@@ -431,11 +471,9 @@
         [::progress-backstop-ms [:int {:min 1}]]]]]
      :nil]]}
   ([root target]
-   (delete-recursively-impl! root target nil nil))
-  ([root target {progress! ::progress!
-                 progress-backstop-ms ::progress-backstop-ms}]
-   (delete-recursively-impl!
-    root target progress! progress-backstop-ms)))
+   (delete-recursively-impl! root target {}))
+  ([root target options]
+   (delete-recursively-impl! root target options)))
 
 (defn content?
   "Whether a value names exactly one file-content source.
