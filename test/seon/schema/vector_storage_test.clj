@@ -572,7 +572,9 @@
            (is (= #{[(id "e")]} (db/q '[:find ?e :in $ ?e ?a :where [(missing? $ ?e ?a)]] database (id "e") :seon.vector-test.p/peers)))))
        (testing "a query naming only cardinality-one attributes never derives the declarations (V5)"
          (let [query '[:find ?entity . :in $ ?attribute :where [?entity ?attribute]]
-               ask #(#'db/may-read-vectors? (:schema database) (dq/memoized-parse-query %1) {:query %1 :args %2})]
+               parsed (dq/memoized-parse-query query)
+               patterns (#'db/query-patterns parsed)
+               ask #(#'db/may-read-vectors? (:schema database) parsed {:query %1 :args %2} patterns)]
            (is (false? (ask query [database :seon.vector-test.p/id])))
            (is (true? (ask query [database :seon.vector-test.p/items])))))
        (testing "get-else over a vector attribute refuses by name"

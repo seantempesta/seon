@@ -1,4 +1,9 @@
-[#:seon.task{:name "equal-declaration-fixtures-branch-off-different-commits"
+[#:seon.task{:name "a-query-derives-its-read-plan-once"
+             :kind :function
+             :intent "`seon.db/q` and `seon.db/replay-read` derive `seon.db/query-patterns` and `seon.db/query-variable-attributes` once per read and pass those values through encoding, execution and decoding. Preserve native result identity and read evidence."
+             :must-read #{seon.db/q seon.db/replay-read seon.db/query-patterns seon.db/query-variable-attributes}
+             :evidence #{"docs/research/agent-platform/2026-10-12/cost-record.md"}}
+ #:seon.task{:name "equal-declaration-fixtures-branch-off-different-commits"
              :kind :function
              :intent "Red at HEAD caba650fa (`bin/seon check --at HEAD`, run aa4ecc41bcc9): two nested `seon.test-support/with-database` fixtures do not branch off the same commit, so `seon.db/carried-projection` sharing across equal declaration content is unproven. Find which fixture write moves the executing commit and restore the shared basis, or correct the assertion's premise."
              :must-read #{seon.db/carried-projection seon.test-support/with-database}}

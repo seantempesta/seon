@@ -1157,7 +1157,7 @@
     captured)))
 
 (declare decode-index-page decode-query-result decode-pull-result read-declarations
-         with-declarations encode-query-request query-value-type-error query-input-values)
+         with-declarations encode-query-request query-value-type-error query-input-values query-patterns)
 
 (defn- pull-plan-with-evidence
   [& arguments]
@@ -1232,6 +1232,7 @@
                       (fn [arguments]
                         (mapv #(if (= ::database %) database %) arguments)))
               parsed-query (query/memoized-parse-query (:query query-request))
+              patterns (query-patterns parsed-query)
               input-values (query-input-values parsed-query (:args query-request))]
           ;; Evidence recorded before reads were type-checked can still hold
           ;; a mistyped value; it refuses here as the read now would. A query
@@ -1239,11 +1240,9 @@
           ;; retired (a pull selector derived from the old schema): Datahike
           ;; raises it, and the replay classifies it as `q` does, a value, so
           ;; the read is not current instead of throwing into the turn.
-          (or (query-value-type-error declarations query-request parsed-query input-values)
+          (or (query-value-type-error declarations query-request patterns input-values)
               (try
-                (let [answer (vector-query-call declarations query-request
-                                                (encode-query-request declarations query-request parsed-query input-values)
-                                                parsed-query input-values)]
+                (let [answer (vector-query-call declarations query-request parsed-query input-values patterns)]
                   (if (vector? answer) (second answer) answer))
                 (catch clojure.lang.ExceptionInfo cause
                   (dependency-error 'seon.db/replay-read cause)))))
@@ -2291,10 +2290,10 @@
     (cond-> values source-symbol (into [source-symbol]))))
 
 (defn- malformed-query-pattern-error
-  {:malli/schema [:=> [:cat :map :map] [:or :nil :seon.error/base]]}
-  [request parsed-query]
+  {:malli/schema [:=> [:cat :map [:vector :map]] [:or :nil :seon.error/base]]}
+  [request patterns]
   (when-let [pattern (some #(when (> (count (:pattern %)) 5) %)
-                           (query-patterns parsed-query))]
+                           patterns)]
     (let [offending (parsed-pattern-value pattern)]
       (assoc (diagnostic
        {:seon.error/message "seon.db/q received a data pattern with more than five positions."
@@ -2326,8 +2325,8 @@
 (defn- query-value-type-error
   "Check each pattern's installed attribute and value together. Input bindings
    are derived once by the read and shared with its encoding and decoding."
-  {:malli/schema [:=> [:cat :map :map :seon.schema/value :map] [:or :nil :seon.error/base]]}
-  [declarations request parsed-query input-values]
+  {:malli/schema [:=> [:cat :map :map [:vector :map] :map] [:or :nil :seon.error/base]]}
+  [declarations request patterns input-values]
   (let [arguments (:args request)
         databases (query-source-databases (:query request) arguments)
         schemas (update-vals databases #(dbi/-schema (schema-database %)))]
@@ -2357,11 +2356,11 @@
 
            (and (seq invalid) (not (edn-encoded? declarations attribute)))
            (value-type-error 'seon.db/q database declaration attribute (first invalid)))))
-     nil (query-patterns parsed-query))))
+     nil patterns)))
 
 (defn- query-variable-attributes
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [parsed-query input-values]
+  {:malli/schema [:=> [:cat [:vector :map] :map] :map]}
+  [patterns input-values]
   (reduce
      (fn [attributes pattern]
        (let [attribute-node (nth (:pattern pattern) 1 nil)
@@ -2376,13 +2375,12 @@
            (update attributes variable (fnil into #{}) candidates)
            attributes)))
      {}
-     (query-patterns parsed-query)))
+     patterns))
 
 (defn- query-find-attributes
-  {:malli/schema [:=> [:cat :map :map :map] [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]]]]}
-  [declarations parsed-query input-values]
-  (let [variable-attributes (query-variable-attributes parsed-query input-values)
-        elements (vec (parser/find-elements (:qfind parsed-query)))
+  {:malli/schema [:=> [:cat :map :map :map [:vector :map]] [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]]]]}
+  [declarations parsed-query variable-attributes patterns]
+  (let [elements (vec (parser/find-elements (:qfind parsed-query)))
         positions (into {} (keep-indexed #(when (instance? Variable %2) [(:symbol %2) %1])) elements)]
     (mapv
      (fn [element]
@@ -2397,7 +2395,7 @@
                                 (let [[_ attribute value] (:pattern pattern)]
                                   (when (= (:symbol element) (:symbol value))
                                     (get positions (:symbol attribute)))))
-                              (query-patterns parsed-query))]
+                              patterns)]
                  {::attribute-position position}
                  (if (= (count encoded) (count attributes))
                    (vec encoded)
@@ -2407,10 +2405,9 @@
 
 (defn- encode-query-request
   "Encode values at parsed Datalog value positions, using the write codec."
-  {:malli/schema [:=> [:cat :map :map :seon.schema/value :map] :map]}
-  [declarations request parsed-query input-values]
+  {:malli/schema [:=> [:cat :map :map :map :map :map [:vector :map]] :map]}
+  [declarations request parsed-query input-values attributes patterns]
   (let [bindings (query-input-bindings input-values)
-        attributes (query-variable-attributes parsed-query input-values)
         encode (fn [attribute value]
                  (if (and attribute (edn-encoded? declarations attribute))
                    (ask-declarations declarations
@@ -2427,7 +2424,7 @@
                           (let [form (parser.impl/get-source pattern)
                                 position (if (:symbol (:source pattern)) 3 2)]
                             [form (assoc (vec form) position (encode attribute (:value value)))])))))
-              (query-patterns parsed-query))]
+              patterns)]
     (letfn [(encode-binding [binding value]
               (cond
                 (instance? BindScalar binding)
@@ -2437,7 +2434,9 @@
                 (instance? BindTuple binding) (mapv encode-binding (:bindings binding) value)
                 :else value))]
       (assoc request
-             :query (walk/postwalk #(get replacements % %) (:query request))
+             :query (if (seq replacements)
+                      (walk/postwalk #(get replacements % %) (:query request))
+                      (:query request))
              :args (mapv encode-binding (:qin parsed-query) (:args request))))))
 
 (defn- decode-query-field
@@ -2516,13 +2515,13 @@
   "True when no find element can carry an encoded value or a decodable map.
    Pull, aggregate and function-bound elements keep the decoding walk."
   {:malli/schema [:=> [:cat :map [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]
-                                           [:map [:seon.db/pull-spec :map]]]]] :boolean]}
-  [parsed-query attributes]
+                                           [:map [:seon.db/pull-spec :map]]]] [:vector :map]] :boolean]}
+  [parsed-query attributes patterns]
   (let [bound (into #{}
                     (comp (mapcat :pattern)
                           (filter #(instance? Variable %))
                           (map :symbol))
-                    (query-patterns parsed-query))]
+                    patterns)]
     (and (every? nil? attributes)
          (every? #(and (instance? Variable %) (bound (:symbol %)))
                  (parser/find-elements (:qfind parsed-query))))))
@@ -2530,10 +2529,10 @@
 (defn- decode-query-result
   "`result` decoded column by column: EDN slots, and each find element in
    `pulls` (index -> logical pull spec) to its logical vectors."
-  {:malli/schema [:=> [:cat :map :map :seon.schema/value [:map-of :int :map] :map] :seon.schema/value]}
-  [declarations parsed-query result pulls input-values]
+  {:malli/schema [:=> [:cat :map :map :seon.schema/value [:map-of :int :map] :map [:vector :map]] :seon.schema/value]}
+  [declarations parsed-query result pulls variable-attributes patterns]
   (let [attributes (reduce-kv #(assoc %1 %2 {::pull-spec %3})
-                              (query-find-attributes declarations parsed-query input-values) pulls)
+                              (query-find-attributes declarations parsed-query variable-attributes patterns) pulls)
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
         decode-result
@@ -2564,7 +2563,7 @@
       ;; attribute: each value is a stored datom component the walk would
       ;; return unchanged, so the result is already native. Walking it cost
       ;; 5 ms / 21 MB for 19,232 tuples against Datahike's cached 0.002 ms.
-      (or (native-query-result? parsed-query attributes)
+      (or (native-query-result? parsed-query attributes patterns)
           ;; A function-bound column (for example get-else's numeric default)
           ;; is not proven native by data patterns. With no encoded columns
           ;; and no maps anywhere in the answer, the recursive map decoder
@@ -2626,8 +2625,8 @@
    declarations: cells are installed and the query has a pull, rules,
    `missing?`/`get-else`/`get-some`, or a data pattern whose attribute is
    unknown or installed cardinality-many (as every vector attribute is)."
-  {:malli/schema [:=> [:cat :map :map :map] :boolean]}
-  [installed parsed-query encoded]
+  {:malli/schema [:=> [:cat :map :map :map [:vector :map]] :boolean]}
+  [installed parsed-query encoded patterns]
   (boolean
    (and (contains? installed :seon.db.vector/cells)
         (let [bound (query-input-values parsed-query (:args encoded))]
@@ -2640,7 +2639,7 @@
                                              (instance? Variable node) (get bound (:symbol node)))]
                         (or (empty? attributes)
                             (some #(= :db.cardinality/many (get-in installed [% :db/cardinality])) attributes))))
-                    (query-patterns parsed-query)))))))
+                    patterns))))))
 
 (defn- vector-query-call
   "Run one encoded Datalog `request`: lowered for vector storage once
@@ -2648,10 +2647,12 @@
    (`decode-query-result`). Answers `[response result]`, or the refusal of
    `get-else`/`get-some` over a vector attribute. `q` and `replay-read` both
    run through it."
-  {:malli/schema [:=> [:cat :map :map :map :seon.schema/value :map]
+  {:malli/schema [:=> [:cat :map :map :map :map [:vector :map]]
                   [:or [:tuple :map :seon.schema/value] :seon.db/error-result]]}
-  [declarations logical encoded parsed-query input-values]
-  (let [projection (when (may-read-vectors? (::installed-schema declarations) parsed-query encoded)
+  [declarations logical parsed-query input-values patterns]
+  (let [variable-attributes (query-variable-attributes patterns input-values)
+        encoded (encode-query-request declarations logical parsed-query input-values variable-attributes patterns)
+        projection (when (may-read-vectors? (::installed-schema declarations) parsed-query encoded patterns)
                      @(::read-projection declarations))
         lowered (if-not projection
                   [encoded {}]
@@ -2673,7 +2674,7 @@
       lowered
       (let [[request pulls] lowered
             response (d/q-with-evidence request)]
-        [response (decode-query-result declarations parsed-query (:datahike.query/result response) pulls input-values)]))))
+        [response (decode-query-result declarations parsed-query (:datahike.query/result response) pulls variable-attributes patterns)]))))
 
 (defn- pull-output-options
   [spec]
@@ -2963,9 +2964,10 @@
           (refused-read aligned 'seon.db/q)
           (let [request (assoc normalized :args aligned)
                 parsed-query (query/memoized-parse-query (:query request))
+                patterns (query-patterns parsed-query)
                 input-values (query-input-values parsed-query aligned)]
             (or (nil-query-input-error request parsed-query)
-                (malformed-query-pattern-error request parsed-query)
+                (malformed-query-pattern-error request patterns)
                 (with-declarations
                   (some #(when (db.utils/db? %) %) aligned) 'seon.db/q
                   ;; A RELATION-ONLY QUERY HAS NO DATABASE SOURCE AT ALL. Every
@@ -2975,10 +2977,8 @@
                   ;; it reads "nothing to decode" as "cannot decode".
                   :seon.db/relation-only
                   (fn [declarations]
-                    (or (query-value-type-error declarations request parsed-query input-values)
-                        (let [answer (vector-query-call declarations request
-                                                        (encode-query-request declarations request parsed-query input-values)
-                                                        parsed-query input-values)]
+                    (or (query-value-type-error declarations request patterns input-values)
+                        (let [answer (vector-query-call declarations request parsed-query input-values patterns)]
                           (if-not (vector? answer)
                             answer
                             (let [[response result] answer]

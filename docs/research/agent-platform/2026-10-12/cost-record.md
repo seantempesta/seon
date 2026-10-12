@@ -100,3 +100,33 @@ The repeatable driver is `script/seon/cost_record.clj`, invoked with
 Datahike branch `seon/cost-record`, commit `ec907fb5`, pushed to the maintained
 fork. The recording target of 15–20 ms is **not met**. The namespace-order
 patch is not applied. Items 2–4 and LZ4 buffer reuse remain.
+
+## Query derivation
+
+A scalar query on default measured 0.46 ms and 67,416 allocated bytes.
+`seon.profile/measure` counted seven `seon.db/query-patterns` calls and two
+`seon.db/query-variable-attributes` calls. The tightened native-result test
+requires one of each for every query in its existing table. The same parsed
+patterns and attributes now pass through validation, vector selection,
+encoding and decoding; an unchanged query does not pass through postwalk.
+The read evidence and logical/native result contracts remain unchanged.
+
+Candidate `219e779f589f458278ddf5307eed4a95687daef0` passed the new assertions
+and 167 assertions overall. Two errors came from an existing test calling
+the changed private function with its old arity; that caller is converted.
+The next check names it along with the full vector-storage namespace.
+
+Warm second MCP request: preceding serialization candidate 153.35 ms;
+query candidate 176.42 ms, 8,916,128 caller-thread allocated bytes.
+This is a regression in the observed window, not evidence of a speedup.
+Both probes overlap check activity, so only the deterministic derivation
+counts establish the reduction. The full read-wrapper overhead and repeated
+pulls remain to be measured after root's restart. Full lint: zero errors,
+1,574 warnings, 6.876 s.
+
+The installed task ingester requires a string name; the instruction's symbol
+name fails candidate boot. The new task uses the installed representation.
+After the dependency commit, ordinary checks refuse against default's old
+loaded dependency. Archived candidate checks preserve default and test the
+committed dependency. **RESET NEEDED** means root's batched restart here;
+no store reset is requested.
