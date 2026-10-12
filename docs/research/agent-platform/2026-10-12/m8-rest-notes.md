@@ -1,7 +1,7 @@
 ---
-title: "M8 rest (goal lane goal-m8): S5 committed; publication's signal and the deletions wait on held files"
+title: "M8 rest (goal lanes goal-m8, goal-m8b): S5, the dead chain and publication's signal committed; the gate's proofs and the verb's deletion next"
 type: research
-status: goal lane, 2026-10-12, time box 45 minutes. Slice (a) committed (2736c187d). Slices (b) and (c) not committed: their files are held (src/seon/cluster/agent.clj and test/seon/cluster/db_flow_test.clj by lane agent-batch, src/seon/turn.clj by lane dsml).
+status: goal lanes, 2026-10-12. (a) committed (2736c187d); the dead chain of (c) committed (ad20b764d); (b) committed by lane goal-m8b on root's ruling (option 1); the rest of (c) not started.
 ---
 
 # M8 rest notes
@@ -23,24 +23,31 @@ Why no gap opens: on main a `:done` end arrives only through `seon.merge/merge-t
 `:merged` outcome (`next-actions` merges only `:done` and `:sent-back` ends; `:sent-back` closes `:closed`). A `:done`
 end on main without the outcome exists only in hand-written fixtures; such a leaf would read as ready again.
 
-## (b) Publication's signal: not done, a design decision for root
+## (b) Publication's signal: done (lane goal-m8b), root's option 1
 
-`seon.cluster.agent/publication-due?` (agent.clj, held) reads "its merge request reached main". Replacing it by
-"`:merged` + `:seon.task/merge-commit`, no `:seon.task/git-commit`, no refusal" alone makes every fact-only merge
-(no declarations: most db-flow merges, every cluster without a checkout) due for publication on every pass:
-`seon.merge/publish!` then either refuses at `checkout` (a `:seon.task/refusal` recorded on every such merge) or,
-with an empty path set, records nothing and stays due forever (a `merge-accepted` per pass). Options:
-1. (recommended) `seon.merge/merge!` knows its accepted declarations at merge time: record whether the merge moved
-   any (the accepted paths) in `merge-tx`'s transaction, e.g. publication due iff the merge commit's accepted
-   declarations are non-empty, derived once and written as a fact; `publication-due?` reads it.
-2. `publish!` with no paths writes a terminal fact (it published nothing) and answers; costs one `merge-accepted`
-   per fact-only merge, once.
-3. Keep the request read until (c) deletes the request; then derive declarations from `seon.cluster.source/merge-accepted`.
-Also `seon.merge/publish!` reads `(merged-request database a)` for the run id: it goes with the request.
+`seon.merge/merge!`'s gated path adds `[:db/add a :seon.task/merged-declarations n]` (n = the count of
+`seon.cluster.source/prepare-merge!`'s `:seon.source/expected-digests`, never 0: an empty delta refuses at the gate) to
+the `merging` data `seon.cluster.source/accept-merge!` transacts, so the fact is written in the merge transaction
+itself. `:seon.task/merged-declarations` (`[:int {:min 1}]`) is declared in `seon.task.edn` and on
+`:seon.task/assignment-row`. `seon.cluster.agent/publication-due?` reads only the pulled row (merged, merge commit,
+merged declarations, no git commit, no refusal) and no longer queries the merge request; `lifecycle-facts` pulls the
+new attribute. A facts-only merge records nothing and is never due.
+
+Proofs: `seon.cluster.merge-test/an-accepted-merge-is-published-by-the-next-pass` asserts `(= 1 merged-declarations)`
+after the gated merge: red with the test alone on HEAD (run 57d2d156d5fd: the attribute is undeclared), green with the
+change (run 639de3be31d6) except its line "main is unchanged" after a gate refusal, red on HEAD too (run 26fdcd4daab7
+at 52ff26287): a refused gate moves main's commit; pre-existing, not this change's. New
+`seon.merge-test/a-facts-only-merge-is-never-due-for-publication` (the facts-only path: no fact, no `:publish?`) and
+`seon.cluster.merge-test/a-requested-green-end-merges-and-publishes-with-no-hand-act` (publication now depends on
+the fact) green.
+
+Left from (b): `seon.merge/publish!` still reads `merged-request` for the git commit's run id; it goes with the
+request in (c) (the acceptance's run id is optional; the gate's own run, `:seon.test.run/id` of the prepared merge,
+is the one to record if a consumer needs it).
 
 ## (c) Deletions
 
-- **Dead chain, ready as a patch:** `m8-dead-chain.patch` (HEAD c264da25e-based, applies to 2736c187d; scratch commit
+- **Dead chain, committed in ad20b764d from this patch:** `m8-dead-chain.patch` (HEAD c264da25e-based, applies to 2736c187d; scratch commit
   fdf6c20f6). Deletes `seon.turn/land-ended!` (no caller anywhere), `land-end!`, `landing-tx`, `root-execution`,
   the `source-land!` delay and the now-unused `clojure.java.io` require; `seon.cluster.source/land!` (its only caller
   was that delay); `:seon.config.root/land?` (`resources/seon/schemas/seon.config.root.edn` deleted whole, it held
@@ -65,3 +72,24 @@ Also `seon.merge/publish!` reads `(merged-request database a)` for the run id: i
 - `(help)`'s "green proofs end your task and tell root" (src/seon/bootstrap.clj) is still true at 2736c187d.
 
 RESTART NEEDED for 2736c187d to be live on default (ordinary `src/seon/task.clj`).
+
+### (c) next, as found by lane goal-m8b (not started)
+
+- The gate needs one more decision before the verb can go: without the request, `merge!` must know whether the
+  branch changed declarations at all (`prepare-merge!` refuses an empty delta, and most merges are facts only).
+  Simplest: `merge!` reads the three-way once (`seon.cluster.source/compare-branch`, as
+  `seon.cluster.agent/unmerged-count` does) and gates only when it is non-empty, with the proofs from
+  `seon.task/obligations` of the assignment's task (`:seon.task/proofs`); the alternative is `prepare-merge!`
+  answering an empty delta as a value rather than a refusal (source.clj, lane m8-apply). The first costs a second
+  comparison per declaration merge; the second changes `prepare-merge!`'s contract.
+- Callers to convert in the deleting commit: `seon.turn/end-task!`'s merge clause and `end-merge-request`,
+  the `program-request-merge!` delay (turn.clj); `my.program/request-merge!`; `seon.task/request-merge!`,
+  `red-first`; `seon.merge/merge-request`, `merged-request`; the request schema (`:seon.task/merge-request`,
+  `-row`, `-view`, `:merge`, `:of-assignment`, `:commit`, `:proved`, `:red-first`) in `seon.task.edn`; tests
+  `seon.cluster.merge-test` (`requested-agent!` calls the verb), `seon.cluster.host-test`
+  (`a-merge-request-waits-for-its-assigned-tasks-proofs-then-reaches-root`, 427-460),
+  `seon.turn-continue-test` (306, 427-520), `seon.cluster.db-flow-test` (461, 470, 751, 989; held by m8-apply).
+- Red proof: `seon.task-test/a-done-branch-merges-with-no-merge-request-written-by-the-agent` (task exists in
+  `seon.task.edn`, deftest absent): an own-branch agent defines the fix, its done end is written with no request,
+  one `db<->flow` pass: `:merged`, main's `:seon.program/definition-digest` of the fixed function equals the
+  branch's, and the branch holds no `:seon.task/merge-request`.

@@ -1,6 +1,7 @@
 (ns seon.merge-test
   (:require [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -510,6 +511,26 @@
               (is (nil? (:seon.task/merge-commit second-merge)) "a repeat transacts nothing")
               (is (= main (db/commit-id (db/db connection))) "main is unchanged")
               (is (= commit (merge-base-on connection a)))))))))))
+
+(deftest a-facts-only-merge-is-never-due-for-publication
+  (support/with-database
+   (fn [connection]
+     (let [handle (task/task-handle 'fixture.tasks "merge-facts-only" :function)]
+       (with-assigned-fork
+        connection handle
+        (fn [fork _ a]
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (let [merged (merged! connection a)
+                main (db/db connection)
+                row (some #(when (= a (:db/id %)) %)
+                          (cluster.agent/lifecycle-facts main (:seon.store/store (support/execution-handle connection))
+                                                         {:seon.flow.plan/started #{} :seon.flow.plan/paused #{}}))]
+            (is (uuid? (:seon.task/merge-commit merged)) "the facts merged")
+            (is (= :merged (:seon.task/outcome (db/pull main [:seon.task/outcome] a))))
+            (is (nil? (:seon.task/merged-declarations (db/pull main [:seon.task/merged-declarations] a)))
+                "a merge of facts alone records no moved declarations")
+            (is (map? row) "the assignment is held")
+            (is (not (:seon.flow.plan/publish? row)) "and its publication is never due"))))))))
 
 (deftest a-root-edit-after-capture-keeps-roots-value
   (support/with-database

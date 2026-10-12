@@ -2055,14 +2055,13 @@
                  (some (complement forked?) waiting)))))
 
 (defn- publication-due?
-  "Whether assignment `a`'s publication is due on main `database`, from its `row`: merged, its merge commit
-  recorded, no git commit and no refusal recorded, and its merge carried declarations (its merge request
-  reached main with it)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :map] :boolean]}
-  [database a {outcome :seon.task/outcome commit :seon.task/merge-commit git :seon.task/git-commit refused :seon.task/refusal}]
-  (boolean (and (= :merged outcome) commit (not git) (not refused)
-                (seq (db/q '[:find [?r ...] :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                           database a)))))
+  "Whether an assignment's publication is due, from its `row` on main: merged, its merge commit recorded,
+  its merge moved declarations (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes in the
+  merge's own transaction), and no git commit and no refusal recorded. A merge of facts alone is never due."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [{outcome :seon.task/outcome commit :seon.task/merge-commit moved :seon.task/merged-declarations
+    git :seon.task/git-commit refused :seon.task/refusal}]
+  (boolean (and (= :merged outcome) commit moved (not git) (not refused))))
 
 (defn- branch-admission-end
   "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on `branch`'s head, read from main
@@ -2133,7 +2132,8 @@
                        (let [{main-end :seon.task.attempt/end base :seon.task/merge-base :as row}
                              ;; an assignment holding none of these yet pulls as nil
                              (or (db/pull database [:seon.task.attempt/end :seon.task/merge-base :seon.task/outcome
-                                                    :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal] a)
+                                                    :seon.task/merge-commit :seon.task/merged-declarations
+                                                    :seon.task/git-commit :seon.task/refusal] a)
                                  {})
                              head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b})
                              ;; the branch is read while it holds something unmerged
@@ -2143,7 +2143,7 @@
                              end (or main-end on-branch
                                      (when (= :cancelled (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id h])))
                                        :cancelled))
-                             publish? (publication-due? database a row)]
+                             publish? (publication-due? row)]
                          (when (uuid? head)
                            (cond-> {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
                                     :seon.agent/id id :seon.flow.plan/head head

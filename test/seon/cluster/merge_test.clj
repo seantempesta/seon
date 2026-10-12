@@ -325,7 +325,8 @@
 (defn- assignment-row
   "Assignment `key`'s merge and publication facts on main."
   [connection key]
-  (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal]
+  (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit :seon.task/merged-declarations
+                                :seon.task/git-commit :seon.task/refusal]
            [:seon.task/assignment key]))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-accepted-merge-is-published-by-the-next-pass
@@ -360,6 +361,8 @@
                  "main holds the agent's definition")
              (is (= :merged (:seon.task/outcome (assignment-row connection request))) "the assignment is merged")
              (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge commit")
+             (is (= 1 (:seon.task/merged-declarations (assignment-row connection request)))
+                 "the merge records, in its own transaction, the one declaration it moved")
              (is (nil? (:seon.task/git-commit (assignment-row connection request))) "and no git commit yet")
              (is (= [text before] [(slurp file) (git! root "rev-parse" "HEAD")]) "the merge writes no file")
              (testing "a path another lane claims waits: the pass writes nothing"

@@ -246,7 +246,8 @@
   when the agent requested the merge (its merge request on the branch names the proofs), the declarations
   it changed since the base, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
-  `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold
+  `merge-tx` and `:seon.task/merged-declarations` (how many it moved) in its transaction, then the merge
+  branch is deleted; the files the checkout `root` would hold
   are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`; publishing the
   merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
   A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
@@ -297,8 +298,10 @@
           :else
           (let [proofs (into #{} (map first) (:seon.task/proved request))
                 prepared (source/prepare-merge! context store branch proofs nil root)
+                ;; the merge records, in its own transaction, how many declarations it moved: what publication reads
+                moved [:db/add a :seon.task/merged-declarations (count (:seon.source/expected-digests prepared))]
                 accepted (when (:seon.source/candidate prepared)
-                           (source/accept-merge! context store prepared {:tx-data merge-call :tx-meta meta}))
+                           (source/accept-merge! context store prepared {:tx-data (conj merge-call moved) :tx-meta meta}))
                 _ (when (:seon.source/candidate prepared)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
                 result (when (:seon.source/commit-id accepted)
