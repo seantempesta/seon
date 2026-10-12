@@ -126,7 +126,10 @@
  ; separate ceiling). Reading more is plain Clojure on result/eN (each cut
  ; prints its continuation form), or (seon.print/full result/eN) opts one
  ; evaluation into printing the value whole.
- :seon.config.render.agent/token-budget 2000
+ ; Raised to 4,096 (owner 2026-10-12: print more, so help and the current-state
+ ; block show whole): chain experiment 8's block was 3,172 tokens whole and
+ ; printed its task intent cut to 202 of 687 characters at 2,000.
+ :seon.config.render.agent/token-budget 4096
  ; Unit: nested structural nodes retained in the visible face.
  :seon.config.render.agent/max-depth 8
  ; Unit: children retained per collection node.

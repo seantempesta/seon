@@ -11,6 +11,10 @@
             [seon.print :as printer]
             [seon.test-support :as support]))
 
+(def ^:private budget
+  "The agent profile's display budget in tokens, as shipped."
+  (:seon.config.render.agent/token-budget config/defaults))
+
 (defn- reply-text
   "The reply text of one `eval_clj` of `code` as `agent-id`."
   {:malli/schema [:=> [:cat :string :string :string] :string]}
@@ -40,15 +44,15 @@
   (true? (:seon.repl/value (reply (pr-str (list '= form expected)) agent-id running))))
 
 (deftest a-child-cap-follows-the-budget
-  ;; 400 small maps fill the budget instead of stopping at a member count.
+  ;; 2,000 small maps fill the budget instead of stopping at a member count.
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [{handle :seon.repl/result shown :seon.repl/value} (reply "(vec (repeat 400 {:a 1 :b \"x\"}))" agent-id running)
+     (let [{handle :seon.repl/result shown :seon.repl/value} (reply "(vec (repeat 2000 {:a 1 :b \"x\"}))" agent-id running)
            members (filterv map? shown)
            form (last shown)]
-       (is (< 100 (count members) 400) "the budget, not a member count, decides how many show")
+       (is (< 100 (count members) 2000) "the budget, not a member count, decides how many show")
        (is (= (list 'drop (count members) handle) form))
-       (is (continued? form (list 'drop (count members) (list 'vec (list 'repeat 400 {:a 1 :b "x"}))) agent-id running))))))
+       (is (continued? form (list 'drop (count members) (list 'vec (list 'repeat 2000 {:a 1 :b "x"}))) agent-id running))))))
 
 (deftest a-cut-set-or-map-continues-where-it-stopped
   ;; A map or set past 64 members shows its first members in `seq` order, and
@@ -85,10 +89,10 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (let [printing "(dotimes [i 3000] (println \"line\" i \"of the printed output\"))"
-           text (reply-text (str "(do " printing " (vec (range 2000)))") agent-id running)
+           text (reply-text (str "(do " printing " (vec (range 5000)))") agent-id running)
            [_ out-handle out-offset] (re-find #"\(subs (result/o[0-9a-f]+) (\d+)\)" text)
            [_ value-offset value-handle] (re-find #"\(drop (\d+) (result/e[0-9a-f]+)\)" text)]
-       (is (<= (tokens/estimate text) 2000) "one budget covers value, output and findings")
+       (is (<= (tokens/estimate text) budget) "one budget covers value, output and findings")
        (is (re-find #":findings" text))
        (is (and out-handle value-handle) "both parts are cut, each with its own source")
        (when (and out-handle value-handle)
@@ -96,13 +100,13 @@
                          (list 'subs (list 'with-out-str (read-string printing)) (parse-long out-offset))
                          agent-id running))
          (is (continued? (list 'drop (parse-long value-offset) (symbol value-handle))
-                         (list 'drop (parse-long value-offset) (list 'vec (list 'range 2000)))
+                         (list 'drop (parse-long value-offset) (list 'vec (list 'range 5000)))
                          agent-id running))))
      (let [small (reply "(do (println \"hi\") 1)" agent-id running)]
        (is (= ["hi\n" 1] [(:seon.repl/out small) (:seon.repl/value small)]) "a small reply is whole")))))
 
 (defn- shown-members
-  "How many of `(vec (range 3000))`'s members a reply shows."
+  "How many of `(vec (range 10000))`'s members a reply shows."
   {:malli/schema [:=> [:cat :map] :int]}
   [reply]
   (count (filter int? (:seon.repl/value reply))))
@@ -118,14 +122,15 @@
   ;; seon.print/*budget* widens every later reply until it is set back.
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [plain (reply "(vec (range 3000))" agent-id running)
-           widened (reply "(with-meta (vec (range 3000)) {:seon.print/budget 4000})" agent-id running)
-           _ (reply "(set! seon.print/*budget* 4000)" agent-id running)
-           session (reply "(vec (range 3000))" agent-id running)
+     (let [wider (* 2 budget)
+           plain (reply "(vec (range 10000))" agent-id running)
+           widened (reply (str "(with-meta (vec (range 10000)) {:seon.print/budget " wider "})") agent-id running)
+           _ (reply (str "(set! seon.print/*budget* " wider ")") agent-id running)
+           session (reply "(vec (range 10000))" agent-id running)
            _ (reply "(set! seon.print/*budget* nil)" agent-id running)
-           restored (reply "(vec (range 3000))" agent-id running)]
+           restored (reply "(vec (range 10000))" agent-id running)]
        (is (< (shown-members plain) (shown-members widened)) "metadata widens the value")
-       (is (= 4000 (:seon.eval/budget-override (override-finding widened))) "the finding names its token count")
+       (is (= wider (:seon.eval/budget-override (override-finding widened))) "the finding names its token count")
        (is (nil? (override-finding plain)))
        (is (= (shown-members widened) (shown-members session)) "the session's set! widens the next form")
        (is (= (shown-members plain) (shown-members restored)) "set! nil restores the profile's budget")))))

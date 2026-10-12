@@ -92,14 +92,13 @@
                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
     nil)))
 
-(deftest ^{:seon/tasks #{'seon.context/the-implement-step-names-its-owner-and-shows-the-whole-intent}}
-  an-implement-step-names-its-owner-and-shows-the-whole-intent
+(deftest an-implement-step-names-its-owner-and-shows-the-whole-intent
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (let [intent (apply str "Whole: " (repeat 250 "word-"))]
+     ;; About 2,200 estimated tokens: past the old 2,000-token display budget, inside the agent profile's.
+     (let [intent (apply str "Whole: " (repeat 1400 "word-"))]
        (proof-task running connection agent-id intent)
        (let [state (block running agent-id)]
-         (is (> (count intent) 1024))
          (is (= intent (:seon.task/intent (:seon.context/task state))) "the intent is shown whole")
          (is (= 'tq.cs (:in-ns (:seon.context/start (:seon.context/step state)))) "the step names the owner namespace")
          (is (= '(my.program/source 'tq.cs/shape) (:source (:seon.context/start (:seon.context/step state)))) "and the first form to read"))))))

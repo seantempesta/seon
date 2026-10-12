@@ -544,10 +544,7 @@
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
   (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
-    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
-    ;; A task's instructions are shown whole: the block widens its own budget (up to the profile's ceiling)
-    ;; rather than let the printer cut the intent to fit the profile's.
-    (:seon.context/task block) (vary-meta assoc :seon.print/budget Integer/MAX_VALUE)))
+    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; What a model pass sends
