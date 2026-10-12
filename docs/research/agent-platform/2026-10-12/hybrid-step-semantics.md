@@ -1,7 +1,7 @@
 ---
 title: "Hybrid: step semantics and the step lifecycle"
 type: research
-status: hybrid of plan-step-semantics-opus.md (63c54b9e0) and plan-step-semantics-sol.md (29a576595) over dig-step-semantics.md (fe9f5d295), chain-experiment-1.md (19bfdc087, F1–F5, its proofs patch) and verify-astra.md #6/#8/#9, aligned with hybrid-push.md (root's db<->flow is the one pusher and reactor) under AGENTS.md 2026-10-12 (agents are compartments; agents transact facts, root reacts; no guards or fences); design only, phases filed as tasks
+status: hybrid of plan-step-semantics-opus.md (63c54b9e0) and plan-step-semantics-sol.md (29a576595) over dig-step-semantics.md (fe9f5d295), chain-experiment-1.md (19bfdc087, F1–F5, its proofs patch) and verify-astra.md #6/#8/#9, aligned with hybrid-push.md as revised (git's untrusted-contributor model: agents never push; everything reaches main through the agent's merge request, whose rule-trusted parts root's db<->flow auto-merges as they change and whose code waits for root) under AGENTS.md 2026-10-12 (agents are compartments; agents transact facts, root reacts; no guards or fences); owner answers of 2026-10-12 to §6 applied in place; design only, phases filed as tasks
 basis: HEAD 29a576595 read by symbol (`seon.test.runner/latest-results`, `seon.test/change-reds`, `seon.turn/reached-red`, `record-reached-red!`, `test-step`, `task-end`, `end-task!`, `next-agent-work`, `first-proof-run-t`; `seon.context/task-done?`, `proofs`, `all-green?`; `seon.cluster.agent/plan`, `plan-facts`, `apply-plan!`, `write-attempt!`, `fork-attempt!`, `follow!`, `write-problem!`, `land-ends!`, `agents-to-start`, `db<->flow`; `seon.cluster.host/start!`; `seon.task/frontier`, `task-edges`); probes on default (archive 2319152dc, pid 94708) below
 ---
 
@@ -14,9 +14,10 @@ a step's obligations from that fact, and one pure rule judges them against the s
 end commit, recorded on the attempt as `:seon.task.attempt/fork`), never against main. The agent judges itself inside
 its own compartment (its branch, its SCI fork, a fork of its environment for tests) and writes the verdict as facts on
 its branch: the tests it broke, its end. Root's `db<->flow`, woken by the branch's listen route, does everything that
-touches main or another agent: pushes those facts (hybrid-push.md), stops the graph, starts the successor from the
-recorded commit, opens root's merge task or its repair problem, and relaunches only by a fact root writes while
-working that problem. Nothing retries, rewrites an end or starts a graph except `plan` over attempts of `:running`
+touches main or another agent: auto-merges the rule-trusted parts of the agent's merge request (its owned task facts,
+its end, message records, occurrences; hybrid-push.md) as they change, leaves code and unowned changes in the merge
+request for root, stops the graph, starts the successor from the recorded commit, opens root's work item or its repair
+problem, and relaunches only by a fact root writes while working that problem. Nothing retries, rewrites an end or starts a graph except `plan` over attempts of `:running`
 tasks. A new red test is a Prove step's product, never breakage; "broken" is a test that existed at the fork point,
 was not red there and is red at the head. Both plans arrived at this shape independently; the differences below are
 settled by the smaller mechanism that the existing data already supports.
@@ -32,16 +33,17 @@ settled by the smaller mechanism that the existing data already supports.
 | F1 | delete the `:seon.test.run/branch` clause of `latest-results`; a db value holds only its lineage's runs; reach digest decides validity | keep "branch-native admission"; pass the origin as explicit input and read it | **Opus, verified.** Reproduced on default (scratch agent `hybrid-steps-probe`): after one check, `latest-results` on its branch answers `[[map-and-set-order-never-changes-an-identity 1 0]]` and, with only `[:config :branch]` renamed on the same value, `[]`. Runs record `:seon.test.run/branch` = the tested value's branch (`seon.test.runner` run row), `seon.test.run` is `:seon.data` (never pushed), and a Datahike branch value holds exactly its lineage's commits, so "latest in this value" is correct without the clause and `proof-status` already compares the reach digest. Sol's explicit origin input is the same read with a second parameter; not needed. **Safety found in the probe:** `seon.turn/first-proof-run-t` and `proof-run-recorded?` also filter by branch and mean "this attempt proved first"; with inherited runs readable they would count a predecessor's run and skip prove-first, so P1 keys them by the attempt (runs after the attempt row's `t` on the branch), not by branch. `seon.test/changed-since-green`'s clause is the same class and goes with P1. |
 | Validity (F3) | `plan-facts` reads `obligations` on the basis commit's value, cached by commit id | resolve the exact predecessor end commits, read via `commit-as-db`, reuse the held value for assembly | **Agreed.** The basis is `:seon.flow.plan/basis` (done needs' end commits); joins are the octopus fork (hybrid-immutable-env E6, `write-attempt!` still takes `(first (sort fork-point))`: E6's deletion). The problem task's intent becomes the failed check as data (`write-problem!`'s "names no proof" string goes). |
 | Context (F4) | proofs, `broken`, product with failure data; status from `step-status` | kind, fork basis, obligations, expected reds, broken tests, one projection | **Both say the same.** `current-state` and `my.task/current` show the obligations and the broken tests from the one observation `step-status` judged, each with status and failure data (`proof-failures` already exists), and `:seon.task/status` comes from `step-status`; `all-green?` as a status source goes. |
-| Ends and relaunch | ends are the attempt's own facts; `:error` end; repair problem by identity `[class attempt]`; relaunch = `:seon.task.attempt/relaunch` root writes, attempt n+1 from the same fork point | same; relaunch as a separate request entity (task, previous attempt, reason, chosen fork commit, revision); root may keep the failed attempt's program | **Opus's fact on the ended attempt** (one indexed fact, idempotent: the row exists) carrying the reason; attempt n+1 forks the same fork point. Sol's "repair may keep the failed attempt's program" is owner question 2. |
+| Ends and relaunch | ends are the attempt's own facts; `:error` end; repair problem by identity `[class attempt]`; relaunch = `:seon.task.attempt/relaunch` root writes, attempt n+1 from the same fork point | same; relaunch as a separate request entity (task, previous attempt, reason, chosen fork commit, revision); root may keep the failed attempt's program | **Opus's fact on the ended attempt** (one indexed fact, idempotent: the row exists) carrying the reason; attempt n+1 forks the same fork point, a plain restart. **Owner:** root may instead name a different fork commit or adjust the environment before starting, so the relaunch carries an optional chosen fork commit (Sol's option, chosen explicitly, never by default). |
 | Lifecycle table and starter | one table; `plan` over attempts of `:running` tasks is the one starter; `:held` = no attempt, no model turn | same; roster is an observation, ended attempts outrank intents | **Agreed (§4).** Stop finishes the pass (landed at HEAD: `follow!` passes `:seon.agent/finish? true`); cancel interrupts. |
 | Catches | delete the four; action failure = the attempt's `:error` end | same, fold into one assembly boundary | **Agreed; split by owner.** hybrid-push U3 deletes `land-ends!`, its catch, `unlanded-ends`' and `detached!`; this design deletes `apply-plan!`'s per-action catch and `db<->flow`'s start catch with `agents-to-start` (P7, P10). |
-| Outside (MCP) agents | an ordinary attempt whose graph has no model proc | hosting builds an execution, not a background model graph; a graph only from root's plan | **Agreed on the law** (`seon.cluster.host/start!` stops starting graphs); owner question 1 decides what an MCP-held attempt's graph is. |
+| Outside (MCP) agents | an ordinary attempt whose graph has no model proc | hosting builds an execution, not a background model graph; a graph only from root's plan | **Agreed on the law** (`seon.cluster.host/start!` stops starting graphs). **Owner:** an MCP entrant declares one of two kinds: it simulates ROOT (world = main, root's capabilities) or an AGENT (exactly an agent's limits: SCI on its own branch, an ordinary attempt, its graph an agent's minus the model proc, each eval request its pass). |
 
 ## 3. Data, selection and the one rule
 
 - **`:seon.task/step`** `[:enum :prove :implement]` on `:seon.task/task` (schema `seon.task.edn`, vocabulary row under
   "subject, step"); the creator writes `:prove` on a Design+Prove step. **`:seon.task.attempt/end`** gains `:error`.
-  **`:seon.task.attempt/relaunch`** `[:string {:min 1}]`: root's reason, written on an ended attempt. **`:seon.error/unimplemented`**:
+  **`:seon.task.attempt/relaunch`** `[:string {:min 1}]`: root's reason, written on an ended attempt, with optional
+  **`:seon.task.attempt/relaunch-fork`** `:uuid`, the commit attempt n+1 forks instead of the ended attempt's fork point. **`:seon.error/unimplemented`**:
   the variant Design's contracted stubs fail with (TASK-CHAIN §3 item 1 `(fail! …)`), so a product test's `:error` names a designed red.
 - **`seon.task/obligations`** (database, task-sym) → `{:seon.task/step k :seon.task/proofs #{…} :seon.task/product #{…}}`:
   two indexed reads over `:seon.task/tasks` (own tags; tags of the tasks whose `needs` name this one). Its callers:
@@ -65,7 +67,10 @@ in the step; this probe's one-test check 845 ms, 1.8 GB JVM window: `my.test/a-t
 ## 4. The lifecycle: one intent table, one starter
 
 Intent `:seon.task/execution` on the task, cluster `:seon.cluster/execution` (R3; paused anywhere wins). Every row is
-derived by `plan` from main (after push) + roster, idempotent by identity; an action and its failure fact are one unit.
+derived by `plan` from main (after the auto-merge of the attempt's rule-trusted facts) + roster, idempotent by
+identity; an action and its failure fact are one unit. Agents never push: an agent's facts reach main only as parts of
+its merge request that `db<->flow` auto-merges by rule (owned task facts, its end, message records, occurrences); its
+code and unowned changes wait in the merge request for root, whose work items are child tasks with hash identity.
 
 | Facts on main | Roster | `db<->flow` (root's world) | Triggering fact written by |
 |---|---|---|---|
@@ -75,10 +80,10 @@ derived by `plan` from main (after push) + roster, idempotent by identity; an ac
 | `:paused`, or cluster `:paused` | graph | `flow/pause`, acknowledged by `flow/ping-proc` under the bound | root |
 | `:stopped` | graph | stop after the current pass (`:seon.agent/finish? true`), join, release the SCI context; attempt open, resumable by `:running` | root |
 | `:cancelled` | graph | interrupt; end `:cancelled` on main (root's own act); `:delete-branch` derived; no problem task | root |
-| end `:done` | graph | `:stop` derived; successors ready; the agent-written merge request becomes root's merge task; branch deleted once pushed, no successor waits, no open request (hybrid-push §4) | agent |
+| end `:done` | graph | `:stop` derived; successors ready; the end is auto-merged, the merge request's code waits as root's child work item (the chain's last step only, P6); branch deleted once its rule-trusted parts are merged, no successor waits and no work item is open (hybrid-push.md) | agent |
 | end `:sent-back` → T | graph | `:stop`; T is not done (`leaf-done`), so T gets attempt n+1 with the counterexample in its context; the sender waits on T again | agent |
 | end `:capped` `:stalled` `:given-back` `:error` | graph | `:stop`; repair problem task by identity `[class attempt]` assigned to root, carrying the end and reason; branch kept; the task leaves `ready` | agent (root for a start `:error`) |
-| that attempt carries `:seon.task.attempt/relaunch` | — | the task is ready again: attempt n+1 from the same fork point | root, working the repair problem (`my.root/relaunch!`; may `refine!` first) |
+| that attempt carries `:seon.task.attempt/relaunch` | — | the task is ready again: attempt n+1 from the ended attempt's fork point (a plain restart), or from `:seon.task.attempt/relaunch-fork` when root named one | root, working the repair problem (`my.root/relaunch!`; may `refine!` or adjust the environment first) |
 | `:sent-back` to the same target twice | — | arbitrate problem (runtime-follows-db §5) | — |
 
 No end is rewritten; a relaunch answers it. The repair problem's proof: its attempt carries a relaunch or its task is
@@ -107,29 +112,32 @@ runtime-follows-db §6 moves schedules to recurring tasks); `apply-plan!`'s per-
 | P6 | merge request only from a step no task needs (`src/seon/turn.clj` `end-task!`, `test/seon/cluster/db_flow_test.clj`) | rows in P3's test: p's `:done` records no merge request; i's does | `seon.turn/a-merge-request-comes-only-from-a-step-no-task-needs` |
 | P7 | #6: a failed `:attempt`/`:start-flow` (one unit) writes the attempt's `:error` end; delete `apply-plan!`'s catch (`src/seon/cluster/agent.clj`, `test/seon/cluster/db_flow_test.clj`) | `seon.cluster.db-flow-test/a-failed-start-ends-its-attempt-and-the-next-plans` | `seon.cluster.agent/a-failed-start-ends-its-attempt-and-the-next-plans` |
 | P8 | #9: cancel interrupts, ends `:cancelled`, deletes the branch, no problem task; pause acknowledged (`src/seon/cluster/agent.clj` with hybrid-push U3's derived lifecycle) | R2 table `seon.cluster.agent-test/each-intent-names-one-roster-state` | existing `seon.cluster.agent/each-intent-names-one-roster-state` |
-| P9 | F5: repair problem per class by identity; `:seon.task.attempt/relaunch` + `my.root/relaunch!`; the `ready` rule (`src/seon/task.clj`, `src/seon/cluster/agent.clj`, `src/my/root.clj`, `test/seon/cluster/db_flow_test.clj`) | `seon.cluster.db-flow-test/a-capped-attempt-relaunches-only-by-roots-fact` (capped → problem, no attempt 2; relaunch → attempt 2 from attempt 1's fork point) | `seon.cluster.agent/a-capped-attempt-has-no-relaunch`; rows of `seon.task/each-problem-class-is-detected-from-its-facts` |
-| P10 | #8: one starter; delete `agents-to-start`, the start catch, `host/start!`'s graph start, the held arm; fixtures converted (`src/seon/cluster/agent.clj`, `src/seon/cluster/host.clj`, `src/seon/turn.clj`, tests); after owner question 1 and runtime-follows-db §6 | `seon.turn-test/a-held-task-opens-no-model-turn`; P8's table | `seon.turn/a-held-task-opens-no-model-turn` |
+| P9 | F5: repair problem per class by identity; `:seon.task.attempt/relaunch` (reason, optional `relaunch-fork`) + `my.root/relaunch!`; the `ready` rule (`src/seon/task.clj`, `src/seon/cluster/agent.clj`, `src/my/root.clj`, `test/seon/cluster/db_flow_test.clj`) | `seon.cluster.db-flow-test/a-capped-attempt-relaunches-only-by-roots-fact` (capped → problem, no attempt 2; relaunch → attempt 2 from attempt 1's fork point) | `seon.cluster.agent/a-capped-attempt-has-no-relaunch`; rows of `seon.task/each-problem-class-is-detected-from-its-facts` |
+| P10 | #8: one starter; delete `agents-to-start`, the start catch, `host/start!`'s graph start, the held arm; the MCP entrant declares ROOT or AGENT (§6.1: an AGENT entrant is an ordinary attempt whose graph lacks the model proc); fixtures converted (`src/seon/cluster/agent.clj`, `src/seon/cluster/host.clj`, `src/seon/mcp.clj`, `src/seon/turn.clj`, tests); after runtime-follows-db §6 | `seon.turn-test/a-held-task-opens-no-model-turn`; P8's table | `seon.turn/a-held-task-opens-no-model-turn` |
 | P-final | chain experiment 2: same subject and instructions plus Prove's "run the tests reaching the subject against the designed shape"; zero nudges; restart default on that HEAD first | the chain test extended to Design+Prove (expected red product) → Implement → one root merge request, no hand end edits; then the paid run (about 5 + 4 calls) with a merge request in root's queue | `seon.cluster.agent/the-real-chain-runs-with-no-nudges` |
 
-**Order.** P1 → P2 → P3 → P4 (P3/P4 share `context.clj`: one lane) → P5, P6 → P7, P8 (with hybrid-push U3) → P9 →
-P10 → P-final. P1–P6 alone unblock the chain (F1–F4); P7–P10 remove the nudges' cause. P1 and P3 are Opus lanes (the test
+**Order (owner-approved).** P1 → P2 → P3 → P4 (P3/P4 share `context.clj`: one lane) → P5, P6; then hybrid-push.md's
+merge-request and auto-merge phases; then P7, P8 (with its derived lifecycle) → P9 → P10; then P-final, the zero-nudge
+chain rerun. P1–P6 alone unblock the chain (F1–F4); P7–P10 remove the nudges' cause. P1 and P3 are Opus lanes (the test
 step is on the one path); P2 is a platform slice; P4–P9 Sonnet on this spec. Collisions: `src/seon/cluster/agent.clj`,
 `src/seon/task.clj` and `test/seon/cluster/db_flow_test.clj` are also hybrid-push U2/U3/U5/U6's; root sequences them.
 The patch's deftests land with P3 and P5 (its task entries land here; `seon.turn/a-form-without-source-is-shown-as-a-fault` too).
 
-## 6. Owner questions (the recommended answer is used unless overruled)
+## 6. Owner decisions (2026-10-12)
 
-1. **An outside (MCP) agent's graph.** Recommended: an MCP-held task is an ordinary attempt (root assigns it) whose graph
-   has the mailbox and test procs and no model proc (`graph-definition` by the agent's record, `:seon.agent/settings`
-   naming no model); the eval request is its pass. Alternative: no graph; messages wait as data on main (hybrid-push U5)
-   and are read at the next eval request's context. P10 waits for this.
-2. **Relaunch fork point.** Recommended: the same fork point (a fresh start; tracked refinements are already pushed).
-   Alternative (Sol): root names the failed attempt's end commit to keep its partial program, risking its failure's cause.
-3. **Stub error type.** Recommended: declare `:seon.error/unimplemented` in P2 and make Design's stubs `fail!` with it;
-   until then P3 accepts `:fail` reports only.
-4. **Design as its own step kind.** Recommended: not now; Design's checks are own proofs on a `:prove` step.
-5. **`:given-back` routing.** Recommended: a repair problem for root (a given-back names no target); a send-back with a
-   target routes to that target.
+1. **An outside (MCP) entrant declares one of two kinds.** It simulates ROOT (its world is main in the cluster, with
+   root's capabilities) or an AGENT (exactly an agent's limits and environment: SCI on its own branch, an ordinary
+   attempt; its graph is an agent's minus the model proc, since the model is outside; each MCP eval request is its pass).
+   P10 proceeds on this.
+2. **Relaunch.** Default: the same fork point, a plain restart with no changes. Root may instead name a different fork
+   commit (`:seon.task.attempt/relaunch-fork`) or adjust the environment before starting.
+3. **`:seon.error/unimplemented`** is the type Design's stubs fail with (declared in P2; until then P3 accepts `:fail`
+   reports only). **Design stays inside `:prove`.** **A given-back end without a target is root's repair problem**; a
+   send-back with a target routes to that target.
+4. **Merge model.** Agents never push: everything reaches main through the agent's merge request (its contents the branch
+   diff since its base); root's `db<->flow` auto-merges the rule-trusted parts (owned task facts, end, message records,
+   occurrences) as they change; code and unowned changes wait in the merge request for root; no "findings"; root's work
+   items are child tasks with hash identity. hybrid-push.md is being revised to this by its author.
 
 ## 7. Probes (default, archive 2319152dc; scratch agent `hybrid-steps-probe`, disposable)
 
