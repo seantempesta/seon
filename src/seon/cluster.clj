@@ -1644,6 +1644,12 @@
                 (assoc result path value)))
             held (map vector missing rows))))
 
+(defn- derivation-world-weight
+  "The retained bytes of a derivation world: a digest per form and the shape closure."
+  {:malli/schema [:=> [:cat [:map [::digests [:map-of :keyword :string]] [::shapes [:set :keyword]]]] nat-int?]}
+  [world]
+  (+ (* 160 (count (::digests world))) (* 64 (count (::shapes world)))))
+
 (defn- file-derivation-key
   "Hash one file's already selected derivation inputs, only on a content miss."
   {:malli/schema [:=> [:cat :seon.source/analyzer-digest [:vector :seon.schema/value]
@@ -1701,8 +1707,7 @@
         row-shapes (program/shapes-in projection)
         world (cache/lookup
                ::derivation-world [forms dependencies row-shapes]
-               #(+ (* schema/declaration-projection-bytes-per-form (count forms)) (* 128 (count dependencies))
-                   (* 128 (count (::digests %))))
+               derivation-world-weight
                #(let [forms (update-vals forms derivation-form)]
                   {::key (id/digest 64 [forms dependencies row-shapes])
                    ::absent (id/digest 64 [nil])

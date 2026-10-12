@@ -3,7 +3,9 @@
   refusals never retained. Each test builds its own cache value; nothing here
   touches the process cache."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.cache :as cache])
+            [seon.cache :as cache]
+            [seon.cluster]
+            [seon.task])
   (:import [java.util.concurrent CountDownLatch Executors TimeUnit]
            [java.util.concurrent.atomic AtomicLong]))
 
@@ -140,3 +142,29 @@
       (is (= ::big (get-in kinds [::big :seon.cache/kind])))
       (is (= 75 (get-in kinds [::big :seon.cache/hit-percent])) "three hits of four lookups")
       (is (< (get-in kinds [::small :seon.cache/byte-percent]) (get-in kinds [::big :seon.cache/byte-percent]))))))
+
+(defn- value-bytes
+  "A coarse retained size of a plain value, counted from its leaves: 40 bytes and one per
+  character for a string, 24 for any other leaf, 48 per collection and 32 per element."
+  [v]
+  (cond (string? v) (+ 40 (count v))
+        (map? v) (reduce + 48 (map (fn [[k x]] (+ 32 (value-bytes k) (value-bytes x))) v))
+        (coll? v) (reduce + 48 (map #(+ 32 (value-bytes %)) v))
+        :else 24))
+
+(deftest a-kinds-weight-counts-its-value-not-its-key
+  (let [digest (apply str (repeat 64 "a"))
+        declarations (into {} (map (fn [i] [(str "t" i) {:seon.task/name (symbol (str "n" i))
+                                                          :seon.task/intent (apply str (repeat 200 "x"))
+                                                          :seon.task/kind :function}])) (range 200))
+        tx (mapv (fn [i] [:db/add i :seon.task/execution :held]) (range 200))
+        world {:seon.cluster/key digest :seon.cluster/absent digest
+               :seon.cluster/digests (into {} (map (fn [i] [(keyword "k" (str i)) digest])) (range 3000))
+               :seon.cluster/shapes (set (map #(keyword "k" (str %)) (range 100)))}]
+    (doseq [[kind weigh value] [[:seon.task/task-basis @#'seon.task/task-basis-weight declarations]
+                                [:seon.task/tasks-tx @#'seon.task/tasks-tx-weight tx]
+                                [:seon.cluster/derivation-world @#'seon.cluster/derivation-world-weight world]]]
+      (testing kind
+        (let [ratio (/ (double (weigh value)) (value-bytes value))]
+          (is (<= 0.5 ratio 2.0) "the charge is within 2x of the value's size, whatever the projection"))))
+    (is (empty? (cache/retained :seon.task/file-grammar)) "the never-hit grammar digest is not cached")))

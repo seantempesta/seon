@@ -167,6 +167,14 @@
             datoms))
         (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/task)))))
 
+(def ^:private task-basis-bytes-per-task 512)
+
+(defn- task-basis-weight
+  "The retained bytes of a basis: its declarations, by handle."
+  {:malli/schema [:=> [:cat :map] nat-int?]}
+  [basis]
+  (* task-basis-bytes-per-task (count basis)))
+
 (defn task-basis
   "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files] [:or :seon.task/basis :seon.db/invalid-read-error]]}
@@ -175,8 +183,7 @@
         content (task-content database projection)
         names (set (map file-namespace (keys files)))]
     (cache/lookup ::task-basis [(:seon.schema.projection/forms projection) content names]
-                  #(+ (* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms projection)))
-                      (* 80 (reduce + 0 (map count content))) (* 512 (count %)))
+                  task-basis-weight
                   #(let [stored (stored-tasks database :seon.task/ns names)]
                      (or (read-error stored) (update-vals stored (partial declared projection))))
                   #(not (read-error %)))))
@@ -308,11 +315,8 @@
   [database files basis]
   (let [projection (db/carried-projection database)
         forms (:seon.schema.projection/forms projection)
-        grammar (cache/lookup ::file-grammar forms
-                              (constantly (* schema/declaration-projection-bytes-per-form (count forms)))
-                              #(id/digest 64 [forms]))
         proposed (into [] (mapcat (fn [[path text]]
-                                   (cache/lookup ::file-declarations [grammar path text]
+                                   (cache/lookup ::file-declarations [forms path text]
                                                  #(+ 256 (* 2 (count text)) (* 512 (count %)))
                                                  #(file-declarations projection path text)))) files)
         by-id (into {} (map (juxt :seon.task/id identity)) proposed)
@@ -322,6 +326,12 @@
       (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
     ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
     (admitted database (into (into (symbol-tx database) (held-tx database)) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))))
+
+(defn- tasks-tx-weight
+  "The retained bytes of a delta: its operations."
+  {:malli/schema [:=> [:cat [:vector :seon.schema/value]] nat-int?]}
+  [tx]
+  (* 256 (count tx)))
 
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
@@ -334,9 +344,7 @@
   (let [projection (db/carried-projection database)
         content (task-content database projection)]
     (cache/lookup ::tasks-tx [(:seon.schema.projection/forms projection) content files basis]
-                  #(+ (* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms projection)))
-                      (* 80 (reduce + 0 (map count content)))
-                      (* 2 (reduce + 0 (map count (vals files)))) (* 256 (count %)))
+                  tasks-tx-weight
                   #(tasks-tx-in database files basis))))
 
 (defn task-revision
