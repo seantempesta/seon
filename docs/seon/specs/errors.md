@@ -8,7 +8,7 @@ tags: [spec, errors, malli]
 # Errors: one map, two carriers, one boundary
 
 What exists: five constructors, value-to-exception round trips at every read, a bespoke re-description of Malli
-reports, a separate "fault" vocabulary for Seon's own failures and a 4,735-line error area (`error.clj` 2838,
+reports, a separate `seon.fault` vocabulary for Seon's own failures and a 4,735-line error area (`error.clj` 2838,
 `error/refusal.clj` 787, `fault.clj` 453, `problems.clj` 657). S1 (`33fb994f2`) installed the optional
 `:seon.error/type` key and removed the metadata stamp from `src`; `seon.error.refusal/chain` already walks cause and
 suppressed edges cycle-safely and keeps each link's data whole. Data flow after this spec: a producer builds ONE error
@@ -16,7 +16,7 @@ map with ONE validating constructor; it returns the map when answering is its jo
 the entrant boundary takes it back once; Seon's own errors are recorded once per signature at the task home with a
 count and one question task, assigned to the producing function's steward if one is held, else to root (the
 assignment is the one notification, §6; ledger RT-12), whose decision files the owner task; every occurrence rides the evaluation or call where it happened and
-reaches the agent that caused it in that reply. There is no separate fault concept. Principal approach: Malli's own
+reaches the agent that caused it in that reply. There is no separate concept for Seon's own failures. Principal approach: Malli's own
 shapes (`:multi` on a type key, the instrument report, cached explainers, `malli.error`) and Clojure's (`ex-info`).
 
 Rulings: §9. **[V]** read or probed 2026-10-07 (HEAD `42e569d9d`, default running it); **[U]** proven in the named
@@ -50,7 +50,7 @@ the recorder's signature reads layer (`seon.error/signature`), the recorded-erro
 
 `:seon.error/world` holds references only. `world-reference` derives the evaluation id with the two-argument
 `(id/evaluation run-id ordinal)` today [V]; after the loop cut the run id is the eval request id and the ordinal the position in
-the eval request (agent-loop §1), so the formula is unchanged; the world keys it reads (`:seon.turn/id`,
+the eval request (agent-loop §1), so the formula is unchanged; the evaluation keys it reads (`:seon.turn/id`,
 `:seon.batch/ordinal`) change in agent-loop P2.
 
 **Variations.** Each variant is the base plus its own members, in its owner's schema EDN. Seon's registry has no
@@ -85,7 +85,7 @@ and ignores suppressed throwables (`clojure/core_print.clj:484-501`); its `:via`
 1. *Live value*: the map as built, held in memory and returned or thrown. `refusal/references` turns a database into
    its commit id, a connection or SCI context into its identity and a place (atom, delay, promise) into class and
    identity. It does not bound size.
-2. *Stored evidence*: the recorder stores the first occurrence as the value printer's shown text of the final assembled
+2. *Stored evidence*: the recorder stores the first occurrence as the value printer's printed value of the final assembled
    map, nothing else (owner ruling, round 6). The printer already handles laziness, cycles, opaque objects and budget,
    so no second walk decides what is safe to store [U: cut asserts a nested opaque value and an unrealized sequence
    print by class without being realized].
@@ -95,17 +95,17 @@ and ignores suppressed throwables (`clojure/core_print.clj:484-501`); its `:via`
 
 `seon.error.refusal/error` stays the one constructor. Its installed arity is `[alternative members]` (validates, still
 stamps at/layer) [V]. Add `(error type operation message)` and `(error type operation message data)` to the
-SAME defn in P2; they become the only arities in the cut. The three-argument arity supplies `{}` as data. Both use this target contract:
+SAME defn in P2; they become the only arities in the cut. The three-argument arity defaults the data to `{}`. Both use this target contract:
 
 ```clojure
 [:function [:=> [:cat :qualified-keyword :qualified-symbol :string] :seon.error/base]
            [:=> [:cat :qualified-keyword :qualified-symbol :string :map] :seon.error/base]]
 ```
 
-Acquire the operation's projection, reference the data, associate type/operation/message, then validate the complete
-map. The constructor's failure boundary must cover projection acquisition and referencing too, not just explanation;
+Acquire the operation's registry, reference the data, associate type/operation/message, then validate the complete
+map. The constructor's failure boundary must cover registry acquisition and referencing too, not just explanation;
 otherwise a registry failure escapes before the literal emergency map can be built. The emergency path performs no
-registry lookup, reference traversal or attributed diagnostic construction.
+registry lookup, reference traversal or attributed error construction.
 
 ```clojure
 (defn fail!
@@ -118,15 +118,15 @@ registry lookup, reference traversal or attributed diagnostic construction.
      (throw (ex-info (:seon.error/message e) e)))))
 ```
 
-Validation checks the complete map against the schema named by `type` in the operation's projection with Malli's cached
+Validation checks the complete map against the schema named by `type` in the operation's registry with Malli's cached
 explainer (`m/explainer`, cached on the schema object, `core.cljc:353-361,2690-2712`); valid costs one cached validator
 call. On failure it returns `:seon.error/malformed-error` holding `:seon.error/attempted` (the referenced map) and the
 explain `problems`. Both carriers pass through it, so a malformed `(fail! :my.fs/not-found-error 'example/f "m")` is
 refused at construction, not at a base-only boundary (Malli validates outputs only after `(apply f args)` returns,
 `core.cljc:2236-2240` [V]). The malformed error and every error built while the registry itself fails are assembled as
 literals without validation or explanation: building an error never recurses into explaining one. The cached
-explainer and packaged-projection fallback are installed; the nonrecursive literal failure path is
-a new requirement, not current behavior (`construction-refusal` calls `diagnostic`, which re-enters projection and
+explainer and packaged-registry fallback are installed; the nonrecursive literal failure path is
+a new requirement, not current behavior (`construction-refusal` calls `diagnostic`, which re-enters the registry and
 attribution). `construction-refusal` and `checking-projection` fold into `malformed` in the cut.
 
 **Rule.** Return the map when answering is the function's job: agent tools (`my.*`), validators and checks whose result
@@ -141,7 +141,7 @@ IS the verdict (merge checks, gates, write-back digests). Throw it everywhere el
 
 A contract refusal or core defect is not in the tool's union and propagates. A deliberate translation names its own
 type and keeps the original Throwable as the third argument to `ex-info`, with the constructor's returned map
-as data and that map's message. The shown `fail!` arities have no cause argument; they cannot preserve it alone. No other layer catches to convert.
+as data and that map's message. The `fail!` arities above have no cause argument; they cannot preserve it alone. No other layer catches to convert.
 
 | # | Before | After |
 |---|---|---|
@@ -164,15 +164,15 @@ frame and attribution. Installed `chain`, `root-frame` and `producer` independen
 change those helpers and every caller together so `caught` does not repeat them. Preserve `root-frame`'s
 whole-root-trace rule: the chain's compressed per-link frames alone do not identify that frame. Build
 `:seon.error/exception` only when no primary link carries a declared type, then add the chain, optional frame,
-producer and world references without overwriting producer-supplied fields.
+producer and evaluation references without overwriting producer-supplied fields.
 
 - The outermost declared error along the PRIMARY cause path wins: it is the producer's deliberate decision. A typed
   error that was only suppressed (a cleanup refusal) stays evidence in the chain and never retypes the primary.
 - `producer` receives the chosen map, never nil. `producer`, `attributed` and `world-reference` stay as the blame rule;
   their inputs move to the new report fields in the cut (§5).
-- An error already recorded in this propagation keeps its receipt in its link's data and is not recounted.
+- An error already recorded in this propagation keeps its result in its link's data and is not recounted.
 - Recording is the entrant's step, not `caught`'s: each entrant calls the recorder (§6) on the map when it is Seon's
-  own error and assocs the receipt as `:seon.error/recorded`; an agent's own mistake is delivered and not recorded.
+  own error and assocs the result as `:seon.error/recorded`; an agent's own mistake is delivered and not recorded.
   The classification rule is not decided [U: owner question, before P4]. An entrant that recorded an error never
   rethrows it to an enclosing boundary (`seon.flow/var-process` records every transform throw again).
 
@@ -189,11 +189,11 @@ Only functions that return errors list error alternatives: `my.*` tools, validat
 
 ## 5. Instrumentation
 
-Arming stays on every function (`seon.instrument` `apply!`, `arm-var!`, `wrap-interpreted`, call preparation). The
+Instrumentation stays on every function (`seon.instrument` `apply!`, `arm-var!`, `wrap-interpreted`, call preparation). The
 report becomes one adapter over Malli's five report kinds (`core.cljc:2219-2240` [V]):
 
 Malli supplies these checked schema/value pairs: input/args, output/value, guard/[args value]. Arity and
-schema-at-call reports are never explained. The adapter receives the armed callee symbol/digest, projection and
+schema-at-call reports are never explained. The adapter receives the instrumented callee symbol/digest, registry and
 captured caller attribution as explicit inputs, so P4's calculation can be tested without a live stack or registry.
 The wrapper captures those observations before calling it. Convert explanations with `me/with-spell-checking` and
 `me/with-error-messages`; keep the declared problem members below. The report must throw the constructed map as
@@ -203,11 +203,11 @@ merely by escaping.
 
 Caller and digest fields are optional when unavailable: omit them, never associate nil. In particular, a top-level
 REPL form has no calling definition (`refusal/calling-definition`); do not call `var-digest` with nil or construct a
-malformed error while reporting the original refusal. Retain the evaluation's world reference for that case.
+malformed error while reporting the original refusal. Retain the evaluation reference for that case.
 
 - **Blame** is captured at the report: input and arity blame the caller, with the caller's digest as it ran
   (`refusal/calling-definition` and `refusal/var-digest`, as `boundary-refusal` captures both today [V]); output and
-  guard blame the callee by its armed digest. Nothing is re-read after a reload. SCI branch
+  guard blame the callee by its instrumented digest. Nothing is re-read after a reload. SCI branch
   attribution is kept.
 - **Schema-at-call**: its original exception is the `ex-info` cause, so `caught` keeps it in the chain; the failing
   schema is never re-explained. An evaluation interrupt that Malli reported this way is rethrown untouched as the bound.
@@ -222,7 +222,7 @@ malformed error while reporting the original refusal. Retain the evaluation's wo
 
 Spell checking needs a closed map (on Seon's open `:my.fs/read-request` the misspelled key yields only `missing required
 key` [V]): `explained` explains the refusal path against `mu/closed-schema` and drops `::m/extra-key` errors that carry
-no suggestion, so open maps stay open. Refusal path only: 207 µs per refusal, unarmed, default [V].
+no suggestion, so open maps stay open. Refusal path only: 207 µs per refusal, uninstrumented, default [V].
 
 `(my.fs/read {:my.fs/pth "AGENTS.md" :my.fs/max-bytes 0})`, from the real report and explain output on default:
 
@@ -265,26 +265,26 @@ structural, order-independent `id/id` hashing, which is already implemented (`sr
 equal sets have equal signatures regardless of insertion order; no identity change is a prerequisite.
 `exception-class` is the root link's class for
 `:seon.error/exception`, else absent. So two contract refusals with different failure types, or two host exceptions of
-different classes at one frame, are different rows. Member names reuse installed keys where the meaning is the same
+different classes at one frame, are different entities. Member names reuse installed keys where the meaning is the same
 (`:seon.error/occurrence-count`, `:seon.error/shown`) [U: P1 registry search].
 
-**Opening.** The writer function reads the row on the in-transaction database. It OPENS when the row is absent or
+**Opening.** The writer function reads the entity on the in-transaction database. It OPENS when the entity is absent or
 resolved (below). An opening writes, in the same home transaction, one generated task from the triage template
 (`seon.task/generate-tx`, ledger RT-7, RT-8, RT-12) assigned to the function's steward if one is held, else to root:
-a question about the error row whose answer is a decision (the owner tasks it filed, each with a red reproduction, or
-no action with a reason), its proof the generic `seon.task-question-test/root-decided`. The row refs it as
+a question about the error entity whose answer is a decision (the owner tasks it filed, each with a red reproduction, or
+no action with a reason), its proof the generic `seon.task-question-test/root-decided`. The entity refs it as
 `:seon.error/task`; the assignment is the one notification (an assignment is a wake), and no message is sent. The
 agent whose call caused the error is never the assignee: the error comes back to it in its reply. A repeat increments
 the count and updates `latest-digest`/`latest-at`; it writes no task. (This supersedes the 2026-10-07 "creates no
 task" rule, per AGENTS.md "with a count, a task and one notification".)
 
-**Every occurrence is attached and delivered.** The recorder returns a receipt `{signature count opened?}` for repeats
-too; the boundary assocs it as `:seon.error/recorded`. The settlement stores the signature on the evaluation or provider
+**Every occurrence is attached and delivered.** The recorder returns a result `{signature count opened?}` for repeats
+too; the boundary assocs it as `:seon.error/recorded`. The recording transaction stores the signature on the evaluation or provider
 call where the failure surfaced (`:seon.cluster.eval/error-signatures`, `:seon.ai.attempt/error-signatures`, values,
-since the row lives at the home; agent-loop §2.1). The causing agent reads the error in that reply and in its history;
+since the entity lives at the home; agent-loop §2.1). The causing agent reads the error in that reply and in its history;
 an agent on another branch needs no copy. Every error in a reply's `:errors` and `:diagnostics` carries its result
 handle, so the agent can dig into it (`result/e…`); results are runtime only, so after a restart the handle answers
-that the live value is gone while the shown text and facts remain. This replaces the temporal fault window and its
+that the live value is gone while the printed value and facts remain. This replaces the temporal error window and its
 folded repeats.
 
 **Resolution** (rewritten): a recorded error is resolved
@@ -309,17 +309,17 @@ targets: 10× over it is a defect) and against AGENTS.md's 100 ms bound for the 
 An unknown or refused recording write runs the owner's stop request and prints through `print-unrecorded!`, never
 retried. Goes: `prepare` and the admission stack, `commit-call`/`recording`/`occurred-since` (12 existence reads per
 repeat), the `-valid?` predicates and generators, `seon.fault` folding, steward escalation and cluster copy; the
-`seon.fault` namespace keeps only what the recorder needs, renamed into `seon.error` in S-delete. The fault vocabulary
+`seon.fault` namespace keeps only what the recorder needs, renamed into `seon.error` in S-delete. The legacy error names
 (`seon.fault`, `:seon.fault/*`, `:seon.error.fault/*`, `:seon.cluster.eval/faults`, `:seon.task/faults`,
-`:seon.problems/open-fault`, "open-fault") retires; old rows are not migrated (§9.6).
+`:seon.problems/open-fault`, `open-fault`) retires; old entities are not migrated (§9.6).
 
 ## 7. Slices
 
 Preparatory slices are invisible unless labeled; each lands through `bin/lane commit --test`, HEAD boots after each, and
-each is dual-reviewed. Then ONE dependency-complete cut, proven by publishing and adopting on a branch of the live store
-before it lands.
+each is dual-reviewed. Then ONE dependency-complete cut, proven by publishing and transacting on a branch of the live store
+before it is committed.
 
-**S1 (landed `33fb994f2`).** Optional type key; producer stamps and render/recording readers moved.
+**S1 (committed `33fb994f2`).** Optional type key; producer stamps and render/recording readers moved.
 
 **S1b Repair (a correction, not invisible).** (1) `seon.error/prepare` retypes the converted observation to its final
 declared schema (`:seon.db.write/error`, `:seon.schema/error`) before revalidation and before returning it as the
@@ -331,9 +331,9 @@ provider-failure, phase and opening fixtures assert the recorded variant. Refere
 `malli/src/malli/core.cljc:1861-1905`.
 
 **P1 Accrete schemas.** Variant wrappers by script, `:seon.error/malformed-error`, `:seon.error/exception`, the five
-Malli report variants with their render pairs, `:seon.error/digest`/`caller`/`arm`/`arities`, the row members of §6,
+Malli report variants with their render pairs, `:seon.error/digest`/`caller`/`arm`/`arities`, the entity members of §6,
 `:seon.task/errors`, `:seon.message/error`. The eval/call `error-signatures` are loop P0's. Nothing reads them; the
-active base is not tightened. Proven by publish+adopt on a live-store branch. References:
+active base is not tightened. Proven by publish+transact on a live-store branch. References:
 `malli/src/malli/registry.cljc:17-96`; `malli/docs/reusable-schemas.md:116-120`.
 
 **P2 Constructor arities.** `[type operation message]` and `[type operation message data]` on the existing `error`,
@@ -342,11 +342,11 @@ still producing at/layer; `fail!`. Invisible: no caller uses them yet. Test: T8,
 **P3 Type producers, by owner family (BEHAVIOR CHANGE, declared per family).** Each family converts its sites to the
 new arities with named variants. Typing changes which render pair is chosen and the recorded signature, so each family
 slice states its render and signature change and lands with its regression. Test: T1 on `my.fs/read`; per-family `are`
-rows of input to type. References: `malli/src/malli/core.cljc:203-207`; `datahike/src/datahike/db/transaction.cljc:27-32`;
+cases of input to type. References: `malli/src/malli/core.cljc:203-207`; `datahike/src/datahike/db/transaction.cljc:27-32`;
 `clj-reload/src/clj_reload/core.clj:367-381`.
 
 **P4 Pure calculations, unwired.** Functions with explicit observed inputs (§5): report conversion,
-the signature (after structural identity is installed), the row-writer's transaction calculation.
+the signature (after structural identity is installed), the entity writer's transaction calculation.
 The active `resolution`, recorder and report stay wired until
 the cut. Tested on values (T3, T9) and at the REPL on the lane's own SCI branch. References:
 `malli/src/malli/core.cljc:2210-2240,3166-3187`; `malli/src/malli/error.cljc:332-390`; `malli/src/malli/util.cljc:128`;
@@ -354,12 +354,12 @@ the cut. Tested on values (T3, T9) and at the REPL on the lane's own SCI branch.
 
 **Cut.** Together: the two-argument arity goes with every caller; base requires type, operation, message and drops
 `at`/`layer`; `error?` and every `(:seon.error/at x)` predicate; `caught` at every entrant of §3, with identity membership in the existing chain walk; the report adapter and
-attribution; the row writer, signature, row schema (`:seon.error/signature`'s row-schema `:seon.error/error` rewritten
-to §6's members), task/message opening, receipts carried through the shared settlement owner (agent-loop P1),
+attribution; the entity writer, signature, entity schema (`:seon.error/signature`'s schema `:seon.error/error` rewritten
+to §6's members), task/message opening, results carried through the shared recording owner (agent-loop P1),
 resolution; every reader of recorded-error associations converted to carried signatures, including
-`seon.render.transcript` and the MCP reply (`seon.mcp/observed`, over the receipts the settlement saved), keeping their run grouping;
-`turn.batch/reply` carries error maps with their receipts and handles, not their messages; render selection by type.
-Root resets default once after it lands: recorded errors are not migrated. Test: T1-T12 plus the kept list of §8.
+`seon.render.transcript` and the MCP reply (`seon.mcp/observed`, over the results the recording transaction saved), keeping their run grouping;
+`turn.batch/reply` carries error maps with their results and handles, not their messages; render selection by type.
+Root resets default once after it is committed: recorded errors are not migrated. Test: T1-T12 plus the kept list of §8.
 References: all of P1-P4.
 
 **After the cut** (each a declared change where output differs): **S-reads**, one read family at a time, its refusal
@@ -386,9 +386,9 @@ One behavior each, asserted on data:
   member and digest (caller for input/arity, callee for output/guard) and, for input, a problem at `[0 :my.fs/pth]`
   suggesting `[[0 :my.fs/path]]`; top-level calls with no caller omit unavailable attribution; schema-at-call keeps its exception in the chain; a reporter failure is
   `:seon.error/exception` carrying the original kind.
-- **T4 references**: an error whose data holds a connection carries its identity, not the object; its stored shown
-  text prints an opaque value and an unrealized sequence by class without realizing it.
-- **T5 recording**: the same failure twice gives one row, count 2, no task, one message to root; both evaluations
+- **T4 references**: an error whose data holds a connection carries its identity, not the object; its stored printed
+  value prints an opaque value and an unrealized sequence by class without realizing it.
+- **T5 recording**: the same failure twice gives one entity, count 2, no task, one message to root; both evaluations
   carry the signature. Mixed-type problem paths do not throw, and insertion order does not change the signature.
 - **T6 unrecordable**: a refused recording write runs the stop request and prints (`fault_test.clj`'s case, renamed).
 - **T7 undeclared variant**: a returning function answering a type outside its `:multi` is an output refusal naming the
@@ -402,8 +402,8 @@ One behavior each, asserted on data:
 - **T11 recurrence**: a failure after resolution opens one new message.
 - **T12 registry failure**: an error built while schema lookup throws is a literal, with no recursive explain.
 
-Kept, adapted: `refusal-test` (cleanup failure beside the primary, worlds referenced, wrapped cause recorded whole);
-`instrument-test` (guard armed in JVM and SCI, deadline reported as the bound, reporter failure not relabeled, output
+Kept, adapted: `refusal-test` (cleanup failure beside the primary, evaluation references kept, wrapped cause recorded whole);
+`instrument-test` (guard instrumented in JVM and SCI, deadline reported as the bound, reporter failure not relabeled, output
 refusal names its function); `attribution-test` (blame follows the producer, batch failure names the visible
 definition); `fault-test/an-unknown-write-outcome-stops-and-throws-without-retry`;
 `error-test/a-fault-site-survives-recompilation-and-moved-lines`. Concurrent repeats are a concurrency test: root decides
@@ -419,14 +419,14 @@ construction-refusal cases of `refusal_test.clj`, `refusal_grammar_test.clj`, vi
    `:seon.error/base`. An error stays buildable when the registry fails: no recursive explain while reporting.
 3. Returned when answering is the job, else thrown in `ex-info`; taken back once at the boundary.
 4. Instrumentation from Malli's report; refusal-path spelling suggestions against `mu/closed-schema`.
-5. No fault concept: Seon's own failures are errors, recorded once per signature (64 characters) at the task home with a
-   count, the first occurrence's shown text, the latest producer digest and time, and one notification; no task until an agent or root files one. Every
+5. No separate concept: Seon's own failures are errors, recorded once per signature (64 characters) at the task home with a
+   count, the first occurrence's printed value, the latest producer digest and time, and one notification; no task until an agent or root files one. Every
    occurrence is attached to the evaluation or call where it happened. A deleted producer's error resolves on deletion;
    otherwise resolution = the producer changed AND the task's success tests have a green run since. No escalation,
    stewards, folding or branch-to-cluster copy.
 6. No `:seon.error/at` on the map. Recorded errors are not migrated: default is reset after each cut that changes them.
-7. Work is cut as preparatory slices, then one dependency-complete cut proven by publish+adopt on a live-store branch.
-   Loop P0-P1 (schema, shared settlement owner) land before this cut, which moves the settlement's error duty from the
-   temporal window to carried receipts; this cut lands before the loop cut.
-8. Results are runtime only: an error's stored form is its shown text and ids; every error in a reply has a result
+7. Work is cut as preparatory slices, then one dependency-complete cut proven by publish+transact on a live-store branch.
+   Loop P0-P1 (schema, shared recording owner) are committed before this cut, which moves the recording transaction's
+   error duty from the temporal window to carried results; this cut is committed before the loop cut.
+8. Results are runtime only: an error's stored form is its printed value and ids; every error in a reply has a result
    handle while its live value exists.
