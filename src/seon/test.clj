@@ -808,9 +808,8 @@
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
   union gate walk. Named requests retain their declared eligibility scope.
-  Green evidence from an earlier program is reused when its reachable content
-  and external inputs still match; red evidence only while the program is also
-  unchanged since it ran. Its tested provenance remains unchanged.
+  A result from an earlier program, green or red, is reused when its reachable
+  content and external inputs still match. Its tested provenance remains unchanged.
   Unknown coverage refuses. No filesystem reads occur."
   {:malli/schema [:=> [:cat :seon.test.selection/request]
                   [:or :seon.test.selection/result :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
@@ -1142,15 +1141,8 @@
             ;; Reuse is content-keyed: a completed member's stored reach digest
             ;; against the current one, one batched read (B4 §2a). A member
             ;; recorded without it, or not yet exited, is unknown and executes.
-            ;; A red is answered from its record only while the whole program is
-            ;; unchanged since it ran (equal program revisions): a reach digest
-            ;; cannot see what a body evaluates or resolves at run time, and red
-            ;; never stands in for a change that may have fixed it. A member cut
-            ;; by its bound is such a red once it exits.
-            revisions-now (runner/program-revisions-digest database)
-            red-holds? (fn [run-eid member]
-                         (or (green? member)
-                             (and revisions-now (= revisions-now (one run-eid :seon.test.run/program-revisions)))))
+            ;; Green, red and a member cut by its bound alike: nothing at an
+            ;; unchanged key can have changed.
             current-reach (let [recorded (into [] (keep (fn [[test-symbol _]]
                                                           (when-let [[_ member] (get latest test-symbol)]
                                                             (when (and (complete? member) (one member :seon.test.member/reach-digest)
@@ -1163,7 +1155,6 @@
                                  (when-let [[run-eid member] (get latest test-symbol)]
                                    ;; Evidence naming no loaded program is unknown.
                                    (when (and (complete? member)
-                                              (red-holds? run-eid member)
                                               (one run-eid :seon.test.run/loaded-commit-id)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
                                               (not (observed-reached test-symbol))

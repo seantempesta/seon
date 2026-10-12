@@ -310,3 +310,25 @@
      (let [step (:seon.cost/step (support/mcp-request (answer running agent-id "sci" "(+ 1 2)")))]
        (is (pos? (:seon.cost/alloc-mb step 0.0)) "the reply carries the step's cost, read before it was offered")
        (is (contains? step :seon.cost/cpu-ms))))))
+
+(deftest ^{:seon.test/long "Four eval requests of an agent, each with its automatic test step: about 2 s measured on default's JVM."
+           :seon.test/long-ms 15000}
+  an-unrelated-write-reruns-no-test-at-an-unchanged-key
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [value #(:seon.repl/value (support/mcp-reply (answer running agent-id "sci" %)))
+           check "(my.test/check {:seon.test/identities #{'request.cost.reuse/green-test 'request.cost.reuse/red-test}})"
+           _ (value (str "(ns request.cost.reuse (:require [clojure.test :refer [deftest is]]))\n"
+                         "(defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                         "(deftest green-test (is (= 1 (f))))\n"
+                         "(deftest red-test (is (= 2 (f))))"))
+           first-check (value (str "(select-keys " check " [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"))
+           _ (value "(defn u \"Unrelated.\" {:malli/schema [:=> [:cat] :int]} [] 7)")
+           measured (value (str "(let [m (seon.profile/measure #(select-keys " check
+                                " [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count]))]"
+                                " (assoc (:seon.profile/value m) :seon.profile/ms (:seon.profile/ms m)))"))]
+       (is (false? (:seon.test/passed? first-check)) "the red test is red")
+       (is (= 0 (:seon.test/executed-count measured)) "no test at an unchanged key executes after an unrelated write")
+       (is (= 2 (:seon.test/reused-count measured)) "the green and the red are both answered from their records")
+       (is (false? (:seon.test/passed? measured)) "the reused red is still red")
+       (is (< (:seon.profile/ms measured) 1000) "a check that executes nothing is sub-second")))))

@@ -715,10 +715,11 @@
                             :seon.test/policy :named
                             :seon.test/identities #{'reach.fixture/red-test}})
          first-run (request)
+         _ (define! connection '[:seon.fn/sym reach.fixture/unrelated] "(defn unrelated {:malli/schema [:=> [:cat] :int]} [] 7)")
          again (request)]
     (is (= [1 0] [(:seon.test/executed-count first-run) (:seon.test/reused-count first-run)]))
     (is (= [0 1] [(:seon.test/executed-count again) (:seon.test/reused-count again)])
-        "the same program and inputs execute nothing")
+        "an unrelated write leaves the red's key unchanged: it executes nothing")
     (is (false? (:seon.test/passed? again)))
     (is (= 1 (:seon.test/fail-count (first (:seon.test/results again)))))
     (is (seq (:seon.test.failure/reports (first (:seon.test/results again)))) "the red keeps its failure data")
