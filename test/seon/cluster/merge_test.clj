@@ -396,13 +396,18 @@
                  head (git! root "rev-parse" "HEAD")
                  request (requested! running connection "side"
                                      "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
-                 main (db/commit-id (db/db connection))
-                 refused (merge! execution request)]
+                 main-t (db/basis-t (db/db connection))
+                 refused (merge! execution request)
+                 projection (schema/handed-projection)
+                 owned (into (program/program-attributes projection) (keys (program/cluster-attributes projection)))
+                 written (into (sorted-set) (comp (map :a) (filter owned))
+                               (db/datoms (db/since (db/db connection) main-t) :eavt))]
              (is (= :seon.source/red-test-error (:seon.error/type refused)))
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
              (is (nil? (:seon.task/outcome (assignment-row connection request))) "the assignment stays open")
-             (is (= main (db/commit-id (db/db connection))) "main is unchanged")
+             ;; main may record root's own run of the red at its head (seon.test/change-reds, hybrid-test-results Q2, R8)
+             (is (= #{} written) "main holds no program or cluster fact the refused merge wrote")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))

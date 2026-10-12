@@ -3133,7 +3133,7 @@
   "Of `tests`, those red on `branch` (a branch's database) whose same test is not red at `main`'s head (root's
   world, the merge target): the reds the branch's change made, sorted. A test not red on the branch is not the
   change's, and one main does not hold is not red there. Main's side is `fork-point-red` at main's head commit:
-  its recorded result, else one run on a branch forked there, never recorded on main."
+  its recorded result, else one run on a branch forked there, recorded on main as root's own evidence at that key."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/context-source [:sequential :seon.test/sym]]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
   [branch main tests]
