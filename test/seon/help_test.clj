@@ -83,7 +83,9 @@
        (support/transacted! connection
                             (support/replacement-tx @connection
                                                     [:seon.fn/sym 'seon.bootstrap/help-value]
-                                                    (str source "\n;; revised")
+                                                    ;; inside the form: a comment after it is no part of the definition
+                                                    (str/replace-first source "[database agent-id]"
+                                                                       "[database agent-id]\n  ;; revised")
                                                     {}))
        (is (false? (db/read-evidence-current? @connection evidence))
            "a new definition of help makes its evidence stale")))))
