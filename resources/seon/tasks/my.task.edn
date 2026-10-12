@@ -1,4 +1,8 @@
 [#:seon.task{:name "task-creation-is-not-an-agent-call"
              :kind :function
              :intent "my.task (the agent-facing API) exposes `my.task/current` and `my.task/send-back!` but not task creation or refinement: `seon.task/create!` upserts a runtime task from a declaration, yet (dir my.task) does not list a call over it, so an agent cannot file a finding as a task or edit its own task. Done when `my.task/refine!` over `seon.task/create!`'s upsert, with the agent's world supplied, is listed by (dir my.task), documented with an example, and a regression edits a task from an agent's evaluation (plan §0 item 6)."
-             :must-read #{my.task/current seon.task/create!}}]
+             :must-read #{my.task/current seon.task/create!}}
+ #:seon.task{:name "a-send-back-stores-its-counterexample-for-the-relaunched-agent"
+             :kind :function
+             :intent "`my.task/send-back!` accepts `:my.task/counterexample` and returns it in its reply, but no attribute stores it: `seon.turn/end-task-call` writes the reason and target on the sending attempt, and `seon.context/send-backs` (the `:seon.context/send-backs` block of `my.task/current` and the current-state block) renders only the reason, so the relaunched agent never sees the counterexample (step-context lane). Declare the counterexample as a Malli-schemed attribute on the sending attempt, written by `seon.turn/end-task-call` in the same transaction as the reason, and have `seon.context/send-backs` carry it as data beside the reason. Proof: the `my.task-test` deftest `a-send-back-with-a-counterexample-shows-it-to-the-next-attempt` the implementer writes first sends back with `{:expected 1 :actual 2}`, launches the target's next attempt and asserts `(:seon.context/send-backs (my.task/current))` holds that map."
+             :must-read #{my.task/send-back! seon.turn/end-task-call seon.context/send-backs my.task/current}}]
