@@ -108,3 +108,26 @@
          ;; One subject owns no other declaration: one breaks read, in the writer.
          (is (= 1 (profile/calls-of measured 'my.program/breaks))
              "ns-unmap! of a one-function namespace reads the subject's breakage once"))))))
+
+(deftest ns-unalias-of-an-empty-namespace-computes-the-deletion-report-once
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "program-unalias-once-fixture")
+     (let [ctx (support/fork-cluster-ctx connection)
+           fork (sci/fork ctx)
+           context {:seon.sci.eval/ctx fork :my.program/base-ctx ctx :seon.db/connection connection}]
+       (support/transacted!
+        connection
+        [(seon-program/declaration-row
+          (db/carried-projection @connection)
+          {:seon.ns/name 'my.unalias.once :seon.ns/source "(ns my.unalias.once)"
+           :seon.ns/aliases #{{:seon.ns.alias/local 'text :seon.ns.alias/target-ns 'clojure.string}}}
+          :all :agent)])
+       (doseq [target-ctx [ctx fork]]
+         (sci/eval-string* target-ctx "(do (in-ns 'my.unalias.once) (alias 'text 'clojure.string))"))
+       (let [measured (profile/measure #(program/ns-unalias! context 'my.unalias.once 'text))
+             removed (:seon.profile/value measured)]
+         (is (= #{'my.unalias.once} (:seon.program/affected removed)))
+         ;; The namespace owns no declaration: one breaks read, in the writer.
+         (is (= 1 (profile/calls-of measured 'my.program/breaks))
+             "ns-unalias! of a namespace reads its breakage once"))))))

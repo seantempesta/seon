@@ -607,39 +607,40 @@
   [context namespace-name alias-name]
   (read-result
    {:seon.program/subject namespace-name} 'my.program/ns-unalias!
+   ;; The deletion report is computed once, in the writer, as in retract-operation!.
    #(let [connection (:seon.db/connection context)
-          [report affected] (deletion-report (let [result (db/db connection)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result)) namespace-name)]
-      (if (blocking? report)
+          computed (promise)
+          result (db/transact!
+                  connection
+                  [[:db.fn/call
+                    (fn [database]
+                      (let [[current subjects :as report] (deletion-report database namespace-name)]
+                        (deliver computed report)
+                        (when (blocking? current)
+                          (throw (ex-info "Alias removal refused." (refusal 'my.program/ns-unalias! current subjects))))
+                        (let [aliases (db/q database
+                                            '[:find [?alias ...] :in $ ?ns ?local :where
+                                              [?namespace :seon.ns/name ?ns]
+                                              [?namespace :seon.ns/aliases ?alias]
+                                              [?alias :seon.ns.alias/local ?local]]
+                                            namespace-name alias-name)]
+                          (when (:seon.db/invalid-read aliases)
+                            (throw (ex-info (:seon.error/message aliases) aliases)))
+                          (mapv (fn [entity] [:db/retractEntity entity]) aliases))))]])
+          [report affected] (when (realized? computed) @computed)]
+      (cond
+        (and report (blocking? report))
         (refusal 'my.program/ns-unalias! report affected)
-        (let [transaction
-              (let [result (db/transact!
-                connection
-                [[:db.fn/call
-                  (fn [database]
-                    (let [[current subjects] (deletion-report database namespace-name)
-                          _ (when (blocking? current)
-                              (throw (ex-info "Alias removal refused." (refusal 'my.program/ns-unalias! current subjects))))
-                          aliases (let [result (db/q database
-                                         '[:find [?alias ...] :in $ ?ns ?local :where
-                                           [?namespace :seon.ns/name ?ns]
-                                           [?namespace :seon.ns/aliases ?alias]
-                                           [?alias :seon.ns.alias/local ?local]]
-                                         namespace-name alias-name)]
- (if (:seon.db/invalid-read result)
 
- (throw (ex-info (:seon.error/message result) result)) result))]
-                      (mapv (fn [entity] [:db/retractEntity entity]) aliases)))]])]
- (if (:seon.db/transaction-refused result)
+        (:seon.db/transaction-refused result)
+        (throw (ex-info (:seon.error/message result) result))
 
- (throw (ex-info (:seon.error/message result) result)) result))
-              form (list 'clojure.core/ns-unalias (list 'quote namespace-name) (list 'quote alias-name))]
+        :else
+        (let [form (list 'clojure.core/ns-unalias (list 'quote namespace-name) (list 'quote alias-name))]
           (native! (:seon.sci.eval/ctx context) form)
           (native! (:my.program/base-ctx context) form)
           {:seon.program/subject namespace-name :seon.program/affected #{namespace-name}
-           :seon.db/basis-t (db/basis-t (:db-after transaction))
+           :seon.db/basis-t (db/basis-t (:db-after result))
            :seon.program/unknown (:seon.program/unknown report)})))))
 
 ;;; Reading a declaration: source, search and sizes return small data maps.
