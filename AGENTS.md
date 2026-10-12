@@ -288,8 +288,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and instrumentation converge; never call an unchanged entity healthy.
   Ordinary clusters keep their program; selected development clusters reload explicitly.
-- **Merge is a root task.** An agent's green end requests the merge (`seon.task/request-merge!`) once its proofs pass
-  and no test its change broke is red on its source branch; the merge request is a task. Root's tools live in `my.root`
+- **Merge is a root task.** An agent writes no merge request: a done branch is merged by root's `db<->flow`, whose gate takes the
+  proofs from the assignment's task (`seon.task/obligations`) and requires no test its change broke red on its source
+  branch; the merge request is the assignment. Root's tools live in `my.root`
   (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use git's words: a merge request is
   reviewed, then merged (`:merged`) or closed with a reason (`:closed`); root reads the diff before it merges until
   criteria for automatic merges are written. Root works it through the ordinary REPL holding both sides — a

@@ -141,12 +141,12 @@ Forms and timings are in the branch REPL note, `docs/prds/agent-platform/landing
 4. **Test there.** `seon.test/run` takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities.
-5. **Request a merge, then root merges.** Root assigns the task (`seon.task/assign!`);
+5. **A done branch is merged by root.** Root assigns the task (`seon.task/assign!`);
    the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`); its green end
-   records the merge request (`my.program/request-merge!`, which runs those proofs on its branch).
+   writes no request, and root's `db<->flow` merges the branch with the proofs taken from the task.
    A merge request is the assignment: root reads `(my.root/merge-requests)` (the open assignments) and
    merges one with `(my.root/merge! {:seon.task/assignment key})` (`seon.merge/merge!`: one transaction
-   from the merge base, the facts inside main's writer and, when the agent requested it, the declarations
+   from the merge base, the facts inside main's writer and, when the branch changed declarations, the declarations
    prepared and accepted on a merge branch; the assignment closes `:merged` in it; then write-back and one
    git commit), or closes it with `my.root/close!` and a reason. Only the proofs gate
    acceptance; other reaching tests' reds are shown as `:seon.source/red`. They merge the branch's

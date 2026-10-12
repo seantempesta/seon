@@ -1,8 +1,6 @@
 (ns seon.turn-continue-test
   (:require [clojure.core.async :as async]
             [my.root]
-            [clojure.java.io :as io]
-            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -23,8 +21,6 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.flow :as flow]
-            [seon.fn :as fn]
-            [seon.program :as program]
             [seon.repl :as repl]
             [seon.test-support :as support]
             [seon.turn :as turn]))
@@ -301,9 +297,9 @@
 
 
 (deftest ^{:seon/tasks #{'seon.turn/a-task-end-never-reaches-root}
-           :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass, its merge request's proof run."
+           :seon.test/long "An own-branch agent's setup and settings with their test steps, one fixture-model pass."
            :seon.test/long-ms 60000}
-  a-task-that-ends-green-records-one-merge-request-on-its-branch
+  a-task-that-ends-green-writes-its-end-once-on-its-branch
   (support/with-running-agent
    (fn [running _ connection]
      (let [member (get-in (db/db connection) [:config :branch])
@@ -334,12 +330,9 @@
           (until #(:seon.agent/admission-closed-tx
                    (db/pull (db/db target) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id]))
                  1000)))
-       (let [mine (db/db target)
-             proposed (db/q '[:find ?merge . :in $ ?branch :where [?p :seon.task/branch ?branch] [?p :seon.task/merge ?merge]]
-                            mine branch)]
+       (let [mine (db/db target)]
          (is (= 1 (count @ledger)) "one model call turned the proof green")
          (is (= [:done] (attempt-ends mine agent-id)) "the end is written once, on the agent's own branch")
-         (is (string? proposed) "with its merge request beside it")
          (is (empty? (db/q '[:find ?m :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id] [?m :seon.message/from ?agent]]
                            (db/db connection) agent-id))
              "and the agent wrote nothing on main: db<->flow merges its end there (seon.cluster.agent/next-actions)"))))))
@@ -424,7 +417,7 @@
        (is (= [:done] (attempt-ends (db/db target) agent-id))
            "the form after two prose replies was evaluated and turned the proof green")))))
 
-(deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end's merge-request run."
+(deftest ^{:seon.test/long "Three setup evaluations with their test steps, then the end."
            :seon.test/long-ms 30000}
   a-task-end-and-the-agents-close-are-one-transaction
   (support/with-running-agent
@@ -452,80 +445,6 @@
                         (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))]
               (ends))
            "the attempt holds the end once, written by the transaction that closed the agent")))))
-
-;;; A green end observed without a model call: the agent's fix arrives through its own MCP entrance, then the
-;;; end is observed on the agent's own execution handle as its loop observes it.
-
-(defn- branch-agent!
-  "An own-branch agent assigned the task `<ns>/<task-name>` (root's, at the member's home), whose proof is red on
-  its branch; answers the agent's id and its execution handle."
-  {:malli/schema [:=> [:cat :string :seon.db/connection :symbol :string] :map]}
-  [running connection ns-sym task-name]
-  (let [agent-id (str "end-" task-name "-" (seon.id/id))
-        {branch :seon.store/branch} (support/own-branch-agent! running agent-id (str "(ns " ns-sym ")"))
-        id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns ns-sym
-                                         :seon.task/name task-name :seon.task/kind :function :seon.task/intent "Square."}))
-        assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
-                                :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
-    (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
-    {:seon.agent/id agent-id :seon.task/id id}))
-
-(defn- fixed-end!
-  "Evaluate `fix` as `agent-id` in `ns-sym`, then answer its execution handle, whose task has ended :done."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :symbol :string] :map]}
-  [running agent-id ns-sym fix]
-  (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
-  (agent/acquire-context! (support/running-cluster running) agent-id))
-
-(defn- end!
-  "Observe the end of `agent-id`'s task on its execution handle `execution`, inside its branch's custody, as the
-  agent's own loop does."
-  {:malli/schema [:=> [:cat :string :map :seon.agent/id] :nil]}
-  [running execution agent-id]
-  (db/with-branch {:seon.db/connection (:seon.db/connection execution)}
-    #(#'turn/end-task! (assoc execution :seon.db.process/id (:seon.db.process/id (support/running-cluster running))) agent-id)))
-
-(defn- answering
-  "The merge requests recorded at `home` answering `agent-id`'s assignment."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector :string]]}
-  [home agent-id]
-  (vec (db/q '[:find [?request ...] :in $ ?agent-id
-               :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?p :seon.task/of-assignment ?a]
-               [?p :seon.task/merge-request ?request]]
-             home agent-id)))
-
-(defn- root-home!
-  "Make the running member's branch root's home, so tasks, merges and end messages stay inside the fixture."
-  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
-  [connection]
-  (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
-                             (:seon.cluster/name (support/execution-handle nil))]])
-  nil)
-
-(deftest ^{:seon.test/long "An own-branch agent's first request, assignment proof run and fix with its test step, then two merge-request runs."
-           :seon.test/long-ms 60000}
-  an-end-requests-a-merge-once-whatever-interrupted-it
-  (support/with-running-agent
-   (fn [running _ connection]
-     (root-home! connection)
-     (support/declare-source! connection 'tq.endp
-                              (str "(ns tq.endp (:require [clojure.test :refer [deftest is]]))\n"
-                                   "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
-                                   "(deftest ^{:seon/tasks #{'tq.endp/area}} area-test (is (= 25 (area 5))))\n"))
-     (let [{agent-id :seon.agent/id} (branch-agent! running connection 'tq.endp "area")
-           execution (fixed-end! running agent-id 'tq.endp "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")]
-       (is (= :done (turn/task-end (db/db (:seon.db/connection execution)) agent-id)) "the fix turned the proof green")
-       ;; an end interrupted after it requested the merge and before it told root
-       (db/with-branch {:seon.db/connection (:seon.db/connection execution)}
-         #((requiring-resolve 'my.program/request-merge!)
-           {:my.program/context (assoc execution :my.program/base-ctx (:seon.sci.eval/base-ctx execution))
-            :seon.db/connection (:seon.db/connection execution) :seon.agent/id agent-id}))
-       ;; the branch moves on before the end is observed again
-       (agent-eval running agent-id "(+ 1 2)")
-       (end! running execution agent-id)
-       (let [mine (db/db (:seon.db/connection execution))]
-         (is (= 1 (count (answering mine agent-id))) "the end requested the merge once, on the agent's branch")
-         (is (= [:done] (attempt-ends mine agent-id)) "and the end is written once"))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done}
            :seon.test/long "An own-branch agent's setup and settings with their test steps, one run on main and one fixture-model pass with its test step."

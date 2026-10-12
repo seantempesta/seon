@@ -116,3 +116,7 @@ RESTART NEEDED for 2736c187d to be live on default (ordinary `src/seon/task.clj`
   `requested-agent!` becomes `assigned-agent!` (its callers keep their assertions), `seon.cluster.host-test`
   427-460, `seon.turn-continue-test` 306, 427-520, `seon.cluster.db-flow-test` 461, 470, 751, 989. Retire
   `seon.task/a-done-branch-merges-with-no-merge-request-written-by-the-agent` in that commit (its deftest is green).
+
+### (c) verb deleted (lane del-request)
+
+`seon.task/request-merge!`, `red-first`, `my.program/request-merge!`, `seon.turn/end-merge-request`, `end-task!`'s merge clause and the `program-request-merge!` delay, the merge-request schema keys in `seon.task.edn` (`:merge-request`, `-view`, `-row`, `:of-assignment`, `:commit`, `:proved`, `:red-first`, `:run-id`, `:program`) are deleted; AGENTS.md's "Merge is a root task" and the repl skill name the derived rule. Tests: merge-test's `requested-agent!` became `assigned-agent!`; host-test's request test and turn-continue's `an-end-requests-a-merge-once-whatever-interrupted-it` deleted (verb); db-flow assertions on the request removed.

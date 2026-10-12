@@ -198,7 +198,7 @@
  #:seon.task{:name "a-reused-answer-names-a-recorded-run"
              :kind :function
              :intent "`seon.test/run` answers a request whose members are all reused green results with a freshly minted `:seon.test.run/id` that no transaction records (default c53c9306e: two identical `my.test/check` calls as root answered e049515f2437, recorded, then e4c192b659d6, recorded nowhere). `my.program/proposal!` stores that id as the merge request's `:seon.task/run-id`, so agent parity-slug-1's merge request e121213ad63d cites run 9e1a613bbcdb that neither its branch nor main holds. Done when a reused answer carries the id of a run that is recorded (the run whose results it reuses, or one it records), asserted by `my.test-check-test/a-reused-check-answers-a-run-id-it-recorded`."
-             :must-read #{seon.test/run seon.task/request-merge! my.test/check}
+             :must-read #{seon.test/run my.test/check}
              :evidence #{"docs/research/agent-platform/2026-10-11/parity-probe.md"}}
  #:seon.task{:name "a-members-reads-stay-out-of-its-callers-evidence"
              :kind :function

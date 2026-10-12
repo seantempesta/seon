@@ -723,7 +723,7 @@
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})
           (= 1 (count assigned))
-          (merge {:seon.task/key key :seon.task/assigned handle :seon.task/of-assignment [:seon.task/assignment key]
+          (merge {:seon.task/key key :seon.task/assigned handle
                   :seon.task/proofs (:seon.task/proofs edges #{})}
                  (select-keys task [:seon.task/ns :seon.task/sym]))
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
@@ -753,52 +753,6 @@
                      (not [?a :seon.task.attempt/end _])]
                    database agent-id)]
     (or (read-error open) (first (apply max-key second [nil 0] (seq open))))))
-
-(defn- red-first
-  "The `proofs` observed red on `database` (the proposing branch) at a reach
-  no green member of the same test shares, as `[test reach-digest]`: each
-  failed at the program before the change (health plan §5, owner ruling: a
-  task made from a fault is proven only red first)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol]]
-                  [:or [:set [:tuple :symbol [:string {:min 64 :max 64}]]] :seon.db/error-result]]}
-  [database proofs]
-  (let [members (db/q '[:find ?test ?reach ?fail ?error :in $ [?test ...]
-                        :where [?member :seon.test.member/symbol ?test]
-                               [?member :seon.test.member/reach-digest ?reach]
-                               [?member :seon.test.member/fail-count ?fail]
-                               [?member :seon.test.member/error-count ?error]]
-                      database (vec proofs))]
-    (if (map? members)
-      members
-      (let [green (into #{} (keep (fn [[proof reach fail failure]] (when (zero? (+ fail failure)) [proof reach]))) members)]
-        (into #{} (keep (fn [[proof reach fail failure]]
-                          (when (and (pos? (+ fail failure)) (not (green [proof reach]))) [proof reach])))
-              members)))))
-
-(defn request-merge!
-  "Record on `connection`'s branch (the agent's world; its successful end copies it to main) the merge
-  request for the assigned `work`: its merge task and one merge request
-  of the commit `view` names on its branch, with its proofs at their definition digests, the run and its
-  tested program, and each proof observed red on the branch before the change (`:seon.task/red-first`, read
-  from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a
-  repeat request finds it; the recurrence key `[key commit]` records one merge request per commit. Answers
-  the merge request view."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/assigned-work
-                       [:map [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit]
-                        [:seon.task/proved :seon.task/proved] [:seon.task/run-id :seon.task/run-id]
-                        [:seon.task/program :seon.task/program]]]
-                  [:or :seon.task/merge-request-view :seon.task/conflict-error :seon.error/value]]}
-  [connection agent-id {:seon.task/keys [key ns of-assignment]} view]
-  (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge-" key) :seon.task/kind :merge
-                       :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
-                      agent-id)
-        red (red-first (db/db connection) (into #{} (map first) (:seon.task/proved view)))
-        view (cond-> (assoc view :seon.task/merge-request (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
-               (seq red) (assoc :seon.task/red-first red))
-        report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/of-assignment of-assignment))))]
-    (cond (map? red) red
-          (:seon.error/at report) report
-          :else view)))
 
 (defonce ^:private retire-branch!
   ;; my.agent closes a branch's agent before its branch is deleted; a my namespace is never required here

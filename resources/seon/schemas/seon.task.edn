@@ -117,17 +117,7 @@
                   [:seon.task/git-commit {:optional true} :seon.task/git-commit] [:seon.task/refusal {:optional true} :seon.task/refusal]
                   [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
                   [:seon.task.attempt/relaunch-fork {:optional true} :seon.task.attempt/relaunch-fork]]
- :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row
-                          :description "seon.id/id over [assignment commit], the recurrence key: one merge request per assignment and requested commit."}]
- :merge [:and {:seon.db/index true :description "The generated merge task a merge request records."} :seon.task/handle]
- :of-assignment [:and {:description "The assignment the merge request answers."} :seon.db/ref]
- :commit [:uuid {:description "C: the source branch's commit its proofs ran on."}]
- :proved [:set {:min 1 :description "Each proof as [test symbol, definition digest] at C: references that outlive C."}
-          [:tuple :symbol [:string {:min 64 :max 64}]]]
- :red-first [:set {:description "Each proof observed red on the source branch before its change, as [test symbol, reach digest]: a proof must have failed at the old program (health plan §5)."}
-           [:tuple :symbol [:string {:min 64 :max 64}]]]
- :run-id [:and {:description "The test run on C that proved them."} :seon.test.run/id]
- :program [:and {:description "The run's tested program identity."} :seon.test.run/program-digest]
+ :merge [:and {:seon.db/index true :description "The merge task an end message names."} :seon.task/handle]
  :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome, or for a parent its children all done."} :seon.task/outcome :seon.task/children]
  :resolution [:map {:description "Why a task is closed: derived, never stored."}
               [:seon.task/closed-by :seon.task/closed-by]]
@@ -140,21 +130,13 @@
                  [:seon.agent/routing {:optional true} :seon.agent/routing]
                  [:seon.env/environment {:optional true} :seon.env/environment]]
  :proof-run [:and {:description "The error that kept the task's proofs from running in the agent's world at assignment: the infrastructure failure that refused :proof-run-failed, never work."} :seon.schema/value]
- :assignment-view [:map {:description "An assignment as root's assign! answers it: the task, the agent and its branch; the agent's merge request is recorded once a deftest naming the task (^{:seon/tasks #{'ns/task-name}}) passes on the branch."}
+ :assignment-view [:map {:description "An assignment as root's assign! answers it: the task, the agent and its branch; root's merge takes its proofs from the task, the deftests naming it (^{:seon/tasks #{'ns/task-name}})."}
                    [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                    [:seon.agent/id :seon.agent/id] [:seon.task/branch :seon.task/branch]
                    [:seon.render/operations :seon.render/operations]]
- :merge-request-view [:map [:seon.task/merge-request :seon.task/merge-request] [:seon.task/merge :seon.task/merge]
-                 [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
-                 [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]
- :merge-request-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
-                [:seon.task/merge-request :seon.task/merge-request] [:seon.task/merge :seon.task/merge] [:seon.task/of-assignment :seon.task/of-assignment]
-                [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
-                [:seon.task/red-first {:optional true} :seon.task/red-first]
-                [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]
- :assigned-work [:map {:description "What an agent's branch is assigned: the key naming its merge task, the owning namespace, the proofs and the assignment its merge request answers."}
+ :assigned-work [:map {:description "What an agent's branch is assigned: the key naming its assignment, the owning namespace and the proofs."}
                  [:seon.task/key :seon.task/key] [:seon.task/ns :seon.task/ns] [:seon.task/proofs :seon.task/proofs]
-                 [:seon.task/of-assignment :seon.task/of-assignment] [:seon.task/assigned {:optional true} :seon.task/assigned]
+                 [:seon.task/assigned {:optional true} :seon.task/assigned]
                  [:seon.task/sym {:optional true} :seon.task/sym]]
  :key [:string {:min 1 :description "What names a merge task: the assignment identity."}]
  :quoted-symbol [:cat [:= quote] :qualified-symbol]

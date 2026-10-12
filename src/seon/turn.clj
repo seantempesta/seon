@@ -67,8 +67,6 @@
   (delay (requiring-resolve 'seon.context/task-done?)))
 (defonce ^:private context-task-finished?
   (delay (requiring-resolve 'seon.context/task-finished?)))
-(defonce ^:private program-request-merge!
-  (delay (requiring-resolve 'my.program/request-merge!)))
 (defonce ^:private context-end-summary-tx
   (delay (requiring-resolve 'seon.context/end-summary-tx)))
 (defonce ^:private test-run
@@ -2190,35 +2188,12 @@
                   (and attempt (= :sent-back end) target reason)
                   (conj [:db/add attempt :seon.task.attempt/reason reason])))))
 
-(defn- end-merge-request
-  "The merge request the end of the task `agent-id` holds already recorded on `home` (its branch, or main
-  once copied), with its merge
-  task's outcome and landing refusal: the latest merge request answering the agent's assignment of that task; nil
-  when none was recorded, so one end requests the merge at most once whatever interrupted it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :map]]}
-  [home agent-id]
-  (let [held (task/agent-task home agent-id)
-        found (when (string? held)
-                (db/q '[:find ?tx (pull ?p [:seon.task/merge-request :seon.task/merge :seon.task/branch :seon.task/commit
-                                            :seon.task/proved :seon.task/run-id :seon.task/program])
-                        :in $ ?agent-id ?handle
-                        :where [?g :seon.agent/id ?agent-id] [?a :seon.task/agent ?g] [?a :seon.task/assigned ?handle]
-                        [?p :seon.task/of-assignment ?a] [?p :seon.task/merge-request _ ?tx]]
-                      home agent-id held))
-        request (when (and (seq found) (not (db/read-refusal? found)))
-                  (update (second (last (sort-by first found))) :seon.task/proved set))]
-    (when request
-      (merge request (dissoc (db/pull home [:seon.task/outcome :seon.task/refusal] [:seon.task/id (:seon.task/merge request)])
-                             :db/id)))))
-
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`), all in the agent's
-  own world (its branch, custody): request the merge of its change when it ended green and no task needs it
-  (`my.program/request-merge!`, the agent's own act; a merge request this end already recorded is reused,
-  `end-merge-request`), record the agent's outcome (`seon.context/end-summary-tx`), then close the agent and
-  write the end on its attempt in one transaction (`end-task-call`). Nothing reaches main here: the end
-  datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which stops the graph, squash-merges the end, refinements,
-  children and merge request to main in one transaction and deletes the branch once merged
+  own world (its branch, custody): record the agent's outcome (`seon.context/end-summary-tx`), then close the
+  agent and write the end on its attempt in one transaction (`end-task-call`). Nothing reaches main here: the end
+  datom wakes db<->flow through the branch's route (`:seon.wake/starts`), which stops the graph, squash-merges the end, refinements
+  and children to main in one transaction and deletes the branch once merged
   (`seon.cluster.agent/next-actions`); root learns of the end from that merge on main.
   nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
@@ -2232,21 +2207,7 @@
                                 :seon.agent/id agent-id}))
         write! (fn [tx] (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [database (db/db connection)
-            held (task/agent-task database agent-id)
-            needed? (db/q '[:find ?next . :in $ ?h :where [?t :seon.task/id ?h]
-                            [?next :seon.task/needs ?t]] database held)
-            merge? (and (= :done end) (nil? needed?))
-            recorded (when merge? (end-merge-request database agent-id))
-            execution (when (and merge? (nil? recorded)) (@cluster-agent-acquire-context! cluster agent-id))
-            request (or recorded
-                        (when execution
-                          (@program-request-merge! {:my.program/context (assoc execution :my.program/base-ctx
-                                                                               (:seon.sci.eval/base-ctx execution))
-                                                    :seon.db/connection (:seon.db/connection execution)
-                                                    :seon.agent/id agent-id})))
-            _ (when (:seon.error/at request) (fault! 'my.program/request-merge! request))
-            end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
+      (let [end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
             kept (when (seq end-summary-tx) (write! end-summary-tx))
             _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
             ;; the branch commit the attempt ended at: its successor's fork basis

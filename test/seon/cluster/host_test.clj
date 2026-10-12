@@ -422,49 +422,6 @@
                (db/pull (db/db connection) [:seon.task/intent {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id task-id]))
             "the task is on the cluster, written by the agent")))))
 
-(deftest ^{:seon.test/long "Three nested seon.test/run requests of one member each (red, green, green again); 60 s per nested run is merge-test's measured bound."
-           :seon.test/long-ms 180000}
-  a-merge-request-waits-for-its-assigned-tasks-proofs-then-reaches-root
-  ;; Before, request-merge! took any issue id the agent named, ran no test and
-  ;; messaged root at once; root inferred pending merge requests from messages.
-  (with-host-world {}
-    (fn [{:keys [handle connection branch!]}]
-      (support/transacted! connection (support/agent-tx @connection "root"))
-      (let [branch (branch!)
-            hosted (host-on! handle branch "mcp/proposer")
-            refusal #(first (hosted-run! hosted "(:seon.task/refused (my.program/request-merge! {}))"))
-            to-root #(set (db/q '[:find [?about ...] :where [?r :seon.agent/id "root"] [?m :seon.message/to ?r]
-                                  [?m :seon.message/about ?about]] (db/db connection)))
-            declaration {:seon.task/ns host-ns :seon.task/name "square" :seon.task/kind :function :seon.task/intent "Square."}
-            task-id (read-string (first (hosted-run! hosted (str "(:seon.task/id (seon.task/create! '" (pr-str declaration) "))"))))
-            as-root #(db/with-branch {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
-        (support/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
-        (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
-        (is (nil? (:seon.error/message (as-root task/assign! {:seon.agent/context-source handle :seon.task/assigned task-id
-                                                              :seon.task/agent [:seon.agent/id "mcp/proposer"] :seon.task/branch branch})))
-            "root assigns the task while its proof is red")
-        (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))")
-        (hosted-run! hosted (str "(clojure.test/deftest ^{:seon/tasks #{'" (task/task-sym host-ns "square") "}} square-test"
-                                 " (clojure.test/is (= 9 (square 3))))"))
-        (is (= ":unproven" (refusal)) "a red proof refuses")
-        (is (empty? (to-root)) "and root hears nothing")
-        (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
-        (let [[about] (hosted-run! hosted "(:seon.task/merge (my.program/request-merge! {}))")
-              mine #(filter (fn [open] (= branch (:seon.task/branch open))) (my.root/merge-requests {:seon.db/db (db/db connection)}))
-              [open] (mine)]
-          (is (string? (read-string about)) "the proven request is recorded on the agent's branch")
-          (is (= [branch] (map :seon.task/branch (mine))) "root reads the open assignment, the merge request, from facts")
-          (is (= [(list 'my.root/merge! {:seon.task/assignment (:seon.task/assignment open)})]
-                 (take 1 (:seon.render/operations open)))
-              "a merge request offers its merge by its assignment")
-          (hosted-run! hosted "(my.program/request-merge! {})")
-          (is (= [open] (mine)) "requesting again opens no second merge request"))
-        (is (= {:seon.task/changed? true}
-               (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."
-                                                         :seon.task/basis {task-id declaration}))
-                            [:seon.task/changed?])))
-        (is (not= ":revised-since-assignment" (refusal)) "a task root revised stays assigned at its new revision")))))
-
 (deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
            :seon.test/long-ms 60000}
   a-branch-agents-test-member-writes-its-own-world

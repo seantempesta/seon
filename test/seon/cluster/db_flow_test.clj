@@ -457,19 +457,11 @@
           (pass! handle (:seon.agent/routing handle))
           (is (empty? (attempts connection "b")) "B waits on A")
           (is (= :done (landed! handle connection "a" ::a-ended)) "A's turn turns its proof green and its step ends it")
-          (is (empty? (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
-                              [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                            (db/db connection) (chain-handle "a")))
-              "a step its successor needs records no merge request")
           (pass! handle (:seon.agent/routing handle))
           (let [[[_ branch-b]] (seq (attempts connection "b"))]
             (is (seq (proof-runs-on (db/branch-database (db/db connection) branch-b) (proof "a")))
                 "B's branch forked from A's end commit: it holds A's proof run")
-            (is (= :done (landed! handle connection "b" ::b-ended)) "and B ends the chain")
-            (is (seq (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
-                             [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                           (db/branch-database (db/db connection) branch-b) (chain-handle "b")))
-                "the step no task needs records its merge request on its branch, for root's merge")))))))))
+            (is (= :done (landed! handle connection "b" ::b-ended)) "and B ends the chain")))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-fresh-attempt-is-work-without-a-message 'seon.turn/a-send-back-names-its-target-on-the-attempt}}
   a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target
@@ -748,11 +740,6 @@
                   _ (landed! handle connection "g" ::g-ended)
                   database (db/db connection)
                   head (db/branch-database database branch)]
-              (is (seq (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]] head a))
-                  "the agent requested its merge on its branch")
-              (is (empty? (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                                database a))
-                  "nothing of it reached main")
               (is (not= (db/commit-id head) (:seon.task/merge-base (db/pull database [:seon.task/merge-base] a)))
                   "its base did not move")
               (is (= {:seon.task.attempt/end :error}
@@ -985,10 +972,6 @@
                    "the model's reply turned p's step proof green on its branch"))
              (is (= :done (landed! handle connection "p" ::p-ended))
                  "its step proof is green and its only red test is its product, new at its fork point")
-             (is (empty? (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
-                                 [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                               (db/db connection) (chain-handle "p")))
-                 "the Prove predecessor records no merge request")
              (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
 
 (deftest a-prove-step-admitted-by-its-successor-opens-a-model-turn

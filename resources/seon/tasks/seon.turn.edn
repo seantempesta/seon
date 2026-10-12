@@ -173,8 +173,8 @@
              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md"}}
  #:seon.task{:name "a-task-end-never-reaches-root"
              :kind :function
-             :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so `my.program/request-merge!` never runs and root's `seon.cluster.source/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (`my.program/request-merge!`) named by `:seon.task/merge`, which `seon.cluster.source/prepare-merge!` takes."
-             :must-read #{seon.turn/task-end seon.turn/end-task-call my.program/request-merge! seon.cluster.source/prepare-merge! seon.cluster.message/send!}
+             :intent "When a model agent's task ends nobody is told, and a green task proposes no merge: the turn loop stops calling the model once the proofs are green, so the retired request-merge! never runs and root's `seon.cluster.source/prepare-merge!` has nothing to take (plan §0, chain run 4 gap 1; DYNAMIC-CONTEXT stage 3). Done when every task end (`seon.turn/task-end`) sends root exactly one message holding references only (`:seon.task/end`, the task's id as `:seon.message/about`) and, ended green, the agent's own proposal (the retired request-merge!) named by `:seon.task/merge`, which `seon.cluster.source/prepare-merge!` takes."
+             :must-read #{seon.turn/task-end seon.turn/end-task-call seon.cluster.source/prepare-merge! seon.cluster.message/send!}
              :evidence #{"docs/seon/schedule/cards/DYNAMIC-CONTEXT.md" "docs/seon/plan.md"}}
  #:seon.task{:name "a-reached-red-test-keeps-a-task-from-ending-done"
              :kind :function

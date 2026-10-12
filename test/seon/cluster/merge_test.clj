@@ -273,16 +273,16 @@
        "(deftest ^{:seon/tasks #{'tq.land/side}} side-test (is (= 4 (side 2))))\n\n"
        "(deftest side-identity-test (is (= 3 (side 3))))\n"))
 
-(declare requested-agent!)
+(declare assigned-agent!)
 
-(defn- requested!
+(defn- assigned!
   "An own-branch agent assigned the task `<ns>/<task-name>` (`tq.land` by default) that evaluates `fix` in
-  that namespace and requests its merge on its branch; the assignment's key, the merge request root merges."
+  that namespace on its branch; the assignment's key, the merge request root merges."
   {:malli/schema [:function [:=> [:cat :string :seon.db/connection :string :string] :seon.task/assignment]
                   [:=> [:cat :string :seon.db/connection :symbol :string :string] :seon.task/assignment]]}
-  ([running connection task-name fix] (requested! running connection 'tq.land task-name fix))
+  ([running connection task-name fix] (assigned! running connection 'tq.land task-name fix))
   ([running connection ns-sym task-name fix]
-   (:seon.task/assignment (requested-agent! running connection ns-sym task-name fix))))
+   (:seon.task/assignment (assigned-agent! running connection ns-sym task-name fix))))
 
 (defn- assigned-agent!
   "An own-branch agent assigned the task `<ns-sym>/<task-name>` that evaluates `fix` in that namespace on its
@@ -297,16 +297,6 @@
     (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
     (agent-eval running agent-id (str "(in-ns '" ns-sym ")\n" fix))
     {:seon.task/assignment (:seon.task/assignment assigned) :seon.agent/id agent-id :seon.db/connection on-branch}))
-
-(defn- requested-agent!
-  "`requested!`'s agent: `assigned-agent!`'s, which then requests its merge."
-  [running connection ns-sym task-name fix]
-  (let [{agent-id :seon.agent/id :as assigned} (assigned-agent! running connection ns-sym task-name fix)
-        requested (agent-eval running agent-id "(my.program/request-merge! {})")]
-    ;; a refused fixture step is surfaced, never left for the merge to miss
-    (if (:seon.task/merge-request (:seon.repl/value requested))
-      assigned
-      (throw (ex-info "The agent requested no merge." {:requested requested})))))
 
 (defn- merge!
   "Root's merge of `assignment` (`my.root/merge!`) through the cluster `execution`."
@@ -359,7 +349,7 @@
        (try
          (testing "a green request merges on main; the next pass publishes it in one git commit"
            (let [fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
-                 request (requested! running connection "area" fix)
+                 request (assigned! running connection "area" fix)
                  text (slurp file)
                  before (git! root "rev-parse" "HEAD")
                  merged (merge! execution request)]
@@ -401,7 +391,7 @@
          (testing "a red reaching test answers the gate's refusal, decides nothing and writes nothing"
            (let [text (slurp file)
                  head (git! root "rev-parse" "HEAD")
-                 request (requested! running connection "side"
+                 request (assigned! running connection "side"
                                      "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
                  main-t (db/basis-t (db/db connection))
                  refused (merge! execution request)
@@ -435,7 +425,7 @@
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
            fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
            {key :seon.task/assignment agent-id :seon.agent/id on-branch :seon.db/connection}
-           (requested-agent! running connection 'tq.land "area" fix)
+           (assigned-agent! running connection 'tq.land "area" fix)
            before (git! root "rev-parse" "HEAD")]
        (try
          ;; the agent's green end on its own branch, as its last pass writes it
@@ -456,8 +446,7 @@
          (is (str/includes? (slurp (io/file root path)) fix) "the file holds the agent's span")
          (finally (support/delete-root! root)))))))
 
-(deftest ^{:seon/tasks #{'seon.task/a-done-branch-merges-with-no-merge-request-written-by-the-agent}
-           :seon.test/long "One own-branch agent's first request and assignment, one gate (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and one db<->flow pass."
+(deftest ^{:seon.test/long "One own-branch agent's first request and assignment, one gate (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and one db<->flow pass."
            :seon.test/long-ms 180000}
   a-done-branch-merges-with-no-merge-request-written-by-the-agent
   (support/with-running-agent
@@ -478,8 +467,6 @@
                          #(support/transacted! on-branch [[:db.fn/call #'turn/end-task-call agent-id :done
                                                            (db/commit-id (db/db on-branch)) nil]]))
          (let [branch-digest (digest on-branch)]
-           (is (empty? (db/q '[:find ?r :where [?r :seon.task/merge-request _]] (db/db on-branch)))
-               "the agent wrote no merge request")
            (pass! running)
            (is (= :merged (:seon.task/outcome (assignment-row connection key))) "one pass merges the done end")
            (is (= 1 (:seon.task/merged-declarations (assignment-row connection key))) "with the one declaration it changed")
@@ -527,7 +514,7 @@
                     "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :tq.shape/radius] :tq.shape/area]}\n  [r]\n  (* r r))\n"
                     "(defn label\n  \"The area's label.\"\n  {:malli/schema [:=> [:cat :tq.shape/area] :string]}\n  [a]\n  (str a))")]
        (try
-         (let [request (requested! running connection 'tq.shape "area" fix)
+         (let [request (assigned! running connection 'tq.shape "area" fix)
                before (git! root "rev-parse" "HEAD")
                landed (merge! execution request)
                _ (pass! running)
@@ -632,7 +619,7 @@
            root (checkout! "proposals-message-test" {"test/tq/land.clj" land-source})
            entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
-           assignment (requested! running connection "area"
+           assignment (assigned! running connection "area"
                                   "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
            agent-id (get-in (db/pull (db/db connection) [{:seon.task/agent [:seon.agent/id]}] [:seon.task/assignment assignment])
                             [:seon.task/agent :seon.agent/id])
@@ -697,7 +684,7 @@
            execution (support/running-cluster running)]
        (try
          ;; agent r7-problems-prose required the namespace it fixed from `user`; its landing refused :one-file
-         (let [request (requested! running connection "area"
+         (let [request (assigned! running connection "area"
                                    (str "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
                                         "\n(in-ns 'user)\n(require 'tq.land)"))
                landed (merge! execution request)
