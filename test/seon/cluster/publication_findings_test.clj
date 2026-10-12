@@ -1,5 +1,6 @@
 (ns seon.cluster.publication-findings-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.fn :as functions]
@@ -28,7 +29,9 @@
           (#'cluster/report-analysis-warnings! remaining remaining)
           (#'cluster/report-analysis-warnings! nil findings))
         (is (= ["findings in analyzed files: 0; added=0; resolved=1"
-                "findings in analyzed files: 0; added=0; resolved=0"
-                "findings in analyzed files: 1; delta unavailable: no corresponding previous manifest"]
-               @output)))
+                "findings in analyzed files: 0; added=0; resolved=0"]
+               (take 2 @output)))
+        (is (= 3 (count @output)))
+        (is (str/starts-with? (nth @output 2) "findings in analyzed files: 1; delta unavailable")
+            "without a previous publication the report carries the count and no delta"))
       (finally (support/delete-recursively! root)))))

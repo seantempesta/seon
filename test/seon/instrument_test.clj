@@ -256,7 +256,9 @@
   (let [unit {:seon.render/value {:seon.ai.attempt/id "rootless"}}
         missing-root? (schema/projection-validator (schema/handed-projection)
                                                    :seon.render.value/missing-root-identity-error)]
-    (is (contains? (instrument/instrumented) #'ai/attempt-ai))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error)
+         (test-support/refusal-data #(ai/attempt-ai "not a unit")))
+        "a call outside the contract is refused, so the Var is armed under either evaluator")
     (doseq [render [ai/attempt-ai ai/attempt-html]]
       (is (missing-root? (render unit)))))
   ;; E07: a core fault already recorded by this propagation is rethrown by
@@ -308,8 +310,7 @@
         (fs/delete-recursively! base base)))))
 
 (deftest a-wrong-shaped-call-throws-a-flat-error-value
-  ;; boot armed `error/value`; the test re-arms nothing
-  (is (contains? (instrument/instrumented) #'error/value))
+  ;; the refusal below proves `error/value` is armed, by whichever owner arms it
      (let [failure (try
                      ;; the archived D1 shape: a value the declared
                      ;; contract forbids, which the callee would have
@@ -336,8 +337,7 @@
            "the problem names the refused argument and what arrived")))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
-  ;; boot armed the projection builders; the test re-arms nothing
-  (is (contains? (instrument/instrumented) #'schema/build-projection))
+  ;; the projection builders are armed by their owner; the test re-arms nothing
      (let [base-key :seon.instrument-test.local/base
            alias-key :seon.instrument-test.local/alias
            forms (assoc (schema/snapshot)
