@@ -667,6 +667,20 @@
     (some->> (selection-read! (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute value))
              (db/behavior-digest database))))
 
+(defn- behavior-changed
+  "Those of the definitions `symbols` whose behavior `after` holds otherwise than `before`: added, removed or
+  at another behavior digest; a docstring-only change keeps the behavior digest, so no test observes it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential :qualified-symbol]]
+                  [:sequential :qualified-symbol]]}
+  [before after symbols]
+  (let [held (definition-digests before (vec symbols))
+        offered (definition-digests after (vec symbols))
+        behavior (fn [database symbol] (some #(behavior-of database [% symbol]) [:seon.fn/sym :seon.test/sym]))]
+    (filter #(and (not= (get held %) (get offered %))
+                  (or (nil? (get held %)) (nil? (get offered %))
+                      (not= (behavior before %) (behavior after %))))
+            symbols)))
+
 (defn- changed-definition-symbols
   "The definitions changed since `basis` in the same lineage, as two sets: those whose own behavior changed, and
   the declarations of namespaces whose bindings changed."
@@ -689,15 +703,7 @@
                         :where (or [?entity :seon.fn/sym ?symbol]
                                    [?entity :seon.test/sym ?symbol])]
                       history changed-entities))
-        as-of (db/as-of database basis)
-        before (definition-digests as-of (vec direct))
-        after (definition-digests database (vec direct))
-        behavior (fn [database symbol] (some #(behavior-of database [% symbol]) [:seon.fn/sym :seon.test/sym]))
-        ;; A docstring-only change keeps the behavior digest: no test observes it.
-        direct (filter #(and (not= (get before %) (get after %))
-                             (or (nil? (get before %)) (nil? (get after %))
-                                 (not= (behavior as-of %) (behavior database %))))
-                       direct)
+        direct (behavior-changed (db/as-of database basis) database direct)
         changed-bindings (selection-read!
                     (db/q '[:find [?entity ...] :in $ [?attribute ...]
                             :where [?entity ?attribute]]
@@ -2088,6 +2094,29 @@
                            (filter (fn [[a v]] (or (not= :seon.ns/name a)
                                                    (and (some #{v} declaring) (binding-lost? world candidate v))))
                                    identities))))))
+
+(defn request-changes
+  "What one eval request changed, in print order; empty when it defined nothing.
+  Read from the `entities` its recording transaction wrote, between `before`
+  and `after`, that transaction's databases: the definitions at another
+  behavior, each namespace that lost a binding (`binding-lost?`, as `changes`
+  keeps one) and the schemas it wrote."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :int]] :seon.test/changed]}
+  [before after entities]
+  (let [entities (vec entities)
+        on-both (fn [query] (into #{} (mapcat #(selection-read! (db/q query % entities))) [before after]))
+        symbols (on-both '[:find [?symbol ...] :in $ [?e ...]
+                           :where (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])])
+        names (on-both '[:find [?name ...] :in $ [?e ...]
+                         :where (or-join [?e ?ns]
+                                  (and [?e :seon.ns/name] [(identity ?e) ?ns])
+                                  [?ns :seon.ns/aliases ?e] [?ns :seon.ns/refers ?e] [?ns :seon.ns/imports ?e])
+                                [?ns :seon.ns/name ?name]])
+        schemas (on-both '[:find [?key ...] :in $ [?e ...] :where [?e :seon.schema/form] [?e :seon.schema/key ?key]])]
+    (vec (sort print/compare-values
+               (concat (behavior-changed before after (vec symbols))
+                       (keep #(when (binding-lost? before after %) [:seon.ns/name %]) names)
+                       (map #(vector :seon.schema/key %) schemas))))))
 
 (defn changes
   "What a check of `execution` must reach: the declarations its program holds

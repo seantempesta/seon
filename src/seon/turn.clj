@@ -80,6 +80,8 @@
   (delay (requiring-resolve 'seon.test.runner/latest-results)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
+(defonce ^:private test-request-changes
+  (delay (requiring-resolve 'seon.test/request-changes)))
 (defonce ^:private test-reaching
   (delay (requiring-resolve 'seon.test/reaching)))
 (defonce ^:private test-fork-point-red
@@ -4605,22 +4607,33 @@
              :seon.ns/name namespace-name
              :seon.cluster.reply/sources sources})) :seon.agent/id agent-id :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.db/db database}))))
 
+(defn- recording
+  "What a run's recording transaction `outcome` changed, as its test step reads it: the database it was
+  written on, the one it left and the entities its datoms name."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.turn.loop/recording]}
+  [outcome]
+  {:seon.turn.loop/before (:db-before outcome)
+   :seon.turn.loop/after (:db-after outcome)
+   :seon.turn.loop/entities (into #{} (map :e) (:tx-data outcome))})
+
 (defn- settled
   "`report` carrying the database value its terminal settlement left
   (`:seon.turn.loop/basis`): the run's callers read the run there, never on a
   later connection value."
   {:malli/schema [:=> [:cat :seon.turn.loop/settlement :seon.turn.loop/turn-report] :seon.turn.loop/turn-report]}
   [settlement report]
-  (cond-> report
-    (get-in settlement [:seon.turn.loop/outcome :db-after])
-    (assoc :seon.turn.loop/basis (get-in settlement [:seon.turn.loop/outcome :db-after]))))
+  (let [outcome (:seon.turn.loop/outcome settlement)]
+    (cond-> report
+      (:db-after outcome) (assoc :seon.turn.loop/basis (:db-after outcome)
+                                 :seon.turn.loop/recording (recording outcome)))))
 
 (defn- applied
   "`report` carrying the value its settlement left."
   {:malli/schema [:=> [:cat :seon.turn.loop/turn-report :seon.db/transaction-report]
                   :seon.turn.loop/turn-report]}
   [report outcome]
-  (assoc report :seon.turn.loop/basis (:db-after outcome)))
+  (assoc report :seon.turn.loop/basis (:db-after outcome)
+                :seon.turn.loop/recording (recording outcome)))
 
 (defn- with-saved
   "`report` carrying each held form with the receipt its settlement saved
@@ -5371,19 +5384,17 @@
          :seon.render/operations ['(my.test/check-platform {})]}))))
 
 (defn- run-reaching
-  "Run the tests reaching `changed`, what the branch changed since this request's previous run (its whole change
-  before the first), after the proofs, as one request bounded by `limit-ms`; nil when the branch equals its base.
-  With a `platform` proof, its host-bound functions seed nothing and its pending tests are not run here."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? [:or :seon.test/changed :seon.error/value]
-                       [:maybe :seon.turn.loop/platform]]
+  "Run the tests reaching `changed`, what this eval request changed, after the proofs, as one request bounded
+  by `limit-ms`; nil when it changed nothing. With a `platform` proof, its host-bound functions seed nothing
+  and its pending tests are not run here."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? :seon.test/changed [:maybe :seon.turn.loop/platform]]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
   [execution limit-ms changed platform]
   (let [connection (:seon.db/connection execution)
         request {:seon.test/execution execution :seon.test/recording-connection connection
                  :seon.test/policy :named :seon.test/check-time-limit-ms limit-ms}]
-    (cond (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) nil
-          (:seon.error/at changed) changed
-          (nil? platform) (@test-run (assoc request :seon.test/changed (vec changed) :seon.test/since-previous-run? true))
+    (cond (empty? changed) nil
+          (nil? platform) (@test-run (assoc request :seon.test/changed changed))
           :else
           (let [host-bound (set (:seon.turn.loop/host-bound platform))
                 others (vec (remove #(host-bound (if (symbol? %) % (second %))) changed))
@@ -5494,18 +5505,21 @@
 
 (defn- record-broken!
   "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point
-  (`seon.context/step-status`): the head is its obligations and the tests reaching its whole change `changed`;
+  (`seon.context/step-status`): the head is its obligations and the tests reaching its whole change
+  (`seon.test/changes`), derived only for an agent holding a task;
   each red there is looked up at the fork point (`seon.test/fork-point-red`, in the agent's own world, bounded
   by `limit-ms`). Records the verdict's broken and new reds on the agent's row on its branch, replacing the
   previous step's, and answers the broken tests, sorted. Nothing is read or written on main."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id [:or :seon.test/changed :seon.error/value] pos-int?]
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int?]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [execution agent-id changed limit-ms]
+  [execution agent-id limit-ms]
   (let [connection (:seon.db/connection execution)
         database (db/db connection)
         handle (task/agent-task database agent-id)
         sym (when (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
-        reached (cond (not (:seon.error/at changed)) (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)})
+        changed (when sym (@test-changes execution connection))
+        reached (cond (nil? sym) []
+                      (not (:seon.error/at changed)) (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)})
                       (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) []
                       :else changed)
         ;; the head: every reached test, judged as new until the fork point says otherwise
@@ -5534,34 +5548,40 @@
           (vec (sort (:seon.context/broken verdict)))))))
 
 (defn- test-step
-  "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
-  acquisition of the agent's world; tests reaching a host-bound change are named as its platform proof, not run and within the dial `:seon.config.test/step-time-limit-ms`. The proofs
-  take the bound first; the reaching request gets what they left, at least 1 ms, so it selects its tests
-  and reports those it did not start as pending. A throw from either becomes the error beside the pass's
-  values, never a replacement for them; nil when no request ran."
-  {:malli/schema [:=> [:cat :map :seon.agent/id] [:maybe :seon.turn.loop/test-summary]]}
-  [cluster agent-id]
+  "The pass's automatic test step: the held task's proofs, then the tests reaching what the run changed
+  (`seon.test/request-changes` over `run`, its recording transaction's databases and entities), on one
+  acquisition of the agent's world; tests reaching a host-bound change are named as its platform proof, not
+  run. Within the dial `:seon.config.test/step-time-limit-ms` the proofs take the bound first; the reaching
+  request gets what they left, at least 1 ms, so it selects its tests and reports those it did not start as
+  pending. A throw from either becomes the error beside the pass's values, never a replacement for them; nil
+  when no request ran, and nothing is acquired when the agent holds no proof and the run changed nothing."
+  {:malli/schema [:=> [:cat :map :seon.agent/id [:maybe :seon.turn.loop/recording]]
+                  [:maybe :seon.turn.loop/test-summary]]}
+  [cluster agent-id run]
   (try
     (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
-          limit (step-limit-ms cluster agent-id)
-          execution (@cluster-agent-acquire-context! cluster agent-id)
-          connection (:seon.db/connection execution)
-          changed (@test-changes execution connection)
-          platform (when (vector? changed) (platform-proof (db/db connection) changed))
-          proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
-          left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
-      (let [reaching (run-reaching execution (max 1 left) changed platform)
-            ;; a derivation that fails is shown beside the step's values, never in place of them
-            red (try (record-broken! execution agent-id changed limit)
-                     (catch Throwable failure
-                       (or (error/refusal failure)
-                           (seon.error.refusal/diagnostic
-                            (Date.) :seon.turn/test-step `record-broken!
-                            {:seon.error/message "The tests the change broke could not be judged."
-                             :seon.error/exception-class (.getName (class failure))}))))]
-        (some-> (summary (ran-something proofs) (ran-something reaching) platform)
-                (merge (test-costs (db/db connection) [proofs reaching]))
-                (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red)))))
+          changed (if run
+                    (@test-request-changes (:seon.turn.loop/before run) (:seon.turn.loop/after run) (:seon.turn.loop/entities run))
+                    [])]
+      (when (or proofs? (seq changed))
+        (let [limit (step-limit-ms cluster agent-id)
+              execution (@cluster-agent-acquire-context! cluster agent-id)
+              connection (:seon.db/connection execution)
+              platform (platform-proof (db/db connection) changed)
+              proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
+              left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))
+              reaching (run-reaching execution (max 1 left) changed platform)
+              ;; a derivation that fails is shown beside the step's values, never in place of them
+              red (try (record-broken! execution agent-id limit)
+                       (catch Throwable failure
+                         (or (error/refusal failure)
+                             (seon.error.refusal/diagnostic
+                              (Date.) :seon.turn/test-step `record-broken!
+                              {:seon.error/message "The tests the change broke could not be judged."
+                               :seon.error/exception-class (.getName (class failure))}))))]
+          (some-> (summary (ran-something proofs) (ran-something reaching) platform)
+                  (merge (test-costs (db/db connection) [proofs reaching]))
+                  (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))))))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error
@@ -5577,6 +5597,14 @@
   [commit-id queued]
   (when (and commit-id (seq queued))
     {:seon.turn.loop/queued queued :seon.source/commit-id commit-id}))
+
+(defn- merge-queue
+  "The queue after a step: the `older` queue's tests joined to those the step's `newer` queue left, on the newer commit."
+  {:malli/schema [:=> [:cat [:maybe :seon.turn.loop/queue] [:maybe :seon.turn.loop/queue]] [:maybe :seon.turn.loop/queue]]}
+  [older newer]
+  (if (and older newer)
+    (update newer :seon.turn.loop/queued #(into [] (distinct) (concat % (:seon.turn.loop/queued older))))
+    (or newer older)))
 
 (defn- summary-queue
   "The queue a step's `tests` summary leaves: its proofs' then its reaching tests' pending."
@@ -5753,7 +5781,9 @@
                                    :seon.turn.work/next next}
                                   now)
                           pending-commit (select-keys report [:seon.turn.loop/basis])
-                          report (dissoc report :seon.turn.loop/basis)
+                          ;; what the run changed: its recording transaction, between its two databases
+                          run-change (:seon.turn.loop/recording report)
+                          report (dissoc report :seon.turn.loop/basis :seon.turn.loop/recording)
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
                           ;; A refusal whose settlement still committed (a
@@ -5799,7 +5829,7 @@
                           test-start (System/nanoTime)
                           stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
                                         (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
-                          tests (when stepped? (test-step cluster agent-id))
+                          tests (when stepped? (test-step cluster agent-id run-change))
                           report (cond-> report
                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
                                                       (/ (- (System/nanoTime) test-start) 1e6)))
@@ -5807,12 +5837,9 @@
                           ;; step recorded the proofs: the end closes the agent once.
                           _ (when (and (nil? submission) (= :closed (:seon.turn.loop/outcome report)))
                               (end-task! cluster agent-id))
-                          ;; THE QUEUE IS THIS PROC'S STATE: a pass that ran its own step replaces it
-                          ;; with what that step left (the new requests cover the older queue on the
-                          ;; newer program); any other pass carries it to the idle pass.
-                          queue (if (step-due? report)
-                                  (summary-queue tests)
-                                  (:seon.turn.loop/queue state))
+                          ;; THE QUEUE IS THIS PROC'S STATE: a step runs only what its own run changed,
+                          ;; so what it left joins the older queue, carried to the idle pass.
+                          queue (merge-queue (:seon.turn.loop/queue state) (summary-queue tests))
                           ;; THE STEP'S OWN COST: its proc thread's counters since the step began
                           step-cost (some-> (:seon.flow/step-start seon.batch/*world*) seon.flow/step-cost)
                           ;; how many definitions the reply compares with main; a refused read compares none

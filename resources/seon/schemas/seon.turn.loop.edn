@@ -208,6 +208,8 @@
                    :seon.turn.loop/refusal]
                   [:seon.turn.loop/basis {:optional true}
                    :seon.turn.loop/basis]
+                  [:seon.turn.loop/recording {:optional true}
+                   :seon.turn.loop/recording]
                   [:seon.turn.loop/tests {:optional true} :seon.turn.loop/tests]
                   ; the wall time of each stage the pass ran (fork, the batch's own, settle, test step)
                   [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
@@ -219,6 +221,12 @@
                  ; The database value a run's terminal settlement left: its
                  ; callers read the run's evaluations there, not on a later value.
                  :basis :seon.db/database-value,
+ ; What the run's recording transaction changed, as its test step reads it
+ ; (seon.test/request-changes): the database it was written on, the one it
+ ; left and the entities its datoms name.
+ :recording [:map [:seon.turn.loop/before :seon.db/database-value]
+             [:seon.turn.loop/after :seon.db/database-value]
+             [:seon.turn.loop/entities [:set :int]]],
                  :refusal :seon.error/value,
                  :write-refusals [:int {:min 1}],
                  :parked :seon.error/value,

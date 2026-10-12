@@ -142,11 +142,13 @@
    (fn [running agent-id _]
      ;; the repeated work (200 queries) spends more self time than :seon.config.fn.cost/min-total-us
      (let [form "(do (dotimes [_ 200] (seon.db/q '[:find ?e . :where [?e :db/ident :db/ident]] (seon.db/db))) (let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/key]] (seon.db/db))] (if (set? rows) (count rows) 0)))"
-           runs (vec (repeatedly 5 #(answer running agent-id "sci" form)))
+           ;; each request's one recording transaction stores what ranks in its top by self time, so the
+           ;; stored set settles over a few requests of the same work
+           runs (vec (repeatedly 6 #(answer running agent-id "sci" form)))
            seen (mapv #(:seon.repl/value (support/mcp-reply %)) runs)
            [fourth fifth] (map support/mcp-request (take-last 2 runs))]
        (is (<= 1 (seen 1) 12) "the first request wrote cost entities, at most definitions defined + tests run + top")
-       (is (= (seen 3) (seen 4)) "the same work again writes none")
+       (is (= (seen 4) (seen 5)) "the same work again writes none")
        (is (= (:seon.cost/transactions fourth) (:seon.cost/transactions fifth)) "accounting adds no transaction")
        (is (<= (:seon.cost/calls fifth) (* 1.1 (:seon.cost/calls fourth))) "accounting adds no armed calls")))))
 
@@ -332,3 +334,29 @@
        (is (= 2 (:seon.test/reused-count measured)) "the green and the red are both answered from their records")
        (is (false? (:seon.test/passed? measured)) "the reused red is still red")
        (is (< (:seon.profile/ms measured) 1000) "a check that executes nothing is sub-second")))))
+
+(deftest ^{:seon.test/long "Five eval requests of an agent on the cluster's own branch, one test outliving the step's bound: about 3 s."
+           :seon.test/long-ms 20000}
+  a-request-on-a-drifted-branch-runs-only-the-tests-reaching-its-own-change
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [request #(answer running agent-id "sci" %)
+           ;; drift the step never finishes: a test outliving the step's bound is unfinished
+           ;; in every run, so no run of the branch's whole change ever completes
+           _ (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
+                                    {:seon.config.test/step-time-limit-ms 300})
+           _ (request (str "(ns request.cost.drift (:require [clojure.test :refer [deftest is]]))\n"
+                           "(defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                           "(deftest f-test (is (= 1 (f))))\n"
+                           "(deftest slow-test (Thread/sleep 1000) (is (= 1 (f))))"))
+           _warm (request "(+ 1 2)")
+           measured (profile/measure #(request "(+ 1 2)"))
+           read-only (:seon.profile/value measured)
+           defined (request "(defn g \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2) (deftest g-test (is (= 2 (g))))")]
+       (is (nil? (support/mcp-tests read-only)) "a request that defines nothing runs no test")
+       (is (< (:seon.profile/ms measured) 200) "a read-only request on a drifted branch costs no test step")
+       (is (= 1 (:seon.cost/count (:seon.cost/tests (support/mcp-request defined))))
+           "a defn runs the one test reaching it, not the branch's drift")
+       (is (= {:seon.test/passed? true :seon.turn.loop/red []}
+              (:seon.turn.loop/reaching (support/mcp-tests defined)))
+           "nothing of the drift is left pending by the defn's step")))))

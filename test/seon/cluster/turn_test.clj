@@ -2861,7 +2861,7 @@
        (is (nil? (:seon.turn.loop/tests again)) "an unchanged red is answered from its record and not shown again")))))
 
 (deftest a-throwing-test-step-answers-its-error-beside-the-pass
-  (let [summary (#'seon.turn/test-step {} "agent-x")]
+  (let [summary (#'seon.turn/test-step {} "agent-x" nil)]
     (is (:seon.error/message (get-in summary [:seon.turn.loop/proofs :seon.turn.loop/test-error])))))
 
 (defn- step-dial!
