@@ -28,8 +28,7 @@
            "the task root holds")
        (is (seq (get-in current [:seon.context/proofs :seon.context/proof-list])) "its proofs, each with its status")))))
 
-(deftest ^{:seon/tasks #{'seon.context/a-steps-instructions-reach-its-agent}}
-  current-answers-the-held-steps-instructions
+(deftest current-answers-the-held-steps-instructions
   ;; A step's instructions are data on the task its creator wrote (TASK-CHAIN §2); the agent reads them here.
   (with-root true
    (fn [connection]

@@ -85,7 +85,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private task-selector
-  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/must-read])
+  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions :seon.task/must-read])
 
 ;; Every failing assertion of a red proof, in the order `seon.render.test` shows (file, line, report id)
 ;; so two passes show the same list. The

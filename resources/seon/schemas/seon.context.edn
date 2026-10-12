@@ -3,6 +3,7 @@
                 [:seon.task/id :seon.task/id]
                 [:seon.task/sym :seon.task/sym]
                 [:seon.task/intent :seon.task/intent]
+                [:seon.task/instructions {:optional true} :seon.task/instructions]
                 [:seon.task/must-read {:optional true} :seon.task/must-read]],
                :turns
                [:map {:description "Model calls left against the current wake and the held task's status."}
@@ -80,6 +81,7 @@
                [:map {:description "The block as the AI face shows it: the task without its handle."}
                 [:seon.context/task {:optional true}
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
+                  [:seon.task/instructions {:optional true} :seon.task/instructions]
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]

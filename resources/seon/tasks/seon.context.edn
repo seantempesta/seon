@@ -57,11 +57,6 @@
              :must-read #{seon.context/current-state seon.cluster.source/changed-identities seon.program/three-way my.program/diff seon.profile/measure}
              :needs #{[:seon.task/sym seon.cluster.squash/a-repeated-auto-merge-adds-nothing]}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
- #:seon.task{:name "a-steps-instructions-reach-its-agent"
-  :kind :function
-  :intent "A step's `:seon.task/instructions` (TASK-CHAIN §2: what this step's agent is to do, as data on the task) never reach the agent: `seon.context/held-task` pulls only id, symbol, intent and must-read, so `my.task/current` and `seon.context/current-state` omit them. Met in chain experiments 1 and 2 (both copied the instructions into each step's intent by hand). Done when `seon.context/held-task` carries `:seon.task/instructions` when the task has them and `my.task-test/current-answers-the-held-steps-instructions` is green."
-  :must-read #{seon.context/held-task my.task/current seon.context/current-state}
-  :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-2.md" "docs/research/agent-platform/2026-10-12/chain-experiment-1.md"}}
  #:seon.task{:name "a-send-back-reason-reaches-the-targets-next-attempt"
   :kind :function
   :intent "A send-back's reason and counterexample (`my.task/send-back!`) reach only root's end message: `seon.turn/end-task-call` records `:seon.task.attempt/target` on the attempt but not the reason, and `seon.context/current-state` renders no send-back for the target's next attempt, so the relaunched agent does not know why it was sent back (TASK-CHAIN §3: the reconciler launches a fresh agent with the decision in context). Chain experiment 2: root copied the Implement agent's counterexample into the Design+Prove step's intent by hand. Done when the sending attempt records its reason and the target's next attempt reads it under `:seon.context/send-backs` in `my.task/current`, and `seon.cluster.db-flow-test/a-send-back-reason-reaches-the-targets-next-attempt` is green."
