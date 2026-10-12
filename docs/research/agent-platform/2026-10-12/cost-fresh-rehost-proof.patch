@@ -1,0 +1,21 @@
+diff --git a/test/seon/cluster/host_test.clj b/test/seon/cluster/host_test.clj
+index 59815b249..2d637dbbf 100644
+--- a/test/seon/cluster/host_test.clj
++++ b/test/seon/cluster/host_test.clj
+@@ -200,6 +200,16 @@
+                     (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
+         (is (nil? (host/hosted handle branch)) "the parent registry no longer records the host")))))
+ 
++(deftest an-existing-agent-rehosts-without-a-transaction
++  (with-host-world {}
++    (fn [{:keys [handle connection branch!]}]
++      (let [branch (branch!)
++            hosted (host-on! handle branch "mcp/rehost")
++            before [(db/basis-t (db/db connection)) (db/basis-t (branch-db handle branch))]]
++        (host/stop! hosted)
++        (host-on! handle branch "mcp/rehost")
++        (is (= before [(db/basis-t (db/db connection)) (db/basis-t (branch-db handle branch))]))))))
++
+ (deftest stopping-the-cluster-releases-every-host-connection
+   ;; A reset stops the instance in this JVM: a host left running kept its
+   ;; branch connection, so its branch outlived the reforked cluster.
