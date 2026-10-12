@@ -7,7 +7,7 @@
             [seon.db :as db]
             [seon.fs :as filesystem]
             [seon.config :as config]
-            [seon.fs.jvm]
+            [seon.fs.jvm :as jvm]
             [seon.schema :as schema]
             [seon.schema.edn])
   (:import [java.nio.charset StandardCharsets]
@@ -247,6 +247,8 @@
             (filesystem/delete-recursively! (str outside) (str outside))))))))
 
 (deftest an-open-directory-handle-defeats-a-swapped-parent-link
+  ;; The parent is opened, then its path is swapped for a link outside the
+  ;; root, then the write runs through the handle it already holds.
   (with-temp-tree
     (fn [root]
       (let [parent (.resolve root "parent")
@@ -255,93 +257,70 @@
             outside (.resolve (.getParent root) (str (random-uuid)))
             sentinel (.resolve outside "file.txt")
             before (.getBytes "before" StandardCharsets/UTF_8)
-            parent-access-var (ns-resolve 'seon.fs.jvm 'parent-access)
-            original (var-get parent-access-var)]
+            config (policy root)]
         (try
           (write-octets! path before)
           (write-octets! sentinel (.getBytes "outside" StandardCharsets/UTF_8))
-          (let [result
-                (with-redefs-fn
-                  {parent-access-var
-                   (fn [& arguments]
-                     (let [opened (apply original arguments)]
-                       (Files/move parent parked
-                                   (make-array java.nio.file.CopyOption 0))
-                       (Files/createSymbolicLink
-                        parent outside
-                        (make-array java.nio.file.attribute.FileAttribute 0))
-                       opened))}
-                  #((handler 'write)
-                    {:my.fs/path "parent/file.txt"
-                     :my.fs/content {:my.fs/text "inside"}
-                     :my.fs/precondition
-                     {:my.fs/expected-digest (sha-256 before)}}
-                    (policy root)))]
-            (is (true? (:my.fs/changed? result)))
-            (is (= "inside"
-                   (String. (Files/readAllBytes (.resolve parked "file.txt"))
-                            StandardCharsets/UTF_8)))
-            (is (= "outside"
-                   (String. (Files/readAllBytes sentinel)
-                            StandardCharsets/UTF_8))))
+          (let [access (jvm/parent-access "parent/file.txt" config)]
+            (try
+              (Files/move parent parked (make-array java.nio.file.CopyOption 0))
+              (Files/createSymbolicLink
+               parent outside
+               (make-array java.nio.file.attribute.FileAttribute 0))
+              (let [result (jvm/write-opened
+                            {:my.fs/path "parent/file.txt"
+                             :my.fs/content {:my.fs/text "inside"}
+                             :my.fs/precondition
+                             {:my.fs/expected-digest (sha-256 before)}}
+                            config access)]
+                (is (true? (:my.fs/changed? result))))
+              (finally
+                (jvm/close-streams! (:seon.fs.jvm/streams access)))))
+          (is (= "inside"
+                 (String. (Files/readAllBytes (.resolve parked "file.txt"))
+                          StandardCharsets/UTF_8))
+              "the write reached the directory the handle opened")
+          (is (= "outside"
+                 (String. (Files/readAllBytes sentinel)
+                          StandardCharsets/UTF_8))
+              "the swapped link's referent is untouched")
           (finally
             (filesystem/delete-recursively! (str outside) (str outside))))))))
 
 (deftest staged-write-cleanup-deletes-only-its-own-link-entry
+  ;; A write's stage entry is swapped for a link before the write discards it.
   (with-temp-tree
     (fn [root]
       (let [path (.resolve root "target.txt")
             outside (.resolve (.getParent root) (str (random-uuid)))
             sentinel (.resolve outside "must-survive.txt")
-            before (.getBytes "before" StandardCharsets/UTF_8)
-            precondition-var (ns-resolve 'seon.fs.jvm 'precondition-state)
-            original (var-get precondition-var)
-            calls (atom 0)]
+            config (policy root)]
         (try
-          (write-octets! path before)
+          (write-octets! path (.getBytes "before" StandardCharsets/UTF_8))
           (write-octets! sentinel [83 65 70 69])
-          (let [result
-                (with-redefs-fn
-                  {precondition-var
-                   (fn [& arguments]
-                     (let [state (apply original arguments)]
-                       (when (= 2 (swap! calls inc))
-                         (let [stage
-                               (first
-                                (filter
-                                 #(str/starts-with?
-                                   (str (.getFileName ^Path %))
-                                   ".seon-write-")
-                                 (paths-in root)))]
-                           (Files/delete stage)
-                           (Files/createSymbolicLink
-                            stage sentinel
-                            (make-array
-                             java.nio.file.attribute.FileAttribute 0))
-                           (throw
-                            (ex-info
-                             "simulated interruption"
-                             {:my.fs/write-failed true :seon.error/at (java.util.Date.) :seon.error/layer :my.fs/invocation :seon.error/operation 'my.fs/write
-                              :seon.error/message
-                              "The staged write was interrupted."
-                              :seon.error/data {:my.fs/path "target.txt"}}))))
-                       state))}
-                  #((handler 'write)
-                    {:my.fs/path "target.txt"
-                     :my.fs/content {:my.fs/text "after"}
-                     :my.fs/precondition
-                     {:my.fs/expected-digest (sha-256 before)}}
-                    (policy root)))]
-            (is (true? (:my.fs/write-failed result)))
-            (is (= "before"
-                   (String. (Files/readAllBytes path)
-                            StandardCharsets/UTF_8)))
-            (is (Files/exists sentinel no-follow))
-            (is (empty?
-                 (filter
-                  #(str/starts-with? (str (.getFileName ^Path %))
-                                     ".seon-write-")
-                  (paths-in root)))))
+          (let [{directory :seon.fs.jvm/directory :as access}
+                (jvm/parent-access "target.txt" config)]
+            (try
+              (let [{stage :seon.fs.jvm/stage-name}
+                    (jvm/stage-content! directory {:my.fs/text "after"}
+                                        (:seon.config.fs/max-write-bytes config))
+                    staged (.resolve root ^Path stage)]
+                (Files/delete staged)
+                (Files/createSymbolicLink
+                 staged sentinel
+                 (make-array java.nio.file.attribute.FileAttribute 0))
+                (jvm/discard-stage! directory stage))
+              (finally
+                (jvm/close-streams! (:seon.fs.jvm/streams access)))))
+          (is (= "before"
+                 (String. (Files/readAllBytes path) StandardCharsets/UTF_8)))
+          (is (Files/exists sentinel no-follow)
+              "the link's referent survives the discard")
+          (is (empty?
+               (filter
+                #(str/starts-with? (str (.getFileName ^Path %)) ".seon-write-")
+                (paths-in root)))
+              "the stage entry itself is gone")
           (finally
             (filesystem/delete-recursively! (str outside) (str outside))))))))
 

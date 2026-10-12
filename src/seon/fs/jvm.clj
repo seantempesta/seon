@@ -163,7 +163,21 @@
                              no-follow-links)))
     (catch NoSuchFileException _ nil)))
 
-(defn- close-streams!
+(defn directory-handle?
+  "True for an open no-follow directory handle (a `SecureDirectoryStream`)."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? SecureDirectoryStream value))
+
+(defn path?
+  "True for a `java.nio.file.Path`."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? Path value))
+
+(defn close-streams!
+  "Close the directory handles an access opened, innermost first."
+  {:malli/schema [:=> [:cat [:vector [:fn seon.fs.jvm/directory-handle?]]] :nil]}
   [streams]
   (doseq [stream (reverse streams)]
     (.close ^java.io.Closeable stream)))
@@ -233,7 +247,12 @@
    opened
    segments))
 
-(defn- parent-access
+(defn parent-access
+  "An open handle on the parent directory of `path`, reached segment by
+  segment without following links, and the entry name beneath it. The handle
+  stays bound to the directory it opened whatever later happens to its path;
+  the caller closes `:seon.fs.jvm/streams`."
+  {:malli/schema [:=> [:cat :my.fs/path :seon.config/effective] [:map [:seon.fs.jvm/directory [:fn seon.fs.jvm/directory-handle?]] [:seon.fs.jvm/streams [:vector [:fn seon.fs.jvm/directory-handle?]]] [:seon.fs.jvm/name [:fn seon.fs.jvm/path?]]]]}
   [path effective]
   (let [{root :seon.fs.jvm/root relative :seon.fs.jvm/relative}
         (path-plan path effective)
@@ -659,7 +678,10 @@
         {:my.fs/created? false
          :my.fs/before-digest actual}))))
 
-(defn- stage-content!
+(defn stage-content!
+  "Write `content` to a fresh stage entry in `directory` and force it to disk;
+  returns the stage's name and the content's digest and size."
+  {:malli/schema [:=> [:cat [:fn seon.fs.jvm/directory-handle?] :my.fs/content :int] [:map [:seon.fs.jvm/stage-name [:fn seon.fs.jvm/path?]] [:seon.fs.jvm/content :map]]]}
   [^SecureDirectoryStream directory content write-limit]
   (let [stage-name (fs/path (str ".seon-write-" (UUID/randomUUID) ".stage"))
         info (content-info content write-limit)]
@@ -688,6 +710,69 @@
     {:seon.fs.jvm/stage-name stage-name
      :seon.fs.jvm/content info}))
 
+(defn discard-stage!
+  "Delete the stage entry `stage-name` from `directory`, never what it may now
+  link to; a stage a completed move consumed is already gone."
+  {:malli/schema [:=> [:cat [:fn seon.fs.jvm/directory-handle?] [:fn seon.fs.jvm/path?]] :nil]}
+  [^SecureDirectoryStream directory stage-name]
+  (try
+    (.deleteFile directory stage-name)
+    (catch NoSuchFileException _))
+  nil)
+
+(defn- move-stage!
+  [^SecureDirectoryStream directory entry-name path precondition read-limit
+   stage-name]
+  (try
+    ;; No filesystem compares a digest at the rename, so only this JVM's
+    ;; recheck-and-move excludes; staging and fsync run outside it. External
+    ;; writers are detected, not excluded.
+    (locking write-serialization
+      (precondition-state directory entry-name path precondition read-limit)
+      (.move directory stage-name directory entry-name))
+    (catch AtomicMoveNotSupportedException _
+      (refuse! :my.fs/atomic-write-unsupported
+               true
+               "The filesystem refused an atomic file move."
+               {:my.fs/path path}))))
+
+(defn write-opened
+  "Write `request` through an already open parent `access`: check the
+  precondition, stage the content, recheck and move it over the entry, and
+  discard the stage whatever happens. Throws the refusal it meets."
+  {:malli/schema
+   [:=> [:cat :my.fs/write-request :seon.config/effective [:map [:seon.fs.jvm/directory [:fn seon.fs.jvm/directory-handle?]] [:seon.fs.jvm/streams [:vector [:fn seon.fs.jvm/directory-handle?]]] [:seon.fs.jvm/name [:fn seon.fs.jvm/path?]]]]
+    :my.fs/write-result]}
+  [request effective {directory :seon.fs.jvm/directory
+                       entry-name :seon.fs.jvm/name}]
+  (let [path (:my.fs/path request)
+        write-limit (:seon.config.fs/max-write-bytes effective)
+        read-limit (:seon.config.fs/max-read-bytes effective)
+        precondition (:my.fs/precondition request)
+        before (precondition-state directory entry-name path precondition
+                                   read-limit)
+        content (content-info (:my.fs/content request) write-limit)
+        proposed (:seon.fs.jvm/digest content)]
+    (if (= proposed (:my.fs/before-digest before))
+      (merge {:my.fs/path path
+              :my.fs/changed? false
+              :my.fs/after-digest proposed
+              :my.fs/bytes-written (:seon.fs.jvm/file-bytes content)}
+             before)
+      (let [{stage-name :seon.fs.jvm/stage-name
+             staged-content :seon.fs.jvm/content}
+            (stage-content! directory (:my.fs/content request) write-limit)]
+        (try
+          (move-stage! directory entry-name path precondition read-limit
+                       stage-name)
+          (merge {:my.fs/path path
+                  :my.fs/changed? true
+                  :my.fs/after-digest (:seon.fs.jvm/digest staged-content)
+                  :my.fs/bytes-written (:seon.fs.jvm/file-bytes staged-content)}
+                 before)
+          (finally
+            (discard-stage! directory stage-name)))))))
+
 (defn- write
   {:malli/schema
    [:=> [:cat :my.fs/write-request :seon.config/effective]
@@ -695,59 +780,11 @@
   [request effective]
   (let [path (:my.fs/path request)]
     (try
-      (let [{directory :seon.fs.jvm/directory
-             entry-name :seon.fs.jvm/name
-             streams :seon.fs.jvm/streams}
-            (parent-access path effective)]
+      (let [access (parent-access path effective)]
         (try
-          (let [write-limit (:seon.config.fs/max-write-bytes effective)
-                read-limit (:seon.config.fs/max-read-bytes effective)
-                precondition (:my.fs/precondition request)
-                before (precondition-state directory entry-name path
-                                           precondition read-limit)
-                content (content-info (:my.fs/content request) write-limit)
-                proposed (:seon.fs.jvm/digest content)]
-            (if (= proposed (:my.fs/before-digest before))
-              (merge {:my.fs/path path
-                      :my.fs/changed? false
-                      :my.fs/after-digest proposed
-                      :my.fs/bytes-written
-                      (:seon.fs.jvm/file-bytes content)}
-                     before)
-              (let [{stage-name :seon.fs.jvm/stage-name
-                     staged-content :seon.fs.jvm/content}
-                    (stage-content! directory (:my.fs/content request)
-                                    write-limit)]
-                (try
-                  ;; No filesystem compares a digest at the rename, so only
-                  ;; this JVM's recheck-and-move excludes; staging and fsync
-                  ;; run outside it. External writers are detected, not excluded.
-                  (locking write-serialization
-                    (precondition-state directory entry-name path
-                                        precondition read-limit)
-                    (.move ^SecureDirectoryStream directory stage-name
-                           ^SecureDirectoryStream directory entry-name))
-                  (merge {:my.fs/path path
-                          :my.fs/changed? true
-                          :my.fs/after-digest
-                          (:seon.fs.jvm/digest staged-content)
-                          :my.fs/bytes-written
-                          (:seon.fs.jvm/file-bytes staged-content)}
-                         before)
-                  (catch AtomicMoveNotSupportedException _
-                    (refuse! :my.fs/atomic-write-unsupported
-                             true
-                             "The filesystem refused an atomic file move."
-                             {:my.fs/path path}))
-                  (finally
-                    ;; The stage name is this write's own: a completed move
-                    ;; consumed it, so its deletion finds nothing.
-                    (try
-                      (.deleteFile ^SecureDirectoryStream directory
-                                   stage-name)
-                      (catch NoSuchFileException _)))))))
+          (write-opened request effective access)
           (finally
-            (close-streams! streams))))
+            (close-streams! (:seon.fs.jvm/streams access)))))
       (catch Throwable error
         (error-value error :my.fs/write-failed true "The file write failed."
                      {:my.fs/path path})))))
