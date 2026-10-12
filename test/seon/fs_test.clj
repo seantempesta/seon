@@ -130,3 +130,15 @@
         (and (true? (#'seon.fs/under-path? root (str root "/" segment)))
              (false? (#'seon.fs/under-path? root (str root segment "x"))))))
     :seed 2026101301)))
+
+(deftest ^{:seon/tasks #{'seon.fs/implement-an-equal-root-and-target-have-no-intermediate-paths}}
+    intermediate-paths-lists-the-roots-from-root-to-target-exclusive
+  (doseq [[root target expected] [["/r" "/r" []]
+                                  ["/r" "/r/a" ["/r"]]
+                                  ["/r" "/r/a/b" ["/r" "/r/a"]]
+                                  ["/r/" "/r/a/b" ["/r" "/r/a"]]]]
+    (testing (str (pr-str target) " under " (pr-str root))
+      (is (= expected
+             (mapv #(.toString ^java.nio.file.Path %)
+                   (#'seon.fs/intermediate-paths (java.nio.file.Paths/get root (into-array String []))
+                                                 (java.nio.file.Paths/get target (into-array String [])))))))))
