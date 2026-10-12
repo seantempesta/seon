@@ -222,11 +222,11 @@
           (testing "the head lacks both additions before the merge"
             (is (every? #(nil? (:db/id (db/pull (db/db h-conn) [:db/id] %))) [added-fn added-test])))
           (testing "a selection merges only named changes; a selected test reaching an unselected addition refuses by name"
-            (is (= #{added-test} (get-in (source/prepare-merge! target store c proofs #{added-test})
+            (is (= #{added-test} (get-in (source/prepare-merge! target store c proofs {:selection #{added-test}})
                                          [:seon.error/offending :seon.program/identities])))
             (is (= [[:seon.fn/sym 'absent/declaration]]
-                   (:seon.error/offending (source/prepare-merge! target store c proofs #{[:seon.fn/sym 'absent/declaration]})))))
-          (let [prepared (source/prepare-merge! target store c proofs #{added-fn added-test})
+                   (:seon.error/offending (source/prepare-merge! target store c proofs {:selection #{[:seon.fn/sym 'absent/declaration]}})))))
+          (let [prepared (source/prepare-merge! target store c proofs {:selection #{added-fn added-test}})
                 _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? prepared)))
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
@@ -294,7 +294,7 @@
                 [(fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
                 (fn [{:keys [target store c proofs root file made]}]
                   (let [before (slurp file)
-                        refused (source/prepare-merge! target store c proofs nil root)]
+                        refused (source/prepare-merge! target store c proofs {:root root})]
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
                     (is (= :not-analyzable (:seon.source/write-back-refused refused)))
                     (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
@@ -315,7 +315,7 @@
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
              namespace-entity [:seon.ns/name fixture-ns]
-             prepared (source/prepare-merge! target store c proofs #{check} root)
+             prepared (source/prepare-merge! target store c proofs {:selection #{check} :root root})
              _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
              _ (is (true? (:seon.test/passed? prepared)))
              accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
@@ -368,7 +368,7 @@
               (submit! request "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
               (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest callee-check (clojure.test/is (= 3 ("
                                     fixture-ns "/callee 2))))"))))
-          (let [prepared (source/prepare-merge! target store c #{(second check)} nil root)
+          (let [prepared (source/prepare-merge! target store c #{(second check)} {:root root})
                 _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 written (when (:seon.source/commit-id accepted)

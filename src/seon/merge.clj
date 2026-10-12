@@ -62,23 +62,22 @@
   "The value set of a cardinality-many coordinate merged member by member, as git merges
   lines: (ours - (base - theirs)) union (theirs - base). A member either side removed is
   removed and a member either side added is added, so two sets never conflict."
-  {:malli/schema [:=> [:cat [:maybe [:set :seon.schema/value]] [:maybe [:set :seon.schema/value]]
-                       [:maybe [:set :seon.schema/value]]]
+  {:malli/schema [:=> [:cat [:set :seon.schema/value] [:set :seon.schema/value] [:set :seon.schema/value]]
                   [:set :seon.schema/value]]}
   [base ours theirs]
-  (let [base (or base #{}) theirs (or theirs #{})]
-    (set/union (set/difference (or ours #{}) (set/difference base theirs))
-               (set/difference theirs base))))
+  (set/union (set/difference ours (set/difference base theirs))
+             (set/difference theirs base)))
 
 (defn- shown-state
   "A conflict's scalar or cardinality-many value, with named absence."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword
-                       [:maybe [:set :seon.schema/value]]] :seon.schema/value]}
-  [database attribute values]
-  (cond
-    (nil? values) :seon.program/absent
-    (= :db.cardinality/many (get-in database [:schema attribute :db/cardinality])) values
-    :else (first values)))
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :qualified-keyword] :seon.schema/value]
+                  [:=> [:cat :seon.db/database-value :qualified-keyword [:set :seon.schema/value]] :seon.schema/value]]}
+  ([_database _attribute] :seon.program/absent)
+  ([database attribute values]
+   (if (= :db.cardinality/many (get-in database [:schema attribute :db/cardinality]))
+     values
+     (first values))))
 
 (defn squash-merge
   "Transaction data and conflicts for source relative to its merge base and target."
@@ -129,15 +128,15 @@
                     :else :theirs)]
          (case rule
            :ours result
-           :members (update result :tx-data into (attribute-tx entity attribute (or o #{}) (member-merge b o t)))
+           :members (update result :tx-data into (attribute-tx entity attribute (or o #{}) (member-merge (or b #{}) (or o #{}) (or t #{}))))
            :theirs (update result :tx-data into (attribute-tx entity attribute (or o #{}) (or t #{})))
            :add (update result :tx-data conj
                         [:db.fn/call add-count entity attribute (- (or (first t) 0) (or (first b) 0))])
            :root (update result :conflicts conj
                          {:entity entity :attribute attribute
-                          :base (shown-state source attribute b)
-                          :ours (shown-state target attribute o)
-                          :theirs (shown-state source attribute t)}))))
+                          :base (apply shown-state source attribute (some-> b vector))
+                          :ours (apply shown-state target attribute (some-> o vector))
+                          :theirs (apply shown-state source attribute (some-> t vector))}))))
      {:tx-data [] :conflicts []} changes)))
 
 (defn- conflict-task!
@@ -156,26 +155,21 @@
     nil))
 
 (defn- merged
-  "Assignment `a`'s three-way on main `database` from its merge base (`:seon.task/merge-base`, else the commit
-  its branch forked at, `fork`) to the source commit `commit`, under `projection`'s rules, with the end the
+  "Assignment `a`'s three-way on main `database` from its merge base commit `base-commit` to the source commit `commit`, under `projection`'s rules, with the end the
   source holds for `a`: nothing when the base already is `commit`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
-                       [:maybe :seon.task/merge-base]]
+                       :seon.task/merge-base]
                   [:map [:tx-data :seon.store/transaction-data] [:conflicts :seon.merge/conflicts]
                    [:end {:optional true} :seon.task.attempt/end]]]}
-  [database a commit projection fork]
+  [database a commit projection base-commit]
   ;; read from the datoms: inside the writer the value carries no projection of its own
-  (let [base-commit (or (:v (first (d/datoms database :eavt a :seon.task/merge-base))) fork)]
-    (when-not (uuid? base-commit)
-      (throw (ex-info "The assignment has no merge base." {:seon.error/message "The assignment has no merge base."
-                                                          :db/id a :seon.squash/source-commit commit})))
-    (if (= base-commit commit)
-      {:tx-data [] :conflicts []}
-      (let [base (db/commit-database database base-commit)
-            source (db/commit-database database commit)]
-        (try (let [end (:v (first (d/datoms source :eavt a :seon.task.attempt/end)))]
-               (cond-> (squash-merge source base database projection) end (assoc :end end)))
-             (finally (source/release! [base source])))))))
+  (if (= base-commit commit)
+    {:tx-data [] :conflicts []}
+    (let [base (db/commit-database database base-commit)
+          source (db/commit-database database commit)]
+      (try (let [end (:v (first (d/datoms source :eavt a :seon.task.attempt/end)))]
+             (cond-> (squash-merge source base database projection) end (assoc :end end)))
+           (finally (source/release! [base source]))))))
 
 (defn merge-tx
   "Assignment `a`'s squash merge of the source commit `commit` onto main, computed inside main's writer on its own
@@ -188,14 +182,18 @@
                   [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
                    :seon.store/transaction-data]
                   [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
-                        [:maybe :seon.task/merge-base]]
+                        :seon.task/merge-base]
                    :seon.store/transaction-data]]}
-  ([database a commit projection] (merge-tx database a commit projection nil))
+  ([database a commit projection]
+   (if-some [stored (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
+     (merge-tx database a commit projection stored)
+     (throw (ex-info "The assignment has no merge base." {:seon.error/message "The assignment has no merge base."
+                                                         :db/id a :seon.squash/source-commit commit}))))
   ([database a commit projection fork]
    (let [base-commit (or (:v (first (d/datoms database :eavt a :seon.task/merge-base))) fork)]
      (if (= base-commit commit)
        []
-       (let [{:keys [tx-data end]} (merged database a commit projection fork)]
+       (let [{:keys [tx-data end]} (merged database a commit projection base-commit)]
          (cond-> (conj tx-data [:db/add a :seon.task/merge-base commit])
            (empty? (d/datoms database :eavt a :seon.task/outcome))
            (conj [:db/add a :seon.task/outcome (if (= :sent-back end) :closed :merged)])))))))
@@ -241,27 +239,11 @@
       (symbol? task-sym) (assoc :seon.task/sym task-sym)
       (string? agent-id) (assoc :seon.agent/id agent-id))))
 
-(defn merge!
-  "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and
-  the store it holds or its SCI context's environment holds) as ONE
-  transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
-  facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
-  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not
-  end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
-  proofs of the assignment's task on C (`seon.task/obligations`) and
-  the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
-  `merge-tx` and `:seon.task/merged-declarations` (how many it moved) in its transaction, then the merge
-  branch is deleted; the files the checkout `root` would hold
-  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`; publishing the
-  merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
-  A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
-  with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
-
-  Example:
-  (seon.merge/merge! execution \"0123456789ab\" \"/Users/me/src/project\")"
-  {:malli/schema [:=> [:cat :seon.merge/execution :seon.task/assignment [:maybe :seon.fn/root]]
+(defn- merge-onto
+  "`merge!`'s work: assignment `key`'s merge through `execution`, the checkout `:root` (when given) proving the files."
+  {:malli/schema [:=> [:cat :seon.merge/execution :seon.task/assignment [:map [:root {:optional true} :seon.fn/root]]]
                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
-  [execution key root]
+  [execution key {:keys [root]}]
   ;; A cluster handle holds its store in its SCI context's environment, where
   ;; `seon.cluster.agent/acquire-context!` reads it; an acquired context holds it directly.
   (let [ctx (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))
@@ -311,7 +293,7 @@
                 result)
               report))
           :else
-          (let [prepared (source/prepare-merge! context store branch (:seon.task/proofs owed) nil root)
+          (let [prepared (source/prepare-merge! context store branch (:seon.task/proofs owed) (cond-> {} root (assoc :root root)))
                 ;; the merge records, in its own transaction, how many declarations it moved: what publication reads
                 moved [:db/add a :seon.task/merged-declarations (count (:seon.source/expected-digests prepared))]
                 accepted (when (:seon.source/candidate prepared)
@@ -334,6 +316,32 @@
               (:seon.error/at result) (assoc result :seon.source/accepted accepted)
               :else (do (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result))
                         (assoc result :seon.source/accepted accepted)))))))))
+
+(defn merge!
+  "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and
+  the store it holds or its SCI context's environment holds) as ONE
+  transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
+  facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
+  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`), its source did not
+  end `:sent-back` and no task needs its task, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
+  proofs of the assignment's task on C (`seon.task/obligations`) and
+  the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
+  `merge-tx` and `:seon.task/merged-declarations` (how many it moved) in its transaction, then the merge
+  branch is deleted; the files the checkout `root` would hold
+  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`; publishing the
+  merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
+  A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
+  with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
+
+  Example:
+  (seon.merge/merge! execution \"0123456789ab\" \"/Users/me/src/project\")"
+  {:malli/schema [:function
+                  [:=> [:cat :seon.merge/execution :seon.task/assignment]
+                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]
+                  [:=> [:cat :seon.merge/execution :seon.task/assignment :seon.fn/root]
+                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]]}
+  ([execution key] (merge-onto execution key {}))
+  ([execution key root] (merge-onto execution key {:root root})))
 
 (defn checkout
   "The checkout cluster `cluster-name` publishes merged declarations into, as a canonical path: its

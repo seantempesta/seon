@@ -477,7 +477,7 @@
     (db/with-branch {:seon.db/connection connection}
                     #(merge/merge! {:seon.db/connection connection
                                     :seon.store/store (:seon.store/store (support/execution-handle connection))}
-                                   key nil))))
+                                   key))))
 
 (defn- intent-on
   "The intent of task `handle` on `connection`'s head."
@@ -598,3 +598,18 @@
                                                             (db/carried-projection main)))]
             (is (= 4 (count (:seon.profile/value measured))) "the intent's retraction and assertion, the moved base and the outcome")
             (is (<= (:seon.profile/ms measured) 20)))))))))
+
+(defn- maybe-schemas
+  "The symbols of the vars in namespaces `names` whose declared contract holds a `:maybe`."
+  {:malli/schema [:=> [:cat [:fn seq?]] [:vector :qualified-symbol]]}
+  [names]
+  (vec (sort (for [n names
+                   [_ v] (ns-interns n)
+                   :let [schema (:malli/schema (meta v))]
+                   :when (some #{:maybe} (tree-seq coll? seq schema))]
+               (symbol v)))))
+
+(deftest merge-and-agent-facing-contracts-declare-absence-as-no-key
+  (let [agent-facing (filter #(.startsWith (str (ns-name %)) "my.") (all-ns))]
+    (is (= [] (maybe-schemas (concat [(the-ns 'seon.merge)] agent-facing))))
+    (is (seq agent-facing) "the my.* namespaces were loaded")))

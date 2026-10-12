@@ -888,28 +888,25 @@
   transaction applies all three. A conflict answers the three-way value; an
   empty delta refuses.
 
-  A `selection` of declaration identities merges only those changes: a
+  An `:selection` option of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
   reaching an unselected change (a new helper it calls), refuses by name.
   A selected declaration carries its namespace's row (requires, aliases) when
   the candidate changed it. Without one the whole delta merges, namespace rows
   included.
 
-  With the checkout `root`, the files write-back would produce are proven first
+  With the `:root` option, the checkout, the files write-back would produce are proven first
   (`proven-files` over the merged value, `seon.db/with`): a declaration naming
   a namespace its file does not require refuses before any test runs."
   {:malli/schema [:function
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs]
                    [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
-                        [:maybe :seon.program/identity-set]]
-                   [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
-                        [:maybe :seon.program/identity-set] [:maybe :seon.fn/root]]
+                        [:map [:selection {:optional true} :seon.program/identity-set]
+                         [:root {:optional true} :seon.fn/root]]]
                    [:or :seon.source/prepared :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
-  ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs nil nil))
-  ([source held-store candidate proofs selection] (prepare-merge! source held-store candidate proofs selection nil))
-  ([source held-store candidate proofs selection root]
+  ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs {}))
+  ([source held-store candidate proofs {:keys [selection root]}]
   (let [{:keys [c-id base branch head changed maps three]}
         (let [head (db/db (:seon.db/connection source))]
           (compare-branch held-store candidate head (get-in head [:config :branch])))]

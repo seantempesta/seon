@@ -828,7 +828,7 @@
              before-copy (clean-key-count store)
              copied (db/with-branch {:seon.db/connection connection}
                                     #(merge/merge! {:seon.db/connection connection :seon.store/store store}
-                                                   (:seon.task/assignment (db/pull (db/db connection) [:seon.task/assignment] a)) nil))
+                                                   (:seon.task/assignment (db/pull (db/db connection) [:seon.task/assignment] a))))
              with-copy (clean-key-count store)]
          (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
          (is (uuid? (:seon.task/merge-commit copied)))

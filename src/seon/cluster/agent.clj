@@ -2260,8 +2260,9 @@
       ;; the checkout the merged files are proven against before acceptance, as publish! will write them
       :merge (let [root (merge/checkout (db/db connection) (:seon.cluster/name handle))
                    merged (db/with-branch {:seon.db/connection connection}
-                                          #(merge/merge! (assoc handle :seon.store/store (handle-store handle))
-                                                         (:seon.task/assignment action) (when (string? root) root)))]
+                                          #(apply merge/merge! (assoc handle :seon.store/store (handle-store handle))
+                                                          (:seon.task/assignment action)
+                                                          (when (string? root) [root])))]
                (when (:seon.error/at merged) (throw (ex-info (:seon.error/message merged "The merge was refused.") merged))))
       ;; a refused publication is recorded on the assignment by publish! itself; the throw records the fault
       :publish (let [published (merge/publish! handle (:seon.task/assignment action))]

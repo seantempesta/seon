@@ -100,7 +100,7 @@
         checkout (when-not (:seon.error/at open) (some->> (:seon.cluster/name context) (merge/checkout database)))]
     (if (:seon.error/at open)
       open
-      (merge/merge! context key (when (string? checkout) checkout)))))
+      (if (string? checkout) (merge/merge! context key checkout) (merge/merge! context key)))))
 
 (defn close!
   "Close the open assignment `:seon.task/assignment` without merging it, saying why (`:seon.task/reason`): it
