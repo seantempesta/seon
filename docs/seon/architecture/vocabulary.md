@@ -52,7 +52,7 @@ a word marked (target) names its rename, not yet merged.
 |---|---|---|
 | branch | `branch!`: a named pointer to a commit; no copy | lane branch, worktree, fork of the database |
 | main | a cluster's own branch, the line every accepted change is merged into; one per cluster, so a store has several | cluster head, home, "HEAD" for it |
-| checked-out branch | the branch an agent's context holds (`my.agent/branch`, `git branch --show-current`); a new checkout is a new context | custody (internal word in `seon.db/call-with-custody` only) |
+| checked-out branch | the branch an agent's context holds (`my.agent/branch`, `git branch --show-current`); a new checkout is a new context | custody |
 | merge, merged | `merge!` and git's merge: a source branch's changes enter the target branch, as a merge commit or a fast-forward; merged is the state after (owner 2026-10-12, CN-26) | land, landed, landing, unlanded |
 | merge request | an assignment, as the thing root merges: source branch, target branch, merge base, outcome (`seon.merge/merge!`, `my.root/merge-requests`) | proposal, candidate |
 | source branch, target branch | GitLab's pair: the branch proposed, the branch it is merged into | head and base (both mean something else here), the proposing branch |
@@ -90,7 +90,7 @@ Words no library names. Each has one meaning.
 | product | the deftests tagged with tasks whose `:seon.task/needs` names a Prove step; the new red tests that step supplies to its successors | proof-product entity |
 | obligations | `seon.task/obligations` selects the step kind, its own tagged proofs and its successors' tagged product tests from one database value; Implement requires proofs, Prove requires product | duplicate proof selection |
 | needs | `:seon.task/needs`: the tasks a task runs after; siblings without a need between them run in parallel; a join names several; inherited by descendants | after, position, depends-on |
-| ready | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (code: `seon.task/frontier` until CN-27 renames it `seon.task/ready`); never stored | frontier, ready list, queue, scheduler state |
+| ready | the derived set of tasks that should be running now: leaves, not done, needs done, intent permitting, no open attempt (code: `seon.task/ready`); never stored | frontier, ready list, queue, scheduler state |
 | attempt | one assignment entity of a task to an agent on a branch, numbered within its task (`seon.id/id [handle number]`, `seon.task/attempt-tx`), ended once by its end fact | run (of a task), launch |
 | intent | `:seon.task/execution`, the stored permission for an attempt: `:held` (never launched), `:running`, `:paused` (graph exists, nothing runs), `:stopped` (graph gone, resumable), `:cancelled` (terminal); cluster `:seon.cluster/execution` is `:running` or `:paused` | desired state, status, run state |
 | db<->flow | the one Flow process in the cluster graph that links Datahike and Flow both ways (`seon.cluster.agent/db<->flow`): it reads the facts, asks `plan` what to do, writes the attempt first and makes Flow follow (start, resume, pause, stop); the only thing that starts agent graphs | reconciler, armer, scheduler, dispatcher, launcher |

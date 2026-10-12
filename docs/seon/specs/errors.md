@@ -76,7 +76,7 @@ to `:my.fs/path` and a `:multi` is that family's BEHAVIOR CHANGE.
 installed `:seon.error/link` (class, message, whole referenced `ex-data`, first-party frames, `:seon.error/suppressed-by`,
 `:seon.error/cause-of`) [V]. Installed `cause-links` and `chain` use equality-based Clojure sets, not identity
 sets; two distinct Throwables overriding equality can collapse into one link. Correct both to identity membership
-in the cut (`seon.error.refusal/preserve-primary-and-suppressed-causes`), preserving the one walk. `Throwable->map` is never used as the traversal: it follows `.getCause` with no seen-set
+in the cut [TARGET], preserving the one walk. `Throwable->map` is never used as the traversal: it follows `.getCause` with no seen-set
 and ignores suppressed throwables (`clojure/core_print.clj:484-501`); its `:via` shape is what each link resembles.
 `:seon.error/frame` is `root-frame`: the root cause's first authored frame, else each enclosing link's outward.
 
@@ -158,7 +158,7 @@ class gets a named variant in its owner's EDN; a base-only contract gains its va
 
 ## 3. The boundary
 
-`seon.error.refusal/caught` converts a Throwable to the map; it does not record it. Normalize through the existing
+[TARGET] `seon.error.refusal/caught` (not yet defined) converts a Throwable to the map; it does not record it. Normalize through the existing
 `chain` owner once, carrying the primary path and referenced links as intermediate values for error selection,
 frame and attribution. Installed `chain`, `root-frame` and `producer` independently traverse the Throwable;
 change those helpers and every caller together so `caught` does not repeat them. Preserve `root-frame`'s
@@ -272,8 +272,8 @@ different classes at one frame, are different entities. Member names reuse insta
 resolved (below). An opening writes, in the same home transaction, one generated task from the triage template
 (`seon.task/generate-tx`, ledger RT-7, RT-8, RT-12) assigned to the function's steward if one is held, else to root:
 a question about the error entity whose answer is a decision (the owner tasks it filed, each with a red reproduction, or
-no action with a reason), its proof the generic `seon.task-question-test/root-decided`. The entity refs it as
-`:seon.error/task`; the assignment is the one notification (an assignment is a wake), and no message is sent. The
+no action with a reason), its proof a generic root-decided test [TARGET: not yet written]. The entity refs it as
+`:seon.error/task` [TARGET: not yet declared]; the assignment is the one notification (an assignment is a wake), and no message is sent. The
 agent whose call caused the error is never the assignee: the error comes back to it in its reply. A repeat increments
 the count and updates `latest-digest`/`latest-at`; it writes no task. (This supersedes the 2026-10-07 "creates no
 task" rule, per AGENTS.md "with a count, a task and one notification".)

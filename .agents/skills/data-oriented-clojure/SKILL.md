@@ -202,8 +202,8 @@ namespace's keys, then validating the copy, is plumbing. At a real boundary (per
 interface) declare what is transformed and why; rename once with `clojure.set/rename-keys`.
 Never carry live resources into a persisted or printed value.
 
-SEON: `seon.schema/admit-declarations!` copies each `:seon.schema.projection/X` to `:seon.schema/X`, but it also
-computes defaults, compiled schemas, predicate functions and affected sets. Reuse the registry's keys where they
+SEON: `seon.schema/admit-declarations!` re-keys `:seon.schema.projection/X` values as `:seon.schema/X`
+request keys for `validate-declarations!`, and also computes the affected schema and function sets and predicate functions. Reuse the registry's keys where they
 mean the same; keep those derivations. `seon.render.transcript/receipt-entry` is a normalization boundary (namespace,
 time fallback, run relationships, a shared entry reply), not a mirror; remove only proven duplicate facts.
 
@@ -343,7 +343,7 @@ the pieces, not one runnable block.
   (let [d (ex-data e)] (if (tool-error? d) d (throw e))))
 
 ;; 4. Boundary: an exception that is not a declared error reaches the entrant's one catch:
-;;    (catch Throwable t (refusal/caught t)) -> {:seon.error/type :seon.error/exception … :seon.error/chain …},
+;;    (catch Throwable t …) ; [TARGET] `refusal/caught` -> {:seon.error/type :seon.error/exception … :seon.error/chain …},
 ;;    delivered in the agent's reply with a result handle and recorded once per signature.
 
 ;; 5. Assertion, through the agent's entrance (clojure-testing skill, example 3; the path must be inside the

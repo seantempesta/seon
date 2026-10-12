@@ -197,11 +197,11 @@ is invented for it, and one lifecycle (`seon.cluster.agent/next-actions`) carrie
 
 | Entrant | Agent id | Branch | SCI context | Database, connection | Writes go to |
 |---|---|---|---|---|---|
-| root (`:seon.mcp/agent` absent or `"root"`) | the cluster's root row | main | the cluster's | main's connection | main |
-| MCP, a new agent id | minted by the caller's name; its row is written on main and on its branch by `seon.cluster.host/home-call` (via `seon.mcp/execution` → `seon.cluster.host/register!`, `seon.cluster.host/host!`) | its own, `agent-<id>`, forked from main's head by `my.agent/create-branch!` | a fork of the cluster's, on its branch (`seon.cluster.agent/acquire-context!`, borrowing the branch: the execution does not own it) | its branch's connection; a database value is read from it per call | its branch only |
-| MCP, a known agent id | its row | its `:seon.agent/branch` | as above | as above | its branch only; a retired id (`:seon.agent/admission-closed-tx`) refuses by name |
+| root (`:seon.mcp/agent` absent or `"root"`) | the cluster's root entity | main | the cluster's | main's connection | main |
+| MCP, a new agent id | minted by the caller's name; its entity is written on main and on its branch by `seon.cluster.host/home-call` (via `seon.mcp/execution` → `seon.cluster.host/register!`, `seon.cluster.host/host!`) | its own, `agent-<id>`, forked from main's head by `my.agent/create-branch!` | a fork of the cluster's, on its branch (`seon.cluster.agent/acquire-context!`, borrowing the branch: the execution does not own it) | its branch's connection; a database value is read from it per call | its branch only |
+| MCP, a known agent id | its entity | its `:seon.agent/branch` | as above | as above | its branch only; a retired id (`:seon.agent/admission-closed-tx`) refuses by name |
 | schedule firing | the schedule's `:seon.schedule.task/owner` | that agent's branch | that agent's | as the agent | as the agent |
-| an assigned model agent | its row | the assignment's `:seon.task/branch` | a fork on that branch | its branch's connection | its branch only |
+| an assigned model agent | its entity | the assignment's `:seon.task/branch` | a fork on that branch | its branch's connection | its branch only |
 
 Capabilities are the same `my.*` functions for every non-root entrant; only root holds main. An agent's facts and
 code reach main only through root's `db<->flow`: an assignment's through its merge (merge.md §1), a taskless agent's
@@ -209,13 +209,13 @@ program change through a lane's write-back and commit, then reload (it never mer
 
 **A taskless agent's end** is the existing retirement fact, `:seon.agent/admission-closed-tx`, written **on its own
 branch** by the agent: `(my.agent/retire-branch! {:seon.store/branch <its own branch>})` (`my.agent/retire-own-branch!`
-closes admission on its branch's agent rows in its own connection's custody). It is the same fact an assignment's
+closes admission on its branch's agent entities in its own connection's checked-out branch). It is the same fact an assignment's
 end writes (`seon.turn/end-task-call`). No idle timeout exists and none is added: an MCP session that never writes its
 end keeps its branch, as today. Its branch's listen route wakes root's `db<->flow` on that write (G8's route).
 
 **Its derivation.** `seon.cluster.agent/lifecycle-facts` also reads every agent on main whose `:seon.agent/branch` the
 store holds, is not main's branch, and that no assignment names (`[?x :seon.task/agent ?g]` absent). For each it
-reads its end from main's row, else from its branch head's row (one branch read per such agent, as `branch-end`
+reads its end from main's entity, else from its branch head's entity (one branch read per such agent, as `branch-end`
 does for an assignment), and, only once ended, its unmerged program change: `seon.cluster.source/compare-branch` of
 the branch against main's head (the comparison `my.program/diff` and merge share), whose `seon.program/three-way`
 sets `:seon.program/added`, `:seon.program/changed-on-branch`, `:seon.program/retracted` and
@@ -230,7 +230,7 @@ assignment's rule with "merged" read as "nothing unmerged":
   for root, as a scratch probe's definitions are kept until its end is written;
 - not ended → no action.
 
-The row is the held row without the assignment's keys (`:seon.task/assignment`, `:seon.task/assigned`,
+The entity is the held entity without the assignment's keys (`:seon.task/assignment`, `:seon.task/assigned`,
 `:seon.task/merge-base` absent) plus `:seon.flow.plan/unmerged` (the count of the four sets); the action carries
 `:seon.agent/id` and `:seon.task/branch` and no `:seon.task/assigned` (open schema accretion on
 `:seon.flow.plan/action`). Cost per pass: one branch read per open taskless agent; one fork-point read plus the
@@ -238,7 +238,7 @@ changed declarations' digests per ended one.
 
 **Proof (M13).** `seon.cluster.agent/an-ended-taskless-agent-with-nothing-unmerged-has-its-branch-deleted`: an MCP
 agent hosted on its own branch writes its end with `my.agent/retire-branch!` of its own branch; after one `db<->flow`
-pass `(contains? (seon.cluster.registry/branches store) branch)` is false and main's agent row holds
+pass `(contains? (seon.cluster.registry/branches store) branch)` is false and main's agent entity holds
 `:seon.agent/admission-closed-tx`; a second agent that `defn`s one function before its end keeps its branch and
 `next-actions` names no `:delete-branch` for it. Red today: `lifecycle-facts` reads assignments only, and the hosted
 execution borrows its branch, so `release-context!`'s unlink never runs for it.
@@ -512,7 +512,7 @@ agent attribute declares its side (`:seon.agent/written-at`), and the writer ref
   and passes the value to the block, the proofs, the cap and the provider settings; nothing else looks up the home.
 - **Cap.** Each assignment carries a grant minted when it is written; call entities record it; calls left is the cap
   setting minus the call entities on the grant (§3.5).
-- **Answered basis.** `:seon.agent/answered-t` is the home basis the last committed model eval request presented.
+- **Answered basis.** [TARGET] `:seon.agent/answered-t` (not yet declared) is the home basis the last committed model eval request presented; today the unanswered triggers are derived by `seon.turn/unanswered-triggers`.
 
 Cards: [README-agent-entity](../schedule/cards/README-agent-entity.md) (AE-1 … AE-7).
 

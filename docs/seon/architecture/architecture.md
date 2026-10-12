@@ -213,7 +213,7 @@ The target `seon.task` is the one work family. Trigger resolves identity at the
 writer; it does not start an agent. Start validates completion inputs, assigns the
 agent and admits the first work. A repeat retains the existing task/agent; a new
 actionable occurrence reaches a parked agent through the existing wake/message
-owner. Namespace responsibility is many-to-many `:seon.ns/agents`, separate from
+owner. Namespace responsibility is many-to-many `:seon.ns/agents` ([TARGET], not yet declared), separate from
 assignment and the REPL's current namespace.
 
 Repair completion requires every declared test obligation and any subject-local
