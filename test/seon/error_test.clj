@@ -1904,3 +1904,37 @@
            "the local in scope at the failing form is named beside the guess")
        (is (not-any? #{'other 'items} (take 1 (:seon.error/nearest reply)))
            "the nearest local by spelling ranks first")))))
+
+(deftest ^{:seon/tasks #{'seon.error/implement-a-blank-error-message-is-replaced}}
+  a-blank-error-message-is-replaced-by-the-sentence-that-describes-the-source
+  (let [cases
+        [["a whitespace-only member is no message at all"
+          {:seon.error/message "   "} nil
+          "An unclassified clojure.lang.PersistentArrayMap arrived where an error was expected."]
+         ["an empty member is no message at all"
+          {:seon.error/message ""} nil
+          "An unclassified clojure.lang.PersistentArrayMap arrived where an error was expected."]
+         ["a blank member lets the transition sentence answer"
+          {:seon.error/message "   "
+           :seon.turn/transition "the transition"
+           :seon.turn/rule :seon.turn/not-the-holder}
+          nil
+          "the transition was refused by :seon.turn/not-the-holder."]
+         ["a blank member lets the root cause answer"
+          {:seon.error/message "  "} (ex-info "boom" {})
+          "boom"]
+         ["a real message is returned unchanged"
+          {:seon.error/message "  the transition refused  "} nil
+          "  the transition refused  "]
+         ["a real message wins over the turn branches"
+          {:seon.error/message "real"
+           :seon.turn/transition "the transition"
+           :seon.turn/rule :seon.turn/not-the-holder}
+          nil
+          "real"]]]
+    (doseq [[what source failure expected] cases]
+      (let [answer (#'seon.error/message source failure)]
+        (is (string? answer) what)
+        (is (not (re-matches #"\s*" answer))
+            (str what " -- the answer is never blank, got " (pr-str answer)))
+        (is (= expected answer) what)))))
