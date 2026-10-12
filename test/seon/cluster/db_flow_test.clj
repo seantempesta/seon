@@ -217,6 +217,14 @@
       (agent/release-context! execution)))
   nil)
 
+(defn- eventually
+  "Poll `ready?` every 20 ms for at most two seconds; its last answer. Branch deletion is detached io work."
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
+  [ready?]
+  (loop [n 100]
+    (let [answer (ready?)]
+      (if (or answer (zero? n)) answer (do (Thread/sleep 20) (recur (dec n)))))))
+
 (defn- await-on!
   "Await `observe` of `connection`'s head answering non-nil, re-read after each transaction; its answer."
   {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat] :seon.schema/value] :keyword] :seon.schema/value]}
@@ -391,7 +399,9 @@
           (is (task/done? (db/db connection) (chain-handle "p")) "its successor's need is met")
           (is (contains? (task/ready (db/db connection)) (chain-handle "i")) "its successor is ready")
           (pass! handle routing)
-          (is (seq (attempts connection "i")) "and forks main"))))))))
+          (is (seq (attempts connection "i")) "and forks main")
+          (is (eventually #(not (contains? (registry/branches (agent/handle-store handle)) branch)))
+              "the closed Prove step's branch is deleted, as a merged one is"))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}}
   an-ended-attempts-closed-merge-releases-its-connection-and-branch
@@ -456,14 +466,6 @@
                    "naming its target on the attempt")))))))))))
 
 ;;; P2: an attempt's end lands on main from its branch, once, and its branch goes or stays.
-
-(defn- eventually
-  "Poll `ready?` every 20 ms for at most two seconds; its last answer. Branch deletion is detached io work."
-  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
-  [ready?]
-  (loop [n 100]
-    (let [answer (ready?)]
-      (if (or answer (zero? n)) answer (do (Thread/sleep 20) (recur (dec n)))))))
 
 (defn- end-on-branch!
   "Write the attempt of `task-name`'s end `end` on its own branch, as its last transaction does: the

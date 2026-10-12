@@ -2101,7 +2101,9 @@
       ;; publication reads main alone: the merge commit, then the checkout
       publish? (conj (action :publish))
       ;; deletion reads main after the merge and its publication: their own writes wake the next pass
-      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch)))))
+      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch))
+      ;; a satisfied step has nothing to merge: once main holds its end, its branch holds nothing to keep
+      (and (= :satisfied end) main-end) (conj (action :delete-branch)))))
 
 (defn- taskless-actions
   "The actions that carry taskless agent `row` through its end, in order (`next-actions`): ended, its graph
@@ -2124,7 +2126,8 @@
   (copied to main before merge bases existed); any other end main lacks is written there (`:close`); a merge
   whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
   a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
-  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
+  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass;
+  a satisfied end has nothing to merge, so its branch is deleted once main holds the end.
   A taskless agent (a row naming no `:seon.task/assignment`) follows the same rule with merged read as nothing
   unmerged (`taskless-actions`).
   Pure; each action is idempotent by identity, by head = merge base or by the git commit main records."
