@@ -1,19 +1,10 @@
 #:seon.squash
 {:source-branch [:and {:seon.db/index true
-                       :description "Transaction metadata of an end copy: the branch whose facts it copied."}
+                       :description "Transaction metadata of a squash merge (seon.merge/merge!): the branch whose facts it merged."}
                  :seon.store/branch]
  :source-commit [:and {:seon.db/index true
-                       :description "Transaction metadata of an end copy: the source branch's commit it copied from."}
+                       :description "Transaction metadata of a squash merge (seon.merge/merge!): the source branch's commit it merged."}
                  :seon.source/commit-id]
  :conflict [:map {:description "One value both main and the source branch changed since their merge base, kept as main's by the entity schema's :root rule."}
             [:entity :seon.db/entity-id] [:attribute :qualified-keyword]
-            [:base :seon.schema/value] [:ours :seon.schema/value] [:theirs :seon.schema/value]]
- :copy [:map {:description "What an end copy did on main: the branch and commit it copied, how many datoms it asserted or retracted, and the conflicts root decides."}
-        [:seon.squash/source-branch :seon.squash/source-branch]
-        [:seon.squash/source-commit :seon.squash/source-commit]
-        [:seon.squash/datoms :seon.squash/datoms]
-        [:seon.squash/conflicts :seon.squash/conflicts]]
- :datoms [:int {:min 0 :description "How many datoms an end copy asserted or retracted on main."}]
- :conflicts [:vector {:description "The :root conflicts of one end copy."} :seon.squash/conflict]
- :context [:map {:description "What a by-hand squash merge writes through: main's connection, supplied from root's world."}
-           [:seon.db/connection :seon.db/connection]]}
+            [:base :seon.schema/value] [:ours :seon.schema/value] [:theirs :seon.schema/value]]}

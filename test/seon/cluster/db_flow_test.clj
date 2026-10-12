@@ -2,6 +2,7 @@
   "db<->flow's decision, `seon.cluster.agent/plan`, as a table: facts read on
   main and the registry's live graphs in, the actions db<->flow applies out."
   (:require [clojure.core.async :as async]
+            [my.root]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -135,6 +136,10 @@
             [[{:seon.flow.plan/head c2 :seon.flow.plan/started? true} [] "running: no end anywhere"]
              [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :merge]
               "ended on its branch: the graph stops, then the branch merges"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/requested? true :seon.flow.plan/head c2 :seon.flow.plan/started? true}
+              [:stop :close] "a requested merge carries declarations: the graph stops, its end alone is written on main and root merges it"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1} [:delete-branch]
+              "root merged it: deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/kept? true} [] "merged and kept"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c2} [:merge]
@@ -369,16 +374,12 @@
                                               ::retire-ended)))
                     child (get-in @routing [:seon.agent/children branch])
                     graph (get-in @child [:seon.agent/started agent-id :seon.flow/executor])
-                    ;; the end's landing stops the graph and releases its connections; the open merge request keeps the branch
+                    ;; the end stops the graph and releases its connections; the branch's merge request waits for root
                     _ (pass! handle routing)
-                    merge-task (first (db/q '[:find [?merge ...] :in $ ?id
-                                              :where [?agent :seon.agent/id ?id] [?work :seon.task/agent ?agent]
-                                              [?request :seon.task/of-assignment ?work] [?request :seon.task/merge ?merge]]
-                                            (db/db connection) agent-id))
-                    _ (is (contains? (registry/branches store) branch) "landing keeps the branch for its open merge request")
+                    _ (is (contains? (registry/branches store) branch) "the requested merge keeps the branch for root")
                     closed (task/close! {:seon.db/connection connection :seon.store/store store
                                          :seon.agent/routing (if from-attempt? child routing)}
-                                        merge-task :closed "The lifecycle proof closes this request.")]
+                                        key :closed "The lifecycle proof closes this request.")]
                 (is (some? branch-connection) "the attempt owned an open connection before closing")
                 (is (= :closed (:seon.task/outcome closed)))
                 (is (nil? (:seon.task/delete-refusals closed)))
@@ -465,8 +466,8 @@
             (is (= :done (landed! handle connection "b" ::b-ended)) "and B ends the chain")
             (is (seq (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
                              [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
-                           (db/db connection) (chain-handle "b")))
-                "the step no task needs records its merge request")))))))))
+                           (db/branch-database (db/db connection) branch-b) (chain-handle "b")))
+                "the step no task needs records its merge request on its branch, for root's merge")))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-fresh-attempt-is-work-without-a-message 'seon.turn/a-send-back-names-its-target-on-the-attempt}}
   a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target
@@ -588,8 +589,9 @@
           (let [routing (:seon.agent/routing handle)
                 store (agent/handle-store handle)]
             (pass! handle routing)
-            (let [[_ branch agent-id a] (end-on-branch! handle connection "e" :done)]
-              (db/with-branch {:seon.db/connection connection} #(merge/merge! connection a branch {}))
+            (let [[key branch agent-id] (end-on-branch! handle connection "e" :done)]
+              (db/with-branch {:seon.db/connection connection}
+                              #(merge/merge! {:seon.db/connection connection :seon.store/store store} key nil))
               (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
               (pass! handle routing)
               (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
@@ -613,7 +615,7 @@
                 store (agent/handle-store handle)
                 intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
             (pass! handle routing)
-            (let [[key branch _ a] (end-on-branch! handle connection "e" :given-back)
+            (let [[key branch] (end-on-branch! handle connection "e" :given-back)
                   problem #(db/pull (db/db connection) [:seon.task/intent]
                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" key))])]
               (pass! handle routing)
@@ -627,12 +629,14 @@
               (pass! handle routing)
               (is (= 1 (count (copies (db/db connection) branch))) "a second pass writes nothing")
               (testing "root's by-hand merge lands what the success path would"
-                (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (merge/merge! connection a branch {})))
+                (let [merge! #(db/with-branch {:seon.db/connection connection}
+                                              (fn [] (merge/merge! {:seon.db/connection connection :seon.store/store store} key nil)))
                       merged (merge!)]
-                  (is (pos? (:seon.squash/datoms merged)))
+                  (is (uuid? (:seon.task/merge-commit merged)))
                   (is (= "Refined on the branch." (intent)))
-                  (is (zero? (:seon.squash/datoms (merge!)))
-                      "and a second merge writes nothing new")))))))))))
+                  (let [main (db/commit-id (db/db connection))]
+                    (is (nil? (:seon.task/merge-commit (merge!))) "and a second merge transacts nothing")
+                    (is (= main (db/commit-id (db/db connection)))))))))))))))
 
 ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
 
@@ -707,7 +711,9 @@
                                                    :seon.store/branch branch})))))))))))
 
 (deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
-  a-green-end-is-written-on-its-branch-and-reaches-main-only-by-its-copy
+  a-requested-green-end-waits-on-its-branch-for-roots-merge
+  ;; the agent requested the merge of its change: its facts and declarations merge together, by root
+  ;; (my.root/merge!, seon.merge/merge!), so db<->flow stops the graph and writes only its end on main
   (binding [*space* "tq.endcustody"]
     (test-support/with-database
      (fn [connection]
@@ -721,20 +727,22 @@
                   child (get-in @routing [:seon.agent/children branch])
                   graph (get-in @child [:seon.agent/started agent-id :seon.flow/executor])
                   _ (landed! handle connection "g" ::g-ended)
-                  copy (first (copies (db/db connection) branch))
-                  database (db/db connection)]
-              (is (= copy (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
-                  "the end reached main in its copy, never written there by the agent")
-              (is (= copy (db/q '[:find ?tx . :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _ ?tx]]
+                  database (db/db connection)
+                  head (db/branch-database database branch)]
+              (is (= (first (copies database branch))
+                     (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
+                  "the end reached main alone, in one transaction from the branch")
+              (is (empty? (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
                                 database a))
-                  "and its merge request with it")
-              (is (empty? (db/q '[:find ?m :in $ ?id :where [?g :seon.agent/id ?id] [?m :seon.message/from ?g]] database agent-id))
-                  "with no message from the agent on main")
-              (is (= :done (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
-                                 (db/branch-database database branch) key))
-                  "the end lives on the agent's branch, kept for its open merge request")
+                  "its merge request stays on the branch for root's merge")
+              (is (seq (db/q '[:find ?r :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]] head a)))
+              (is (not= (db/commit-id head) (:seon.task/merge-base (db/pull database [:seon.task/merge-base] a)))
+                  "and nothing merged")
+              (is (= [:done] (keep #(when (= key (:seon.task/assignment %)) (:seon.task.attempt/end %))
+                                   (my.root/merge-requests {:seon.db/db database})))
+                  "root's open merge requests show it done")
               (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "its graph was stopped and joined")
-              (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] (db/branch-database database branch)))
+              (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] head))
                   "without interrupting the pass that wrote the end")
               (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] database))
                   "with no fault recorded")))))))))

@@ -15,13 +15,12 @@
              :kind :function
              :intent "(hybrid-done-and-merge M4) A both-sides-changed coordinate with no declared `:seon.cluster/conflict` rule becomes a `:seon.merge/unmerged` entity on the merge branch only (new schema `resources/seon/schemas/seon.merge.edn`; `seon.id/id [assignment attribute entity-identity]`; members `attribute`, `entity`, `base`, `ours`, `theirs`, `source-commit`; any write to the coordinate on the merge branch retracts it). Delete `seon.merge/conflict-task!`; convert `db_flow_test` (680) and `squash_test` (101). Red proof: `seon.merge-test/a-conflict-keeps-its-three-values-on-the-merge-branch` (pulled base, ours, theirs and source-commit equal the values merged). Cost: under 50 ms. Platform slice (`--test`)."
              :must-read #{seon.merge/conflict-task! seon.merge/squash-merge seon.program/three-way seon.id/id}
-             :needs #{[:seon.task/sym my.root/a-merge-is-keyed-by-the-assignment]}
-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
+                         :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
  #:seon.task{:name "a-merge-whose-reached-definition-moved-writes-nothing"
              :kind :function
              :intent "(hybrid-done-and-merge M7) The gate is the one rule; designed reds are data. `seon.context/step-status` on the merge branch at main's head B replaces `seon.cluster.source/accept-merge!`'s red-test refusal and `seon.test/change-reds`; coverage accepts a designed red (`seon.context/designed-red?` made public: a failure of type `:seon.error/unimplemented` on a deftest whose `:seon/tasks` names a task with no `:merged` assignment); `merge-tx`'s compare-and-swap of the tested digests replaces `seon.cluster.source/declarations-held-tx`; `:parents` dropped. Delete `seon.test/change-reds` and its `test_test` cases (362-386). Red proofs: `seon.cluster.merge-test/a-merge-whose-reached-definition-moved-writes-nothing` (tx-data [], `:seon.task/outcome` absent), `a-prove-steps-designed-reds-pass-the-gate` (an `:seon.error/unimplemented` red tagged to an open task: :merged; the same red with an untyped error: the coordinate stays unmerged on the merge branch). Cost: gate reuse on an unchanged result under 100 ms. After M6."
              :must-read #{seon.cluster.source/accept-merge! seon.cluster.source/declarations-held-tx seon.test/change-reds seon.context/designed-red? seon.context/step-status}
-             :needs #{[:seon.task/sym my.root/a-merge-is-keyed-by-the-assignment] [:seon.task/sym seon.context/every-agent-sees-where-its-reds-came-from]}
+             :needs #{[:seon.task/sym seon.context/every-agent-sees-where-its-reds-came-from]}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
  #:seon.task{:name "an-accepted-merge-is-published-by-the-next-pass"
              :kind :function

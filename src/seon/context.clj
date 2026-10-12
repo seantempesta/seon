@@ -448,6 +448,13 @@
         recorded (recorded-end-summary database agent-id)
         branch-db (when (keyword? branch) (db/branch-database database branch))
         outcome (or recorded (when branch-db (branch-end-summary branch-db agent-id sym)))
+        ;; the merge request is the agent's latest assignment of the task
+        assignments (when merge
+                      (db/q '[:find ?n ?k :in $ ?id ?h :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g]
+                              [?a :seon.task/assigned ?h] [?a :seon.task/assignment ?k]
+                              [(get-else $ ?a :seon.task.attempt/number 0) ?n]]
+                            database agent-id task-id))
+        assignment (when (set? assignments) (second (last (sort assignments))))
         landing (when merge
                   (let [row (db/pull database [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
                                      [:seon.task/id merge])]
@@ -457,7 +464,7 @@
         (cond-> (into {:seon.task/id task-id :seon.task/end end :seon.agent/id agent-id
                         :seon.render/operations
                         (cond-> [(list 'seon.context/model-context (list 'seon.db/branch-database (list 'seon.db/db) branch) {} agent-id)]
-                          merge (conj (list 'my.root/merge! {:seon.task/merge merge}))
+                          (string? assignment) (conj (list 'my.root/merge! {:seon.task/assignment assignment}))
                           sym (conj (list 'seon.task/create! {:seon.task/ns (symbol (namespace sym)) :seon.task/name (name sym)
                                                               :seon.task/basis task-id})))}
                        outcome)

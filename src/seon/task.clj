@@ -838,38 +838,32 @@
       (let [retired (retire!)] (when (:seon.error/at retired) retired)))))
 
 (defn close!
-  "Close the merge request `merge-task`: write its `outcome` (`:merged`, or `:closed` with `reason`) at
-  main and delete the source branch each of its merge requests names, closing the agent there
-  (`delete-branch!`; a refused deletion is answered beside the closed request), unless the requesting agent's
-  cluster keeps ended branches for audit (`:seon.config.agent/keep-ended-branches?`). The one close owner: root's merge (`seon.cluster.source/land!`, which deletes the merge
-  branch it tested) and root's decline (`my.root/close!`) both end here. Answers the closed merge request.
+  "Close assignment `key` (the merge request) without merging it: write its `outcome` and `reason` at main and
+  delete its branch, closing the agent there (`delete-branch!`; a refused deletion is answered beside the closed
+  assignment), unless its agent's cluster keeps ended branches for audit (`:seon.config.agent/keep-ended-branches?`).
+  Root's decline (`my.root/close!`) ends here; root's merge closes in its own transaction (`seon.merge/merge-tx`).
+  Answers the closed assignment.
 
   Example:
   (seon.task/close! context \"0123456789ab\" :closed \"The change belongs in seon.db.\")"
-  {:malli/schema [:=> [:cat :seon.task/close-context :seon.task/merge :seon.task/outcome [:maybe :seon.task/reason]]
+  {:malli/schema [:=> [:cat :seon.task/close-context :seon.task/assignment :seon.task/outcome [:maybe :seon.task/reason]]
                   [:or :seon.task/closed :seon.error/value]]}
-  [{connection :seon.db/connection :as context} merge-task outcome reason]
-  (let [report (written connection (cond-> [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]]
-                                     reason (conj [:db/add [:seon.task/id merge-task] :seon.task/reason reason])))
+  [{connection :seon.db/connection :as context} key outcome reason]
+  (let [report (written connection (cond-> [[:db/add [:seon.task/assignment key] :seon.task/outcome outcome]]
+                                     reason (conj [:db/add [:seon.task/assignment key] :seon.task/reason reason])))
+        row (when (:db-after report)
+              (db/q '[:find [?branch ?id] :in $ ?k
+                      :where [?a :seon.task/assignment ?k] [?a :seon.task/branch ?branch] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                    (:db-after report) key))
+        [branch agent-id] (when (sequential? row) row)
         ;; a branch whose agent's cluster keeps ended branches stays for audit
-        kept? (fn [database branch]
-                (let [agents (db/q '[:find [?id ...] :in $ ?merge ?branch
-                                     :where [?request :seon.task/merge ?merge] [?request :seon.task/branch ?branch]
-                                     [?request :seon.task/of-assignment ?a] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
-                                   database merge-task branch)]
-                  (and (sequential? agents)
-                       (some #(true? (config/agent-cluster-dial database % :seon.config.agent/keep-ended-branches?)) agents))))
-        branches (when (:db-after report)
-                   (db/q '[:find [?branch ...] :in $ ?merge
-                           :where [?request :seon.task/merge ?merge] [?request :seon.task/branch ?branch]]
-                         (:db-after report) merge-task))
-        branches (cond->> branches (sequential? branches) (remove #(kept? (:db-after report) %)))]
+        kept? (and agent-id (true? (config/agent-cluster-dial (:db-after report) agent-id :seon.config.agent/keep-ended-branches?)))]
     (cond (:seon.error/at report) report
-          (:seon.error/at branches) branches
-          :else (let [refused (into [] (keep #(delete-branch! context %)) (sort branches))]
-                  (cond-> {:seon.task/id merge-task :seon.task/outcome outcome}
+          (:seon.error/at row) row
+          :else (let [refused (when (and branch (not kept?)) (delete-branch! context branch))]
+                  (cond-> {:seon.task/assignment key :seon.task/outcome outcome}
                     reason (assoc :seon.task/reason reason)
-                    (seq refused) (assoc :seon.task/delete-refusals refused))))))
+                    refused (assoc :seon.task/delete-refusals [refused]))))))
 
 ;;; READY (runtime-follows-db §2): the leaves that should run now, derived from the tree,
 ;;; the intents and the attempts' ends, with no scheduler state. Recursion is positive (`under`,

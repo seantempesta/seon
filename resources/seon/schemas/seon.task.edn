@@ -67,7 +67,7 @@
             :seon.db/ref]
  :faults [:set {:seon.db/index true :description "The fault signatures a task answers (seon.error/commit-call writes a producer's own task with each of its faults). The task is closed when every one is resolved (seon.task/resolution)."} :seon.db/ref]
  :created-by [:and {:description "The agent that wrote a runtime task (7.8); file reconciliation never retracts a task carrying it."} :seon.db/ref]
- :outcome [:enum {:description "How root closed a merge request (seon.task/close!): merged, or closed with a reason; absence means open."} :merged :closed]
+ :outcome [:enum {:description "How root closed an assignment, the merge request: merged (seon.merge/merge-tx, in the merge's transaction, for a :done end), or closed (another end merged, or root's decline with a reason, seon.task/close!); absence means open. A merge task generated before assignments carried it records it too."} :merged :closed]
  :landed [:uuid {:description "The main commit a merge task's landing made (seon.cluster.source/land! on a green end, seon.turn/end-task!)."}]
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
  :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing met (a red gate, a write-back or commit refusal); the task stays undecided for root."}]
@@ -100,6 +100,7 @@
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
  :merge-base [:uuid {:description "The main commit an assignment's branch merges from: the commit its branch forked at, written by root on main once the branch exists (seon.cluster.agent/start-attempt!), then the source commit each merge took, moved inside that merge's transaction (seon.merge/merge-tx), so a repeated merge adds nothing."}]
+ :merge-commit [:uuid {:description "The main commit root's merge of an assignment made (seon.merge/merge!), recorded once it committed: what publication of the merged declarations reads."}]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                   [:seon.task/revision {:seon.cluster/conflict :ours :description "Derived from the task's declaration by the writer that revises it (seon.task/advance-assignments-tx), so main's own advance wins a concurrent one: the conflict that matters is the task's, reported once."} :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
@@ -108,6 +109,8 @@
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]
                   [:seon.task.attempt/fork {:optional true} :seon.task.attempt/fork]
                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+                  [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
+                  [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
                   [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
                   [:seon.task.attempt/relaunch-fork {:optional true} :seon.task.attempt/relaunch-fork]]
  :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row
@@ -124,10 +127,10 @@
  :closed-by [:enum {:description "What closed a task (seon.task/resolution): root's merge outcome, or for a parent its children all done."} :seon.task/outcome :seon.task/children]
  :resolution [:map {:description "Why a task is closed: derived, never stored."}
               [:seon.task/closed-by :seon.task/closed-by]]
- :closed [:map {:description "A merge request root closed (seon.task/close!), with its outcome and reason."}
-          [:seon.task/id :seon.task/id] [:seon.task/outcome :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
+ :closed [:map {:description "An assignment root closed (seon.task/close!), with its outcome and reason."}
+          [:seon.task/assignment :seon.task/assignment] [:seon.task/outcome :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
           [:seon.task/delete-refusals {:optional true :description "Each source branch deletion that refused, answered beside the closed request."} [:vector :seon.error/value]]]
- :reason [:string {:min 1 :description "Why root closed a merge request without merging it."}]
+ :reason [:string {:min 1 :description "Why root closed an assignment without merging it."}]
  :close-context [:map {:description "What closing a merge request reads and writes: the connection whose main it writes, and the store, routing and environment that delete a source branch with its agent."}
                  [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]
                  [:seon.agent/routing {:optional true} :seon.agent/routing]

@@ -10,14 +10,15 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.merge :as merge]
             [seon.error.refusal :as refusal]
             [seon.task :as task]))
 
 (def ^:private laws
-  ["Read a merge request's diff before merging it (my.program/diff on its source branch): until criteria for automatic merges are written, root reviews every merge."
+  ["Read a merge request's diff before merging it (my.program/diff on its source branch): until criteria for automatic merges are written, root reviews every merge of code."
    "A task chain runs in order: model the data and specify the interface, then write the proofs, then implement the body; each step is its own task with its own proofs."
-   "Merge with (my.root/merge! {:seon.task/merge id}); it deletes the merge branch and the source branch, closing the agent."
-   "Close a merge request that must not merge with (my.root/close! {:seon.task/merge id :seon.task/reason why}); it deletes the source branch, closing the agent."
+   "A merge request is an assignment: (my.root/merge-requests) lists the open ones. Merge one with (my.root/merge! {:seon.task/assignment key}); the branch is deleted once merged, closing the agent."
+   "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."])
 
 (defn instructions
@@ -29,96 +30,96 @@
   []
   {:my.root/laws laws})
 
-(def ^:private request-selector
-  [:seon.task/merge-request :seon.task/merge :seon.task/branch :seon.task/commit
-   :seon.task/proved :seon.task/run-id :seon.task/program])
-
 (defn- offered
-  "`request` with the merge and the close of its merge task offered."
-  {:malli/schema [:=> [:cat :seon.task/merge-request-view] :my.root/merge-request]}
+  "Open assignment `request` with its merge and its close offered."
+  {:malli/schema [:=> [:cat :my.root/open-assignment] :my.root/merge-request]}
   [request]
   (assoc request :seon.render/operations
-         [(list 'my.root/merge! {:seon.task/merge (:seon.task/merge request)})
-          (list 'my.root/close! {:seon.task/merge (:seon.task/merge request)
+         [(list 'my.root/merge! {:seon.task/assignment (:seon.task/assignment request)})
+          (list 'my.root/close! {:seon.task/assignment (:seon.task/assignment request)
                                  :seon.task/reason "Why this change must not merge."})]))
 
+(defn- with-branch-end
+  "Open assignment `row` with the end its branch head holds when main holds none: an agent's requested merge
+  waits there for my merge."
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.root/open-assignment] :my.root/open-assignment]}
+  [database {branch :seon.task/branch key :seon.task/assignment :as row}]
+  (if (:seon.task.attempt/end row)
+    row
+    (if-let [head (db/branch-database database branch)]
+      (try (let [end (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                           head key)]
+             (cond-> row (keyword? end) (assoc :seon.task.attempt/end end)))
+           (finally (source/release! [head])))
+      row)))
+
 (defn merge-requests
-  "The open merge requests on my cluster: every merge request whose merge task
-  records no outcome yet, with its branch, commit, proofs and run, each
+  "The open merge requests on my cluster: every assignment with no outcome yet (`seon.task/close!`,
+  `seon.merge/merge-tx`), with its task, branch, merge base and its end (main's, else its branch head's), each
   offering its merge and its close.
 
   Example:
   (my.root/merge-requests)"
   {:malli/schema [:=> [:cat :my.root/merge-request-read] [:or :my.root/merge-requests :seon.db/error-result]]}
   [{database :seon.db/db}]
-  (let [found (db/q '[:find [(pull ?r ?selector) ...]
-                      :in $ ?selector
-                      :where [?r :seon.task/merge-request] [?r :seon.task/merge ?handle] [?t :seon.task/id ?handle]
-                      (not [?t :seon.task/outcome])]
-                    database request-selector)]
-    ;; a pulled cardinality-many value is a vector; :seon.task/proved is a set
+  (let [found (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned :seon.task/branch :seon.task/merge-base
+                                       :seon.task.attempt/end]) ...]
+                      :where [?a :seon.task/assignment] [?a :seon.task/branch] (not [?a :seon.task/outcome])]
+                    database)]
     (if (db/read-refusal? found)
       found
-      (mapv #(offered (update % :seon.task/proved set)) (sort-by :seon.task/merge-request found)))))
+      (mapv #(offered (with-branch-end database (dissoc % :db/id))) (sort-by :seon.task/assignment found)))))
 
-(defn- open-merge-request
-  "The open merge request of merge task `merge-task` my cluster records last, or the refusal naming it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] [:or :seon.task/merge-request-view :seon.error/value]]}
-  [database merge-task]
-  (let [found (db/q '[:find ?tx (pull ?r ?selector)
-                      :in $ ?selector ?handle
-                      :where [?r :seon.task/merge ?handle] [?r :seon.task/merge-request _ ?tx]
-                      [?t :seon.task/id ?handle] (not [?t :seon.task/outcome])]
-                    database request-selector merge-task)]
-    (cond (db/read-refusal? found) found
-          (empty? found)
-          (refusal/diagnostic (java.util.Date.) :seon.program/write 'my.root/merge!
-                              {:seon.error/message (str "Merge task " merge-task " has no open merge request.")
-                               :seon.error/member :seon.task/merge :seon.error/offending merge-task
-                               :seon.render/operations ['(my.root/merge-requests)]})
-          :else (update (second (last (sort-by first found))) :seon.task/proved set))))
+(defn- open-assignment
+  "Assignment `key` on my cluster when it records no outcome, else the refusal naming it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment :qualified-symbol]
+                  [:or :map :seon.error/value]]}
+  [database key operation]
+  (let [row (db/pull database [:seon.task/branch :seon.task/outcome] [:seon.task/assignment key])]
+    (if (and (:seon.task/branch row) (not (:seon.task/outcome row)))
+      row
+      (refusal/diagnostic (java.util.Date.) :seon.program/write operation
+                          {:seon.error/message (str "Assignment " key " is not an open merge request.")
+                           :seon.error/member :seon.task/assignment :seon.error/offending key
+                           :seon.render/operations ['(my.root/merge-requests)]}))))
 
 (defn merge!
-  "Merge the open merge request of merge task `:seon.task/merge` into my
-  cluster (`seon.cluster.source/land!`): its proofs and the tests reaching
-  the change run on a fresh merge branch of the head I hold, the tested
-  program merges, the merge request closes `:merged` (`seon.task/close!`,
-  deleting the merge branch and the source branch), and the declarations are
-  written back into the checkout `:seon.fn/root` (the cluster's
-  `:seon.config.fs/working-root` when absent) in one git commit. Answers the
-  landing with each step's milliseconds, or the first refusal as data; a red
-  gate leaves the merge request open.
+  "Merge the open assignment `:seon.task/assignment` into my cluster (`seon.merge/merge!`): its branch's facts,
+  and, when its agent requested the merge, its declarations, gated by the proofs and the tests reaching the
+  change on a fresh merge branch of the head I hold, then written back into the checkout `:seon.fn/root` (the
+  cluster's `:seon.config.fs/working-root` when absent) in one git commit. The assignment closes `:merged` in
+  the merge's transaction and its branch is deleted by the next lifecycle pass. Answers the merge, or the
+  first refusal as data; a red gate leaves the assignment open.
 
   Example:
-  (my.root/merge! {:seon.task/merge \"0123456789ab\"})"
+  (my.root/merge! {:seon.task/assignment \"0123456789ab\"})"
   {:malli/schema [:=> [:cat :my.root/merge-request-request]
-                  [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
-  [{context :my.program/context merge-task :seon.task/merge root :seon.fn/root}]
+                  [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
+  [{context :my.program/context key :seon.task/assignment root :seon.fn/root}]
   (let [database (db/db (:seon.db/connection context))
-        request (open-merge-request database merge-task)
-        effective (when-not (or root (:seon.error/at request)) (config/effective database (:seon.cluster/name context)))
+        open (open-assignment database key 'my.root/merge!)
+        effective (when-not (or root (:seon.error/at open)) (config/effective database (:seon.cluster/name context)))
         checkout (or root (some-> (:seon.config.fs/working-root effective) java.io.File. .getCanonicalPath))]
-    (cond (:seon.error/at request) request
+    (cond (:seon.error/at open) open
           (:seon.error/at effective) effective
-          :else (source/land! context request checkout))))
+          :else (merge/merge! context key checkout))))
 
 (defn close!
-  "Close the open merge request of merge task `:seon.task/merge` without
-  merging it, saying why (`:seon.task/reason`): it records `:closed` and
-  deletes the source branch, closing its agent (`seon.task/close!`). Answers
-  the closed merge request.
+  "Close the open assignment `:seon.task/assignment` without merging it, saying why (`:seon.task/reason`): it
+  records `:closed` and deletes the source branch, closing its agent (`seon.task/close!`). Answers the closed
+  assignment.
 
   Example:
-  (my.root/close! {:seon.task/merge \"0123456789ab\" :seon.task/reason \"The change belongs in seon.db.\"})"
+  (my.root/close! {:seon.task/assignment \"0123456789ab\" :seon.task/reason \"The change belongs in seon.db.\"})"
   {:malli/schema [:=> [:cat :my.root/close-request] [:or :seon.task/closed :seon.error/value]]}
-  [{context :my.program/context merge-task :seon.task/merge reason :seon.task/reason}]
+  [{context :my.program/context key :seon.task/assignment reason :seon.task/reason}]
   (let [connection (:seon.db/connection context)
-        request (open-merge-request (db/db connection) merge-task)]
-    (if (:seon.error/at request)
-      request
+        open (open-assignment (db/db connection) key 'my.root/close!)]
+    (if (:seon.error/at open)
+      open
       (task/close! (cond-> (select-keys context [:seon.db/connection :seon.store/store :seon.agent/routing])
                      (:seon.env/environment context) (assoc :seon.env/environment (:seon.env/environment context)))
-                   merge-task :closed reason))))
+                   key :closed reason))))
 
 (defn ended
   "The task ends in my unread inbox, each as the value its end message stands

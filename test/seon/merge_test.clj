@@ -438,11 +438,14 @@
                                              [:seon.task/assignment (:seon.task/assignment row)]))))))))
 
 (defn- merged!
-  "Merge `branch` onto main for assignment `a` through `seon.merge/merge!`, under main's custody."
-  {:malli/schema [:=> [:cat :seon.db/connection :int :seon.store/branch] [:maybe :seon.squash/copy]]}
-  [connection a branch]
-  (when-let [merge! (ns-resolve 'seon.merge 'merge!)]
-    (db/with-branch {:seon.db/connection connection} #(merge! connection a branch {}))))
+  "Merge assignment `a`'s branch onto main through `seon.merge/merge!`, under main's custody."
+  {:malli/schema [:=> [:cat :seon.db/connection :int] [:or :seon.merge/merged :seon.error/value]]}
+  [connection a]
+  (let [key (:seon.task/assignment (db/pull (db/db connection) [:seon.task/assignment] a))]
+    (db/with-branch {:seon.db/connection connection}
+                    #(merge/merge! {:seon.db/connection connection
+                                    :seon.store/store (:seon.store/store (support/execution-handle connection))}
+                                   key nil))))
 
 (defn- intent-on
   "The intent of task `handle` on `connection`'s head."
@@ -465,15 +468,16 @@
         (fn [fork branch a]
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
           (let [commit (db/commit-id (db/db fork))
-                first-merge (merged! connection a branch)]
-            (is (some? first-merge) "seon.merge/merge! exists")
+                first-merge (merged! connection a)]
+            (is (uuid? (:seon.task/merge-commit first-merge)) "the merge transacted")
             (is (= "b" (intent-on connection handle)))
             (is (= commit (merge-base-on connection a)) "the merge base moved to the merged source commit")
-            (is (= [] ((or (ns-resolve 'seon.merge 'merge-tx) (constantly nil))
-                          (db/db connection) a commit (db/carried-projection (db/db connection))))
+            (is (= [] (merge/merge-tx (db/db connection) a commit (db/carried-projection (db/db connection))))
                 "the writer's transaction data for a repeat is empty")
-            (let [second-merge (merged! connection a branch)]
-              (is (= 0 (:seon.squash/datoms second-merge)))
+            (let [main (db/commit-id (db/db connection))
+                  second-merge (merged! connection a)]
+              (is (nil? (:seon.task/merge-commit second-merge)) "a repeat transacts nothing")
+              (is (= main (db/commit-id (db/db connection))) "main is unchanged")
               (is (= commit (merge-base-on connection a)))))))))))
 
 (deftest a-root-edit-after-capture-keeps-roots-value
@@ -486,11 +490,11 @@
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
           (db/with-branch {:seon.db/connection connection}
                           #(support/transacted! connection [{:db/id [:seon.task/id handle] :seon.task/intent "root edited"}]))
-          (let [merged (merged! connection a branch)]
+          (let [merged (merged! connection a)]
             (is (= "root edited" (intent-on connection handle)) "main keeps root's value")
             (is (= [{:entity (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/id handle]))
                      :attribute :seon.task/intent :base "a" :ours "root edited" :theirs "b"}]
-                   (:seon.squash/conflicts merged))
+                   (:seon.merge/conflicts merged))
                 "the writer's conflict is answered with its three values"))))))))
 
 (deftest a-reverted-branch-value-reverts-on-main
@@ -501,10 +505,10 @@
         connection handle
         (fn [fork branch a]
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
-          (merged! connection a branch)
+          (merged! connection a)
           (is (= "b" (intent-on connection handle)))
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "a"}])
-          (merged! connection a branch)
+          (merged! connection a)
           (is (= "a" (intent-on connection handle)) "the revert since the last merge reaches main")))))))
 
 (deftest an-occurrence-counted-on-the-branch-adds-once-on-main
@@ -522,9 +526,9 @@
                 count-on #(:seon.error.occurrence/count
                            (db/pull (db/db %) [:seon.error.occurrence/count] [:seon.error.occurrence/id occurrence]))]
             (is (= [2 2] [(count-on fork) (count-on connection)]) "base 1, branch 2, main 2")
-            (merged! connection a branch)
+            (merged! connection a)
             (is (= 3 (count-on connection)) "the branch's one occurrence adds once")
-            (merged! connection a branch)
+            (merged! connection a)
             (is (= 3 (count-on connection)) "a repeated merge adds nothing"))))))))
 
 (deftest a-merge-stays-within-its-cost-bound
@@ -540,5 +544,5 @@
           (let [main (db/db connection)
                 measured (profile/measure #(merge/merge-tx main a (db/commit-id (db/db fork))
                                                             (db/carried-projection main)))]
-            (is (= 3 (count (:seon.profile/value measured))) "the intent's retraction and assertion and the moved base")
+            (is (= 4 (count (:seon.profile/value measured))) "the intent's retraction and assertion, the moved base and the outcome")
             (is (<= (:seon.profile/ms measured) 20)))))))))

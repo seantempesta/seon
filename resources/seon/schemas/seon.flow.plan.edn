@@ -46,7 +46,8 @@
  :main-end [:and {:description "The end main holds on an assignment, beside the end its branch holds."} :seon.task.attempt/end]
  :head [:and {:description "The commit an assignment's branch head names now."} :seon.source/commit-id]
  :started? [:boolean {:description "Whether the registry holds the assignment's agent's graph."}]
- :kept? [:boolean {:description "Whether a merged branch stays: an open merge request answers it, its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?), or a successor still forks from its end commit."}]
+ :kept? [:boolean {:description "Whether a merged branch stays: its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?), or a successor still forks from its end commit."}]
+ :requested? [:boolean {:description "Present (true) when the branch head holds the agent's merge request for the assignment: its declarations merge with its facts only through root's merge (my.root/merge!), so db<->flow merges nothing of it (until hybrid-done-and-merge M8)."}]
  :held-assignment [:map {:description "One assignment whose branch the store holds, as db<->flow derives its lifecycle from it (seon.cluster.agent/lifecycle-facts): its end (main's, else its branch head's), its merge base and head, whether its graph runs and whether its branch stays once merged."}
                    [:db/id :seon.db/entity-id]
                    [:seon.task/assignment :seon.task/assignment]
@@ -58,5 +59,6 @@
                    [:seon.task/merge-base {:optional true} :seon.task/merge-base]
                    [:seon.flow.plan/head :seon.flow.plan/head]
                    [:seon.flow.plan/started? :seon.flow.plan/started?]
-                   [:seon.flow.plan/kept? :seon.flow.plan/kept?]]
+                   [:seon.flow.plan/kept? :seon.flow.plan/kept?]
+                   [:seon.flow.plan/requested? {:optional true} :seon.flow.plan/requested?]]
  :held [:vector {:description "Every assignment whose branch the store holds, by key."} :seon.flow.plan/held-assignment]}

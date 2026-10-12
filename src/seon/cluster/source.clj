@@ -17,7 +17,6 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.env :as env]
             [seon.error :as error]
             [seon.fn :as fn]
             [seon.fs :as fs]
@@ -1008,18 +1007,20 @@
   base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
   head refuses, by handle and holder. Answers the accepted merge `write-back!`
   takes: its identities, the commit before it, its merge commit and the run.
+  The `merging` transaction data and metadata (root's merge of the assignment's
+  facts, `seon.merge/merge!`) ride in the same transaction.
 
   Example:
-  (accept-merge! source store prepared)"
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
-                       [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
-                        [:seon.task/proofs :seon.task/proofs]
-                        [:seon.source/expected-digests :seon.source/expected-digests]
-                        [:parents [:set :seon.source/commit-id]]
-                        [:seon.source/advanced-base :seon.source/advanced-base]]]
-                  [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
-  [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}]
+  (accept-merge! source store prepared {:tx-data [] :tx-meta {}})"
+  {:malli/schema [:function
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.source/prepared]
+                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.source/prepared :seon.source/merging]
+                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]]}
+  ([source held-store prepared] (accept-merge! source held-store prepared {:tx-data []}))
+  ([source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
+                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}
+   {merging :tx-data meta :tx-meta}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
@@ -1086,8 +1087,10 @@
               (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected] advanced] tx)
-                                          :parents (conj merged e-id)})]
+                                         (cond-> {:tx-data (-> [[:db.fn/call declarations-held-tx expected] advanced]
+                                                                  (into tx) (into merging))
+                                                  :parents (conj merged e-id)}
+                                           meta (assoc :tx-meta meta)))]
                 (if (:db-after report)
                   (do
                     (let [merged-db (commit-database held-store (first merged))]
@@ -1102,7 +1105,7 @@
                    (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
                    :seon.source/commit-id (db/commit-id (:db-after report))})
                   report))))
-          (finally (d/release-materialized-db tested)))))))
+          (finally (d/release-materialized-db tested))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Write-back: an accepted merge's replacements, back into their one file
@@ -1622,15 +1625,15 @@
           members)))
 
 (defn- commit-message
-  "The landing's commit message: what merged and the evidence it merged on, in `bin/lane`'s trailer form."
+  "The merge's commit message: what merged and the evidence it merged on, in `bin/lane`'s trailer form."
   {:malli/schema [:=> [:cat :seon.source/acceptance [:vector :seon.source/path]] :string]}
-  [{task-sym :seon.task/sym merge-task :seon.task/merge agent-id :seon.agent/id run-id :seon.test.run/id
+  [{task-sym :seon.task/sym assignment :seon.task/assignment agent-id :seon.agent/id run-id :seon.test.run/id
     commit-id :seon.source/commit-id}
    paths]
-  (str "Land " (or task-sym (str "merge task " merge-task)) (when agent-id (str " from agent " agent-id))
+  (str "Merge " (or task-sym (str "assignment " assignment)) (when agent-id (str " from agent " agent-id))
        ": merged on main as " commit-id " by gate run " run-id "\n\n"
        "Written: " (str/join " " paths) "\n\n"
-       "Merge-task: " merge-task "\n"
+       "Assignment: " assignment "\n"
        "Merge-commit: " commit-id "\n"
        "Branch-evidence-runs: " run-id "\n"
        "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
@@ -1704,80 +1707,14 @@
   (let [paths (vec (:seon.source/changed-paths written))]
     (call-with-commit-lock root paths #(commit-locked root paths acceptance))))
 
-(defn- acceptance-names
-  "The task, agent and merge task an accepted landing names, read on the cluster `database`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :map]}
-  [database merge-task]
-  (let [[task-sym agent-id] (db/q '[:find [?sym ?agent] :in $ ?m
-                                   :where [?mt :seon.task/id ?m] [?mt :seon.task/created-by ?a] [?a :seon.agent/id ?agent]
-                                   [?p :seon.task/merge ?m] [?p :seon.task/of-assignment ?as] [?as :seon.task/assigned ?tid]
-                                   [?t :seon.task/id ?tid] [?t :seon.task/sym ?sym]]
-                                 database merge-task)]
-    (cond-> {:seon.task/merge merge-task}
-      (symbol? task-sym) (assoc :seon.task/sym task-sym)
-      (string? agent-id) (assoc :seon.agent/id agent-id))))
-
-(defn- land-held!
-  "`land!` through `execution`, which carries its `:seon.store/store`."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/merge-request-view :seon.fn/root]
-                  [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
-  [execution {merge-task :seon.task/merge branch :seon.task/branch proved :seon.task/proved} root]
-  (let [store (:seon.store/store execution)
-        connection (:seon.db/connection execution)
-        clock (volatile! {})
-        timed (fn [step f] (let [start (System/nanoTime) value (f)]
-                             (vswap! clock assoc step (quot (- (System/nanoTime) start) 1000000))
-                             value))
-        prepared (timed :prepare #(prepare-merge! execution store branch (into #{} (map first) proved) nil root))
-        accepted (when (:seon.source/candidate prepared) (timed :accept #(accept-merge! execution store prepared)))
-        closed (when (:seon.source/commit-id accepted)
-                 (timed :close #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
-                                    ((requiring-resolve 'seon.task/close!)
-                                     (cond-> {:seon.db/connection connection :seon.store/store store}
-                                       (:seon.env/environment execution)
-                                       (assoc :seon.env/environment (:seon.env/environment execution)
-                                              :seon.agent/routing (:seon.agent/routing (:seon.env/environment execution))))
-                                     merge-task :merged nil))))
-        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at closed)))
-                  (timed :write-back #(write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})))
-        acceptance (when (:seon.source/changed-paths written)
-                     (merge (acceptance-names (db/db connection) merge-task)
-                            (select-keys accepted [:seon.test.run/id :seon.source/commit-id])))
-        committed (when acceptance (timed :commit #(commit! root written acceptance)))]
-    (cond
-      (seq (:seon.program/conflict prepared))
-      (seon.error.refusal/error :seon.source/conflict-error
-       {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/land!
-        :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and request the merge again."
-        :seon.task/merge merge-task :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
-      (not (:seon.source/candidate prepared)) prepared
-      (not (:seon.source/commit-id accepted)) accepted
-      (:seon.error/at closed) (assoc closed :seon.source/accepted accepted)
-      (:seon.error/at written) (assoc written :seon.source/accepted accepted)
-      (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
-      :else {:seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
-             :seon.source/written written :seon.git/commit (:seon.git/commit committed)
-             :seon.source/step-ms @clock})))
-
 (defn land!
-  "Merge the green merge request `merge-request` (an open one, `my.root/merge-requests`) in one call:
-  `prepare-merge!` on a fresh merge branch of `execution`'s head, `accept-merge!` through the
-  unchanged gate, then `seon.task/close!` `:merged` (deleting the merge branch and the source branch),
-  `write-back!` into the checkout `root` and `commit!` of exactly the written paths.
-  Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
-  data under its own `:seon.error/type` (a conflict as `:seon.source/conflict-error`), never thrown: a refused prepare or acceptance (a red gate) leaves the merge request
-  open and writes nothing; a write-back or commit refusal after acceptance carries
-  `:seon.source/accepted` (main already holds the merge) for a retry.
-
-  Example:
-  (land! execution merge-request \"/Users/me/src/project\")"
+  "Root's merge of the assignment the merge request `merge-request` answers (`seon.merge/merge!`), into the
+  checkout `root`: the one merge, called here until `seon.turn/land-end!` goes (hybrid-done-and-merge M8)."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/merge-request-view :seon.fn/root]
-                  [:or :seon.source/landed :seon.source/conflict-error :seon.error/value]]}
+                  [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
   [execution merge-request root]
-  ;; A cluster handle holds its store in its SCI context's environment, where
-  ;; `seon.cluster.agent/acquire-context!` reads it; an acquired context holds it directly.
-  (let [ctx (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))
-        environment (or (some-> ctx env/of) (:seon.env/environment execution))
-        store (or (:seon.store/store execution) (:seon.store/store environment))]
-    (land-held! (cond-> (assoc execution :seon.store/store store) environment (assoc :seon.env/environment environment))
-                merge-request root)))
+  ((requiring-resolve 'seon.merge/merge!)
+   execution
+   (db/q '[:find ?k . :in $ ?r :where [?m :seon.task/merge-request ?r] [?m :seon.task/of-assignment ?a] [?a :seon.task/assignment ?k]]
+         (db/db (:seon.db/connection execution)) (:seon.task/merge-request merge-request))
+   root))

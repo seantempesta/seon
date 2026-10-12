@@ -1,0 +1,12 @@
+#:seon.merge
+{:execution [:map {:description "Root's world a merge runs through: main's connection, and the store it holds (else its SCI context's environment holds it); the gate of requested declarations acquires its merge branch through it as a cluster handle."}
+             [:seon.db/connection :seon.db/connection] [:seon.store/store {:optional true} :seon.store/store]]
+ :conflicts [:vector {:description "The :root conflicts one merge met, each kept as main's value."} :seon.squash/conflict]
+ :merged [:map {:description "What root's merge of an assignment did (seon.merge/merge!): its merge base, now the source commit C, and, when it transacted, main's merge commit, the outcome it closed the assignment with and the conflicts it met; a merge of requested declarations adds the acceptance, the files written back and the git commit."}
+          [:seon.task/assignment :seon.task/assignment] [:seon.task/merge-base :seon.task/merge-base]
+          [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
+          [:seon.task/outcome {:optional true} :seon.task/outcome]
+          [:seon.merge/conflicts :seon.merge/conflicts]
+          [:seon.source/accepted {:optional true} :seon.source/accepted]
+          [:seon.source/written {:optional true} :seon.source/written]
+          [:seon.git/commit {:optional true} :seon.git/commit]]}

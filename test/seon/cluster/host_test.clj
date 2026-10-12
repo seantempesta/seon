@@ -450,16 +450,15 @@
         (is (empty? (to-root)) "and root hears nothing")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
         (let [[about] (hosted-run! hosted "(:seon.task/merge (my.program/request-merge! {}))")
-              open (my.root/merge-requests {:seon.db/db (db/db connection)})]
-          (is (= [[(read-string about) branch #{'my.agents.host-probe/square-test}]]
-                 (mapv (juxt :seon.task/merge :seon.task/branch #(set (map first (:seon.task/proved %)))) open))
-              "root reads the open merge request from facts")
-          (is (= [(list 'my.root/merge! {:seon.task/merge (read-string about)})]
-                 (take 1 (:seon.render/operations (first open))))
-              "a merge request offers its merge")
+              mine #(filter (fn [open] (= branch (:seon.task/branch open))) (my.root/merge-requests {:seon.db/db (db/db connection)}))
+              [open] (mine)]
+          (is (string? (read-string about)) "the proven request is recorded on the agent's branch")
+          (is (= [branch] (map :seon.task/branch (mine))) "root reads the open assignment, the merge request, from facts")
+          (is (= [(list 'my.root/merge! {:seon.task/assignment (:seon.task/assignment open)})]
+                 (take 1 (:seon.render/operations open)))
+              "a merge request offers its merge by its assignment")
           (hosted-run! hosted "(my.program/request-merge! {})")
-          (is (= #{(read-string about)} (set (map :seon.task/merge (my.root/merge-requests {:seon.db/db (db/db connection)}))))
-              "requesting again finds the same merge task"))
+          (is (= [open] (mine)) "requesting again opens no second merge request"))
         (is (= {:seon.task/changed? true}
                (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."
                                                          :seon.task/basis {task-id declaration}))
@@ -660,7 +659,7 @@
   ;; from an agent on another branch. Owner ruling 2026-10-06: no merge
   ;; function refuses a caller for not being root; a branch agent's
   ;; merge acts on its own branch, and the merge's own checks answer
-  ;; (here: the merge task it names has no open merge request).
+  ;; (here: the assignment it names is not an open merge request).
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       (support/transacted! connection (support/agent-tx @connection "root"))
@@ -668,8 +667,8 @@
             hosted (host-on! handle branch "mcp/proposer")]
         (hosted-run! hosted "(my.message/send {:my.message/to \"root\" :my.message/about \"a-fix\" :my.message/content \"Please merge.\"})")
         (is (= [] (my.root/merge-requests {:seon.db/db (db/db connection)})) "only a proven merge request is one")
-        (is (= ["[:seon.task/merge \"000000000000\"]"]
-               (hosted-run! hosted "((juxt :seon.error/member :seon.error/offending) (my.root/merge! {:seon.task/merge \"000000000000\"}))")))))))
+        (is (= ["[:seon.task/assignment \"000000000000\"]"]
+               (hosted-run! hosted "((juxt :seon.error/member :seon.error/offending) (my.root/merge! {:seon.task/assignment \"000000000000\"}))")))))))
 
 ;;; A restart loses every host and its branch connection while the branch stays
 ;;; listed and the agent admitted; `host/stop!` drops exactly that.

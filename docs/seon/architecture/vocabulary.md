@@ -54,7 +54,7 @@ a word marked (target) names its rename, not yet merged.
 | main | a cluster's own branch, the line every accepted change is merged into; one per cluster, so a store has several | cluster head, home, "HEAD" for it |
 | checked-out branch | the branch an agent's context holds (`my.agent/branch`, `git branch --show-current`); a new checkout is a new context | custody (internal word in `seon.db/call-with-custody` only) |
 | merge, merged | `merge!` and git's merge: a source branch's changes enter the target branch, as a merge commit or a fast-forward; merged is the state after (owner 2026-10-12, CN-26) | land, landed, landing, unlanded |
-| merge request | a merge task asking root to merge a source branch into a target branch; a new commit from the same source updates it | proposal, candidate |
+| merge request | an assignment, as the thing root merges: source branch, target branch, merge base, outcome (`seon.merge/merge!`, `my.root/merge-requests`) | proposal, candidate |
 | source branch, target branch | GitLab's pair: the branch proposed, the branch it is merged into | head and base (both mean something else here), the proposing branch |
 | merge base | the newest common ancestor commit (`git merge-base`) | base digest |
 | merge branch | the branch root's merge creates off the target, where tests run on the merged result before main moves | S, the candidate, the tested branch |
