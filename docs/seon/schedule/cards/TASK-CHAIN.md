@@ -10,7 +10,7 @@ created: 2026-10-11
 What exists: tasks are entities (`seon.task/create!` upserts with `:seon.task/basis`; history is Datahike's), their
 proofs are tagged deftests, an agent's context is rendered live from its task by `seon.context/current-state`, a task's
 end sends root one message and closes the agent (DYNAMIC-CONTEXT stages 1–3), `seon.task/assign!` runs a task's proofs in
-the agent's world before assigning, and `seon.cluster.source/land!` takes a green merge request to main, disk and git in
+the agent's world before assigning, and `my.root/merge!` takes a green merge request to main, disk and git in
 one call. The approach: one general mechanism (a task value, stage types as data, one context function, one stage-aware
 proof selection) so pipeline variations are data, run side by side and measured, rather than code. No pipeline proc,
 supervisor, poller, done-check registry, stored instructions, send-back cap or advance dial: the agent lifecycle that
@@ -101,7 +101,7 @@ modifies on the subject.
    (`my.task/send-back!` to Prove or Design with the counterexample). Decision `:changed #{syms}` or `:send-back`.
 4. **Land** (needs Implement; root): the green end records the merge request, a problem task assigned to root carrying
    the diff since the merge base, every reached test with its result, the proofs and the decisions (plan §0 item 8); root
-   merges (`my.root/merge!` over `seon.cluster.source/land!`) or closes with a reason. A gate red is a send-back to
+   merges (`my.root/merge!`) or closes with a reason. A gate red is a send-back to
    Implement or Prove.
 5. **Retrospective** (needs Land; root): the end summary (proofs, errors by signature, calls, send-backs, cost before and
    after); closure derived from green proofs on main; follow-ups filed as tasks with red proofs; the instructions a
@@ -205,8 +205,7 @@ step's stable prefix (measure cache hits per step); the first experiment's subje
 
 Verified against HEAD be10632f3 by symbol: `seon.turn/step` (the pass runs `test-step`, then, when a model pass closed
 its turn, `end-task!`), `seon.turn/task-end` (`:done` is `seon.context/task-done?`: every tagged proof green on the
-branch and no reached red), `seon.turn/end-task!` (proposal → `land-end!` under the dial `:seon.config.root/land?` →
-`seon.context/outcome-tx` at the task home → `end-message` to root → `end-task-call` closes admission),
+branch and no reached red), `seon.turn/end-task!` (`seon.context/outcome-tx` at the task home → `end-message` to root → `end-task-call` closes admission),
 `seon.task/assign!` (runs the proofs in the agent's own world first; refuses `:proofs-green`, `:proofs-unobserved`,
 `:no-proofs`), `seon.task/task-edges` (proofs = deftests tagged with the task symbol), `seon.task/refuted` (proofs red at a
 reach no green member shares), `seon.task/resolution` (closedness derived: faults, signal, outcome; nothing stored),
@@ -245,7 +244,7 @@ tagged proofs with the current stage's proofs (one `or` in one function; no new 
 | **Survey / Design** | `:seon.task/must-read` resolved on the branch (`[?e :seon.fn/sym s]`, `:seon.ns/name`, `:seon.test/sym`); the intent's backticked symbols resolved the same way; the decision component; for `:added` keys, `malli.core/schema` compiles and `m/validate` holds on each `:seon.task.stage/sample` | any reference unresolved; intent names no existing symbol; no decision; an added key that does not compile or whose samples fail; a declared stub symbol without a complete contract | prune and add references; rewrite the intent in typed symbols; register schemas and contracted stubs; write the decision with `:unchanged` + reason when nothing is new |
 | **Prove** | the deftests tagged with the task (`task-edges`); `seon.task/refuted` on the branch at the head program; each proof's run result (`:seon.test/elapsed-ms`); the proof's var usages (`clojure.core/slurp`, `clojure.java.io/*`) ; the decision | no tagged proof; a proof green at the head program (`assign!` would refuse `:proofs-green`); a proof whose failure data is not the stated class (an `:error` where a `:fail` is stated); elapsed over the dial `:seon.config.test/step-time-limit-ms`; a proof reading files; no decision on "tests asserting the old behavior" | tag proofs; make each fail with the stated data; keep them program-reading and cheap; record `:changed #{old tests}` or `:unchanged` + reason |
 | **Implement** | today's `task-done?`; the stage decision | any proof red, a reached test red on branch and not on main, or no decision | the body; the decision `:changed #{syms}` (or `:send-back` with target and reason: the proof or intent is wrong, with the data) |
-| **Land** | the merge task (`:seon.task/landed-git`, `:seon.task/refusal`, `:seon.task/refused-tests`) | neither landed nor refused with a routed target | automatic (`seon.turn/land-end!`); a refusal writes the decision `:send-back` to Implement (red reached test) or Prove (refused proof) |
+| **Land** | the merge task (`:seon.task/landed-git`, `:seon.task/refusal`, `:seon.task/refused-tests`) | neither landed nor refused with a routed target | root's `my.root/merge!`; a refusal writes the decision `:send-back` to Implement (red reached test) or Prove (refused proof) |
 | **Retrospective** | `seon.task/resolution` on the home; the task's open follow-ups; the stage type's template revision | the task's proofs are green on main but it is still open (no retirement); friction recorded with no template change and no `:none` decision | retire (derived, §8.1.3); file follow-ups as tasks with red proofs; edit the template or decide `:none` |
 
 Judgment stays in two places only, both recorded as data and judged downstream: Survey's choice of references (scored
@@ -264,11 +263,11 @@ for the last stage. Make it the transition for every stage:
    `:seon.task.stage/template`. Pipelines are a vector of stage ids on a pipeline entity; the task refs its pipeline.
 2. **`seon.turn/task-proofs`** returns the task's tagged proofs ∪ the current stage's proofs. Nothing else changes:
    `task-done?` is "stage done", `task-end` answers `:done`, the block shows the red stage proof with its data.
-3. **`seon.turn/end-task!` gains one branch, `advance-end!`, beside `land-end!`**: for a `:done` end whose task has a
+3. **`seon.turn/end-task!` gains one branch, `advance-end!`**: for a `:done` end whose task has a
    next stage (or a `:send-back` decision with a target), in the same transaction as `outcome-tx` it sets
    `:seon.task/stage` and calls the one launch path the chain runs already (`seon.competency/start-run!`: a fresh agent,
-   its branch, `seon.task/assign!`, which runs the new stage's proofs red first). Proposal and landing run only when the
-   stage is Implement. Under a dial `:seon.config.chain/advance?`, as landing is under `:seon.config.root/land?`.
+   its branch, `seon.task/assign!`, which runs the new stage's proofs red first). The merge runs only when the
+   stage is Implement. Under a dial `:seon.config.chain/advance?`.
 4. **The next agent's first wake is its assignment**, as today. Its context is `seon.context/current-state` rendering
    the stage template from the stage entity (derived at render, never stored: the card's `:seon.task/instructions`
    field goes), then the task as the previous stage left it.
