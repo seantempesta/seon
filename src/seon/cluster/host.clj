@@ -66,6 +66,19 @@
       :else (agent/creation-tx {:seon.agent/id agent-id :seon.ns/name namespace-name
                                 :seon.agent/branch branch :seon.cluster/name cluster-name}))))
 
+(defn register!
+  "Admit the agent on this connection; an existing matching admission writes nothing."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.agent/branch :seon.ns/name :seon.cluster/name]
+                  [:or :nil :seon.db/transaction-refused-error]]}
+  [connection agent-id branch namespace-name cluster-name]
+  (let [existing (agent-entity (db/db connection) agent-id)]
+    (when-not (and (= branch (:seon.agent/branch existing))
+                   (not (:seon.agent/admission-closed-tx existing))
+                   (not (:seon.error/at existing)))
+      (let [result (db/with-branch {}
+                     #(db/transact! connection [[:db.fn/call #'home-call agent-id branch namespace-name cluster-name]]))]
+        (when-not (:db-after result) result)))))
+
 (defn- start!
   "Admit the agent as homed on the execution's branch, on the cluster and on
   that branch (each writer decides, `home-call`), then start its graph there
@@ -82,10 +95,7 @@
         ;; branch: a message to or from it resolves on either, and root lists it.
         ;; The first writer's refusal is the answer; nothing starts.
         refused (some (fn [target]
-                        (let [result (db/with-branch {}
-                                       #(db/transact! target [[:db.fn/call #'home-call agent-id branch namespace-name
-                                                               (:seon.cluster/name cluster-handle)]]))]
-                          (when-not (:db-after result) result)))
+                        (register! target agent-id branch namespace-name (:seon.cluster/name cluster-handle)))
                       [(:seon.db/connection cluster-handle) connection])]
    (if refused
     refused

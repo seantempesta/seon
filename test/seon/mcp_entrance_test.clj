@@ -8,6 +8,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.host :as host]
+            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -15,6 +16,7 @@
             [seon.fault :as fault]
             [seon.id :as id]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.transcript :as transcript]
             [seon.sci.admit :as admit]
@@ -109,6 +111,50 @@
   (let [task (java.util.concurrent.FutureTask. ^java.util.concurrent.Callable f)]
     (.start (Thread. task))
     (.get task 60 java.util.concurrent.TimeUnit/SECONDS)))
+
+(deftest a-fresh-request-inherits-one-admission
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [instance (get @running-instances running)
+           handle (:seon.turn.loop/cluster instance)
+           store (:seon.store/store instance)
+           agents (vec (repeatedly 4 #(str "fresh-cost-" (id/id))))]
+       (try
+         (is (nil? (outside #(host/register! connection (first agents) (keyword (str "fresh-home-" (id/id)))
+                                             'user (:seon.cluster/name handle)))))
+         (let [measurements
+               (mapv (fn [agent-id]
+                       (outside
+                        #(profile/measure
+                          (fn [] (#'mcp/eval-clj {:seon.mcp/code "(+ 1 2)" :seon.mcp/agent agent-id
+                                                 :seon.mcp/cluster running :seon.mcp/mode "sci"})))))
+                     agents)
+               measured (subvec measurements 1)]
+           (is (false? (second (:seon.profile/value (first measurements))))
+               "a committed admission with no branch is completed by the request")
+           (is (< (nth (sort (map :seon.profile/ms measured)) 1) 150)
+               "a fresh request avoids the duplicate admission cost")
+           (doseq [m measured]
+             (is (false? (second (:seon.profile/value m))))
+             (is (= 3 (profile/calls-of m 'seon.db/transact-call)))
+             (is (= 2 (profile/calls-of m 'seon.cluster.registry/branch!)))))
+         (let [agent-id (peek agents)
+               branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+           (outside #(host/stop! (host/hosted handle branch)))
+           (let [m (outside #(profile/measure
+                              (fn [] (#'mcp/eval-clj {:seon.mcp/code "(+ 1 2)" :seon.mcp/agent agent-id
+                                                     :seon.mcp/cluster running :seon.mcp/mode "sci"}))))]
+             (is (false? (second (:seon.profile/value m))))
+             (is (= 1 (profile/calls-of m 'seon.db/transact-call))
+                 "rehosting writes only the evaluation's recording")))
+         (finally
+           (doseq [agent-id agents
+                   :let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch]
+                                                           [:seon.agent/id agent-id]))]
+                   :when branch]
+             (outside
+              #(do (some-> (host/hosted handle branch) host/retire!)
+                   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
 (defn- stored-origins
   "Each stored evaluation of `agent-id` as `[source origin]`, origin nil when

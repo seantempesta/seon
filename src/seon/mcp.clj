@@ -23,6 +23,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
+            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -207,12 +208,15 @@
       (and (:db/id entity) (or (nil? home) (= live home))) on-cluster
       :else
       (let [branch (or home (keyword (str "agent-" (id/id))))
-            created (when-not home
+            registered (when-not home
+                         (host/register! connection agent-id branch (or namespace-name 'user)
+                                         (:seon.cluster/name handle)))
+            created (when-not (or registered (contains? (registry/branches store) branch))
                       (my.agent/create-branch! {:seon.store/branch branch}
                                                {:seon.store/store store :seon.db/connection connection
                                                 :seon.agent/routing (:seon.agent/routing handle)}))]
-        (if (:seon.error/at created)
-          created
+        (if-let [refused (or registered (when (:seon.error/at created) created))]
+          refused
           ;; host! answers its refusal by name (closed admission, another
           ;; agent hosted there): the caller's to fix
           (let [host (host/host! {:seon.turn.loop/cluster (assoc handle :seon.store/store store)
