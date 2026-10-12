@@ -1,53 +1,79 @@
 (ns seon.central-round
-  "Run the full compiled tier on an isolated root, as `seon.interpreted-census` does for one list.
-
-  bb -cp script:src -m seon.central-round ROOT OUT-EDN [BATCH] [SYMBOLS-EDN]
-
-  ROOT is a running isolated operator root (`bin/seon --root ROOT start`, which must stay alive while
-  this runs). Without SYMBOLS-EDN every stored `:seon.test/sym` is run, less fixture material, which
-  `seon.test/run` refuses as a whole batch. Each batch is one request of root on the cluster's own
-  execution. A refused batch (the root is not ready, or a member hung past the check limit) waits for the
-  cluster handle and is tried once more; a second refusal is recorded per symbol. One EDN line per symbol is
-  appended to OUT-EDN (class `:central`, counts and whole failure message, or `:unrun`/`:refusal`)."
+  "Run the compiled tier on an isolated running root.
+  clojure -Sdeps '{:paths [\"script\" \"src\" \"resources\"]}' -M -m seon.central-round ROOT OUT [BATCH] [SYMBOLS-EDN]
+  Each request awaits the runner's actual body exit under the members' declared
+  bound. Unfinished execution and unknown transport outcomes are recorded and
+  end the round. Output is shown text from the value printer."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]
-            [seon.interpreted-census :as census]
-            [seon.operator :as operator]))
+            [seon.operator :as operator]
+            [seon.error.refusal :as refusal]
+            [seon.print :as print]
+            [seon.render.value :as value]))
 
-(def ^:private fixture-material #"test-resolution-fixture|test-runner-failure-fixture")
+(def test-symbols-query
+  '[:find [?s ...] :where [?e :seon.test/sym ?s] (not [?e :seon.test/fixture])])
 
-(defn- value [root form]
-  (try (:seon.operator/value (operator/live-root-value! root form {:seon.operator/command :check}))
-       (catch Throwable e {:seon.error/message (str "driver: " (ex-message e))})))
+(defn test-symbols-form
+  "Select test declarations that are not fixture material."
+  {:malli/schema [:=> [:cat] [:sequential :seon.schema/value]]}
+  []
+  `(let [handle# (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))
+         symbols# (seon.db/q '~test-symbols-query
+                             (seon.db/db (:seon.db/connection handle#)))]
+     (if (vector? symbols#) (vec (sort symbols#)) symbols#)))
 
-(defn- test-symbols [root]
-  (->> (value root (pr-str '(let [handle (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))]
-                              (vec (sort (map first (datahike.api/q '[:find ?s :where [?e :seon.test/sym ?s]]
-                                                                     @(:seon.db/connection handle))))))))
-       (remove #(re-find fixture-material (str %)))
-       vec))
+(defn batch-form
+  "One runner request; the runner joins actual body exit within the declared bound."
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:sequential :seon.schema/value]]}
+  [symbols]
+  `(let [handle# (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default"))
+         connection# (:seon.db/connection handle#)
+         bound# (seon.test/declared-bound-ms (seon.db/db connection#) '~(set symbols))]
+     (seon.db/call-with-custody
+      {:seon.db/connection connection#}
+      #(seon.test/run {:seon.test/execution handle# :seon.test/recording-connection connection#
+                       :seon.test/policy :named :seon.test/identities '~(set symbols)
+                       :seon.test/rerun? true :seon.test/include-long? true
+                       :seon.test/check-time-limit-ms bound#}))))
 
-(defn- ready? [root]
-  (boolean (value root (pr-str '(some? (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "default")))))))
-
-(defn- run-batch [root part]
-  (let [answer (value root (pr-str (#'census/batch-form "default" "root" part)))]
-    (if (map? answer) answer {:refusal (pr-str answer)})))
+(defn run-round!
+  "Submit each part once, recording its complete answer; end on unknown execution."
+  {:malli/schema [:=> [:cat [:=> [:cat [:sequential :symbol]] :map]
+                       [:=> [:cat :map] :seon.schema/value] [:sequential [:sequential :symbol]]] :nil]}
+  [submit! record! parts]
+  (loop [[part & remaining] parts]
+    (when part
+      (let [answer (submit! part)]
+        (record! {:seon.central-round/symbols (vec part) :seon.central-round/answer answer})
+        (when (and (contains? answer :seon.test/results)
+                   (empty? (:seon.test/unfinished answer))
+                   (empty? (:seon.test/pending answer))
+                   (not (:seon.test/recording-refusal answer)))
+          (recur remaining)))))
+  nil)
 
 (defn -main
-  "Run every batch and append its members to OUT-EDN."
+  "Run the selected declarations once and save their answers through the value printer."
+  {:malli/schema [:=> [:cat :string :string [:* :string]] :nil]}
   [root out & [batch symbols-file]]
-  (let [syms (if symbols-file (edn/read-string (slurp symbols-file)) (test-symbols root))
-        size (Long/parseLong (or batch "25"))]
-    (println (count syms) "tests")
-    (doseq [[n part] (map-indexed vector (partition-all size syms))]
-      (let [answer (loop [attempt 0]
-                     (let [answer (run-batch root part)]
-                       (if (and (< attempt 1) (or (nil? (:results answer)) (:refusal answer) (:seon.error/message answer)))
-                         (do (while (not (ready? root)) (Thread/sleep 3000)) (recur (inc attempt)))
-                         answer)))
-            lines (census/batch-lines (constantly :central) part
-                                      (cond-> answer (:seon.error/message answer) (assoc :refusal (:seon.error/message answer))))]
-        (spit out (str/join (map #(str (pr-str %) "\n") lines)) :append true)
-        (println "batch" n (count part) "tests" (:ms answer) "ms"
-                 (count (filter #(pos? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))) (:results answer))) "red")))))
+  (let [record! #(spit out (str (value/core-text %) "\n") :append true)
+        bound (operator/operation-bound-ms {:seon.operator/command :check})
+        live-value! #(operator/prepl-value! (operator/advertisement root nil)
+                                            (print/form-text %) bound nil bound)]
+    (try
+      (let [symbols (if symbols-file (edn/read-string (slurp symbols-file))
+                        (live-value! (test-symbols-form)))]
+        (if (vector? symbols)
+          (run-round! #(live-value! (batch-form %)) record!
+                      (partition-all (Long/parseLong (or batch "25")) symbols))
+          (record! {:seon.central-round/answer symbols})))
+      (catch Throwable failure
+        (record! {:seon.central-round/unknown true
+                  :seon.central-round/error
+                  (refusal/error :seon.operator/operation-error
+                                 {:seon.error/operation 'seon.central-round/-main
+                                  :seon.error/message "Central round ended without an observed terminal answer."
+                                  :seon.operator/disposition :client-failed
+                                  :seon.error/offending {:seon.operator/root root}
+                                  :seon.error/throwable failure})}))))
+  nil)
