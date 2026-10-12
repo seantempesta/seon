@@ -51,8 +51,7 @@
     (is (= 'tq.assigned/work-root (:my.task/target sent)))
     (is (= {:expected 1 :actual 2} (:my.task/counterexample sent)))))
 
-(deftest ^{:seon/tasks #{'seon.instrument/an-arity-refusal-offers-the-functions-example}}
-  a-send-back-with-positional-arguments-is-answered-with-its-example
+(deftest a-send-back-with-positional-arguments-is-answered-with-its-example
   ;; chain experiment 2: an Implement agent called (my.task/send-back! target reason); the refusal named only the
   ;; destructured arglist, so its last calls were spent and the send-back never happened.
   (let [refusal (try (apply my.task/send-back! ['tq.assigned/work-root "The proof contradicts the intent."])
