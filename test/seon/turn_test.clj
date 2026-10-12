@@ -1969,8 +1969,7 @@
                                            "(in-ns 'cc.one) (defn twice [x] (* 2 x))")]
        (is (= made counted) "a defn's reply counts the commits its branch advanced")))))
 
-(deftest ^{:seon/tasks #{'seon.turn/an-eval-request-on-an-unchanged-program-forks-nothing}}
-  an-eval-request-on-an-unchanged-program-forks-nothing
+(deftest an-eval-request-on-an-unchanged-program-forks-nothing
   (support/with-running-agent
    (fn [running agent-id _]
      (let [request #(json/read-str (mcp/call (json/write-str {"name" "eval_clj"
