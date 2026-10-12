@@ -69,6 +69,9 @@ conversion of its last caller; every phase names a red proof that resolves to a 
   `bin/lane commit LANE -m MSG --branch-evidence AGENT PATHS` instead proves
   `src`/`test` Clojure files by the agent's branch evidence on the live root (`bin/lane evidence AGENT PATH...` asks
   that question alone) and falls back to the throwaway check when it cannot.
+- **Restart batches:** a lane never commits a dependency or fork bump (`deps.edn`, a `reference-code/` gitlink);
+  `bin/lane commit` refuses it (exit 2) unless root passes `--restart-batch` when it opens a batch and restarts
+  default right after. Write the change as a patch for root's next batch.
 - **Hooks:** the launcher passes `--dangerously-bypass-hook-trust` on both
   `run` and `resume`, because Codex silently skips a project hook whose trust snapshot
   no longer matches. Codex snapshots `.codex/hooks.json` at

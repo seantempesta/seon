@@ -10,6 +10,9 @@
 #   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--accept-red-before TEST]... PATH...
 #                                        lint, and prove PATH... by AGENT's branch evidence on the
 #                                        live root instead of a throwaway JVM (falls back to the check)
+#   bin/lane commit  LANE -m MSG --restart-batch ... PATH...
+#                                        root only, when it has opened a restart batch: without it a commit of deps.edn
+#                                        or a reference-code/ gitlink (dependency or fork bump) is refused
 #   bin/lane evidence AGENT PATH... [-- TEST...]
 #                                        ask the branch-evidence question alone (exit 0 proven, 2 not, 3 unavailable);
 #                                        tests after -- are accepted as red before the change
@@ -54,6 +57,7 @@
 # Refusals (exit 2) name the rule they enforce:
 #   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
 #   - a commit path the lane never claimed;
+#   - deps.edn or a reference-code/ gitlink without --restart-batch (a bump belongs to root's restart batch);
 #   - anything staged in the index beyond the commit's paths;
 #   - `bin/seon check PATHS [--test NS...]` or clj-kondo reporting an error on the candidate.
 # A landed commit whose paths or message differ from the request exits 3 (LANE COMMIT MISMATCH);
@@ -454,7 +458,7 @@ commit() {
   local lane="$1"; shift
   valid_lane "$lane"
   [[ -e "$claims/$lane.paths" ]] || refuse "lane $lane has no claims; run bin/lane claim first"
-  local message="" tests=() paths=() path evidence_agent="" accepted=() at_candidate=""
+  local message="" tests=() paths=() path evidence_agent="" accepted=() at_candidate="" restart_batch=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -m) message="$2"; shift 2 ;;
@@ -463,6 +467,7 @@ commit() {
       --test) [[ $# -ge 2 ]] || refuse "--test needs a test name"; tests+=("--test" "$2"); shift 2 ;;
       --include-long) tests+=("--include-long"); shift ;;
       --at-candidate) at_candidate=1; shift ;;
+      --restart-batch) restart_batch=1; shift ;;
       *) paths+=("${1#./}"); shift ;;
     esac
   done
@@ -483,6 +488,16 @@ commit() {
     owner="$(owner_of "$path" || true)"
     [[ "$owner" == "$lane" ]] || refuse "$path is not claimed by lane $lane${owner:+ (lane $owner holds it)}"
   done
+  # A dependency or fork bump commits only inside a restart batch root opened (AGENTS.md "Restart in batches").
+  if [[ -z "$restart_batch" ]]; then
+    local mode
+    for path in "${paths[@]}"; do
+      mode="$(git ls-files -s -- "$path" | cut -c1-6)"
+      if [[ "$path" == deps.edn ]] || [[ "$path" == reference-code/* && ( "$mode" == 160000 || -e "${path%/}/.git" ) ]]; then
+        refuse "$path is a dependency or fork bump: it commits only inside a restart batch root opens (AGENTS.md, Restart in batches); write the change as a patch for root's next batch; nothing committed"
+      fi
+    done
+  fi
   # The staged-index check runs only under the lock (commit_locked): outside it,
   # another lane's in-lock `git add` of its new file reads as foreign staging.
 

@@ -121,3 +121,16 @@
     (let [refused (lane dir "commit" "one" "-m" "x" "--branch-evidence" "nobody" "src/x/core.cljc")]
       (is (= 2 (:exit refused)))
       (is (str/includes? (:err refused) "names no test: pass each reaching test as --test NS/VAR")))))
+
+(deftest a-reference-code-gitlink-commits-only-inside-a-restart-batch
+  (let [dir (scratch)
+        sha "1111111111111111111111111111111111111111"]
+    (sh dir "git" "update-index" "--add" "--cacheinfo" (str "160000," sha ",reference-code/dep"))
+    (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "gitlink")
+    (.mkdirs (io/file dir "reference-code/dep"))
+    (is (zero? (:exit (lane dir "claim" "one" "reference-code/dep"))))
+    (let [refused (lane dir "commit" "one" "-m" "bump" "reference-code/dep")
+          batch (lane dir "commit" "one" "-m" "bump" "--restart-batch" "reference-code/dep")]
+      (is (= 2 (:exit refused)))
+      (is (str/includes? (:err refused) "restart batch"))
+      (is (str/includes? (:err batch) "names no test") "with the flag it reaches the normal check"))))
