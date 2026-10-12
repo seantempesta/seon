@@ -187,22 +187,46 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    ledger: a change need not delete what it adds, feature for feature. Write the simplest correct form of what is
    needed; when the code grows, name what it lets go elsewhere and plan that deletion. Large additions still start
    with the smaller alternative considered, and net deletion never excuses needless machinery.
-4. **Pick the model by risk; every lane proves its slice.**
-   - **Sonnet** measures, diagnoses, writes specs, deletes and sweeps, and implements clearly specified slices. When
-     it cannot find the cause or a clearly correct fix in about fifteen minutes, it bows out with what it measured.
-   - **Opus** changes the semantics of the one REPL path (eval request, evaluation, render, evidence) and other
-     boot-critical platform code, designing by dogfooding: alternatives tried at the REPL on its own branch, the
-     tests reaching the change, timings.
-   - **Astra, an outside model trained on a different distribution, takes the hard performance work** a Sonnet lane
-     bowed out of, and FIXES what it finds: super-linear transformations, repeated work (the same derivation
-     executed thousands of times, whole-program work per change, re-reading what the caller holds).
-   - **Every lane refuses bad changes on sight** and proves its own slice before committing (see "Prove
-     each slice before it is committed"). Every review is dual (a fresh Opus agent and Astra, independently) and never
-     substitutes for that proof.
-   - **Root** assigns file ownership so the two never edit the same file at once, rules on disputes, and resolves
-     already-ruled questions by citing their authority. For a new decision with hours of cross-owner work, root
-     offers three priced options: the simplest viable first, the recommendation marked, each with its guarantee,
-     cost and sacrifice.
+4. **Pick the model by the work; every lane proves its slice** (owner, 2026-10-12, from a day of measured outcomes).
+   - **Haiku gathers and verifies; it never judges alone.** Digs before a design round (prior attempts, the code
+     path, rulings, edge cases, library seams); a **pre-brief before every Opus or Sonnet phase** (every caller, test,
+     quoted symbol and schema reference of what the phase changes or deletes, the reds on HEAD, the prior notes and the
+     file collisions — it caught a deletion that would have stopped every chain); inventories; red triage from stored
+     runs by the commit that changed the behavior; **flake hunting** (run a suspect test alone several times at the
+     suspect commits before anyone designs a fix — a "Datahike bug" was a flaky fixture); the **performance sentinel**
+     after each restart (`script/seon/sentinel.clj` against its last baseline). Haiku never makes SCI requests as root
+     on default (they write test runs to main): JVM mode or throwaway checks only. Its output is evidence a stronger
+     model or a test confirms; it does not pick tasks or decide on judgement.
+   - **Sonnet** does clearly specified work: implements a phase whose design and red proof are written, mechanical
+     fixes and sweeps, renames, filing and retiring tasks, applying patches, narrow checks, and running the central
+     round. When it cannot find the cause or a clearly correct fix in about fifteen minutes, it stops with what it
+     measured.
+   - **Opus** takes the hard problems: the semantics of the one REPL path (eval request, evaluation, render,
+     evidence), the writer, the test runner, boot-critical code, design gaps a check found, root causes nobody has
+     isolated, and one of the two independent plans of a design round; it designs by dogfooding (alternatives tried at
+     the REPL on its own branch, the tests reaching the change, timings).
+   - **Astra, an outside model trained on a different distribution,** takes the hard performance work and FIXES what
+     it finds (super-linear transformations, repeated work, whole-program work per change, re-reading what the caller
+     holds), and writes the other independent plan of a design round.
+   - **Fable** writes the hybrid of a design round (the tie-break between the two plans, which it did not write) and
+     the periodic audit of how planning and execution are going. Never revisions, fixes or implementation: a check's
+     failures go to Opus (design) or Sonnet (mechanical).
+   - **Count before designing.** Before choosing between design options, measure how often the case occurs in the
+     code (a design for multimethods was stopped when `src` turned out to hold none): the owner prefers the simple
+     general rule over modeling a rare construct.
+   - **Schedule** (root): file-disjoint lanes run in parallel; two lanes needing one file run one after the other, the
+     second briefed with the first's commit; a phase waits for the files it needs rather than editing around them
+     (patch files for a held file). A design round is dig → two independent plans → hybrid → narrow check → tasks
+     (see "Design by independent plans and a hybrid"). One goal probe is always in flight: a chain experiment on HEAD
+     with small ordinary tasks that carry red proofs, its hand acts counted against the previous run.
+   - **Every lane refuses bad changes on sight** and proves its own slice before committing (see "Prove each slice
+     before it is committed"). **Every review is dual and independent**: a fresh Opus agent and Astra, neither seeing
+     the other, each finding reproduced before it is fixed; a review never substitutes for the proof. A performance
+     commit is proven by the cost it targets, end to end (see "Make cost follow changed inputs").
+   - **Root** assigns file ownership so no two lanes edit one file at once, rules on disputes, resolves
+     already-ruled questions by citing their authority, batches restarts, and merges. For a new decision with hours of
+     cross-owner work, root offers three priced options: the simplest viable first, the recommendation marked, each
+     with its guarantee, cost and sacrifice.
 5. **Change one loadable slice.** Edit the owner in place: no second registry, renderer, runner, retry, cache or
    version-two namespace. A moved, renamed or deleted function converts every caller in the same commit — tests,
    quoted symbols, error operations and schema references included — and retires the old path. Script mechanical
