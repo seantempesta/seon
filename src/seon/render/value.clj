@@ -760,12 +760,12 @@
           (scalar ::print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
       (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap clojure.lang.PersistentTreeMap} c)
       ;; A keyword key names a path step only where `keyword-lookup?` permits.
-      ;; An entity (it carries `:db/id` or an installed identity attribute) is
-      ;; the one map whose attributes the database schema describes.
+      ;; A map is an entity only when it carries `:db/id`; the database schema
+      ;; describes that one map's attributes.
       (let [lookup? (keyword-lookup? x)]
         {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
          :lookup? lookup?
-         :entity? (boolean (and lookup? (or (find x :db/id) (some #(find x %) identity-attributes))))
+         :entity? (boolean (and lookup? (find x :db/id)))
          :sorted? (sorts? x key)
          :members (held-order x identity-attributes key)})
       (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)

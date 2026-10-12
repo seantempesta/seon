@@ -1498,3 +1498,25 @@
     (is (> (count (:seon.render.value/text projection)) (* 0.9 budget)) "the budget left is spent on the string")
     (is (= source (str (:seon.print/prefix cut) (subs source (:seon.render.data/next-offset cut))))
         "the dig offset continues exactly where the shown text stops")))
+
+(deftest a-count-prints-as-an-entity-reference
+  ;; A map is an entity only when it carries :db/id: an integer under a ref
+  ;; attribute in a map that merely holds an identity attribute prints as the
+  ;; number, never as the entity that number names.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "count-ref")
+     (support/transacted! connection (support/agent-tx (db/db connection) "count-ref-agent"))
+     (let [id "count-ref-agent"
+           eid (db/q '[:find ?e . :in $ ?id :where [?e :seon.agent/id ?id]] (db/db connection) id)
+           text #(:seon.render.value/text (value/prepare (render-request connection %)))]
+       (is (int? eid) "the referent exists, so its eid names a real entity")
+       (is (= (str "{:seon.agent/id \"a\", :seon.turn/agent " eid "}")
+              (text {:seon.turn/agent eid :seon.agent/id "a"}))
+           "an identity attribute does not make a map an entity")
+       (is (= (str "{:seon.source/digest 7, :seon.turn/agent " eid "}")
+              (text {:seon.turn/agent eid :seon.source/digest 7}))
+           "a source digest does not make a map an entity")
+       (is (= (str "{:db/id 7, :seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
+              (text {:db/id 7 :seon.turn/agent eid}))
+           "with :db/id the map is an entity and the integer is resolved")))))
