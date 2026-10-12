@@ -2249,18 +2249,20 @@
     (catch Exception failure (result-read-error "latest-results" failure))))
 
 (defn result-at-reach
-  "The result of the newest admitted execution of `test-symbol` recorded on `database` under exactly
-  `reach-digest`, however many later executions at other digests exist; nil when none ran there.
-  Proportional to that test's executions: one `:seon.test.member/symbol` index read and one digest read per member."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test/reach-digest]
-                  [:or :nil :seon.test/result :seon.test/result-unknown :seon.test/execution-error]]}
-  [database test-symbol reach-digest]
+  "Each test of `reaches` (test to reach digest) with the result of its newest admitted execution recorded on
+  `database` under exactly that digest, however many later executions at other digests exist; a test none ran
+  there is absent. One `:seon.test.member/symbol` index read per test and one digest read per member, then the
+  newest-execution reads once for the whole set."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/reach-digests]
+                  [:or [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]] :seon.test/execution-error]]}
+  [database reaches]
   (try
-    (first (newest-results database
-                           (into {} (keep (fn [{member :e}]
-                                            (when (= reach-digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest)))))
-                                              [member test-symbol])))
-                                 (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol)))))
+    (let [members (into {} (for [[test-symbol digest] reaches
+                                 {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))
+                                 :when (= digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest)))))]
+                             [member test-symbol]))]
+      (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity))
+            (newest-results database members)))
     (catch Exception failure (result-read-error "result-at-reach" failure))))
 
 (defn red-result?

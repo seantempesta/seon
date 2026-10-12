@@ -20,6 +20,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
             [seon.test-support :as test-support]
+            [seon.turn :as turn]
             [seon.turn.world :as world]))
 
 (defn- facts
@@ -279,8 +280,28 @@
              (registry/retire-branch! {:seon.store/store (agent/handle-store handle)
                                       :seon.store/branch branch}))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
-  a-fresh-attempt-proves-first-and-green-proofs-end-it-with-no-model-call
+(defn- fixed-chain-world
+  "Call `body` with the chain world of `tasks` (as `chain-world`), each proof red at its fork point, and a provider
+  answering each model turn, in the order of `fixed`, by redefining that task's proof green on the agent's branch:
+  each step reaches done through its own loop."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :string] :map [:=> [:cat :seon.agent/context-source] :seon.schema/value]]
+                  :seon.schema/value]}
+  [connection fixed tasks body]
+  (let [fix #(str "(in-ns '" *space* "-proofs)\n(clojure.test/deftest ^{:seon/tasks #{'" *space* "/" % "}} proves-" %
+                  " (clojure.test/is (= 1 1)))")]
+    (test-support/with-provider
+     (atom []) (test-support/reply-queue (mapv fix fixed))
+     (fn [server]
+       (chain-world
+        connection tasks
+        (fn [handle]
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+          (body handle)))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt 'seon.context/a-proof-green-before-the-work-is-not-done}}
+  a-task-satisfied-at-the-base-opens-no-model-turn
+  ;; the prove pass runs the proof at the base program: green there, the step has nothing to do
   (binding [*space* "tq.chaing"]
   (test-support/with-database
    (fn [connection]
@@ -288,12 +309,17 @@
       connection {"g" [#{} "(clojure.test/is (= 1 1))"]}
       (fn [handle]
         (pass! handle (:seon.agent/routing handle))
-        (let [[[_ branch agent-id]] (seq (attempts connection "g"))
-              end (landed! handle connection "g" ::g-ended)
-              branch-db (db/branch-database (db/db connection) branch)]
-          (is (= :done end) "its first pass ran its green proofs and ended it")
-          (is (seq (proof-runs branch-db (proof "g"))) "on its own branch")
-          (is (zero? (model-turns branch-db agent-id)) "with no model call"))))))))
+        (let [[[key branch agent-id]] (seq (attempts connection "g"))
+              on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle) :seon.store/branch branch})
+              _ (await-on! on-branch #(:green (:seon.context/counts (context/proofs (db/db on-branch) (symbol *space* "g")))) ::g-proved)
+              branch-db (db/db on-branch)
+              verdict (context/step-verdict branch-db agent-id)]
+          (is (= :satisfied (:seon.task/status verdict)) "its proof was green at its fork point")
+          (is (= #{(proof "g")} (:seon.context/green-before verdict)) "and names it")
+          (is (nil? (turn/next-agent-work branch-db {:seon.agent/id agent-id})) "no model turn opens")
+          (is (zero? (model-turns branch-db agent-id)) "none was taken")
+          (is (nil? (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]] branch-db key))
+              "and nothing ends it as done"))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}}
   an-ended-attempts-closed-merge-releases-its-connection-and-branch
@@ -301,8 +327,8 @@
     (binding [*space* (if from-attempt? "tq.retirelocal" "tq.retireroot")]
       (test-support/with-database
        (fn [connection]
-         (chain-world
-          connection {"g" [#{} "(clojure.test/is (= 1 1))"]}
+         (fixed-chain-world
+          connection ["g"] {"g" [#{} "(clojure.test/is (= 1 2))"]}
           (fn [handle]
             (let [routing (:seon.agent/routing handle)
                   store (agent/handle-store handle)]
@@ -389,17 +415,17 @@
          (finally (release! routing))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
-  a-green-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
+  a-done-first-step-ends-itself-and-its-end-starts-the-next-from-its-commit
   (binding [*space* "tq.chain"]
   (test-support/with-database
    (fn [connection]
-     (chain-world
-      connection {"a" [#{} "(clojure.test/is (= 1 1))"] "b" [#{"a"} "(clojure.test/is (= 1 1))"]}
+     (fixed-chain-world
+      connection ["a" "b"] {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
       (fn [handle]
         (do
           (pass! handle (:seon.agent/routing handle))
           (is (empty? (attempts connection "b")) "B waits on A")
-          (is (= :done (landed! handle connection "a" ::a-ended)) "A's green proofs end it, with no model call")
+          (is (= :done (landed! handle connection "a" ::a-ended)) "A's turn turns its proof green and its step ends it")
           (is (empty? (db/q '[:find ?r :in $ ?h :where [?a :seon.task/assigned ?h]
                               [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
                             (db/db connection) (chain-handle "a")))
@@ -630,8 +656,8 @@
   (binding [*space* "tq.endcustody"]
     (test-support/with-database
      (fn [connection]
-       (chain-world
-        connection {"g" [#{} "(clojure.test/is (= 1 1))"]}
+       (fixed-chain-world
+        connection ["g"] {"g" [#{} "(clojure.test/is (= 1 2))"]}
         (fn [handle]
           (let [routing (:seon.agent/routing handle)]
             (pass! handle routing)

@@ -92,7 +92,7 @@
          [:seon.task/completion-tokens {:optional true} :seon.task/completion-tokens]
          [:seon.task/end-unknown {:optional true} :seon.task/end-unknown]
          [:seon.render/operations [:vector :seon.render/read-form]]]
- :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored."} :working :requested :done :bailed :capped]
+ :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored. :satisfied: every proof was already known green at its fork point, so no model turn opens."} :working :satisfied :requested :done :bailed :capped]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
  :assignment [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/assignment-row
                        :description "seon.id/id over [task attempt-number]: one attempt of a task by an agent on its branch (seon.task/attempt-tx), written on the cluster; rows written before attempts were numbered derive from [task agent branch]."}]

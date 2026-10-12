@@ -1,11 +1,30 @@
 ---
 title: "M1 notes: where the code contradicts hybrid-done-and-merge M1"
 type: research
-status: lane m1, 2026-10-12, on HEAD 074a2c045. Two contradictions found before any M1 source edit beyond `seon.test.runner/result-at-reach`; the rest of M1 waits for root's choice below.
+status: lane m1, 2026-10-12. Contradiction 1 decided by the owner (below); M1 landed under that rule.
 basis: code read by symbol in the working tree; one read-only probe on default (jvm mode as root, `seon.test/admit-run` called on main's value, nothing transacted).
 ---
 
 # M1 notes
+
+## Decision (owner, 2026-10-12, verbatim): "we don't need to run it again on main. that's an edge case. Keep things simple and performant."
+
+None of options A, B or C: no `admit-run` change, no extra proof run, nothing stored. M1 judges the base only from
+runs that already exist (a launched assignment's prove pass). A proof with no run at its base reach digest has an
+unknown base result, which never counts as green and keeps today's fork point. `:satisfied` (no model turn) only when
+every proof is green at the head and known green at the base; otherwise `:done` is today's rule. A hand-assigned task
+with no base runs therefore behaves as today. Under this rule `the-outcome-recorded-at-the-end-equals-the-one-the-branch-shows`
+stays green (its proof is unknown at the base); four `db_flow_test` tests went red, because a launched attempt's
+green proof is now `:satisfied`: one became M1's no-turn proof, three start red and a provider reply redefines the
+proof green (`fixed-chain-world`). Contradiction 2 is closed: lane cost-record2 released `seon.db`, so
+`seon.db/commit-database` opens the base. Section 3's batch fix landed: one `result-at-reach` call per step for
+all its proofs; the base read measured 3.9–5.4 ms warm for three real proofs (hybrid M1 row).
+
+Left as findings: `seon.cluster.agent/basis-valid?` still calls `datahike.api/commit-as-db` itself and can call
+`seon.db/commit-database`; `step-verdict` runs several times per pass (`task-finished?` in `proved-unanswered?`,
+`next-agent-work`, the block), so the base read repeats each time.
+
+The text below is the analysis that led to the decision.
 
 ## 1. A fork run cannot be recorded on the agent's branch (blocks proof 4, and through it proofs 2 and 3 for every agent that did not prove first)
 

@@ -297,7 +297,8 @@
        (is (= {:green 1} (:seon.task/proof-counts from-branch)) "the task's one proof is green")))))
 
 (deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main
-                         'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red}}
+                         'seon.context/a-prove-steps-red-proof-for-its-successor-is-not-a-reached-red
+                         'seon.context/a-proof-green-before-the-work-is-not-done}}
   each-step-kind-is-done-by-its-one-rule
   ;; head: each test's status at the step's branch head; fork point: the tests it held, true when red there
   (let [green {:seon.context/proof-status :green}
@@ -308,8 +309,12 @@
         judged (fn [step proofs product head fork-point]
                  (context/step-status {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
                                        :seon.context/head head :seon.context/fork-point fork-point}))]
-    (doseq [[step proofs product head fork-point status broken new-red why]
+    (doseq [[step proofs product head fork-point status broken new-red why green-before]
             [[:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p true} :done #{} #{} "its proof green, nothing broken"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p false} :satisfied #{} #{} "its proof known green at the fork point: nothing to do" #{'tq.rule/p}]
+             [:implement #{'tq.rule/p 'tq.rule/u} #{} {'tq.rule/p green 'tq.rule/u green} {'tq.rule/p true 'tq.rule/u false} :done #{} #{} "an existing green test tagged beside its red proof" #{'tq.rule/u}]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {} :done #{} #{} "an unknown fork point result is never green"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p false} :working #{'tq.rule/p} #{} "a proof green at the fork point that the change broke" #{'tq.rule/p}]
              [:implement #{} #{} {} {} :working #{} #{} "no proof proves nothing"]
              [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} :working #{} #{} "its proof red"]
              [:implement #{'tq.rule/p} #{} {'tq.rule/p pending} {'tq.rule/p true} :working #{} #{} "its proof unrun at its reach"]
@@ -326,7 +331,8 @@
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :working #{} #{} "a product its fork point already held is not new"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]]]
-      (is (= {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+      (is (= (cond-> {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+               green-before (assoc :seon.context/green-before green-before))
              (judged step proofs product head fork-point))
           why))))
 

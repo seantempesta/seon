@@ -539,5 +539,5 @@
            database (db/db connection)]
        (is (not= base (get (runner/reach-digests database [proof]) proof)) "the change reaches the proof")
        (is (= [0 1] (counts (first (runner/latest-results database [proof])))) "the newest execution is red")
-       (is (= [1 0] (counts (runner/result-at-reach database proof base))) "the base run answers at the base digest")
-       (is (nil? (runner/result-at-reach database proof (apply str (repeat 64 "0")))) "no run at a digest is absent")))))
+       (is (= [1 0] (counts (get (runner/result-at-reach database {proof base}) proof))) "the base run answers at the base digest")
+       (is (= {} (runner/result-at-reach database {proof (apply str (repeat 64 "0"))})) "no run at a digest is absent")))))

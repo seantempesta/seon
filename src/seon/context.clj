@@ -169,11 +169,12 @@
 
 (defn step-status
   "The status of a step from one observation: `:seon.context/broken`, the head's reds present at the fork point
-  and not red there; `:seon.context/new-red`, the head's reds absent there; and `:seon.task/status`, `:done` by
-  the step's one rule, else `:working`. An `:implement` step is done when its proofs are nonempty and all green,
-  nothing is broken and every new red is a proof; a `:prove` step when its own proofs are all green, its product
-  is nonempty, nothing is broken and its new reds are exactly its product, each red by failing
-  assertions or an unimplemented stub."
+  and not red there; `:seon.context/new-red`, the head's reds absent there; `:seon.context/green-before`, its
+  proofs known green there, when any; and `:seon.task/status`. An `:implement` step is `:satisfied` when its
+  proofs are nonempty, all green and all known green at the fork point: it has nothing to do. Else it is `:done`
+  when its proofs are nonempty and all green, nothing is broken and every new red is a proof. A `:prove` step is
+  done when its own proofs are all green, its product is nonempty, nothing is broken and its new reds are exactly
+  its product, each red by failing assertions or an unimplemented stub. Any other step is `:working`."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
     head :seon.context/head fork-point :seon.context/fork-point}]
@@ -181,12 +182,16 @@
         reds (into #{} (comp (map key) (filter #(= :red (status %)))) head)
         broken (into #{} (filter #(false? (get fork-point %))) reds)
         new-red (into #{} (remove #(contains? fork-point %)) reds)
+        green-before (into #{} (filter #(false? (get fork-point %))) proofs)
         green? (fn [tests] (every? #(= :green (status %)) tests))
+        satisfied? (and (= :implement step) (seq proofs) (green? proofs) (= (count green-before) (count proofs)))
         done? (case step
                 :implement (and (seq proofs) (green? proofs) (empty? broken) (every? proofs new-red))
                 :prove (and (green? proofs) (seq product) (empty? broken) (= new-red product)
                             (every? (comp designed-red? head) product)))]
-    {:seon.task/status (if done? :done :working) :seon.context/broken broken :seon.context/new-red new-red}))
+    (cond-> {:seon.task/status (cond satisfied? :satisfied done? :done :else :working)
+             :seon.context/broken broken :seon.context/new-red new-red}
+      (seq green-before) (assoc :seon.context/green-before green-before))))
 
 (defn held-task
   "The declaration of the task `agent-id` holds, read on `database`, its world (its branch holds its
@@ -201,12 +206,28 @@
             ;; a cardinality-many pull is a vector; the declaration holds a set
             (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
 
+(defn- base-results
+  "Each of `proofs` with a known result at the fork point of `agent-id`'s branch `database` (`seon.turn/fork-commit`):
+  the run the branch already holds at the reach digest the proof has in that commit (`seon.test.runner/result-at-reach`),
+  true when red, false when green. A proof with no run there, or absent there, is absent: unknown, never green."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:set :seon.test/sym]]
+                  [:or :seon.context/fork-point :seon.error/value]]}
+  [database agent-id proofs]
+  (let [commit (when (seq proofs) (turn/fork-commit database agent-id))
+        base (when commit (db/commit-database database commit))
+        names (when base (into [] (filter #(seq (db/datoms base :avet :seon.test/sym %))) (sort proofs)))
+        digests (when (seq names) (runner/reach-digests base names))
+        results (when (and (seq digests) (not (:seon.error/at digests))) (runner/result-at-reach database digests))]
+    (or (some #(when (:seon.error/at %) %) [digests results])
+        (into {} (keep (fn [[s result]] (case (proof-status result (get digests s)) :green [s false] :red [s true] nil)))
+              results))))
+
 (defn step-observation
   "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
   (`seon.task/obligations`), the head's entries for them and for `judged`, the tests the agent's test step
   found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
   present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
-  supplies the step's last record."
+  supplies the step's last record and each proof's known result at the fork point (`base-results`) replaces it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym
                        [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
                   [:or :seon.context/step-observation :seon.error/value]]}
@@ -216,10 +237,13 @@
         broken (set (or (:seon.context/broken judged) (:seon.agent/broken row)))
         new-red (set (or (:seon.context/new-red judged) (:seon.agent/new-red row)))
         head (when-not (:seon.error/at owed)
-               (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))]
-    (or (some #(when (:seon.error/at %) %) [owed head])
+               (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))
+        base (when (and (not judged) (map? head) (not (:seon.error/at head)))
+               (base-results database agent-id (set (filter head (:seon.task/proofs owed)))))]
+    (or (some #(when (:seon.error/at %) %) [owed head base])
         (assoc owed :seon.context/head head
-                    :seon.context/fork-point (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))))))
+                    :seon.context/fork-point (merge (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))
+                                                    base)))))
 
 (defn step-verdict
   "The held task's step on `database`, the agent's branch, judged by `step-status` over `step-observation`: the
@@ -248,6 +272,13 @@
       (seq broken) (assoc :seon.context/broken-tests (entries broken))
       (seq product) (assoc :seon.context/product-tests (entries product))
       (seq other) (assoc :seon.context/new-red-tests (entries other)))))
+
+(defn task-finished?
+  "True when the step of the task `agent-id` holds on `database`, the agent's branch, is done or satisfied
+  (`step-verdict`): nothing is left for a model turn to do."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (contains? #{:done :satisfied} (:seon.task/status (step-verdict database agent-id))))
 
 (defn task-done?
   "True when the step of the task `agent-id` holds is done on `database`, the agent's branch (`step-verdict`): the
@@ -458,7 +489,7 @@
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
     (or (some #(when (:seon.error/at %) %) (concat [found left proven verdict unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
-                                       held (assoc :seon.task/status (cond (= :done (:seon.task/status verdict)) :done
+                                       held (assoc :seon.task/status (cond (#{:done :satisfied} (:seon.task/status verdict)) (:seon.task/status verdict)
                                                                            (zero? left) :capped
                                                                            :else :working))
                                        namespace (assoc :seon.context/namespace namespace))}

@@ -66,6 +66,8 @@
   (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private context-task-done?
   (delay (requiring-resolve 'seon.context/task-done?)))
+(defonce ^:private context-task-finished?
+  (delay (requiring-resolve 'seon.context/task-finished?)))
 (defonce ^:private program-request-merge!
   (delay (requiring-resolve 'my.program/request-merge!)))
 (defonce ^:private context-end-summary-tx
@@ -2347,15 +2349,15 @@
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose first proof run on `database`, its branch, came
-  after every answering turn (`latest-answering-turn-t`) and its proofs are not all green: that red run is the
-  attempt's work, answered by the model turn it opens."
+  after every answering turn (`latest-answering-turn-t`) and its step is neither done nor satisfied
+  (`seon.context/task-finished?`): that red run is the attempt's work, answered by the model turn it opens."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/handle] :boolean]}
   [database agent-id handle]
   (let [proved-t (first-proof-run-t database agent-id)]
     (boolean (and (int? proved-t)
                   (attempt-running? database handle)
                   (> proved-t (latest-answering-turn-t database agent-id))
-                  (not (@context-task-done? database agent-id))))))
+                  (not (@context-task-finished? database agent-id))))))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2376,7 +2378,7 @@
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition and evaluated a form, or is the first
   in a row that evaluated none (`continuing-reply?`), and never once the held
-  task's proofs are all green (`seon.context/task-done?`). An agent whose task
+  task's step is done or satisfied (`seon.context/task-finished?`). An agent whose task
   ended (`task-end`, recorded by `end-task-call`) has its admission closed and
   is given no work, whatever wakes it.
   Virtual and system replies never authorize continuation.
@@ -2436,7 +2438,7 @@
               (when (or (seq wakes)
                         (proved-unanswered? db agent-id held)
                         (and (continuing-reply? db agent-id)
-                             (not (@context-task-done? db agent-id))))
+                             (not (@context-task-finished? db agent-id))))
                 (cond->
                  {:seon.turn.work/situation :open
                   :seon.agent/id agent-id}
@@ -5310,8 +5312,8 @@
 
 (defn- prove-turn
   "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no
-  model call and no form. Answers the pass closed, so the step's end (`end-task!`) ends the task `:done` when
-  every proof is green; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
+  model call and no form: the run at the base program, so a step whose proofs are all green there is
+  `:satisfied` (`seon.context/step-status`) and opens no model turn; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
   bound parks after its repeats."
   {:malli/schema [:=> [:cat :map] :seon.turn.loop/turn-report]}
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work report :seon.turn.loop/report}]
@@ -5460,7 +5462,7 @@
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
 
-(defn- fork-commit
+(defn fork-commit
   "The commit the agent's step is judged against, read on `database`, its branch: its open attempt's fork point
   (`:seon.task.attempt/fork`, a predecessor's end commit), else the commit its branch was forked at; nil on a
   branch with no fork (main itself)."

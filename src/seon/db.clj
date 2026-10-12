@@ -394,6 +394,13 @@
 
 (declare schema-database)
 
+(defn commit-database
+  "Open the commit `commit-id` of `database`'s store with primary indexes and the caller's cache identity; nil when
+  the store lacks it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id] [:maybe :seon.db/database-value]]}
+  [database commit-id]
+  (d/commit-as-db (schema-database database) commit-id {:secondary-indices? false}))
+
 (defn branch-database
   "Open the branch head's commit with primary indexes and the caller's cache identity."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
@@ -402,7 +409,7 @@
   (let [origin (schema-database database)
         head (k/get (:store origin) branch nil {:sync? true})]
     (when-let [commit (get-in head [:meta :datahike/commit-id])]
-      (d/commit-as-db origin commit {:secondary-indices? false}))))
+      (commit-database origin commit))))
 
 (defn undecoded-datoms
   "The datoms of `index` at `components` over `database`, as `[entity attribute value]` triples
