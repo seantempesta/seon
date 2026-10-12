@@ -543,7 +543,7 @@
 
 (defn create!
   "Create a runtime task in my world (`connection`: my branch, main for root; an agent's tasks
-  reach main with its successful end, `seon.cluster.squash/copy!`) from its declaration (7.8). Its handle is
+  reach main with its successful end, `seon.cluster.squash/merge!`) from its declaration (7.8). Its handle is
   the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
   changes nothing; a different one refuses with base, current and proposed unless
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol

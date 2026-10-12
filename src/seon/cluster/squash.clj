@@ -1,5 +1,5 @@
 (ns seon.cluster.squash
-  "Pure three-way squash merge of declared cluster facts."
+  "Three-way squash merge of declared cluster facts onto main, computed inside main's writer."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [seon.cluster.source :as source]
@@ -25,19 +25,6 @@
                                 (when (and other (not= entity other)) [entity other]))))
                           (d/datoms source :eavt entity)))))
           entities)))
-
-(defn- selected-coordinates
-  "Changed coordinates whose entity carries one of the selected identities."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.program/identity]
-                       [:maybe [:set :seon.program/identity]]]
-                  [:set :seon.program/identity]]}
-  [source coordinates selection]
-  (if (nil? selection)
-    coordinates
-    (let [past (d/history source)
-          entities (into #{} (mapcat (fn [[attribute value]]
-                                      (map :e (d/datoms past :avet attribute value)))) selection)]
-      (into #{} (filter #(entities (second %))) coordinates))))
 
 (defn add-count
   "Transaction data adding the source delta to the writer's current count."
@@ -81,18 +68,17 @@
   "Transaction data and conflicts for source relative to its merge base and target."
   {:seon/tasks #{'seon.cluster.squash/an-attempts-cluster-facts-copy-onto-main-by-identity}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
-                       :seon.db/database-value :seon.schema/projection
-                       [:maybe [:set :seon.program/identity]]]
+                       :seon.db/database-value :seon.schema/projection]
                   [:map [:tx-data :seon.store/transaction-data]
                    [:conflicts [:vector [:map [:entity :seon.db/entity-id]
                                          [:attribute :qualified-keyword]
                                          [:base :seon.schema/value]
                                          [:ours :seon.schema/value]
                                          [:theirs :seon.schema/value]]]]]]}
-  [source base target projection selection]
+  [source base target projection]
   (let [rules (program/cluster-attributes projection)
         attributes (set (keys rules))
-        coordinates (selected-coordinates source (program/changed-identities base source {} attributes) selection)
+        coordinates (program/changed-identities base source {} attributes)
         remap (collision-remap source base target (into #{} (map second) coordinates))
         mapped (into #{} (map (fn [[attribute entity]] [attribute (get remap entity entity)])) coordinates)
         before (program/projected-values base coordinates {})
@@ -105,7 +91,12 @@
         collisions (into #{} (keep (fn [[attribute entity]]
                                      (when (and (= :add (rules attribute)) (contains? remap entity))
                                        [attribute (get remap entity)]))) coordinates)
-        changes (set/union collisions (:seon.program/added comparison) (:seon.program/retracted comparison)
+        ;; a count the branch moved adds its delta to main's, even when main moved it to the same value
+        counted (into #{} (filter (fn [[attribute :as coordinate]]
+                                    (and (= :add (rules attribute)) (not (contains? remap (second coordinate)))
+                                         (not= (get before coordinate) (get theirs coordinate)))))
+                      coordinates)
+        changes (set/union collisions counted (:seon.program/added comparison) (:seon.program/retracted comparison)
                            (:seon.program/changed-on-branch comparison) (:seon.program/conflict comparison))]
     (reduce
      (fn [result [attribute entity :as coordinate]]
@@ -114,6 +105,7 @@
              o (get ours coordinate)
              conflict? ((:seon.program/conflict comparison) coordinate)
              rule (cond
+                    (counted coordinate) :add
                     (and conflict? (= :db.cardinality/many (get-in source [:schema attribute :db/cardinality]))) :members
                     (or conflict? (collisions coordinate)) (rules attribute)
                     :else :theirs)]
@@ -145,45 +137,62 @@
       (throw (ex-info (:seon.error/message created "The conflict's problem task was refused.") created)))
     nil))
 
-(defn copy!
-  "Squash `branch` onto main through `connection` as ONE transaction carrying `meta`
-  and the provenance (source branch and commit) as transaction metadata.
-  Each `:root` conflict is first written as root's problem task. Never a Datahike
-  merge: a parented commit would pin the branch's lineage to main for collection.
-  Answers what it copied."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch [:maybe [:set :seon.program/identity]] :map]
+(defn- merged
+  "Assignment `a`'s three-way on main `database` from its merge base (`:seon.task/merge-base`) to the source
+  commit `commit`, under `projection`'s rules: nothing when the base already is `commit`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
+                  [:map [:tx-data :seon.store/transaction-data] [:conflicts :seon.squash/conflicts]]]}
+  [database a commit projection]
+  ;; read from the datoms: inside the writer the value carries no projection of its own
+  (let [base-commit (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
+    (when-not (uuid? base-commit)
+      (throw (ex-info "The assignment has no merge base." {:seon.error/message "The assignment has no merge base."
+                                                          :db/id a :seon.squash/source-commit commit})))
+    (if (= base-commit commit)
+      {:tx-data [] :conflicts []}
+      (let [base (db/commit-database database base-commit)
+            source (db/commit-database database commit)]
+        (try (squash-merge source base database projection)
+             (finally (source/release! [base source])))))))
+
+(defn merge-tx
+  "Assignment `a`'s squash merge of the source commit `commit` onto main, computed inside main's writer on its own
+  `database` under main's `projection`: the three-way from its merge base (`:seon.task/merge-base`) to `commit`
+  against `database`, with the base moved to `commit` in the same transaction, so a repeat adds nothing; []
+  when the base already is `commit`. A `:root` conflict keeps main's value (`merge!` answers it)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
+                  :seon.store/transaction-data]}
+  [database a commit projection]
+  (let [base-commit (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
+    (if (= base-commit commit)
+      []
+      (conj (:tx-data (merged database a commit projection)) [:db/add a :seon.task/merge-base commit]))))
+
+(defn merge!
+  "Squash-merge `branch`'s head onto main through `connection` for assignment `a`: ONE transaction of
+  `merge-tx`, which runs the three-way inside the writer and advances the merge base, carrying `meta` and the
+  provenance (source branch and commit) as transaction metadata. Each `:root` conflict, kept as main's value,
+  is written as root's problem task. Never a Datahike merge: a parented commit would pin the branch's lineage
+  to main for collection. Answers what it merged and the conflicts the writer met."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/entity-id :seon.store/branch :map]
                   :seon.squash/copy]}
-  [connection branch selection meta]
+  [connection a branch meta]
   (let [target (db/db connection)
-        main-branch (get-in target [:config :branch])
-        source (db/branch-database target branch)
-        _ (when-not source
-            (throw (ex-info "The branch to squash has no head." {:seon.store/branch branch})))
-        base (source/merge-base source target main-branch branch)]
-    (when (:seon.error/at base) (throw (ex-info (:seon.error/message base "The branch has no merge base.") base)))
-    (try
-      (let [commit (db/commit-id source)
-            {:keys [tx-data conflicts]} (squash-merge source base target
-                                                      (or (db/carried-projection target) (schema/handed-projection))
-                                                      selection)
-            _ (run! #(conflict-task! connection branch %) conflicts)
-            report (db/transact! connection {:tx-data tx-data
-                                             :tx-meta (assoc meta :seon.squash/source-branch branch
-                                                             :seon.squash/source-commit commit)})]
-        (when-not (:db-after report)
-          (throw (ex-info (:seon.error/message report "The end copy was refused.") report)))
-        {:seon.squash/source-branch branch :seon.squash/source-commit commit
-         :seon.squash/datoms (count tx-data) :seon.squash/conflicts conflicts})
-      (finally (source/release! [base source])))))
-
-(defn squash-merge!
-  "Copy `branch`'s cluster facts onto main by hand, as an attempt's successful end
-  does (`copy!`), restricted to the identities `selection` names (nil: all).
-  Root's way to land an error end's branch; a second copy writes nothing new.
-
-  Example:
-  (seon.cluster.squash/squash-merge! {} :attempt-0123456789ab nil)"
-  {:malli/schema [:=> [:cat :seon.squash/context :seon.store/branch [:maybe [:set :seon.program/identity]]]
-                  :seon.squash/copy]}
-  [{connection :seon.db/connection} branch selection]
-  (db/with-branch {:seon.db/connection connection} #(copy! connection branch selection {})))
+        head (db/branch-database target branch)
+        _ (when-not head
+            (throw (ex-info "The branch to merge has no head." {:seon.error/message "The branch to merge has no head."
+                                                               :seon.store/branch branch})))
+        commit (try (db/commit-id head) (finally (source/release! [head])))
+        projection (or (db/carried-projection target) (schema/handed-projection))
+        report (db/transact! connection {:tx-data [[:db.fn/call merge-tx a commit projection]]
+                                         :tx-meta (assoc meta :seon.squash/source-branch branch
+                                                         :seon.squash/source-commit commit)})
+        _ (when-not (:db-after report)
+            (throw (ex-info (:seon.error/message report "The merge was refused.") report)))
+        ;; the conflicts merge-tx met, derived again from the value it read
+        conflicts (:conflicts (merged (:db-before report) a commit projection))]
+    (run! #(conflict-task! connection branch %) conflicts)
+    {:seon.squash/source-branch branch :seon.squash/source-commit commit
+     ;; the merged facts: neither the transaction's own metadata nor the moved merge base
+     :seon.squash/datoms (count (remove #(or (= (:tx %) (:e %)) (= :seon.task/merge-base (:a %))) (:tx-data report)))
+     :seon.squash/conflicts conflicts}))

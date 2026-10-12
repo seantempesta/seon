@@ -30,7 +30,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection]
                   [:map-of :qualified-keyword :map]]}
   [source base projection]
-  (let [whole (costs (profile/measure #(squash/squash-merge source base base projection nil)))
+  (let [whole (costs (profile/measure #(squash/squash-merge source base base projection)))
         changed (db/since (db/history source) (db/basis-t base))]
     {::squash whole
      ::attributes (into {}

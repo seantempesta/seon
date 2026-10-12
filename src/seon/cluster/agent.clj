@@ -1911,14 +1911,28 @@
         (when (seq rows) (write! connection rows))))
     nil))
 
+(defn- write-merge-base!
+  "Write on main attempt `key`'s merge base, the commit its `branch` forked at (`seon.cluster.registry/base-commit-id`),
+  unless main already holds one: `seon.cluster.squash/merge-tx` moves it from there."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch [:maybe :seon.task/assignment]] :nil]}
+  [handle branch key]
+  (when key
+    (let [connection (:seon.db/connection handle)
+          database (db/db connection)
+          row (db/pull database [:db/id :seon.task/merge-base] [:seon.task/assignment key])]
+      (when-not (:seon.task/merge-base row)
+        (write! connection [[:db/add (:db/id row) :seon.task/merge-base (registry/base-commit-id database branch)]]))))
+  nil)
+
 (defn- start-attempt!
   "Start a `:start-flow` action's graph under its intent.
-  Fork its branch, acquire the branch execution, write its agent and attempt
-  there when the fork point predates them (`seed-attempt!`), and start its flow.
+  Fork its branch, record its merge base on main (`write-merge-base!`), acquire the branch execution, write its
+  agent and attempt there when the fork point predates them (`seed-attempt!`), and start its flow.
   A repeat finds the branch, its rows and the started graph and does nothing new."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/facts :seon.flow.plan/action] :nil]}
   [handle _facts {agent-id :seon.agent/id branch :seon.task/branch intent :seon.task/execution :as action}]
   (fork-attempt! handle branch (:seon.task/assignment action))
+  (write-merge-base! handle branch (:seon.task/assignment action))
   (let [execution (acquire-context! handle nil {:seon.agent/branch branch})]
     (seed-attempt! handle (:seon.db/connection execution) action)
     (start-branch-flow! handle execution agent-id (or intent :running))
@@ -2023,8 +2037,8 @@
                                :seon.task/name (str "attempt-ended-" key) :seon.task/kind :work
                                :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
                                                       (when reason (str ": " reason)) ". Nothing was copied to main;"
-                                                      " its branch " (name branch) " is kept. Copy it by hand with"
-                                                      " seon.cluster.squash/squash-merge!, or destroy it with"
+                                                      " its branch " (name branch) " is kept. Merge it by hand with"
+                                                      " seon.cluster.squash/merge!, or destroy it with"
                                                       " my.agent/retire-branch!.")})]
     (when (:seon.error/at created)
       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
@@ -2146,8 +2160,8 @@
 
 (defn land-ends!
   "Land each of `ends` on main, then stop its graph and settle its branch (P2).
-  A :done or :sent-back end is copied by `seon.cluster.squash/copy!` (ONE main
-  transaction); an error end copies nothing and becomes root's problem task.
+  A :done or :sent-back end is squash-merged by `seon.cluster.squash/merge!` (ONE main
+  transaction, its merge base advanced in it); an error end copies nothing and becomes root's problem task.
   The graph stops without interrupting the pass that wrote the end, and is joined.
   A merge request still open keeps the branch until it closes (`seon.task/close!`),
   landing it with no root when `:seon.config.root/land?` says so; else a successful
@@ -2162,7 +2176,7 @@
         (let [copied? (#{:done :sent-back} end)]
           (if copied?
             (db/with-branch {:seon.db/connection connection}
-                                  #(squash/copy! connection branch nil {:seon.squash/attempt a}))
+                            #(squash/merge! connection a branch {:seon.squash/attempt a}))
             (record-error-end! connection ended))
           (when-let [registry (entry-registry routing agent-id)]
             (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))

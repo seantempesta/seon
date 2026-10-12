@@ -99,6 +99,7 @@
  :assigned [:and {:seon.db/index true :description "The assigned task's handle, a value, never a ref (7.2)."} :seon.task/handle]
  :agent [:and {:seon.db/index true :description "The agent an assignment names."} :seon.db/ref]
  :branch [:and {:description "The branch the work is on."} :seon.store/branch]
+ :merge-base [:uuid {:description "The main commit an assignment's branch merges from: the commit its branch forked at, written by root on main once the branch exists (seon.cluster.agent/start-attempt!), then the source commit each merge took, moved inside that merge's transaction (seon.cluster.squash/merge-tx), so a repeated merge adds nothing."}]
  :assignment-row [:map {:seon.db/attributes true :seon.program/partition :seon.cluster}
                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                   [:seon.task/revision {:seon.cluster/conflict :ours :description "Derived from the task's declaration by the writer that revises it (seon.task/advance-assignments-tx), so main's own advance wins a concurrent one: the conflict that matters is the task's, reported once."} :seon.task/revision] [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
@@ -106,6 +107,7 @@
                   [:seon.task.attempt/end {:optional true} :seon.task.attempt/end] [:seon.task.attempt/target {:optional true} :seon.task.attempt/target]
                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason] [:seon.task.attempt/commit {:optional true} :seon.task.attempt/commit]
                   [:seon.task.attempt/fork {:optional true} :seon.task.attempt/fork]
+                  [:seon.task/merge-base {:optional true} :seon.task/merge-base]
                   [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
                   [:seon.task.attempt/relaunch-fork {:optional true} :seon.task.attempt/relaunch-fork]]
  :merge-request [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/merge-request-row

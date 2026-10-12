@@ -573,12 +573,13 @@
                   "and the reason")
               (pass! handle routing)
               (is (= 1 (count (copies (db/db connection) a))) "a second pass writes nothing")
-              (testing "root's by-hand copy lands what the success path would"
-                (let [copied (squash/squash-merge! {:seon.db/connection connection} branch nil)]
-                  (is (pos? (:seon.squash/datoms copied)))
+              (testing "root's by-hand merge lands what the success path would"
+                (let [merge! #(db/with-branch {:seon.db/connection connection} (fn [] (squash/merge! connection a branch {})))
+                      merged (merge!)]
+                  (is (pos? (:seon.squash/datoms merged)))
                   (is (= "Refined on the branch." (intent)))
-                  (is (zero? (:seon.squash/datoms (squash/squash-merge! {:seon.db/connection connection} branch nil)))
-                      "and a second copy writes nothing new")))))))))))
+                  (is (zero? (:seon.squash/datoms (merge!)))
+                      "and a second merge writes nothing new")))))))))))
 
 ;;; P4: an attempt's world holds its own assignment, so nothing it reads reaches main.
 

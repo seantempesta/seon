@@ -797,14 +797,23 @@
 (deftest ^{:seon/tasks #{'seon.flow/an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted}}
   a-deleted-attempts-storage-is-reclaimed-by-the-next-collection
   ;; Datahike's mark (`gc.cljc` reachable-in-branch) walks every head; an end copy is a plain
-  ;; transaction with no parent link, so a deleted attempt's commits and nodes reach nothing and are swept.
+  ;; transaction with no parent link (`seon.cluster.squash/merge!`), so a deleted attempt's commits and nodes reach
+  ;; nothing and are swept.
   (with-program-store
    (fn [store connection]
      (let [handle (task/task-handle 'fixture.tasks "reclaimed" :function)
            branch :attempt-reclaimed
+           ;; this store holds the program's attributes and no cluster, so the assignment's agent is its
+           ;; identity alone: the merge validates the assignment it moves, never the agent it names
+           _ (d/transact connection [{:seon.agent/id "reclaimed"}])
            _ (test-support/transacted! connection [(test-support/task-row handle "Original")])
-           baseline (clean-key-count store)
-           base (db/db connection)]
+           [row] (task/attempt-tx (db/db connection) handle "reclaimed" branch)
+           _ (test-support/transacted! connection [row])
+           base (db/db connection)
+           a (:db/id (db/pull base [:db/id] [:seon.task/assignment (:seon.task/assignment row)]))
+           ;; the fork below is taken at `base`, so `base` is the assignment's merge base
+           _ (test-support/transacted! connection [[:db/add a :seon.task/merge-base (db/commit-id base)]])
+           baseline (clean-key-count store)]
        (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch branch
                                                      :seon.cluster.registry/from (db/commit-id base) :seon.db/db base})))
        (let [fork (db/carry-connection-projection-state! (store/open-branch! store branch)
@@ -817,7 +826,7 @@
                                          (db/commit-id (db/db fork))))))
                           (finally (store/release-branch! fork)))
              before-copy (clean-key-count store)
-             copied (db/with-branch {:seon.db/connection connection} #(squash/copy! connection branch nil {}))
+             copied (db/with-branch {:seon.db/connection connection} #(squash/merge! connection a branch {}))
              with-copy (clean-key-count store)]
          (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
          (is (pos? (:seon.squash/datoms copied)))
