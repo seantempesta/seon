@@ -7,7 +7,7 @@
  #:seon.task{:name "the-call-state-is-an-atom"
              :kind :function
              :intent "The call-state atom (atom audit A008/A009) still holds plans and the snapshot; the direct pure-memo replacement cost +2.4 us per call (+28%, 0.50 -> 2.94 us) on a hook that runs on every SCI Var call. Design recorded: key the projection-held memo by commit identity first, call internals unarmed, hold plans in a projection-held LRU keyed by revision key plus symbol."
-             :must-read #{seon.call-preparation/hook seon.call-preparation/snapshot}
+             :must-read #{seon.call-preparation/snapshot}
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"}}
  #:seon.task{:name "a-map-argument-missing-its-database-is-refused-not-supplied"
              :kind :function

@@ -1,9 +1,4 @@
-[#:seon.task{:name "a-live-io-prepl-session-has-no-idle-bound"
-             :kind :function
-             :intent "Every eval_clj session_id opens an io-prepl session (a socket in the one shared bridge, a thread in the JVM) that lives until an error, a timeout or its JVM's replacement. Sessions whose JVM is gone are now released when runtime_status lists them; a finished lane's session on the live JVM is not, because a caller's going away is invisible to the shared bridge. Declare an idle limit as a cluster config dial, enforced by the owner that observes idleness (the JVM's prepl server), and answer a released named session with its declared :session-lost."
-             :must-read #{seon.dev.mcp/execute-clj-eval}
-             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}
- #:seon.task{:name "large-source-request-fails-in-the-bridge",
+[#:seon.task{:name "large-source-request-fails-in-the-bridge",
             :kind :function,
             :intent
             "MCP eval_clj request containing load-string of about 95 KB source fails immediately with 'Tool eval_clj failed in the MCP bridge (PREPL evaluation failed.)' and misleading start-JVM guidance, while {:alive true} succeeds and same source loads when assembled through separate smaller requests. Verify actual bridge failure and report a structured size/compilation error; do not claim a limit from this one observation.",
