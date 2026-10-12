@@ -12,6 +12,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
+            [seon.cluster.wake :as wake]
             [seon.merge :as merge]
             [seon.batch]
             [seon.config :as config]
@@ -109,6 +110,14 @@
   (testing "an invalid running leaf is a problem, never an attempt"
     (is (= [[:problem b] [:attempt a] [:start-flow a]]
            (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/invalid #{b}}) (plan-registry) 4))))))
+
+(deftest a-publication-wakes-the-pass-that-deletes-the-merged-branch
+  ;; `seon.merge/publish!` writes :seon.task/git-commit and nothing else after it; the branch's
+  ;; :delete-branch is derived by the next pass, so that fact must be one of the wakes that start it
+  (test-support/with-database
+   (fn [connection]
+     (is (contains? (wake/starting-attributes (db/db connection)) :seon.task/git-commit)
+         "the publication's own write wakes db<->flow"))))
 
 (deftest
   each-intent-is-one-flow-action
