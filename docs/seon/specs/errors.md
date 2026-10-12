@@ -315,7 +315,7 @@ repeat), the `-valid?` predicates and generators, `seon.fault` folding, steward 
 
 ## 7. Slices
 
-Preparatory slices are invisible unless labeled; each lands through `bin/lane commit --test`, HEAD boots after each, and
+Preparatory slices are invisible unless labeled; each is committed through `bin/lane commit --test`, HEAD boots after each, and
 each is dual-reviewed. Then ONE dependency-complete cut, proven by publishing and transacting on a branch of the live store
 before it is committed.
 
