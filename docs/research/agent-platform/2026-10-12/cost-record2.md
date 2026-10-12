@@ -4,6 +4,8 @@ type: research
 status: in progress
 ---
 
+f18ab95e3 reverted in this commit (revert-fressian): measured regression; the encoder call count was a proxy, not the cost.
+
 # Recording and acquisition cost, second investigation
 
 The recording transaction passes through `seon.db/transact-call`, Datahike's
