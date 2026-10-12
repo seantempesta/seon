@@ -206,3 +206,10 @@
                                   (some? (some #{"README.md"} (:seon.ref/nearest error)))]))
     "#the-goal" [:file "the-goal" false true]
     "#" [:file nil false true]))
+
+(deftest a-name-resolved-at-top-level-is-cited-by-name-below
+  ;; my.task/current's docstring names seon.context/task-sections; the text cites both, so the second shows once
+  (let [[current task-sections] (ref/references (db/db) {:seon.ref/text "`my.task/current` and `seon.context/task-sections`"})
+        below (first (filter #(= 'seon.context/task-sections (:seon.ref/name %)) (:seon.ref/references current)))]
+    (is (some? (:seon.fn/source task-sections)) "at top level the name shows its content")
+    (is (= {:seon.ref/name 'seon.context/task-sections} below) "below it is cited by name only")))

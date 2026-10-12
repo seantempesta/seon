@@ -306,6 +306,23 @@
     problem-kind (assoc found :seon.ref/message (problem-messages problem-kind))
     :else (resolve-path database found)))
 
+(defn- cite-once
+  "`answers` with each name shown once: a name resolved at top level, or already shown below an earlier referent, is
+  cited by its `:seon.ref/name` alone in every later mention."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [answers]
+  (let [shown (into #{} (keep :seon.ref/name) answers)]
+    (second
+     (reduce (fn [[seen kept] answer]
+               (let [[seen below] (reduce (fn [[seen below] brief]
+                                            (let [n (:seon.ref/name brief)]
+                                              (if (and n (seen n))
+                                                [seen (conj below {:seon.ref/name n})]
+                                                [(cond-> seen n (conj n)) (conj below brief)])))
+                                          [seen []] (:seon.ref/references answer))]
+                 [seen (conj kept (cond-> answer (seq below) (assoc :seon.ref/references below)))]))
+             [shown []] answers))))
+
 (defn references
   "Each reference `source`'s text makes, resolved on `database` or a problem.
 
@@ -323,7 +340,8 @@
          (reduce (fn [[seen kept] c] (if (seen (identity-of c)) [seen kept] [(conj seen (identity-of c)) (conj kept c)]))
                  [#{} []])
          second
-         (mapv #(answer database %)))))
+         (mapv #(answer database %))
+         cite-once)))
 
 (defn names
   "The qualified symbols `text` cites as code spans, read by the one rule `references` resolves."
