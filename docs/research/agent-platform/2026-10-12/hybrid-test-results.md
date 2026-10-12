@@ -1,144 +1,322 @@
 ---
 title: "Hybrid: which tests are red, and which reds a change caused, as Seon data"
 type: research
-status: hybrid of plan-test-results-opus.md (f8e361b17) and plan-test-results-astra.md (f60ceee3b) over dig-test-results.md, under AGENTS.md 2026-10-12 and the owner rules in the planners' brief (simple and performant over rare edge cases; no guards or fences; Clojure, Datahike, Malli, clojure.test and git words). Narrow check self-applied (§8) before this commit. Owner questions in §6 are open; every phase in §5 fits either answer. No task is filed by this document.
-basis: HEAD f60ceee3b. Code read by symbol: `seon.test.runner/result-at-reach`, `newest-results`, `latest-results`, `red-at-current-reach?`, `red-result?`, `reach-digests`; `seon.test/fork-point-red`, `change-reds`, `admit-run`, `verified?`, `recorded-result`, `green-members`; `seon.turn/record-broken!`, `test-step`, `run-reaching`, `request-summary`, `summary`, `fork-commit`; `seon.context/proof-status`, `head-entries`, `designed-red?`, `step-status`, `base-results`, `step-observation`, `step-section`, `main-database`; `seon.cluster.branch-evidence/test-evidence`, `verdict`, `branch-evidence`; `seon.cluster.source/red-test-verdicts`, `red-test-refusal`, `accept-merge!`; `seon.cluster.agent/release-context!`; `seon.operator/run-candidate-tests!`, `check!`; `seon.central-round/batch-form`, `run-round!`, `-main`; `bin/lane` (evidence and commit), `bin/test-check`; schemas `seon.context.edn`, `seon.agent.edn`, `seon.turn.loop.edn`, `seon.test.run.edn`, `seon.test.member.edn`, `seon.source.edn`. Probes on default (archive at commit `6acc8213…`, `runtime_status` faulted: 3 open faults, 8 agent-error signatures, 37 errored receipts, 1 failed test, heap 2.08 GB of 4 GB; agent `hybrid-tr`, SCI on its own branch `:agent-8294aa2c7a6f`, retired after; root in jvm mode read-only except one disposable fork, §7).
+status: hybrid of plan-test-results-opus.md (f8e361b17) and plan-test-results-astra.md (f60ceee3b) over dig-test-results.md, revised in place by lane tr-revise (Opus) after narrow-check-test-results.md (6d82fc948) and the owner's rule of 2026-10-12 ("Do not re-run any tests that don't need to be re-run"). The owner's rule replaces the four questions of the first version (§7). Narrow check self-applied (§9). No task is filed by this document.
+basis: HEAD 6d82fc948. Code read by symbol: `seon.test/select`, `green-members`, `measured-body`, `admit-run`, `fork-point-red`, `change-reds`, `run-request`; `seon.test.runner/reach-digests`, `reach-index`, `reached-graph`, `reach-graph`, `reach-attribute`, `reach-revision-key`, `reach-node`, `reach-schema-node`, `reach-memberships`, `result-at-reach`, `latest-results`, `record-latest-tx`; `seon.batch/sink`, `executed`, `top`; `seon.profile/timed`; `seon.fn.analyzer/attributed-usages`; `seon.db/content-revisions`, `entities-changed-after`, `*read-evidence-sink*`; `seon.config/effective`; `seon.turn/run-reaching`, `test-step`, `record-broken!`, `request-summary`, `fork-commit`; `seon.context/step-observation`, `head-entries`, `base-results`, `step-status`, `step-section`, `main-database`; `seon.problems/failed-tests`, `families`; `seon.cluster.branch-evidence/test-evidence`, `verdict`. Probes on default (§8): `runtime_status` faulted (5 open faults, 9 agent-error signatures, 42 `:seon.problems/errored-receipt` entries, 7 failed tests, heap 0.70 GB of 4 GB); root in jvm mode read-only; agent `tr-revise` in sci mode on its own branch `:agent-a6b431a443a0`, retirement requested after.
 ---
 
 # Which tests are red, and which reds a change caused
 
 ## 1. The design in one page
 
-**What exists.** A test result is a content-addressed fact: each member of a run carries the reach digest and the evaluator of what it ran (`:seon.test.member/reach-digest`, `:seon.test.member/evaluator`), so a result recorded anywhere is true wherever that digest occurs. `seon.test.runner/result-at-reach` reads the newest admitted result at exactly one digest on any database value. M1 already reads a proof's base result this way (`seon.context/base-results`). Everything else judges by eye or by a run thrown away: `seon.turn/record-broken!` asks `seon.test/fork-point-red` for each red, which runs the test on a child branch forked at the base and then releases the child (`seon.cluster.agent/release-context!` → `seon.cluster.registry/retire-branch!`), so the base result is lost after the call; `seon.cluster.branch-evidence/test-evidence` asks `red-at-current-reach?` on the cluster head, which can answer red-before only if main holds a run, and the hand list `--accept-red-before` is the way through; `bin/seon check` judges by its throwaway JVM's exit; the central round's 2,832 answers live in `tmp/` text. Both plans reach the same skeleton: one pure read at the base's own digests, main filled only by runs root already makes, unknown kept unknown, the hand list deleted. The hybrid takes that skeleton with Opus's smaller shape and Astra's two corrections.
+**The owner's rule.** A test result is a fact keyed by what the test ran. A test runs only when its key has no result; a
+result at a key is reused wherever that key occurs (its branch, main, after a merge), red and error included. Nothing
+is re-run that cannot have changed.
 
-**The one correction both plans make, verified (§7 P2).** A reached test has a *different* reach digest at the head than at the base (`f-is-one`: `539bb38d…` at the base, `41b1a9fa…` after the change), so "main's result at the same digest as my red" answers nothing (`result-at-reach base-db head-reach` → `{}`). The question is asked at each side's own digest: the base's digests are computed on the base commit's value, then read on the branch and on main. This is what `base-results` does for proofs today and what `fork-point-red` does for its inherited case; the design makes it the one read for every red.
+**The key** is the tuple Seon already stores, with two inputs it misses today added at their producers (§2):
 
-**The data.** A run is `:seon.test.run/*`, unchanged, `:seon.program/partition :seon.data` (owner question Q1 prices the alternative; nothing below depends on it). No new entity, no comparison schema, no baseline file. One change of shape: `:seon.context/fork-point` becomes `test → :seon.context/proof-status` (`:green`, `:red`, `:pending`, the enum the head already uses; absent means the base does not hold the test). Today it is `test → boolean` and its two producers disagree on an unknown base: `step-observation` rebuilds `(not (broken s))` (green there) and `fork-point-red` merges `(zipmap present (repeat false))` (green there), so a base that could not be run inside the step's bound makes the test **broken**. Neither is "unknown". `step-status` derives one set per rule:
+| Component | Stored on | Covers |
+|---|---|---|
+| `:seon.test.member/reach-digest` | member | the test and every declaration its static closure reaches (calls, references, quoted symbols, subject), each declaration's behavior digest, and every schema form its keywords and contracts name, transitively (`seon.test.runner/reach-index`, a Merkle hash over components) |
+| + the declarations the body executed outside that closure (new, §2.1) | member | computed names, `requiring-resolve` of a built symbol, anything the static graph cannot see |
+| `:seon.test.member/evaluator` | member | compiled and interpreted are different executions (205 tests red only interpreted) |
+| `:seon.test.run/input-digest` | run | files and dependency versions under `seon.test.cache/input-roots` (deps.edn, local roots, gitlinks) |
+| `:seon.test.run/config-digest` (new, §2.2) | run | the cluster configuration the test read its dials from |
 
-| Head | Base | Set | Meaning |
+**The one read.** `seon.test.runner/results-at` `(databases keys) → {test result}`: for each test, the newest completed
+result at its key in any of `databases`, newest first; a test with no such result is absent (unknown). It generalizes
+`result-at-reach` (which matches the reach digest only) and runs nothing, so selection, the block, a render,
+`--branch-evidence` and `bin/seon check` all call it. `databases` is the asker's own branch and main's head
+(`seon.context/main-database`, already read from a branch for costs); for root it is main and every live branch head.
+
+**Selection** (`seon.test/select`) runs exactly the selected tests whose current key has no result. Today it reuses a
+green at an equal reach digest but a red only "while the program is also unchanged since it ran"
+(`red-holds?` against `program-revisions-digest`), so any program write reruns every red: root's
+`(doc my.root/close!)` ran 54 tests in 10.6 s and 4.3 GB (narrow check, brief); on `tr-revise`'s branch, after one
+unrelated `defn`, `select` lists the red `t-red` to run although its latest result sits at its current reach digest
+`1efe171c…`, and reuses the two greens (§8 P3). That condition is a fence: it stands in for the stale-Var class
+(`seon.test/an-unchanged-red-is-reused-after-the-agent-redefines-what-it-reaches`, a red recorded at a new digest by an
+old body). Greens are exposed to the same class and reuse anyway. Phase R1 deletes the fence; R2 closes the class for
+both colors at its producer: a result whose executed definitions differ from the tested program has no key.
+
+**Judgment** ("did my change cause this red?") is the same read at the base's own keys: a reached test has a new key at
+the head, so the base's keys are computed on the base commit's value and read on the branch and main (verified in the
+first version and again by the narrow check: `66f93e8a`→`5bfb2c9d`). A base result nobody holds is run once, on a child
+at the base, and kept on the agent's branch, where every later step reuses it by its key (owner, Q4). The step's
+judgment is then derived on read: `:seon.agent/broken` and `:seon.agent/new-red` are deleted.
+
+| Head | Base (`results-at` at the base key) | Set | Meaning |
 |---|---|---|---|
 | `:red` | `:green` | `:seon.context/broken` (exists) | the change caused it |
-| `:red` | `:red` | red-before, counted in `:seon.context/test-counts`, never listed | red before the change (failing differently is still red before: owner, simple over rare cases) |
-| `:red` | `:pending` | `:seon.context/unknown` (new) | nobody knows; never green, never the change's |
-| `:red` | absent | `:seon.context/new-red` (exists) | a test the change added (a Prove step's product, or a designed red) |
-| `:pending` | any | pending | unrun at its reach: never red, never green |
+| `:red` | `:red` | red-before, counted in `:seon.context/test-counts`, never listed | red before the change |
+| `:red` | absent result | `:seon.context/unknown` (new) | not yet known; never green, never the change's |
+| `:red` | test absent at the base | `:seon.context/new-red` (exists) | a test the change added |
+| `:pending` | any | pending | unrun at its key: never red, never green |
 
-`:seon.agent/broken` and `:seon.agent/new-red` stay the step's record on the agent entity on its branch, written by `record-broken!`; `:seon.agent/unknown` joins them. Owner question Q4 says whether that record stays (the owner's M1 rule: no `admit-run` change, no `fork-point-red` or `record-broken!` change) or the fork run is kept instead and the record deleted; the read below is the same either way.
+**What main holds.** Runs are `:seon.program/partition :seon.data` and never merge (owner, Q1). There is no batch tier
+on main (owner, Q2): main runs only keys nobody ran. Main's results come from root's own requests (5 runs, 56 tests
+today, §8 P2), root's reads of live branches at equal keys, and root's merge gate, whose answers root records on main
+(R8, the one point §7 asks the owner to confirm).
 
-**The one read: `seon.test.runner/fork-point`** `(databases base tests evaluator) → {test status}`. The base reach digests of the `tests` the base holds (`reach-digests` on the base commit's value, `seon.db/commit-database`); then one `result-at-reach` per database in `databases`, keeping members whose `:seon.test.member/evaluator` equals `evaluator`, newest first; a test present with no such result is `:pending`. `databases` is the branch and main's head read from the branch (`seon.context/main-database`, which already does this read for costs; verified from my branch: `[:cluster-default 1]`). It writes nothing and runs nothing, so a render may call it. Measured on my branch: two tests, three `result-at-reach` reads, 3.5 ms, 3.7 MB, 32 reads; `reach-digests` for three real tests 322 ms and 502 MB the first time on this JVM, 1.75 ms after (§7 P3). The evaluator is part of the key because selection already reuses only runs of the requesting kind and 205 tests were red only interpreted (`interpreted-tier.md`); both plans agree, so it is not an owner question. Main's one run shows why the *member's* evaluator keys, not the run's: the request was `:compiled` and the member ran `:interpreted` (§7 P1).
+**Nondeterminism** (owner, Q3): two completed results at one key that disagree are a defect of the test. They arise
+only from an explicit `:seon.test/rerun?` or two runs racing, since nothing else reruns a key. `seon.problems` derives
+them as their own family; the newest result answers meanwhile; root files the test's task.
 
-**Unknown resolves at most once, where a decision needs it.** The block never runs a test: an agent sees `unknown` and the form that resolves it. The test step keeps today's `fork-point-red` for the head's reds (one run per red on a child at the base: 294 ms and 249 MB for a 0.07 ms test, §7 P5; the cost the stored main results remove), with one change: no result → `:pending`, never `false`. `--branch-evidence` and merge acceptance do the same at the cluster head under `:interpreted`, as `change-reds` does today. Unreached tests keep their base digest, so no request reruns them and they can never be the change's.
+**Cost.** Selection after an unrelated write executes zero bodies (R1's measured proof). The key costs one reach
+derivation per changed program; today a changed program's first derivation for three tests is 390–805 ms and
+0.6–1.8 GB (narrow check claim 11, cost-gb item 2), and a whole program 3–5 s and 5–6 GB. R11 makes it proportional to
+the changed declarations: attribute maps updated from the entities changed since the previous revision instead of
+re-read, node facts taken from those maps instead of one pull per node.
 
-**How main gets results** (owner question Q2; three sources, no second mechanism):
-1. **The restart batch's round, run as root on default.** `seon.central-round/batch-form` already records on default's own connection (`:seon.test/recording-connection connection#` from `seon.operator.runtime/running-instances`): main's one run today, `764ebff07cf9`, is exactly this shape (`:named`, request `:compiled`, `:cluster-default`). The round ran on an isolated root that was nuked; the change is where it runs, and `-main` answers run ids instead of writing `OUT` text. Compiled bases for `bin/seon check` and root's totals.
-2. **Root's gate run on the merge branch (after M7).** Whether that run reaches main is Q1: as data it stays on the merge branch; as program, or by a selection rule in `merge-tx`, it merges with the code it tested.
-3. **Nothing else.** No extra base run on main (owner, `m1-notes.md`). An agent's own base runs stay on its branch.
+## 2. Each way the key could miss a dependency, closed at its producer
 
-**How it renders.** The reply's test summary (`:seon.turn.loop/test-summary`) gains `:seon.turn.loop/broken` for every agent (today only a task holder), `:seon.turn.loop/unknown` and the count `:seon.turn.loop/red-before`; absent when empty. The current-state block's step section (`seon.context/step-section`) opens with `:seon.context/test-counts` `{:broken :unknown :red-before :new-red}`, then `:seon.context/broken-tests` (exists, with failing assertions), `:seon.context/unknown-tests` (symbols only) and `:seon.context/new-red-tests` (exists); red-before is counted, never listed (owner: steer by totals); the section carries `:seon.render/form (my.test/reds)`: each red of the agent's last step with its head result, base status and the run ids behind both. Measured through the value printer and `seon.ai.tokens/estimate` (§7 P4): counts only 54 tokens; three broken with one failing assertion each and two unknown 364 tokens; the reply's addition 48 tokens. Today an agent holding no task sees nothing: its block shows only `:seon.context/turns`, and its reply shows `:seon.turn.loop/red [f-is-one]` with no origin (§7 P2).
+### 2.1 Calls the static graph cannot see
 
-**One answer, three entrances.** MCP `eval_clj`: the block, or `(my.test/reds)`. `bin/lane commit --branch-evidence AGENT`: `test-evidence` sorts a reaching red by `fork-point` at the cluster head, a `:pending` one resolved by one `fork-point-red` there under `:interpreted` within the check dial: `:red` → `:seon.source/red-before`, a positive fact that proves and is named in the trailer; `:green` → `:seon.source/broken`, refuses; still `:pending` → unproven, naming the test and the form. `--accept-red-before`, `:seon.source/accepted-red-before` and the "accepted" trailer are deleted. `bin/seon check`: the throwaway JVM already writes its members as EDN when `SEON_TEST_RESULT_FILE` is set (`bin/test-check`, read by `seon.test.platform/run-check!`); `check!` reads that file and judges each red member over the live root's prepl by `fork-point` on main at HEAD under `:compiled`: red at both does not refuse; green at the base refuses; unknown refuses as today. That retires `seon.operator/bin-lane-commit-cannot-accept-a-test-already-red-on-head`.
+Verified (§8 P4, P5): clj-kondo's analysis already counts a quoted symbol as a reference
+(`seon.fn.analyzer/attributed-usages` joins `:symbols`), so `(resolve 'trr.probe/k)` and every
+`(delay (requiring-resolve 'seon.test/run))` in `seon.turn` are in static reach (`seon.turn/test-run` references
+`[seon.test/run]` on main). Missed: a name built at run time. `t-dyn` calls `k2` through
+`(requiring-resolve (symbol "trr.probe" (str "k" 2)))`; after `k2` changed from 4 to 5 the step ran nothing and
+`select` reused `t-dyn`'s green while its body answered false.
 
-**Deleted by this design:** the boolean fork point and its two disagreeing defaults; `seon.test.runner/red-at-current-reach?`; `--accept-red-before`, `bin/lane evidence … -- TEST`, `:seon.source/accepted-red-before`; the central round's `OUT` file; hand diffing of reds in commit messages and `tmp/`. `seon.test/change-reds` and `red-test-verdicts` are M7's to delete (hybrid-done-and-merge); until then `change-reds` reads `fork-point` like everyone else.
+The producer already observes what ran. `seon.profile/timed` counts every instrumented call into the call sink of the
+executing context, keyed by executed definition `[sym digest]` (the digest the installed callable holds), and
+`seon.test/measured-body` gives each member its own sink; `k2` appears in that request's cost diff as an interpreted
+call. Today the member keeps only a count and a top 10 (`:seon.test.member/calls`, `/top`). R2 keeps the rest of the
+observation where it is needed:
 
-## 2. Point by point
+- `:seon.test.member/dynamic-calls`: the executed symbols outside the test's static closure (the closure is already in
+  hand in `record-latest-tx`, `reach-memberships` of the tested database). Usually empty: zero datoms.
+- The member's reach digest is the closure digest of the test plus its dynamic calls (`reach-digests` gains extra
+  roots per test). A lookup computes each test's key with the dynamic calls of its newest result; when they are empty,
+  as for nearly every test, this is today's digest.
+- An executed `[sym digest]` whose digest differs from the tested database's definition digest for `sym` (a carried
+  stale Var, a compiled host-bound callable a branch has redefined) leaves the member with no reach digest: the
+  result is kept and shown, and it keys nothing (the runner's existing rule: "a member recorded without it ... is
+  unknown and executes"). This makes the stale-Var class unreusable for green and red alike, which is what lets R1's
+  fence go.
 
-| Point | Opus | Astra | Hybrid, and why |
-|---|---|---|---|
-| Same-digest comparison | wrong: every reached test has a new digest at the head; read at the base's digests (P3 `:same-reach? false`) | same correction (R0/R1 probe) | **Agreed, re-verified** (§7 P2: `539bb38d`→`41b1a9fa`; cross-program same-digest read `{}`). One read at each side's own digests. |
-| Shape of the answer | fork point `test → :green/:red/:pending`; one new set `:seon.context/unknown` | new `seon.test/compare-results`, schema `:seon.test/comparison` with transitions (`:introduced`, additional, fixed, unknown) and run refs | **Opus.** The enum and the observation shape exist; a transition vocabulary is a second classifier beside `step-status`. Astra's run refs and "fixed" live in `(my.test/reds)`, one requery away. |
-| Stored judgment | keep `:seon.agent/broken`/`new-red`, add `unknown` | delete them; derive on read | **Opus now, Astra if Q4-B.** Derivation needs the base result; without the fork run kept, the judgment is the only home of that result. The owner declined the admission change for M1; the design keeps the read pure in both cases. |
-| Failure identity | not compared; red at both is red-before | compare report identities; same set = unchanged, added = additional failure | **Opus.** Owner: simple over rare cases; Astra notes duration failures carry milliseconds in their identity, so two overruns would read as a new failure. The head's failing assertions are shown. |
-| Flaky | newest execution decides; the flake is its own task | contradiction at one key → unknown, both run refs, no rerun loop | **Opus (recommended), Astra as Q3-B.** Both agree: no flag, no quarantine, no rerun loop. |
-| Evaluator keys the base | yes (`:pending` across evaluators) | yes (actual member evaluator in the validity key) | **Agreed; not an owner question.** Verified: main's run is `:compiled` by request and `:interpreted` by member. |
-| `fork-point-red` | keep; record its run on the execution's own connection (T2) | delete with `change-reds` (T7); zero execution to answer | **Keep, default fixed to `:pending`; its run kept only under Q4-B.** Opus's T2 as written is refused by `admit-run` (`:seon.test/cluster-mismatch` for a non-snapshot run with `tested-branch`, test.clj; m1-notes probe), which Opus did not name and Astra's T3 does. One bounded run per red where a decision needs it is proportional to the change (owner rule), and it exists. |
-| How main gets results | merge acceptance's main side (T2), the gate after M7, the round on default (T6) | admission change (T3), the gate's run recorded on main at merge (T4), the round (T5) | **The round on default first (cheapest, already records on main: verified P1); the gate's run by Q1.** Opus's "merge acceptance records on main for free" needs the same admission change. |
-| Admission change | implicit | explicit, at the writer, validated against the merged program | **Astra's naming, as owner question Q4**, since the owner declined it for M1. |
-| `bin/seon check` | pure `check-verdict` over the throwaway's results and main's `fork-point` | record the candidate's results on the proposal, then compare | **Opus's pure verdict, Astra's transport:** `bin/test-check` already writes members as EDN; no recording on main for a rejected candidate. |
-| `branch-evidence` | `fork-point` at the merge base; red-before proves; delete the list | same answer through the one step rule; convert the per-function reach loop | **Agreed.** Astra's performance note is the filed `seon.test.runner/tests-reaching-rebuilds-the-whole-program-reach-graph-per-change`; T3 passes the reached set once. |
-| Rendering | lists broken, unknown, new-red with failures; `(my.test/reds)`; ≈250 tokens | counts first, requery form, details one call away; ≈70–100 tokens | **Astra's counts first, Opus's lists after** (red-before counted only). Measured: 54 / 364 / 48 tokens (§7 P4). |
-| Central round | `OUT` deleted; prints run ids | runner-owned recording; `OUT` demoted to presentation | **Agreed; Opus's deletion.** `run-round!` answers the run ids. |
-| Phases and size | 6 phases, net ≈ −10 source | 9 phases, net +30–150 source | **6 phases, net ≈ −15 source** (§4). |
-| Red proofs | named deftests in existing files, red on HEAD | proposed tests with HEAD counterexamples | **Opus's form**, each checked against the existing files (§5). |
+Multimethods and protocols: a defmethod is not instrumented, so the sink cannot see it. Verified on the branch:
+after `(defmulti area :shape)` and its `:sq` method, `area` has no entity (`pull` → nil; the namespace's declarations
+are `g u h k k2`), and `t-multi`'s reach names `trr.probe/area` as an unresolved name, which the index treats as host
+code. Changing the method to `(* 3 s)` ran nothing and `t-multi`'s green was reused while its body answered false. For
+files, analysis already attributes defmethod bodies and protocol implementations to the method var
+(`attributed-usages`, `:defmethod`, `:protocol-impls`); the branch's write path does not declare them. R3 declares
+`defmulti`, `defmethod` and protocol extension forms on the branch as the file index does, so a method body is part of
+its multimethod's leaf. Rejected: treating every unresolved name in a program namespace as unknown evidence. 351 of
+8,274 call and reference targets on main are such names, mostly task symbols in `:seon/tasks` metadata (§8 P6); that
+would make most of the suite unkeyable.
 
-## 3. Edge cases, and the design that makes each correct
+### 2.2 Inputs that are not code
+
+| Input | Today | Design |
+|---|---|---|
+| Schemas and the registry | in the key: `reach-node` collects each declaration's keywords and its contract's, `reach-schema-node` hashes each reached schema form and its keywords, transitively | unchanged |
+| Dependency versions, files under input roots | run's `:seon.test.run/input-digest`; `select` reuses only runs with an equal one | `results-at` compares it too |
+| Loaded platform commit, host-bound code | `select` reuses nothing when the loaded source differs from the recorded commit (`loaded-drift?`); a branch's host-bound change is a platform proof, not run in SCI (`seon.turn/platform-proof`) | plus R2: an executed digest that differs from the tested definition leaves the result without a key |
+| Configuration facts | not keyed: a test reading a dial after `config/apply!` reuses its old result | R4: `:seon.test.run/config-digest`, `seon.id/id` of `seon.config/effective` for the run's cluster on the tested database, computed once per run; compared like the input digest |
+| Fixture files | a test declaring `:seon.test/fixture-observation` is never reused (`seon.test/verified?`) | unchanged |
+| Fixture data in the database | a fixture branch is the tested commit plus the test's own writes, both in the key | unchanged |
+| Other cluster data read from the tested commit (tasks, agents, messages) | not keyed | not keyed: a test reading live cluster data it did not write breaks "tests are deterministic" (AGENTS.md); it surfaces as nondeterminism (§2.3). The alternative is priced in §7 |
+
+### 2.3 Nondeterministic tests
+
+Same key, different outcome: R12 adds `:seon.problems/nondeterministic-tests` to `seon.problems/families`, derived
+from the members at one key (the read `failed-tests` already makes for reds), each with both run ids. `results-at`
+answers the newest, so nothing waits on the defect. No flag, quarantine or rerun loop. The sacrifice: since no key is
+rerun, a flake is seen only when someone asks for `:seon.test/rerun?` or two runs race.
+
+### 2.4 The cost of the key
+
+The cold whole-program derivation (3–5 s, 5–6 GB) is paid once per JVM; the cost that recurs is the first derivation
+after each changed program, because `reach-attribute` re-reads an attribute's whole datom range whenever its content
+revision changes (any `defn` changes `:seon.fn/calls`), and `reached-graph` pulls every node it visits (7,657 reads for
+three tests). cost-gb attributes most of that allocation to restoring Datahike index nodes (LZ4 frames, about 745 of
+1,300 sampled MB) and found that batching the pulls alone stays red (481 ms / 1,246 MB against the parent's
+605 ms / 1,523 MB). R11 removes the reads instead of batching them:
+
+1. `reach-attribute` keeps, per branch, the map it derived for the previous revision with that revision's basis
+   (`::reach-attribute-head` already names the previous revision), and builds the new map from it plus the datoms of
+   `seon.db/entities-changed-after` that basis. The cost is proportional to the entities changed.
+2. `reached-graph` takes every reach fact (`:seon.fn/calls`, `/references`, `/keywords`, `/spec`, `/doc`,
+   `:seon.test/subject`) from those attribute maps, as `reach-declarations` already does for names and digests, so
+   visiting a node reads nothing.
+3. Component digests stay a Merkle hash, so a change rehashes only the components that reach it; the `::reach-index`
+   cache stays keyed by content.
+
+## 3. Reads, rendering and entrances
+
+- **Reply** (`seon.turn/test-step`, which sets `:seon.turn.loop/broken` today, not `summary`): `broken` for every agent,
+  `:seon.turn.loop/unknown`, and the count `:seon.turn.loop/red-before`; absent when empty (48 tokens measured in the
+  first version's sample).
+- **Current-state block** (`seon.context/step-section`): `:seon.context/test-counts` `{:broken :unknown :red-before
+  :new-red}` first, then `:seon.context/broken-tests` with failing assertions, `:seon.context/unknown-tests` (symbols),
+  `:seon.context/new-red-tests`, for every agent; the form `(my.test/reds)` gives each red's head and base result and
+  the run ids behind both. A no-task agent's head is `head-entries` over its reached tests: `step-observation`
+  accepts an absent task, whose obligations are empty (today it needs the task's `sym` and the block shows only
+  `:seon.context/turns`, §8 P3).
+- **`bin/lane commit --branch-evidence AGENT`** (`test-evidence`): a reaching red's base by `results-at` at the
+  cluster head: red → `:seon.source/red-before`, which proves and is named in the trailer; green →
+  `:seon.source/broken`, refused; unknown → unproven, naming the test and the form that runs its base on the agent's
+  branch. It runs nothing, so it needs no execution handle (narrow check F4).
+- **`bin/seon check`**: `seon.operator/check-verdict`, pure, over the throwaway's members (`bin/test-check` writes them
+  under `SEON_TEST_RESULT_FILE`) and main's `results-at` under `:compiled`: red at both does not refuse, green at the
+  base refuses, unknown refuses.
+- **Evaluator** (narrow check F5): every `results-at` caller passes the evaluator it compares, from the one decision
+  `seon.test/run-request` makes (`:compiled` for root, `:interpreted` otherwise): `select` its request's,
+  `step-observation` and `base-results` the agent's (`:interpreted`; root's `:compiled`), `test-evidence`
+  `:interpreted`, `check-verdict` `:compiled`.
+
+## 4. Edge cases
 
 | Case | Design |
 |---|---|
-| Flaky test | The newest execution at the key decides (Q3-A); no rerun loop. Under Q3-B two disagreeing executions at one key read `:pending`. |
-| Over-bound or unfinished base or head | `:seon.test/result-unknown` (exists) maps to `:pending`: never red, never green, never broken. Today's `(repeat false)` default makes it broken; T1 deletes it. |
-| Designed red (`:seon.error/unimplemented` tagged to an open task) | On main it is red at the base, so an agent sees red-before, never broken; a Prove step's own product is new-red, judged by `seon.context/designed-red?` (exists). Today `designed-red?` accepts a plain `:fail` (§7 P1, Astra's finding): that is M7's filed task, not this design's. |
-| Host-bound test or change | `branch-evidence` keeps `:seon.test.platform/proven` (`platform-run?`, `git-sha`). `bin/seon check` judges compiled against compiled; an interpreted base never decides a compiled head or the reverse (evaluator key). |
-| Deleted machinery's tests | Absent at the head, so never red there and never listed; `branch-evidence` routes gone tests through `reach` on the head as today. |
-| Unknown reach digest | `reach-digests` refuses `:seon.test/unknown-error` when a declaration has no stored definition digest; `fork-point` answers that refusal, so unknown evidence never keys a comparison (the code's own rule). |
-| Cold reach digests | Three real tests: 322 ms and 502 MB first, 1.75 ms after (§7 P3); Opus: whole program 3.0 s and 5.0 GB; Astra: three tests 411 ms and 683 MB. The cache is keyed by the requested set, so a subset recomputes: the filed `seon.test.runner/verified-recomputes-reach-digests-for-the-whole-program`. `fork-point` asks once for its whole set. |
-| Main holds a run under another evaluator than the asker | `:pending` for that asker: main's compiled round never certifies an interpreted red (205 interpreted-only reds). |
-| Main holds nothing for the test | `:pending`, shown as unknown, with the form that resolves it; never green, never counted as caused. |
-| A test the branch added | Absent at the base → new-red; a Prove step's product under `designed-red?`, else "a new red is no implement step's work" (existing table case). |
-| Stored green that is not verified (inputs or source changed) | `seon.test/verified?` stays the acceptance predicate in `branch-evidence`; `fork-point` answers the base only. |
-| Main moved after the fork | `fork-point` reads main's *head* beside the branch: a result main recorded after the fork is seen without a merge. |
+| A red at an unchanged key after an unrelated write | reused (R1); today rerun (§8 P3) |
+| A result produced by a stale body | no key (R2): kept and shown, never reused |
+| A dial changed by `config/apply!` | new config digest: every result of that cluster reruns once (R4) |
+| Over-bound or unfinished member | `:seon.test/result-unknown` (exists): no outcome, no reuse, `:pending` at the head, unknown at the base |
+| Designed red (`:seon.error/unimplemented` on an open task) | red at the base on main → red-before; a Prove step's own product → new-red under `designed-red?` (which accepts a plain `:fail` today: M7's task) |
+| Compiled result, interpreted asker | absent: main's compiled results never decide an agent's interpreted red |
+| Main holds nothing at the base key | unknown, with the form that runs it; run once on the agent's branch (R5), then reused |
+| Main moved after the fork | `results-at` reads main's head beside the branch |
+| A test the branch deleted | absent at the head, never listed |
+| Undigested declaration in the closure | `reach-digests` refuses (`:seon.test/unknown-error`): no key, the test runs |
+| Root after a merge | the merge gate's answers are on main (R8), so the merged keys rerun nowhere |
 
-## 4. Deleted, by symbol (body lines at HEAD), with the phase converting its last caller
+## 5. Deleted, with the phase converting the last caller
 
-| Deleted | Lines | Callers converted | Phase |
-|---|---|---|---|
-| the boolean fork point: `step-observation`'s `(not (broken s))` and `fork-point-red`'s `(zipmap present (repeat false))`; `:seon.context/fork-point` `[:map-of :seon.test/sym :boolean]` | ≈ 4 | `step-status`, `step-observation`, `base-results`, `record-broken!`, `fork-point-red`, `change-reds` (reads `= :red`), `context_test` table, `test_failure_facts_test` (line 186 passes `{}`) | T1 |
-| `seon.context/base-results` body | 15 → ≈ 5 (a `fork-point` call) | `step-observation` | T1 |
-| `seon.test.runner/red-at-current-reach?` | 10 | `branch-evidence/test-evidence`; must-read of tasks `seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done` and `seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge`; `docs/seon/schedule/cards/ROOT-AGENT.md` line 201 | T3 |
-| `--accept-red-before`, `bin/lane evidence … -- TEST`, `accepted` parsing and the `Branch-evidence-red-before-accepted:` trailer; `:seon.source/accepted-red-before` (schema and `branch-evidence-request` member); `verdict`'s `accepted` argument | ≈ 25 | `bin/lane` (13 lines name it), `seon.source.edn`, `branch_evidence_test` ("root's acceptance" block), `RF-2.md` line 29, `agent-loop-ledger.md` line 169, task intents in `seon.task.edn` (`assign-cannot-see-a-red-proof-the-gate-will-not-land`) and `seon.operator.edn` | T3 |
-| task `seon.operator/bin-lane-commit-cannot-accept-a-test-already-red-on-head` | 5 | `seon.operator.edn` | T4 |
-| `seon.central-round/-main`'s `OUT` argument and `record!` spit | ≈ 5 | `script/seon/central_round.clj`, its usage line, `central-round.md` invocation | T5 |
-| hand diffing of reds in commit messages and `tmp/` | — | the block, `(my.test/reds)`, the run on main | T2, T5 |
+| Deleted | Callers converted | Phase |
+|---|---|---|
+| `red-holds?`, `revisions-now` and the sentence "red evidence only while the program is also unchanged" in `seon.test/select` | `select` only | R1 |
+| the boolean fork point (`step-observation`'s `(not (broken s))`, `fork-point-red`'s `(zipmap present (repeat false))`, `:seon.context/fork-point` `[:map-of :seon.test/sym :boolean]`) | `step-status`, `step-observation`, `base-results`, `record-broken!`, `fork-point-red`, `change-reds`, `context_test` table, `test_failure_facts_test` | R6 |
+| the child's lost run: `fork-point-red` recording on the released child | `fork-point-red` | R5 |
+| `:seon.agent/broken`, `:seon.agent/new-red` (schema `seon.agent.edn`, writes in `record-broken!`, the read in `step-observation`) | `seon.context/step-observation`, `seon.turn/record-broken!`, `seon.turn-test` (asserts `:seon.agent/broken`), intent in `resources/seon/tasks/seon.turn.edn` naming `record-reached-red!` | R6 |
+| `seon.test.runner/red-at-current-reach?` | `test-evidence`; must-read of `seon.turn/a-reached-test-unrun-or-red-on-main-does-not-block-done`, `seon.cluster.source/a-test-never-run-on-the-target-is-not-blamed-on-the-merge`; `docs/seon/schedule/cards/ROOT-AGENT.md` | R9 |
+| `--accept-red-before`, `bin/lane evidence … -- TEST`, the accepted trailer, `:seon.source/accepted-red-before`, `verdict`'s `accepted` | `bin/lane`, `seon.source.edn`, `branch_evidence_test`, `RF-2.md`, `agent-loop-ledger.md`, `docs/research/agent-platform/2026-10-08/lane-templates/repl-slice.md` (F2), intents in `seon.task.edn`, `seon.operator.edn` | R9 |
+| task `seon.operator/bin-lane-commit-cannot-accept-a-test-already-red-on-head` | `seon.operator.edn` | R10 |
+| `seon.test.runner/result-at-reach` (generalized into `results-at`) | `seon.context/base-results`, its runner test | R6 |
+| per-attribute full re-read in `reach-attribute`, per-node pull in `reached-graph` | both private to `seon.test.runner` | R11 |
 
-Added: `fork-point` ≈ 15, `:seon.context/unknown` and `test-counts` ≈ 8 schema lines, `my.test/reds` ≈ 12, `check-verdict` ≈ 12, `:seon.agent/unknown` 2. Net source about **−15**, schemas about +10, tests about +45 (cases and four deftests). Not deleted here: `seon.test/change-reds` (15), `red-test-verdicts` and `red-test-refusal` (M7 owns them; `change-reds` reads `fork-point` meanwhile), `fork-point-red` (33; its default changes).
+Not deleted: `seon.test/change-reds`, `red-test-verdicts` (M7's); `fork-point-red` (it is the one place a base runs).
+The central round's `OUT` stays: the round no longer runs on main (Q2), so the first version's T5 is dropped, and with
+it narrow-check failures F3 and F7.
 
-## 5. Phases (about fifteen minutes each; HEAD boots after every one; each proof red on HEAD f60ceee3b; cost through `seon.profile/measure`)
+## 6. Phases (about fifteen minutes each; HEAD boots after every one; each proof red on HEAD 6d82fc948; costs through `seon.profile/measure`)
 
-Status per phase: **not started**. Each commit updates the status of its phase's entry.
+Status per phase: **not started**. Each commit updates its phase's status.
 
-| # | Slice and owned files | Red proof (data assertion) | Cost bound | Status |
+| # | Slice and owned files | Red proof (data assertion; why red on HEAD) | End-to-end cost bound | Status |
 |---|---|---|---|---|
-| T1 | **The fork point is a status map; unknown is its own set.** `seon.test.runner/fork-point` (new, beside `result-at-reach`); `:seon.context/fork-point` becomes `[:map-of :seon.test/sym :seon.context/proof-status]`; `step-status` derives `:seon.context/unknown`; `step-observation` and `base-results` read `fork-point`; `fork-point-red` answers statuses (no result → `:pending`); `record-broken!` and `change-reds` read `= :red`. Files: `src/seon/test/runner.clj`, `src/seon/context.clj`, `src/seon/test.clj`, `src/seon/turn.clj`, `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj`, `test/seon/test_failure_facts_test.clj` (line 186), `test/seon/test/runner_test.clj` | `seon.context-test/each-step-kind-is-done-by-its-one-rule`: every case's fork point converted to statuses, plus `{p :green r :pending}` → `:working`, `unknown #{r}`, `broken #{}` (red on HEAD: the schema is boolean and `step-status` has no `:seon.context/unknown`). `seon.test.runner-test/the-fork-point-reads-a-base-result-at-the-base-digest` (new, beside `a-result-at-the-base-reach-digest-survives-later-runs`): a green at the base digest and a red at the head digest → `{t :green}`; an `:interpreted` base asked under `:compiled` → `{t :pending}` (red on HEAD: no such function) | `fork-point` for three real tests, digests warm, < 10 ms (measured components: 3.5 ms for two tests and three reads; `result-at-reach` on main 0.15 ms) | not started |
-| T2 | **Every agent sees its reds' origin.** `record-broken!` judges reached reds with or without a held task and writes `:seon.agent/unknown` beside `broken` and `new-red`; `summary` gains `:seon.turn.loop/broken` for every agent, `:seon.turn.loop/unknown`, `:seon.turn.loop/red-before`; `step-section` opens with `:seon.context/test-counts` and gains `:seon.context/unknown-tests`, shown for every agent; `my.test/reds`. Files: `src/seon/turn.clj`, `src/seon/context.clj`, `src/my/test.clj`, `resources/seon/schemas/{seon.agent,seon.turn.loop,seon.context,my.test}.edn`, `test/seon/context_test.clj` | `seon.context-test/broken-tests-show-with-their-failures` (exists, long) gains: an agent holding **no** task whose change turns a base-green test red shows it in `:seon.context/broken-tests` with `:seon.context/test-counts {:broken 1 …}`, and `(my.test/reds)` maps it to base `:green` (red on HEAD: a no-task agent's block holds only `:seon.context/turns`, §7 P2) | block read < 20 ms warm (14–16 ms today, §7 P2); the step's cost unchanged | not started |
-| T3 | **`--branch-evidence` reads the same answer; the accepted list goes.** `test-evidence` sorts the reaching reds by `fork-point` at the cluster head under the branch's evaluator, resolving `:pending` with one `fork-point-red` there within the check dial, and passes the reached set once; `:seon.source/broken` (new bucket) refuses, red-before proves; delete `red-at-current-reach?`, `:seon.source/accepted-red-before`, `--accept-red-before`, `evidence -- TEST`, the accepted trailer. Host-bound slice (`bin/`): `bin/lane commit … --test seon.cluster.branch-evidence-test`. Files: `src/seon/cluster/branch_evidence.clj`, `src/seon/test/runner.clj`, `resources/seon/schemas/seon.source.edn`, `bin/lane`, `test/seon/cluster/branch_evidence_test.clj`, `resources/seon/tasks/{seon.turn,seon.cluster.source,seon.task}.edn` (must-read and intents), `docs/seon/schedule/cards/{RF-2,ROOT-AGENT}.md`, `docs/seon/schedule/agent-loop-ledger.md` | `seon.cluster.branch-evidence-test/a-branch-proves-its-files-only-with-current-green-evidence`: "a test red on H too is red before" asserts `(:seon.source/proven? answer)` **true** with no accepted set (H holds `broken-check` red at H's digest from root's `check`); a new `testing`: `callee` green at H and red on the branch is in `:seon.source/broken` and `proven?` false (red on HEAD: proven? false until accepted; no `:seon.source/broken`) | the whole answer < 1 s over the prepl with no `:pending` red; each `:pending` red adds one bounded run (≈ 300 ms for a fast test, §7 P5) | not started |
-| T4 | **`bin/seon check` judges its reds against main.** `seon.operator/check-verdict` (pure: the result file's members and main's `fork-point` statuses → refused?, red-before, unknown); `candidate-tests!` sets `SEON_TEST_RESULT_FILE` and `check!` asks the live root for the statuses over the prepl as `bin/lane` does. Files: `script/seon/operator.clj`, `test/seon/operator_test.clj`, `resources/seon/tasks/seon.operator.edn` (task retired) | `seon.operator-test/a-check-red-main-holds-red-does-not-refuse` (new, a table over `check-verdict`): `{t :red}` → not refused, red-before `[t]`; `{t :green}` → refused; `{t :pending}` → refused, unknown `[t]` (red on HEAD: no such function) | the extra prepl read < 200 ms | not started |
-| T5 | **The round records on main and answers run ids.** `-main` takes no `OUT`; `run-round!` returns the vector of `:seon.test.run/id` its batches recorded (schema `[:vector :seon.test.run/id]`) and prints them through the value printer; `batch-form` unchanged (it already records on default's connection). Files: `script/seon/central_round.clj`, `test/seon/central_round_test.clj`, `docs/research/agent-platform/2026-10-12/central-round.md` (invocation) | `seon.central-round-test/a-round-answers-its-run-ids-not-a-file` (new, beside `terminal-batches-preserve-evidence-and-advance`): two fixture batches whose answers carry run ids → `run-round!` returns both ids in order (red on HEAD: it returns nil, contract `:nil`) | storage per result reported from the run on main (Opus P2 bound: ≤ 32 datoms per result, ≈ 92k per 2,872-test round) | not started (owner Q2 decides when the round runs on default) |
-| T6 | **(After M7 and owner Q1) the gate's run reaches main.** Q1-B: `:seon.test.run/run`'s partition and the merge composition change together (Astra §2); Q1-C: a selection rule in `merge-tx` takes the runs whose members' digests equal the merged head's (≈ 20 lines); Q1-A: nothing. Files: `src/seon/merge.clj`, `resources/seon/schemas/seon.test.run.edn`, `test/seon/cluster/merge_test.clj` | `seon.cluster.merge-test/main-keeps-the-merge-results-after-the-branch-is-deleted` (Astra's name): after merge and branch deletion, `result-at-reach` on main holds the gate's result at the merged digests (red on HEAD: `:seon.data` never merges) | recording increment < 100 ms | not started (Q1) |
+| R1 | **Selection reuses a result at its key, red and error included.** Delete `red-holds?` and `revisions-now` in `seon.test/select`; a red at an equal reach digest, input digest and evaluator is `:seon.test/unchanged` with its failure data (the `red-records` read exists). Files: `src/seon/test.clj`, `test/seon/request_cost_test.clj`. Platform slice (the test runner): `bin/lane commit … --test seon.request-cost-test --test seon.test.redefined-callee-test` | New `seon.request-cost-test/an-unrelated-write-reruns-no-test-at-an-unchanged-key` (pattern of `a-request-counts-its-own-calls-reads-and-transactions`): as root on the fixture cluster, define `f`, a red and a green deftest on it, one request runs both; define an unrelated `u`; then `seon.profile/measure` around the next eval request: the reply has no `:seon.cost/tests` (zero bodies executed) and the selection's `:seon.test.selection/unchanged` holds both tests. Red on HEAD: `select` lists the red to run after an unrelated write (§8 P3). `a-red-test-reruns-green-after-its-callee-is-redefined` stays green (a real redefinition changes the key) | the measured request < 1 s with zero executed bodies (root today: 54 tests, 10.6 s, 4.3 GB) | not started |
+| R2 | **A result is keyed by what its body executed.** `measured-body` returns the sink's `seon.batch/executed` keys; `record-latest-tx` stores `:seon.test.member/dynamic-calls` (executed symbols outside `reach-memberships`) and omits the reach digest when an executed digest differs from the tested definition digest; `reach-digests` takes extra roots per test; `select` computes each key with its newest result's dynamic calls. Files: `src/seon/test.clj`, `src/seon/test/runner.clj`, `resources/seon/schemas/seon.test.member.edn`, `test/seon/test/redefined_callee_test.clj` | New `seon.test.redefined-callee-test/a-test-reruns-when-a-function-it-calls-by-a-computed-name-changes`: an own-branch agent defines `k2` and a deftest calling it by a built symbol; redefines `k2`; the next `my.test/check` has `:seon.test/executed-count` 1 and `passed?` false. Red on HEAD: the green is reused while the body answers false (§8 P5) | recording overhead < 1 ms per member; 0 datoms for an empty set (measured over the round's members, reported) | not started |
+| R3 | **Multimethod and protocol bodies are declarations on a branch.** The branch write path declares `defmulti`, `defmethod` and protocol extension forms as the file index does (`seon.fn.analyzer/attributed-usages` attributes method bodies to the method var). The owner of the write path is verified first (`seon.sci.eval/install-evaluated-rows!` is the candidate). Files: `src/seon/sci/eval.clj`, `test/seon/test/redefined_callee_test.clj`, `test/seon/test/reach_test.clj` | New `seon.test.redefined-callee-test/a-test-reruns-when-a-method-of-its-multimethod-changes` (§8 P5's `t-multi`): `executed-count` 1, `passed?` false; a file case added to `seon.test.reach-test/a-digest-follows-its-closures-content-and-nothing-else`: a changed defmethod body changes the digest of a test calling the multimethod. Red on HEAD: `area` has no entity on the branch and the green is reused | defining a method < 100 ms request (today's `defn` requests 446 ms whole, its evaluation 22 ms) | not started |
+| R4 | **Configuration is in the key.** `seon.test.runner/provenance` adds `:seon.test.run/config-digest` (`seon.id/id` of `seon.config/effective` for the run's cluster on the tested database); `select` compares it beside the input digest. Files: `src/seon/test/runner.clj`, `src/seon/test.clj`, `resources/seon/schemas/seon.test.run.edn`, `test/seon/test/selection_test.clj`. One-time effect: every stored result lacks the digest and reruns once (§7) | New `seon.test.selection-test/a-changed-dial-reruns-a-test-that-reads-it`: a fixture run, then `support/apply-config!` changes one dial; `select` lists the test to run. Red on HEAD: `select`'s run filter compares input digest, evaluator and reach only | one `config/effective` per run, < 5 ms | not started |
+| R5 | **A base run is kept on the agent's branch.** `seon.test/admit-run` admits a run whose tested commit is the destination branch's base (`:seon.test.run/tested-branch` the child, member digests on the tested database, which `record-latest-tx` already takes as `tested-database`); `fork-point-red` records on the execution's connection. Files: `src/seon/test.clj`, `src/seon/test/runner.clj`, `test/seon/test_test.clj`. Writer slice: `--test seon.test-test` | New `seon.test-test/a-base-run-is-read-at-the-next-step-without-running`: two `fork-point-red` calls for one red; the second executes no body and answers red. Red on HEAD: the child's run is released with the child (narrow check claim 13: runs 5 → 5) | second call < 10 ms; the first is one test run (≈ 300 ms for a fast test) | not started |
+| R6 | **One status map, unknown its own set, the judgment derived.** `seon.test.runner/results-at` (generalizing `result-at-reach`); `:seon.context/fork-point` becomes `test → :seon.context/proof-status`; `step-status` derives `:seon.context/unknown`; `step-observation` and `base-results` read `results-at` at the base keys; `record-broken!` only runs the bases nobody holds (R5) and writes nothing; delete `:seon.agent/broken`, `:seon.agent/new-red`. Files: `src/seon/test/runner.clj`, `src/seon/context.clj`, `src/seon/turn.clj`, `src/seon/test.clj`, `resources/seon/schemas/{seon.context,seon.agent}.edn`, `resources/seon/tasks/seon.turn.edn`, `test/seon/context_test.clj`, `test/seon/turn_test.clj`, `test/seon/test_failure_facts_test.clj`, `test/seon/test/runner_test.clj` | `seon.context-test/each-step-kind-is-done-by-its-one-rule`: every case converted to statuses, plus `{p :green r :pending}` → `:working`, `unknown #{r}`, `broken #{}`. New `seon.test.runner-test/results-at-reads-each-tests-newest-result-at-its-key`: a green at the base key and a red at the head key → the green at the base key; an `:interpreted` result asked under `:compiled` → absent. Red on HEAD: boolean schema, no `:seon.context/unknown`, no `results-at` | block read < 20 ms warm (14–16 ms today) | not started |
+| R7 | **Every agent sees its reds' origin.** `step-observation` accepts an absent task (obligations empty, head = `head-entries` over the reached tests); `test-step` sets `:seon.turn.loop/broken` for every agent, `unknown`, `red-before`; `step-section` counts; `my.test/reds`. Files: `src/seon/context.clj`, `src/seon/turn.clj`, `src/my/test.clj`, `resources/seon/schemas/{seon.turn.loop,seon.context,my.test}.edn`, `test/seon/context_test.clj` | `seon.context-test/broken-tests-show-with-their-failures` (exists, long) gains a no-task agent whose change turns a base-green test red: in `:seon.context/broken-tests`, `test-counts {:broken 1 …}`, `(my.test/reds)` base green. Red on HEAD: the block holds only `:seon.context/turns` (§8 P3) | block read < 20 ms warm | not started |
+| R8 | **(After M7) Root reads branches; the merge gate's answers stay on main.** Root's `results-at` databases are main and every live branch head; the gate's run on the merge branch is admitted on main through R5's admission (tested branch the merge branch). Files: `src/seon/test/runner.clj`, M7's merge owner (today `seon.cluster.source/accept-merge!`), `test/seon/cluster/merge_test.clj` | New `seon.cluster.merge-test/main-keeps-the-merge-results-after-the-branch-is-deleted`: after merge and branch deletion, `results-at` on main holds the gate's results at the merged keys and root's next request executes no body for them. Red on HEAD: `:seon.data` runs stay on the deleted branch | recording increment < 100 ms; root's read over live branch heads < 20 ms (56 branches × 0.15 ms per `result-at-reach`) | not started (owner confirms, §7) |
+| R9 | **`--branch-evidence` reads the same answer; the accepted list goes.** `test-evidence` sorts reaching reds by `results-at` at the cluster head under `:interpreted` and passes the reached set once; `:seon.source/broken` refuses, red-before proves, unknown names the form; delete per §5 (F2's lane template included). Host-bound slice (`bin/`): `--test seon.cluster.branch-evidence-test`. Files: `src/seon/cluster/branch_evidence.clj`, `src/seon/test/runner.clj`, `resources/seon/schemas/seon.source.edn`, `bin/lane`, `test/seon/cluster/branch_evidence_test.clj`, `resources/seon/tasks/{seon.turn,seon.cluster.source,seon.task}.edn`, `docs/seon/schedule/cards/{RF-2,ROOT-AGENT}.md`, `docs/seon/schedule/agent-loop-ledger.md`, `docs/research/agent-platform/2026-10-08/lane-templates/repl-slice.md` | `seon.cluster.branch-evidence-test/a-branch-proves-its-files-only-with-current-green-evidence`: "a test red on H too is red before" asserts `proven?` true with no accepted set; a new `testing`: green at H and red on the branch is in `:seon.source/broken` and refuses. Red on HEAD: proven only when accepted | answer < 1 s over the prepl; it runs no test | not started |
+| R10 | **`bin/seon check` judges its reds against main.** `seon.operator/check-verdict` (pure) over the result file and main's `results-at` under `:compiled`; `check!` sets `SEON_TEST_RESULT_FILE` and asks the live root over the prepl. Files: `script/seon/operator.clj`, `test/seon/operator_test.clj`, `resources/seon/tasks/seon.operator.edn` | New `seon.operator-test/a-check-red-main-holds-red-does-not-refuse` (table over `check-verdict`): main red → not refused, red-before; main green → refused; absent → refused, unknown. Red on HEAD: no such function | the prepl read < 200 ms | not started |
+| R11 | **The key costs what changed.** `reach-attribute` derives a new revision's map from the previous one plus `seon.db/entities-changed-after` its basis; `reached-graph` reads node facts from attribute maps, no pull per node. Files: `src/seon/test/runner.clj`, `test/seon/test/reach_test.clj` | `seon.test.reach-test/a-changed-programs-first-reach-digest-is-subsecond` (cost-gb's proof, saved in `cost-gb-reach.patch`, re-added): after one declaration transaction, `reach-digests` for one real test < 100 ms and < 128 MB through `seon.profile/measure`. Red on HEAD: 605 ms / 1,523 MB (cost-gb parent) | the proof's bounds; a whole-program derivation after one change reported beside them | not started |
+| R12 | **Two outcomes at one key are a problem of the test.** `seon.problems` family `:seon.problems/nondeterministic-tests` from members at one key with different outcomes, both run ids; `results-at` answers the newest. Files: `src/seon/problems.clj`, `src/seon/test/runner.clj`, `resources/seon/schemas/seon.problems.edn`, `test/seon/problems_test.clj` | New `seon.problems-test/two-outcomes-at-one-key-are-a-nondeterministic-test`: two fixture runs of one test at one key, one green one red (the second with `:seon.test/rerun?`, its body reading a value the fixture changes between runs), → one entry with both run ids. Red on HEAD: no such family | inside `failed-tests`' existing read: < 10 ms added | not started |
 
-**Order.** T1 → T2; T3 and T4 after T1 (they read `fork-point`); T5 independent; T6 after M7 and Q1. File collisions with hybrid-done-and-merge: `src/seon/context.clj` (M7, M14) and `src/seon/turn.clj` (M8, M10, M11, M13): root sequences T1 and T2 before M7 so M7's gate inherits `:seon.context/unknown`. T1 and T2 are Opus lanes (the one path's judgment); T3, T4 platform slices; T5 Sonnet.
+**Order.** R1 first (the owner's measured proof; it touches only `select`). R2 and R4 next: R2 closes the stale-body
+class for green and red alike, R4 the configuration input. R3 and R11 independent. R5 → R6 → R7; R9, R10 after R6; R8
+after M7; R12 after R1. File collisions with hybrid-done-and-merge: `src/seon/context.clj` (M7, M14) and
+`src/seon/turn.clj` (M8, M10, M11, M13): root sequences R6 and R7 before M7 so M7's gate inherits
+`:seon.context/unknown`. R1, R2, R5, R6 are Opus (the one path's evidence and the runner); R9, R10 platform slices;
+R3, R4, R11, R12 Sonnet, with Astra for R11 if its first lane bows out.
 
-## 6. Owner questions (each priced; every phase above fits either answer)
+## 7. The owner's rulings applied, and what only the owner can decide
 
-**Q1. Are runs program (merge) or data (never merge), and what does main retain?**
-- **A. Data; root records its own observations (recommended).** Main holds the round's runs and nothing from branches; the gate's run stays on the merge branch. Cost 0; T6 is empty. Sacrifice: a reached test's current result on main after a merge is unknown until the next round. Correct AGENTS.md "The program is entities: … test evidence keyed by exercised definition digests" to say evidence is data keyed by digests.
-- B. Program. Runs merge three-way (added entities never conflict); main inherits every agent's evidence. Cost: the partition change plus Astra's portability work (destination transaction refs derived at admission; owned reports and reused coverage travel), 1–2 phases; one run per eval request lands on main, most superseded. Sacrifice: the gate trusts agent evidence it did not run.
-- C. Merge only the runs at the merged head's digests (Opus): ≈ 20 lines in `merge-tx`, main gets current evidence only. Dependent phase: T6.
+The first version's four questions are answered by the owner's rule (2026-10-12):
 
-**Q2. Where do main's results come from?**
-- A. Only from merges (Q1-B or C): unreached tests stay unknown on main; no totals for root. Cost 0.
-- **B. The restart batch's round, already run, as root on default (recommended).** No extra run; about 61 minutes of load on default per batch (central round: 114 batches, 5 at the 240 s bound) and ≈ 92k datoms per round; compiled bases for `bin/seon check`; root's totals. Dependent phase: T5.
-- C. B plus the round run interpreted, so agents' bases are free: a second ≈ 60-minute round per batch.
+- **Q1 → runs are data.** `:seon.test.run/run` stays `:seon.program/partition :seon.data`; nothing merges. AGENTS.md's
+  "The program is entities: … test evidence keyed by exercised definition digests" should say evidence is data keyed
+  by digests (a root edit to AGENTS.md, not this lane's file).
+- **Q2 → no batch tier on main.** The central round is not run on main; main runs only keys nobody ran. The first
+  version's T5 is dropped.
+- **Q3 → a flake is its own task**, derived (R12); the newest result answers meanwhile.
+- **Q4 → the base run is kept and reused by its key** (R5); the stored judgment is deleted (R6).
 
-**Q3. Flaky tests.**
-- **A. The newest execution at the key decides (recommended);** a flake is its own task. Cost 0.
-- B. Two executions at one key that disagree read `:pending`: `newest-results` keeps the distinct outcomes per key, ≈ 5 lines. Dependent phase: T1.
+Only the owner can decide:
 
-**Q4. The base run of a red: keep it, or keep the judgment?** (The owner's M1 rule declined options A–C of `m1-notes.md` for proofs; this asks the same for reached reds.)
-- **A. Keep the judgment (recommended now):** `record-broken!` writes `:seon.agent/broken`, `new-red` and `unknown` on the agent entity on its branch as today; the fork run on the child is discarded and repeats when the branch's reds change. Cost 0 beyond T1; ≈ 300 ms and 250 MB per red per judging step (§7 P5).
-- B. Keep the run: `seon.test/admit-run` admits a non-snapshot run with `:seon.test.run/tested-branch` naming the child at the base commit, checked against the tested commit's program rather than the destination head; `head-entries` reads each test at its current digest so a later base run never masks the head's (both named in `m1-notes.md` option A); then `:seon.agent/broken`, `new-red`, `unknown` and their schema entries are deleted and the block derives everything from `fork-point`. Cost: one writer phase with an admission proof and a masking proof, about two phases. Sacrifice: a run naming a released child is provenance only. Dependent phases: T1 (the read is the same), T2 (what the record holds).
+1. **Root records its merge gate's answers on main (R8, recommended).** The gate reads the source branch's results at
+   the merged keys and root's merge admits them on main as root's run, so a merged change reruns nowhere. This is root
+   recording its own observation, not a merge of the branch's runs. The alternative is to record nothing: after the
+   source branch is deleted, each merged change's reaching tests rerun once on main, which the owner's rule forbids.
+2. **Cluster data a test reads that is neither program, schema, configuration nor input files** (tasks, agents,
+   messages on the tested commit) stays out of the key (recommended): AGENTS.md requires deterministic tests with
+   injected inputs, and such a test surfaces through R12. The alternative keys it: a per-member read sink records the
+   attributes the body read and the key includes their `seon.db/content-revisions` on the tested commit. That costs
+   one phase and the sink (bodies run with `*read-evidence-sink*` nil today), and it reruns every test that reads a
+   frequently written attribute (test runs themselves) on every request, so it needs pattern currency
+   (`seon.db/read-evidence-current?`) to be usable: about three phases.
+3. **R4's one-time rerun.** Adding the configuration digest leaves every stored result without it, so every test
+   reruns once, at the next restart batch. The cheaper alternative, dropping it, leaves configuration unkeyed.
 
-## 7. Verification at the code and on default (2026-10-12)
+Not a question: the evaluator stays in the key (both plans, and 205 interpreted-only reds). Its consequence is stated:
+root's compiled results on main never decide an agent's interpreted red; an agent's bases come from its own runs.
 
-- **P1 (live facts, jvm as root, read-only).** Main holds **1 run and 1 member**, not 0 as the dig and both plans found: `764ebff07cf9`, `:seon.test.run/at` 06:34 today, `:branch :cluster-default`, `:policy :named`, request `:evaluator :compiled`, no `tested-branch`, no `git-sha`; its member `chain2.proofs/design-prove-wrote-the-implement-proof` ran `:interpreted`, began and ended, fail 1 (`latest-results`); 2,873 test declarations; 50 agent branches. The conclusion holds: no baseline. `(#'seon.context/designed-red? {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]})` → `true` (Astra's finding). `(seon.test.runner/red-at-current-reach? d 'seon.context-test/each-step-kind-is-done-by-its-one-rule)` → `false` (main holds no run for it: red-before can never be found there today). 26 ms, 495 reads.
-- **P2 (the correction and the gap, sci as `hybrid-tr` on its own branch).** `(defn f [] 1)`, `(deftest f-is-one …)`, `(deftest f-is-two (is (= 2 (f))))`: the step ran both, reply `{:seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red [hybrid-tr.probe/f-is-two]}}`, no origin; 582 ms, `:seon.cost/step` 547 MB for two tests whose bodies took 26 ms (Opus finding (b) again). `(def base-db (seon.db/db))`, `(def base-reach (reach-digests base-db [f-is-one f-is-two]))`, `(defn f [] 2)`: red `[f-is-one]`. Then, in one `seon.profile/measure`: `base-reach` `{f-is-one 539bb38d… f-is-two b870a23a…}`, head reach `{f-is-one 41b1a9fa… f-is-two bca32f29…}`; `(result-at-reach d base-reach)` → f-is-one pass 1, f-is-two fail 1, both `:interpreted`; `(result-at-reach d head-reach)` → f-is-one fail 1, f-is-two pass 1; `(result-at-reach base-db head-reach)` → `{}`. 3.52 ms, 3.7 MB, 32 reads. `(seon.context/current-state)` before and after → only `:seon.context/turns`; 14–16 ms. `(#'seon.context/main-database (seon.db/db))` from the branch → main, `:cluster-default`, 1 run.
-- **P3 (reach cost, jvm).** `reach-digests` on main for three real tests (the proofs named in T1, T3): first call 322 ms, 502 MB, 7,657 reads (`seon.db/pull-logical` 99 ms self); second call 1.75 ms, 2.2 MB, 0 reads. `result-at-reach` on main for those digests 0.15 ms, 3 reads, `{}`.
-- **P4 (tokens, jvm).** A sample step section printed by `seon.render.value/core-text` and measured by `seon.ai.tokens/estimate`: counts only 54 tokens; three broken tests with one failing assertion each plus two unknown 364 tokens (1,167 characters); the reply's `broken` plus `red-before` 48 tokens.
-- **P5 (the cost the stored results remove, jvm as root; one disposable fork of main, released).** `(seon.test/fork-point-red handle commit ['seon.context-test/each-step-kind-is-done-by-its-one-rule] nil)` → `{… false}`; 294 ms, 249 MB, 565 reads, 7 transactions (`seon.db/transact-call` 84 ms self, `registry/branch!` 36 ms); main's commit unchanged and still 1 run after: the child's run is gone with the child.
-- **Code read.** `fork-point-red` records with `:seon.test/recording-connection` = the child's connection and `(finally (@release-context! child))`; `release-context!` calls `registry/retire-branch!` for an owning handle. Its answer merges `(zipmap present (repeat false))` first, so a present test with no result is green there; `step-observation` builds `[s (not (broken s))]` for judged tests. `admit-run` refuses a non-snapshot run whose `:seon.test.run/branch` is not the destination's or that carries `tested-branch` (`:seon.test/cluster-mismatch`; probed by `m1-notes.md` on main's value, not re-run here). `test-evidence` calls `red-at-current-reach? head` per unverified red and `test/reaching` once per changed function. `verdict` requires `(every? accepted red-before)`. `bin/lane` passes `accepted` into `:seon.source/accepted-red-before` and writes the `Branch-evidence-red-before-accepted:` trailer. `run-candidate-tests!` answers `:seon.operator/tests-passed?` from `command!` succeeding or refusing (exit code); `bin/test-check` writes the run's members as EDN when `SEON_TEST_RESULT_FILE` is set. `batch-form` records on default's connection from `running-instances`; `-main`'s `record!` is `(spit out …)`; `run-round!`'s contract is `:nil`. `designed-red?` accepts `(= :fail (:type %))`. `:seon.test.run/run` carries `:seon.program/partition :seon.data`. `test/seon/central_round_test.clj` exists with three deftests (Opus called it new); `test/seon/operator_test.clj` and `test/my/test_test.clj` exist.
-- **Not verified here:** `bin/seon check` end to end with a result file; the merge-branch run reaching main (T6, Q1); the round on default (T5, Q2); a cold whole-program `reach-digests` (Opus: 3.0 s, 5.0 GB). No main write, no reset, no reload, no uncommitted source loaded; the probe branch retired.
+## 8. Verification on default (2026-10-12)
 
-## 8. Narrow check, self-applied
+- **P1 (status).** `runtime_status`: faulted, 5 open faults, 9 agent-error signatures, 42 `:seon.problems/errored-receipt` entries, 7 failed
+  tests, 9 untested-hot warnings, heap 0.70 GB of 4 GB, commit `6acc85d3…`.
+- **P2 (main, jvm as root, read-only; F1).** 5 runs, 167 members, 56 tests with results, 7 red; 2,881 test
+  declarations; 56 `:seon.agent/branch` values; the latest members' evaluators 55 `:compiled`, 1 `:interpreted`;
+  `seon.turn/test-run`'s `:seon.fn/references` `[seon.test/run]`. 24 ms.
+- **P3 (red rerun, sci as `tr-revise`).** `g` (returns 1), `k`, `h` (`(inc (g))`), deftests `t-static`, `t-resolve`
+  (`((resolve 'trr.probe/k))`), `t-red` (`(= 2 (g))`): reply red `[trr.probe/t-red]`; request 820.8 ms, test step
+  384 ms, step allocation 733 MB for three tests of 44.7 ms. Then `(defn u … 7)`: no test executed; request 446 ms,
+  test step 265 ms, step 568 MB. Then `(+ 1 1)`: 180.5 ms, test step 124 ms, step 276 MB, no test executed (a step that
+  runs nothing costs 124–265 ms and 276–568 MB: the open test-step cost tasks). Then `seon.test/select` (`:named`,
+  `:interpreted`, the three tests) in `seon.profile/measure`: 11.0 ms; to run `[t-red]`; reused `t-resolve`,
+  `t-static`; `t-red`'s current reach digest `1efe171c…` equals its latest result's. `(keys (seon.context/current-state))`
+  before the probe → `(:seon.context/turns)`.
+- **P4 (static reach).** `reach-memberships`: `t-resolve` holds `trr.probe/k` (a quoted symbol is a reference);
+  `t-static` holds `h`, `g`.
+- **P5 (hidden calls).** `k2` (returns 4), `t-dyn` (`(requiring-resolve (symbol "trr.probe" (str "k" 2)))`),
+  `(defmulti area :shape)` with an `:sq` method, `t-multi`: both green; `k2` appears in that request's cost diff as an
+  interpreted call. Then `k2` → 5 and the method → `(* 3 s)`: the step ran no test; `select` reused both greens
+  (`[t-dyn 1 0] [t-multi 1 0]`) while their bodies' expressions evaluated live answered `[false false]`.
+  `reach-memberships`: `t-dyn` holds no `k2`; `t-multi` holds `trr.probe/area`, which has no entity
+  (`pull` → nil; the namespace declares `g u h k k2`). `:seon.config.test.cost/top` is 10.
+- **P6 (unresolved names, jvm).** Of 8,274 distinct `:seon.fn/calls` and `:seon.fn/references` targets on main, 351
+  are in a program namespace with no declaration (sample: task symbols such as
+  `my.program/a-search-limit-is-a-positive-integer`). 95 ms.
+- **Code read.** `select`'s `red-holds?` and `revisions-now`; `latest` filters this branch's runs only, with no
+  tested branch, equal input digest and evaluator. `measured-body` binds a fresh `seon.batch/sink`; `seon.profile/timed`
+  counts by `[sym digest]`. Test bodies run with `db/*read-evidence-sink*` nil. `record-latest-tx` computes
+  `reach-memberships` of the tested database and stores `:seon.test/reach`. `reach-node` takes calls, references,
+  subject, keywords and the contract's keywords; `reach-schema-node` hashes the form. `reach-attribute` re-derives a
+  whole attribute map per content revision and retires the branch's previous one. `failed-tests` already judges a red
+  by its current reach digest. Carried from the first version and re-verified by the narrow check (claims 4–17, 20–25):
+  the base digests differ from the head's, `result-at-reach` across programs answers `{}`, `fork-point-red` costs
+  ≈ 300 ms and 250 MB per red and loses its run.
+- **Not verified here:** root's `(doc my.root/close!)` cost (cited from the brief and the narrow check; running it
+  writes runs to main); R4's red case end to end; whether file-declared defmethod bodies change the multimethod's leaf
+  (R3's file case decides it); the size of `:seon.test.member/dynamic-calls` over the suite. No main write, no reset, no
+  reload, no uncommitted source loaded. The probe branch's retirement returned `:my.agent/retiring? true`,
+  `:my.agent/retired? false` (the known lifecycle task `seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion`).
 
-1. **Every live claim reproduces** (§7): main's run count (drifted 0 → 1; reported with the run's shape), `designed-red?` on a plain `:fail`, `red-at-current-reach?` on main, the changed reach digests of a reached test and the `{}` cross-program read, the base results surviving on the branch at the base's digests, the no-task agent's empty block and origin-less reply, `main-database` from a branch, `reach-digests` cold and warm, `result-at-reach` on main, the token sizes, `fork-point-red`'s cost and the loss of its run. Claims taken from the code are cited by symbol; the one probe not re-run (`admit-run`'s refusal) is cited to `m1-notes.md` and the code.
-2. **Every deletion is in the phase converting its last caller** (§4): the boolean fork point goes in T1 with all five readers and both tests that build one; `red-at-current-reach?` and the accepted list go in T3 with `test-evidence`, `verdict`, `bin/lane`, the schema, the test, two task must-reads and three documents; the operator task in T4; `OUT` in T5 with its invocation document. `change-reds`, `red-test-verdicts` and `fork-point-red` are not deleted here (M7 owns the first two; the third keeps a caller in `record-broken!` and `test-evidence`). HEAD boots after each phase: no phase removes a function another phase still calls.
-3. **Every phase names a red proof** in an existing or stated file with a data assertion red on HEAD: T1 `each-step-kind-is-done-by-its-one-rule` (boolean schema today) and a new runner deftest (no `fork-point`); T2 `broken-tests-show-with-their-failures` (no-task block is empty today); T3 `a-branch-proves-its-files-only-with-current-green-evidence` (`proven?` false until accepted today); T4 a new operator deftest (no `check-verdict`); T5 a new central-round deftest (`run-round!` returns nil); T6 Astra's merge deftest (`:seon.data` never merges).
-4. **Words:** Clojure, Datahike, Malli, clojure.test and git only; none of the retired words appear outside quoted code.
+## 9. Narrow check, self-applied
+
+1. **Every live claim reproduces** (§8): main's counts re-read today (F1: 5 runs, 56 tests, 7 red, 2,881 declarations,
+   56 branches); the red rerun after an unrelated write (P3); quoted symbols in reach (P4); the reused greens of a
+   computed-name call and a multimethod method while their bodies answer false (P5); the 351 unresolved names (P6). The
+   numbers carried from the first version are the narrow check's reproductions, cited by claim. The root rerun cost is
+   cited, not reproduced (§8).
+2. **Every deletion is in the phase converting its last caller** (§5), searched with `rg` across `src`, `test`,
+   `script`, `resources`, `bin`, `docs/seon` and the lane templates: `:seon.agent/broken` and `/new-red` have three
+   readers (`step-observation`, `record-broken!`, `turn_test`) and one task intent, all in R6; `red-holds?` is local to
+   `select`; `red-at-current-reach?` and the accepted list as the narrow check counted them, plus `repl-slice.md` (F2),
+   in R9. HEAD boots after each phase: no phase removes a function a later phase still calls; `result-at-reach` is
+   replaced in R6, the phase that converts `base-results`.
+3. **Every phase names a red proof** in an existing or named file, a data assertion, and why it is red on HEAD (§6).
+   R1 and R11 are measured-cost proofs through `seon.profile/measure` (AGENTS.md 64668ecae); R8 is conditional on M7.
+4. **The narrow check's failures:** F1 counts updated (§8 P2). F2: R9 converts the lane template. F3, F7: removed (the
+   round's phase is dropped, Q2). F4: removed (`--branch-evidence` runs nothing; the agent's step runs bases). F5:
+   every `results-at` caller's evaluator is named (§3). F6: the no-task head is `head-entries` over the reached tests,
+   and `test-step`, not `summary`, sets `:seon.turn.loop/broken` (§3, R7). F8: removed (the judgment is derived on read,
+   nothing is persisted between phases). F9: R8 depends on M7 and names today's owner, `seon.cluster.source/accept-merge!`.
+5. **Words:** Clojure, Datahike, Malli, clojure.test and git only; retired words appear only inside quoted code.
