@@ -17,6 +17,7 @@
             [seon.fn :as fn]
             [seon.id :as id]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.task :as task]
@@ -293,16 +294,37 @@
         (throw (ex-info "The agent requested no merge." {:defined defined :requested requested})))))))
 
 (defn- merge!
-  "Root's merge of `assignment` into the checkout `root` (`my.root/merge!`) through the cluster `execution`."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/assignment :seon.fn/root]
+  "Root's merge of `assignment` (`my.root/merge!`) through the cluster `execution`."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/assignment]
                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
-  [execution assignment root]
-  ((requiring-resolve 'my.root/merge!) {:my.program/context (assoc execution :my.program/base-ctx (:seon.sci.eval/ctx execution)) :seon.task/assignment assignment :seon.fn/root root}))
+  [execution assignment]
+  ((requiring-resolve 'my.root/merge!) {:my.program/context (assoc execution :my.program/base-ctx (:seon.sci.eval/ctx execution)) :seon.task/assignment assignment}))
 
-(deftest ^{:seon/tasks #{'seon.test/an-unloaded-agent-namespace-runs-interpreted-at-the-gate}
-           :seon.test/long "Two own-branch agents' first requests, assignments and request runs, and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+(defn- checkout-dial!
+  "Name the disposable checkout `root` as the cluster's `:seon.config.fs/working-root` on `connection`:
+  the checkout its merges are proven against and published into."
+  [connection root]
+  (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil)) {:seon.config.fs/working-root root}))
+
+(defn- pass!
+  "One db<->flow pass over the running cluster `running`, as a wake runs it."
+  [running]
+  (let [handle (support/running-cluster running)]
+    (cluster.agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
+                             :seon.flow/plan :seon.cluster.merge-test/wake)
+    nil))
+
+(defn- assignment-row
+  "Assignment `key`'s merge and publication facts on main."
+  [connection key]
+  (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal]
+           [:seon.task/assignment key]))
+
+(deftest ^{:seon/tasks #{'seon.merge/an-accepted-merge-is-published-by-the-next-pass
+                         'seon.test/an-unloaded-agent-namespace-runs-interpreted-at-the-gate}
+           :seon.test/long "Two own-branch agents' first requests, assignments and request runs, and two merges (each one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
            :seon.test/long-ms 240000}
-  a-green-request-lands-on-main-and-disk-in-one-call
+  an-accepted-merge-is-published-by-the-next-pass
   (support/with-running-agent
    (fn [running _ connection]
      (let [member (get-in (db/db connection) [:config :branch])
@@ -310,45 +332,65 @@
            _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
            path "test/tq/land.clj"
            root (checkout! "land-test" {path land-source})
+           _ (checkout-dial! connection root)
            file (io/file root path)
            ;; the checkout's file declared at the cluster head unrun, as publication declares it
            entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
            execution (support/running-cluster running)
            digest #(:seon.program/definition-digest (db/pull (db/db %1) [:seon.program/definition-digest] [:seon.fn/sym %2]))
-           outcome #(:seon.task/outcome (db/pull (db/db connection) [:seon.task/outcome] [:seon.task/assignment %]))]
+           ledger (io/file root "tmp/orchestrator/lanes/other-lane.paths")]
        (try
-         (testing "a green request lands on main, on disk and in one git commit in one call"
+         (testing "a green request merges on main; the next pass publishes it in one git commit"
            (let [fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
                  request (requested! running connection "area" fix)
+                 text (slurp file)
                  before (git! root "rev-parse" "HEAD")
-                 landed (merge! execution request root)]
-             (is (some? request) "the agent requested its merge")
-             (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
-             (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "the value names the written file")
-             ;; main moves on after the merge commit (the merge task's decision, the write-back's reindex)
+                 merged (merge! execution request)]
+             (is (nil? (:seon.error/message merged)) "the merge answers no refusal")
              (is (= fix (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'tq.land/area])))
                  "main holds the agent's definition")
+             (is (= :merged (:seon.task/outcome (assignment-row connection request))) "the assignment is merged")
+             (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge commit")
+             (is (nil? (:seon.task/git-commit (assignment-row connection request))) "and no git commit yet")
+             (is (= [text before] [(slurp file) (git! root "rev-parse" "HEAD")]) "the merge writes no file")
+             (testing "a path another lane claims waits: the pass writes nothing"
+               (io/make-parents ledger)
+               (spit ledger (str path "\n"))
+               (pass! running)
+               (is (= [text before] [(slurp file) (git! root "rev-parse" "HEAD")]))
+               (is (nil? (:seon.task/git-commit (assignment-row connection request))) "the publication stays due")
+               (io/delete-file ledger))
+             (let [measured (profile/measure #(pass! running))]
+               (is (< (:seon.profile/ms measured) 1000) "one small file's publication pass stays under a second")
+               (is (< (:seon.profile/alloc-bytes measured) (* 256 1024 1024)) "and allocates under 256 MB on its thread"))
+             (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection request)]
+               (is (nil? refused) "the publication answers no refusal")
+               (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
+               (is (= before (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
+               (is (= [path] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit)))
+                   "carrying exactly the merged file"))
+             (is (str/includes? (slurp file) fix) "the file holds the agent's span")
              (is (= (digest connection 'tq.land/area)
                     (:seon.program/definition-digest
                      (some #(when (= [:seon.fn/sym 'tq.land/area] (program/row-identity %)) %)
                            (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]}))))
                  "the file declares the definition main holds")
-             (is (str/includes? (slurp file) fix) "the file holds the agent's span")
-             (is (= :merged (outcome request)) "the assignment, the merge request, is merged")
-             (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD")
-             (is (= before (git! root "rev-parse" "HEAD^")))))
+             (is (= "" (git! root "status" "--porcelain" "--" "test")) "nothing is left staged or dirty")
+             (let [published (slurp file) head (git! root "rev-parse" "HEAD")]
+               (pass! running)
+               (is (= [published head] [(slurp file) (git! root "rev-parse" "HEAD")]) "a second pass changes nothing"))))
          (testing "a red reaching test answers the gate's refusal, decides nothing and writes nothing"
            (let [text (slurp file)
                  head (git! root "rev-parse" "HEAD")
                  request (requested! running connection "side"
                                      "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
                  main (db/commit-id (db/db connection))
-                 refused (merge! execution request root)]
+                 refused (merge! execution request)]
              (is (= :seon.source/red-test-error (:seon.error/type refused)))
              (is (= #{['tq.land/side-identity-test :red]}
                     (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
-             (is (nil? (outcome request)) "the assignment stays open")
+             (is (nil? (:seon.task/outcome (assignment-row connection request))) "the assignment stays open")
              (is (= main (db/commit-id (db/db connection))) "main is unchanged")
              (is (= text (slurp file)) "the file is unchanged")
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
@@ -383,6 +425,7 @@
            path "test/tq/shape.clj"
            schema-path "resources/seon/schemas/tq.shape.edn"
            root (checkout! "land-schema-test" {path shape-source schema-path shape-schemas})
+           _ (checkout-dial! connection root)
            ;; the checkout's schemas, then its file, declared at the cluster head unrun, as publication declares them
            schemas (schema-entities (db/db connection) (edn/read-string shape-schemas))
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) schemas (mapv program/row-identity schemas)))
@@ -396,15 +439,16 @@
        (try
          (let [request (requested! running connection 'tq.shape "area" fix)
                before (git! root "rev-parse" "HEAD")
-               landed (merge! execution request root)
+               landed (merge! execution request)
+               _ (pass! running)
+               git-commit (:seon.task/git-commit (assignment-row connection request))
                main (db/db connection)
                file-schemas (edn/read-string (slurp (io/file root schema-path)))
                published (into {} (map (juxt :seon.schema/key :seon.program/definition-digest))
                                (schema/canonical-schema-entities (db/carried-projection main) file-schemas))
                held #(:seon.program/definition-digest (db/pull main [:seon.program/definition-digest] [:seon.schema/key %]))]
-           (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
-           (is (= #{path schema-path} (set (get-in landed [:seon.source/written :seon.source/changed-paths])))
-               "the function's file and its schema resource are written")
+           (is (nil? (:seon.error/message landed)) "the merge answers no refusal")
+           (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass published it")
            (is (= {:tq.shape/radius [:and {:description "A radius."} [:int {:min 0}]] :tq.shape/side :int
                    :tq.shape/area [:int {:min 0}]}
                   file-schemas)
@@ -420,8 +464,8 @@
                   (edn/read-string (:seon.fn/spec (db/pull main [:seon.fn/spec] [:seon.fn/sym 'tq.shape/label]))))
                "the consumer's contract names the new schema on main")
            (is (= #{path schema-path}
-                  (set (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" (:seon.git/commit landed)))))
-               "one git commit carries both files")
+                  (set (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit))))
+               "one git commit carries the function's file and its schema resource")
            (is (= before (git! root "rev-parse" "HEAD^"))))
          (finally (support/delete-root! root)))))))
 
@@ -557,6 +601,7 @@
            _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
            path "test/tq/land.clj"
            root (checkout! "scratch-land-test" {path land-source})
+           _ (checkout-dial! connection root)
            entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
            _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
            execution (support/running-cluster running)]
@@ -565,8 +610,11 @@
          (let [request (requested! running connection "area"
                                    (str "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
                                         "\n(in-ns 'user)\n(require 'tq.land)"))
-               landed (merge! execution request root)]
-           (is (nil? (:seon.error/type landed)) "the landing answers no refusal")
-           (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "only the changed file is written")
-           (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD"))
+               landed (merge! execution request)
+               _ (pass! running)
+               git-commit (:seon.task/git-commit (assignment-row connection request))]
+           (is (nil? (:seon.error/type landed)) "the merge answers no refusal")
+           (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass publishes it as the checkout's new HEAD")
+           (is (= [path] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit)))
+               "only the changed file is written"))
          (finally (support/delete-root! root)))))))

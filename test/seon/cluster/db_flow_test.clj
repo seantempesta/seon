@@ -141,6 +141,8 @@
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1} [:delete-branch]
               "root merged it: deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/publish? true} [:publish]
+              "merged declarations main has not published: published before the branch is deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/kept? true} [] "merged and kept"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c2} [:merge]
               "written after its merge: merged again"]

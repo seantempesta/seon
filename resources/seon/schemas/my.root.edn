@@ -8,9 +8,8 @@
                           :my.root/open-assignment [:map [:seon.render/operations :seon.render/operations]]]
           :merge-requests [:vector :my.root/merge-request]
           :merge-request-read [:map [:seon.db/db :seon.db/database-value]]
-          :merge-request-request [:map {:description "The open assignment root merges, into the checkout :seon.fn/root (the cluster's :seon.config.fs/working-root when absent)."}
-                                  [:my.program/context :my.program/context] [:seon.task/assignment :seon.task/assignment]
-                                  [:seon.fn/root {:optional true} :seon.fn/root]]
+          :merge-request-request [:map {:description "The open assignment root merges; its declarations publish into the cluster's :seon.config.fs/working-root."}
+                                  [:my.program/context :my.program/context] [:seon.task/assignment :seon.task/assignment]]
           :close-request [:map {:description "The open assignment root closes without merging, and why."}
                           [:my.program/context :my.program/context] [:seon.task/assignment :seon.task/assignment]
                           [:seon.task/reason :seon.task/reason]]

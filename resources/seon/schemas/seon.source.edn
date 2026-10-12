@@ -106,8 +106,8 @@
                [:seon.source/commit-id :seon.source/commit-id]
                [:seon.test.run/id {:optional true} :seon.test.run/id]],
               :acceptance
-              [:map {:description "What a merge's git commit names: the assignment, the run that gated it, the merge commit, and the task and agent when the cluster records them."}
-               [:seon.task/assignment :seon.task/assignment] [:seon.test.run/id :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
+              [:map {:description "What a merge's git commit names: the assignment, the merge commit, and the run that gated it, the task and agent when they are known."}
+               [:seon.task/assignment :seon.task/assignment] [:seon.test.run/id {:optional true} :seon.test.run/id] [:seon.source/commit-id :seon.source/commit-id]
                [:seon.task/sym {:optional true} :seon.task/sym] [:seon.agent/id {:optional true} :seon.agent/id]],
               :prepared
               [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, the digest each merged declaration held on the destination, and the candidate's commit."}

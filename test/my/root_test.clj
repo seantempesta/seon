@@ -81,8 +81,7 @@
                            #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "Done."}
                                                             [:db/add a :seon.task.attempt/end :done]]))
            (let [measured (profile/measure #(my.root/merge! {:my.program/context (root-context connection)
-                                                             :seon.task/assignment assignment
-                                                             :seon.fn/root "/nonexistent"}))]
+                                                             :seon.task/assignment assignment}))]
              (is (<= (:seon.profile/ms measured) 100) "a facts merge, first in its JVM, under 100 ms")
              (is (<= (:seon.profile/alloc-bytes measured) (* 64 1024 1024)) "and under 64 MB allocated on its thread"))
            (finally (store/release-branch! fork)
@@ -114,8 +113,7 @@
                                                             [:db/add a :seon.task.attempt/end :done]]))
            (let [commit (db/commit-id (db/db fork))
                  open (my.root/merge-requests {:seon.db/db (db/db connection)})
-                 merged (my.root/merge! {:my.program/context (root-context connection) :seon.task/assignment assignment
-                                         :seon.fn/root "/nonexistent"})
+                 merged (my.root/merge! {:my.program/context (root-context connection) :seon.task/assignment assignment})
                  row (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-base :seon.task/merge-commit
                                                   :seon.task.attempt/end]
                               [:seon.task/assignment assignment])]

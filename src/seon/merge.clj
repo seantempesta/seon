@@ -5,6 +5,7 @@
             [datahike.api :as d]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as refusal]
@@ -245,11 +246,11 @@
   when the agent requested the merge (its merge request on the branch names the proofs), the declarations
   it changed since the base, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
-  `merge-tx` in its transaction, then the merge branch is deleted, the declarations are written back into the
-  checkout `root` and committed to git (`write-back!`, `commit!`). Main's commit is recorded as
-  `:seon.task/merge-commit`. A base already at C merges nothing and transacts nothing. Answers the merge, or
-  the first refusal as data with nothing merged; a write-back or commit refusal after the merge carries
-  `:seon.source/accepted`. A `:root` conflict of the facts keeps main's value and is answered beside them.
+  `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold
+  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`; publishing the
+  merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
+  A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
+  with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
 
   Example:
   (seon.merge/merge! execution \"0123456789ab\" \"/Users/me/src/project\")"
@@ -304,11 +305,7 @@
                          (let [after (db/db connection)
                                before (db/commit-database after (:seon.source/base-commit-id accepted))
                                done (db/commit-database after (:seon.source/commit-id accepted))]
-                           (try (answer before done) (finally (source/release! [before done])))))
-                written (when (and result (not (:seon.error/at result)))
-                          (source/write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root}))
-                committed (when (:seon.source/changed-paths written)
-                            (source/commit! root written (acceptance (db/db connection) key accepted)))]
+                           (try (answer before done) (finally (source/release! [before done])))))]
             (cond
               (seq (:seon.program/conflict prepared))
               (refusal/error :seon.source/conflict-error
@@ -318,8 +315,77 @@
               (not (:seon.source/candidate prepared)) prepared
               (not (:seon.source/commit-id accepted)) accepted
               (:seon.error/at result) (assoc result :seon.source/accepted accepted)
-              (:seon.error/at written) (assoc written :seon.source/accepted accepted)
-              (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
               :else (do (run! #(conflict-task! connection branch %) (:seon.merge/conflicts result))
-                        (assoc result :seon.source/accepted accepted :seon.source/written written
-                               :seon.git/commit (:seon.git/commit committed))))))))))
+                        (assoc result :seon.source/accepted accepted)))))))))
+
+(defn checkout
+  "The checkout cluster `cluster-name` publishes merged declarations into, as a canonical path: its
+  `:seon.config.fs/working-root` on `database`; else the refusal naming the unreadable dial."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster/name] [:or :seon.fn/root :seon.error/value]]}
+  [database cluster-name]
+  (let [effective (config/effective database cluster-name)
+        root (when-not (:seon.error/at effective) (:seon.config.fs/working-root effective))]
+    (cond
+      (:seon.error/at effective) effective
+      (string? root) (.getCanonicalPath (java.io.File. ^String root))
+      :else (refusal/error :seon.source/write-back-error
+                           {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.merge/checkout
+                            :seon.error/message "The cluster names no :seon.config.fs/working-root to publish into; nothing was written."
+                            :seon.source/write-back-refused :root-refused :seon.error/offending cluster-name}))))
+
+(defn- merged-request
+  "The run id of the merge request on main `database` answering assignment `a`; {} when it names none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:map [:seon.task/run-id {:optional true} :seon.task/run-id]]]}
+  [database a]
+  (or (db/q '[:find (pull ?r [:seon.task/run-id]) . :in $ ?a
+              :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
+            database a)
+      {}))
+
+(defn publish!
+  "Publish assignment `key`'s merged declarations into the cluster's checkout (`checkout`) through
+  `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
+  (`seon.cluster.source/merge-accepted` of its `:seon.task/merge-commit`), written back
+  (`seon.cluster.source/write-back!`, which proves and reindexes each file) and committed as one git
+  commit of exactly those paths (`seon.cluster.source/commit!`) under the merge's own claim in `bin/lane`'s
+  ledger (lane `merge-<key>`), then `:seon.task/git-commit` written. A path another lane claims, or one
+  with uncommitted changes the merge's claim does not cover, waits: nothing is written and the
+  publication stays due (`:seon.merge/waiting`). A refusal is recorded on the assignment as
+  `:seon.task/refusal`, its error type, and answered. A crash anywhere leaves it due: a write-back finding
+  the merged bytes on disk installs them again unchanged, and paths HEAD already holds answer the commit
+  that names this merge.
+
+  Example:
+  (seon.merge/publish! execution \"0123456789ab\")"
+  {:malli/schema [:=> [:cat :seon.merge/publication :seon.task/assignment]
+                  [:or :seon.merge/published :seon.error/value]]}
+  [{connection :seon.db/connection cluster-name :seon.cluster/name} key]
+  (let [database (db/db connection)
+        {a :db/id commit :seon.task/merge-commit} (db/pull database [:db/id :seon.task/merge-commit] [:seon.task/assignment key])
+        lane (str "merge-" key)
+        root (checkout database cluster-name)
+        accepted (if (:seon.error/at root) root (source/merge-accepted connection commit))
+        paths (when-not (:seon.error/at accepted) (source/merge-paths connection accepted))
+        waiting (when paths (source/waiting-paths root lane paths))
+        refuse (fn [refused]
+                 (let [recorded (db/transact! connection [[:db/add a :seon.task/refusal (:seon.error/type refused)]])]
+                   (if (:db-after recorded) refused recorded)))]
+    (cond
+      (:seon.error/at accepted) (refuse accepted)
+      (seq waiting) {:seon.task/assignment key :seon.merge/waiting waiting}
+      :else
+      (let [_ (source/claim-paths! root lane paths)
+            written (source/write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})
+            run-id (:seon.task/run-id (merged-request database a))
+            committed (when-not (:seon.error/at written)
+                        (source/commit! root written (acceptance database key (cond-> accepted run-id (assoc :seon.test.run/id run-id)))))
+            outcome (cond (:seon.error/at written) (refuse written)
+                          (:seon.error/at committed) (refuse committed)
+                          :else (let [recorded (db/transact! connection [[:db/add a :seon.task/git-commit (:seon.git/commit committed)]])]
+                                  (if (:db-after recorded)
+                                    {:seon.task/assignment key :seon.source/written written
+                                     :seon.git/commit (:seon.git/commit committed)}
+                                    recorded)))]
+        ;; the claim outlives only a crash: a refusal recorded or a commit recorded both release it
+        (source/release-claim! root lane)
+        outcome))))

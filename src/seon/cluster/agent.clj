@@ -1992,7 +1992,7 @@
            (:pause :resume :cancel) (follow! handle routing action)
            ;; an open assignment's :stop follows its intent; an ended one's names its entity
            :stop (if (:db/id action) (apply-lifecycle! handle routing action) (follow! handle routing action))
-           (:merge-base :merge :close :delete-branch) (apply-lifecycle! handle routing action))
+           (:merge-base :merge :publish :close :delete-branch) (apply-lifecycle! handle routing action))
          ;; a translation: the failure names the action it stopped, so the boundary can end its assignment
          (catch Exception cause
            (throw (ex-info (or (ex-message cause) "db<->flow's action failed.") {:seon.flow.plan/action action} cause)))))
@@ -2062,6 +2062,16 @@
     (boolean (or (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?))
                  (some (complement forked?) waiting)))))
 
+(defn- publication-due?
+  "Whether assignment `a`'s publication is due on main `database`, from its `row`: merged, its merge commit
+  recorded, no git commit and no refusal recorded, and its merge carried declarations (its merge request
+  reached main with it)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :map] :boolean]}
+  [database a {outcome :seon.task/outcome commit :seon.task/merge-commit git :seon.task/git-commit refused :seon.task/refusal}]
+  (boolean (and (= :merged outcome) commit (not git) (not refused)
+                (seq (db/q '[:find [?r ...] :in $ ?a :where [?r :seon.task/of-assignment ?a] [?r :seon.task/merge-request _]]
+                           database a)))))
+
 (defn lifecycle-facts
   "What db<->flow reads before it derives the ended assignments' actions (`next-actions`).
   Every assignment on main `database` whose branch the `store` holds: its end on main, else on its branch head
@@ -2078,13 +2088,15 @@
         branches (registry/branches store)]
     (into [] (keep (fn [[a k h b id]]
                      (when (contains? branches b)
-                       (let [{main-end :seon.task.attempt/end base :seon.task/merge-base}
-                             (db/pull database [:seon.task.attempt/end :seon.task/merge-base] a)
+                       (let [{main-end :seon.task.attempt/end base :seon.task/merge-base :as row}
+                             (db/pull database [:seon.task.attempt/end :seon.task/merge-base :seon.task/outcome
+                                                :seon.task/merge-commit :seon.task/git-commit :seon.task/refusal] a)
                              head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b})
                              ;; the branch is read while it holds something unmerged
                              {on-branch :seon.task.attempt/end requested? :seon.flow.plan/requested?}
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
-                             end (or main-end on-branch)]
+                             end (or main-end on-branch)
+                             publish? (publication-due? database a row)]
                          (when (uuid? head)
                            (cond-> {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
                                     :seon.agent/id id :seon.flow.plan/head head
@@ -2093,6 +2105,7 @@
                                                                         (kept? database branches a id end)))}
                              end (assoc :seon.task.attempt/end end)
                              requested? (assoc :seon.flow.plan/requested? true)
+                             publish? (assoc :seon.flow.plan/publish? true)
                              main-end (assoc :seon.flow.plan/main-end main-end)
                              base (assoc :seon.task/merge-base base)))))))
           (sort-by second rows))))
@@ -2105,15 +2118,16 @@
   merge base and main holds no other end (`:merge`), unless main holds its end with no merge base (copied
   to main before merge bases existed) or the branch holds the agent's merge request, whose declarations
   merge with its facts only through root's merge (`my.root/merge!`, the same `seon.merge/merge!`), so its end
-  alone is written on main for root (`:close`); any other end main lacks is written there (`:close`); a branch
-  already merged (head = merge base, or so copied) that nothing keeps is deleted (`:delete-branch`), so whether
-  it stays is read on main after its merge, whose own write wakes that pass. Pure; each action is
-  idempotent by identity or by head = merge base."
+  alone is written on main for root (`:close`); any other end main lacks is written there (`:close`); a merge
+  whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
+  a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
+  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
+  Pure; each action is idempotent by identity, by head = merge base or by the git commit main records."
   {:malli/schema [:=> [:cat :seon.flow.plan/held] :seon.flow.plan/actions]}
   [held]
   (into [] (mapcat (fn [{end :seon.task.attempt/end main-end :seon.flow.plan/main-end base :seon.task/merge-base
                          head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
-                         requested? :seon.flow.plan/requested? :as row}]
+                         requested? :seon.flow.plan/requested? publish? :seon.flow.plan/publish? :as row}]
                      (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
                                                             :seon.task/branch])
                                           :seon.flow.plan/op %)
@@ -2129,8 +2143,10 @@
                          merging? (conj (action :merge))
                          ;; a requested merge's end waits for root on main, with nothing merged
                          (and end (nil? main-end) (or requested? (not (merged-ends end)))) (conj (action :close))
-                         ;; deletion reads main after the merge: the merge's own write wakes the next pass
-                         (and merge? (or copied? (= head base)) (not kept?)) (conj (action :delete-branch))))))
+                         ;; publication reads main alone: the merge commit, then the checkout
+                         publish? (conj (action :publish))
+                         ;; deletion reads main after the merge and its publication: their own writes wake the next pass
+                         (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch))))))
         held))
 
 (defn- ended-problem!
@@ -2188,10 +2204,16 @@
                                            (throw (ex-info "The assignment's branch retains no fork commit to merge from."
                                                            {:seon.error/message "The assignment's branch retains no fork commit to merge from."
                                                             :seon.store/branch branch})))]])
-      :merge (let [merged (db/with-branch {:seon.db/connection connection}
+      ;; the checkout the merged files are proven against before acceptance, as publish! will write them
+      :merge (let [root (merge/checkout (db/db connection) (:seon.cluster/name handle))
+                   merged (db/with-branch {:seon.db/connection connection}
                                           #(merge/merge! (assoc handle :seon.store/store (handle-store handle))
-                                                         (:seon.task/assignment action) nil))]
+                                                         (:seon.task/assignment action) (when (string? root) root)))]
                (when (:seon.error/at merged) (throw (ex-info (:seon.error/message merged "The merge was refused.") merged))))
+      ;; a refused publication is recorded on the assignment by publish! itself; the throw records the fault
+      :publish (let [published (merge/publish! handle (:seon.task/assignment action))]
+                 (when (:seon.error/at published)
+                   (throw (ex-info (:seon.error/message published "The publication was refused.") published))))
       :close (close! connection action)
       ;; the stop lets the pass that wrote the end finish, then joins it
       :stop (do (when-let [registry (entry-registry routing agent-id)]

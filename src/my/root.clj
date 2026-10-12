@@ -7,7 +7,6 @@
   (my.root/merge-requests)"
   (:require [seon.cluster.message :as message]
             [seon.cluster.source :as source]
-            [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
             [seon.merge :as merge]
@@ -86,23 +85,22 @@
 (defn merge!
   "Merge the open assignment `:seon.task/assignment` into my cluster (`seon.merge/merge!`): its branch's facts,
   and, when its agent requested the merge, its declarations, gated by the proofs and the tests reaching the
-  change on a fresh merge branch of the head I hold, then written back into the checkout `:seon.fn/root` (the
-  cluster's `:seon.config.fs/working-root` when absent) in one git commit. The assignment closes `:merged` in
-  the merge's transaction and its branch is deleted by the next lifecycle pass. Answers the merge, or the
-  first refusal as data; a red gate leaves the assignment open.
+  change on a fresh merge branch of the head I hold, the files proven against the cluster's checkout
+  (`:seon.config.fs/working-root`). The assignment closes `:merged` in the merge's transaction; the next
+  lifecycle pass publishes its declarations into the checkout in one git commit (`seon.merge/publish!`), then
+  deletes its branch. Answers the merge, or the first refusal as data; a red gate leaves the assignment open.
 
   Example:
   (my.root/merge! {:seon.task/assignment \"0123456789ab\"})"
   {:malli/schema [:=> [:cat :my.root/merge-request-request]
                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
-  [{context :my.program/context key :seon.task/assignment root :seon.fn/root}]
+  [{context :my.program/context key :seon.task/assignment}]
   (let [database (db/db (:seon.db/connection context))
         open (open-assignment database key 'my.root/merge!)
-        effective (when-not (or root (:seon.error/at open)) (config/effective database (:seon.cluster/name context)))
-        checkout (or root (some-> (:seon.config.fs/working-root effective) java.io.File. .getCanonicalPath))]
-    (cond (:seon.error/at open) open
-          (:seon.error/at effective) effective
-          :else (merge/merge! context key checkout))))
+        checkout (when-not (:seon.error/at open) (some->> (:seon.cluster/name context) (merge/checkout database)))]
+    (if (:seon.error/at open)
+      open
+      (merge/merge! context key (when (string? checkout) checkout)))))
 
 (defn close!
   "Close the open assignment `:seon.task/assignment` without merging it, saying why (`:seon.task/reason`): it

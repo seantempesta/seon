@@ -1563,6 +1563,58 @@
        {:seon.source/changed-paths [] :seon.source/files []}
        proven))))
 
+(defn- main-parent
+  "The parent of commit `after` on its own branch, or the `:commit-absent` refusal.
+  It is the main commit a merge was transacted onto, beside the merged commits its
+  other parents name (Datahike's lineage, `datahike.api/parent-commit-ids`)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
+                  [:or :seon.source/commit-id :seon.source/write-back-error]]}
+  [connection after]
+  (let [branch (get-in after [:config :branch])]
+    (or (some (fn [parent]
+                (let [database (d/commit-as-db connection parent)]
+                  (try (when (= branch (get-in database [:config :branch])) parent)
+                       (finally (some-> database d/release-materialized-db)))))
+              (d/parent-commit-ids after))
+        (write-back-refusal :commit-absent "The merge commit names no parent on its own branch."
+                            {:seon.error/offending (db/commit-id after)}))))
+
+(defn merge-accepted
+  "The accepted merge main's merge `commit` made, as `write-back!` takes it.
+  Derived from the commits on `connection`'s store alone: the declarations whose
+  definition digest the merge changed, the main commit it was transacted onto and
+  the merge commit; else the `:commit-absent` refusal."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/commit-id]
+                  [:or :seon.source/accepted :seon.source/write-back-error]]}
+  [connection commit]
+  (let [after (d/commit-as-db connection commit)
+        parent (if after
+                 (main-parent connection after)
+                 (write-back-refusal :commit-absent "The merge commit is unavailable in this store."
+                                     {:seon.error/offending commit}))
+        before (when (uuid? parent) (d/commit-as-db connection parent))]
+    (try
+      (if-not before
+        parent
+        (let [touched (fn/report-identities before after
+                                            (vec (d/datoms (d/since (d/history after) (db/basis-t before)) :eavt))
+                                            (vec program/identity-attributes))]
+          (when (:seon.db/invalid-read touched) (throw (ex-info (:seon.error/message touched) touched)))
+          (let [[was now] (map #(held-digests % (set touched)) [before after])]
+            {:seon.program/identities (into #{} (filter #(not= (was %) (now %))) touched)
+             :seon.source/base-commit-id parent :seon.source/commit-id commit})))
+      (finally (run! #(some-> % d/release-materialized-db) [before after])))))
+
+(defn merge-paths
+  "The sorted checkout-relative paths `write-back!` writes `accepted` into.
+  Each change's one file as the main commit before the merge records it
+  (`change-path`); a change naming no file names none here (`write-back!` refuses it)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted] [:vector :seon.source/path]]}
+  [connection {identities :seon.program/identities before :seon.source/base-commit-id}]
+  (let [database (d/commit-as-db connection before)]
+    (try (vec (sort-by str (into #{} (keep #(change-path database %)) identities)))
+         (finally (d/release-materialized-db database)))))
+
 (defn write-back!
   "Write the function and test changes of `accepted` (`accept-merge!`'s
   accepted merge on `connection`'s branch) into their source files under
@@ -1631,11 +1683,11 @@
     commit-id :seon.source/commit-id}
    paths]
   (str "Merge " (or task-sym (str "assignment " assignment)) (when agent-id (str " from agent " agent-id))
-       ": merged on main as " commit-id " by gate run " run-id "\n\n"
+       ": merged on main as " commit-id (when run-id (str " by gate run " run-id)) "\n\n"
        "Written: " (str/join " " paths) "\n\n"
        "Assignment: " assignment "\n"
        "Merge-commit: " commit-id "\n"
-       "Branch-evidence-runs: " run-id "\n"
+       (when run-id (str "Branch-evidence-runs: " run-id "\n"))
        "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
 
 (defn- call-with-commit-lock
@@ -1666,21 +1718,41 @@
             (.close ^java.io.OutputStream (:in holder))
             (deref holder)))))))
 
+(defn- committed-merge
+  "The commit of the checkout `root` whose message names the merge commit `commit-id`
+  (`commit-message`'s `Merge-commit:` trailer), or the refusal saying none does."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] :seon.source/commit-id]
+                  [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
+  [root paths commit-id]
+  (let [found (git root ["log" "-1" "--format=%H" "--fixed-strings" (str "--grep=Merge-commit: " commit-id)])]
+    (if (and (zero? (:exit found)) (seq (:out found)))
+      {:seon.git/commit (:out found)}
+      (commit-refusal paths "The written paths equal HEAD and no commit names this merge; nothing was committed."
+                      {:seon.error/offending (:err found)}))))
+
 (defn- commit-locked
   "`commit!` under the lane commit lock: the staged-index check, the commit of
-  exactly `paths` and its verification."
+  exactly `paths` and its verification. Untracked files among `paths` are added alone
+  first and unstaged again if git refuses the commit, as `bin/lane commit` does. Paths
+  already equal to HEAD were committed by this merge before: its commit answers."
   {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
   [root paths acceptance]
   (let [staged (git root ["diff" "--cached" "--name-only"])
         other (when (zero? (:exit staged)) (vec (remove (set paths) (remove str/blank? (str/split-lines (:out staged))))))
+        untracked (when (seq paths) (git root (into ["ls-files" "--others" "--exclude-standard" "--"] paths)))
+        added (vec (remove str/blank? (str/split-lines (str (:out untracked)))))
+        unchanged? (and (seq paths) (empty? added) (zero? (:exit (git root (into ["diff" "--quiet" "HEAD" "--"] paths)))))
         before (git root ["rev-parse" "HEAD"])]
     (cond
       (not (zero? (:exit staged))) (commit-refusal paths "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
-      (seq other) (commit-refusal paths "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
-      (empty? paths) (commit-refusal paths "The landing wrote no path to commit." {:seon.error/offending paths})
+      (seq other) (commit-refusal paths "Other paths are staged in the shared index; a merge commits only its own." {:seon.error/offending other})
+      (empty? paths) (commit-refusal paths "The merge wrote no path to commit." {:seon.error/offending paths})
+      unchanged? (committed-merge root paths (:seon.source/commit-id acceptance))
       :else
-      (let [made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
+      (let [_ (when (seq added) (git root (into ["add" "--"] added)))
+            made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
+            _ (when (and (seq added) (not (zero? (:exit made)))) (git root (into ["reset" "-q" "--"] added)))
             after (git root ["rev-parse" "HEAD"])
             carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])]
         (cond
@@ -1706,6 +1778,54 @@
   [root written acceptance]
   (let [paths (vec (:seon.source/changed-paths written))]
     (call-with-commit-lock root paths #(commit-locked root paths acceptance))))
+
+;;; The lane ledger `bin/lane` keeps: tmp/orchestrator/lanes/<lane>.paths, one checkout-relative path
+;;; (or dir/ prefix) per line.
+
+(defn- ledger-file
+  "The path of lane `lane`'s claims file in the checkout `root`'s lane ledger."
+  {:malli/schema [:=> [:cat :seon.fn/root :string] :string]}
+  [root lane]
+  (str (io/file root "tmp" "orchestrator" "lanes" (str lane ".paths"))))
+
+(defn- covers?
+  "Whether the ledger entry `entry` covers `path`: equal, or a dir/ prefix of it (`bin/lane`'s `covers`)."
+  {:malli/schema [:=> [:cat :string :seon.source/path] :boolean]}
+  [entry path]
+  (or (= entry path) (and (str/ends-with? entry "/") (str/starts-with? path entry))))
+
+(defn waiting-paths
+  "The `paths` of the checkout `root` lane `lane` may not write now, sorted: each one another lane's
+  claim in `bin/lane`'s ledger covers, or with uncommitted changes (`git status`) no claim of `lane`
+  covers. A path a lane holds or edits waits; nothing is locked."
+  {:malli/schema [:=> [:cat :seon.fn/root :string [:vector :seon.source/path]] [:vector :seon.source/path]]}
+  [root lane paths]
+  (let [claims (for [file (or (.listFiles (.getParentFile (io/file (ledger-file root lane)))) [])
+                     :let [name (.getName ^java.io.File file)]
+                     :when (str/ends-with? name ".paths")
+                     entry (remove str/blank? (str/split-lines (slurp file)))]
+                 [(subs name 0 (- (count name) (count ".paths"))) entry])
+        holders (fn [path] (into #{} (keep (fn [[holder entry]] (when (covers? entry path) holder))) claims))
+        dirty? (fn [path] (seq (:out (git root ["status" "--porcelain" "--" path]))))]
+    (vec (sort (filter (fn [path] (let [held (holders path)]
+                                    (or (seq (disj held lane)) (and (not (held lane)) (dirty? path)))))
+                       paths)))))
+
+(defn claim-paths!
+  "Record lane `lane`'s claim of `paths` in the checkout `root`'s `bin/lane` ledger; nil."
+  {:malli/schema [:=> [:cat :seon.fn/root :string [:vector :seon.source/path]] :nil]}
+  [root lane paths]
+  (let [file (io/file (ledger-file root lane))]
+    (io/make-parents file)
+    (spit file (str (str/join "\n" paths) "\n"))
+    nil))
+
+(defn release-claim!
+  "Remove lane `lane`'s claims from the checkout `root`'s `bin/lane` ledger; nil."
+  {:malli/schema [:=> [:cat :seon.fn/root :string] :nil]}
+  [root lane]
+  (Files/deleteIfExists (.toPath (io/file (ledger-file root lane))))
+  nil)
 
 (defn land!
   "Root's merge of the assignment the merge request `merge-request` answers (`seon.merge/merge!`), into the
