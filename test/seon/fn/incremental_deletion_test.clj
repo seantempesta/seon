@@ -195,3 +195,28 @@
        (is (qualified-symbol? producer) "the fixture program declares a render producer")
        (is (contains? (set (:seon.fn/calls entity)) producer)
            "A submitted invoker reaches the population's producers, not only its own batch's.")))))
+
+(deftest ^{:seon.test/long "One sample-root analysis plus one incremental reconciliation on a fixture branch."
+           :seon.test/long-ms 15000}
+  an-unchanged-caller-of-a-dependency-is-reanalyzed-in-a-root-the-jvm-does-not-run-from
+  ;; The sample root is under tmp/, which no source root of the JVM's checkout declares, as a working
+  ;; checkout is not when the JVM runs from data/source/<sha> (Run 14, F28).
+  (in-sample
+   (fn [connection root prefix source _]
+     (let [directory (str "src/" prefix)
+           request {:seon.fn/root (.getCanonicalPath root) :seon.fn/roots ["src"]}
+           caller (str "(ns " prefix ".user (:require [" prefix ".callee] [malli.core]))\n"
+                       "(defn run [] [(" prefix ".callee/kept) (malli.core/validator :int)])\n")
+           _ (doseq [[file text] {"callee.clj" (:callee source) "user.clj" caller}]
+               (spit (doto (io/file root directory file) io/make-parents) text))
+           _ (support/transacted! connection (seon.fn/analyze-entities request))
+           selected (assoc request :seon.source/previous-database (db/db connection)
+                                   :seon.fn/changed-paths #{(str directory "/callee.clj")})]
+       ;; a signature change (a second arity) selects the unchanged caller for analysis again
+       (spit (io/file root directory "callee.clj")
+             (str "(ns " prefix ".callee)\n(defn produce [] 1)\n(defn kept ([] 2) ([x] x))\n"))
+       (is (= support/committed
+              (support/refusal-data
+               #(seon.fn/index! (assoc selected :seon.db/connection connection
+                                                :seon.program/rows (seon.fn/analyze-entities selected)))))
+           "the caller of the changed definition is analyzed again, its malli.core call resolved")))))

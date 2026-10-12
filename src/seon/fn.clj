@@ -2745,6 +2745,8 @@
   (if (empty? paths)
     []
     (let [forms (:seon.schema.projection/forms projection)
+          ;; the analyzer's own cache decision, made once here, so the cacheless read below follows it
+          cache-root (analyzer/analysis-cache-root paths cache-root)
           files (mapv io/file paths)
           contexts (if captured
                      (update-vals (select-keys captured paths) text-context)
