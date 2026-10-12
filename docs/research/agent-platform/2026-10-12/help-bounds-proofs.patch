@@ -1,0 +1,42 @@
+diff --git a/test/seon/help_test.clj b/test/seon/help_test.clj
+index e1ef8dc66..e3ff5a9f4 100644
+--- a/test/seon/help_test.clj
++++ b/test/seon/help_test.clj
+@@ -144,6 +144,20 @@
+            heads (set (map first (mapcat taught-forms lines)))]
+        (is (contains? heads 'seon.schema/register!) "help teaches the registration form")))))
+ 
++(deftest help-prints-whole-without-a-large-value-finding
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [reply (support/reply (agent-text "(help)" agent-id running))]
++       (is (= [] (filterv #(= :large-value (:seon.repl/finding %)) (:seon.repl/findings reply)))
++           "a value the printer shows whole is not flagged large")))))
++
++(deftest source-finds-a-schema-registered-in-the-same-eval-request
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [code "(do (seon.schema/register! :comp.order/qty :int) (my.program/source :comp.order/qty))"
++           value (:seon.repl/value (support/reply (agent-text code agent-id running)))]
++       (is (nil? (:seon.program/not-found value)) "the key registered a moment ago is found")))))
++
+ (deftest dir-lists-what-an-agent-calls-as-an-agent-calls-it
+   (support/with-running-agent
+    (fn [running agent-id _]
+@@ -151,7 +165,7 @@
+                            (:seon.repl/value (support/reply (agent-text "(dir my.program)" agent-id running))))
+            leaves (set (tree-seq coll? seq (vec (vals functions))))]
+        (is (not (contains? functions 'my.program/supplied-context)) "an internal helper is not listed")
+-       (is (= '([sym]) (get functions 'my.program/source)) "a supplied database is not an argument")
++       (is (= '([subject]) (get functions 'my.program/source)) "a supplied database is not an argument")
+        (is (not-any? leaves [:seon.db/db :my.program/context 'database 'context])
+            "no arglist names a supplied world member")))))
+ 
+
+TASK ENTRY for resources/seon/tasks/my.program.edn (held by lane del-request; tag the second deftest ^{:seon/tasks #{'my.program/source-finds-a-schema-registered-in-the-same-eval-request}} when the entry is added):
+ #:seon.task{:name "source-finds-a-schema-registered-in-the-same-eval-request"
+             :kind :function
+             :intent "`(my.program/source :comp.order/qty)` answers `:seon.program/not-found` in the same eval request as the `(seon.schema/register! :comp.order/qty :int)` that creates the key (one `(do ...)` form); the next eval request finds it. Done when `my.program/source` of a key registered earlier in the same eval request answers its definition. Red proof: `seon.help-test/source-finds-a-schema-registered-in-the-same-eval-request` (red on HEAD: not-found :comp.order/qty)."
+             :must-read #{my.program/source seon.schema/register! seon.sci.lookup/schema-documentation}}
+
+ITEM 1 note: help-prints-whole-without-a-large-value-finding is red on HEAD (value-tokens 1874 against [:<= 1000]); lane block-print holds resources/seon/schemas/seon.config.eval.edn, whose working-tree change already makes the bound [:<= 4096]. Commit this test with or after that change.

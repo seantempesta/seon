@@ -151,7 +151,7 @@
                            (:seon.repl/value (support/reply (agent-text "(dir my.program)" agent-id running))))
            leaves (set (tree-seq coll? seq (vec (vals functions))))]
        (is (not (contains? functions 'my.program/supplied-context)) "an internal helper is not listed")
-       (is (= '([sym]) (get functions 'my.program/source)) "a supplied database is not an argument")
+       (is (= '([subject]) (get functions 'my.program/source)) "a supplied database is not an argument")
        (is (not-any? leaves [:seon.db/db :my.program/context 'database 'context])
            "no arglist names a supplied world member")))))
 
