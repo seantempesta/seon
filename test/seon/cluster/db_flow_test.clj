@@ -829,6 +829,41 @@
               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
                   "with nothing interrupted")))))))))
 
+(deftest a-failed-start-ends-its-attempt-and-the-next-plans
+  ;; x forks its need a's end commit, whose branch is gone (chain experiment 3's G7): its start fails, and the
+  ;; failure is x's assignment's end, so no pass starts it again while y, ready beside it, starts
+  (binding [*space* "tq.failstart"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"a" [#{} "(clojure.test/is (= 1 2))"] "x" [#{"a"} "(clojure.test/is (= 1 2))"]
+                    "y" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                started #(:seon.flow.plan/started (agent/registry-facts routing))]
+            (test-support/transacted! connection (agent/creation-tx {:seon.agent/id "tq-gone-agent" :seon.ns/name 'user
+                                                                     :seon.cluster/name "tq-chain"
+                                                                     :seon.agent/branch :tq-gone-branch}))
+            (let [[row] (task/attempt-tx (db/db connection) (chain-handle "a") "tq-gone-agent" :tq-gone-branch)]
+              (test-support/transacted! connection [row])
+              (test-support/transacted! connection
+                                        [[:db/add [:seon.task/assignment (:seon.task/assignment row)] :seon.task.attempt/end :done]
+                                         [:db/add [:seon.task/assignment (:seon.task/assignment row)] :seon.task.attempt/commit
+                                          (db/commit-id (db/db connection))]]))
+            (pass! handle routing)
+            (let [[[key-x _ _ end] :as xs] (seq (attempts connection "x"))]
+              (is (= 1 (count xs)) "x got its first assignment")
+              (is (= :error end) "whose failed start ended it in the same run")
+              (is (string? (:seon.task.attempt/reason (db/pull (db/db connection) [:seon.task.attempt/reason]
+                                                               [:seon.task/assignment key-x])))
+                  "with the failure as its reason"))
+            (pass! handle routing)
+            (is (= 1 (count (attempts connection "x"))) "the next run never assigns x again")
+            (let [[[_ _ agent-y end-y] :as ys] (seq (attempts connection "y"))]
+              (is (= 1 (count ys)) "and y has its assignment")
+              (is (= :open end-y))
+              (is (contains? (started) agent-y) "whose graph runs")))))))))
+
 ;;; Chain experiment 1 (docs/research/agent-platform/2026-10-12/chain-experiment-1.md): a Design+Prove step's output
 ;;; is a red proof for its successor, written on its own branch.
 

@@ -1977,9 +1977,9 @@
     nil))
 
 (defn apply-plan!
-  "Apply db<->flow's `actions` over `facts` in order.
-  Through `handle` and its `routing`.
-  Each action's failure is recorded as db<->flow's fault and the rest still apply."
+  "Apply db<->flow's `actions` over `facts` in order, through `handle` and its `routing`.
+  An action that fails stops the rest: its failure is thrown again naming the action
+  (`:seon.flow.plan/action`, the cause kept) for db<->flow's one catch (`failed-pass!`)."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing :seon.flow.plan/facts
                        :seon.flow.plan/actions]
                   :nil]}
@@ -1990,12 +1990,30 @@
            :start-flow (start-attempt! handle facts action)
            :problem (write-problem! handle action)
            (:pause :resume :stop :cancel) (follow! handle routing action))
-         (catch Exception failure
-           (fault/fault! (env/of handle) failure
-                         {:seon.error/layer :seon.flow/plan :seon.error/operation `apply-plan!
-                          :seon.db.process/id (:seon.db.process/id handle)
-                          :seon.agent/id (:seon.agent/id action "root")}))))
+         ;; a translation: the failure names the action it stopped, so the boundary can end its assignment
+         (catch Exception cause
+           (throw (ex-info (or (ex-message cause) "db<->flow's action failed.") {:seon.flow.plan/action action} cause)))))
   nil)
+
+(defn- failed-pass!
+  "db<->flow's one catch, the Flow proc's boundary, for its pass's `failure`.
+  The assignment a failed `:attempt`, `:start-flow` or `:merge` names ends `:error` on main with the
+  failure's message as its reason, so no later pass derives that action again (`seon.task/ready` reads
+  the end as terminal); the failure is recorded as db<->flow's fault."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.error/throwable] :nil]}
+  [handle failure]
+  (let [action (:seon.flow.plan/action (ex-data failure))
+        cause (or (when action (ex-cause failure)) failure)
+        key (:seon.task/assignment action)
+        connection (:seon.db/connection handle)]
+    (when (and key (#{:attempt :start-flow :merge} (:seon.flow.plan/op action))
+               (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
+      (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
+                          [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
+                           (or (not-empty (ex-message cause)) "db<->flow's action failed.")]]))
+    (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
+                                         :seon.db.process/id (:seon.db.process/id handle)})
+    nil))
 
 (defn- branch-end
   "The end `branch`'s head records on attempt `key`, read from main `database`'s store; nil when none."
@@ -2215,6 +2233,37 @@
           (filter #(turn/more-agent-work? database {:seon.agent/id %}))
           (remove scheduled candidates))))
 
+(defn- run-pass!
+  "One db<->flow pass over cluster `handle` and its `routing`: the ended attempts land on main first, so the
+  plan reads them ended (P2); then the attempts are written and Flow follows them (R1); then the agents with
+  work that no attempt names start. The first failure stops the pass and reaches db<->flow's one catch."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
+  [handle routing]
+  (let [connection (:seon.db/connection handle)]
+    (land-ends! handle routing (unlanded-ends @connection (handle-store handle)))
+    (settle-kept-branches! handle routing)
+    (let [db @connection
+          facts (plan-facts db)
+          max-running (:seon.config.agent/max-running (config/effective db (:seon.cluster/name handle)))]
+      (when (or (:seon.error/at facts) (not (int? max-running)))
+        (throw (ex-info "db<->flow could not read what to plan."
+                        (if (:seon.error/at facts) facts {:seon.config.agent/max-running max-running}))))
+      (apply-plan! handle routing facts (plan facts (registry-facts routing) max-running)))
+    ;; db<->flow starts the agents whose custody is its own execution's branch: a branch inherits rows that
+    ;; name its parent's, and those agents belong to the parent's db<->flow. A row naming no branch still
+    ;; reaches `start-flow!`, whose acquisition refuses it by name.
+    (let [db @connection
+          own-branch (get-in db [:config :branch])
+          agents (into [] (keep (fn [[id branch]] (when (#{own-branch ::none} branch) id)))
+                       (db/q '[:find ?id ?branch
+                               :where [?agent :seon.agent/id ?id]
+                               [(get-else $ ?agent :seon.agent/branch ::none) ?branch]]
+                             db))
+          unstarted (remove #(contains? (:seon.agent/started @routing) %) agents)]
+      (doseq [agent-id (sort (agents-to-start db (set unstarted)))]
+        (start-flow! {:seon.turn.loop/cluster handle :seon.agent/id agent-id :seon.agent/routing routing})))
+    nil))
+
 (defn db<->flow
   "db<->flow transform, in Flow's four arities.
   Derive unstarted agents with work or schedules under a payload-free wake,
@@ -2299,46 +2348,7 @@
        [state nil])
 
      :else
-     (let [handle (:seon.turn.loop/cluster state)
-           routing (:seon.agent/routing state)
-           connection (:seon.db/connection handle)
-           db @connection
-           ;; db<->flow starts the agents whose custody is its own execution's
-           ;; branch: a branch inherits rows that name its parent's, and those
-           ;; agents belong to the parent's db<->flow. A row naming no branch still
-           ;; reaches `start-flow!`, whose acquisition refuses it by name.
-           own-branch (get-in db [:config :branch])
-           agents (into [] (keep (fn [[id branch]] (when (#{own-branch ::none} branch) id)))
-                        (db/q '[:find ?id ?branch
-                                :where [?agent :seon.agent/id ?id]
-                                [(get-else $ ?agent :seon.agent/branch ::none) ?branch]]
-                              db))
-           unstarted (remove #(contains? (:seon.agent/started @routing) %) agents)]
-       ;; each start fails alone: its fault is recorded and the pass goes on
-       (doseq [agent-id (sort (agents-to-start db (set unstarted)))]
-         (try (start-flow! {:seon.turn.loop/cluster handle
-                            :seon.agent/id agent-id
-                            :seon.agent/routing routing})
-              (catch Exception failure
-                (fault/fault! (env/of handle) failure
-                              {:seon.error/layer :seon.flow/plan :seon.error/operation `start-flow!
-                               :seon.db.process/id (:seon.db.process/id handle) :seon.agent/id agent-id}))))
-       ;; the ended attempts land on main first, so the plan reads them ended (P2)
-       (try (land-ends! handle routing (unlanded-ends @connection (handle-store handle)))
-            (settle-kept-branches! handle routing)
-            (catch Exception failure
-              (fault/fault! (env/of handle) failure
-                            {:seon.error/layer :seon.flow/plan :seon.error/operation `unlanded-ends
-                             :seon.db.process/id (:seon.db.process/id handle)})))
-       ;; the attempts: write first, then make Flow follow (R1)
-       (let [db @connection
-             facts (plan-facts db)
-             max-running (:seon.config.agent/max-running (config/effective db (:seon.cluster/name handle)))]
-         (if (or (:seon.error/at facts) (not (int? max-running)))
-           (fault/fault! (env/of handle)
-                         (ex-info "db<->flow could not read what to plan."
-                                  (if (:seon.error/at facts) facts {:seon.config.agent/max-running max-running}))
-                         {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
-                          :seon.db.process/id (:seon.db.process/id handle)})
-           (apply-plan! handle routing facts (plan facts (registry-facts routing) max-running))))
+     (let [handle (:seon.turn.loop/cluster state)]
+       (try (run-pass! handle (:seon.agent/routing state))
+            (catch Exception failure (failed-pass! handle failure)))
        [state nil]))))

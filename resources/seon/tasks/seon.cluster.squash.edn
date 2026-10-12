@@ -15,6 +15,7 @@
              :kind :function
              :intent "(hybrid-done-and-merge M4) A both-sides-changed coordinate with no declared `:seon.cluster/conflict` rule becomes a `:seon.merge/unmerged` entity on the merge branch only (new schema `resources/seon/schemas/seon.merge.edn`; `seon.id/id [assignment attribute entity-identity]`; members `attribute`, `entity`, `base`, `ours`, `theirs`, `source-commit`; any write to the coordinate on the merge branch retracts it). Delete `seon.cluster.squash/conflict-task!`; convert `db_flow_test` (680) and `squash_test` (101). Red proof: `seon.cluster.squash-test/a-conflict-keeps-its-three-values-on-the-merge-branch` (pulled base, ours, theirs and source-commit equal the values merged). Cost: under 50 ms. Platform slice (`--test`)."
              :must-read #{seon.cluster.squash/conflict-task! seon.cluster.squash/squash-merge seon.program/three-way seon.id/id}
+             :needs #{[:seon.task/sym my.root/a-merge-is-keyed-by-the-assignment]}
              :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
  #:seon.task{:name "a-merge-whose-reached-definition-moved-writes-nothing"
              :kind :function

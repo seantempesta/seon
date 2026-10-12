@@ -893,7 +893,8 @@
   "The handles of every task that should be running now in `database` (main's): the leaves whose own
   intent is :running (no inheritance: ingestion and `create!` write :held on every task, so an absent
   intent never appears and nothing launches by being read here), not done, without a terminal end other
-  than :done, minus those a need blocks.
+  than :done (an :error end, a failed start among them, is terminal too: no pass assigns it again by
+  itself), minus those a need blocks.
   Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
   hundred times more. A leaf with an open attempt stays in it; the registry tells running from launch."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
@@ -901,7 +902,7 @@
   (let [eligible (db/q '[:find ?t ?h :in $ % :where [?t :seon.task/execution :running]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
                          (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
-                                   [(contains? #{:given-back :capped :stalled :cancelled} ?e)])]
+                                   [(contains? #{:given-back :capped :stalled :cancelled :error} ?e)])]
                        database ready-rules)
         blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database ready-rules))]
     (or (read-error eligible) (read-error blocked)
