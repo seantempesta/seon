@@ -839,6 +839,10 @@
   (run! #(when (and % (not (:seon.error/at %))) (d/release-materialized-db %)) values)
   nil)
 
+(def merge-bound
+  "The bound on the changed entities one merge comparison reads (`seon.program/changed-identities`)."
+  {:seon.program/max-datoms 10000})
+
 (defn compare-branch
   "Compare `candidate`'s committed program with `head` (a database value of the
   branch `target`) on their merge base: the candidate's changed identities, the base, candidate and
@@ -851,7 +855,7 @@
   (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
     (if (:seon.error/at c-id)
       {:c-id c-id}
-      (let [bound {:seon.program/max-datoms 10000}
+      (let [bound merge-bound
             branch (commit-database held-store c-id)
             base (merge-base branch head target candidate)
             ;; Only what the candidate changed since its base can merge or
@@ -1013,6 +1017,20 @@
                             "A test of the named run is not green; a merge commits only when every test is.")
       :seon.source/red-tests red-tests :seon.source/refused-test-run run-id :seon.test.run/branch s})))
 
+(defn uncontracted
+  "The functions among `identities` that `database` holds with no complete `:malli/schema`, private ones
+  included, by symbol: what a merge refuses (`accept-merge!`) and what keeps an implement step from done
+  (`seon.context/step-status`). Macros and host-bound declarations carry no arity contract."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:vector :seon.fn/sym]]}
+  [database identities]
+  (into [] (keep (fn [[a f]]
+                   (when (= :seon.fn/sym a)
+                     (let [entity (db/pull database [:db/id :seon.fn/spec :seon.fn/macro? :seon.fn/host-bound?] [a f])]
+                       (when (and (:db/id entity) (not (:seon.fn/spec entity))
+                                  (not (:seon.fn/macro? entity)) (not (:seon.fn/host-bound? entity)))
+                         f)))))
+        (sort-by (comp str second) identities)))
+
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
   `source`: the named run on S complete, each of its `:seon.task/proofs` a
@@ -1083,12 +1101,7 @@
                 ;; REPL admits an uncontracted sketch with a warning; merge is
                 ;; where the contract becomes required. Macros and host-bound
                 ;; declarations carry no arity contract (sci/eval.clj:1005-1011).
-                uncontracted (for [[a f] delta :when (= :seon.fn/sym a)
-                                   :let [entity (db/pull tested [:db/id :seon.fn/spec :seon.fn/macro?
-                                                                 :seon.fn/host-bound?] [a f])]
-                                   :when (and (:db/id entity) (not (:seon.fn/spec entity))
-                                              (not (:seon.fn/macro? entity))
-                                              (not (:seon.fn/host-bound? entity)))] f)
+                uncontracted (uncontracted tested delta)
                 uncovered (for [[a f] delta :when (= :seon.fn/sym a)
                                 :when (:db/id (db/pull tested [:db/id] [a f]))
                                 :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
@@ -1106,10 +1119,13 @@
               (:seon.error/at on-main) on-main
               (seq red-tests) (red-test-refusal run-id s red-tests)
               (seq uncontracted)
-              (refuse (str "Every function a merge carries declares a complete :malli/schema; these do not: "
-                           (vec uncontracted) ". Declare their data shapes as registered schemas, "
-                           "contract them on the candidate branch, run their tests and request the merge again.")
-                      (vec uncontracted))
+              (seon.error.refusal/error :seon.source/uncontracted-error
+               {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
+                :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included; these do not: "
+                                         uncontracted ". Declare their data shapes as registered schemas, "
+                                         "contract them on the candidate branch, run their tests and request the merge again.")
+                :seon.error/offending uncontracted :seon.source/uncontracted uncontracted
+                :seon.source/refused-test-run run-id :seon.test.run/branch s})
               (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
               (:seon.error/at tx) tx
               (empty? tx) (refuse "The destination already holds the tested entities." (vec delta))

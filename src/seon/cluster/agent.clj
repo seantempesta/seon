@@ -2147,30 +2147,90 @@
       (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
     nil))
 
+(defn- relaunch-reason
+  "Why task `h`'s attempt, ended for `why` with `unmerged` declarations main lacks, is relaunched, while its
+  relaunched attempts on main `database` are fewer than `relaunches` (`:seon.config.run/relaunches`); nil once
+  the dial is used."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :string pos-int? :seon.config.run/relaunches]
+                  [:maybe :seon.task.attempt/relaunch]]}
+  [database h why unmerged relaunches]
+  (let [used (or (db/q '[:find (count ?b) . :in $ ?h :where [?b :seon.task/assigned ?h] [?b :seon.task.attempt/relaunch _]]
+                       database h)
+                 0)]
+    (when (and (int? used) (< used relaunches))
+      (str why " with " unmerged " declarations main lacks: relaunch " (inc used) " of " relaunches
+           " continues from its end commit."))))
+
+(defn- relaunch-dial
+  "The relaunch dial of `handle`'s cluster (`:seon.config.run/relaunches`); an unreadable dial throws."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] :seon.config.run/relaunches]}
+  [handle]
+  (let [relaunches (:seon.config.run/relaunches (config/effective (db/db (:seon.db/connection handle)) (:seon.cluster/name handle)))]
+    (when-not (int? relaunches)
+      (throw (ex-info "db<->flow could not read the relaunch dial." {:seon.error/message "db<->flow could not read the relaunch dial."
+                                                                      :seon.config.run/relaunches relaunches})))
+    relaunches))
+
+(def ^:private fixable-refusals
+  "The merge refusals the attempt's agent can fix on its branch, and its block shows: a merge refused for one is
+  relaunched from the attempt's end commit like a capped end with work (`refused-merge-relaunch`)."
+  #{:seon.source/uncontracted-error})
+
+(defn- refused-merge-relaunch
+  "The facts relaunching assignment `key`, whose merge was refused for a reason its agent can fix
+  (`fixable-refusals`) with `unmerged` declarations main lacks on its `branch`: its `:error` end with the
+  refusal as its reason, its end commit from the branch head, and its relaunch (`relaunch-reason`); nil when
+  the dial is used or the branch head records no end commit."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action :string :seon.flow.plan/unmerged]
+                  [:maybe [:map [:seon.task.attempt/end :seon.task.attempt/end] [:seon.task.attempt/reason :seon.task.attempt/reason]
+                           [:seon.task.attempt/commit :seon.task.attempt/commit]
+                           [:seon.task.attempt/relaunch :seon.task.attempt/relaunch]]]]}
+  [handle {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} reason unmerged]
+  (let [main (db/db (:seon.db/connection handle))
+        head (db/branch-database main branch)
+        commit (when head
+                 (try (db/q '[:find ?c . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/commit ?c]] head key)
+                      (finally (source/release! [head]))))
+        relaunch (when (and (uuid? commit) (pos-int? unmerged))
+                   (relaunch-reason main h "Its merge was refused" unmerged (relaunch-dial handle)))]
+    (when relaunch
+      {:seon.task.attempt/end :error :seon.task.attempt/reason reason
+       :seon.task.attempt/commit commit :seon.task.attempt/relaunch relaunch})))
+
 (defn- failed-pass!
   "db<->flow's one catch, the Flow proc's boundary, for its pass's `failure`.
   The assignment a failed `:attempt`, `:start-flow`, `:merge-base` or `:merge` names ends `:error` on main with the
   failure's message as its reason, so no later pass derives that action again (`seon.task/ready` reads
-  the end as terminal); the failure is recorded as db<->flow's fault. A refused `:merge` also delivers root's
-  problem task for that end (`ended-problem!`), naming the refusal's type and message."
+  the end as terminal); the failure is recorded as db<->flow's fault. A `:merge` refused for a reason its agent can
+  fix (`fixable-refusals`) is relaunched instead, while the relaunch dial lasts (`refused-merge-relaunch`): the
+  agent's own mistake is delivered to its next attempt, never a fault. Any other refused `:merge` also delivers
+  root's problem task for that end (`ended-problem!`), naming the refusal's type and message."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.error/throwable] :nil]}
   [handle failure]
   (let [action (:seon.flow.plan/action (ex-data failure))
         cause (or (when action (ex-cause failure)) failure)
         key (:seon.task/assignment action)
-        connection (:seon.db/connection handle)]
-    (when (and key (#{:attempt :start-flow :merge-base :merge} (:seon.flow.plan/op action))
-               (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
-      (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
-                          [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
-                           (or (not-empty (ex-message cause)) "db<->flow's action failed.")]])
-      (when (= :merge (:seon.flow.plan/op action))
-        (ended-problem! connection action :error
-                        (str (when-let [type (:seon.error/type (ex-data cause))] (str (pr-str type) " "))
-                             (or (not-empty (ex-message cause)) "db<->flow's merge was refused."))
-                        (source/unmerged-count (db/db connection) (handle-store handle) (:seon.task/branch action)))))
-    (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
-                                         :seon.db.process/id (:seon.db.process/id handle)})
+        connection (:seon.db/connection handle)
+        merge? (= :merge (:seon.flow.plan/op action))
+        type (:seon.error/type (ex-data cause))
+        reason (str (when type (str (pr-str type) " ")) (or (not-empty (ex-message cause)) "db<->flow's merge was refused."))
+        owned? (and key (#{:attempt :start-flow :merge-base :merge} (:seon.flow.plan/op action))
+                    (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
+        unmerged (when (and owned? merge?)
+                   (source/unmerged-count (db/db connection) (handle-store handle) (:seon.task/branch action)))
+        relaunch (when (and unmerged (fixable-refusals type)) (refused-merge-relaunch handle action reason unmerged))]
+    (cond
+      relaunch
+      (write! connection (mapv (fn [[attribute value]] [:db/add [:seon.task/assignment key] attribute value]) (sort relaunch)))
+
+      owned?
+      (do (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
+                              [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
+                               (or (not-empty (ex-message cause)) "db<->flow's action failed.")]])
+          (when merge? (ended-problem! connection action :error reason unmerged))))
+    (when-not relaunch
+      (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
+                                           :seon.db.process/id (:seon.db.process/id handle)}))
     nil))
 
 (defn- close!
@@ -2200,14 +2260,9 @@
                             :db/id))
             facts (cond-> facts (= :satisfied end) (assoc :seon.task/outcome :closed))
             unmerged (when-not (#{:cancelled :satisfied} end) (source/unmerged-count (db/db connection) store branch))
-            used (when (and (pos-int? unmerged) (#{:capped :stalled} end) (:seon.task.attempt/commit facts))
-                   (or (db/q '[:find (count ?b) . :in $ ?h :where [?b :seon.task/assigned ?h] [?b :seon.task.attempt/relaunch _]]
-                             (db/db connection) h)
-                       0))
-            facts (cond-> facts
-                    (and (int? used) (< used relaunches))
-                    (assoc :seon.task.attempt/relaunch (str "Ended " (name end) " with " unmerged " declarations main lacks: relaunch "
-                                                            (inc used) " of " relaunches " continues from its end commit.")))]
+            relaunch (when (and (pos-int? unmerged) (#{:capped :stalled} end) (:seon.task.attempt/commit facts))
+                       (relaunch-reason (db/db connection) h (str "Ended " (name end)) unmerged relaunches))
+            facts (cond-> facts relaunch (assoc :seon.task.attempt/relaunch relaunch))]
         (when (and unmerged (not (:seon.task.attempt/relaunch facts)))
           (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts) unmerged))
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))
@@ -2247,11 +2302,7 @@
       :publish (let [published (merge/publish! handle (:seon.task/assignment action))]
                  (when (:seon.error/at published)
                    (throw (ex-info (:seon.error/message published "The publication was refused.") published))))
-      :close (let [relaunches (:seon.config.run/relaunches (config/effective (db/db connection) (:seon.cluster/name handle)))]
-               (when-not (int? relaunches)
-                 (throw (ex-info "db<->flow could not read the relaunch dial." {:seon.error/message "db<->flow could not read the relaunch dial."
-                                                                                 :seon.config.run/relaunches relaunches})))
-               (close! connection (handle-store handle) action relaunches))
+      :close (close! connection (handle-store handle) action (relaunch-dial handle))
       ;; the stop lets the pass that wrote the end finish, then joins it
       :stop (do (when-let [registry (entry-registry routing agent-id)]
                   (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))

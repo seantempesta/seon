@@ -1185,6 +1185,56 @@
             (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                 "with no fault recorded"))))))))))
 
+;;; F45: a merge refused for a reason its agent can fix relaunches, the reason shown in the next block.
+
+(deftest ^{:seon.test/long "One chain world, one attempt's refused gate (a nested seon.test/run on a fresh merge branch) and its relaunch over three db<->flow passes."
+           :seon.test/long-ms 120000}
+  a-merge-refused-for-a-missing-contract-relaunches-with-the-refusal-shown
+  (binding [*space* "tq.uncontracted"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        ;; z, already green, only gives the world a program to define
+        connection {"u" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                rows (str *space* "-rows")
+                doubled (symbol rows "doubled")
+                problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" %))]))]
+            ;; u's red proof lives in the checkout, beside the function it reaches
+            (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                   (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                        "(deftest ^{:seon/tasks #{'" *space* "/u}} proves-u (is (= 4 (twice 2))))\n")})
+            (pass! handle routing)
+            (let [[[key-1 branch-1]] (seq (attempts connection "u"))
+                  on-1 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-1})]
+              ;; the agent's first pass ran its red proof: it is idle when its work and end are written
+              (await-on! on-1 #(not-empty (proof-runs (db/db on-1) (symbol rows "proves-u"))) ::proved)
+              ;; the work: a correct body through a private helper that declares no contract
+              (define-on! on-1 (symbol rows) (str "(defn- doubled [x] (* 2 x))\n"
+                                                  "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (doubled x))"))
+              (test-support/transacted! on-1 [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
+                                              [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit (db/commit-id (db/db on-1))]])
+              (pass! handle routing)
+              (let [first-row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task.attempt/reason :seon.task.attempt/relaunch]
+                                       [:seon.task/assignment key-1])]
+                (is (= :error (:seon.task.attempt/end first-row)) "the refused merge ends the attempt")
+                (is (str/includes? (str (:seon.task.attempt/reason first-row)) ":seon.source/uncontracted-error")
+                    "naming the refusal")
+                (is (string? (:seon.task.attempt/relaunch first-row)) "and relaunches it, as a capped end with work")
+                (is (nil? (problem key-1)) "with no problem task for root"))
+              (pass! handle routing)
+              (let [[[key-2 branch-2 agent-2]] (seq (remove #(= key-1 (first %)) (attempts connection "u")))
+                    on-2 (when branch-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2}))
+                    step (when on-2 (:seon.context/step (context/current-state (db/db on-2) agent-2)))]
+                (is (string? key-2) "the second attempt starts")
+                (is (= {:seon.task/status :working :seon.context/uncontracted [doubled]}
+                       (select-keys step [:seon.task/status :seon.context/uncontracted]))
+                    "its block names the uncontracted helper the merge refused"))))))))))
+
 ;;; H5: a capped attempt with work continues from its end commit, up to :seon.config.run/relaunches.
 
 (defn- relaunch-row
