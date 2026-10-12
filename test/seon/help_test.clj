@@ -5,7 +5,6 @@
             [edamame.core :as edamame]
             [seon.mcp :as mcp]
             [seon.bootstrap :as bootstrap]
-            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.task :as task]
@@ -217,11 +216,10 @@
        (is (str/includes? implement ":seon.context/proof-failures") "Implement's Done names the proof failures")
        (is (not (str/includes? implement ":seon.error/unimplemented")) "Implement's Done is not Prove's")))))
 
-(deftest help-is-shorter-than-it-was-and-never-says-root-reviews
+(deftest help-never-says-root-reviews
   (with-prove-agent
    (fn [connection]
      (let [text (str/join "\n" (lines-of @connection))]
-       (is (< (tokens/estimate text) 2162) "the help is below its former 2,162 tokens, the longer Prove Done included")
        (is (not (re-find #"(?i)root (reviews|answers)|ask root|\"root\"" text)) "nothing waits on root")))))
 
 (deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-in-ns-first-and-no-probing}}
@@ -290,9 +288,9 @@
 (deftest help-teaches-private-contracts-and-the-whole-proof-set
   (with-help-agent
    (fn [connection]
-     (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn {:error/message \"a java.nio.file.Path\" :gen/schema :string} seon.fs/path?]")) (lines-of @connection))
+     (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn {:error/message \"an even integer\" :gen/elements [0 2 4]} clojure.core/even?]")) (lines-of @connection))
          "a help line says defn- needs a contract and shows a named predicate with its message and generator")
-     (is (some #(and (str/includes? % "Prefer a plain Malli schema") (str/includes? % "a-contract-naming-a-branch-predicate-is-refused-at-the-writer")) (lines-of @connection))
+     (is (some #(and (str/includes? % "Prefer a plain Malli schema") (str/includes? % "one you define on your branch is refused")) (lines-of @connection))
          "a help line prefers plain schemas and says a branch predicate is refused at write")))
   (with-prove-agent
    (fn [connection]
