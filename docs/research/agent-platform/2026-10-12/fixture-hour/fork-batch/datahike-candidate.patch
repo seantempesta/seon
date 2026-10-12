@@ -1,0 +1,95 @@
+diff --git a/deps.edn b/deps.edn
+index b469ce39..9bbb367e 100644
+--- a/deps.edn
++++ b/deps.edn
+@@ -3,7 +3,7 @@
+         org.replikativ/hasch                        {:mvn/version "0.4.100"
+                                                      :exclusions [org.clojure/clojurescript]}
+         org.replikativ/konserve                     {:git/url "https://github.com/seantempesta/konserve"
+-                                                     :git/sha "5b39fddd6ae58bae7d08880daecd1ad7242ea273"
++                                                     :git/sha "26444d372bf97de219d55c06d5d23bd6f5cfc634"
+                                                      :exclusions [org.clojure/clojurescript
+                                                                   org.clojars.mmb90/cljs-cache]}
+ 
+diff --git a/src/datahike/store.cljc b/src/datahike/store.cljc
+index 4a9251e2..30966cbb 100644
+--- a/src/datahike/store.cljc
++++ b/src/datahike/store.cljc
+@@ -134,17 +134,22 @@
+ ;; so every overlay of one store would share ONE frontend, and `ready-store
+ ;; :tiered` copies the whole backend into it (`sync-on-connect`, above).
+ 
+-(defn- overlay-frontend [overlay]
+-  (or (km/connect-mem-store overlay {:sync? true})
+-      (km/new-mem-store (atom {}) {:sync? true :id overlay})))
++(defn- overlay-frontend-config [{:keys [overlay frontend-config]}]
++  (or frontend-config {:backend :memory :id overlay}))
++
++(defn- overlay-frontend [config]
++  (let [frontend (overlay-frontend-config config)]
++    (if (ks/store-exists? frontend {:sync? true})
++      (ks/connect-store frontend {:sync? true})
++      (ks/create-store frontend {:sync? true}))))
+ 
+ (defmethod ks/-connect-store :datahike/overlay
+-  [{:keys [backend-config overlay]} opts]
++  [{:keys [backend-config] :as config} opts]
+   (async+sync (:sync? opts) *default-sync-translation*
+               (go-try-
+                (let [backend (<?- (ks/connect-store backend-config opts))]
+                  (<?- (kt/connect-tiered-store
+-                       (overlay-frontend overlay)
++                       (overlay-frontend config)
+                        backend
+                        :write-policy :frontend-only
+                        :read-policy :frontend-first
+@@ -155,10 +160,13 @@
+   (ks/store-exists? backend-config opts))
+ 
+ (defmethod ks/-release-store :datahike/overlay
+-  [{:keys [backend-config]} store opts]
+-  (ks/release-store backend-config (:backend-store store) opts))
++  [{:keys [backend-config] :as config} store opts]
++  (async+sync (:sync? opts) *default-sync-translation*
++              (go-try-
++               (<?- (ks/release-store (overlay-frontend-config config)
++                                     (:frontend-store store) opts))
++               (<?- (ks/release-store backend-config (:backend-store store) opts)))))
+ 
+ (defmethod ks/-delete-store :datahike/overlay
+-  [{:keys [overlay]} opts]
+-  (async+sync (:sync? opts) *default-sync-translation*
+-              (go-try- (km/delete-mem-store overlay))))
++  [config opts]
++  (ks/delete-store (overlay-frontend-config config) opts))
+diff --git a/test/datahike/test/overlay_test.clj b/test/datahike/test/overlay_test.clj
+index 129e2ba5..17b58486 100644
+--- a/test/datahike/test/overlay_test.clj
++++ b/test/datahike/test/overlay_test.clj
+@@ -18,6 +18,7 @@
+                           :backend-config (:store base-cfg)}))
+ 
+ (deftest overlay-writes-never-reach-the-shared-store
++  (doseq [frontend [:memory :file]]
+   (let [dir (str (Files/createTempDirectory "overlay" (make-array FileAttribute 0)) "/store")
+         base-cfg {:store {:backend :file :path dir :id (random-uuid)}
+                   :keep-history? true :schema-flexibility :write}
+@@ -28,7 +29,11 @@
+         before (disk dir)
+         count-n #(d/q '[:find (count ?e) . :where [?e :m/n]] %)]
+     (try
+-      (let [cfg-a (overlay-config base-cfg)
++      (let [cfg-a (cond-> (overlay-config base-cfg)
++                    (= :file frontend)
++                    (assoc-in [:store :frontend-config]
++                              {:backend :file :id (random-uuid)
++                               :path (str (io/file dir ".." "frontend"))}))
+             cfg-b (overlay-config base-cfg)
+             a (d/connect cfg-a)
+             _ (d/branch! a :db :member)
+@@ -61,4 +66,4 @@
+           (try (is (= 200 (count-n @fresh))) (finally (d/release fresh)))))
+       (finally
+         (d/release base)
+-        (d/delete-database base-cfg)))))
++        (d/delete-database base-cfg))))))

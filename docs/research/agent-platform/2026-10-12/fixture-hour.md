@@ -1,6 +1,31 @@
 # File backed fixture experiment
 
-The fixture candidate branches the executing program with a private Konserve file frontend instead of republishing it. The scoped blob-configuration fix now passes all six behavior assertions with two clusters in one database. The combined candidate remains unaccepted: the shell reaches binary reading and finds that Konserve's `TieredStore` does not implement the binary range protocol; the latest fixture acquisition also exceeds its existing allocation limit. No implementation commit or fork bump has been made.
+Konserve range reads are implemented and pushed on `seon/tiered-range-reads`, commit `26444d372bf97de219d55c06d5d23bd6f5cfc634`. The fork batch stops at the Datahike file-frontend slice: its three overlay errors still reproduce, and a smaller probe exposes the earlier empty-file read hidden by cleanup. No Datahike implementation, Seon fixture conversion, dependency bump or default restart was accepted.
+
+## Fork batch result, 2026-10-12
+
+`konserve.tiered/TieredStore` now implements `konserve.protocols/PBinaryRangeStore` by selecting the frontend or backend exactly as its binary read method does and delegating the bounded read. The authoritative checkout is `reference-code/konserve`, whose origin is `https://github.com/seantempesta/konserve.git`; its parent was the pinned `e4334756413917305968333bf305e658c177765d`. The public range API is synchronous. Inherited reads do not populate the frontend or materialize the entire binary value.
+
+- Parent regression: two new tests, 23 assertions, 22 missing-protocol errors. [Output](fixture-hour/fork-batch/fork-batch-konserve-red.log).
+- Changed regression: two tests, 26 assertions, zero failures/errors. It covers inherited and local binary keys, frontend precedence, both read policies, missing keys, exact byte ranges, partial final ranges, offsets beyond the end and zero-length ranges. [Output](fixture-hour/fork-batch/fork-batch-konserve-green.log).
+- A 4 KiB read from a 32 MiB file allocated 30,712 bytes in 0.562 ms for an inherited key and 30,728 bytes in 0.465 ms for a local key. Both are below the existing file-range regression's 1 MiB allocation ceiling. This is new protocol functionality: the same parent operation throws, so there is no parent latency improvement ratio.
+- Konserve's own `clojure -M:test`: 92 tests, 1,397 assertions, zero failures/errors. [Full output](fixture-hour/fork-batch/fork-batch-konserve-full.log). The commit adds 13 net source lines and 73 test lines. It is pushed to our fork; no pull request was opened.
+
+The retained Datahike file-frontend patch was applied to `c9e57c6fb65365d5ce92b59854fb02ea59054fe7` on `seon/overlay-file-frontend`. `bb kaocha --focus datahike.test.overlay-test` still returns **3 tests, 36 assertions, 3 errors, 0 failures**, both with Datahike's original Konserve pin and after selecting the new range-enabled commit. [Original-pin output](fixture-hour/fork-batch/fork-batch-datahike-red.log), [new-pin output](fixture-hour/fork-batch/fork-batch-datahike-current.log), [exact candidate patch](fixture-hour/fork-batch/datahike-candidate.patch).
+
+The [smaller probe](fixture-hour/fork-batch/overlay-cause.clj) places connection release directly around the operation that opens it, exposing the earlier error without changing production cleanup. Run it from the Datahike checkout with `clojure -M:test <absolute-path-to-probe>` after applying the candidate patch. It connects the file overlay successfully, then `datahike.versioning/branch!` fails in `datahike.writing/read-head` with **“File is empty or deleted during read”, `{:length -1 :expected [20 8]}`**. [Original-pin cause](fixture-hour/fork-batch/fork-batch-datahike-cause.log), [new-pin cause](fixture-hour/fork-batch/fork-batch-datahike-cause-current.log).
+
+The producer path is Konserve's EDN read-through warming. `konserve.tiered/TieredStore` schedules `warm!` on a background `go` and returns the inherited value before that write completes. `konserve.impl.defaults/io-operation` opens the final file through `konserve.filestore/BackingFilestore` with `CREATE`; `konserve.impl.defaults/update-blob` later writes its replacement and moves it into place. A subsequent frontend read can therefore encounter an empty destination during the unfinished warm. This source path explains the empty-file observation; the probe does not yet control the interleaving or prove a repaired implementation. The existing Konserve test explicitly describes nonblocking warming, so changing it requires a further producer change with its own regression. No cleanup exception filter, retry, extra lock, fallback read or Seon workaround was added.
+
+The full overlay test acquires its first overlay connection before entering the bracket that releases it; `branch!` throws before that bracket. The still-held connection then causes base deletion to report `:database-has-active-connections`, masking the empty-file exception. Correcting that test bracket would improve evidence but would not repair the file frontend. The existing task `seon.test-support/file-backed-branch-without-republication` remains blocked on this dependency path; its proof remains red.
+
+The range commit changes no EDN connection behavior. `datahike.store/ready-store` still invokes `konserve.tiered/sync-on-connect` for `:tiered`. A separate timing of that synchronization was not completed, and no claim is made that `:tiered` is adequate or that the file overlay is accepted. The scoped threshold patch, Seon paired fixture measurement, shell/two-cluster regressions and heavy selection were not rerun in this batch because slice 2 failed. No honest new fixture bound has been established.
+
+At entry, `bin/seon status` and MCP `runtime_status` both reported default available but degraded (six recorded errors, one unowned namespace, untested-hot warnings). A read-only MCP JVM probe on root/default confirmed the loaded TieredStore still lacks the range protocol; the form took 1 ms, the request 40.3 ms, with 0.2 MB request allocation and 6.2 MB entrance allocation. It loaded no changed source. Full Seon `clj-kondo --lint src script test --cache false --parallel` completed in 7,391 ms with **0 errors**, 1,621 warnings. [Lint output](fixture-hour/fork-batch/fork-batch-lint.log).
+
+The failed Datahike candidate was preserved and reversed. Both dependency checkouts again match Seon's gitlinks; the Konserve branch and pushed commit remain available. No Seon source, dependency coordinate or shared index change belongs to this batch. Other lanes' changing cluster, schema, test-runner, task and documentation files were not touched or loaded; they did not cause this stop. Default was never stopped, reset or restarted, and no worktree was created. Root should not restart for this report: the combined dependency/fixture commit has not been made.
+
+## Previous fixture experiment
 
 ## Measured checks
 
@@ -31,7 +56,7 @@ The next implementation uses a new `:datahike/overlay` with an optional file fro
 
 The standalone publication fixtures (`seon.test-support/populate-published-root!` and `seon.test-support/populate-published-operator-root!`) still need independent durable stores for boot, GC and subprocess subjects. They remain unchanged. A complete solution for those callers is not proved by the file frontend patch; it must retain their private physical-store semantics. Do not claim all of the historical fixture hour is removed.
 
-## Current acceptance result
+## Previous acceptance result
 
 The owner withdrew the invented one-second target, authorized a 10,000 ms regression limit based on twice the prior 4,843.77 ms maximum, and then assigned the real multi-cluster blob-threshold bug to this slice. The 128,000,000-byte assertion is unchanged. The owner requires a Seon-only commit, with no dependency bump.
 
