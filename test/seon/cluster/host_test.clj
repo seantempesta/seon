@@ -170,6 +170,18 @@
                         (get-in @(:seon.agent/routing handle) [:seon.agent/children branch]))
             "the host lives in the child registry the parent records")))))
 
+(deftest a-private-definition-with-an-armed-contract-is-not-rendered-as-missing-its-contract
+  ;; Run 17 call 4 (F50): a defn- whose output contract refused its call rendered :contract :missing.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/armed-private")
+            _ (hosted-run! hosted "(defn- armed-private [x] (map inc [x]))")
+            shown (hosted-run! hosted (str "(defn- armed-private {:malli/schema [:=> [:cat :int] [:vector :int]]} [x] (map inc [x]))"
+                                           " (armed-private 1)"))]
+        (is (some #(re-find #"armed-private" (str %)) shown) "the definition was shown")
+        (is (not-any? #(re-find #":contract :missing" (str %)) shown)
+            "an armed contract is never rendered as missing")))))
+
 (deftest a-definition-whose-body-expands-macros-persists
   ;; Before (2026-09-28 dogfood loop), a defn whose body used cond-> or case
   ;; returned its Var but wrote no entity: the positionless usages clj-kondo

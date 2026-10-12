@@ -82,10 +82,17 @@
                   :when f]
               [t (outcome {:seon.test.member/fail-count f :seon.test.member/error-count e})])))))
 
+(defn- armed?
+  "Whether the Var `v` carries a contract: the definition armed it, whether or not the
+  database this reply reads has recorded it yet."
+  {:malli/schema [:=> [:cat :seon.render.var/var] :boolean]}
+  [v]
+  (some? (:malli/schema (meta v))))
+
 (defn status
   "What the definition `sym` has to say, empty when nothing is worth saying.
 
-  Its contract when missing, and its reaching tests: pending when no result
+  Its contract when missing (neither recorded nor carried by its Var, `armed`), and its reaching tests: pending when no result
   was recorded against a program holding its current definition (the run's
   basis is before the transaction that wrote it), newly red or green against
   the latest result before that definition. Each list shows its first five
@@ -96,12 +103,12 @@
   Proportional to the reaching tests: one gate-set read, the indexed latest
   results and one query over the tests with a current result; no reach
   digests are derived."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :seon.render.var/status]}
-  [database sym]
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :boolean] :seon.render.var/status]}
+  [database sym armed]
   (let [entity (db/pull database [:db/id :seon.fn/spec :seon.fn/macro? :seon.fn/constant?] [:seon.fn/sym sym])
         ;; a refused read or no entity says nothing about the contract
         contract (when (and (map? entity) (not (db/read-refusal? entity)) (:db/id entity)
-                            (not (or (:seon.fn/spec entity) (:seon.fn/macro? entity) (:seon.fn/constant? entity))))
+                            (not (or armed (:seon.fn/spec entity) (:seon.fn/macro? entity) (:seon.fn/constant? entity))))
                    :missing)
         tests (let [t (sfn/gate-sets {:seon.db/db database :seon.fn/seeds #{sym}})] (if (vector? t) t []))
         since (when (seq tests) (definition-tx database sym))
@@ -133,7 +140,8 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.var/view]}
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
-        said (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))]
+        said (when (and sym (:seon.db/db unit))
+               (status (:seon.db/db unit) sym (armed? (:seon.render/value unit))))]
     (cond-> (assoc said :seon.render.var/symbol sym)
       (or (seq (:seon.render.var/pending said)) (seq (:seon.render.var/newly-red said)))
       (assoc :seon.render/operations [(list 'my.test/check {:seon.test/changed [sym]})]))))
@@ -144,7 +152,8 @@
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
         {:seon.render.var/keys [contract example pending newly-red newly-green counts]}
-        (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))
+        (when (and sym (:seon.db/db unit))
+          (status (:seon.db/db unit) sym (armed? (:seon.render/value unit))))
         tests (fn [label ts k]
                 (when (seq ts)
                   [:li label (when-let [n (get counts k)] (str " (" n ")")) ": "
