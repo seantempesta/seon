@@ -28,6 +28,17 @@
            "the task root holds")
        (is (seq (get-in current [:seon.context/proofs :seon.context/proof-list])) "its proofs, each with its status")))))
 
+(deftest ^{:seon/tasks #{'seon.context/a-steps-instructions-reach-its-agent}}
+  current-answers-the-held-steps-instructions
+  ;; A step's instructions are data on the task its creator wrote (TASK-CHAIN §2); the agent reads them here.
+  (with-root true
+   (fn [connection]
+     (let [handle (task/agent-task (db/db connection) "root")]
+       (test-support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/instructions "Write the red proof first."]])
+       (is (= "Write the red proof first."
+              (get-in (my.task/current {:seon.db/db (db/db connection) :seon.agent/id "root"})
+                      [:seon.context/task :seon.task/instructions])))))))
+
 (deftest current-with-no-task-answers-the-agent-alone
   (with-root false
    (fn [connection]
@@ -40,6 +51,16 @@
     (is (= "The proof contradicts the intent." (:my.turn/result sent)) "the reason is the reply")
     (is (= 'tq.assigned/work-root (:my.task/target sent)))
     (is (= {:expected 1 :actual 2} (:my.task/counterexample sent)))))
+
+(deftest ^{:seon/tasks #{'seon.instrument/an-arity-refusal-offers-the-functions-example}}
+  a-send-back-with-positional-arguments-is-answered-with-its-example
+  ;; chain experiment 2: an Implement agent called (my.task/send-back! target reason); the refusal named only the
+  ;; destructured arglist, so its last calls were spent and the send-back never happened.
+  (let [refusal (try (apply my.task/send-back! ['tq.assigned/work-root "The proof contradicts the intent."])
+                     (catch Exception thrown (ex-data thrown)))]
+    (is (= :seon.instrument/arity-error (:seon.error/type refusal)) "the call is refused by its contract")
+    (is (= 'my.task/send-back! (first (first (:seon.instrument/examples refusal))))
+        "the refusal offers the docstring's Example as a form to run")))
 
 (deftest send-back-with-a-blank-reason-answers-its-error
   (is (:seon.error/at (my.task/send-back! {:my.task/reason "  "}))))

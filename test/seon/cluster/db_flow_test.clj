@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [my.task :as my.task]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
@@ -869,6 +870,31 @@
                  "the Prove predecessor records no merge request")
              (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
 
+(deftest ^{:seon/tasks #{'seon.turn/a-prove-step-admitted-by-its-successor-opens-a-model-turn}}
+  a-prove-step-admitted-by-its-successor-opens-a-model-turn
+  ;; q is a :prove step with no proof of its own: admission starts it because i needs it (`plan-facts`), so its
+  ;; fresh attempt is work. Its one model reply writes i's red proof, its product, and it ends :done.
+  (binding [*space* "tq.chainbare"]
+  (test-support/with-database
+   (fn [connection]
+     (let [ledger (atom [])]
+       (test-support/with-provider
+        ledger (test-support/reply-queue
+                [(str "(in-ns 'tq.chainbare-behavior)\n"
+                      "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))")])
+        (fn [server]
+          (chain-world
+           ;; z, already green, only gives the world a program to define; satisfied, it takes no model turn
+           connection {"q" [#{} nil :prove] "i" [#{"q"} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
+           (fn [handle]
+             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                             :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+             (pass! handle (:seon.agent/routing handle))
+             (is (= 1 (count (attempts connection "q"))) "admission started q by its successor's declaration")
+             (is (= :done (landed! handle connection "q" ::q-ended))
+                 "its fresh attempt opened a model turn, whose reply wrote its product")
+             (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
+
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/a-successor-whose-proof-its-predecessor-wrote-starts}}
   a-successor-whose-proof-its-predecessor-wrote-starts
@@ -906,6 +932,36 @@
             (is (empty? (db/q '[:find ?t :where [?t :seon.task/name ?n] [(clojure.string/starts-with? ?n "invalid-task")]]
                               (db/db connection)))
                 "and writes no :invalid-task problem for it")))))))))
+
+(deftest ^{:seon/tasks #{'seon.context/a-send-back-reason-reaches-the-targets-next-attempt}}
+  a-send-back-reason-reaches-the-targets-next-attempt
+  ;; chain experiment 2: the Implement agent's counterexample reached root's end message only, so the relaunched
+  ;; Design+Prove agent never saw why it was sent back. a sends itself back with a reason; its next attempt reads it.
+  (binding [*space* "tq.chainback"]
+  (test-support/with-database
+   (fn [connection]
+     (let [ledger (atom [])
+           reason "Assertion 3 can never pass: its eid is nil."]
+       (test-support/with-provider
+        ledger (test-support/reply-queue
+                [(str "(my.task/send-back! {:my.task/reason \"" reason "\" :my.task/target '" *space* "/a})")])
+        (fn [server]
+          (chain-world
+           connection {"a" [#{} "(clojure.test/is (= 1 2))"]}
+           (fn [handle]
+             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                             :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
+             (pass! handle (:seon.agent/routing handle))
+             (is (= :sent-back (landed! handle connection "a" ::a-sent-back)) "a's one reply sent it back")
+             (pass! handle (:seon.agent/routing handle))
+             (let [[_ branch agent-id] (some (fn [[k :as row]]
+                                               (when (= 2 (:seon.task.attempt/number (db/pull (db/db connection) [:seon.task.attempt/number] [:seon.task/assignment k])))
+                                                 row))
+                                             (attempts connection "a"))
+                   on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle) :seon.store/branch branch})]
+               (is (some #(= reason (:seon.task.attempt/reason %))
+                         (:seon.context/send-backs (my.task/current {:seon.db/db (db/db on-branch) :seon.agent/id agent-id})))
+                   "the relaunched attempt's task names why it was sent back")))))))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/a-successor-whose-proof-its-predecessor-wrote-starts}}
   admission-reads-a-prove-steps-proof-or-successor-declaration

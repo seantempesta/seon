@@ -150,4 +150,10 @@
              :intent "(hybrid-done-and-merge M15) New `my.program/restore!` (git's `restore --source=<merge-base>`; schema entry in `resources/seon/schemas/my.program.edn`): one entity by identity returns to its `:seon.task/merge-base` value on the agent's branch, retracted when the base lacked it, through `seon.program/exact-replacement-tx`; the deletion law is unchanged, so restoring an entity another live function calls is refused as data by the writer's referrer check. Red proof: `my.program-test/restore-returns-an-entity-to-its-merge-base-value` (after `(my.program/restore! 'a/f)` the function's digest equals the base's and `my.program/diff` no longer lists it; an entity added on the branch is retracted; restoring a called entity is refused as data). Cost: under 50 ms. After M14."
              :must-read #{my.program/diff my.program/ns-unmap! my.program/remove-ns! seon.program/exact-replacement-tx seon.context/current-state}
              :needs #{[:seon.task/sym seon.context/the-current-state-shows-the-branch-diff-since-its-merge-base]}
-             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-12/hybrid-done-and-merge.md"}}
+ #:seon.task{:name "a-function-called-through-its-callers-is-reached-by-their-tests"
+  :kind :function
+  :intent "`my.program/tests-reaching` answers 47 gating tests for `seon.render.value/prepare` and none for `seon.render.value/classify`, which `seon.render.value/make-node` and `seon.render.value/tuple-node` call on every value `prepare` prints (classify also calls itself), with only an `:outside-graph` unknown. Chain experiment 2: the Implement step that changed `classify` ran only its own proof, was judged to have broken nothing (`seon.context/step-status` saw no red), and its merge request reached root with the 61 `seon.render.value-test` tests never run. Done when reach follows callers through a self-recursive function, so the tests reaching `prepare` reach `classify`, and `my.program-test/a-function-called-through-its-callers-is-reached-by-their-tests` is green."
+  :must-read #{my.program/tests-reaching seon.test.runner/tests-reaching seon.render.value/classify seon.render.value/make-node}
+  :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-2.md"}}
+]

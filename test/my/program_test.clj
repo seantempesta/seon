@@ -19,6 +19,20 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
+(deftest ^{:seon/tasks #{'my.program/a-function-called-through-its-callers-is-reached-by-their-tests}}
+  a-function-called-through-its-callers-is-reached-by-their-tests
+  ;; chain experiment 2: `seon.render.value/prepare` is gated by the printer's tests, but `classify`, which
+  ;; `make-node` calls on every value `prepare` prints, is reached by none, so an Implement step that changed it
+  ;; ran only its own proof and was judged to have broken nothing.
+  (support/with-database
+   (fn [connection]
+     (let [reaching (fn [subject] (set (:seon.program/gating (program/tests-reaching {:seon.db/db (db/db connection)
+                                                                                       :seon.program/subject subject}))))]
+       (is (contains? (reaching 'seon.render.value/prepare) 'seon.render.value-test/a-reference-prints-as-its-referent-s-identity)
+           "the printer's test reaches its entrance")
+       (is (contains? (reaching 'seon.render.value/classify) 'seon.render.value-test/a-reference-prints-as-its-referent-s-identity)
+           "and the function its entrance calls on every value")))))
+
 (deftest program-reads-name-the-referrers-and-propose-without-writing
   (support/with-database
    (fn [connection]
