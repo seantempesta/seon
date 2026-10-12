@@ -26,3 +26,10 @@
 
 (deftest a-contract-task-is-not-its-own-finding
   (is (= {'seon.fs/attributes #{}} (contracts/findings (db/db) ['seon.fs/attributes]))))
+
+(deftest a-generated-intent-sends-a-nil-input-to-its-caller
+  ;; The call evidence is not read: the rule is in every generated intent.
+  (doseq [function-symbol ['seon.fs/attributes 'seon.contracts/report]]
+    (let [intent (:seon.task/intent (contracts/task (db/db) function-symbol))]
+      (is (re-find #"change the caller so it does not pass nil" intent))
+      (is (re-find #"absence is no key" intent)))))

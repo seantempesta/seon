@@ -38,7 +38,9 @@
        "if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer "
        "emits a bad value, keep the contract, file a task on the producer naming `" function-symbol
        "` in its must-read with the exact form, the refused value's essence and the Malli explain, and say so "
-       "in your reply. Never widen to :any, [:maybe ...] or :map to go green. Done when `seon.contracts/gaps` "
+       "in your reply. Never widen to :any, [:maybe ...] or :map to go green. "
+       "A caller that passes nil to an input is the producer of the bad value: change the caller so it does not pass nil (absence is no key), or take a map with the key optional; never contract nil with [:maybe ...] or :nil. "
+       "Done when `seon.contracts/gaps` "
        "answers [] for it and its reaching tests stay green and no slower."))
 
 (defn task

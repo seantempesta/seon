@@ -113,6 +113,12 @@ something. Decide with evidence:
 
 Never widen to `:any`, `[:maybe ...]` or `:map` to go green. Root reviews every loosened contract at merge.
 
+**A nil input is the caller's defect.** When a function's callers pass nil for an input, do not contract nil
+(`[:maybe X]`, `[:or X :nil]`, a nilable registered name): absence is no key. Change the caller so it does not
+pass nil, or make the function take a map whose key is optional. The generated intent says this for every input
+(the call evidence is not read). If you do need a nil literal in a schema, `[:= nil]` is not valid Malli (nil is read
+as the properties slot): write `[:= {} nil]` or `:nil`.
+
 ## 5. Generating a contract task
 
 `seon.contracts/task` turns any uncontracted function into an assignable task declaration: name
