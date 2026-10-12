@@ -2192,6 +2192,38 @@
   (try (results-from-facts run-id (run-result-facts database run-id))
        (catch Exception failure (result-read-error run-id failure))))
 
+(defn- newest-results
+  "The result of the newest admitted execution among `members` (member entity to test symbol) on `database`, one
+  per test, sorted by symbol: one query for the runs holding the members and one over those runs, however many."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :int :qualified-symbol]]
+                  [:vector [:or :seon.test/result :seon.test/result-unknown]]]}
+  [database members]
+  (let [runs (when (seq members)
+               (mapv (fn [[run member]] [(members member) run])
+                     (execution-read
+                      (db/q '[:find ?run ?member :in $ [?member ...]
+                              :where [?run :seon.test.run/members ?member]]
+                            database (vec (keys members))))))
+        admitted (when (seq runs)
+                   (into {} (map (fn [[run id selected]] [run [id selected]]))
+                         (execution-read
+                          (db/q '[:find ?run ?id ?selected
+                                  :in $ [?run ...]
+                                  :where [?run :seon.test.run/id ?id]
+                                         [?run :seon.test.run/selection-tx ?selected]
+                                         (not [?run :seon.test.run/published-base-digest])]
+                                database (vec (distinct (map second runs)))))))
+        entities (into #{} (keep (fn [[test-symbol run]]
+                                   (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
+                       runs)
+        latest (vals (reduce (fn [result [sym :as entity]] (assoc result sym entity))
+                             (sorted-map) (sort-by #(nth % 2) entities)))
+        results (if (seq latest) (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest)) {})]
+    (->> latest
+         (map (comp results first))
+         (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
+         vec)))
+
 (defn latest-results
   "Read the latest native admitted execution of each requested test.
   Missing executions are absent; an incomplete latest execution is that test's
@@ -2205,45 +2237,31 @@
   An index read from each name (`:seon.test.member/symbol` AVET), one query
   for the runs holding those members and one over those runs: proportional
   to the requested tests' executions, never every member, and a run more
-  adds no read. Measured unarmed on
-  default 2026-09-27: the executions of 14 tests (148) in 3.9 ms where the
-  unbound Datalog took 152 ms; 595 tests (377 results) in 60 ms where it took
-  4.7 s."
+  adds no read."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   [:or :seon.test/latest-results :seon.test/execution-error]]}
   [database test-symbols]
   (try
-    (let [members (into {} (for [test-symbol (distinct test-symbols)
-                                 {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
-                             [member test-symbol]))
-          ;; One read for the runs holding every member, however many runs they span.
-          runs (when (seq members)
-                 (mapv (fn [[run member]] [(members member) run])
-                       (execution-read
-                        (db/q '[:find ?run ?member :in $ [?member ...]
-                                :where [?run :seon.test.run/members ?member]]
-                              database (vec (keys members))))))
-          admitted (when (seq runs)
-                     (into {} (map (fn [[run id selected]] [run [id selected]]))
-                           (execution-read
-                            (db/q '[:find ?run ?id ?selected
-                                    :in $ [?run ...]
-                                    :where [?run :seon.test.run/id ?id]
-                                           [?run :seon.test.run/selection-tx ?selected]
-                                           (not [?run :seon.test.run/published-base-digest])]
-                                  database (vec (distinct (map second runs)))))))
-          entities (into #{} (keep (fn [[test-symbol run]]
-                                     (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
-                         runs)
-          latest (vals (reduce (fn [result [sym :as entity]] (assoc result sym entity))
-                               (sorted-map) (sort-by #(nth % 2) entities)))
-          results (if (seq latest) (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest)) {})]
-      ;; One batch of reads for every run, never one per run or per test.
-      (->> latest
-           (map (comp results first))
-           (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
-           vec))
+    (newest-results database
+                    (into {} (for [test-symbol (distinct test-symbols)
+                                   {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
+                               [member test-symbol])))
     (catch Exception failure (result-read-error "latest-results" failure))))
+
+(defn result-at-reach
+  "The result of the newest admitted execution of `test-symbol` recorded on `database` under exactly
+  `reach-digest`, however many later executions at other digests exist; nil when none ran there.
+  Proportional to that test's executions: one `:seon.test.member/symbol` index read and one digest read per member."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test/reach-digest]
+                  [:or :nil :seon.test/result :seon.test/result-unknown :seon.test/execution-error]]}
+  [database test-symbol reach-digest]
+  (try
+    (first (newest-results database
+                           (into {} (keep (fn [{member :e}]
+                                            (when (= reach-digest (:v (first (execution-read (db/datoms database :eavt member :seon.test.member/reach-digest)))))
+                                              [member test-symbol])))
+                                 (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol)))))
+    (catch Exception failure (result-read-error "result-at-reach" failure))))
 
 (defn red-result?
   "Whether `result` is an executed, failing recorded test result."

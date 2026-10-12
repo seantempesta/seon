@@ -516,3 +516,28 @@
                  "the reach digest, not the branch name, is what decides the result's validity")
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
+
+(deftest ^{:seon/tasks #{'seon.context/a-proof-green-before-the-work-is-not-done}}
+  a-result-at-the-base-reach-digest-survives-later-runs
+  ;; the proof runs green at the base program, then red once the change reaches it: its base run stays readable by
+  ;; the reach digest it had there, while the newest execution is the red one
+  (test-support/with-database
+   (fn [connection]
+     (let [source #(str "(ns tq.rar (:require [clojure.test :refer [deftest is]]))\n"
+                        "(defn f {:malli/schema [:=> [:cat] :int]} [] " % ")\n"
+                        "(deftest f-is-one (is (= 1 (f))))\n")
+           proof 'tq.rar/f-is-one
+           run! #(sut/run {:seon.test/execution (test-support/execution-handle connection)
+                           :seon.test/recording-connection connection
+                           :seon.test/policy :named :seon.test/rerun? true :seon.test/identities #{proof}})
+           counts (juxt :seon.test/pass-count :seon.test/fail-count)
+           _ (test-support/declare-source! connection 'tq.rar (source 1))
+           _ (run!)
+           base (get (runner/reach-digests (db/db connection) [proof]) proof)
+           _ (test-support/transacted! connection (test-support/replacement-tx (db/db connection) [:seon.fn/sym 'tq.rar/f] (source 2) {}))
+           _ (run!)
+           database (db/db connection)]
+       (is (not= base (get (runner/reach-digests database [proof]) proof)) "the change reaches the proof")
+       (is (= [0 1] (counts (first (runner/latest-results database [proof])))) "the newest execution is red")
+       (is (= [1 0] (counts (runner/result-at-reach database proof base))) "the base run answers at the base digest")
+       (is (nil? (runner/result-at-reach database proof (apply str (repeat 64 "0")))) "no run at a digest is absent")))))
