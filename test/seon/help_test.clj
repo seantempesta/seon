@@ -290,8 +290,10 @@
 (deftest help-teaches-private-contracts-and-the-whole-proof-set
   (with-help-agent
    (fn [connection]
-     (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn seon.fs/path?]")) (lines-of @connection))
-         "a help line says defn- needs a contract and shows a named predicate")))
+     (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn {:error/message \"a java.nio.file.Path\" :gen/schema :string} seon.fs/path?]")) (lines-of @connection))
+         "a help line says defn- needs a contract and shows a named predicate with its message and generator")
+     (is (some #(and (str/includes? % "Prefer a plain Malli schema") (str/includes? % "a-contract-naming-a-branch-predicate-is-refused-at-the-writer")) (lines-of @connection))
+         "a help line prefers plain schemas and says a branch predicate is refused at write")))
   (with-prove-agent
    (fn [connection]
      (is (some #(str/includes? % "table rows and the property law both") (done-lines @connection "help"))
