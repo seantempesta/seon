@@ -1622,8 +1622,7 @@
                             [(:seon.fn.file/relative-path file) digest]))
         held (into {} (keep (fn [file]
                              (when-let [key (content file)]
-                               (when-let [value (cache/lookup ::file-schema-keys key
-                                                             (constantly 0) (constantly nil))]
+                               (when-let [value (cache/present ::file-schema-keys key)]
                                  [(:seon.fn.file/relative-path file) value])))) files)
         missing (filterv #(not (contains? held (:seon.fn.file/relative-path %))) files)
         rows (when (seq missing)

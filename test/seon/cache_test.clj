@@ -168,3 +168,14 @@
         (let [ratio (/ (double (weigh value)) (value-bytes value))]
           (is (<= 0.5 ratio 2.0) "the charge is within 2x of the value's size, whatever the projection"))))
     (is (empty? (cache/retained :seon.task/file-grammar)) "the never-hit grammar digest is not cached")))
+
+(deftest a-presence-probe-counts-no-miss
+  (let [held (cache/create 1000000)
+        counted (fn [k] (get-in (cache/status held) [:seon.cache/kinds ::probed k] 0))]
+    (is (nil? (cache/present held ::probed :k)) "an absent key answers nil")
+    (is (zero? (counted :seon.cache/misses)) "the probe counted no miss")
+    (is (= :v (cache/lookup held ::probed :k (constantly 10) (constantly :v) some?)))
+    (is (= 1 (counted :seon.cache/misses)) "the real lookup counted one miss")
+    (is (= :v (cache/present held ::probed :k)) "a completed entry answers its value")
+    (is (= 1 (counted :seon.cache/misses)))
+    (is (zero? (counted :seon.cache/hits)) "the probe counted no hit")))

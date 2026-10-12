@@ -232,6 +232,18 @@
          (when on-complete (.thenRun pending ^Runnable on-complete))
          {:seon.cache/pending-kind kind :seon.cache/since (java.util.Date.)})))))
 
+(defn present
+  "The completed value of `[kind content-key]`, or nil when it is absent, pending or
+  refused. Counts neither a hit nor a miss: a presence probe does no work."
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword :seon.schema/value] :seon.schema/value]
+                  [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :seon.schema/value]]}
+  ([kind content-key] (present @process kind content-key))
+  ([{::keys [^AsyncCache cache]} kind content-key]
+   (when-let [^CompletableFuture pending (.getIfPresent cache [kind content-key])]
+     (when (and (.isDone pending) (not (.isCompletedExceptionally pending)))
+       (::value (.join pending))))))
+
 (defn evict!
   "Remove the one entry `[kind content-key]`: a value its owner has replaced
   (a derivation that learned more of what it reads). Answers nil."

@@ -110,7 +110,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value [:fn clojure.core/ifn?]]
                   :seon.schema/value]}
   [database derivation-name derivation]
-  (let [reads (cache/lookup ::reads derivation-name weight (constantly ::unknown) #(not= ::unknown %))
+  (let [reads (if-some [known (cache/present ::reads derivation-name)] known ::unknown)
         k (derivation-key database derivation-name reads)]
     (if-not k
       (derivation database)
