@@ -44,7 +44,8 @@
 (set! *warn-on-reflection* true)
 
 (def event-backstop-seconds
-  "The loud clock around test events whose publishers are observable."
+  "The loud clock around test events awaited outside any test body (a REPL fixture, a provider's handler thread);
+  inside a body, `await-event!` waits at most that test's own declared bound (`event-bound-ms`)."
   20)
 
 (defn effective-config
@@ -555,14 +556,23 @@
                 (or (db/carried-projection database)
                     (schema/projection-from-database database)))))))))
 
+(defn event-bound-ms
+  "How long a test event may be awaited on this thread: the declared body bound of the test whose body runs here
+  (`seon.test.runner/declared-limit-ms`), since an event missing past it already fails that test; outside a body,
+  `event-backstop-seconds`."
+  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
+  []
+  (if-let [test-var (first test/*testing-vars*)]
+    ((requiring-resolve 'seon.test.runner/declared-limit-ms) test-var)
+    (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
+
 (defn await-event!
-  "Await one channel, latch, future, or watched reference with a loud backstop.
-  The fourth argument supplies the observation bound in milliseconds."
+  "Await one channel, latch, future, or watched reference with a loud backstop: `event-bound-ms`, or the fourth
+  argument's observation bound in milliseconds."
   ([event-source event]
    (await-event! event-source event (constantly true)))
   ([event-source event accept?]
-   (await-event! event-source event accept?
-                 (.toMillis TimeUnit/SECONDS event-backstop-seconds)))
+   (await-event! event-source event accept? (event-bound-ms)))
   ([event-source event accept? timeout-ms]
    (cond
      (instance? clojure.lang.IRef event-source)
@@ -1342,6 +1352,9 @@
         cluster-name (:seon.cluster/name target)
         agent-id (str "running-agent-" (id/id))
         running (str "running-agent-" (id/id))
+        ;; a test cluster publishes code merges into its own disposable checkout, never the live one
+        checkout (temp-root "running-agent-checkout")
+        _ (apply-config! connection cluster-name {:seon.config.fs/working-root checkout})
         world-environment (environment cluster-name connection)
         ctx (fork-cluster-ctx connection cluster-name)
         routing (attempt-routing connection)]
@@ -1372,6 +1385,7 @@
         (try
           (body running agent-id connection)
           (finally
+            (delete-root! checkout)
             (swap! operator.runtime/running-instances dissoc running)
             (agent/stop-flow! request)
             (doseq [channel [(:seon.cluster.wake/channel handle) (:seon.render/context-channel handle)

@@ -458,3 +458,13 @@
                   (dissoc (test-support/code-request {:seon.batch/world world :seon.batch/text "(inc 1) (inc 2)"})
                           :seon.batch/settle))]
        (is (= [2 3] (mapv :seon.batch/value (:seon.batch/entries batch))))))))
+
+(deftest a-running-agent-cluster-publishes-into-its-own-checkout
+  (test-support/with-running-agent
+    (fn [_running _agent-id connection]
+      (let [root ((requiring-resolve 'seon.merge/checkout) (db/db connection)
+                  (:seon.cluster/name (test-support/execution-handle connection)))
+            live (.getCanonicalPath (io/file (System/getProperty "user.dir")))]
+        (is (string? root) "the fixture cluster names a working root")
+        (is (not= live root) "a fixture cluster never publishes into the live checkout")
+        (is (.isDirectory (io/file root)))))))

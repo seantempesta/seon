@@ -328,18 +328,28 @@
          :expected '(pos? assertion-count)
          :actual assertion-count}))))
 
+(defn declared-limit-ms
+  "The body bound `test-var` declares: its `:seon.test/long-ms` when it also names its `:seon.test/long` reason,
+  never below `ordinary`, the packaged `:seon.test/time-limit-ms` by default."
+  {:malli/schema [:function [:=> [:cat :seon.test/var] :seon.test/time-limit-ms]
+                  [:=> [:cat :seon.test/var :seon.test/time-limit-ms] :seon.test/time-limit-ms]]}
+  ([test-var]
+   (declared-limit-ms test-var (get-in (schema.edn/packaged-forms) [:seon.test/time-limit-ms 1 :default])))
+  ([test-var ordinary]
+   (let [metadata (meta test-var)
+         declaration (program/test-markers metadata (meta (:ns metadata)))
+         reason (:seon.test/long declaration)
+         allowance (:seon.test/long-ms declaration)]
+     (if (and (string? reason) (not (str/blank? reason))
+              (integer? allowance) (pos? allowance))
+       (max ordinary allowance) ordinary))))
+
 (defn- duration-failures
   "Turn an observed body overrun into ordinary, durably recorded assertion evidence."
   {:malli/schema [:=> [:cat :seon.test.runner/report-options :seon.test/var :seon.test/elapsed-ms :seon.test/time-limit-ms]
                   [:vector :seon.test/duration-failure]]}
   [_options test-var elapsed ordinary]
-  (let [metadata (meta test-var)
-        declaration (program/test-markers metadata (meta (:ns metadata)))
-        reason (:seon.test/long declaration)
-        allowance (:seon.test/long-ms declaration)
-        limit (if (and (string? reason) (not (str/blank? reason))
-                       (integer? allowance) (pos? allowance))
-                (max ordinary allowance) ordinary)]
+  (let [limit (declared-limit-ms test-var ordinary)]
     (if (> elapsed limit)
       [{:type :fail :var test-var
         :message (str "Test " (var-symbol test-var) " exceeded its declared duration: "
