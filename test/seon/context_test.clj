@@ -456,13 +456,24 @@
              [:prove #{} #{} {} {} :working #{} #{} "no product"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} :working #{} #{} "its product green proves nothing"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :working #{} #{'tq.rule/s} "an error is no designed red"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :working #{} #{} "a product its fork point already held is not new"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :satisfied #{} #{} "a product its fork point already held, red by design: nothing to do"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {'tq.rule/s true} :working #{} #{} "a product held at the fork point red by an error is no designed red"]
+             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true 'tq.rule/s true} :working #{} #{} "a product held at the fork point beside its own proof red"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]]]
       (is (= (cond-> {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
                green-before (assoc :seon.context/green-before green-before))
              (judged step proofs product head fork-point))
           why))))
+
+(deftest a-step-section-shows-what-its-rule-counted
+  ;; a :working step names the broken and new reds its one rule judged, so the agent sees why it is not done
+  (let [red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
+        observation {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{'tq.rule/s}
+                     :seon.context/head {'tq.rule/s red 'tq.rule/r red} :seon.context/fork-point {'tq.rule/r false}}
+        section (context/step-section (merge observation (context/step-status observation)))]
+    (is (= {:seon.task/status :working :seon.context/broken #{'tq.rule/r} :seon.context/new-red #{'tq.rule/s}}
+           (select-keys section [:seon.task/status :seon.context/broken :seon.context/new-red])))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."

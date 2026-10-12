@@ -2165,7 +2165,9 @@
   "Write a `:close` action's end on main through `connection` (`store` holds the branch) and merge nothing else.
   Root's problem task first, then ONE transaction with the assignment's end facts its branch head holds,
   carrying the branch and commit they came from as transaction metadata. A `:cancelled` end is db<->flow's own:
-  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide."
+  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide. A `:satisfied`
+  end, a step whose product main already holds, is closed the same way with its branch's end facts and no
+  problem task: it meets its successors' needs (`seon.task/ready-rules`)."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store :seon.flow.plan/action] :nil]}
   [connection store {a :db/id key :seon.task/assignment branch :seon.task/branch end :seon.task.attempt/end :as action}]
   (let [head (db/branch-database (db/db connection) branch)]
@@ -2178,8 +2180,9 @@
                                                     :seon.task.attempt/reason]) .
                                     :in $ ?k :where [?a :seon.task/assignment ?k]]
                                   head key)
-                            :db/id))]
-        (when-not cancelled?
+                            :db/id))
+            facts (cond-> facts (= :satisfied end) (assoc :seon.task/outcome :closed))]
+        (when-not (#{:cancelled :satisfied} end)
           (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts)
                           (source/unmerged-count (db/db connection) store branch)))
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))

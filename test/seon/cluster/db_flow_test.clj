@@ -348,8 +348,35 @@
           (is (= #{(proof "g")} (:seon.context/green-before verdict)) "and names it")
           (is (nil? (turn/next-agent-work branch-db {:seon.agent/id agent-id})) "no model turn opens")
           (is (zero? (model-turns branch-db agent-id)) "none was taken")
-          (is (nil? (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]] branch-db key))
-              "and nothing ends it as done"))))))))
+          (is (= :satisfied (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                                         (db/db on-branch) key)
+                                       ::g-ended))
+              "it ends satisfied, never done"))))))))
+
+(deftest a-prove-step-whose-product-main-holds-closes-satisfied-and-its-successor-forks-main
+  ;; the product, the successor's proof red by design, is on main before the Prove step forks: nothing to do
+  (binding [*space* "tq.chainheld"]
+  (test-support/with-database
+   (fn [connection]
+     (chain-world
+      connection {"p" [#{} nil :prove] "i" [#{"p"} "(clojure.test/is (= 1 2))"]}
+      (fn [handle]
+        (let [routing (:seon.agent/routing handle)
+              _ (pass! handle routing)
+              [[key branch agent-id]] (seq (attempts connection "p"))
+              on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle) :seon.store/branch branch})
+              end (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                              (db/db on-branch) key)
+                             ::held-product-ended)]
+          (is (= :satisfied end) "the Prove step ends satisfied")
+          (is (zero? (model-turns (db/db on-branch) agent-id)) "with no model call")
+          (pass! handle routing)
+          (is (= :closed (db/q '[:find ?o . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task/outcome ?o]] (db/db connection) key))
+              "main closes it without a merge")
+          (is (task/done? (db/db connection) (chain-handle "p")) "its successor's need is met")
+          (is (contains? (task/ready (db/db connection)) (chain-handle "i")) "its successor is ready")
+          (pass! handle routing)
+          (is (seq (attempts connection "i")) "and forks main"))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}}
   an-ended-attempts-closed-merge-releases-its-connection-and-branch

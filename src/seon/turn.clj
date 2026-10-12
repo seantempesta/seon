@@ -63,8 +63,8 @@
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 (defonce ^:private context-model-context
   (delay (requiring-resolve 'seon.context/model-context)))
-(defonce ^:private context-task-done?
-  (delay (requiring-resolve 'seon.context/task-done?)))
+(defonce ^:private context-step-verdict
+  (delay (requiring-resolve 'seon.context/step-verdict)))
 (defonce ^:private context-task-finished?
   (delay (requiring-resolve 'seon.context/task-finished?)))
 (defonce ^:private context-end-summary-tx
@@ -2145,8 +2145,8 @@
         database agent-id))
 
 (defn task-end
-  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` once every proof is
-  green (`seon.context/task-done?`), `:sent-back` once a turn completed naming the task that owns the mistake
+  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` or `:satisfied` as its
+  step is (`seon.context/step-verdict`), `:sent-back` once a turn completed naming the task that owns the mistake
   (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
@@ -2154,14 +2154,15 @@
   [database agent-id]
   (let [held (task/agent-task database agent-id)]
     (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
-      (cond (@context-task-done? database agent-id) :done
-            (sent-back-to database agent-id) :sent-back
-            (db/q '[:find ?turn . :in $ ?agent-id
-                    :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
-                    [?turn :seon.turn/disposition :completed]]
-                  database agent-id) :given-back
-            (= 0 (turns-left database agent-id)) :capped
-            (stalled? database agent-id) :stalled))))
+      (let [status (:seon.task/status (@context-step-verdict database agent-id))]
+        (cond (#{:done :satisfied} status) status
+              (sent-back-to database agent-id) :sent-back
+              (db/q '[:find ?turn . :in $ ?agent-id
+                      :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                      [?turn :seon.turn/disposition :completed]]
+                    database agent-id) :given-back
+              (= 0 (turns-left database agent-id)) :capped
+              (stalled? database agent-id) :stalled)))))
 
 (defn end-task-call
   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
@@ -5205,13 +5206,30 @@
           (nil? sym) #{}
           :else (set (:seon.task/proofs (task/task-edges database sym))))))
 
+(defn- step-tests
+  "The tests the step of the task `agent-id` holds is judged by on `database`, the agent's branch: its proofs and,
+  for a `:prove` step, the product tests `database` already holds (`seon.task/obligations`), so the run at its fork
+  point shows whether main holds its product."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
+  [database agent-id]
+  (let [proofs (task-proofs database agent-id)
+        handle (when-not (:seon.error/at proofs) (task/agent-task database agent-id))
+        sym (when (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
+        owed (when sym (task/obligations database sym))]
+    (cond (:seon.error/at proofs) proofs
+          (:seon.error/at owed) owed
+          (= :prove (:seon.task/step owed))
+          (into proofs (filter #(seq (db/datoms database :avet :seon.test/sym %))) (:seon.task/product owed))
+          :else proofs)))
+
 (defn- run-proofs
-  "Run the proofs of the task `agent-id` holds, but those in `excluded`, on `execution` as one test request bounded by `limit-ms`; nil when none is left."
+  "Run the tests the step of the task `agent-id` holds is judged by (`step-tests`), but those in `excluded`, on
+  `execution` as one test request bounded by `limit-ms`; nil when none is left."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int? [:set :seon.test/sym]]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
   [execution agent-id limit-ms excluded]
   (let [connection (:seon.db/connection execution)
-        proofs (task-proofs (db/db connection) agent-id)
+        proofs (step-tests (db/db connection) agent-id)
         proofs (if (:seon.error/at proofs) proofs (into #{} (remove excluded) proofs))]
     (cond (:seon.error/at proofs) proofs
           (empty? proofs) nil
@@ -5223,10 +5241,11 @@
   "The transaction of the first run of the proofs of the task `agent-id` holds recorded on `database`, the agent's
   branch, after its attempt's row: the attempt's own proving, never a run its value inherited from a predecessor;
   for a task naming no proof, the transaction of the attempt's row itself (nothing is left to prove, so the
-  attempt has proved first); nil when none ran, the proofs' read refusal when they cannot be read."
+  attempt has proved first); nil when none ran, the proofs' read refusal when they cannot be read. The proofs are
+  the tests its step is judged by (`step-tests`), a Prove step's held product included."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.error/value]]}
   [database agent-id]
-  (let [proofs (task-proofs database agent-id)]
+  (let [proofs (step-tests database agent-id)]
     (cond
       (:seon.error/at proofs) proofs
       (empty? proofs)

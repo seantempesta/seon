@@ -81,6 +81,7 @@
                        [:seon.render/operations [:vector :seon.render/read-form]]]
                :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :satisfied :working]]
+                      [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
                       [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and, for a Prove step, of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
                       [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions or unimplemented stubs when done."} [:vector :seon.context/test-entry]]

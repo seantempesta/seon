@@ -73,7 +73,7 @@
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
  :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing, or an assignment's publication (seon.merge/publish!), met (a red gate, a write-back or commit refusal); the merge stays as it is for root, and no pass publishes it again until root retracts this."}]
  :refused-tests [:set {:description "The tests whose red verdict refused a merge task's landing."} :seon.test/sym]
- :end [:enum {:description "How an agent's task ended: its proofs green, given back with my.task/send-back!, its turns spent, stalled (the loop stopped calling it before its proofs passed), or sent back to the task my.task/send-back! named as its :my.task/target. The end closes the agent's admission (seon.turn/end-task-call). Producer: seon.turn/task-end."} :done :given-back :capped :stalled :sent-back]
+ :end [:enum {:description "How an agent's task ended: its proofs green, its step satisfied at its fork point (seon.context/step-status: nothing to merge), given back with my.task/send-back!, its turns spent, stalled (the loop stopped calling it before its proofs passed), or sent back to the task my.task/send-back! named as its :my.task/target. The end closes the agent's admission (seon.turn/end-task-call). Producer: seon.turn/task-end."} :done :satisfied :given-back :capped :stalled :sent-back]
  :calls [:int {:min 0 :description "The model calls an ended task's agent took."}]
  :prompt-tokens [:int {:min 0 :description "The prompt tokens an ended task's model calls sent."}]
  :completion-tokens [:int {:min 0 :description "The completion tokens an ended task's model calls received."}]

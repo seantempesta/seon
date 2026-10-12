@@ -173,7 +173,9 @@
   proofs are nonempty, all green and all known green at the fork point: it has nothing to do. Else it is `:done`
   when its proofs are nonempty and all green, nothing is broken and every new red is a proof. A `:prove` step is
   done when its own proofs are all green, its product is nonempty, nothing is broken and its new reds are exactly
-  its product, each red by failing assertions or an unimplemented stub. Any other step is `:working`."
+  its product, each red by failing assertions or an unimplemented stub; it is `:satisfied` when the same holds of
+  a product its fork point already held red and nothing is new: main holds its product. Any other step is
+  `:working`."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
     head :seon.context/head fork-point :seon.context/fork-point}]
@@ -183,7 +185,10 @@
         new-red (into #{} (remove #(contains? fork-point %)) reds)
         green-before (into #{} (filter #(false? (get fork-point %))) proofs)
         green? (fn [tests] (every? #(= :green (status %)) tests))
-        satisfied? (and (= :implement step) (seq proofs) (green? proofs) (= (count green-before) (count proofs)))
+        satisfied? (case step
+                     :implement (and (seq proofs) (green? proofs) (= (count green-before) (count proofs)))
+                     :prove (and (seq product) (green? proofs) (empty? broken) (empty? new-red)
+                                 (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product)))
         done? (case step
                 :implement (and (seq proofs) (green? proofs) (empty? broken) (every? proofs new-red))
                 :prove (and (green? proofs) (seq product) (empty? broken) (= new-red product)
@@ -344,7 +349,8 @@
           observation (merge observation (step-status observation)))))
 
 (defn step-section
-  "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, then each
+  "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, the tests its
+  rule counted broken and new red (what keeps it from done), then each
   test that keeps it from done beside its proofs: the tests its change broke, for a Prove step the product it
   owes its successors, and any other new red; each with its status and, when red, its failing assertions.
   Lists are absent when empty."
@@ -354,7 +360,7 @@
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
         product (when (= :prove step) product)
         other (remove (into (set proofs) product) new-red)]
-    (cond-> {:seon.task/step step :seon.task/status status}
+    (cond-> {:seon.task/step step :seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
       (seq broken) (assoc :seon.context/broken-tests (entries broken))
       (seq product) (assoc :seon.context/product-tests (entries product))
       (seq other) (assoc :seon.context/new-red-tests (entries other)))))

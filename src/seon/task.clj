@@ -914,12 +914,14 @@
 
 (def ready-rules
   "The stratified rules `ready` reads: `leaf-done` (an assignment of it merged on main, outcome
-  :merged, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
+  :merged, or one ended :satisfied, whose product main already holds, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
   inherited needs), `blocked` (a need with an open leaf at or under it) and `execution` (a task's own
   `:seon.task/execution`, else its nearest ancestor's down `:seon.task/children`)."
   '[[(execution ?t ?e) [?t :seon.task/execution ?e]]
     [(execution ?t ?e) [?p :seon.task/children ?t] [(missing? $ ?t :seon.task/execution)] (execution ?p ?e)]
     [(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task/outcome :merged ?tx]
+     (not-join [?t ?tx] [?b :seon.task.attempt/end :sent-back ?tx2] [?b :seon.task.attempt/target ?t] [(> ?tx2 ?tx)])]
+    [(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end :satisfied ?tx]
      (not-join [?t ?tx] [?b :seon.task.attempt/end :sent-back ?tx2] [?b :seon.task.attempt/target ?t] [(> ?tx2 ?tx)])]
     [(under ?n ?l) [?n :seon.task/children ?l]]
     [(under ?n ?l) [?n :seon.task/children ?c] (under ?c ?l)]
@@ -995,7 +997,7 @@
 
 (defn done?
   "Whether task `handle` is done in `database`: a leaf when an assignment of it merged on main (outcome
-  :merged) with no later :sent-back targeting it, a parent when no leaf under it is open. An unknown
+  :merged) or ended :satisfied with no later :sent-back targeting it, a parent when no leaf under it is open. An unknown
   task is not done."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
