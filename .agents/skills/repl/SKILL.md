@@ -98,23 +98,23 @@ exercised. Re-evaluating a contracted Var replaces its wrapper;
 `:seon.instrument/changed-identities` it collects and re-instruments the complete
 loaded program; name the changed identities when you have them.
 
-For the selected development cluster, the complete JVM form is below.
-Choose the namespace to reload; the database supplies both the registry
-and instrumentation mode (`seon.schema/projection-from-database`,
-`seon.config/effective`).
+For the selected development cluster, the JVM form below has the request shape `seon.test` passes to
+`seon.instrument/apply!`. Choose the namespace to reload; the database supplies the registry and the admission caps
+(`seon.schema/projection-from-database`, `seon.config/effective`, `seon.config/result-caps`).
 
 ```clojure
 (let [connection (seon.cluster.boot/connection "default")
       database @connection
-      projection (seon.schema/projection-from-database database)]
+      projection (seon.schema/projection-from-database database)
+      configuration (seon.config/effective database "default")]
   (seon.schema/call-with-projection
    projection
    (fn []
-     (let [configuration (seon.config/effective database "default")]
-       (require 'seon.health :reload)
-       (seon.instrument/apply!
-        {:seon.config/on-core-error (:seon.config/on-core-error configuration)
-         :seon.schema/projection projection})))))
+     (require 'seon.health :reload)
+     (seon.instrument/apply!
+      {:seon.sci.admit/caps (seon.config/result-caps configuration)
+       :seon.schema/projection projection
+       :seon.db/db database}))))
 ```
 
 Use actual agent turns for persistence, isolation, publication, or

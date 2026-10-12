@@ -30,7 +30,7 @@ Read core.async's implementation before assigning a workload:
 - A missing workload defaults to `:mixed`.
 
 Those are implementation facts at
-`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:243-323`.
+`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`.
 The `:compute` hop does not discover I/O inside a transform and does not divide
 one transform into CPU and blocking segments.
 
@@ -43,41 +43,35 @@ Core.async's default dispatch executors are:
 | `:mixed` | cached platform pool |
 
 Verify the constructors at
-`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`.
+`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`.
 These defaults are not bounded by the machine's core count. `executor-for`
-memoizes one executor per workload tag for the whole process (`:98-111`).
+memoizes one executor per workload tag for the whole process.
 
 Seon's `var-process` accepts only `:io` or `:compute`, refuses a missing or
 `:mixed` declaration, a non-Var step and arguments that name no
-`:seon.env/environment`, all at construction (`src/seon/flow.clj:286-385`).
+`:seon.env/environment`, all at construction (`src/seon/flow.clj`).
 Requiring a Var means re-evaluating the referenced `defn` changes behavior
 without rebuilding the graph.
 
 ## Current executor ownership
 
-The process root holds one executor pair,
-`seon.operator.runtime/root-executor-pair`
-(`resources/seon/operator/runtime.clj:17-28`):
-
-- `:io` is core.async's own memoized `(executor-for :io)`, virtual thread per
-  task;
-- `:compute` is `seon.flow/bounded-platform-executor`, a fixed platform pool of
-  `availableProcessors` threads (`src/seon/flow.clj:387-391`).
+The process `:io` executor is core.async's own memoized `(executor-for :io)`
+(`clojure.core.async.impl.dispatch/executor-for`), a virtual thread per task.
+Each graph owns a separate executor (below).
 
 Do not flatten the roles below into "the executor":
 
 | graph or work | executor it receives | source |
 |---|---|---|
-| every graph (each agent, the cluster graph, the work launcher) | its own `graph-executor` as `:io-exec`: a virtual thread per proc task, the graph's join | `src/seon/flow.clj:80-100`, assigned by `start-graph!` `:101-125` |
-| the cluster handle's `:seon.flow/executor` | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3409-3424`, assigned `:3486-3488` |
-| launcher I/O submissions | root `:io` as the task executor | `src/seon/flow.clj:610`, dispatched in `execute-io-work!` `:440` |
-| capability handlers | root `:io` | `src/seon/effect.clj:465-467` |
+| every graph (each agent, the cluster graph, the work launcher) | its own `seon.flow/graph-executor` as `:io-exec`: a daemon platform thread per proc task, named by graph and proc, and the graph's join | `src/seon/flow.clj`, assigned by `start-graph!` |
+| the cluster handle's `:seon.flow/executor` | `seon.cluster/projection-executor`: root `:io`, binding the cluster's registry state around each task | `src/seon/cluster.clj`, assigned |
+| launcher I/O submissions | the `task-executor` handed to `seon.flow/execute-io-work!` | `src/seon/flow.clj` |
 
 Flow's resolver uses core.async's defaults exactly when a graph omits the
 matching override
-(`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:50-56,145-148`).
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`).
 
-The root `:compute` pool is shared by every cluster in the JVM
+Fairness of a shared compute pool across clusters is an open issue
 (`docs/seon/issues/root-compute-executor-has-no-per-cluster-fairness.md`).
 
 ## Parking, occupation, and pinning
@@ -103,8 +97,8 @@ their live state.
 ## The bounded submission owner
 
 The work launcher accepts one submission kind: `seon.flow/submit!` for
-detached I/O work (`src/seon/flow.clj:679`); its one production caller is a
-background effect (`src/seon/effect.clj:865`). The turn path does not enter
+detached I/O work (`src/seon/flow.clj`); its one production caller is a
+background effect (`src/seon/effect.clj`). The turn path does not enter
 it: the turn proc evaluates SCI inline and calls the model inline. This
 boundary is recorded in
 `docs/seon/issues/turn-evaluations-bypass-work-submission.md`.
@@ -117,11 +111,11 @@ The launcher owns:
   and `submit!` returns false; the proc's input channel is core.async's own
   fixed buffer of that size, which admission keeps from ever blocking;
 - an active-count gate bounded by the configured concurrency
-  (`with-submission-filter`, `:482`);
+  (`with-submission-filter`);
 - the root `:io` task executor; and
 - task completion routed back to the launcher proc.
 
-Inspect `src/seon/flow.clj:482-759` before changing admission. The active
+Inspect `src/seon/flow.clj` before changing admission. The active
 count spans each submission's complete lifetime. If work parks inside a host
 call, its logical slot remains occupied even though the virtual thread may
 have released its carrier.
@@ -153,11 +147,11 @@ lines 20-42). Do not turn those host measurements into universal constants.
 
 ## What a capability boundary changes
 
-`seon.effect/request!` (`src/seon/effect.clj:920`) is the one system-side owner
-for capability requests. It commits the request receipt before the protected
+`seon.effect/request!` (`src/seon/effect.clj`) is the one system-side owner
+for capability requests. It commits the request result before the protected
 JVM handler runs on the process-root `:io` executor, bounds terminal data,
-commits settlement once, and recovery interrupts an open receipt and never
-dispatches it again (`src/seon/effect.clj:1-8`). Workload reachability over
+commits recording transaction once, and recovery interrupts an open result and never
+dispatches it again (`src/seon/effect.clj`). Workload reachability over
 `:seon.fn/calls` remains unimplemented.
 
 The request owner is the honest place to separate CPU admission from blocking
@@ -177,7 +171,7 @@ and leaf workload facts; that reachability owner is still **[TARGET]**.
 
 The only built metadata step is parse-time lifting of explicit
 `:seon.workload` metadata into `:seon.fn/workload`
-(`src/seon/sci/reader.cljc:285-304`).
+(`src/seon/sci/reader.cljc`).
 
 ## Decision checklist
 

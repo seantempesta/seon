@@ -9,9 +9,9 @@ tags: [reference, datahike]
 Loaded when you need Datalog patterns beyond the SKILL.md basics. The examples
 show Datahike's query grammar with `d/q` over one explicit immutable database
 value; reads are synchronous. In Seon code the query owner is `seon.db/q`
-(`src/seon/db.clj:2450`), which accepts the same grammar; direct `datahike.api`
+(`src/seon/db.clj`), which accepts the same grammar; direct `datahike.api`
 calls survive only inside `seon.db`, the store/registry and classified
-branch-custody owners, and system-side listeners (`AGENTS.md:201-204`).
+branch-checked-out branch owners, and system-side listeners (`AGENTS.md`).
 
 ## Contents
 
@@ -57,8 +57,8 @@ example: use `:with` whenever duplicate projected values must remain distinct.
 
 Seon's maintained Datahike accepts a query map with `:query`, `:args`,
 `:order-by`, `:offset`, and `:limit`
-(`normalize-q-input`, `reference-code/datahike/src/datahike/query.cljc:97-120`;
-`parse-order-by` through `apply-order-by`, `:3549-3634`):
+(`normalize-q-input`, `reference-code/datahike/src/datahike/query.cljc`;
+`parse-order-by` through `apply-order-by`):
 
 ```clojure
 (d/q {:query '[:find ?name ?score
@@ -140,8 +140,8 @@ A PLAIN ref with no sub-pattern pulls back as `{:db/id N}` — name it with a
 sub-pattern (`{::parent [::name]}`) to pull its fields. A COMPONENT ref expands
 to a nested map under `[*]`. Pull also supports reverse-ref navigation
 (`::parent` → `{:my.ns/_parent [...]}`)
-(`reference-code/datahike/src/datahike/pull_api.cljc:298-302` for
-`{:db/id N}`, `:335-337` for a sub-selector, `:346-351` for the unasked
+(`reference-code/datahike/src/datahike/pull_api.cljc` for
+`{:db/id N}` for a sub-selector for the unasked
 component expansion). SKILL.md's "three grammars of a reference" is the
 complete table.
 
@@ -160,7 +160,7 @@ without faulting data in:
 ```
 
 Use index access only for a measured index-level debugging or implementation
-need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2894`).
+need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj`).
 
 ## Performance tips
 
@@ -168,14 +168,14 @@ need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2894`).
 - **Give the planner selective facts** — constrain entities with known eids or
   unique attribute values. The maintained planner, not caller clause order,
   orders operations and chooses index scans
-  (`reference-code/datahike/src/datahike/query/plan.cljc:1524-1663`).
+  (`reference-code/datahike/src/datahike/query/plan.cljc`).
 - **Scalar form (`.`)** when expecting one result — skips the set wrapper.
 - **Prefer pull** over N follow-up queries when fetching related entities.
 - **Thread one database value** through a unit of work instead of repeatedly
   dereferencing a connection. It is a correctness and performance win.
 - **Don't `memoize` on a db value** — `=` on a DB compares the EAVT index and
-  can fault index nodes from durable storage on a cache hit
-  (`equiv-db`, `reference-code/datahike/src/datahike/db.cljc:755-767`).
+  can error index nodes from durable storage on a cache hit
+  (`equiv-db`, `reference-code/datahike/src/datahike/db.cljc`).
   Measure before caching.
 - **Use `d/history` only when historical additions and retractions are the
   query subject.**

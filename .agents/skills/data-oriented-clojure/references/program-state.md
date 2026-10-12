@@ -13,5 +13,5 @@ implementation. Git history preserves the historical text and measurements.
 Read the [current skill](../SKILL.md) and the
 [binding turn PRD §13–§15](../../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
 The PRD requires one persistent SCI context per agent, live private objects,
-and stored shown text. Those are ruled targets; this reference does not claim
+and stored printed value. Those are ruled targets; this reference does not claim
 the ongoing source implementation has completed them.

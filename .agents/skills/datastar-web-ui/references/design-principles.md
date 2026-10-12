@@ -73,7 +73,7 @@ The maintained font and dense-size tokens are the monospace stack and
 `text-2xs` definitions at `resources/public/css/input.css:58-64`; the fixed
 message bar demonstrates the compact border, spacing, and type rhythm
 (`.seon-bar`, `resources/public/css/input.css:991-1029`, rendered by
-`message-bar-html`, `src/seon/render/web.clj:271`).
+`message-bar-html`, `src/seon/render/web.clj`).
 
 - Use the maintained monospace stack.
 - Use `text-xs` for dense body text and `text-2xs` for metadata.
@@ -90,28 +90,28 @@ message bar demonstrates the compact border, spacing, and type rhythm
 ## Current rendering boundary
 
 Current UI hiccup is JVM Clojure serialized through `seon.render.hiccup/->string`
-(`src/seon/render/hiccup.clj:486`); HTML walk units receive stable wrappers in
-`surface-html` (`src/seon/render/web.clj:380-402`). `seon.render.block/surface-id`
-is the one stable DOM-ID derivation (`src/seon/render/block.clj:61-96`), and
+(`src/seon/render/hiccup.clj`); HTML walk units receive stable wrappers in
+`surface-html` (`src/seon/render/web.clj`). `seon.render.block/surface-id`
+is the one stable DOM-ID derivation (`src/seon/render/block.clj`), and
 delivery is owned by the render proc and feed (`render-step`,
-`src/seon/render/web.clj:2566`; `feed`, `:2805`).
+`src/seon/render/web.clj`; `feed`).
 
 Build semantic hiccup with stable element IDs. Let the existing walk and block
 owners produce source, transcript, problem, and data presentation; the shared
 walk membership/order seam is `seon.render.walk/neighborhood`
-(`src/seon/render/walk.clj:697`). Do not
+(`src/seon/render/walk.clj`). Do not
 restore old `seon.ui.*` CLJS namespaces or quarry-era block call signatures.
 
 Design within the live web UI shapes:
 
 - namespace pages place walk units in one ranked layout
-  (`page-response`, `src/seon/render/web.clj:3167-3192`;
+  (`page-response`, `src/seon/render/web.clj`;
   `.seon-rank-layout`, `resources/public/css/input.css:1301`);
 - debug pages carry a local `showEverything` signal and a grid of panes
-  (`debug-response`, `src/seon/render/web.clj:3410`, signals at `:3422`,
-  `:3509`; `.seon-debug`, `resources/public/css/input.css:1466`); and
+  (`debug-response`, `src/seon/render/web.clj`, signals at,
+; `.seon-debug`, `resources/public/css/input.css:1466`); and
 - the exact live URLs come from the one route table
-  (`src/seon/render/route.clj:5-31`).
+  (`src/seon/render/route.clj`).
 
 Inspect the owning renderer before choosing a data shape. Do not assume a
 deleted tagged renderer's accepted values survived unchanged.
@@ -134,20 +134,20 @@ Do not use visual work to imply that target runtime mechanisms already exist.
 The following remain **[TARGET]**:
 
 - generalized `my.canvas` controls and `/call`: neither appears in the exact
-  live route table (`src/seon/render/route.clj:5-31`), while current input is
+  live route table (`src/seon/render/route.clj`), while current input is
   the fixed message bar and context-action POSTs (`message-bar-html`,
-  `src/seon/render/web.clj:271`; `context-response`, `:3630`) plus
+  `src/seon/render/web.clj`; `context-response`) plus
   browser-local Datastar signals;
 - agent-owned `::renders`: the live blueprint contains only mailbox, turn and
-  schedule (`graph-definition`, `src/seon/cluster/agent.clj:560-607`).
+  schedule (`graph-definition`, `src/seon/cluster/agent.clj`).
 
 Revisioned packages and reconnect keyframes are current. The render proc builds
 each package with a delta and complete keyframe, while each tab sends the delta
 for a contiguous revision and the keyframe after a gap (`next-package`,
-`src/seon/render/web.clj:1828-1854`; `package-patches`, `:1856-1866`).
+`src/seon/render/web.clj`; `package-patches`).
 
 Canonical namespace pages, root/agent aliases, and both debug variants are
-current routes (`src/seon/render/route.clj:5-16`). Keep visual work inside those
+current routes (`src/seon/render/route.clj`). Keep visual work inside those
 current boundaries unless the owner explicitly resumes a named target.
 
 ## The product bar (owner, 2026-09-14)
@@ -158,7 +158,7 @@ Seon opens the page and understands within ten seconds what this agent is
 doing, what it saw, and what went wrong. Every visual change is verified
 by LOOKING at a screenshot of the live page at 1440 px and 700 px before
 it is committed; the screenshot log (file → defects seen → change) goes in
-the landing note. A page that is "green" but unread is unverified.
+the commit note. A page that is "green" but unread is unverified.
 
 Information design for a UI that is scanned, not read:
 
@@ -169,14 +169,14 @@ Information design for a UI that is scanned, not read:
   semantic colours (`--color-success`, `--color-warning`, `--color-error`,
   `--color-info`) are reserved for state and never used as accent.
 - **Faithful and formatted are two layers.** Stored bytes (prompt text,
-  replies, shown text) are rendered exactly, tokenised into spans whose
+  replies, printed value) are rendered exactly, tokenised into spans whose
   text concatenates back to the bytes; formatting sits in the spans and
   around the block, never inside the bytes. An agent's `:error` evaluation
   is history, styled as history, never as a page failure.
-- **Repeated things compose as one object.** Cards, rows, and labels in a
+- **Repeated things compose as one object.** Cards, list items, and labels in a
   series share edges, baselines, and inner padding; a recurring element
   sits in the same place on each. Consecutive identical items fold into one
-  row with a count.
+  item with a count.
 - **Not everything is a card.** Border, fill, and radius say "separate
   object"; spend them on the one thing that needs lifting.
 - **The page at rest is complete.** Everything meant to be read is present
