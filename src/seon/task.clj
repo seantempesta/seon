@@ -875,10 +875,10 @@
 ;;; `needs*`) and negation applies only to finished relations, which Datahike evaluates.
 
 (def ready-rules
-  "The stratified rules `ready` reads: `leaf-done` (an attempt ended :done with no later
-  :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and inherited needs) and
-  `blocked` (a need with an open leaf at or under it)."
-  '[[(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end :done ?tx]
+  "The stratified rules `ready` reads: `leaf-done` (an assignment of it merged on main, outcome
+  :merged, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
+  inherited needs) and `blocked` (a need with an open leaf at or under it)."
+  '[[(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task/outcome :merged ?tx]
      (not-join [?t ?tx] [?b :seon.task.attempt/end :sent-back ?tx2] [?b :seon.task.attempt/target ?t] [(> ?tx2 ?tx)])]
     [(under ?n ?l) [?n :seon.task/children ?l]]
     [(under ?n ?l) [?n :seon.task/children ?c] (under ?c ?l)]
@@ -908,8 +908,9 @@
         (let [blocked (set blocked)] (into #{} (keep (fn [[t h]] (when-not (blocked t) h))) eligible)))))
 
 (defn done?
-  "Whether task `handle` is done in `database`: a leaf when an attempt of it ended :done with no
-  later :sent-back targeting it, a parent when no leaf under it is open. An unknown task is not done."
+  "Whether task `handle` is done in `database`: a leaf when an assignment of it merged on main (outcome
+  :merged) with no later :sent-back targeting it, a parent when no leaf under it is open. An unknown
+  task is not done."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
   (let [task (db/q '[:find ?n . :in $ ?h :where [?n :seon.task/id ?h]] database handle)

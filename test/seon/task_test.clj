@@ -151,13 +151,15 @@
 
 (defn- ended
   "An attempt row of tq.tree/`task-name` by the fixture agent, ended `end` (open when nil), sent
-  back to `target` when given; `n` keeps a task's second attempt distinct."
-  {:malli/schema [:=> [:cat :seon.db/database-value :string [:maybe :seon.task.attempt/end] [:maybe :string] :int] :map]}
+  back to `target` when given; `n` keeps a task's second attempt distinct. `:merged` is a :done end
+  whose merge reached main (`:seon.task/outcome` `:merged`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string [:maybe [:or :seon.task.attempt/end [:= :merged]]] [:maybe :string] :int] :map]}
   [database task-name end target n]
   (cond-> {:seon.task/assignment (id/id [(handle task-name) "tq-tree-agent" n]) :seon.task/assigned (handle task-name)
            :seon.task/attempt-of [:seon.task/id (handle task-name)] :seon.task/revision (task/task-revision database (handle task-name))
            :seon.task/agent [:seon.agent/id "tq-tree-agent"] :seon.task/branch (keyword (str "tq-" task-name "-" n))}
-    end (assoc :seon.task.attempt/end end)
+    (= :merged end) (assoc :seon.task.attempt/end :done :seon.task/outcome :merged)
+    (and end (not= :merged end)) (assoc :seon.task.attempt/end end)
     target (assoc :seon.task.attempt/target [:seon.task/id (handle target)])))
 
 (defn- after
@@ -186,27 +188,30 @@
                                      (concat ["design" "prove" "b" "integrate" "schema"] fan-out bodies)))
      (body (db/db connection)))))
 
-(def ^:private done-through-prove [[["design" :done] ["prove" :done]]])
+(def ^:private done-through-prove [[["design" :merged] ["prove" :merged]]])
 
 (def ^:private all-but-integrate
-  (conj done-through-prove (mapv #(vector % :done) (concat fan-out ["schema"] bodies))))
+  (conj done-through-prove (mapv #(vector % :merged) (concat fan-out ["schema"] bodies))))
 
 (deftest ^{:seon/tasks #{'seon.task/the-ready-leaves-are-those-whose-needs-are-done}} the-ready-leaves-are-those-whose-needs-are-done
   (with-tree
    (fn [database]
      (are [txs expected] (= (set (map handle expected)) (task/ready (after database txs)))
        [] ["design"]
-       [[["design" :done]]] ["prove"]
+       [[["design" :merged]]] ["prove"]
        done-through-prove (conj fan-out "schema")
-       (conj done-through-prove [["schema" :done] ["f1" :done]]) (concat (rest fan-out) bodies)
+       (conj done-through-prove [["schema" :merged] ["f1" :merged]]) (concat (rest fan-out) bodies)
        all-but-integrate ["integrate"]
-       (conj all-but-integrate [["integrate" :done]]) []
-       (conj all-but-integrate [["integrate" :done] ["merge" :execution :running]]) ["merge"]
+       (conj all-but-integrate [["integrate" :merged]]) []
+       (conj all-but-integrate [["integrate" :merged] ["merge" :execution :running]]) ["merge"]
        (conj done-through-prove [["f1" :sent-back "prove"]]) ["prove"]
-       [[["design" :done] ["prove" nil]]] ["prove"]
-       [[["design" :done] ["prove" :given-back]]] []
+       [[["design" :merged] ["prove" nil]]] ["prove"]
+       [[["design" :merged] ["prove" :given-back]]] []
        (conj done-through-prove [["f1" :execution :stopped]]) (conj (vec (rest fan-out)) "schema")
-       (conj all-but-integrate [["integrate" :done] ["merge" :execution :running]] [["merge" :done]]) [])
+       (conj all-but-integrate [["integrate" :merged] ["merge" :execution :running]] [["merge" :merged]]) [])
+     (is (not (contains? (task/ready (after database [[["design" :done]]])) (handle "prove")))
+         "a need ended :done whose merge has not reached main leaves its successor unready")
+     (is (not (task/done? (after database [[["design" :done]]]) (handle "design"))) "done is merged, not ended")
      (is (task/done? (after database all-but-integrate) (handle "b")) "a parent is done when its leaves are")
      (is (= {:seon.task/closed-by :seon.task/children} (task/resolution (after database all-but-integrate) (handle "b")))))))
 
@@ -224,7 +229,7 @@
 (deftest ^{:seon/tasks #{'seon.task/the-ready-leaves-are-those-whose-needs-are-done}} ready-answers-in-under-10-ms-for-fifty-leaves
   (with-tree
    (fn [database]
-     (let [value (after database (conj done-through-prove [["schema" :done] ["f1" :done]]))
+     (let [value (after database (conj done-through-prove [["schema" :merged] ["f1" :merged]]))
            acquired (profile/measure #(task/ready value))
            measured (profile/measure #(task/ready value))]
        (is (= (:seon.profile/value acquired) (:seon.profile/value measured)))
