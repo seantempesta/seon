@@ -1187,8 +1187,8 @@
 
 ;;; F45: a merge refused for a reason its agent can fix relaunches, the reason shown in the next block.
 
-(deftest ^{:seon.test/long "One chain world, one attempt's refused gate (a nested seon.test/run on a fresh merge branch) and its relaunch over three db<->flow passes."
-           :seon.test/long-ms 120000}
+(deftest ^{:seon.test/long "One chain world, one attempt's refused gate (a nested seon.test/run on a fresh merge branch), its relaunch and the relaunched attempt's merge gate over four db<->flow passes."
+           :seon.test/long-ms 180000}
   a-merge-refused-for-a-missing-contract-relaunches-with-the-refusal-shown
   (binding [*space* "tq.uncontracted"]
     (test-support/with-database
@@ -1233,7 +1233,22 @@
                 (is (string? key-2) "the second attempt starts")
                 (is (= {:seon.task/status :working :seon.context/uncontracted [doubled]}
                        (select-keys step [:seon.task/status :seon.context/uncontracted]))
-                    "its block names the uncontracted helper the merge refused"))))))))))
+                    "its block names the uncontracted helper the merge refused")
+                ;; the second attempt re-touches only the helper; twice keeps attempt 1's change
+                (await-on! on-2 #(not-empty (proof-runs (db/db on-2) (symbol rows "proves-u"))) ::proved-2)
+                (define-on! on-2 (symbol rows) "(defn- doubled {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
+                (test-support/transacted! on-2 [[:db/add [:seon.task/assignment key-2] :seon.task.attempt/end :done]
+                                                [:db/add [:seon.task/assignment key-2] :seon.task.attempt/commit (db/commit-id (db/db on-2))]])
+                (let [digest (fn [database sym] (db/q '[:find ?d . :in $ ?s :where [?f :seon.fn/sym ?s] [?f :seon.program/definition-digest ?d]]
+                                                      database sym))
+                      branch-2-value (db/db on-2)
+                      _ (pass! handle routing)
+                      main (db/db connection)]
+                  (is (= :merged (:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment key-2])))
+                      "the relaunched attempt merges")
+                  (is (= (digest branch-2-value doubled) (digest main doubled)) "main holds the helper attempt 2 contracted")
+                  (is (= (digest branch-2-value (symbol rows "twice")) (digest main (symbol rows "twice")))
+                      "and the body of twice only attempt 1 changed")))))))))))
 
 ;;; H5: a capped attempt with work continues from its end commit, up to :seon.config.run/relaunches.
 
@@ -1272,8 +1287,8 @@
                 (is (and (string? key-2) (not= key-1 key-2) (not= branch-1 branch-2)) "a new assignment and branch")
                 (is (= (:seon.task/merge-base first-row) (:seon.task/merge-base (relaunch-row main key-2)))
                     "keeping the first attempt's merge base")
-                (is (= (:seon.task.attempt/commit first-row) (registry/base-commit-id main branch-2))
-                    "forked at the first attempt's end commit")
+                (is (= (:seon.task/merge-base first-row) (registry/base-commit-id main branch-2))
+                    "its branch's merge base is the first attempt's, so its merge takes both attempts' changes")
                 (let [on-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2})
                       [row agent :as ids] (row-ids (db/db on-2) key-2 agent-2)]
                   (is (and (int? row) (int? agent) (= (row-ids main key-2 agent-2) ids))

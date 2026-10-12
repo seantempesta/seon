@@ -1853,16 +1853,20 @@
       (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))))))
 
 (defn- fork-attempt!
-  "Fork an attempt's `branch` at `fork-point` unless the store holds it: main's head, or a relaunched attempt's
-  end commit, so its work carries over; the commit it forked at (`seon.cluster.registry/base-commit-id`). Every
-  need merged before the attempt was planned (`seon.task/ready`), so main holds what they made."
+  "Fork an attempt's `branch` toward main at `fork-point` unless the store holds it: main's head, or a relaunched
+  attempt's end commit, so its work carries over, forked from that commit's own branch so it inherits that
+  attempt's merge base (`seon.cluster.registry/branch-fork-entity`) and its merge takes both attempts' changes; its
+  merge base (`seon.cluster.registry/base-commit-id`). Every need merged before the attempt was planned
+  (`seon.task/ready`), so main holds what they made."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/branch :seon.flow.plan/fork-point] :seon.source/commit-id]}
   [handle branch fork-point]
   (let [database (db/db (:seon.db/connection handle))
+        main (get-in database [:config :branch])
         store (handle-store handle)
         result (when-not (contains? (registry/branches store) branch)
-                 (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db database
-                                  :seon.cluster.registry/from (if (uuid? fork-point) fork-point (get-in database [:config :branch]))}))]
+                 (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.branch/target main
+                                  :seon.db/db (if (uuid? fork-point) (db/commit-database database fork-point) database)
+                                  :seon.cluster.registry/from (if (uuid? fork-point) fork-point main)}))]
     (when (:seon.error/at result) (throw (ex-info (:seon.error/message result "The attempt's fork was refused.") result)))
     (registry/base-commit-id database branch)))
 
