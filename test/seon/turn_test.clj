@@ -20,6 +20,8 @@
             [seon.sci.observe :as observe]
             [seon.test-support :as support]
             [seon.task :as task]
+            [seon.test :as seon.test]
+            [seon.test.runner :as runner]
             [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]
@@ -2009,3 +2011,34 @@
               (db/pull ended [:seon.task.attempt/end {:seon.task.attempt/target [:seon.task/sym]}]
                        [:seon.task/assignment (id/id [h 1])]))
            "the end names the task the work went back to, as a ref on the attempt")))))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/a-forked-value-reads-the-results-it-inherited}}
+  a-predecessors-proof-run-does-not-count-as-the-attempts
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.preds.edn"
+                                           "[#:seon.task{:name \"a\" :kind :work :intent \"Do a.\"}]"}})
+     (support/declare-proof! connection 'tq.preds-test 'proves-a 'tq.preds/a)
+     (let [agent-id "tq-pred-agent"
+           proof-run! (fn []
+                        (let [database (db/db connection)
+                              provenance (runner/provenance database)]
+                          (support/transacted!
+                           connection [[:db.fn/call seon.test/admit-run
+                                        {:seon.test.run/provenance provenance
+                                         :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name (support/execution-handle connection))]
+                                         :seon.test.run/input-digest (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
+                                         :seon.test.run/policy :named :seon.test.run/include-long? false
+                                         :seon.test.run/identities #{'tq.preds-test/proves-a}
+                                         :seon.test.run/members [{:seon.test.member/symbol 'tq.preds-test/proves-a
+                                                                  :seon.test.member/reasons #{:named}}]}]])))]
+       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+       ;; a predecessor's run of the same proof, inherited by the value the attempt works on
+       (proof-run!)
+       (support/transacted! connection (task/attempt-tx (db/db connection) (task/task-handle 'tq.preds "a" :work) agent-id :tq-pred))
+       (is (false? (turn/proof-run-recorded? (db/db connection) agent-id))
+           "a run recorded before the attempt is its predecessor's: the attempt still proves first")
+       (proof-run!)
+       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
+           "the attempt's own run of its proofs is its proving first")))))

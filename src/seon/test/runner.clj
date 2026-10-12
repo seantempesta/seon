@@ -2193,7 +2193,9 @@
   "Read the latest native admitted execution of each requested test.
   Missing executions are absent; an incomplete latest execution is that test's
   `:seon.test/result-unknown`, never an older green. A failed read refuses the
-  whole answer. Snapshot evidence never certifies this branch.
+  whole answer. Snapshot evidence never certifies this branch. A value reads every
+  run its lineage holds, those it inherited from the branch it forked included:
+  whether a result still holds is its reach digest's to decide, never the branch name.
 
   ## Costs
 
@@ -2222,13 +2224,11 @@
                      (into {} (map (fn [[run id selected]] [run [id selected]]))
                            (execution-read
                             (db/q '[:find ?run ?id ?selected
-                                    :in $ [?run ...] ?branch
-                                    :where [?run :seon.test.run/branch ?branch]
-                                           [?run :seon.test.run/id ?id]
+                                    :in $ [?run ...]
+                                    :where [?run :seon.test.run/id ?id]
                                            [?run :seon.test.run/selection-tx ?selected]
                                            (not [?run :seon.test.run/published-base-digest])]
-                                  database (vec (distinct (map second runs)))
-                                  (get-in (db/schema-database database) [:config :branch])))))
+                                  database (vec (distinct (map second runs)))))))
           entities (into #{} (keep (fn [[test-symbol run]]
                                      (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
                          runs)

@@ -474,3 +474,45 @@
     (is (= {::runner/snapshot-instrumented {::runner/drift-added wrapped}
             ::runner/snapshot-registered {::runner/drift-removed wrapped}}
            drift))))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/a-forked-value-reads-the-results-it-inherited 'seon.context/a-step-proof-cannot-observe-its-agents-test-evidence}}
+  a-forked-value-reads-the-results-it-inherited
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           test-symbol (first (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database)))
+           provenance (runner/provenance database)
+           _ (test-support/transacted!
+              connection [[:db.fn/call sut/admit-run
+                           {:seon.test.run/provenance provenance
+                            :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))]
+                            :seon.test.run/input-digest (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
+                            :seon.test.run/policy :named :seon.test.run/include-long? false
+                            :seon.test.run/members [{:seon.test.member/symbol test-symbol :seon.test.member/reasons #{:named}}]}]])
+           _ (runner/commit-results! connection {:seon.test.runner/results
+                                                 [{:seon.test/sym test-symbol :seon.test/pass-count 1
+                                                   :seon.test/fail-count 0 :seon.test/error-count 0
+                                                   :seon.test.member/began? true :seon.test.member/ended? true
+                                                   :seon.test.run/terminated? true}]
+                                                 :seon.test.run/provenance provenance
+                                                 :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                                                 :seon.test/run-at (:seon.test.run/at provenance)
+                                                 :seon.test.run/terminated? false})
+           recorded (db/db connection)
+           store (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "inherits-results-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id recorded) :seon.db/db recorded}
+           expected (runner/latest-results recorded [test-symbol])]
+       (is (= [[test-symbol 1 0]] (mapv (juxt :seon.test/sym :seon.test/pass-count :seon.test/fail-count) expected))
+           "the run's own value reads its result")
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (is (= expected (runner/latest-results (db/db fork) [test-symbol]))
+                 "a value forked from the recording branch reads the result its lineage holds")
+             (is (= (runner/reach-digests recorded [test-symbol]) (runner/reach-digests (db/db fork) [test-symbol]))
+                 "the reach digest, not the branch name, is what decides the result's validity")
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))

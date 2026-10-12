@@ -5280,20 +5280,22 @@
 
 (defn- first-proof-run-t
   "The transaction of the first run of the proofs of the task `agent-id` holds recorded on `database`, the agent's
-  branch, destined for that branch; nil when none ran, the proofs' read refusal when they cannot be read."
+  branch, after its attempt's row: the attempt's own proving, never a run its value inherited from a predecessor;
+  nil when none ran, the proofs' read refusal when they cannot be read."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.error/value]]}
   [database agent-id]
   (let [proofs (task-proofs database agent-id)]
     (if (or (:seon.error/at proofs) (empty? proofs))
       (when (:seon.error/at proofs) proofs)
-      (db/q '[:find (min ?t) . :in $ ?branch [?proof ...]
-              :where [?run :seon.test.run/branch ?branch] [?run :seon.test.run/identities ?proof]
-              [?run :seon.test.run/identities _ ?t]]
-            database (get-in database [:config :branch]) (vec proofs)))))
+      (db/q '[:find (min ?t) . :in $ ?id [?proof ...]
+              :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?attempt]
+              (not-join [?g ?attempt] [?b :seon.task/agent ?g] [?b :seon.task/assigned _ ?later] [(> ?later ?attempt)])
+              [?run :seon.test.run/identities ?proof] [?run :seon.test.run/identities _ ?t] [(> ?t ?attempt)]]
+            database agent-id (vec proofs)))))
 
 (defn proof-run-recorded?
-  "True when a run of the task `agent-id` holds has its proofs recorded on `database`, the agent's branch,
-  destined for that branch (red or green), or when the task names no proof: the attempt has proved first."
+  "True when a run of the task `agent-id` holds has its proofs recorded on `database`, the agent's branch, after
+  its attempt's row (red or green), or when the task names no proof: the attempt has proved first."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (or (empty? (task-proofs database agent-id)) (some? (first-proof-run-t database agent-id))))

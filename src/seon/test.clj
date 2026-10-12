@@ -81,7 +81,7 @@
   [database test-symbol]
   (try
     (let [entities (db/q '[:find ?selected ?basis
-                       :in $ ?symbol ?branch
+                       :in $ ?symbol
                        :where [?member :seon.test.member/symbol ?symbol]
                               [?member :seon.test.member/completed-tx]
                               [?member :seon.test.member/terminated-tx]
@@ -92,10 +92,8 @@
                               [?run :seon.test.run/members ?member]
                               [?run :seon.test.run/selection-tx ?selected]
                               [?run :seon.test.run/basis-t ?basis]
-                              [?run :seon.test.run/branch ?branch]
                               (not [?run :seon.test.run/published-base-digest])]
-                     database test-symbol
-                     (get-in (db/schema-database database) [:config :branch]))]
+                     database test-symbol)]
       (if (:seon.error/at entities)
         (unknown test-symbol (:seon.error/message entities))
         (if-let [[_ basis] (last (sort-by first entities))]
