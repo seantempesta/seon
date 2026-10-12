@@ -842,33 +842,52 @@
       (:total node)
       chunk)))
 
-(defn- tuple-node
-  "A short sequential value whose every member is a scalar, a name or a string
-  shown whole (`string-shown`), as one whole print node, else nil. Such a tuple
-  (a frame, a lookup ref, a pair) is admitted whole or not at all."
-  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :seon.print/requery-id] :int] [:maybe :map]]}
-  [c identity-attributes path requery-id max-string]
+(defn- tuple-items
+  "The print node of short sequential `c` and the member room left, or nil:
+  every member a scalar, a name, a string shown whole (`string-shown`) or a
+  counted vector or list that is such a tuple itself, with `room` bounding the
+  members at every depth together."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :seon.print/requery-id] :int :int]
+                  [:maybe [:tuple :map :int]]]}
+  [c identity-attributes path requery-id max-string room]
   (when (and (= :coll (:kind c)) (#{::print/vector ::print/list} (:face c))
-             (not (:pending? c)) (<= (:total c) tuple-bound)
+             (not (:pending? c)) (<= (:total c) room)
              ;; every member reached: a seq stepped short of its count is no tuple
              (= (:total c) (count (:members c))))
-    (let [items (map-indexed
-                 (fn [i member]
-                   ;; A collection is never a tuple member: it is not
-                   ;; classified, so no lazy member is realized here.
-                   (let [x (if (coll? member) {:kind :coll} (classify member identity-attributes 1))
-                         node (case (:kind x)
-                                :scalar (:node x)
-                                :name (assoc (:node x) ::print/text (:text x))
-                                :string (when (= (:total x) (string-shown {:kind :string :total (:total x) :path (conj path i)
-                                                                            :requery-id requery-id}
-                                                                           (:value x) max-string))
-                                          {::print/face ::print/string ::print/value (:value x)})
-                                nil)]
-                     (some-> node (assoc :seon.render.data/path (conj path i)))))
-                 (:members c))]
-      (when (every? some? items)
-        {::print/face (:face c) ::print/items (vec items) :seon.render.data/total (:total c)}))))
+    (reduce
+     (fn [[node room] [i member]]
+       (let [member-path (conj path i)
+             ;; Only a counted collection is classified here, so no lazy
+             ;; member is realized; a map or set is never a tuple member.
+             x (if (coll? member)
+                 (if (and (counted? member) (sequential? member))
+                   (classify member identity-attributes tuple-bound)
+                   {:kind :coll})
+                 (classify member identity-attributes 1))
+             [item room] (case (:kind x)
+                           :scalar [(:node x) room]
+                           :name [(assoc (:node x) ::print/text (:text x)) room]
+                           :string (when (= (:total x) (string-shown {:kind :string :total (:total x) :path member-path
+                                                                       :requery-id requery-id}
+                                                                      (:value x) max-string))
+                                     [{::print/face ::print/string ::print/value (:value x)} room])
+                           :coll (tuple-items x identity-attributes member-path requery-id max-string room)
+                           nil)]
+         (if item
+           [(update node ::print/items conj (assoc item :seon.render.data/path member-path)) room]
+           (reduced nil))))
+     [{::print/face (:face c) ::print/items [] :seon.render.data/total (:total c)} (- room (:total c))]
+     (map-indexed vector (:members c)))))
+
+(defn- tuple-node
+  "A short sequential value of scalars, names, whole strings and such
+  sequences, at most `tuple-bound` members at every depth together
+  (`tuple-items`), as one whole print node, else nil. Such a tuple (a frame,
+  a lookup ref, a pair, a form quoting a symbol) is admitted whole or not at
+  all."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :seon.print/requery-id] :int] [:maybe :map]]}
+  [c identity-attributes path requery-id max-string]
+  (first (tuple-items c identity-attributes path requery-id max-string tuple-bound)))
 
 (defn- leaf-width
   "The flat width of a leaf print node, as the emitter prints it at `depth`:
@@ -963,7 +982,7 @@
 (defn- extras
   "Width fipp's line breaks add to a broken node. A broken tuple fills
   (`seon.print` lays an all-scalar sequence out member by member), so charging
-  every separator as a break bounds what it adds."
+  every separator at every depth as a break bounds what it adds."
   {:malli/schema [:=> [:cat :map] :int]}
   [node]
   (if-not (:broken? node)
@@ -971,8 +990,13 @@
     (case (:kind node)
       (:map :coll) (* (+ (:indent node) (nest node)) (max 0 (dec (+ (:n node) (if (more? node) 1 0)))))
       :entry (+ (:indent node) (if (< (:depth node) nest-cap) 2 0))
-      :leaf (* (+ (:indent node) (if (< (:depth node) nest-cap) 1 0))
-               (max 0 (dec (count (::print/items (:node node))))))
+      ;; A nested tuple breaks at most once per member, each line indented
+      ;; at most one column per depth inside it.
+      :leaf (let [items (rest (tree-seq ::print/items ::print/items (:node node)))
+                  depth (loop [level [(:node node)] d 0]
+                          (if-let [inner (seq (mapcat ::print/items level))] (recur inner (inc d)) d))]
+              (* (+ (:indent node) (if (< (:depth node) nest-cap) depth 0))
+                 (max 0 (dec (count items)))))
       0)))
 
 (defn- start-column

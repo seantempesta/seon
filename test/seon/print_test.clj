@@ -13,6 +13,7 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.print :as print]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
@@ -503,3 +504,17 @@
       (is (= s (edn/read-string text)) "the literal reads back as the string")
       (is (= (count (filter #{\newline} s)) (count (filter #{\newline} text)))
           "each newline is one line break and nothing else breaks"))))
+
+(deftest a-small-nested-form-is-never-cut-inside
+  ;; A short tree of scalars (a form holding a quoted symbol) beside long
+  ;; strings under a full budget prints whole or is cut from outside, never
+  ;; inside: no `(f …1)` and no `(…2)`.
+  (let [value (vec (for [i (range 30)]
+                     {:doc (apply str (repeat 300 "x"))
+                      :ops [(list 'f (list 'quote (symbol "a.b" (str "g" i))))]}))
+        text (render.value/core-text value)
+        forms (re-seq #"\(f [^)]*\)?" text)]
+    (is (seq forms) "the budget shows some of the forms")
+    (is (every? #(re-matches #"\(f 'a\.b/g\d+\)" %) forms) "every shown form is whole")
+    (is (not (re-find #"\(…" text)) "no form is shown as only its count")))
+
