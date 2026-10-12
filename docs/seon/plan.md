@@ -128,8 +128,8 @@ problem task unless the entity schema declares a rule.
    files: `seon.db`, `seon.config`, `seon.profile`, the konserve and Datahike forks, never `seon.sci.eval` or
    `seon.turn` while lane program-context holds them), each at its owner with a before and after number from the same
    probe.
-4. **Library words in src** (ledger §3.18 CN entries, after lane program-context releases its files): CN-27 frontier →
-   ready, CN-15 custody → `with-branch`, CN-18 roster, CN-5 world → bindings, CN-6 receipt, CN-9 shown → printed value,
+4. **Library words in src** (ledger §3.18 CN entries): done CN-27 frontier → ready (2ef43687f), CN-15 custody →
+   `with-branch` (de56c2570); in the tree CN-18 roster; CN-18 roster, CN-5 world → bindings, CN-6 receipt, CN-9 shown → printed value,
    one commit each with every caller; code a plan deletes is not renamed
    (`docs/research/agent-platform/2026-10-12/restart-audit/vocab-src-inventory.md`). Living prose is done (fede4d3d4,
    5c339d69a, 976e3888a, 02cf34720, 39cdc0f7f, 27fb60c0d and the specs commits).
@@ -152,7 +152,7 @@ problem task unless the entity schema declares a rule.
   §10 is the build order, 22 cards of about fifteen minutes each with a red proof). An agent wakes and runs a task; a
   subject task owns step tasks (`:seon.task/children`, in the schema), siblings run in parallel unless one
   `:seon.task/needs` another, a parent never runs; each step carries its `:seon.task/instructions`. What should be
-  running is two reads (`seon.task/frontier` today, `seon.task/ready` after U6), under the dial
+  running is two reads (`seon.task/ready`, renamed from `frontier` in 2ef43687f), under the dial
   `:seon.config.agent/max-running` (default 4, in `config/default.edn`); the attempt is the launch's write; one clock proc
   fires cron tasks; problems are tasks assigned to root; the plan is rendered from needs, never stored; `start --paused`
   for debugging.
