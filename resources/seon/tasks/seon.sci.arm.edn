@@ -14,4 +14,9 @@
              :kind :function
              :intent "A defn whose contract cannot arm stops working: (defn badc {:malli/schema [:=> [:cat :no.such/schema] :int]} [x] x) then (badc 1) answers 'audit.scratch/badc is unavailable: its contract did not arm' on default 2026-10-08, where plain SCI answers 1. `seon.sci.arm/arm!` catches the arming failure and replaces the Var root with refusing-root. CLAUDE.md: preserve malformed contracts as data and never arm them; the owner's law: any valid Clojure SCI can execute works. Correct: the evaluated definition keeps its root, the contract failure is a diagnostic beside it. Proof: a deftest where a defn with an unknown schema key still answers its call and the reply carries the arming diagnostic."
              :must-read #{seon.sci.arm/arm!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
+ #:seon.task{:name "a-fresh-acquisition-restores-the-persisted-imports"
+             :kind :function
+             :intent "Three `seon.cluster.turn-test` deftests are red on HEAD bc347d583 (2026-10-12): `import-addition-is-ordinary-data-and-reacquires-exactly` and `import-only-ns-unmap-installs-exactly-after-its-context-commit` show a fresh acquisition does not restore the agent namespace's persisted import (`(get-in (sci.core/namespace-bindings fresh 'my.agents.agent-a) [:imports 'String])` is nil, and the persisted `ns-unmap` mask is not reinstalled: `(resolve 'String)` still answers `java.lang.String`), and `acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles` finds `:seon.sci.eval/installed` 7 where 6 is expected. One cause to find: how `seon.sci.arm` acquisition installs a namespace's imports and refer targets from the database on a fresh context. Done when the three are green."
+             :must-read #{seon.cluster.agent/acquire-context!}
+             :evidence #{"docs/research/agent-platform/2026-10-12/red-triage.md"}}]

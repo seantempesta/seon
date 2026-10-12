@@ -40,4 +40,9 @@
  #:seon.task{:name "an-agent-call-reaches-resolve-test-without-its-class-loader"
              :kind :function
              :intent "An agent's evaluation reached `seon.test/resolve-test` without `:seon.test/class-loader`, and the contract refused it (`:seon.test/resolution-request`): agent ap-probe-2 on default 340462543, branch :agent-9996d823c28d, 2026-10-10 11:54:55, recorded as an agent error with signature 4e3dc9667cd3. Its request was `(require 'seon.competency-test)`, a `my.test/check` naming `seon.competency-test/t5-slug-removes-edge-hyphens` as changed, then `seon.test/reaching` and a `seon.db/pull`. The caller building the resolution request from an agent's world omits the class loader the request requires. Done when that caller supplies it, or the request's schema says why an interpreted resolution needs none, with a regression running the same forms as an own-branch agent that records no error."
-             :must-read #{seon.test/resolve-test seon.test/run my.test/check}}]
+             :must-read #{seon.test/resolve-test seon.test/run my.test/check}}
+ #:seon.task{:name "a-check-of-named-identities-answers-a-reused-reds-failure-reports"
+             :kind :function
+             :intent "(chain 4 and chain 2, G12; met twice) `(my.test/check {:seon.test/identities #{sym}})` of a test whose recorded result is red answers `{:seon.test/passed? false}` and nothing else, while the same test named by `:seon.test/changed` answers its results and failure reports. `my.test/check` must answer the same `:seon.test/results` (with `:seon.test.failure/reports`) for a reused red as for a run one; the producer is the reuse branch of `seon.test/run` reached from `my.test/check`. Red proof: `my.test-check-test/a-check-of-named-identities-answers-a-reused-reds-failure-reports`. See also `my.test/a-check-failure-shows-no-message` and `seon.turn/a-red-proof-carries-no-reason`, which concern the render of a run's failures."
+             :must-read #{my.test/check seon.test/run seon.render.test/render-ai}
+             :evidence #{"docs/research/agent-platform/2026-10-12/chain-experiment-4.md"}}]

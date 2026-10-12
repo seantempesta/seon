@@ -35,6 +35,22 @@
        (is (= [] (:seon.test/results check)))
        (is (not (contains? check :seon.test/passed?)))))))
 
+(deftest ^{:seon/tasks #{'my.test/a-check-of-named-identities-answers-a-reused-reds-failure-reports}}
+  a-check-of-named-identities-answers-a-reused-reds-failure-reports
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [namespace-name (str "my.reused" (id/id))
+           f (symbol namespace-name "f")
+           red (symbol namespace-name "f-test")
+           _ (answered (str "(ns " namespace-name ") (defn f [x] (inc x))"
+                            " (clojure.test/deftest f-test (clojure.test/is (= 3 (f 1))))")
+                       agent-id running)
+           _ (answered (str "(my.test/check {:seon.test/changed '[" f "]})") agent-id running)
+           named (answered (str "(my.test/check {:seon.test/identities #{'" red "}})") agent-id running)]
+       (is (false? (:seon.test/passed? named)))
+       (is (seq (:seon.test/results named)) "the reused red is listed, not only counted")
+       (is (seq (:seon.test.failure/reports (first (:seon.test/results named)))) "with its failure reports")))))
+
 (deftest a-check-naming-a-definition-of-its-own-request-runs-it-after-recording
   (support/with-running-agent
    (fn [running agent-id _]

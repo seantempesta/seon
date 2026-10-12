@@ -731,7 +731,8 @@ handle))}}
            (into {} (map (juxt identity subject-href)) [20 [:seon.fn/sym "my.render/card"]]))
         "a link selects its subject in the viewing namespace, keeps output and bounds, and carries no page cursor")))
 
-(deftest declared-units-are-components-in-schema-order
+(deftest ^{:seon/tasks #{'seon.render.web/declared-entity-units-follow-the-agent-attributes-the-projection-declares}}
+  declared-units-are-components-in-schema-order
   (support/with-database
    (fn [connection]
      (support/transacted! connection
@@ -1535,7 +1536,8 @@ handle))}}
             (async/close! render-channel)
             (async/close! fault-channel)))))))
 
-(deftest a-reconnect-refuses-a-pass-derived-before-it-connected
+(deftest ^{:seon/tasks #{'seon.render.web/a-reconnect-refuses-a-pass-derived-before-it-connected-is-red}}
+  a-reconnect-refuses-a-pass-derived-before-it-connected
   ;; THE CLASS: a tab taps the mult and then paints the FIRST package it
   ;; sees. A pass already in flight when it tapped was derived at an
   ;; EARLIER database value, and its publication reaches the fresh tap
@@ -2348,7 +2350,8 @@ handle))}}
             (three-passes after)
             (is (= (inc before) (recorded)))))))))
 
-(deftest debug-algorithm-carries-the-render-evaluation-inputs
+(deftest ^{:seon/tasks #{'seon.render.web/the-debug-page-offers-no-session-actions}}
+  debug-algorithm-carries-the-render-evaluation-inputs
   (with-server
     (fn [connection server _context]
       (let [before @connection

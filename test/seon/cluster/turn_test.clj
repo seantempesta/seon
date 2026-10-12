@@ -645,7 +645,8 @@
             (is (= "{:x :clojure.set/after-dynamic-require}" (get results 3))
                 "later sources are read only after prior namespace effects")))))))
 
-(deftest import-only-ns-unmap-installs-exactly-after-its-context-commit
+(deftest ^{:seon/tasks #{'seon.sci.arm/a-fresh-acquisition-restores-the-persisted-imports}}
+  import-only-ns-unmap-installs-exactly-after-its-context-commit
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -690,7 +691,8 @@
                    {:ns (sci.core/create-ns 'my.agents.agent-a)})))
                 "fresh acquisition reinstalls the persisted mask")))))))
 
-(deftest import-addition-is-ordinary-data-and-reacquires-exactly
+(deftest ^{:seon/tasks #{'seon.sci.arm/a-fresh-acquisition-restores-the-persisted-imports}}
+  import-addition-is-ordinary-data-and-reacquires-exactly
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
@@ -718,7 +720,8 @@
                            [:imports 'String]))
                 "fresh acquisition restores the exact local import")))))))
 
-(deftest refused-terminal-program-transactions-settle-and-do-not-refire
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
+  refused-terminal-program-transactions-settle-and-do-not-refire
   ;; Checkpoint-audit blocker B1, through the real SCI boundary with the
   ;; terminal database outcome injected at its one transaction seam. ONE
   ;; refused evaluation settles and closes atomically, records once, and never
@@ -969,7 +972,8 @@
                        [:seon.fn/sym (symbol "my.agents.agent-a" "bad")]))
               "the failed declaration commits no program fact"))))))
 
-(deftest runtime-schema-registration-commits-the-evaluated-form-and-attribute
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
+  runtime-schema-registration-commits-the-evaluated-form-and-attribute
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -1035,7 +1039,8 @@
                           @connection persistent-key))
                   "the committed attribute accepts a fact immediately"))))))))
 
-(deftest runtime-schema-key-changes-pass-the-one-usage-guarded-decision
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
+  runtime-schema-key-changes-pass-the-one-usage-guarded-decision
   ;; ONE rule decides whether a schema form may change, and it is the usage
   ;; guard: a key nothing depends on is an ordinary declaration, and a key
   ;; current data depends on refuses naming those attributes. `c55879b73`
@@ -1195,7 +1200,8 @@
                                 (schema/current-projection))
                     "A-B-A acquisition never repoints the global registry")))))))))
 
-(deftest accepted-first-party-definition-reaches-an-existing-agent-next-turn
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
+  accepted-first-party-definition-reaches-an-existing-agent-next-turn
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -1381,7 +1387,8 @@
                  (:seon.eval/shown (last (agent-evaluations @connection))))
               "the next turn calls the same private definition"))))))
 
-(deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
+(deftest ^{:seon/tasks #{'seon.sci.arm/a-fresh-acquisition-restores-the-persisted-imports}}
+  acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
     (fn [connection]
       (let [target-source
@@ -1996,7 +2003,8 @@
                           database))
               "the already-arrived completion still settles as the plan"))))))
 
-(deftest reasoning-starvation-persists-usage-finish-and-the-named-error
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
+  reasoning-starvation-persists-usage-finish-and-the-named-error
   (doseq [retain? [false true]]
     (with-cluster
     (fn [cluster]
