@@ -48,7 +48,7 @@ version and the transaction's provenance names the step and agent. The step an a
 | `:seon.task/evidence` | subject | reproduction forms, values, paths | Mine, Design |
 | `:seon.task/children` | subject (component) | the step tasks; nested steps allowed | the creator; a stage may add steps |
 | `:seon.task/needs` | step | the steps this one runs after; a join names several | the creator |
-| `:seon.task/instructions` | step | **what this step's agent is to do, as data on the task**: its template's (`seon.step/<kind>`, a task entry in `resources/seon/tasks/seon.step.edn`, first in `seon.task/effective`'s lineage) unless the step declares its own, which overwrites; no stage-type entity or render | the template's author; the step's creator or `my.task/refine!`; the Retrospective edits the template entry |
+| `:seon.task/instructions` | step | **what this step's agent is to do, as data on the task**: copied from its template (`seon.step/<kind>`, a task entry in `resources/seon/tasks/seon.step.edn`) by `seon.task/chain!` when the chain is instantiated, then customized by root or `my.task/refine!`; no stage-type entity or render | the template's author; the step's creator or `my.task/refine!`; the Retrospective edits the template entry |
 | `:seon.task/execution` | step | the intent `:held :running :paused :stopped :cancelled` (runtime-follows-db §3); absent = running | root |
 | the attempt's end | assignment row | `:done`, `:given-back`, `:capped`, `:stalled`, `:sent-back` + `:seon.task/target`, `:cancelled` | the agent's pass (`seon.turn/end-task-call`) |
 | `:seon.task/decisions` | subject | cardinality-many component: step, decision (`:added :changed :removed :unchanged :send-back`), reason, keys, target | every stage, through `refine!` or `send-back!` |
@@ -166,7 +166,8 @@ and `my.task/create!` (the vocabulary cut, plan §0 item 5), the `:sent-back` en
 the stage type entity, the rendered template, `:seon.task/stage`, `:seon.task/basis-commit`, the stage-aware proof
 selection, `advance-end!` and its dial, `my.root/launch!`. Added 2026-10-13 (owner; the lifecycle design round,
 [hybrid-lifecycle](../../../research/agent-platform/2026-10-13/hybrid-lifecycle.md)): a stage's template is an ordinary
-task entry (`seon.step/prove`, `seon.step/implement`), a step's proofs are its own tagged deftests plus its template's
+task entry (`seon.step/survey`, `define`, `design`, `prove`, `implement`), cloned into each chain's steps by
+`seon.task/chain!` with an exit contract the end's writer validates, a step's proofs are its own tagged deftests plus its template's
 handoff deftest (`seon.task/obligations`), and a step is done exactly when `seon.cluster.source/merge-verdict` returns
 no refusal against main's head.
 
