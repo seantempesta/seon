@@ -6,7 +6,7 @@
                           :description "The symbol ns/name naming a task, derived at ingestion beside its handle: what :seon/tasks tags and readers name. Unique: one ns holds one task of a name."}]
  :ns [:symbol {:description "The owning namespace: the task file's stem, resources/seon/tasks/<ns>.edn."}]
  :name [:string {:min 1 :description "The readable name, one symbol's name (seon.task/symbol-name?); with :ns the identifying aspect and the task's symbol."}]
- :step [:enum {:description "The step kind: Prove supplies new red product tests; Implement makes its proofs green. Absence reads as :implement at seon.task/obligations."} :prove :implement]
+ :step [:enum {:description "The step kind: Prove supplies new red product tests; Implement makes its proofs green, its subject's tagged tests and its product among them. A task declaring none is judged by its own tagged tests (seon.task/obligations)."} :prove :implement]
  :intent [:string {:min 1 :description "The goal every step of a chain shares: declared on the subject (required on a task with no parent), inherited down :seon.task/children, a child's own value overwriting (seon.task/effective)."}]
  :instructions [:string {:min 1 :description "A step's own work, beside the goal it shares: declared on the step, never inherited past a task that declares its own (seon.task/effective); my.task/refine! writes it on the held step."}]
  :references [:set {:min 1 :seon.db/index true :seon.program/definition-edge true
@@ -149,10 +149,10 @@
          [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read]
          [:seon.fn/see-also {:optional true} :seon.fn/see-also]]
  :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done or satisfied."} :qualified-symbol]
- :obligations [:map [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
+ :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set :symbol]
- :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/proofs :seon.task/proofs] [:seon.task/referrers :seon.task/referrers]]
+ :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
  :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]
         [:seon.task/ns {:optional true} :seon.task/ns]

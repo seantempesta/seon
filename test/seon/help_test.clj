@@ -37,26 +37,7 @@
   "The help lines help-value answers on `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.help/lines]}
   [database]
-  (help-lines (:seon.help/groups (bootstrap/help-value database "help"))))
-
-(defn- done-lines
-  "The lines of the Done group help-value answers for `agent-id` on `database`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.help/lines]}
-  [database agent-id]
-  (let [done (filter #(= "Done" (:seon.help/title %)) (:seon.help/groups (bootstrap/help-value database agent-id)))]
-    (assert (= 1 (count done)) "help shows exactly one Done group")
-    (:seon.help/lines (first done))))
-
-(defn- with-prove-agent
-  "Run `body` with the fixture connection and an agent holding a :prove step."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] :seon.schema/value]}
-  [body]
-  (with-help-agent
-   (fn [connection]
-     (support/assign-task! connection "help")
-     (support/transacted! connection [{:db/id [:seon.task/id (task/agent-task @connection "help")]
-                                       :seon.task/step :prove}])
-     (body connection))))
+  (help-lines (:seon.help/groups (bootstrap/help-value database))))
 
 (deftest an-agent-identity-offers-help-as-its-operation
   (with-help-agent
@@ -72,7 +53,7 @@
      (let [captured (atom [])
            database @connection
            _ (binding [db/*read-evidence-sink* captured]
-               (bootstrap/help-value database "help"))
+               (bootstrap/help-value database))
            evidence (db/read-evidence @captured)
            source (:seon.fn/source (db/pull database [:seon.fn/source]
                                             [:seon.fn/sym 'seon.bootstrap/help-value]))]
@@ -84,8 +65,8 @@
                             (support/replacement-tx @connection
                                                     [:seon.fn/sym 'seon.bootstrap/help-value]
                                                     ;; inside the form: a comment after it is no part of the definition
-                                                    (str/replace-first source "[database agent-id]"
-                                                                       "[database agent-id]\n  ;; revised")
+                                                    (str/replace-first source "[database]"
+                                                                       "[database]\n  ;; revised")
                                                     {}))
        (is (false? (db/read-evidence-current? @connection evidence))
            "a new definition of help makes its evidence stale")))))
@@ -160,7 +141,7 @@
 (deftest the-help-reply-reads-as-data-its-value-the-help-lines
   (support/with-running-agent
    (fn [running agent-id connection]
-     (is (= (:seon.help/groups (bootstrap/help-value @connection agent-id))
+     (is (= (:seon.help/groups (bootstrap/help-value @connection))
             (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
          "the reply is one EDN form whose value is the help groups, whole"))))
 
@@ -197,29 +178,8 @@
        (is (not-any? leaves [:seon.db/db :my.program/context 'database 'context])
            "no arglist names a supplied world member")))))
 
-(deftest help-teaches-how-a-deftest-names-its-task
-  (with-prove-agent
-   (fn [connection]
-     (is (some #(str/includes? % "(deftest ^{:seon/tasks #{'") (done-lines @connection "help"))
-         "a Prove step's help teaches a deftest whose name carries :seon/tasks"))))
-
-(deftest help-teaches-each-step-its-done
-  (with-prove-agent
-   (fn [connection]
-     (let [prove (str/join "\n" (done-lines @connection "help"))]
-       (is (every? #(str/includes? prove %) [":seon.context/after" ":seon.context/product-tests" ":seon.error/unimplemented"])
-           "Prove's Done names the step after, the product tests and the unimplemented stub")
-       (is (not (str/includes? prove ":seon.context/proof-failures")) "Prove's Done is not Implement's")
-       (is (str/includes? prove "never your own") "Prove tags the successor, never its own task"))))
-  (with-help-agent
-   (fn [connection]
-     (support/assign-task! connection "help")
-     (let [implement (str/join "\n" (done-lines @connection "help"))]
-       (is (str/includes? implement ":seon.context/proof-failures") "Implement's Done names the proof failures")
-       (is (not (str/includes? implement ":seon.error/unimplemented")) "Implement's Done is not Prove's")))))
-
 (deftest help-never-says-root-reviews
-  (with-prove-agent
+  (with-help-agent
    (fn [connection]
      (let [text (str/join "\n" (lines-of @connection))]
        (is (not (re-find #"(?i)root (reviews|answers)|ask root|\"root\"" text)) "nothing waits on root")))))
@@ -238,9 +198,13 @@
 (deftest help-is-an-orienting-guide-in-titled-groups
   (with-help-agent
    (fn [connection]
-     (let [groups (:seon.help/groups (bootstrap/help-value @connection "help"))
+     (support/assign-task! connection "help")
+     (support/transacted! connection [{:db/id [:seon.task/id (task/agent-task @connection "help")] :seon.task/step :prove}])
+     (let [groups (:seon.help/groups (bootstrap/help-value @connection))
            text (str/join "\n" (help-lines groups))]
-       (is (= ["Who you are" "How to speak" "Your task" "Done" "How work proceeds" "Write what you learn"
+       (is (not (re-find #":prove|:implement|Prove|Implement" text))
+           "no group teaches one step's work: a step's guidance is its instructions")
+       (is (= ["Who you are" "How to speak" "Your task" "How work proceeds" "Write what you learn"
                "When you cannot" "Each reply is data" "Data"]
               (mapv :seon.help/title groups))
            "help carries each orienting group, in reading order")
@@ -253,7 +217,7 @@
 (deftest help-teaches-the-common-gotchas-and-names-only-symbols-that-exist
   (with-help-agent
    (fn [connection]
-     (let [groups (:seon.help/groups (bootstrap/help-value @connection "help"))
+     (let [groups (:seon.help/groups (bootstrap/help-value @connection))
            text (str/join "\n" (help-lines groups))
            symbols (distinct (map second (re-seq #"(?<![:\w./'])([a-z][\w.-]*\.[\w.-]*/[\w!?*<>=-]+)" text)))]
        (is (every? #(str/includes? text %) ["[:= {} nil]" "[:cat in1 in2]" "(contains? {:k false} :k)" "mapv" "ns-aliases" ":seon.error/problems"])
@@ -272,29 +236,10 @@
        (is (every? #(str/includes? (str line) %) [":seon.context/before" ":seon.context/after" ":seon.context/merged" "already on your branch"])
            "it names the steps before with what each merged, the steps after, and that the merged work is on the branch")))))
 
-(deftest help-teaches-sending-back-a-wrong-proof-and-writing-a-law
-  (with-help-agent
-   (fn [connection]
-     (support/assign-task! connection "help")
-     (let [implement (str/join "\n" (done-lines @connection "help"))]
-       (is (and (str/includes? implement "(my.task/send-back!") (str/includes? implement "do not bend the code")
-                (str/includes? implement "special-cases one row"))
-           "Implement's Done sends a row it believes wrong back instead of bending the code to it"))))
-  (with-prove-agent
-   (fn [connection]
-     (let [prove (str/join "\n" (done-lines @connection "help"))]
-       (is (and (str/includes? prove "(clojure.test.check/quick-check") (str/includes? prove ":seed 42")
-                (str/includes? prove "a law catches a wrong row"))
-           "Prove's Done teaches a law as a seeded property beside the table rows")))))
-
 (deftest help-teaches-private-contracts-and-the-whole-proof-set
   (with-help-agent
    (fn [connection]
      (is (some #(and (str/includes? % "defn-") (str/includes? % "[:fn {:error/message \"an even integer\" :gen/elements [0 2 4]} clojure.core/even?]")) (lines-of @connection))
          "a help line says defn- needs a contract and shows a named predicate with its message and generator")
      (is (some #(and (str/includes? % "Prefer a plain Malli schema") (str/includes? % "one you define on your branch is refused")) (lines-of @connection))
-         "a help line prefers plain schemas and says a branch predicate is refused at write")))
-  (with-prove-agent
-   (fn [connection]
-     (is (some #(str/includes? % "table rows and the property law both") (done-lines @connection "help"))
-         "the Prove Done group asks for every proof, rows and law"))))
+         "a help line prefers plain schemas and says a branch predicate is refused at write"))))

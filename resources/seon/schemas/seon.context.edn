@@ -14,11 +14,11 @@
                :tests [:vector {:description "The deftests a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
                :tasks [:vector {:description "The tasks a merge moved, each shown one level."} [:or :seon.ref/brief :seon.ref/problem]]
                :step-before [:map {:description "A step the held task needs: its kind and, once main merged an assignment of it, :seon.task/outcome :merged with what that merge moved. Producer: seon.context/step-before."}
-                             [:seon.task/sym :seon.task/sym] [:seon.task/step :seon.task/step]
+                             [:seon.task/sym :seon.task/sym] [:seon.task/step {:optional true} :seon.task/step]
                              [:seon.task/outcome {:optional true} :seon.task/outcome]
                              [:seon.context/merged {:optional true} :seon.context/merged]]
                :step-after [:map {:description "A step that needs the held task: its symbol, the name a Prove step tags its product with, its kind and its instructions."}
-                            [:seon.task/sym :seon.task/sym] [:seon.task/step :seon.task/step]
+                            [:seon.task/sym :seon.task/sym] [:seon.task/step {:optional true} :seon.task/step]
                             [:seon.task/instructions {:optional true} :seon.task/instructions]]
                :subject [:and {:description "The task whose :seon.task/children holds the held task: the owner of the goal its chain shares."} :seon.task/sym]
                :before [:vector {:description "The steps the held task needs, merged onto main before its branch forked when each shows :merged."} :seon.context/step-before]
@@ -59,7 +59,7 @@
                :broken [:set {:description "The tests red at a step's head that its fork point held and that were not red there: what the step's change broke."} :seon.test/sym]
                :new-red [:set {:description "The tests red at a step's head that its fork point did not hold: a Prove step's product, never breakage."} :seon.test/sym]
                :step-observation [:map {:description "What one step is judged by: its obligations, its head and its fork point. Producer: seon.context/step-observation; consumer: seon.context/step-status."}
-                                  [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
+                                  [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                                   [:seon.task/product :seon.task/product]
                                   [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]
                                   [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
@@ -79,7 +79,7 @@
                              [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
                                   [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]
                :step-verdict [:map {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
-                              [:seon.task/step :seon.task/step] [:seon.task/proofs :seon.task/proofs]
+                              [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                               [:seon.task/product :seon.task/product]
                               [:seon.context/head :seon.context/head] [:seon.context/fork-point :seon.context/fork-point]
                               [:seon.task/status [:enum :done :satisfied :working]]
@@ -90,13 +90,13 @@
                :test-entry [:map {:description "One test as a step section shows it: its status and, when red, its failing assertions."}
                             [:seon.test/sym :seon.test/sym] [:seon.context/proof-status :seon.context/proof-status]
                             [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
-               :start [:map {:description "Where a step begins: the form that enters the held task's namespace and, for a Prove step, the namespace of each test its instructions cite. Producer: seon.context/step-start."}
+               :start [:map {:description "Where a step begins: the form that enters the held task's namespace and the namespace of each test its instructions cite. Producer: seon.context/step-start."}
                        [:seon.render/operations [:vector :seon.render/read-form]]]
                :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
-                      [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :satisfied :working]]
+                      [:seon.task/step {:optional true} :seon.task/step] [:seon.task/status [:enum :done :satisfied :working]]
                       [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
                       [:seon.context/unmet {:optional true :description "A working step's unmet done clauses: why it is not done."} :seon.context/unmet]
-                      [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and, for a Prove step, of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
+                      [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
                       [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, each red by a failing assertion or an error its body raised when done."} [:vector :seon.context/test-entry]]
                       [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]

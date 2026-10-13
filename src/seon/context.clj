@@ -198,7 +198,7 @@
 (defn step-status
   "The status of a step from one observation: `:seon.context/broken`, the head's reds present at the fork point
   and not red there; `:seon.context/new-red`, the head's reds absent there; `:seon.context/green-before`, its
-  proofs known green there, when any; and `:seon.task/status`. An `:implement` step is `:satisfied` when its
+  proofs known green there, when any; and `:seon.task/status`. A step other than Prove is `:satisfied` when its
   proofs are nonempty, all green and all known green at the fork point: it has nothing to do. A step is `:done`
   when its done rule has no `unmet` clause, and for every step no function its merge would refuse for lacking a
   complete contract (`:seon.context/uncontracted`, named beside its status): an Implement step's proofs nonempty
@@ -213,10 +213,10 @@
   (let [{broken :seon.context/broken new-red :seon.context/new-red} (reds head fork-point)
         green-before (into #{} (filter #(false? (get fork-point %))) proofs)
         green? (fn [tests] (every? #(= :green (get-in head [% :seon.context/proof-status])) tests))
-        satisfied? (case step
-                     :implement (and (seq proofs) (green? proofs) (= (count green-before) (count proofs)))
-                     :prove (and (seq product) (green? proofs) (empty? broken) (empty? new-red)
-                                 (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product)))]
+        satisfied? (if (= :prove step)
+                     (and (seq product) (green? proofs) (empty? broken) (empty? new-red)
+                          (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product))
+                     (and (seq proofs) (green? proofs) (= (count green-before) (count proofs))))]
     (cond-> {:seon.task/status (cond satisfied? :satisfied (empty? (unmet observation)) :done :else :working)
              :seon.context/broken broken :seon.context/new-red new-red}
       (seq green-before) (assoc :seon.context/green-before green-before)
@@ -277,7 +277,8 @@
         commit (when latest (:seon.task/merge-commit (db/pull database [:seon.task/merge-commit] latest)))
         moved (when commit (merged database commit))]
     (or (some #(when (:seon.error/at %) %) [task merges moved])
-        (cond-> {:seon.task/sym sym :seon.task/step (get task :seon.task/step :implement)}
+        (cond-> {:seon.task/sym sym}
+          (:seon.task/step task) (assoc :seon.task/step (:seon.task/step task))
           latest (assoc :seon.task/outcome :merged)
           (seq moved) (assoc :seon.context/merged moved)))))
 
@@ -296,8 +297,7 @@
         read-error (some #(when (:seon.error/at %) %) [subject needs successors])
         before (when-not read-error (mapv #(step-before database %) (sort needs)))
         after (when-not read-error
-                (mapv #(let [task (db/pull database [:seon.task/sym :seon.task/step :seon.task/instructions] [:seon.task/sym %])]
-                         (if (:seon.error/at task) task (merge {:seon.task/step :implement} task)))
+                (mapv #(db/pull database [:seon.task/sym :seon.task/step :seon.task/instructions] [:seon.task/sym %])
                       (sort successors)))]
     (or read-error
         (some #(when (:seon.error/at %) %) (concat before after))
@@ -412,7 +412,8 @@
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
         product (when (= :prove step) product)
         other (remove (into (set proofs) product) new-red)]
-    (cond-> {:seon.task/step step :seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+    (cond-> {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+      step (assoc :seon.task/step step)
       (= :working status) (assoc :seon.context/unmet (unmet verdict))
       (seq broken) (assoc :seon.context/broken-tests (entries broken))
       (seq product) (assoc :seon.context/product-tests (entries product))
@@ -598,16 +599,15 @@
           branch-db (assoc :seon.task/errors (problems/agent-errors-by-signature database agent-id branch))))))
 
 (defn- step-start
-  "Where the step of `held` begins: the form that enters the namespace owning it and, for a :prove step, the form
-  that enters the namespace of each test its instructions cite (`seon.ref/names`); each must-read carries the form
-  that reads its source."
+  "Where the step of `held` begins: the form that enters the namespace owning it and the form that enters the
+  namespace of each test its instructions cite (`seon.ref/names`); each must-read carries the form that reads its
+  source."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map [:seon.task/sym :seon.task/sym] [:seon.task/instructions {:optional true} :seon.task/instructions]]
-                       :seon.task/step]
+                       [:map [:seon.task/sym :seon.task/sym] [:seon.task/instructions {:optional true} :seon.task/instructions]]]
                   :seon.context/start]}
-  [database {:seon.task/keys [sym instructions]} step]
+  [database {:seon.task/keys [sym instructions]}]
   (let [owner (symbol (namespace sym))
-        tests (when (and (= :prove step) instructions)
+        tests (when instructions
                 (->> (ref/names instructions)
                      (filter #(map? (db/pull database [:db/id] [:seon.test/sym %])))
                      (into (sorted-set) (map (comp symbol namespace)))))]
@@ -647,7 +647,7 @@
                                     (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
               verdict (assoc :seon.context/step
                              (assoc (step-section verdict)
-                                    :seon.context/start (step-start database held (:seon.task/step verdict))))
+                                    :seon.context/start (step-start database held)))
               (seq sent-back) (assoc :seon.context/send-backs sent-back)
               (seq others) (assoc :seon.context/must-reads others)))))))
 
@@ -746,7 +746,7 @@
         block (current-state database agent-id)
         profile (seon.render/request-profile request)
         shown #(sci.eval/shown-result %1 %2 nil)
-        system (shown (bootstrap/help-value database agent-id) request)
+        system (shown (bootstrap/help-value database) request)
         ;; the root call names the producer whose declared AI render shows the block
         prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))
         ;; help carries its own AI render: a request that cannot run it (no context or no

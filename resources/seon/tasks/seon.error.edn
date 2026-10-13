@@ -47,8 +47,10 @@
                                    [:seon.task/sym seon.error/implement-a-blank-error-message-is-replaced]}}
  #:seon.task{:name "prove-a-blank-error-message-is-replaced"
              :step :prove
+             :product #{seon.error-test/a-blank-error-message-is-replaced-by-the-sentence-that-describes-the-source}
              :instructions "In `seon.error-test` add a table test of `seon.error/message` inputs to the messages they answer, including a whitespace-only message case (source `{:seon.error/message \"   \"}`, failure nil) and an empty-string case, asserting each answer is a non-blank string and a non-blank message is returned unchanged. Tag it `^{:seon/tasks #{'seon.error/implement-a-blank-error-message-is-replaced}}`. `seon.error/message` is private: call it through its Var, `(#'seon.error/message source failure)`. Run it red on your branch."}
  #:seon.task{:name "implement-a-blank-error-message-is-replaced"
+             :step :implement
              :needs #{[:seon.task/sym seon.error/prove-a-blank-error-message-is-replaced]}
              :instructions "Make the table green by changing `seon.error/message`, keeping its docstring promise (never absent, never blank): a message map member counts only when it has a non-whitespace character; the other branches are unchanged."}
 ]

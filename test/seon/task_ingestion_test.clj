@@ -77,8 +77,10 @@
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= '#{tq.a/g} (set (:seon.task/references (db/pull @connection [:seon.task/references] [:seon.task/id handle]))))
            "the writer derives the qualified symbols the intent cites")
-       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f tag}}
-              (task/task-edges @connection tag)))
+       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :referrers #{'tq.a 'tq.a/f tag}}
+              (task/task-edges @connection tag))
+           "a task's edges are its subjects and referrers; its proofs are its obligations'")
+       (is (= '#{tq.a/proves} (:seon.task/proofs (task/obligations @connection tag))))
        (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
        (is (= #{tag} (task/open-tasks @connection '[:seon.fn/sym tq.a/g])))
        (is (not-any? #(contains? % tag) (vals (task/task-findings @connection))))

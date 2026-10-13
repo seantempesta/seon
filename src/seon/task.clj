@@ -426,7 +426,7 @@
       (or (read-error handles) (set handles)))
     #{}))
 
-(declare task-entity)
+(declare task-entity effective goal-owner)
 
 (defn- changed-handles
   "The handles of the tasks whose facts `source` wrote after `base`, the commit
@@ -522,8 +522,10 @@
   "The step kind, proofs and product tests of task `sym` over the assigned target basis: `main`'s head, the
   `candidate` and their merge `base`. Each set is main's ∪ (the candidate's − the base's), so root's revisions on main
   apply, the candidate's own additions join, and its removal of a gate it inherited does not; the step is the
-  candidate's. On one database value (an unassigned task) it is that value's own: the tests tagged with the task, and
-  for its product the tests it declares (`:seon.task/product`) and those tagged with a task that needs it."
+  candidate's, absent when it declares none. On one database value (an unassigned task) it is that value's own: its
+  proofs are the tests tagged with the task, and an explicit `:implement` step adds the tests tagged with its subject
+  (`goal-owner`) and its product; its product is its effective `:seon.task/product` (`effective`) and the tests tagged
+  with a task that needs it."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.task/sym]
                    [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]
@@ -531,15 +533,24 @@
                    [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]]}
   ([database sym] (obligations database database database sym))
   ([main candidate base sym]
-   (let [at (fn [database]
-              (let [task (db/pull database [:seon.task/step :seon.task/product] [:seon.task/sym sym])
-                    proofs (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database sym)
+   (let [tagged (fn [database task] (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database task))
+         at (fn [database]
+              (let [task (db/pull database [:seon.task/id :seon.task/step] [:seon.task/sym sym])
+                    handle (:seon.task/id task)
+                    held (when handle (effective database handle))
+                    owner (when (and handle (= :implement (:seon.task/step task))) (goal-owner database handle))
+                    subject (when (and (string? owner) (not= owner handle))
+                              (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id owner])))
+                    proofs (tagged database sym)
+                    inherited (if subject (tagged database subject) [])
                     product (db/q '[:find [?s ...] :in $ ?t :where [?task :seon.task/sym ?t]
                                     [?next :seon.task/needs ?task] [?next :seon.task/sym ?n]
                                     [?e :seon.task/tasks ?n] [?e :seon.test/sym ?s]] database sym)]
-                (or (some read-error [task proofs product])
-                    {:seon.task/step (get task :seon.task/step :implement)
-                     :seon.task/proofs (set proofs) :seon.task/product (into (set product) (:seon.task/product task))})))
+                (or (some read-error [task held owner subject proofs inherited product])
+                    (let [declared (set (:seon.task/product held))]
+                      (cond-> {:seon.task/proofs (cond-> (into (set proofs) inherited) owner (into declared))
+                               :seon.task/product (into declared product)}
+                        (:seon.task/step task) (assoc :seon.task/step (:seon.task/step task)))))))
          ours (at candidate)
          theirs (if (identical? main candidate) ours (at main))
          was (cond (identical? base candidate) ours (identical? base main) theirs :else (at base))
@@ -569,15 +580,13 @@
     (if base (obligations main database base sym) (obligations database sym))))
 
 (defn task-edges
-  "A task's subjects (functions, namespaces), proofs (its `obligations`' own), and the definitions,
-  namespaces and tasks whose must-read (a definition's) or references (a task's) name one of its subjects, over one held value.
-  The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
+  "A task's subjects (functions, namespaces) and the definitions, namespaces and tasks whose must-read (a
+  definition's) or references (a task's) name one of its subjects, over one held value; its proofs are its
+  `obligations`. The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
   [database sym]
   (let [tagged (fn [attribute] (db/q [:find '[?s ...] :in '$ '?t :where ['?e :seon.task/tasks '?t] ['?e attribute '?s]] database sym))
-        owed (obligations database sym)
-        proofs (if (read-error owed) owed (:seon.task/proofs owed))
-        subject-reads (when-not (read-error proofs) [(tagged :seon.fn/sym) (tagged :seon.ns/name)])
+        subject-reads [(tagged :seon.fn/sym) (tagged :seon.ns/name)]
         subjects (when-not (some read-error subject-reads) (set (apply concat subject-reads)))
         referrers (when (seq subjects)
                     (mapv (fn [[reader holder]]
@@ -585,9 +594,8 @@
                                   database (vec subjects)))
                           [[:seon.fn/must-read :seon.fn/sym] [:seon.fn/must-read :seon.test/sym]
                            [:seon.fn/must-read :seon.ns/name] [:seon.task/references :seon.task/sym]]))]
-    (or (read-error proofs) (some read-error subject-reads) (some read-error referrers)
-        {:seon.task/subjects subjects :seon.task/proofs proofs
-         :seon.task/referrers (set (apply concat referrers))})))
+    (or (some read-error subject-reads) (some read-error referrers)
+        {:seon.task/subjects subjects :seon.task/referrers (set (apply concat referrers))})))
 
 (defn open-tasks
   "The task symbols a definition still lists; listing is openness (spec 7.2, 7.6)."

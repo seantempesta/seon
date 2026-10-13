@@ -6,8 +6,11 @@
                                    [:seon.task/sym seon.fs/implement-a-path-under-a-root-answers-true]}}
  #:seon.task{:name "prove-a-path-under-a-root-answers-true"
              :step :prove
+             :product #{seon.fs-test/under-path-tells-what-lies-under-a-root
+                        seon.fs-test/a-path-lies-under-exactly-the-roots-it-extends-by-a-component}
              :instructions "In `seon.fs-test` add a table test of `seon.fs/under-path?` `[ancestor descendant answer]` cases, including root \"/\" with \"/x\" (true), a trailing-slash root \"/a/b/\" with \"/a/b/c\" (true), \"/a/b\" with \"/a/b/c\" (true), \"/a/b\" with \"/a/b\" (true), and cases that must stay false: the sibling prefix \"/a/bc\" under \"/a/b\", and \"/a/b\" under \"/a\" (a descendant is not an ancestor). Tag it `^{:seon/tasks #{'seon.fs/implement-a-path-under-a-root-answers-true}}`. `seon.fs/under-path?` is private: call it through its Var, `(#'seon.fs/under-path? ancestor descendant)`. Run it red on your branch."}
  #:seon.task{:name "implement-a-path-under-a-root-answers-true"
+             :step :implement
              :needs #{[:seon.task/sym seon.fs/prove-a-path-under-a-root-answers-true]}
              :instructions "Make the table green by changing `seon.fs/under-path?` only: an ancestor that already ends in the separator is not given a second one, so \"/\" and a trailing-slash root contain what lies under them. Keep it safe: a sibling that shares a prefix (\"/a/bc\" under \"/a/b\") is never under."}
  #:seon.task{:name "an-equal-root-and-target-have-no-intermediate-paths"
@@ -20,6 +23,7 @@
                         seon.fs-test/intermediate-paths-are-the-root-and-strict-ancestors-of-the-target}
              :instructions "In `seon.fs-test` add (1) a table test of `seon.fs/intermediate-paths` as `[root target expected]` cases, in that one order, each path a string turned into a `java.nio.file.Path` and the result compared as strings: [\"/r\" \"/r\" []], [\"/r\" \"/r/a\" [\"/r\"]], [\"/r\" \"/r/a/b\" [\"/r\" \"/r/a\"]], and a trailing-slash root [\"/r/\" \"/r/a/b\" [\"/r\" \"/r/a\"]]; and (2) a property law with `clojure.test.check/quick-check` and a fixed `:seed`: for a generated root and a generated list of segments appended to it, every element of the result is the root or under it and a strict ancestor of the target. Name the table `intermediate-paths-lists-the-roots-from-root-to-target-exclusive` and the law `intermediate-paths-are-the-root-and-strict-ancestors-of-the-target`, the step's declared product. Tag both `^{:seon/tasks #{'seon.fs/implement-an-equal-root-and-target-have-no-intermediate-paths}}`. `seon.fs/intermediate-paths` is private: call it through its Var, `(#'seon.fs/intermediate-paths root target)`. Run them red on your branch (the root = target row is the red one)."}
  #:seon.task{:name "implement-an-equal-root-and-target-have-no-intermediate-paths"
+             :step :implement
              :needs #{[:seon.task/sym seon.fs/prove-an-equal-root-and-target-have-no-intermediate-paths]}
              :instructions "Make the table and the property green by changing `seon.fs/intermediate-paths` only: a target equal to its root answers `[]`, and a target below the root keeps answering the root and each directory down to, not including, the target."}
 ]

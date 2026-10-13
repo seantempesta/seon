@@ -199,7 +199,7 @@
            proving (:seon.task/assignment (assign! prove))
            prove-chain (:seon.context/chain (block running agent-id))]
        (is (= 'tq.ch/subject (:seon.context/subject prove-chain)) "the step names its subject, the goal's owner")
-       (is (= [{:seon.task/sym 'tq.ch/implement :seon.task/step :implement :seon.task/instructions "Make the rows green."}]
+       (is (= [{:seon.task/sym 'tq.ch/implement :seon.task/instructions "Make the rows green."}]
               (:seon.context/after prove-chain))
            "the Prove step names the step after it, the name its product is tagged with, and what that step will do")
        (is (not (contains? prove-chain :seon.context/before)) "no step comes before it")
@@ -637,7 +637,7 @@
                                   :seon.task/instructions "Make the rows green."))
            _ (task/create! (assoc base :seon.task/name "subject" :seon.task/intent "Goal."
                                   :seon.task/children #{[:seon.task/sym 'tq.cs/prove] [:seon.task/sym 'tq.cs/implement]}))
-           start #(#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions %} :prove)]
+           start #(#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions %})]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
                       :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
                       :seon.task/branch (get-in (db/db connection) [:config :branch])})

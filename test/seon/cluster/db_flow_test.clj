@@ -951,7 +951,7 @@
                       "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves (clojure.test/is (= 1 2)))")])
         (fn [server]
           (chain-world
-           connection {"p" [#{} (str "(clojure.test/is (contains? (:seon.task/proofs (seon.task/task-edges (seon.db/db) '"
+           connection {"p" [#{} (str "(clojure.test/is (contains? (:seon.task/proofs (seon.task/obligations (seon.db/db) '"
                                      *space* "/i)) 'tq.chainprove-behavior/i-behaves))")
                             :prove]
                        "i" [#{"p"} nil]}

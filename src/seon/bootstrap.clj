@@ -5,7 +5,6 @@
             [seon.ai :as ai]
             [seon.turn :as turn]
             [seon.db :as db]
-            [seon.task :as task]
             [seon.config :as config]
             [seon.error.refusal :as error]))
 
@@ -14,36 +13,12 @@
   []
   (list 'seon.bootstrap/help-value))
 
-(def ^:private implement-done
-  "The Done group of an :implement step."
-  {:seon.help/title "Done"
-   :seon.help/lines
-   ["Every deftest in :seon.context/proofs is green on your branch and no test you reach is broken. They start red: read :seon.context/proof-failures, change the function that produces the wrong value, and read the next block. A test already green proves nothing."
-    "A proof that contradicts the intent or itself, a row you believe is wrong, is not yours to satisfy: do not bend the code to it and do not weaken it. Send the task back with the row and why: (my.task/send-back! {:my.task/reason \"Row [\\\"/a\\\" \\\"/a/b\\\" false] contradicts the intent: /a/b is under /a.\"}). Code that special-cases one row to pass is wrong."]})
-
-(def ^:private prove-done
-  "The Done group of a :prove step."
-  {:seon.help/title "Done"
-   :seon.help/lines
-   ["Your product is red deftests for the step after you, tagged with ITS name from :seon.context/after, never your own: (deftest ^{:seon/tasks #{'the.ns/next-step}} names-the-case (is (= 3 (the.ns/f 2)))). Prefer a new row in the table test your instructions name; define a new deftest only for a behavior no test covers."
-    "A function the test calls that does not exist yet is a defn in the owner's namespace with its contract and the body (throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented})). A failing assertion or an error the code under test throws (that one included) is a designed red and merges; a test that does not load runs nothing. Your reds show under :seon.context/product-tests. Done is those reds designed, your own proofs green, nothing broken and every function on your branch contracted, since the merge takes them all (unmap a scratch helper with my.program/ns-unmap!); until then :seon.context/unmet names each clause not yet met. Your product is the whole set of proofs your instructions ask for, table rows and the property law both: write all of them before you end; one red test does not finish the step."
-    "Where a general law holds (a round trip, an inverse, every path extended by a component is under it), write it as a property with a bounded generator and a fixed :seed beside a few table rows; a law catches a wrong row: (deftest ^{:seon/tasks #{'the.ns/next-step}} reverse-twice-is-identity (is (:pass? (clojure.test.check/quick-check 100 (clojure.test.check.properties/for-all [s (clojure.test.check.generators/vector clojure.test.check.generators/small-integer 0 5)] (= s (reverse (reverse s)))) :seed 42))))."]})
-
-(defn- held-step
-  "The step of the task `agent-id` holds on `database`; :implement when it holds none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.task/step]}
-  [database agent-id]
-  (let [handle (task/agent-task database agent-id)]
-    (or (when (string? handle)
-          (:seon.task/step (db/pull database [:seon.task/step] [:seon.task/id handle])))
-        :implement)))
-
 (defn help-value
-  "The REPL instructions: an orienting guide in titled groups, teaching only installed forms, with the Done group of the step `agent-id` holds."
+  "The REPL instructions: an orienting guide in titled groups, teaching only installed forms; a step's own guidance is its instructions."
   {:seon/tasks #{'seon.bootstrap/session-end-is-taught-three-ways}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+   :malli/schema [:=> [:cat :seon.db/database-value]
                   :seon.help/help]}
-  [database agent-id]
+  [database]
   ;; The fixed lines belong to this definition; the source read records its
   ;; code version in the same dependency evidence as every other read.
   (db/pull database [:seon.fn/source]
@@ -62,11 +37,10 @@
      ["You have one tool, eval. Its code is Clojure forms, each starting at column zero; prose goes in ;; comments. Text you write outside the tool is read the same way. Nothing else exists: no other tool, no XML or JSON, no file or shell command."]}
     {:seon.help/title "Your task"
      :seon.help/lines
-     ["Your current-state block is the last part of every request; (seon.context/current-state) reads it again. :seon.context/task holds :seon.task/intent, the goal every step of your chain shares, and :seon.task/instructions, your step's own work: do your instructions, keep the goal true. :seon.context/step is :implement, make the proofs green, or :prove, write red tests for the step after you; :seon.context/start holds the in-ns form for the owner's namespace and, for :prove, for the test namespace your instructions name."
+     ["Your current-state block is the last part of every request; (seon.context/current-state) reads it again. :seon.context/task holds :seon.task/intent, the goal every step of your chain shares, and :seon.task/instructions, your step's own work: do your instructions, keep the goal true: they say what your step makes true and how it is done. :seon.context/start holds the in-ns form for the owner's namespace and for the test namespace your instructions name."
       ":seon.context/chain names the subject, the goal's owner; the steps :seon.context/before you, each with what its merge moved under :seon.context/merged; and the steps :seon.context/after you, each with its instructions. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it. A step after you starts from main once you merge."
       ":seon.context/proofs are the deftests that show your step done, each with its :seon.test/source and :seon.context/proof-status: :red fails, with :seon.context/proof-failures; :pending has no result for your current code yet; :green passes. They run by themselves after each eval request and the next block shows them."
       ":seon.context/must-reads are what the task cites in backticks, each resolved once: a function's :seon.fn/source and :malli/schema, a schema's form, a test's source, a document's heading. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:intent ...}."]}
-    (if (= :prove (held-step database agent-id)) prove-done implement-done)
     {:seon.help/title "How work proceeds"
      :seon.help/lines
      ["1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/intent)."

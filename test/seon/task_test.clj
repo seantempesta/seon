@@ -44,24 +44,34 @@
               (entry "prove" ":step :prove") (entry "prove-own" ":step :prove")
               (entry "body" (needs "prove")) (entry "body-own" (needs "prove-own"))
               (entry "prove-declared" ":step :prove :product #{tq.obligations/law tq.obligations/table}")
-              (entry "body-declared" (needs "prove-declared")))
+              (entry "body-declared" (needs "prove-declared"))
+              (entry "subject" ":product #{tq.obligations/designed} :children #{[:seon.task/sym tq.tree/leaf] [:seon.task/sym tq.tree/plain]}")
+              "#:seon.task{:name \"leaf\" :step :implement}" "#:seon.task{:name \"plain\"}")
      (doseq [[name tag] [['ordinary 'ordinary] ['implementation 'implement]
-                       ['product 'body] ['own 'prove-own] ['product-own 'body-own] ['table 'body-declared]]]
+                       ['product 'body] ['own 'prove-own] ['product-own 'body-own] ['table 'body-declared]
+                       ['goal 'subject] ['leaf-own 'leaf] ['plain-own 'plain]]]
        (test-support/declare-proof! connection 'tq.obligations name (symbol "tq.tree" (str tag))))
      (test-support/transacted! connection (test-support/agent-tx (db/db connection) "tq-obligations-agent"))
      (doseq [[name kind proofs product]
-             [["ordinary" :implement '#{tq.obligations/ordinary} #{}]
+             [;; no step: its own tagged tests, never Implement's
+              ["ordinary" nil '#{tq.obligations/ordinary} #{}]
               ["implement" :implement '#{tq.obligations/implementation} #{}]
               ["prove" :prove #{} '#{tq.obligations/product}]
               ["prove-own" :prove '#{tq.obligations/own} '#{tq.obligations/product-own}]
               ;; a declared product test no test holds yet is owed all the same
-              ["prove-declared" :prove #{} '#{tq.obligations/law tq.obligations/table}]]]
-       (is (= {:seon.task/step kind :seon.task/proofs proofs :seon.task/product product}
-              (task/obligations (db/db connection) (symbol "tq.tree" name))))
+              ["prove-declared" :prove #{} '#{tq.obligations/law tq.obligations/table}]
+              ;; an explicit Implement step adds its subject's tagged tests and its effective product
+              ["leaf" :implement '#{tq.obligations/leaf-own tq.obligations/goal tq.obligations/designed} '#{tq.obligations/designed}]
+              ;; a step with none inherits the product, never the subject's tests
+              ["plain" nil '#{tq.obligations/plain-own} '#{tq.obligations/designed}]]]
+       (is (= (cond-> {:seon.task/proofs proofs :seon.task/product product} kind (assoc :seon.task/step kind))
+              (task/obligations (db/db connection) (symbol "tq.tree" name)))
+           name)
        (is (= proofs (:seon.task/proofs
                       (task/assignment-read (db/db connection) (task/task-handle 'tq.tree name)
-                                            [:seon.agent/id "tq-obligations-agent"])))))
-     (is (= {:seon.task/step :implement :seon.task/proofs #{} :seon.task/product #{}}
+                                            [:seon.agent/id "tq-obligations-agent"])))
+           name))
+     (is (= {:seon.task/proofs #{} :seon.task/product #{}}
             (task/obligations (db/db connection) 'tq.tree/missing))))))
 
 (deftest ^{:seon/tasks #{'seon.task/a-needs-cycle-is-refused-at-the-writer}} a-needs-cycle-is-refused-at-the-writer
