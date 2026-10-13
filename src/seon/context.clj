@@ -322,15 +322,14 @@
       [])))
 
 (defn- base-results
-  "Each of `proofs` with a known result at the fork point of the agent's branch `database` (`seon.turn/fork-commit`):
-  the run the branch already holds at the reach digest the proof has in that commit (`seon.test.runner/result-at-reach`),
-  true when red, false when green. A proof with no run there, or absent there, is absent: unknown, never green."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]]
+  "Each of `proofs` with a known result at `base`, the fork point of the agent's branch `database`
+  (`seon.turn/fork-commit`): the run the branch already holds at the reach digest the proof has in that commit
+  (`seon.test.runner/result-at-reach`), true when red, false when green. A proof with no run there, or absent
+  there, is absent: unknown, never green."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :seon.test/sym]]
                   [:or :seon.context/fork-point :seon.error/value]]}
-  [database proofs]
-  (let [commit (when (seq proofs) (turn/fork-commit database))
-        base (when commit (db/commit-database database commit))
-        names (when base (into [] (filter #(seq (db/datoms base :avet :seon.test/sym %))) (sort proofs)))
+  [database base proofs]
+  (let [names (when (seq proofs) (into [] (filter #(seq (db/datoms base :avet :seon.test/sym %))) (sort proofs)))
         digests (when (seq names) (runner/reach-digests base names))
         results (when (and (seq digests) (not (:seon.error/at digests))) (runner/result-at-reach database digests))]
     (or (some #(when (:seon.error/at %) %) [digests results])
@@ -360,8 +359,10 @@
   (`seon.task/obligations`), the head's entries for them and for `judged`, the tests the agent's test step
   found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
   present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
-  supplies the step's last record, each proof's known result at the fork point (`base-results`) replaces it and
-  the contract gaps its merge would refuse (`contract-gaps`) are observed, for every step."
+  supplies the step's last record, a test the fork point (`seon.turn/fork-commit`, main at the merge base) lacks is
+  new whatever the record says (a relaunched attempt's fork holds its predecessor's unmerged work, and its fresh
+  row records nothing), each proof's known result there (`base-results`) replaces the record and the contract gaps
+  its merge would refuse (`contract-gaps`) are observed, for every step."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym
                        [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
                   [:or :seon.context/step-observation :seon.error/value]]}
@@ -372,12 +373,15 @@
         new-red (set (or (:seon.context/new-red judged) (:seon.agent/new-red row)))
         head (when-not (:seon.error/at owed)
                (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))
-        base (when (and (not judged) (map? head) (not (:seon.error/at head)))
-               (base-results database (set (filter head (:seon.task/proofs owed)))))
+        commit (when (and (not judged) (map? head) (not (:seon.error/at head))) (turn/fork-commit database))
+        fork (when commit (db/commit-database database commit))
+        held? (if fork #(seq (db/datoms fork :avet :seon.test/sym %)) (constantly true))
+        base (when fork (base-results database fork (set (filter head (:seon.task/proofs owed)))))
         refused (when-not (or judged (:seon.error/at owed)) (contract-gaps database agent-id))]
     (or (some #(when (:seon.error/at %) %) [owed head base refused])
         (cond-> (assoc owed :seon.context/head head
-                            :seon.context/fork-point (merge (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))
+                            :seon.context/fork-point (merge (into {} (for [s (keys head) :when (and (not (new-red s)) (held? s))]
+                                                                       [s (not (broken s))]))
                                                             base))
           (seq refused) (assoc :seon.context/uncontracted (source/gap-symbols refused)
                                           :seon.context/contract-gaps (mapv #(select-keys % [:seon.fn/sym :seon.fn.contract/position :seon.fn.contract/finding]) refused))))))

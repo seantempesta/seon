@@ -1289,6 +1289,46 @@
               (pass! handle routing)
               (is (string? (ffirst (remove #(= key-1 (first %)) (attempts connection "u")))) "the second attempt starts")))))))))
 
+(deftest ^{:seon.test/long "One chain world, a Prove attempt's merge refused at its file proof and its relaunch over three db<->flow passes."
+           :seon.test/long-ms 120000}
+  a-relaunched-prove-step-whose-product-main-lacks-is-not-satisfied
+  ;; Run 23 F66: attempt 1 writes p's product, its merge is refused, and attempt 2 forks attempt 1's end commit:
+  ;; the product is on its fork, not on main, so main does not hold it
+  (binding [*space* "tq.relaunchprove"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"p" [#{} nil :prove] "i" [#{"p"} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                behavior (str *space* "-behavior")]
+            (checkout! connection {(str "test/" (str/replace behavior #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                   (str "(ns " behavior "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                        "(deftest placeholder (is (= 1 1)))\n")})
+            (pass! handle routing)
+            (let [[[key-1 branch-1]] (seq (attempts connection "p"))
+                  on-1 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-1})]
+              ;; the product, red by design, calls a namespace SCI has loaded and the file does not require
+              (define-on! on-1 (symbol behavior)
+                (str "(clojure.test/deftest ^{:seon/tasks #{'" *space* "/i}} i-behaves "
+                     "(clojure.test/is (= #{1} (clojure.set/union #{1} #{2}))))"))
+              (test-support/transacted! on-1 [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
+                                              [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit (db/commit-id (db/db on-1))]])
+              (pass! handle routing)
+              (is (string? (:seon.task.attempt/relaunch (db/pull (db/db connection) [:seon.task.attempt/relaunch]
+                                                                 [:seon.task/assignment key-1])))
+                  "the refused merge relaunches it")
+              (pass! handle routing)
+              (let [[[key-2 branch-2]] (seq (remove #(= key-1 (first %)) (attempts connection "p")))
+                    on-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2})
+                    end (await-on! on-2 #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                               (db/db on-2) key-2)
+                                   ::relaunch-ended)]
+                (is (empty? (db/datoms (db/db connection) :avet :seon.test/sym (symbol behavior "i-behaves")))
+                    "main lacks the product")
+                (is (not= :satisfied end) "so the relaunch is not satisfied"))))))))))
+
 ;;; H5: a capped attempt with work continues from its end commit, up to :seon.config.run/relaunches.
 
 (defn- relaunch-row
