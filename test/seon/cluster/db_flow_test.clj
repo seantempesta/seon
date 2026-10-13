@@ -19,6 +19,8 @@
             [seon.context :as context]
             [seon.db :as db]
             [seon.schedule :as schedule]
+            [seon.ai :as ai]
+            [seon.operator.runtime :as operator.runtime]
             [seon.flow :as flow]
             [seon.fn]
             [seon.program]
@@ -1466,3 +1468,87 @@
                 (doseq [execution (vals (:seon.agent/contexts @child))
                         :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                   (agent/release-context! execution))))))))))))
+
+;;; TASK-CHAIN A7 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one launch runs the whole chain. The scripted
+;;; completer plays the model agents only; the test body plays the user, whose POST is one of the scripted replies.
+
+(def ^:private full-chain-input
+  "The `:seon.task/chain-input` of A7: the subject, the five templates in order, no customizations."
+  [{:seon.task/ns 'tq.fullchain :seon.task/name "fix" :seon.task/intent "Make `tq.fullchain-rows/twice` double its input."
+    :seon.task/answer-schema :seon.task/approval}
+   '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement]
+   {}])
+
+(def ^:private full-chain-replies
+  "Each model step's one scripted reply, in chain order: Survey asks the user and records the approval its reply
+  carries; Define, Design and Prove grow the subject's document; Prove adds the red product; Implement turns it green."
+  [(str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+        "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\"})\n"
+        "(my.message/send {:my.message/to \"user\" :my.message/content \"Approve this intent?\"})\n(my.turn/wait)")
+   (str "(let [[reply] (my.message/inbox)] (my.agent/answer! {:seon.task/sym 'tq.fullchain/survey-fix "
+        ":my.message/id (:my.message/id reply) :seon.answer/value {:seon.task/approved? true}}))")
+   (str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+        "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\\n\\n## Examples\\n\\n2 gives 4.\\n\\n"
+        "## Expected cost\\n\\nNo claim.\"})")
+   (str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+        "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\\n\\n## Examples\\n\\n2 gives 4.\\n\\n"
+        "## Expected cost\\n\\nNo claim.\\n\\n## Approach\\n\\nOne contracted function.\"})")
+   (str "(in-ns 'tq.fullchain-rows)\n"
+        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented})))\n"
+        "(clojure.test/deftest twice-doubles (clojure.test/is (= 4 (twice 2))))\n"
+        "(my.task/refine! {:seon.task/product #{'tq.fullchain-rows/twice-doubles}})")
+   "(in-ns 'tq.fullchain-rows)\n(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"])
+
+(deftest ^{:seon/tasks #{'seon.task/chain-loop}
+           :seon.test/long "One launch of a five-step chain: five real SCI attempts, five merges each with its nested gate run, the user's reply and disposable publication, over db<->flow passes; unmeasured until its first green run."
+           :seon.test/long-ms 120000}
+  a-scripted-full-chain-completes-without-hand-acts
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [chain! (requiring-resolve 'seon.task/chain!)
+           calls (atom [])
+           complete (fn [_projection request]
+                      (let [index (count (swap! calls conj request))]
+                        (ai/completion-text {"choices" [{"message" {"content" (get full-chain-replies (dec index) "(my.turn/wait)")}
+                                                         "finish_reason" "stop"}]})))
+           _ (swap! operator.runtime/running-instances update-in [running :seon.turn.loop/cluster]
+                    assoc :seon.turn.loop/complete complete)
+           handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
+           routing (:seon.agent/routing handle)
+           subject (task/task-handle 'tq.fullchain "fix")
+           steps (mapv #(task/task-handle 'tq.fullchain (str (name %) "-fix")) (second full-chain-input))
+           [declaration templates customizations] full-chain-input
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "user"))
+           _ (apply chain! connection [declaration templates customizations])
+           ;; the one hand act: the subject runs
+           _ (test-support/transacted! connection [[:db/add [:seon.task/id subject] :seon.task/execution :running]])
+           question (fn [] (db/q '[:find ?id . :where [?u :seon.agent/id "user"] [?m :seon.message/to ?u] [?m :seon.message/id ?id]]
+                                 (db/db connection)))
+           asker (fn [] (db/q '[:find ?id . :in $ ?h :where [?a :seon.task/assigned ?h] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                              (db/db connection) (first steps)))
+           replied (volatile! false)
+           measured (profile/measure
+                         #(loop [n 600]
+                            (pass! handle routing)
+                            (when (and (not @replied) (question))
+                              ;; the test body plays the user once Survey's question is delivered
+                              (test-support/user-post! running (asker) (question) "Approve")
+                              (vreset! replied true))
+                            (cond (task/done? (db/db connection) subject) :done
+                                  (zero? n) :unfinished
+                                  :else (do (Thread/sleep 100) (recur (dec n))))))
+           main (db/db connection)
+           outcome-of #(db/q '[:find [?o ...] :in $ ?h :where [?a :seon.task/assigned ?h] [?a :seon.task/outcome ?o]] main %)]
+       (is (= :done (:seon.profile/value measured)) "the subject is done")
+       (is (= (repeat 5 [:merged]) (map outcome-of steps)) "each of the five steps merged once")
+       (is (true? @replied) "Survey asked the user, and the user's reply was the test body's only write after running")
+       (is (str/includes? (:seon.task/intent (db/pull main [:seon.task/intent] [:seon.task/id subject])) "## Approach")
+           "the subject's intent accumulated every stage's sections")
+       (is (seq (db/datoms main :avet :seon.test/sym 'tq.fullchain-rows/twice-doubles)) "main holds the product test")
+       (is (every? some? (map #(db/q '[:find ?g . :in $ ?h :where [?a :seon.task/assigned ?h] [?a :seon.task/git-commit ?g]] main %)
+                              (drop 3 steps)))
+           "Prove's and Implement's merges are published as Git commits")
+       (is (empty? (filter #(str/starts-with? (name %) "attempt-") (registry/branches (agent/handle-store handle))))
+           "every attempt branch is retired")
+       (is (= (count full-chain-replies) (count @calls)) "only scripted model calls were made: zero paid calls")
+       (is (number? (:seon.profile/ms measured)) "the chain's end-to-end time is measured")))))
