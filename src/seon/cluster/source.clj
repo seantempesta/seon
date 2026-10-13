@@ -19,6 +19,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as fn]
+            [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
@@ -830,7 +831,7 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files root-refusal identity-namespace new-path)
+(declare proven-files lint-errors root-refusal identity-namespace new-path)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -936,6 +937,8 @@
             proof (when (and root (nil? root-error) (vector? tx))
                     (let [merged (db/with head {:tx-data tx})]
                       (if (:seon.error/at merged) merged (proven-files head merged delta root))))
+            ;; The bar a lane commit holds (bin/lane): no clj-kondo error in a file the merge publishes.
+            lint (when (vector? proof) (lint-errors root proof))
             refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
         (try
           (cond
@@ -950,6 +953,15 @@
             (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
             (:seon.error/at tx) tx
             (:seon.error/at proof) proof
+            (seq lint)
+            (seon.error.refusal/error :seon.source/lint-error
+             {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/prepare-merge!
+              :seon.error/message (str "clj-kondo reports an error in a file this merge would publish, which a lane commit refuses: "
+                                       (str/join "; " (map (fn [{:seon.source/keys [path] :seon.lint/keys [row col type message]}]
+                                                             (str path ":" row ":" col " " type " " message))
+                                                           lint))
+                                       ". Fix it on the candidate branch and request the merge again.")
+              :seon.source/path (:seon.source/path (first lint)) :seon.source/lint-findings lint})
             (empty? proofs) (refuse "A merge names the tests that prove it; none were given." proofs)
             :else
             (let [s (keyword (str "merge-" (id/id)))
@@ -1722,6 +1734,26 @@
                             proof (prove before after (set group) root)]
                         (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
                     [] (sort-by key groups)))))
+
+(defn lint-errors
+  "The clj-kondo errors, under the checkout's `.clj-kondo` configuration (`seon.fn.analyzer/analyze`, one run),
+  in the Clojure files of `proofs` (`proven-files`) as their candidate bytes would publish them under `root`:
+  the findings a lane commit refuses (`bin/lane`), by file and position."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/proof]] [:vector :seon.source/lint-finding]]}
+  [root proofs]
+  (let [clojure (filter #(some (partial str/ends-with? (:seon.source/path %)) [".clj" ".cljc"]) proofs)
+        canonical #(.getCanonicalPath (io/file root ^String (:seon.source/path %)))
+        paths (into {} (map (juxt canonical :seon.source/path)) clojure)
+        texts (into {} (map (juxt canonical #(String. ^bytes (:seon.source/candidate-bytes %) "UTF-8"))) clojure)]
+    (if (empty? texts)
+      []
+      (into [] (keep (fn [{level ::analyzer/level filename ::analyzer/filename :as finding}]
+                       (when (and (= :error level) (paths filename))
+                         {:seon.source/path (paths filename)
+                          :seon.lint/row (long (::analyzer/row finding)) :seon.lint/col (long (::analyzer/col finding))
+                          :seon.lint/type (::analyzer/type finding) :seon.lint/message (::analyzer/message finding)})))
+            (sort-by (juxt ::analyzer/filename ::analyzer/row ::analyzer/col)
+                     (::analyzer/findings (analyzer/analyze {::analyzer/sources texts})))))))
 
 (defn- write-back-commits
   "`write-back!` between the accepted merge's `before` and `after` commits."

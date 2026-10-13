@@ -2181,7 +2181,7 @@
 (def ^:private fixable-refusals
   "The merge refusals the attempt's agent can fix on its branch, and its block shows: a merge refused for one is
   relaunched from the attempt's end commit like a capped end with work (`refused-merge-relaunch`)."
-  #{:seon.source/uncontracted-error})
+  #{:seon.source/uncontracted-error :seon.source/lint-error})
 
 (defn- refused-merge-relaunch
   "The facts relaunching assignment `key`, whose merge was refused for a reason its agent can fix

@@ -300,6 +300,25 @@
                     (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
                     (is (= before (slurp file)))))))
 
+(deftest ^{:seon.test/long "One agent turn on C and one prepare-merge! whose file proof (one analysis and one lint of a one-file fixture) refuses before the gate runs."
+           :seon.test/long-ms 30000}
+  a-file-clj-kondo-reports-an-error-in-refuses-at-prepare-naming-the-finding
+  ;; Chain 4's merge 5f7fc3f7b published an `is` message printing a value; HEAD then failed
+  ;; lint and every lane commit was refused. The merge holds the lane commit's bar.
+  (merge-world! "wblint" "lint-check"
+                [(fn [_] "(clojure.test/deftest lint-check (clojure.test/is (= 1 1) (pr-str :x)))")]
+                (fn [{:keys [target store c proofs root file made]}]
+                  (let [before (slurp file)
+                        refused (source/prepare-merge! target store c proofs {:root root})
+                        finding (first (:seon.source/lint-findings refused))]
+                    (some->> (:seon.source/candidate refused) (vswap! made conj))
+                    (is (= :seon.source/lint-error (:seon.error/type refused)))
+                    (is (= [(subs (.getPath ^java.io.File file) (inc (count root))) :seon/unbounded-assertion-message]
+                           ((juxt :seon.source/path :seon.lint/type) finding)))
+                    (is (pos-int? (:seon.lint/row finding)))
+                    (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
+                    (is (= before (slurp file)))))))
+
 (deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
            :seon.test/long-ms 90000}
   a-require-added-at-the-repl-merges-and-writes-back-its-ns-form
