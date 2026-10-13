@@ -2,8 +2,11 @@
   "A test an agent defined runs its branch's current callee after the agent redefines it."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
+            [seon.cluster.agent :as agent]
             [seon.mcp :as mcp]
-            [seon.test-support :as support]))
+            [seon.operator.runtime :as operator.runtime]
+            [seon.test-support :as support]
+            [sci.core :as sci]))
 
 (defn- agent-value
   "The value of the last form of `code` evaluated as `agent-id` through `seon.mcp/call`."
@@ -66,6 +69,40 @@
                                 "(deftest a-test (is (= 102 (a))))"))]
        (is (= {:seon.test/passed? true :seon.turn.loop/red []} (:seon.turn.loop/reaching redefined))
            "the step runs the bodies the eval request defined")))))
+
+(deftest ^{:seon.test/long "Three eval requests of an own-branch agent, each with its automatic test step, and one branch acquisition."
+           :seon.test/long-ms 15000}
+  a-branch-acquired-from-a-writers-base-runs-the-program-its-head-holds
+  ;; Settlement copied the agent's evaluated roots, analyzed against its own Vars, into its
+  ;; branch's base context, which then claimed the head's program: a branch acquired from that
+  ;; base read the first definition of b through the copied a, so (a) was 101 and a-test failed.
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "base-writer-" (random-uuid))
+           step (fn [code] (agent-value running agent-id code))
+           {lane :seon.store/branch} (support/own-branch-agent!
+                                      running agent-id
+                                      (str "(ns rc.base (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn b \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                                           "(defn a \"Ten more than b.\" {:malli/schema [:=> [:cat] :int]} [] (+ 10 (b)))\n"
+                                           "(deftest a-test (is (= 11 (a))))"))
+           _ (step "(in-ns 'rc.base)\n(defn b \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)")
+           _ (step (str "(in-ns 'rc.base)\n"
+                        "(defn c \"A hundred.\" {:malli/schema [:=> [:cat] :int]} [] 100)\n"
+                        "(defn a \"c plus b.\" {:malli/schema [:=> [:cat] :int]} [] (+ (c) (b)))\n"
+                        "(deftest a-test (is (= 102 (a))))"))
+           routing (:seon.agent/routing (:seon.turn.loop/cluster (get @operator.runtime/running-instances running)))
+           execution (get-in @(get-in @routing [:seon.agent/children lane]) [:seon.agent/contexts [lane agent-id]])
+           member (agent/acquire-context! execution nil {:seon.agent/isolate? true})]
+       (try
+         (is (= [102 [:pass]]
+                (sci/eval-string* (sci/fork (:seon.sci.eval/ctx member))
+                                  (str "(let [reported (atom [])]\n"
+                                       "  (binding [clojure.test/report (fn [m] (swap! reported conj (:type m)))]\n"
+                                       "    ((:test (meta #'rc.base/a-test))))\n"
+                                       "  [(rc.base/a) @reported])")))
+             "the acquired branch runs the bodies the writer's branch head holds")
+         (finally (agent/release-context! member)))))))
 
 (deftest ^{:seon.test/long "Four eval requests of an own-branch agent, each with its automatic test step: about 3 s measured on default's JVM."
            :seon.test/long-ms 15000}

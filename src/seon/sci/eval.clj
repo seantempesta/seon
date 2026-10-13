@@ -1435,6 +1435,17 @@
   (boolean (or (contains? (::test-namespaces @(::kernel/program-snapshot ctx)) namespace-name)
                (nil? (find-ns namespace-name)))))
 
+(defn- committed-function
+  "The program snapshot's entry of one committed function row."
+  {:malli/schema [:=> [:cat [:map [:seon.fn/sym :qualified-symbol]]] :map]}
+  [committed]
+  (let [admission (:seon.schema.admission/source committed)]
+    {::function-source (:seon.fn/source committed)
+     ::function-namespace (symbol (namespace (:seon.fn/sym committed)))
+     ::function-private? (:seon.fn/private? committed)
+     ::function-admission admission
+     ::agent-authored? (= :agent admission)}))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity; saved evaluation results
@@ -1491,13 +1502,7 @@
             admission (:seon.schema.admission/source committed)
             next-projection (or prepared-projection
                                 (schema/projection-from-database db projection))]
-        (kernel/cache-function!
-         ctx function-symbol
-         {::function-source (:seon.fn/source committed)
-          ::function-namespace namespace-name
-          ::function-private? (:seon.fn/private? committed)
-          ::function-admission admission
-          ::agent-authored? (= :agent admission)})
+        (kernel/cache-function! ctx function-symbol (committed-function committed))
         (let [snapshot @(::kernel/program-snapshot ctx)
               loaded (delay (loaded-database ctx db))
               changed? (and (= :agent admission) (overridden-row? @loaded db committed))
@@ -1651,15 +1656,10 @@
     #(sci/eval-form ctx form)))
 
 (defn- transfer-evaluated-roots!
-  "Install each evaluated definition of `installations` into `ctx`.
-
-  The evaluated Var and its root and metadata are read in the context that
-  evaluated it (`source`), whose own binding they are; without one, the
-  evaluation's recorded root. A name `ctx` already holds takes them as its
-  binding of its Var (`sci.core/intern` of an existing name); a new name
-  installs the evaluated Var itself, so closures that captured it and `ctx`
-  call one Var."
-  [ctx source installations]
+  "Install into `ctx` each evaluated definition of `installations`, from the
+  root and metadata its evaluation recorded. A name `ctx` already holds takes
+  them as its binding of its Var (`sci.core/intern` of an existing name)."
+  [ctx installations]
   (let [roots (into {} (mapcat (comp :seon.sci.eval/bindings
                                     :seon.sci.eval/evaluation)) installations)]
     (doseq [qualified (into #{} (keep #(some-> % str symbol))
@@ -1669,29 +1669,18 @@
             :when recorded]
       (let [namespace-name (symbol (namespace qualified))
             local-name (symbol (name qualified))
-            evaluated (when source
-                        (let [v (get-in (sci/namespace-state source) [namespace-name local-name])]
-                          (when (sci.utils/var? v) v)))
-            [value metadata] (if evaluated
-                               (sci.ctx-store/with-ctx source [@evaluated (meta evaluated)])
-                               [(:seon.sci.eval/value recorded) (:seon.sci.eval/metadata recorded)])
-            existing (get-in (sci/namespace-state ctx) [namespace-name local-name])]
+            metadata (:seon.sci.eval/metadata recorded)]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
-        (when (and evaluated (not (sci.utils/var? existing)))
-          (sci/add-namespace! ctx namespace-name {local-name evaluated}))
         (sci.ctx-store/with-ctx ctx
-          (let [target (if (sci.utils/var? existing) existing evaluated)]
-            ;; Already `ctx`'s root and metadata (a new Var `source` owned):
-            ;; nothing to write, so `ctx` holds no binding of its own.
-            (when-not (and target (identical? value @target) (identical? metadata (meta target)))
-              (let [installed (sci/intern ctx namespace-name (with-meta local-name metadata) value)]
-                ;; SCI intern replaces an existing root without adopting symbol
-                ;; metadata. The evaluated :test body and contract belong to
-                ;; the replacement too; retain only the destination's ns.
-                (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))))
+          (let [installed (sci/intern ctx namespace-name (with-meta local-name metadata)
+                                      (:seon.sci.eval/value recorded))]
+            ;; SCI intern replaces an existing root without adopting symbol
+            ;; metadata. The evaluated :test body and contract belong to
+            ;; the replacement too; retain only the destination's ns.
+            (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))
 
-(declare program-key-input acquired-database? stale-reach reinterpret-reach! interpret-affected! carry-promotions!
+(declare program-key-input acquired-database? stale-reach reinterpret-reach! interpret-affected!
          namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
 (defn acquired-program
@@ -1792,14 +1781,38 @@
                                 (program/canonical-row shapes current-row))))))
                 (map vector eids old current))))))))
 
+(defn- record-settled-rows!
+  "Record in the evaluating context `ctx` the rows its own evaluations
+  committed: their entries in its program snapshot, so its next regeneration
+  reads them unchanged rather than another writer's, and, when they cover the
+  whole program change, the settled commit's basis and program key, so its
+  next request forks nothing. Its roots are already the ones it evaluated."
+  [ctx db installations report written-on]
+  (let [committed (into [] (keep #(some->> (:seon.fn/sym (:seon.program/row %))
+                                           (vector :seon.fn/sym)
+                                           (db/pull db '[*])))
+                        installations)]
+    (swap! (::kernel/program-snapshot ctx) update :functions
+           #(into (if (seq %) % (sorted-map)) (map (juxt :seon.fn/sym committed-function)) committed))
+    (when (and report written-on
+               (installation-covers-program-change?
+                ctx written-on report installations (context-projection ctx)))
+      (let [input (program-key-input db ctx)]
+        (swap! (::kernel/program-snapshot ctx)
+               #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input)))))
+    []))
+
 (defn install-evaluated-rows!
   "Install committed rows from the evaluations that produced them.
 
-  The turn fork already owns the exact evaluated Var roots. Transfer the
-  complete batch into the live base before advancing any database-derived
-  projection; installing one root at a time cannot resolve a same-turn test's
-  reference to a same-turn function, while replaying source would execute the
-  definitions twice after settlement."
+  With the evaluating context (`agent-ctx`), which holds every root its forms
+  bound, settlement only records the rows in it (`record-settled-rows!`):
+  `ctx`, the execution's base, is never written, so it stays the program
+  context of the content it acquired and takes the settled program by content
+  at its next `acquire!`. Without one, the rows install into `ctx` from their
+  evaluations' recorded roots: the complete batch first, since installing one
+  root at a time cannot resolve a same-batch test's reference to a same-batch
+  function, while replaying source would execute the definitions twice."
   {:malli/schema
    [:=>
     [:cat
@@ -1822,73 +1835,47 @@
     report :seon.db/transaction-report
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
-  (sci.ctx-store/with-ctx ctx
-    (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
-                      installations)
-          functions (into [] (keep (comp #(some-> % str symbol) :seon.fn/sym :seon.program/row)) installations)
-          previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
-      (transfer-evaluated-roots! ctx agent-ctx installations)
-      ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
-      ;; settlement wrote, and every registration an earlier run committed. The
-      ;; context's own projection is stale for the latter, so a defn naming a
-      ;; schema registered in an earlier run refused out of the turn (reds
-      ;; group I); folding each row into it again also rebuilt the projection
-      ;; once per row. Derived once per committed value (memoized).
-      (let [projection (schema/projection-from-database db)
-            installed (mapv (fn [{program-row :seon.program/row}]
-                              (install-row!
-                               {:seon.sci.eval/ctx ctx
-                                :seon.db/db db
-                                :seon.program/row program-row
-                                ::evaluated? true
-                                ::prepared-projection projection}))
-                            installations)]
-        ;; The agent's snapshot holds the rows its own definitions committed, so
-        ;; its next regeneration reads them unchanged rather than another writer's.
-        (when-let [agent-snapshot (::kernel/program-snapshot agent-ctx)]
-          (swap! agent-snapshot update :functions merge
-                 (select-keys (:functions @(::kernel/program-snapshot ctx))
-                              (keep (comp :seon.fn/sym :seon.program/row) installations))))
-        (when (and report written-on
-                   (every? :seon.sci.eval/installed installed)
-                   (installation-covers-program-change?
-                    ctx written-on report installations (context-projection ctx)))
-          ;; The writer's context holds what it settled: both serve the settled
-          ;; commit's program key, so its next request forks nothing.
-          (let [input (program-key-input db ctx)]
-            (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
-              (swap! (::kernel/program-snapshot target)
-                     #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input))))))
-        ;; A definition that landed in a new Var of `ctx` leaves the callers and
-        ;; tests analyzed against its previous Var calling that one: they are
-        ;; analyzed again here, as one Clojure Var would be seen.
-        (doseq [sym functions
-                :let [before (get previous sym)
-                      held (sci/resolve ctx sym)
-                      evaluated (some-> agent-ctx (sci/resolve sym))]]
-          (cond
-            (and before (not (identical? before held)))
-            (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch)))
-            ;; A caller or test `ctx` took from the evaluating context as that
-            ;; context's own Var was analyzed against its Var of `sym`: where
-            ;; `ctx` holds another, that reach calls a root `ctx` never sees
-            ;; redefined, so it is analyzed again against `ctx`'s Vars.
-            (and evaluated held (not (identical? evaluated held)))
-            (reinterpret-reach! ctx db (stale-reach ctx db sym
-                                                    #(and (not (batch %))
-                                                          (some? (sci/resolve ctx %))
-                                                          (identical? (sci/resolve ctx %) (sci/resolve agent-ctx %)))))))
-        ;; A caller `ctx` still runs compiled never sees a redefinition: the
-        ;; reverse closure of these definitions is bound lazily once, so the
-        ;; next eval request calls the branch's program, as one Clojure Var
-        ;; would. The turn fork walked it at each write (`seon.sci.arm/arm!`):
-        ;; its closure carries over, walked again only for a definition the
-        ;; fork never promoted.
-        (when (seq functions)
-          (if-let [promoted (some-> agent-ctx ::kernel/program-snapshot deref)]
-            (carry-promotions! ctx db promoted functions)
-            (interpret-affected! ctx db functions)))
-        installed))))
+  (if agent-ctx
+    (record-settled-rows! agent-ctx db installations report written-on)
+    (sci.ctx-store/with-ctx ctx
+      (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
+                        installations)
+            functions (into [] (keep (comp #(some-> % str symbol) :seon.fn/sym :seon.program/row)) installations)
+            previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
+        (transfer-evaluated-roots! ctx installations)
+        ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
+        ;; batch wrote, and every registration an earlier run committed,
+        ;; derived once per committed value (memoized).
+        (let [projection (schema/projection-from-database db)
+              installed (mapv (fn [{program-row :seon.program/row}]
+                                (install-row!
+                                 {:seon.sci.eval/ctx ctx
+                                  :seon.db/db db
+                                  :seon.program/row program-row
+                                  ::evaluated? true
+                                  ::prepared-projection projection}))
+                              installations)]
+          (when (and report written-on
+                     (every? :seon.sci.eval/installed installed)
+                     (installation-covers-program-change?
+                      ctx written-on report installations (context-projection ctx)))
+            (let [input (program-key-input db ctx)]
+              (swap! (::kernel/program-snapshot ctx)
+                     #(cond-> (assoc % ::acquired-basis (acquired-basis db)) input (assoc ::program-key input)))))
+          ;; A definition that landed in a new Var of `ctx` leaves the callers and
+          ;; tests analyzed against its previous Var calling that one: they are
+          ;; analyzed again here, as one Clojure Var would be seen.
+          (doseq [sym functions
+                  :let [before (get previous sym)]
+                  :when (and before (not (identical? before (sci/resolve ctx sym))))]
+            (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
+          ;; A caller `ctx` still runs compiled never sees a redefinition: the
+          ;; reverse closure of these definitions is bound lazily once, so the
+          ;; next eval request calls the branch's program, as one Clojure Var
+          ;; would.
+          (when (seq functions)
+            (interpret-affected! ctx db functions))
+          installed)))))
 
 (defn- classpath-locatable?
   "Whether THIS PROCESS's own classpath can serve one namespace's source.
@@ -3228,30 +3215,6 @@
                                                        ::added #{} ::namespaces [] ::tests []})]
         (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
         acquired))))
-
-(defn- carry-promotions!
-  "Bind lazily in `ctx` the closure the turn fork's program snapshot
-  `promoted` interprets beyond `ctx`'s, as `interpret-affected!` would for
-  `changed`; a changed definition the fork does not interpret has its closure
-  walked here. The acquisition after it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:sequential :qualified-symbol]] :map]}
-  [ctx database promoted changed]
-  (let [held @(::kernel/program-snapshot ctx)
-        carried (set (::interpreted promoted))
-        unwalked (remove carried changed)]
-    (when (seq unwalked)
-      (interpret-affected! ctx database unwalked))
-    (binding [sci.lang/*write-observer* nil
-              sci.lang/*expansion-observer* nil]
-      (sci.ctx-store/with-ctx ctx
-        (let [acquired (interpret-overlay!
-                        ctx database
-                        {::overridden (set changed) ::evaluated (set changed) ::added #{} ::namespaces [] ::tests []
-                         ::closure (into #{} (remove (set (::interpreted held))) carried)
-                         ::closure-tests (into #{} (remove (set (::interpreted-tests held)))
-                                               (::interpreted-tests promoted))})]
-          (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
-          acquired)))))
 
 (defn- program-changes
   "What `database` changes of the `loaded` program (`overlay-plan`), or nil when
