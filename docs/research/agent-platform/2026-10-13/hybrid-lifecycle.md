@@ -28,9 +28,10 @@ data, and the contract guarantees they are there.
 ## 0. The rules (owner, 2026-10-13: "one simple system that just works")
 
 Everything is an agent (root or SCI) with a task; tasks chain by linking database refs; agents start and stop by
-modifying data; every state is a database value. The whole lifecycle is these rules, each a datum → one reaction,
-each implemented by **exactly one named function**; nothing else controls the lifecycle, and a lifecycle behavior that
-needs a second function is a defect.
+modifying data; every state is a database value. The whole lifecycle is the simplest set of rules this round could
+find (ten; the number is a finding, not a bound), each a datum → one reaction, each implemented by one named function
+that nothing else duplicates. A behavior that needs a second function for the same datum is the thing to look at
+first, not a violation to enforce.
 
 | # | Datum (on main unless said) | Reaction | The one function |
 |---|---|---|---|
@@ -49,27 +50,30 @@ R1–R10 are what exists today with three substitutions: R4/R5 replace `unmet`'s
 the exit validation at the writer that already records the end, R1 replaces hand-written steps with clones. No
 scheduler, no state tag, no second rule for the same datum.
 
-**Line budget.** The lifecycle lives in `seon.context` 778, `seon.cluster.agent` 2,458, `seon.cluster.source` 2,079,
-`seon.task` 1,054, `seon.turn` 5,876, `seon.merge` 439 lines (12,684 at HEAD). Estimated per phase (§5):
+**Expected cost, as information (owner: not a limit; the right numbers are unknown).** The lifecycle lives in
+`seon.context` 778, `seon.cluster.agent` 2,458, `seon.cluster.source` 2,079, `seon.task` 1,054, `seon.turn` 5,876,
+`seon.merge` 439 lines (12,684 at HEAD). Per phase (§5), estimated before the work and replaced by the measured numbers
+in each commit message:
 
-| Phase | Deleted | Added | Net | Note |
-|---|---|---|---|---|
-| A1–A2 | ~60 (`accept-merge!`'s static checks, duplicated `red` logic in `prepare-merge!`) | ~70 (two functions, one concat) | +10 | extraction |
-| A3–A4 | ~140 (`unmet`, `reds`, `designed-red?`, `contract-gaps`, `base-results`, fork-point proxy, `record-broken!`'s judgment) | ~50 (record the row, read the row) | **−90** | |
-| A5 | ~60 (nine `:satisfied` readers, six members, the branch rule) | ~15 (no-op merge arm) | **−45** | |
-| A6 | ~20 (`fixable-refusals`, the class match) | 0 | −20 | |
-| B1–B2 | ~40 (`declared-source`'s append path) | ~35 (one derivation call, `source` of a namespace) | −5 | |
-| C1 | 0 | ~40 (schema EDN, not code) | +40 | data |
-| C2 | 0 | ~40 (`chain!`) | +40 | **the one new function; over ~60 lines is the smell: it is `create!` in a loop** |
-| C3 | 0 | ~15 (validate at `end-task-call`, show the explain) | +15 | |
-| C4–C5 | 0 | ~30 code + ~120 test (five handoff deftests and helpers) | +30 | tests are not lifecycle code |
-| C6 | ~20 (`refine!`'s hand-listed keys) | ~10 | −10 | |
-| **Total** | **~340** | **~305 code, ~160 test and data** | **≈ −35 code** | the lifecycle should not grow |
+| Phase | Lines deleted (est.) | Lines added (est.) | Runtime the phase touches (est.) |
+|---|---|---|---|
+| A1–A2 | ~60 (`accept-merge!`'s static checks, the duplicated `red` logic in `prepare-merge!`) | ~70 (two functions, one concat) | `prepare-merge!` unchanged, 1.7–4 s with the gate |
+| A3–A4 | ~140 (`unmet`, `reds`, `designed-red?`, `contract-gaps`, `base-results`, fork-point proxy, `record-broken!`'s judgment) | ~50 (record the row, read the row) | +152–213 ms per program-writing request (7 of 39 in Run 24); context render −16 ms (reads the row) |
+| A5 | ~60 (nine `:satisfied` readers, six members, the branch rule) | ~15 (no-op merge arm) | a no-op merge: the test half on recorded results, ~135 ms (`accept-merge!` refused path) |
+| A6 | ~20 (`fixable-refusals`, the class match) | 0 | a relaunch that ends `:done` with 0 model calls: one `prove-turn`, proofs at reach |
+| B1–B2 | ~40 (`declared-source`'s append path) | ~35 | ns-row write per request unchanged (~10 ms); `source` of a namespace one pull |
+| C1 | 0 | ~40 (schema EDN) | publication of one schema file on a branch, measured at C1 |
+| C2 | 0 | ~40 (`chain!`: `create!` in a loop; much more than that is worth a look) | five `create!` transactions, ~100 ms each today |
+| C3 | 0 | ~15 | one Malli validation inside the end transaction, expected under 5 ms (§8 Q3) |
+| C4–C5 | 0 | ~30 code, ~120 test | one handoff deftest per step, run with the proofs inside the step's dial |
+| C6 | ~20 (`refine!`'s hand-listed keys) | ~10 | unchanged |
+| Sum | ~340 | ~305 code, ~160 test and data | one verdict per program-writing request; the rest sub-100 ms |
 
-Smells to simplify, named now: `seon.turn` at 5,876 lines holds R4, R6 and the whole turn loop; R4 (`test-step` with
-`run-proofs`, `run-reaching`, `record-broken!`) is already over 100 lines and A3/A4 must leave it smaller, not larger.
-`seon.cluster.agent/next-actions` + `apply-lifecycle!` + `close!` + `failed-pass!` (R7) are ~250 lines for one rule;
-A5/A6 delete arms and add none. Any phase whose diff adds more than ~100 lines to one of these files stops and reports.
+Where the code is already large: `seon.turn` (5,876) holds R4, R6 and the turn loop, and R4 (`test-step`, `run-proofs`,
+`run-reaching`, `record-broken!`) is over 100 lines before this round; `seon.cluster.agent`'s R7 (`next-actions`,
+`apply-lifecycle!`, `close!`, `failed-pass!`) is ~250 lines. A3–A6 are expected to shrink both; a phase that finds
+itself growing one of them reports the growth with its reason rather than hiding it, and Astra's simplicity review
+reads these numbers against the commits.
 
 ## 1. One judge
 
@@ -159,10 +163,10 @@ declarations only, Q6). The help teaches the `(ns …)` repair only after B1's p
 |---|---|---|---|---|
 | 0 | **Intake** | root (or the owner) | the subject: `:seon.task/intent` from the natural-language problem; the chain cloned (§2.2) | the subject validates as `:seon.task/task` with an intent; `seon.task/chain!` refuses otherwise |
 | 1 | **Survey** | agent | `:seon.task/references` (relevant schemas and keywords, functions, tests, docs, ranked by recorded use: `seon.profile/calls`, `seon.test/reach`, `seon.fn/references`); for a bug the reproducing form as the first `:seon.task/examples` entry with its observed `:actual` | `:seon.task/surveyed` |
-| 2 | **Define** | agent | the PRD in the task: `:seon.task/problem`, `:seon.task/goals`, `:seon.task/non-goals`, `:seon.task/examples` (acceptance examples as data: form, expected, optional actual); implementation detail is added later by other stages, never here | `:seon.task/defined` |
+| 2 | **Define** | agent | the PRD in the task: `:seon.task/problem`, `:seon.task/goals`, `:seon.task/non-goals`, `:seon.task/examples` (acceptance examples as data: form, expected, optional actual); **the expected cost** (`:seon.task/expected-cost`, placeholder §3a: what the work is proportional to and the expected ms/MB for the acceptance examples' inputs); implementation detail is added later by other stages, never here | `:seon.task/defined` |
 | 3 | **Design** | agent | schemas registered at their producers with consumers declared; contracted stubs whose body is `(fail! …)` with `:seon.error/unimplemented`; `:seon.task/declares` (the identities created or changed) | `:seon.task/designed` |
-| 4 | **Prove** | agent | generative tests over the declared schemas (`malli.generator`, test-support fixtures, the testing skill cited in its instructions); `:seon.task/product` (the tests tagged to Implement), red by design | `:seon.task/proven` |
-| 5 | **Implement** | agent | the simplest body turning the product green; callers converted; what it replaces removed | `:seon.task/proven` still valid ∧ the judge accepts |
+| 4 | **Prove** | agent | generative tests over the declared schemas (`malli.generator`, test-support fixtures, the testing skill cited in its instructions); `:seon.task/product` (the tests tagged to Implement), red by design; where Define states an expected cost, a `seon.profile/measure` assertion on it among the product | `:seon.task/proven` |
+| 5 | **Implement** | agent | the simplest body turning the product green; callers converted; what it replaces removed; the cost measured before and after on the acceptance inputs and checked against the expected cost (§3a) | `:seon.task/proven` still valid ∧ the judge accepts |
 | 6 | **Land / Retrospective** | root's `db<->flow`; a root task | the merge, write-back and git commit after **every** step (Land is not a separate agent); the Retrospective edits the **template entries** a friction traced to, and files follow-ups with red proofs | existing merge and write-back tests |
 
 Five templates are built now: `seon.step/survey`, `seon.step/define`, `seon.step/design`, `seon.step/prove`,
@@ -252,6 +256,18 @@ not satisfy it, so the end is never written: validate final owning values, at th
 cloned onto the step, so a variation can declare a stricter or looser exit and root can customize it; no `case` on the
 kind anywhere. `my.task/refine!` accepts every subject content key above (one map, validated by the task schema at the
 writer, no hand list), so a stage writes its findings through the one verb.
+
+### 3a. Placeholder: the expected cost as task data
+
+The owner wants expected runtime as part of the chain itself. Reserved here, to be filled from root's research on prior
+work in runtime estimation (not yet received): **`:seon.task/expected-cost`** on the subject, written by Define, of a
+shape to be decided there (at least: the input the work is proportional to, as a reference to an acceptance example;
+the expected `:seon.profile/ms` and `:seon.profile/alloc-mb` on that input; the reasoning as prose). Prove turns it into
+a `seon.profile/measure` assertion in the product (TASK-CHAIN §3b already names "the cost formula where the subject
+states one"), Implement's measured before/after is compared with it at the judge (a measured regression is a refusal
+the agent fixes, CLAUDE.md "make cost follow changed inputs"), and the Retrospective compares estimate with measurement
+to improve the Define template's instructions. Whether `:seon.task/defined` requires the key, or only when the
+problem states a cost, is decided with root's material; until then it is optional and nothing reads it.
 
 ## 4. Handoff proofs
 
