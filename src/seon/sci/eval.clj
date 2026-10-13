@@ -2925,13 +2925,28 @@
     (db/pull-many database (conj namespace-pattern {:seon.test/ns [:seon.ns/name]})
                   (into [] (keep (fn [datom] (when (= :agent (:v datom)) (:e datom)))) datoms))))
 
+(defn- namespace-digests
+  "Each namespace `database` holds, as `[name definition-digest]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set [:tuple :seon.ns/name :seon.program/definition-digest]]]}
+  [database]
+  (let [pairs (db/q '[:find ?n ?g :where [?e :seon.ns/name ?n] [?e :seon.program/definition-digest ?g]] database)]
+    (when (db/read-refusal? pairs)
+      (throw (ex-info (:seon.error/message pairs) pairs)))
+    (set pairs)))
+
 (defn- derive-overlay-plan
   "What `database` changes of the `loaded` program: the authored functions whose
   digest the loaded program lacks or holds otherwise, the other functions it
-  lacks, and the authored namespace and test rows it does not hold as they are."
+  lacks, the authored test rows it does not hold as they are, and every
+  namespace row it does not hold as it is, authored or file-derived (a file's
+  namespace main declared after the loaded commit is entered from its row)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
   [database loaded]
-  (let [rows (authored-rows database)
+  (let [authored (authored-rows database)
+        authored-names (into #{} (keep :seon.ns/name) authored)
+        changed-files (into [] (comp (map first) (remove authored-names) (distinct) (map #(vector :seon.ns/name %)))
+                            (set/difference (namespace-digests database) (namespace-digests loaded)))
+        rows (into authored (when (seq changed-files) (db/pull-many database namespace-pattern changed-files)))
         previous (authored-rows loaded)
         digests (loaded-digests loaded)
         present (function-symbols database)

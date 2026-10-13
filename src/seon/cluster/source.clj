@@ -987,9 +987,9 @@
             {:seon.task/keys [step] owed :seon.task/proofs designed :seon.task/product} (:seon.task/obligations tested)
             product (when (= :prove step) designed)
             proofs (into (set owed) product)
-            ;; The file the merge would write back, proven before any test runs.
-            root-error (when root (root-refusal root))
-            ;; (an empty delta writes no file)
+            ;; The file the merge would write back, proven before any test runs;
+            ;; an empty delta writes no file, so it names no root to judge.
+            root-error (when (and root (seq tx)) (root-refusal root))
             proof (when (and root (nil? root-error) (seq tx))
                     (let [merged (db/with head {:tx-data tx})]
                       (if (:seon.error/at merged) merged (proven-files head merged delta root))))

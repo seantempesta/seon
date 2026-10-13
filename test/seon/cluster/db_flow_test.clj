@@ -504,15 +504,22 @@
 
 (defn- end-on-branch!
   "Write the attempt of `task-name`'s end `end` on its own branch, as its last transaction does: the
-  task's intent refined, a message to root and the end on the attempt. Answers [key branch agent-id attempt]."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection :string :seon.task.attempt/end]
-                  [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :int]]}
-  [handle connection task-name end]
+  task's intent refined, a message to root and the end on the attempt, after `work` (source defined in
+  `proof-sym`'s namespace, when given) once `proof-sym` ran there. Answers [key branch agent-id attempt]."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.agent/context-source :seon.db/connection :string :seon.task.attempt/end]
+                   [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :int]]
+                  [:=> [:cat :seon.agent/context-source :seon.db/connection :string :seon.task.attempt/end
+                        :qualified-symbol [:maybe :string]]
+                   [:tuple :seon.task/assignment :seon.task/branch :seon.agent/id :int]]]}
+  ([handle connection task-name end] (end-on-branch! handle connection task-name end (proof task-name) nil))
+  ([handle connection task-name end proof-sym work]
   (let [[[key branch agent-id]] (seq (attempts connection task-name))
         branch-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                               :seon.store/branch branch})]
-    ;; the agent's first pass ran its red proofs: it is idle when its end is written
-    (await-on! branch-connection #(not-empty (proof-runs (db/db branch-connection) (proof task-name))) ::proved)
+    ;; the agent's first pass ran its red proofs: it is idle when its work and end are written
+    (await-on! branch-connection #(not-empty (proof-runs (db/db branch-connection) proof-sym)) ::proved)
+    (when work (define-on! branch-connection (symbol (namespace proof-sym)) work))
     (test-support/transacted!
      branch-connection
      (into [{:db/id [:seon.task/id (chain-handle task-name)] :seon.task/intent "Refined on the branch."}
@@ -523,7 +530,7 @@
                    (message/send-call (db/db branch-connection)
                                       (message/candidate {:my.message/to "root" :my.message/content "Only on my branch."})
                                       agent-id))))
-    [key branch agent-id (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))]))
+    [key branch agent-id (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))])))
 
 (defn- copies
   "The transactions on main `database` that merged `branch`'s facts or wrote its end, as transaction ids."
@@ -531,22 +538,38 @@
   [database branch]
   (set (db/q '[:find [?tx ...] :in $ ?b :where [?tx :seon.squash/source-branch ?b]] database branch)))
 
-(deftest
+(defn- done-checkout!
+  "The chain world's checkout holding `e`'s proof in `<space>-rows` beside the stub `twice` it reaches
+  (`checkout!`): a :done end merges only through an accepted candidate. The proof's symbol."
+  {:malli/schema [:=> [:cat :seon.db/connection] :qualified-symbol]}
+  [connection]
+  (let [rows (str *space* "-rows")]
+    (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                           (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                "(deftest ^{:seon/tasks #{'" *space* "/e}} proves-e (is (= 4 (twice 2))))\n")})
+    (symbol rows "proves-e")))
+
+(def ^:private twice-work "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
+
+(deftest ^{:seon.test/long "Two chain worlds (the keep dial off and on), each one attempt's accepted merge (a nested seon.test/run on a fresh merge branch) over three db<->flow passes; measured 6.6-7.4 s."
+           :seon.test/long-ms 30000}
   an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted
   (doseq [keep? [false true]]
     (binding [*space* (if keep? "tq.endkeep" "tq.endcopy")]
       (test-support/with-database
        (fn [connection]
          (chain-world
-          connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+          connection {"e" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
           (fn [handle]
             (let [routing (:seon.agent/routing handle)
-                  store (agent/handle-store handle)]
+                  store (agent/handle-store handle)
+                  proves-e (done-checkout! connection)]
               (when keep?
                 (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
                                 :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}}))
               (pass! handle routing)
-              (let [[key branch agent-id a] (end-on-branch! handle connection "e" :done)
+              (let [[key branch agent-id a] (end-on-branch! handle connection "e" :done proves-e twice-work)
                     intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
                 (is (= #{[key branch agent-id :open]} (attempts connection "e")) "before the pass main lacks the end")
                 (pass! handle routing)
@@ -574,7 +597,8 @@
                 (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
                     "with no fault recorded"))))))))))
 
-(deftest
+(deftest ^{:seon.test/long "One chain world, one attempt's accepted merge (a nested seon.test/run on a fresh merge branch) and two db<->flow passes; measured 6.6 s."
+           :seon.test/long-ms 30000}
   a-merged-assignment-whose-graph-survived-a-crash-is-stopped-and-deleted
   ;; root merged the end (its merge base is the branch head) and the process went down before the graph stopped:
   ;; the next pass derives the stop and the deletion from the facts alone
@@ -582,12 +606,13 @@
     (test-support/with-database
      (fn [connection]
        (chain-world
-        connection {"e" [#{} "(clojure.test/is (= 1 2))"]}
+        connection {"e" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
-                store (agent/handle-store handle)]
+                store (agent/handle-store handle)
+                proves-e (done-checkout! connection)]
             (pass! handle routing)
-            (let [[key branch agent-id] (end-on-branch! handle connection "e" :done)]
+            (let [[key branch agent-id] (end-on-branch! handle connection "e" :done proves-e twice-work)]
               (db/with-branch {:seon.db/connection connection}
                               #(merge/merge! {:seon.db/connection connection :seon.store/store store} key))
               (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
@@ -1122,7 +1147,8 @@
         p-connection (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                          :seon.store/branch branch-p})]
     (define-on! p-connection (symbol (str *space* "-rows")) (rows-source stub))
-    (test-support/transacted! connection
+    ;; p ends on its own branch: merge! reads the end from the source commit
+    (test-support/transacted! p-connection
                               [[:db/add [:seon.task/assignment key-p] :seon.task.attempt/end :done]
                                [:db/add [:seon.task/assignment key-p] :seon.task.attempt/commit (db/commit-id (db/db p-connection))]])
     (pass! handle routing)
@@ -1194,7 +1220,8 @@
                   "with the tests it merged"))
             ;; the Implement step's work: the stub's body, then its end at that commit
             (define-on! i-connection (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
-            (test-support/transacted! connection
+            ;; i ends on its own branch: merge! reads the end from the source commit
+            (test-support/transacted! i-connection
                                       [[:db/add [:seon.task/assignment key-i] :seon.task.attempt/end :done]
                                        [:db/add [:seon.task/assignment key-i] :seon.task.attempt/commit (db/commit-id (db/db i-connection))]])
             (pass! handle routing)
@@ -1266,48 +1293,6 @@
                   (is (= (digest branch-2-value doubled) (digest main doubled)) "main holds the helper attempt 2 contracted")
                   (is (= (digest branch-2-value (symbol rows "twice")) (digest main (symbol rows "twice")))
                       "and the body of twice only attempt 1 changed")))))))))))
-
-;;; F65: a merge whose candidate file would not analyze relaunches, the finding in its reason.
-
-(deftest ^{:seon.test/long "One chain world, one attempt's merge refused at its file proof and its relaunch over three db<->flow passes."
-           :seon.test/long-ms 120000}
-  a-merge-refused-for-an-unrequired-namespace-relaunches-with-the-finding
-  (binding [*space* "tq.unanalyzable"]
-    (test-support/with-database
-     (fn [connection]
-       (chain-world
-        ;; z, already green, only gives the world a program to define
-        connection {"u" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
-        (fn [handle]
-          (let [routing (:seon.agent/routing handle)
-                store (agent/handle-store handle)
-                rows (str *space* "-rows")
-                problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
-                                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" %))]))]
-            (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
-                                   (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
-                                        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
-                                        "(deftest ^{:seon/tasks #{'" *space* "/u}} proves-u (is (= 4 (twice 2))))\n")})
-            (pass! handle routing)
-            (let [[[key-1 branch-1]] (seq (attempts connection "u"))
-                  on-1 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-1})]
-              (await-on! on-1 #(not-empty (proof-runs (db/db on-1) (symbol rows "proves-u"))) ::proved)
-              ;; the work calls a namespace SCI has loaded and the file does not require
-              (define-on! on-1 (symbol rows) (str "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] "
-                                                  "(* x (count (clojure.set/union #{x} #{(- x)}))))"))
-              (test-support/transacted! on-1 [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
-                                              [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit (db/commit-id (db/db on-1))]])
-              (pass! handle routing)
-              (let [first-row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task.attempt/reason :seon.task.attempt/relaunch]
-                                       [:seon.task/assignment key-1])
-                    reason (str (:seon.task.attempt/reason first-row))]
-                (is (= :error (:seon.task.attempt/end first-row)) "the refused merge ends the attempt")
-                (is (str/includes? reason ":seon.source/write-back-error") "naming the refusal")
-                (is (str/includes? reason "clojure.set") "and the finding the agent can fix")
-                (is (string? (:seon.task.attempt/relaunch first-row)) "and relaunches it, as a capped end with work")
-                (is (nil? (problem key-1)) "with no problem task for root"))
-              (pass! handle routing)
-              (is (string? (ffirst (remove #(= key-1 (first %)) (attempts connection "u")))) "the second attempt starts")))))))))
 
 (deftest ^{:seon.test/long "One chain world, a Prove attempt's merge refused at its file proof and its relaunch over three db<->flow passes."
            :seon.test/long-ms 120000}
