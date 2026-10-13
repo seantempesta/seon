@@ -31,6 +31,9 @@ running system: a specification or a source citation describes intent, and the r
 
 ## How we design
 
+- **Keep the task-chain design locked.** No new lifecycle attribute, clause or path without amending
+  [TASK-CHAIN](docs/seon/schedule/cards/TASK-CHAIN.md) and adding a red deftest that proves the change.
+
 Every change follows the same order, from the data outward:
 
 1. **Trace the data flow.** Find where the value is produced, which functions transform it, where it is stored and
