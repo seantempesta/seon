@@ -769,8 +769,7 @@
         (.close ^java.io.OutputStream (:in holder))
         (support/delete-root! root)))))
 
-(deftest ^{:seon/tasks #{'my.program/merge-requests-refuses-its-own-result-on-main}
-           :seon.test/long "One own-branch agent's first request, assignment and request run."
+(deftest ^{:seon.test/long "One own-branch agent's first request, assignment and request run."
            :seon.test/long-ms 120000}
   an-end-message-naming-a-merge-task-is-not-a-request
   ;; an agent's end message names its merge task (:seon.task/merge); the merge request root reads is the assignment
@@ -786,11 +785,13 @@
                                   "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
            agent-id (get-in (db/pull (db/db connection) [{:seon.task/agent [:seon.agent/id]}] [:seon.task/assignment assignment])
                             [:seon.task/agent :seon.agent/id])
-           sent (message/send! {:my.message/to "root" :my.message/content "My task ended: done."
-                                :seon.task/end :done}
-                               connection agent-id)]
+           ;; a send writes nothing unless it keeps; the agent's end message is the stored copy its branch writes
+           sent (message/candidate {:my.message/to "root" :my.message/content "My task ended: done."
+                                    :seon.task/end :done})
+           _ (support/transacted! connection [[:db.fn/call #'message/send-call sent agent-id]])]
        (try
-         (is (:seon.message/id sent) "the end message is recorded")
+         (is (db/q '[:find ?m . :in $ ?id :where [?m :seon.message/id ?id]] (db/db connection) (:seon.message/id sent))
+             "the end message is recorded")
          (let [open ((requiring-resolve 'my.root/merge-requests) {:seon.db/db (db/db connection)})]
            (is (vector? open) "merge-requests answers its merge requests")
            (is (every? :seon.task/assignment open) "every entry is an assignment")
