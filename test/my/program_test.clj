@@ -411,8 +411,7 @@
 ;;; TASK-CHAIN I0 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`), over the link-statement experiment's requests
 ;;; (`docs/research/agent-platform/2026-10-13/link-statement-experiment.md`).
 
-(deftest ^{:seon/tasks #{'seon.task/chain-intake-search}}
-  intake-search-finds-owners-with-candidate-costs
+(deftest intake-search-finds-owners-with-candidate-costs
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)

@@ -31,9 +31,9 @@
      (let [database (db/db connection)
            found (program/search database {:text :seon.render/form :limit 3})]
        (is (= 3 (count (:matches found))))
-       (is (< 3 (:count found)))
+       (is (= 3 (:count found)) "the count is the matches returned")
        (is (= '(my.program/search {:text :seon.render/form :limit 9}) (:more found)))
-       (is (every? #(and (integer? (:line %)) (string? (:snippet %))) (:matches found)))
+       (is (every? #(and (integer? (:line %)) (string? (:snippet %))) (filter :sym (:matches found))))
        (is (not (contains? (program/search database "no such text anywhere zzq") :more)))))))
 
 (deftest sizes-list-lines-largest-first
@@ -52,8 +52,7 @@
     (is (= 'seon.ref/section (first (:seon.error/expected typo))))
     (is (= (:seon.error/message typo) (:seon.error/message elsewhere)) "the message is fixed text; the names are data")))
 
-(deftest ^{:seon/tasks #{'my.program/a-search-snippet-keeps-the-whole-line}}
-  a-search-snippet-keeps-the-whole-line
+(deftest a-search-snippet-keeps-the-whole-line
   ;; match-row cut a trimmed line over 100 characters to 97 and "..."; the value printer alone bounds what is shown.
   (support/with-database
    (fn [connection]
@@ -75,8 +74,7 @@
          'my.program/reads-key
          'my.program/breaks)))))
 
-(deftest ^{:seon/tasks #{'my.program/a-search-limit-is-a-positive-integer}}
-  a-search-limit-is-a-positive-integer
+(deftest a-search-limit-is-a-positive-integer
   ;; :limit 0 answered no matches and a :more form that asks again with limit 0.
   (support/with-database
    (fn [connection]

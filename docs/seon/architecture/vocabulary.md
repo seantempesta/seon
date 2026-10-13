@@ -82,7 +82,7 @@ Words no library names. Each has one meaning.
 | turn | the unit a model call answers: an agent's ordered evaluations and provider attempts, open until closed (`seon.turn`) | run (meaning one turn), `seon.cluster.run` |
 | run | a budget of turns counted from a triggering message or task assignment to the reply or the cap; derived by query, never an entity (CN-19 retires "run" for one turn) | episode, session bound |
 | render function | a function of the data that selects what to show: an AI/HTML pair per entity schema, read-only | producer, view, face |
-| current-state block | the part of an agent's context rendered live from its record each turn | status tail |
+| current-state block | the part of an agent's context rendered live from its record each turn (`seon.context/current-state`) | status tail |
 | write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`seon.cluster.source/write-back!`) | export, push |
 | wake | a listened event the agent has not yet answered (a message, a task change) | notification, trigger |
 | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
