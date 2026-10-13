@@ -11,8 +11,8 @@ What exists: tasks are entities (`seon.task/create!` upserts with `:seon.task/ba
 proofs are tagged deftests, an agent's context is rendered live from its task by `seon.context/current-state`, a task's
 end sends root one message and closes the agent (DYNAMIC-CONTEXT stages 1–3), `seon.task/assign!` runs a task's proofs in
 the agent's world before assigning, and `my.root/merge!` takes a green merge request to main, disk and git in
-one call. The approach: one general mechanism (a task value, stage types as data, one context function, one stage-aware
-proof selection) so pipeline variations are data, run side by side and measured, rather than code. No pipeline proc,
+one call. The approach: one general mechanism (a task value, stage templates that are task entries, one context function, one
+proof selection by `:seon/tasks` tags) so pipeline variations are data, run side by side and measured, rather than code. No pipeline proc,
 supervisor, poller, done-check registry, stored instructions, send-back cap or advance dial: the agent lifecycle that
 exists is the transition, and a fence is refused (AGENTS.md, NO GUARDS OR FENCES).
 
@@ -48,7 +48,7 @@ version and the transaction's provenance names the step and agent. The step an a
 | `:seon.task/evidence` | subject | reproduction forms, values, paths | Mine, Design |
 | `:seon.task/children` | subject (component) | the step tasks; nested steps allowed | the creator; a stage may add steps |
 | `:seon.task/needs` | step | the steps this one runs after; a join names several | the creator |
-| `:seon.task/instructions` | step | **what this step's agent is to do, as data on the task**, written when the step is created (from the pipeline the creator chose); no template file, no stage-type render | the creator; the Retrospective edits future pipelines by editing what it writes |
+| `:seon.task/instructions` | step | **what this step's agent is to do, as data on the task**: its template's (`seon.step/<kind>`, a task entry in `resources/seon/tasks/seon.step.edn`, first in `seon.task/effective`'s lineage) unless the step declares its own, which overwrites; no stage-type entity or render | the template's author; the step's creator or `my.task/refine!`; the Retrospective edits the template entry |
 | `:seon.task/execution` | step | the intent `:held :running :paused :stopped :cancelled` (runtime-follows-db §3); absent = running | root |
 | the attempt's end | assignment row | `:done`, `:given-back`, `:capped`, `:stalled`, `:sent-back` + `:seon.task/target`, `:cancelled` | the agent's pass (`seon.turn/end-task-call`) |
 | `:seon.task/decisions` | subject | cardinality-many component: step, decision (`:added :changed :removed :unchanged :send-back`), reason, keys, target | every stage, through `refine!` or `send-back!` |
@@ -164,7 +164,11 @@ The build order is runtime-follows-db §10 (22 cards with red proofs). Of it, th
 and `my.task/create!` (the vocabulary cut, plan §0 item 5), the `:sent-back` end on the attempt (S3), the two pipeline-A trees (Design+Prove
 → Implement first; the full six later) as EDN the bench writes, and the proof catalogue page. Gone from earlier drafts:
 the stage type entity, the rendered template, `:seon.task/stage`, `:seon.task/basis-commit`, the stage-aware proof
-selection (each step's proofs are its own), `advance-end!` and its dial, `my.root/launch!`.
+selection, `advance-end!` and its dial, `my.root/launch!`. Added 2026-10-13 (owner; the lifecycle design round,
+[hybrid-lifecycle](../../../research/agent-platform/2026-10-13/hybrid-lifecycle.md)): a stage's template is an ordinary
+task entry (`seon.step/prove`, `seon.step/implement`), a step's proofs are its own tagged deftests plus its template's
+handoff deftest (`seon.task/obligations`), and a step is done exactly when `seon.cluster.source/merge-verdict` returns
+no refusal against main's head.
 
 ## 6b. Learning from guessed names (owner decision 7; plan §0 item 9)
 
@@ -188,7 +192,8 @@ fall.
 ## 7. Resolved questions, and what stays open
 
 Resolved (reviews §8.1–§8.2, owner Q13–Q16, and the four rounds of runtime-follows-db): one task per step, the subject
-the handoff; instructions are data on the step, never a template or a stage type; order is `needs`, parallel by default;
+the handoff; instructions are data: the stage's template task entry supplies them and the step's own overwrite (owner,
+2026-10-13; this supersedes "never a template"; a stage type entity stays refused); order is `needs`, parallel by default;
 the reconciler launches, nobody by hand; Check is not a separate agent in pipeline A (Implement's first turn, with a
 send-back right); Survey and Model are one Design step in A; Implement sends back by itself; every step proof is a data
 predicate, no model call; no send-back cap or advance dial, a loop is a problem task; variations are compared on paired
