@@ -167,9 +167,8 @@
                 resumed-namespace
                 (fold-namespace @connection run-id
                                 (fold-evaluations @connection run-id) 1)
-                defaults config/defaults
                 channel (async/chan 1)
-                cluster (merge defaults
+                cluster (test-support/cluster-handle
                                {:seon.db/connection connection
                                 :seon.cluster/name cluster-name
                                 :seon.db.process/id process
@@ -177,8 +176,6 @@
                                 :seon.cluster.wake/channel channel
                                 :seon.render/context-channel channel
                                 :seon.turn.loop/completion channel
-                                :seon.turn.loop/complete #'ai/complete
-                                :seon.sci.admit/caps (config/result-caps defaults)
                                 :seon.config.eval/time-limit-ms 2000})
                 outcome
                 (try
@@ -631,7 +628,8 @@
                          :seon.eval/shown value})))
         ;; `plan-tx` already minted ordinal 2; it stays unsettled, which is
         ;; what this test is about.
-        (let [prepared
+        (let [ctx (test-support/fork-cluster-ctx connection)
+              prepared
               (terminal-data
                {:seon.turn.loop/cluster
                 (test-support/cluster-handle
@@ -641,15 +639,20 @@
                   :seon.db/connection connection
                   :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
                   :seon.db.process/id process
-                  :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
+                  :seon.sci.eval/ctx ctx})
                 :seon.turn.loop/now now
                 :seon.agent/id agent-id
                 :seon.turn/id run-id
                 :seon.db.process/id process
                 :seon.cluster.eval/ordinal 2
                 :seon.sci.eval/evaluation
-                {:seon.eval/shown "3"
-                 :seon.sci.admit/value 3}
+                (test-support/evaluate
+                 {:seon.cluster.eval/source "3"
+                  :seon.sci.eval/ctx ctx
+                  :seon.cluster.eval/ns [:seon.ns/name 'my.agents.undisposed-agent]
+                  :seon.sci.admit/caps (config/result-caps config/defaults)
+                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                  :seon.db/connection connection})
                 :seon.message/trigger message-id})]
           (test-support/transacted! connection (:seon.db/tx-data prepared)))
         (let [terminal
@@ -1013,7 +1016,8 @@
                                   ;; Keep the real writer's diagnostic.
                                   refusal))
                               (publish conn staged-writes commit-roots!)))]
-              ((private-loop-fn 'settle-batch!) cluster requests))
+              ((private-loop-fn 'settle-batch!) cluster requests
+                                              (test-support/empty-program connection ctx)))
             database @connection
             evaluations
             (db/q '[:find ?ordinal ?error

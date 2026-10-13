@@ -1,6 +1,5 @@
 (ns seon.cluster.evaluate-sources-test
-  (:require [seon.ai :as ai]
-            [clojure.core.async :as async]
+  (:require  [clojure.core.async :as async]
             [clojure.test :refer [deftest is]]
             [seon.blob :as blob]
             [seon.agent :as my.agent]
@@ -57,7 +56,7 @@
                     :seon.agent/id "preview-batch-agent"})
            defaults config/defaults
            channel (async/chan 1)
-           cluster (merge defaults
+           cluster (support/cluster-handle
                           {:seon.db/connection connection
                            :seon.cluster/name "preview-batch"
                            :seon.db.process/id "preview-test"
@@ -65,8 +64,6 @@
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
-                           :seon.turn.loop/complete #'ai/complete
-                           :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000})
            raw-source (str "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"later-agent\"])\n"
                          "(in-ns 'preview.batch-next)\n"
@@ -235,7 +232,7 @@
                     :seon.agent/id "profile-once-agent"})
            defaults config/defaults
            channel (async/chan 1)
-           cluster (merge defaults
+           cluster (support/cluster-handle
                           {:seon.db/connection connection
                            :seon.cluster/name "profile-once"
                            :seon.db.process/id "profile-once-test"
@@ -243,8 +240,6 @@
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
-                           :seon.turn.loop/complete #'ai/complete
-                           :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000})
            sources (mapv (fn [ordinal]
                            {:seon.cluster.eval/source (str "(+ 1 " ordinal ")")})

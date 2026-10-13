@@ -458,6 +458,24 @@
       (seq output) (assoc :seon.cluster.eval/output output)
       (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
 
+(defn empty-program
+  "The program argument of `seon.turn/settle-batch!` for a batch whose forms
+  proposed no program change: the fold's request over `connection` and `ctx`,
+  an empty program and no changes."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx] :map]}
+  [connection ctx]
+  {:seon.batch/request
+   (code-request
+    {:seon.batch/world (world/world {:seon.boot/cluster-name "default"
+                                     :seon.db/connection connection
+                                     :seon.sci.eval/ctx ctx
+                                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                     :seon.batch/sink (seon.batch/sink)})
+     :seon.batch/basis (db/db connection)
+     :seon.batch/text ""})
+   :seon.batch/program {}
+   :seon.batch/changes []})
+
 (defn define!
   "The transaction report of `source` run as `world`'s agent in `namespace-name`
   through the fold, its program facts (`seon.turn.batch/program-facts`) written
