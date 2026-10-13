@@ -48,6 +48,8 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
+            [seon.operator.runtime :as operator.runtime]
+            [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
@@ -2367,3 +2369,44 @@ handle))}}
                (set (map #(.attr ^Element % "value")
                          (.select (dom body) ".seon-session-actions input[name=action]"))))
             "the rendered session offers its three system actions")))))
+
+;;; TASK-CHAIN I1 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): a user's reply reaches the asking agent's branch.
+
+(deftest ^{:seon/tasks #{'seon.task/chain-intake-replies}}
+  a-user-reply-post-wakes-the-addressed-agent
+  (support/with-running-agent
+   (fn [running bystander connection]
+     ;; the user: an addressable agent with an inbox and no model graph
+     (support/transacted! connection (support/agent-tx (db/db connection) "user"))
+     (let [{survey :seon.db/connection reply :seon.test/reply}
+           (support/own-branch-agent! running "survey"
+                                      "(my.message/send {:my.message/to \"user\" :my.message/content \"Approve this intent?\"})")
+           sent (:seon.repl/value (support/mcp-reply reply))
+           question (:seon.message/id sent)
+           handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
+           pass! #(cluster.agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
+                                           :seon.flow/plan :seon.agent/test-wake)]
+       (is (nil? (:seon.error/type sent)) "a send to the user is accepted though the user runs no graph")
+       (is (string? question) "the send answers its accepted message id")
+       (pass!)
+       (is (= "user" (get-in (db/pull (db/db connection) [{:seon.message/to [:seon.agent/id]}] [:seon.message/id question])
+                             [:seon.message/to :seon.agent/id]))
+           "the question to the user is persisted on main, where the user's chat shows it")
+       (let [response ((web/handler (service-request connection {:seon.agent/id "user"}))
+                       {:request-method :post :uri "/agent/survey/message"
+                        :headers {"content-type" "application/x-www-form-urlencoded"}
+                        :body (java.io.ByteArrayInputStream.
+                               (.getBytes (str "content=Approve&caused-by=" (URLEncoder/encode (str question) "UTF-8")) "UTF-8"))})]
+         (is (= 204 (:status response)) "the reply form's POST is admitted"))
+       ;; root's delivery to the recipient's branch
+       (pass!)
+       (let [branch (db/db survey)
+             reply-id (db/q '[:find ?id . :in $ ?q
+                              :where [?c :seon.message/id ?q] [?m :seon.message/caused-by ?c] [?m :seon.message/id ?id]]
+                            branch question)]
+         (is (some? reply-id) "the reply, caused by the question, is delivered to survey's own branch")
+         (is (= "user" (get-in (db/pull branch [{:seon.message/from [:seon.agent/id]}] [:seon.message/id reply-id])
+                               [:seon.message/from :seon.agent/id]))
+             "its sender is the service's admitted user, never a form field")
+         (is (turn/more-agent-work? branch {:seon.agent/id "survey"}) "survey has the reply as an unanswered wake"))
+       (is (not (turn/more-agent-work? (db/db connection) {:seon.agent/id bystander})) "another agent is not woken")))))

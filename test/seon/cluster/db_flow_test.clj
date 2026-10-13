@@ -18,6 +18,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.schedule :as schedule]
             [seon.flow :as flow]
             [seon.fn]
             [seon.program]
@@ -1424,3 +1425,44 @@
         "the reopen action names its target")
     (is (= #{:unfinished-task} (set (keep :seon.flow.plan/class (actions {:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0}))))
         "the problem is an unfinished task")))
+
+(deftest ^{:seon/tasks #{'seon.task/chain-actions}}
+  every-agent-start-has-a-task
+  ;; root ruling: a graph starts only from an assignment, and `seon.cluster.agent/plan` is the one owner that starts it
+  (binding [*space* "tq.taskless"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"z" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)]
+            ;; root's maintenance schedules, as boot seeds them: root holds no assignment for them on HEAD
+            (test-support/transacted! connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])
+            (let [planned (agent/plan (agent/plan-facts (db/db connection)) (plan-registry) 4)]
+              (is (seq (filter #(= :start-flow (:seon.flow.plan/op %)) planned)) "the plan starts the task's attempt")
+              (is (every? :seon.task/assignment (filter #(= :start-flow (:seon.flow.plan/op %)) planned))
+                  "every start the plan returns names an assignment"))
+            (is (seq (db/q '[:find [?t ...] :where [?r :seon.agent/id "root"] [?t :seon.schedule.task/owner ?r]] (db/db connection)))
+                "root owns scheduled work")
+            (try
+            (pass! handle routing)
+            (let [started (into (set (keys (:seon.agent/started @routing)))
+                                (mapcat (comp keys :seon.agent/started deref val))
+                                (:seon.agent/children @routing))
+                  assigned (set (db/q '[:find [?id ...] :where [?a :seon.task/assignment] [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                                      (db/db connection)))]
+              (is (seq started) "the pass started the assignment's graph")
+              (is (= #{} (into #{} (remove assigned) started))
+                  "no graph starts without an assignment")
+              (is (not (contains? started "root"))
+                  "a schedule owner with no assignment is not started"))
+            (finally
+              ;; whatever the pass started outside an attempt branch is stopped and released here
+              (doseq [agent-id (keys (:seon.agent/started @routing))]
+                (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing routing}))
+              (doseq [child (vals (:seon.agent/children @routing))]
+                (doseq [agent-id (keys (:seon.agent/started @child))]
+                  (agent/stop-flow! {:seon.agent/id agent-id :seon.agent/routing child}))
+                (doseq [execution (vals (:seon.agent/contexts @child))
+                        :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                  (agent/release-context! execution))))))))))))
