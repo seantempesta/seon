@@ -2,7 +2,7 @@
   "The task tree (runtime-follows-db §2): child tasks and needs as facts, the writer's
   needs-cycle refusal, the attempt and firing facts adopted on a branch of the live store."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is are]]
+            [clojure.test :refer [deftest is are testing]]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.id :as id]
@@ -347,10 +347,73 @@
 
 (deftest ^{:seon/tasks #{'seon.task/chain-obligations}}
   one-selector-serves-every-proof-consumer
-  ;; TASK-CHAIN A1, census half: over analysis data, only `seon.task/obligations` reads `:seon.task/tasks` to select
-  ;; proofs; writers, links, dangling, triage and task-edges' subjects read it for their own purpose.
-  (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/candidate-dangling seon.task/open-tasks seon.task/task-edges
-                   seon.task/task-findings}
-        readers (db/q '[:find [?s ...] :where [?e :seon.fn/keywords :seon.task/tasks] [?e :seon.fn/sym ?s]] (db/db))]
-    (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
-        "no other source function selects proofs by tag")))
+  ;; TASK-CHAIN A1 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one selector over main, candidate and base
+  (test-support/with-database
+   (fn [connection]
+     (ingest! connection (entry "fix" ""))
+     (let [obligations (requiring-resolve 'seon.task/obligations)
+           gate (fn [tagged] (test-support/declare-source!
+                              connection 'tq.gates
+                              (str "(ns tq.gates (:require [clojure.test :refer [deftest is]]))\n"
+                                   (str/join (for [t '[g h]]
+                                               (str "(deftest " (when (tagged t) "^{:seon/tasks #{'tq.tree/fix}} ") t " (is (= 1 2)))\n"))))))
+           _ (gate #{'g})
+           base (db/db connection)
+           ;; the candidate removes G's tag and adds H
+           _ (gate #{'h})
+           candidate (db/db connection)
+           ;; root removes G on main
+           _ (gate #{})
+           moved (db/db connection)]
+       (is (= '#{tq.gates/g tq.gates/h} (:seon.task/proofs (obligations base candidate base 'tq.tree/fix)))
+           "main still requires G and the candidate adds H")
+       (is (= '#{tq.gates/h} (:seon.task/proofs (obligations moved candidate base 'tq.tree/fix)))
+           "root's removal on main applies; the base's inherited gate is no candidate addition")
+       (is (= (task/obligations candidate 'tq.tree/fix) (obligations candidate candidate candidate 'tq.tree/fix))
+           "the two-argument arity is the three-basis one over one value"))))
+  (testing "census: only the selector reads tags to select proofs"
+    (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/candidate-dangling seon.task/open-tasks
+                     seon.task/task-findings seon.task/task-edges seon.cluster.agent/render-identity-html}
+          readers (db/q '[:find [?s ...] :where [?e :seon.fn/keywords :seon.task/tasks] [?e :seon.fn/sym ?s]] (db/db))]
+      (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
+          "writers, links, dangling, triage, task-edges' subjects and namespace tag display read tags for their own purpose"))))
+
+(def ^:private step-templates
+  "The five off-the-shelf templates, in chain order."
+  '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement])
+
+(deftest ^{:seon/tasks #{'seon.task/chain-templates}}
+  one-write-clones-a-chain-and-one-running-readies-survey
+  ;; TASK-CHAIN A3 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`)
+  (test-support/with-database
+   (fn [connection]
+     (let [chain! (requiring-resolve 'seon.task/chain!)
+           subject {:seon.task/ns 'work :seon.task/name "fix" :seon.task/intent "Fix the observed failure."}
+           copy (fn [template] (task/task-handle 'work (str (name template) "-fix")))
+           report (chain! connection subject step-templates {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}})
+           database (db/db connection)
+           pulled (fn [template] (db/pull database [:seon.task/instructions :seon.task/execution :seon.task/proofs
+                                                   {:seon.task/needs [:seon.task/id]}]
+                                          [:seon.task/id (copy template)]))]
+       (is (= 1 (count (into #{} (map :tx) (:tx-data report)))) "the subject, five copies and needs are one transaction")
+       (is (= (set (map copy step-templates))
+              (set (map :seon.task/id (:seon.task/children (db/pull database [{:seon.task/children [:seon.task/id]}]
+                                                                     [:seon.task/id (task/task-handle 'work "fix")])))))
+           "the subject's children are the five copies")
+       (is (= [[] [(copy 'seon.step/survey)] [(copy 'seon.step/define)] [(copy 'seon.step/design)] [(copy 'seon.step/prove)]]
+              (mapv #(mapv :seon.task/id (:seon.task/needs (pulled %))) step-templates))
+           "each copy needs the one before it")
+       (is (= (:seon.task/instructions (db/pull database [:seon.task/instructions] [:seon.task/sym 'seon.step/survey]))
+              (:seon.task/instructions (pulled 'seon.step/survey)))
+           "a copy carries its template's instructions")
+       (is (= '#{tq.gates/root-gate} (:seon.task/proofs (pulled 'seon.step/prove))) "root's customization is on its copy")
+       (is (= [:held nil nil nil nil nil]
+              (mapv #(:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id %]))
+                    (cons (task/task-handle 'work "fix") (map copy step-templates))))
+           "only the subject starts held")
+       (is (= #{(copy 'seon.step/survey)}
+              (task/ready (db/with database [[:db/add [:seon.task/id (task/task-handle 'work "fix")] :seon.task/execution :running]])))
+           "running the subject readies Survey only")
+       (is (empty? (remove #(= (:e %) (:tx %)) (:tx-data (chain! connection subject step-templates
+                                                               {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}}))))
+           "an identical construction changes nothing")))))

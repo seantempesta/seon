@@ -407,3 +407,26 @@
               [#(program/source (db/db connection) 'no.such/thing) #(and (= 'no.such/thing (:seon.program/not-found %)) (string? (:seon.error/fix %))) "an unknown symbol names the form that works"]
               [#(program/callers {:seon.db/db (db/db connection) :seon.program/subject 'no.such/thing}) #(and (= 'no.such/thing (:seon.program/not-found %)) (string? (:seon.error/fix %))) "a read of an unknown subject names the form that works"]]]
        (is (check (call)) message)))))
+
+;;; TASK-CHAIN I0 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`), over the link-statement experiment's requests
+;;; (`docs/research/agent-platform/2026-10-13/link-statement-experiment.md`).
+
+(deftest ^{:seon/tasks #{'seon.task/chain-intake-search}}
+  intake-search-finds-owners-with-candidate-costs
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           test-match? #(clojure.string/ends-with? (namespace (:sym % 'x/x)) "-test")]
+       (testing "a schema key is offered itself, with its producer"
+         (let [[first-match] (:matches (program/search database :seon.message/id))]
+           (is (= :seon.message/id (:seon.schema/key first-match)) "the key ranks first, not merely its users")
+           (is (some? (:my.program/producer first-match)) "with the declaration that produces it")))
+       (doseq [[query owner] [["program context" 'seon.sci.eval/program-context]
+                              ["current-state block" 'seon.context/current-state]]]
+         (let [result (program/search database query)]
+           (is (= owner (:sym (first (:matches result)))) "the vocabulary word finds its owner first")
+           (is (every? #(nat-int? (:my.program/candidate-tokens %)) (:matches result))
+               "each candidate reports its token cost before expansion")
+           (is (not-any? (complement test-match?) (drop-while (complement test-match?) (:matches result)))
+               "owners precede tests")
+           (is (= result (program/search database query)) "ranking is deterministic")))))))

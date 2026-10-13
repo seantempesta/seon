@@ -1388,3 +1388,39 @@
                   (is (= (id/id [(chain-handle "e") 3])
                          (:seon.task/assignment (first (task/attempt-tx (db/db connection) (chain-handle "e") agent-2 :tq-p2))))
                       "the next attempt is the third")))))))))))
+
+;;; TASK-CHAIN A6 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): every end's actions come from one derivation.
+
+(deftest ^{:seon/tasks #{'seon.task/chain-actions}}
+  ends-share-one-action-owner
+  (let [c1 (random-uuid) c2 (random-uuid)
+        held (fn [observed] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
+                                 :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
+                                 :seon.flow.plan/head c2 :seon.flow.plan/started? false :seon.flow.plan/kept? false
+                                 :seon.flow.plan/allowance-left 1 :seon.flow.plan/exited? true
+                                 :seon.flow.plan/work-left? true :seon.flow.plan/refused? false}
+                                observed))
+        actions #(agent/next-actions [(held %)])
+        op-set #(set (map :seon.flow.plan/op (actions %)))]
+    (doseq [[observed expected why]
+            [[{:seon.task.attempt/end :capped :seon.flow.plan/started? true :seon.flow.plan/exited? false} #{:stop}
+              "an ended graph that has not exited only stops"]
+             [{:seon.task.attempt/end :capped} #{:relaunch} "a capped end with work and allowance left relaunches"]
+             [{:seon.task.attempt/end :stalled} #{:relaunch} "so does a stalled end"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/refused? true} #{:relaunch}
+              "so does a done end whose merge was refused"]
+             [{:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0 :seon.flow.plan/refused? true} #{:close :problem}
+              "spent allowance leaves the unfinished work visible: closed with a problem, never relaunched or deleted"]
+             [{:seon.task.attempt/end :sent-back :seon.task.attempt/target [:seon.task/id b] :seon.task.attempt/reason "The proof is wrong."}
+              #{:merge :reopen} "a send-back merges its work and reopens its target, never relaunching the sender"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/exited? false
+               :seon.flow.plan/work-left? false}
+              #{} "an accepted end retires only after its graph exits"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/work-left? false}
+              #{:delete-branch} "and then retires"]]]
+      (is (= expected (op-set observed)) why))
+    (is (= [[:seon.task/id b]] (keep :seon.task.attempt/target (filter #(= :reopen (:seon.flow.plan/op %))
+                                                       (actions {:seon.task.attempt/end :sent-back :seon.task.attempt/target [:seon.task/id b]}))))
+        "the reopen action names its target")
+    (is (= #{:unfinished-task} (set (keep :seon.flow.plan/class (actions {:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0}))))
+        "the problem is an unfinished task")))
