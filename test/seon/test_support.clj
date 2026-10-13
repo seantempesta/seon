@@ -1370,10 +1370,15 @@
 (defn with-running-agent
   "Run `body` with `(running agent-id connection)`: an armed agent on the member's
   branch, its cluster handle registered in `running-instances` under a key of
-  its own (the member's cluster name is shared), released afterwards."
-  {:malli/schema [:=> [:cat [:=> [:cat :string :seon.agent/id :seon.db/connection] :seon.schema/value]]
-                  :seon.schema/value]}
-  [body]
+  its own (the member's cluster name is shared), released afterwards. `members`
+  are handle members the caller sets, as a boot request sets the completer."
+  {:malli/schema [:function
+                  [:=> [:cat [:=> [:cat :string :seon.agent/id :seon.db/connection] :seon.schema/value]]
+                   :seon.schema/value]
+                  [:=> [:cat :map [:=> [:cat :string :seon.agent/id :seon.db/connection] :seon.schema/value]]
+                   :seon.schema/value]]}
+  ([body] (with-running-agent {} body))
+  ([members body]
   (let [target (execution-handle nil)
         connection (:seon.db/connection target)
         cluster-name (:seon.cluster/name target)
@@ -1393,10 +1398,11 @@
                                                                   flow/flow-workload-attributes)})
                           flow/stop-work-launcher!)]
       (let [handle (cluster-handle
-                    {:seon.env/environment world-environment :seon.db/connection connection :seon.cluster/name cluster-name
-                     :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
-                     :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                     :seon.db.process/id cluster/boot-process-identity})
+                    (merge {:seon.env/environment world-environment :seon.db/connection connection :seon.cluster/name cluster-name
+                            :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
+                            :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                            :seon.db.process/id cluster/boot-process-identity}
+                           members))
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (transacted! connection (agent-tx @connection agent-id))
         ;; The registry holds declared instances only (`:seon.boot/instance`),
@@ -1417,7 +1423,7 @@
             (agent/stop-flow! request)
             (doseq [channel [(:seon.cluster.wake/channel handle) (:seon.render/context-channel handle)
                              (:seon.turn.loop/completion handle)]]
-              (when channel (async/close! channel)))))))))
+              (when channel (async/close! channel))))))))))
 
 (defn reply-queue
   "A provider reply function answering `texts` (reply texts or assistant

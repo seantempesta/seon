@@ -1503,16 +1503,15 @@
            :seon.test/long "One launch of a five-step chain: five real SCI attempts, five merges each with its nested gate run, the user's reply and disposable publication, over db<->flow passes; unmeasured until its first green run."
            :seon.test/long-ms 120000}
   a-scripted-full-chain-completes-without-hand-acts
-  (test-support/with-running-agent
+  (let [calls (atom [])
+        complete (fn [_projection request]
+                   (let [index (count (swap! calls conj request))]
+                     (ai/completion-text {"choices" [{"message" {"content" (get full-chain-replies (dec index) "(my.turn/wait)")}
+                                                      "finish_reason" "stop"}]})))]
+   (test-support/with-running-agent
+   {:seon.turn.loop/complete complete}
    (fn [running _ connection]
      (let [chain! (requiring-resolve 'seon.task/chain!)
-           calls (atom [])
-           complete (fn [_projection request]
-                      (let [index (count (swap! calls conj request))]
-                        (ai/completion-text {"choices" [{"message" {"content" (get full-chain-replies (dec index) "(my.turn/wait)")}
-                                                         "finish_reason" "stop"}]})))
-           _ (swap! operator.runtime/running-instances update-in [running :seon.turn.loop/cluster]
-                    assoc :seon.turn.loop/complete complete)
            handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
            routing (:seon.agent/routing handle)
            subject (task/task-handle 'tq.fullchain "fix")
@@ -1551,4 +1550,4 @@
        (is (empty? (filter #(str/starts-with? (name %) "attempt-") (registry/branches (agent/handle-store handle))))
            "every attempt branch is retired")
        (is (= (count full-chain-replies) (count @calls)) "only scripted model calls were made: zero paid calls")
-       (is (number? (:seon.profile/ms measured)) "the chain's end-to-end time is measured")))))
+       (is (number? (:seon.profile/ms measured)) "the chain's end-to-end time is measured"))))))
