@@ -182,8 +182,12 @@
             (is (= 1 (:seon.test/error-count result)))
             (is (= :seon.error/unimplemented (:seon.error/type (first (reports result)))))
             (is (= :done (:seon.task/status
-                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s}
-                                                :seon.context/head head :seon.context/fork-point {}}))))))))))
+                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s} :seon.context/head head
+                                                :seon.context/candidate (db/db connection) :seon.context/main (db/db connection)
+                                                :seon.source/judged {:seon.source/members #{s} :seon.task/proofs #{s} :seon.task/product #{s}
+                                                                     :seon.source/results (runner/latest-results (db/db connection) [s])
+                                                                     :seon.program/identities #{} :seon.test.run/branch :tq-branch
+                                                                     :seon.test.run/id (second (:seon.test/run (first (runner/latest-results (db/db connection) [s]))))}}))))))))))
 
 (deftest an-error-its-subject-throws-is-a-prove-steps-designed-red
   ;; the gap a Prove step's product shows may be a throw: its test is red by error, and that red is its product
@@ -199,8 +203,12 @@
             (is (= 1 (:seon.test/error-count result)) "the thrown exception is the test's one error")
             (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s])))) "the merge gate's predicate counts it")
             (is (= :done (:seon.task/status
-                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s}
-                                                :seon.context/head head :seon.context/fork-point {}}))))))))))
+                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s} :seon.context/head head
+                                                :seon.context/candidate (db/db connection) :seon.context/main (db/db connection)
+                                                :seon.source/judged {:seon.source/members #{s} :seon.task/proofs #{s} :seon.task/product #{s}
+                                                                     :seon.source/results (runner/latest-results (db/db connection) [s])
+                                                                     :seon.program/identities #{} :seon.test.run/branch :tq-branch
+                                                                     :seon.test.run/id (second (:seon.test/run (first (runner/latest-results (db/db connection) [s]))))}}))))))))))
 
 (deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database

@@ -2126,9 +2126,8 @@
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run."
            :seon.test/long-ms 30000}
   the-test-step-writes-nothing-on-main
-  ;; `identity-test` reaches `area`, exists at the fork point and was never run there: the step runs it once at
-  ;; the fork commit in the agent's own world, finds it green there and red at the head, and records it broken
-  ;; on the agent's branch. Main is never read for the verdict nor written.
+  ;; `identity-test` reaches `area` and goes red at the head; main holds no red result for it, so the step's
+  ;; preview of its merge names it the change's own red. Main is never written.
   (support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "broken-" (id/id))
@@ -2149,9 +2148,10 @@
        (mcp/call (json/write-str {"name" "eval_clj"
                                   "arguments" {"code" "(in-ns 'tq.brk)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))"
                                                "agent" agent-id "cluster" running}}))
-       (is (= #{'tq.brk/identity-test}
-              (set (:seon.agent/broken (db/pull (db/db target) [:seon.agent/broken] [:seon.agent/id agent-id]))))
-           "the step recorded what the change broke on the agent's branch")
+       (is (= [{:seon.test/sym 'tq.brk/identity-test :seon.source/verdict :red}]
+              (->> (:seon.source/refusals ((requiring-resolve 'seon.context/step-verdict) (db/db target) agent-id))
+                   (mapcat :seon.source/red-tests) (mapv #(select-keys % [:seon.test/sym :seon.source/verdict]))))
+           "the step's preview of its merge names what the change broke, read on the agent's branch")
        (is (= before (db/commit-id (db/db connection))) "and main's head did not move")))))
 
 (deftest ^{:seon.test/long "An own-branch agent's setup and one assignment."

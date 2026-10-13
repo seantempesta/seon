@@ -357,7 +357,7 @@
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt 'seon.context/a-proof-green-before-the-work-is-not-done}}
   a-task-satisfied-at-the-base-opens-no-model-turn
-  ;; the prove pass runs the proof at the base program: green there, the step has nothing to do
+  ;; the prove pass runs the proof at the base program: green there, the merge would accept, so no model turn opens
   (binding [*space* "tq.chaing"]
   (test-support/with-database
    (fn [connection]
@@ -370,17 +370,17 @@
               _ (await-on! on-branch #(:green (:seon.context/counts (context/proofs (db/db on-branch) (symbol *space* "g")))) ::g-proved)
               branch-db (db/db on-branch)
               verdict (context/step-verdict branch-db agent-id)]
-          (is (= :satisfied (:seon.task/status verdict)) "its proof was green at its fork point")
-          (is (= #{(proof "g")} (:seon.context/green-before verdict)) "and names it")
+          (is (= :done (:seon.task/status verdict)) "its proof green at the base: its merge would accept as it stands")
           (is (nil? (turn/next-agent-work branch-db {:seon.agent/id agent-id})) "no model turn opens")
           (is (zero? (model-turns branch-db agent-id)) "none was taken")
-          (is (= :satisfied (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+          (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
                                                          (db/db on-branch) key)
                                        ::g-ended))
-              "it ends satisfied, never done"))))))))
+              "it ends done, a proposal root's merge decides"))))))))
 
-(deftest a-prove-step-whose-product-main-holds-closes-satisfied-and-its-successor-forks-main
-  ;; the product, the successor's proof red by design, is on main before the Prove step forks: nothing to do
+(deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
+  ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
+  ;; accept as it stands, so it ends done with no model call and root's merge completes it
   (binding [*space* "tq.chainheld"]
   (test-support/with-database
    (fn [connection]
@@ -394,11 +394,11 @@
               end (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
                                               (db/db on-branch) key)
                              ::held-product-ended)]
-          (is (= :satisfied end) "the Prove step ends satisfied")
+          (is (= :done end) "the Prove step ends done")
           (is (zero? (model-turns (db/db on-branch) agent-id)) "with no model call")
           (pass! handle routing)
-          (is (= :closed (db/q '[:find ?o . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task/outcome ?o]] (db/db connection) key))
-              "main closes it without a merge")
+          (is (= :merged (db/q '[:find ?o . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task/outcome ?o]] (db/db connection) key))
+              "main merges it through an accepted candidate")
           (is (task/done? (db/db connection) (chain-handle "p")) "its successor's need is met")
           (is (contains? (task/ready (db/db connection)) (chain-handle "i")) "its successor is ready")
           (pass! handle routing)
@@ -1249,8 +1249,7 @@
                     on-2 (when branch-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2}))
                     step (when on-2 (:seon.context/step (context/current-state (db/db on-2) agent-2)))]
                 (is (string? key-2) "the second attempt starts")
-                (is (= {:seon.task/status :working :seon.context/uncontracted [doubled]}
-                       (select-keys step [:seon.task/status :seon.context/uncontracted]))
+                (is (= [:working [doubled]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
                     "its block names the uncontracted helper the merge refused")
                 ;; the second attempt re-touches only the helper; twice keeps attempt 1's change
                 (await-on! on-2 #(not-empty (proof-runs (db/db on-2) (symbol rows "proves-u"))) ::proved-2)

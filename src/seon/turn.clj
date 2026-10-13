@@ -65,26 +65,18 @@
   (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private context-step-verdict
   (delay (requiring-resolve 'seon.context/step-verdict)))
-(defonce ^:private context-task-finished?
-  (delay (requiring-resolve 'seon.context/task-finished?)))
+(defonce ^:private context-task-done?
+  (delay (requiring-resolve 'seon.context/task-done?)))
 (defonce ^:private context-end-summary-tx
   (delay (requiring-resolve 'seon.context/end-summary-tx)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
   (delay (requiring-resolve 'seon.test.runner/latest-results)))
-(defonce ^:private test-changes
-  (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-request-changes
   (delay (requiring-resolve 'seon.test/request-changes)))
 (defonce ^:private test-reaching
   (delay (requiring-resolve 'seon.test/reaching)))
-(defonce ^:private test-fork-point-red
-  (delay (requiring-resolve 'seon.test/fork-point-red)))
-(defonce ^:private context-step-observation
-  (delay (requiring-resolve 'seon.context/step-observation)))
-(defonce ^:private context-step-status
-  (delay (requiring-resolve 'seon.context/step-status)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -2148,8 +2140,8 @@
         database agent-id))
 
 (defn task-end
-  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` or `:satisfied` as its
-  step is (`seon.context/step-verdict`), `:sent-back` once a turn completed naming the task that owns the mistake
+  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` when its step's
+  preview of the merge refuses nothing (`seon.context/step-verdict`), a proposal root's merge decides, `:sent-back` once a turn completed naming the task that owns the mistake
   (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."
@@ -2158,7 +2150,7 @@
   (let [held (task/agent-task database agent-id)]
     (when (and (string? held) (not (admission-closed? database agent-id)) (nil? (agent-run database agent-id)))
       (let [status (:seon.task/status (@context-step-verdict database agent-id))]
-        (cond (#{:done :satisfied} status) status
+        (cond (= :done status) :done
               (sent-back-to database agent-id) :sent-back
               (db/q '[:find ?turn . :in $ ?agent-id
                       :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
@@ -2235,15 +2227,15 @@
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose first proof run on `database`, its branch, came
-  after every answering turn (`latest-answering-turn-t`) and its step is neither done nor satisfied
-  (`seon.context/task-finished?`): that red run is the attempt's work, answered by the model turn it opens."
+  after every answering turn (`latest-answering-turn-t`) and its step is not done
+  (`seon.context/task-done?`): that red run is the attempt's work, answered by the model turn it opens."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/handle] :boolean]}
   [database agent-id handle]
   (let [proved-t (first-proof-run-t database agent-id)]
     (boolean (and (int? proved-t)
                   (attempt-running? database handle)
                   (> proved-t (latest-answering-turn-t database agent-id))
-                  (not (@context-task-finished? database agent-id))))))
+                  (not (@context-task-done? database agent-id))))))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2263,7 +2255,7 @@
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition (`continuing-reply?`), and never once the held
-  task's step is done or satisfied (`seon.context/task-finished?`). An agent whose task
+  task's step is done (`seon.context/task-done?`). An agent whose task
   ended (`task-end`, recorded by `end-task-call`) has its admission closed and
   is given no work, whatever wakes it.
   Virtual and system replies never authorize continuation.
@@ -2323,7 +2315,7 @@
               (when (or (seq wakes)
                         (proved-unanswered? db agent-id held)
                         (and (continuing-reply? db agent-id)
-                             (not (@context-task-finished? db agent-id))))
+                             (not (@context-task-done? db agent-id))))
                 (cond->
                  {:seon.turn.work/situation :open
                   :seon.agent/id agent-id}
@@ -5283,8 +5275,8 @@
 
 (defn- prove-turn
   "A fresh attempt's first pass: run its task's proofs in the agent's world, recorded on its branch, with no
-  model call and no form: the run at the base program, so a step whose proofs are all green there is
-  `:satisfied` (`seon.context/step-status`) and opens no model turn; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
+  model call and no form: the run at the base program, so a step whose merge would already accept it is
+  `:done` (`seon.context/step-status`) and opens no model turn; a run that could not happen is the pass's refusal, which the turn proc's write-refusal
   bound parks after its repeats."
   {:malli/schema [:=> [:cat :map] :seon.turn.loop/turn-report]}
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work report :seon.turn.loop/report}]
@@ -5440,49 +5432,17 @@
   [database]
   (registry/base-commit-id database (get-in database [:config :branch])))
 
-(defn- record-broken!
-  "Judge the step of the task `agent-id` holds on its branch, `execution`'s, against its fork point
-  (`seon.context/step-status`): the head is its obligations and the tests reaching its whole change
-  (`seon.test/changes`), derived only for an agent holding a task;
-  each red there is looked up at the fork point (`seon.test/fork-point-red`, in the agent's own world, bounded
-  by `limit-ms`). Records the verdict's broken and new reds on the agent's row on its branch, replacing the
-  previous step's, and answers the broken tests, sorted. Nothing is read or written on main."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int?]
-                  [:or [:vector :seon.test/sym] :seon.error/value]]}
-  [execution agent-id limit-ms]
-  (let [connection (:seon.db/connection execution)
-        database (db/db connection)
-        handle (task/agent-task database agent-id)
-        sym (when (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
-        changed (when sym (@test-changes execution connection))
-        reached (cond (nil? sym) []
-                      (not (:seon.error/at changed)) (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)})
-                      (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) []
-                      :else changed)
-        ;; the head: every reached test, judged as new until the fork point says otherwise
-        head (when (and sym (sequential? reached))
-               (@context-step-observation database agent-id sym {:seon.context/broken #{} :seon.context/new-red (set reached)}))
-        reds (when (map? head)
-               (into [] (comp (filter #(= :red (:seon.context/proof-status (val %)))) (map key)) (:seon.context/head head)))
-        commit (when (seq reds) (fork-commit database))
-        fork-point (cond (empty? reds) {}
-                         commit (@test-fork-point-red execution commit reds limit-ms)
-                         ;; no fork: the head is its own fork point
-                         :else (zipmap reds (repeat true)))
-        verdict (when (and (map? head) (not (:seon.error/at fork-point)))
-                  (@context-step-status (assoc head :seon.context/fork-point fork-point)))
-        record (fn [attribute tests]
-                 (let [held (set (get (db/pull database [attribute] [:seon.agent/id agent-id]) attribute))]
-                   (into (mapv #(vector :db/retract [:seon.agent/id agent-id] attribute %) (remove tests held))
-                         (map #(vector :db/add [:seon.agent/id agent-id] attribute %) (remove held tests)))))
-        tx (when verdict
-             (into (record :seon.agent/broken (:seon.context/broken verdict))
-                   (record :seon.agent/new-red (:seon.context/new-red verdict))))
-        written (when (seq tx) (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
-    (if (nil? sym)
-      []
-      (or (some #(when (:seon.error/at %) %) [reached head fork-point written])
-          (vec (sort (:seon.context/broken verdict)))))))
+(defn- step-reds
+  "The tests the step of the task `agent-id` holds leaves red as its change's own, sorted: those the preview of
+  its merge (`seon.context/step-verdict` over its branch, `execution`'s) names `:red`. Reads only; nothing is
+  written on the branch or on main."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id] [:or [:vector :seon.test/sym] :seon.error/value]]}
+  [execution agent-id]
+  (let [verdict (@context-step-verdict (db/db (:seon.db/connection execution)) agent-id)]
+    (if (:seon.error/at verdict)
+      verdict
+      (into [] (comp (filter #(= :red (:seon.source/verdict %))) (map :seon.test/sym) (distinct))
+            (sort-by (comp str :seon.test/sym) (mapcat :seon.source/red-tests (:seon.source/refusals verdict)))))))
 
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching what the run changed
@@ -5509,11 +5469,11 @@
               left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))
               reaching (run-reaching execution (max 1 left) changed platform)
               ;; a derivation that fails is shown beside the step's values, never in place of them
-              red (try (record-broken! execution agent-id limit)
+              red (try (step-reds execution agent-id)
                        (catch Throwable failure
                          (or (error/refusal failure)
                              (seon.error.refusal/diagnostic
-                              (Date.) :seon.turn/test-step `record-broken!
+                              (Date.) :seon.turn/test-step `step-reds
                               {:seon.error/message "The tests the change broke could not be judged."
                                :seon.error/exception-class (.getName (class failure))}))))]
           (some-> (summary (ran-something proofs) (ran-something reaching) platform)

@@ -188,7 +188,7 @@
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/platform {:optional true} :seon.turn.loop/platform]
-                  [:seon.turn.loop/broken {:optional true :description "The tests the agent's change broke, as its step judged them (seon.context/step-status) and recorded on its row (:seon.agent/broken); or why they could not be judged. Absent when none."} [:or [:vector {:min 1} :seon.test/sym] :seon.error/value]]
+                  [:seon.turn.loop/broken {:optional true :description "The tests the agent's change leaves red as its own, as the preview of its merge names them (seon.context/step-verdict, seon.cluster.source/results-verdict); or why they could not be judged. Absent when none."} [:or [:vector {:min 1} :seon.test/sym] :seon.error/value]]
                   [:seon.cost/tests {:optional true} :seon.cost/tests]
                   [:seon.cost/live-tests {:optional true} :seon.cost/live-tests]],
                  :tests :seon.turn.loop/test-summary,

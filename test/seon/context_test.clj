@@ -454,83 +454,51 @@
            "the recorded outcome is what the branch showed")
        (is (= {:green 1} (:seon.task/proof-counts from-branch)) "the task's one proof is green")))))
 
-(deftest ^{:seon/tasks #{'seon.turn/the-test-step-writes-nothing-on-main
-                         'seon.context/a-proof-green-before-the-work-is-not-done}}
-  each-step-kind-is-done-by-its-one-rule
-  ;; head: each test's status at the step's branch head; fork point: the tests it held, true when red there
-  (let [green {:seon.context/proof-status :green}
-        red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
-        errored {:seon.context/proof-status :red :seon.context/proof-failures [{:type :error}]}
-        unimplemented {:seon.context/proof-status :red :seon.context/proof-failures [{:type :error :seon.error/type :seon.error/unimplemented}]}
-        pending {:seon.context/proof-status :pending}
-        judged (fn [step proofs product head fork-point]
-                 (context/step-status {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
-                                       :seon.context/head head :seon.context/fork-point fork-point}))]
-    (doseq [[step proofs product head fork-point status broken new-red why green-before]
-            [[:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p true} :done #{} #{} "its proof green, nothing broken"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p false} :satisfied #{} #{} "its proof known green at the fork point: nothing to do" #{'tq.rule/p}]
-             [:implement #{'tq.rule/p 'tq.rule/u} #{} {'tq.rule/p green 'tq.rule/u green} {'tq.rule/p true 'tq.rule/u false} :done #{} #{} "an existing green test tagged beside its red proof" #{'tq.rule/u}]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {} :done #{} #{} "an unknown fork point result is never green"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p false} :working #{'tq.rule/p} #{} "a proof green at the fork point that the change broke" #{'tq.rule/p}]
-             [:implement #{} #{} {} {} :working #{} #{} "no proof proves nothing"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} :working #{} #{} "its proof red"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p pending} {'tq.rule/p true} :working #{} #{} "its proof unrun at its reach"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/r red} {'tq.rule/p true 'tq.rule/r false} :working #{'tq.rule/r} #{} "a test green at the fork point is red"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/r red} {'tq.rule/p true 'tq.rule/r true} :done #{} #{} "a test already red at the fork point is not broken"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green 'tq.rule/n red} {'tq.rule/p true} :working #{} #{'tq.rule/n} "a new red is no implement step's work"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} :done #{} #{'tq.rule/s} "its product red by assertions, new"]
-             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q green 'tq.rule/s red} {'tq.rule/q true} :done #{} #{'tq.rule/s} "with its own proof green"]
-             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true} :working #{} #{'tq.rule/s} "its own proof red"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s unimplemented} {} :done #{} #{'tq.rule/s} "its product red by an unimplemented stub"]
-             [:prove #{} #{} {} {} :working #{} #{} "no product"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} :working #{} #{} "its product green proves nothing"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :done #{} #{'tq.rule/s} "its product red by an error its subject threw"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s {:seon.context/proof-status :red}} {} :working #{} #{'tq.rule/s} "a red with no failing report ran nothing"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :satisfied #{} #{} "a product its fork point already held, red by design: nothing to do"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {'tq.rule/s true} :satisfied #{} #{} "a product its fork point already held, red by an error: nothing to do"]
-             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true 'tq.rule/s true} :working #{} #{} "a product held at the fork point beside its own proof red"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]
-             [:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red} {'tq.rule/s true} :working #{} #{} "a declared product test absent beside one its fork point held"]
-             [:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red 'tq.rule/l red} {'tq.rule/s true} :done #{} #{'tq.rule/l} "the absent product test supplied beside one its fork point held"]]]
-      (is (= (cond-> {:seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
-               green-before (assoc :seon.context/green-before green-before))
-             (judged step proofs product head fork-point))
-          why))))
+(defn- result
+  "A recorded result of test `s` with `pass`, `fail` and `error` counts, and `reports` when red by a report."
+  ([s pass fail error] (result s pass fail error nil))
+  ([s pass fail error reports]
+   (cond-> {:seon.test/sym s :seon.test/pass-count pass :seon.test/fail-count fail :seon.test/error-count error
+            :seon.test/run-basis-t 1 :seon.test/run-at #inst "2026-10-13T00:00:00Z" :seon.test/run [:seon.test.run/id "a1b2c3d4e5f6"]}
+     reports (assoc :seon.test.failure/reports reports))))
 
-(deftest a-step-section-shows-what-its-rule-counted
-  ;; a :working step names the broken and new reds its one rule judged, so the agent sees why it is not done
-  (let [red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
-        observation {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{'tq.rule/s}
-                     :seon.context/head {'tq.rule/s red 'tq.rule/r red} :seon.context/fork-point {'tq.rule/r false}}
-        section (context/step-section (merge observation (context/step-status observation)))]
-    (is (= {:seon.task/status :working :seon.context/broken #{'tq.rule/r} :seon.context/new-red #{'tq.rule/s}}
-           (select-keys section [:seon.task/status :seon.context/broken :seon.context/new-red])))
-    (is (= {:broken #{'tq.rule/r}} (:seon.context/unmet section)) "the unmet clause names what the change broke")))
+(deftest ^{:seon/tasks #{'seon.task/chain-acceptance}}
+  a-step-is-done-only-when-its-merge-would-accept
+  ;; the step's status is the one results judgment the merge makes over its run, here over the branch's own
+  ;; recorded results: done exactly when it refuses nothing, and a working step names each refusal's type
+  (let [database (db/db *connection*)
+        green #(result % 1 0 0)
+        red #(result % 0 1 0 [{:type :fail}])
+        judged (fn [step proofs product members results on-target]
+                 (let [{status :seon.task/status refusals :seon.source/refusals}
+                       (context/step-status
+                        {:seon.task/step step :seon.task/proofs proofs :seon.task/product product :seon.context/head {}
+                         :seon.context/candidate database :seon.context/main database
+                         :seon.source/judged (cond-> {:seon.source/members members :seon.source/results results
+                                                      :seon.task/proofs (into proofs product) :seon.program/identities #{}
+                                                      :seon.test.run/id "a1b2c3d4e5f6" :seon.test.run/branch :tq-branch}
+                                               (seq product) (assoc :seon.task/product product)
+                                               (seq on-target) (assoc :seon.source/red-on-target on-target))})]
+                   [status (mapv :seon.error/type refusals)]))]
+    (doseq [[step proofs product members results on-target expected why]
+            [[:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(green 'tq.rule/p)] nil [:done []] "its proof green"]
+             [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] #{'tq.rule/r}
+              [:working [:seon.source/red-on-target-error]] "a reaching test main already holds red stops the merge for root"]
+             [:implement #{'tq.rule/p} #{} #{'tq.rule/p 'tq.rule/r} [(green 'tq.rule/p) (red 'tq.rule/r)] nil
+              [:working [:seon.source/red-test-error]] "a reaching test the change turned red"]
+             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [] nil [:working [:seon.source/red-test-error]] "its proof unrun at its reach is unknown, never green"]
+             [:implement #{'tq.rule/p} #{} #{'tq.rule/p} [(red 'tq.rule/p)] nil [:working [:seon.source/red-test-error]] "its proof red"]
+             [:implement #{} #{} #{} [] nil [:working [:seon.source/test-evidence-error]] "no proof proves nothing"]
+             [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(red 'tq.rule/s)] nil [:done []] "its product red by a failing assertion"]
+             [:prove #{} #{'tq.rule/s} #{'tq.rule/s} [(result 'tq.rule/s 0 1 0)] nil [:working [:seon.source/red-test-error]] "a red with no failing report ran nothing"]
+             [:prove #{} #{'tq.rule/s 'tq.rule/l} #{'tq.rule/s 'tq.rule/l} [(red 'tq.rule/s)] nil [:working [:seon.source/red-test-error]] "a declared product test nobody wrote"]
+             [:prove #{'tq.rule/q} #{'tq.rule/s} #{'tq.rule/q 'tq.rule/s} [(red 'tq.rule/q) (red 'tq.rule/s)] nil [:working [:seon.source/red-test-error]] "its own proof red"]]]
+      (is (= expected (judged step proofs product members results on-target)) why))))
 
-(deftest a-working-steps-section-names-each-unmet-clause
-  ;; one rule judges the step and names, as data, each clause that keeps it from done; a done step has none
-  (let [red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
-        green {:seon.context/proof-status :green}
-        unmet (fn [step proofs product head fork-point uncontracted]
-                (let [observation (cond-> {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
-                                           :seon.context/head head :seon.context/fork-point fork-point}
-                                    uncontracted (assoc :seon.context/uncontracted uncontracted))]
-                  (:seon.context/unmet (context/step-section (merge observation (context/step-status observation))))))]
-    (doseq [[step proofs product head fork-point expected why uncontracted]
-            [[:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red} {} {:product-absent #{'tq.rule/l}} "a declared product test nobody wrote"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} {:product #{'tq.rule/s}} "a product test green at the head"]
-             [:prove #{} #{} {} {} {:product #{}} "a Prove step declaring no product"]
-             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true} {:proofs #{'tq.rule/q}} "its own proof red"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} {:new-red #{'tq.rule/n}} "a new red beyond its product"]
-             [:implement #{} #{} {} {} {:proofs #{}} "an Implement step declaring no proof"]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} {:proofs #{'tq.rule/p}} "its proof red"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} {:uncontracted #{'tq.rule/h}}
-              "a Prove step's red product beside a helper its merge would refuse for lacking a contract" ['tq.rule/h]]
-             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p true} {:uncontracted #{'tq.rule/h}}
-              "an Implement step's green proof beside an uncontracted helper" ['tq.rule/h]]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} nil "a done step has no unmet clause"]]]
-      (is (= expected (unmet step proofs product head fork-point uncontracted)) why))))
+(defn- stable
+  "`step` with each refusal's occurrence stamps (when and in which evaluation) removed: the data two reads share."
+  [step]
+  (update step :seon.source/refusals (partial mapv #(dissoc % :seon.error/at :seon.error/world))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."
@@ -557,11 +525,11 @@
        (evaluate running agent-id "(in-ns 'tq.shb)\n(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))")
        (let [step (:seon.context/step (block running agent-id))
              current (:seon.context/step (shown running agent-id "(my.task/current {})"))
-             [broken] (:seon.context/broken-tests step)]
+             [broken] (:seon.context/red-tests step)]
          (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
          (is (= 'tq.shb/identity-test (:seon.test/sym broken)) "the broken test is shown")
          (is (= ["area keeps its side"] (mapv :message (:seon.context/proof-failures broken))) "with its failing assertion")
-         (is (= step current) "my.task/current shows the same step")
+         (is (= (stable step) (stable current)) "my.task/current shows the same step")
          (is (= :working (:seon.task/status step)
                 (:seon.task/status (:seon.context/turns (block running agent-id))))
              "the step is not done, and the block's status says so")
@@ -591,9 +559,8 @@
                                        "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (squared r))"))
        (let [step (:seon.context/step (block running agent-id))]
          (is (= {:green 1} (:seon.context/counts (:seon.context/proofs (block running agent-id)))) "the proof is green")
-         (is (= {:seon.task/status :working :seon.context/uncontracted ['tq.unc/squared]}
-                (select-keys step [:seon.task/status :seon.context/uncontracted]))
-             "the uncontracted helper keeps the step working, named beside its status")
+         (is (= [:working ['tq.unc/squared]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
+             "the uncontracted helper keeps the step working, named by its merge's refusal")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
 (deftest ^{:seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and one read of its block."
@@ -620,7 +587,8 @@
          (is (= :working (:seon.task/status step)) "the :any slot keeps the step working")
          (is (= [{:seon.fn/sym 'tq.anyslot/area :seon.fn.contract/finding :seon.fn.contract.finding/any
                   :seon.fn.contract/position [:seon.fn.contract.position/input 0]}]
-                (:seon.context/contract-gaps step))
+                (mapv #(select-keys % [:seon.fn/sym :seon.fn.contract/finding :seon.fn.contract/position])
+                      (some :seon.source/contract-gaps (:seon.source/refusals step))))
              "the section names the function, the slot and the finding")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
@@ -648,10 +616,8 @@
        (is (= :done (:seon.task/status (:seon.context/step (block running agent-id)))) "the red product alone is done")
        (evaluate running agent-id "(in-ns 'tq.pvu-test)\n(defn rv [s] s)")
        (let [step (:seon.context/step (block running agent-id))]
-         (is (= {:seon.task/status :working :seon.context/uncontracted ['tq.pvu-test/rv]
-                 :seon.context/unmet {:uncontracted #{'tq.pvu-test/rv}}}
-                (select-keys step [:seon.task/status :seon.context/uncontracted :seon.context/unmet]))
-             "the helper keeps the step working, named as its unmet clause")
+         (is (= [:working ['tq.pvu-test/rv]] [(:seon.task/status step) (some :seon.source/uncontracted (:seon.source/refusals step))])
+             "the helper keeps the step working, named by its merge's refusal")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
 (deftest

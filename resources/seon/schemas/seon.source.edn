@@ -126,13 +126,21 @@
                [:seon.task/sym :seon.task/sym] [:seon.task/obligations :seon.task/obligations] [:seon.task/basis :seon.task/basis]
                [:seon.test.run/id {:optional true} :seon.test.run/id]],
               :red-on-target [:set {:description "The run's red members main's head was already red on when the merge was prepared (seon.test/fork-point-red): merge-verdict stops those for root."} :seon.test/sym],
-              :refusals [:vector {:description "Every refusal of a merge's candidate (seon.cluster.source/merge-verdict); empty only for acceptance."} :seon.error/value],
+              :refusals [:vector {:description "Every refusal of a merge's candidate (seon.cluster.source/merge-verdict, its judgment seon.cluster.source/results-verdict); empty only for acceptance."} :seon.error/value],
               :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!)."}
                         [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]],
               :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
               :red [:vector {:min 1 :description "The run's members that are not green, by symbol; any refuses acceptance."} :seon.test/sym],
               :verdict [:enum {:description "Why a test of a merge's run is not green: an executed failure, a failure already recorded on the target for its current reach there, or no executed outcome."} :red :red-on-target :unknown],
-              :red-test [:map {:description "A test of a merge's run that is not green, the run that recorded its result and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],
+              :red-test [:map {:description "A judged test that is not green, the run that recorded its result (the judged run when none did) and its verdict."} :seon.test/sym :seon.test.run/id :seon.source/verdict],
+              :members [:set {:description "The tests a results judgment covers: a merge's run members, or a branch's proofs, product and the tests reaching its change (seon.cluster.source/results-verdict)."} :seon.test/sym],
+              :results [:vector {:description "The recorded results a results judgment reads, one per test at most."} [:or :seon.test/result :seon.test/result-unknown]],
+              :judged [:map {:description "What seon.cluster.source/results-verdict judges: the covered tests and their recorded results, the proofs and a Prove step's product, the tests main's head held red, the candidate's changed identities and the run and branch the refusals name (a branch's newest run its results came from)."}
+                       [:seon.source/members :seon.source/members] [:seon.source/results :seon.source/results]
+                       [:seon.task/proofs :seon.task/proofs] [:seon.task/product {:optional true} :seon.task/product]
+                       [:seon.source/red-on-target {:optional true} :seon.source/red-on-target]
+                       [:seon.program/identities :seon.program/identity-set]
+                       [:seon.test.run/id :seon.test.run/id] [:seon.test.run/branch :seon.store/branch]],
               :red-tests [:vector {:min 1} :seon.source/red-test],
               :red-test-error [:and {:description "accept-merge! refused: a test of the named run is not green."} :seon.source/test-evidence-error [:map [:seon.source/red-tests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/red-tests]]],
               :red-on-target-error [:and {:description "accept-merge! stopped for root: every test the merge leaves red is already red on the target."} :seon.source/test-evidence-error [:map [:seon.source/red-tests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/red-tests]]],
