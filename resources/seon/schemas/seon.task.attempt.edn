@@ -6,4 +6,4 @@
  :target [:and {:description "The task a :sent-back end sends the work back to."} :seon.db/ref]
  :number [:int {:min 1 :description "Which attempt of its task this row is: one more than the task's :seon.task/attempts-made when it was written (seon.task/attempt-tx); with the task's handle it derives the row's identity."}]
  :reason [:string {:min 1 :description "Why an attempt ended other than :done."}]
- :commit [:uuid {:description "The attempt's branch commit at its end: what its merge takes, keyed by commit id, never t."}]}
+ :commit [:and {:description "The attempt's branch commit at its end: what its merge takes, keyed by commit id, never t."} :seon.source/commit-id]}

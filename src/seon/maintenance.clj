@@ -471,13 +471,20 @@
   ;; FileStore sync per candidate at an illustrative five milliseconds.
   5)
 
+(defn- collection-cutoff
+  "The scheduled collection's cutoff: the declared snapshot window, kept
+  behind every commit the store's facts name (`registry/retained-before`)."
+  {:malli/schema [:=> [:cat :seon.store/store] :inst]}
+  [operation-store]
+  (registry/retained-before operation-store (registry/retention-cutoff operation-store)))
+
 (defn- dry-run-store!
   {:malli/schema [:=> [:cat :string :seon.store/store] :seon.operator.collect/result]}
   [managed-root operation-store]
   (let [inventory
         (registry/collect!
          operation-store
-         (registry/retention-cutoff operation-store)
+         (collection-cutoff operation-store)
          {:seon.operator.collect/dry-run? true})
         ;; Reuse the inventory's logical key count; only physical bytes need
         ;; another observation.
@@ -549,7 +556,7 @@
          :seon.operator.collect/complete? false}]
     (try
       (let [inventory
-            (registry/collect! operation-store (registry/retention-cutoff operation-store) {})
+            (registry/collect! operation-store (collection-cutoff operation-store) {})
             swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result
@@ -566,7 +573,7 @@
                               (:seon.operator.collect/bytes after-first)))))]
         (try
           (let [verification-swept
-                (registry/collect! operation-store (registry/retention-cutoff operation-store))
+                (registry/collect! operation-store (collection-cutoff operation-store))
                 after (collection-observation operation-store)
                 evidence (collection-evidence operation-store)
                 verification

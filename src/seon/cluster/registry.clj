@@ -570,8 +570,11 @@
     (run! #(retire-branch! {:seon.store/store store :seon.store/branch %}) unclaimed)
     unclaimed))
 
-(defn- blob-digest-attributes
-  [db]
+(defn- attributes-valued-as
+  "The schema keys of `db` whose declared form resolves to `target`, the
+  target's own key aside (its form is the base type it refines)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:vector :qualified-keyword]]}
+  [db target]
   (let [forms
         (into {}
               (map (fn [[schema-key serialized-form]]
@@ -581,32 +584,31 @@
                      [?schema :seon.schema/key ?schema-key]
                      [?schema :seon.schema/form ?form]]
                    db))
-        ;; An attribute's VALUE is a digest when its form resolves, through
-        ;; schema references, an `:and` with a digest child, or an `:or` whose
-        ;; every alternative is one, to
-        ;; `:seon.blob/digest`. A map, collection or entity schema that merely
-        ;; contains a digest member is not: its stored values are entity ids
-        ;; (component refs), which the sweep must never read as digests.
-        digest-schema?
-        (fn digest-schema? [form seen]
+        ;; An attribute's VALUE is a `target` when its form resolves, through
+        ;; schema references, an `:and` with a target child, or an `:or` whose
+        ;; every alternative is one, to `target`. A map, collection or entity
+        ;; schema that merely contains a target member is not: its stored
+        ;; values are entity ids (component refs), never the target's values.
+        valued-as?
+        (fn valued-as? [form seen]
           (cond
-            (= :seon.blob/digest form) true
+            (= target form) true
             (and (keyword? form)
                  (not (contains? seen form)))
             (boolean
              (when-let [referenced (get forms form)]
-               (digest-schema? referenced (conj seen form))))
+               (valued-as? referenced (conj seen form))))
             (and (vector? form) (= :and (first form)))
-            (boolean (some #(digest-schema? % seen) (remove map? (rest form))))
+            (boolean (some #(valued-as? % seen) (remove map? (rest form))))
             (and (vector? form) (= :or (first form)))
             (let [alternatives (remove map? (rest form))]
               (boolean (and (seq alternatives)
-                            (every? #(digest-schema? % seen) alternatives))))
+                            (every? #(valued-as? % seen) alternatives))))
             :else false))]
     (into []
           (keep (fn [[attribute form]]
-                  (when (and (not= attribute :seon.blob/digest)
-                             (digest-schema? form #{attribute}))
+                  (when (and (not= attribute target)
+                             (valued-as? form #{attribute}))
                     attribute)))
           forms)))
 
@@ -659,7 +661,7 @@
       (fn [state branch]
         (let [database (d/branch-as-db connection branch)]
           (try
-            (let [attributes (set (blob-digest-attributes database))
+            (let [attributes (set (attributes-valued-as database :seon.blob/digest))
                   attributes (if (get-in database [:config :attribute-refs?])
                                (into #{} (keep #(dbi/-ref-for database %)) attributes)
                                attributes)
@@ -695,6 +697,42 @@
   held value on it or an adopted source commit names is pruned; retention
   pruning is a separate policy (`retention-cutoff`)."
   (java.util.Date. 0))
+
+(defn- named-commits
+  "The commits `database`'s current facts name: the values of
+  `:seon.source/commit-id` and of every attribute declared as one. A test
+  world reads its cluster's adopted commit by id (`seon.test/world-base`), so a
+  named commit is read whether or not a branch head still holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :seon.source/commit-id]]}
+  [database]
+  (into #{}
+        (mapcat #(d/q '[:find [?commit ...] :in $ ?a :where [_ ?a ?commit]] database %))
+        (conj (attributes-valued-as database :seon.source/commit-id) :seon.source/commit-id)))
+
+(defn retained-before
+  "The latest cutoff that keeps every commit the facts name.
+
+  It is `remove-before`, or the instant just before the oldest stored commit
+  a branch head's facts name when that is earlier. Datahike marks every
+  commit newer than `remove-before` along each branch's ancestry, so a commit
+  the facts still name (`named-commits`) is never pruned by a retention
+  window (`retention-cutoff`)."
+  {:malli/schema [:=> [:cat :seon.store/store :inst] :inst]}
+  [store remove-before]
+  (let [connection (:seon.store/connection-object store)
+        konserve (konserve-store store)
+        named (into #{}
+                    (mapcat (fn [branch]
+                              (let [database (d/branch-as-db connection branch)]
+                                (try (named-commits database)
+                                     (finally (d/release-materialized-db database))))))
+                    (branches store))
+        instants (keep #(let [{{:datahike/keys [updated-at created-at]} :meta} (head-record konserve %)]
+                          (some-> (or updated-at created-at) .getTime dec))
+                       named)]
+    (if (seq instants)
+      (java.util.Date. (min (.getTime ^java.util.Date remove-before) (apply min instants)))
+      remove-before)))
 
 (defn- collect-and-inventory!
   "Use Datahike's reachability and konserve's candidate selection for either mode."

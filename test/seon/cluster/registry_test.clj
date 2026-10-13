@@ -199,8 +199,11 @@
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           attributes (set (#'registry/blob-digest-attributes database))]
+           attributes (set (#'registry/attributes-valued-as database :seon.blob/digest))]
        (is (contains? attributes :seon.error/shown-blob))
+       (is (every? (set (#'registry/attributes-valued-as database :seon.source/commit-id))
+                   [:seon.task/merge-base :seon.task.attempt/commit])
+           "the commits a merge and a relaunch read by id are declared commit ids")
        (is (not (contains? attributes :seon.agent/runtime))
            "a component ref naming an entity schema is not a digest")
        (is (not (contains? attributes :seon.test/sym))
@@ -452,6 +455,47 @@
           (is (nat-int? (registry/collect! opened)))
           (is (= head (registry/branch-commit-id {:seon.store/store opened
                                                  :seon.store/branch :db}))))))))
+
+(deftest retention-keeps-every-commit-a-current-fact-names
+  ;; A cluster's adoption record names its source commit, which test worlds
+  ;; read by id (`seon.test/world-base`); a later publication leaves it a
+  ;; non-head commit. A check JVM's scheduled collection swept such a commit
+  ;; under the one-hour window, and every check then read a missing node.
+  (with-source-store
+    (fn [opened]
+      (let [adopted (:seon.source/commit-id (cluster-request opened "adopter"))
+            branch (registry/cluster-branch "adopter")
+            _ (registry/ensure-cluster! (cluster-request opened "adopter"))
+            cluster (store/open-branch! opened branch)
+            source (store/open-branch! opened source-branch)]
+        (try
+          (test-support/transacted!
+           cluster
+           [(:seon.config/desired-row
+             (config/compile-manifest
+              {:seon.boot/cluster-name "adopter"
+               :seon.config/manifest {:seon.config.db/snapshot-window-ms 0}}))])
+          (doseq [n (range 3)]
+            (write-marker! (:seon.store/connection-object opened) (str "main-" n))
+            (write-marker! source (str "published-" n))
+            (write-marker! cluster (str "cluster-" n)))
+          (finally
+            (store/release-branch! cluster)
+            (store/release-branch! source)))
+        (is (not-any? #{adopted} (map #(registry/branch-commit-id {:seon.store/store opened
+                                                                   :seon.store/branch %})
+                                      (registry/branches opened)))
+            "the adopted commit is no branch's head")
+        (registry/collect! opened (registry/retained-before opened (registry/retention-cutoff opened)) {})
+        (let [connection (:seon.store/connection-object opened)
+              database (d/commit-as-db connection adopted)]
+          (is (k/exists? (:store @connection) adopted {:sync? true})
+              "the commit the adoption record names survives the collection")
+          (when database
+            (try
+              (is (contains? (markers (atom database)) "ancestral")
+                  "and every node of its indexes reads")
+              (finally (d/release-materialized-db database)))))))))
 
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
