@@ -455,9 +455,10 @@
              [:prove #{} #{'tq.rule/s} {'tq.rule/s unimplemented} {} :done #{} #{'tq.rule/s} "its product red by an unimplemented stub"]
              [:prove #{} #{} {} {} :working #{} #{} "no product"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} :working #{} #{} "its product green proves nothing"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :working #{} #{'tq.rule/s} "an error is no designed red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {} :done #{} #{'tq.rule/s} "its product red by an error its subject threw"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s {:seon.context/proof-status :red}} {} :working #{} #{'tq.rule/s} "a red with no failing report ran nothing"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {'tq.rule/s true} :satisfied #{} #{} "a product its fork point already held, red by design: nothing to do"]
-             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {'tq.rule/s true} :working #{} #{} "a product held at the fork point red by an error is no designed red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s errored} {'tq.rule/s true} :satisfied #{} #{} "a product its fork point already held, red by an error: nothing to do"]
              [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true 'tq.rule/s true} :working #{} #{} "a product held at the fork point beside its own proof red"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/r red} {'tq.rule/r false} :working #{'tq.rule/r} #{'tq.rule/s} "a product beside a broken test"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} :working #{} #{'tq.rule/s 'tq.rule/n} "a new red beyond its product"]
@@ -475,7 +476,27 @@
                      :seon.context/head {'tq.rule/s red 'tq.rule/r red} :seon.context/fork-point {'tq.rule/r false}}
         section (context/step-section (merge observation (context/step-status observation)))]
     (is (= {:seon.task/status :working :seon.context/broken #{'tq.rule/r} :seon.context/new-red #{'tq.rule/s}}
-           (select-keys section [:seon.task/status :seon.context/broken :seon.context/new-red])))))
+           (select-keys section [:seon.task/status :seon.context/broken :seon.context/new-red])))
+    (is (= {:broken #{'tq.rule/r}} (:seon.context/unmet section)) "the unmet clause names what the change broke")))
+
+(deftest a-working-steps-section-names-each-unmet-clause
+  ;; one rule judges the step and names, as data, each clause that keeps it from done; a done step has none
+  (let [red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
+        green {:seon.context/proof-status :green}
+        unmet (fn [step proofs product head fork-point]
+                (let [observation {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
+                                   :seon.context/head head :seon.context/fork-point fork-point}]
+                  (:seon.context/unmet (context/step-section (merge observation (context/step-status observation))))))]
+    (doseq [[step proofs product head fork-point expected why]
+            [[:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red} {} {:product-absent #{'tq.rule/l}} "a declared product test nobody wrote"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} {:product #{'tq.rule/s}} "a product test green at the head"]
+             [:prove #{} #{} {} {} {:product #{}} "a Prove step declaring no product"]
+             [:prove #{'tq.rule/q} #{'tq.rule/s} {'tq.rule/q red 'tq.rule/s red} {'tq.rule/q true} {:proofs #{'tq.rule/q}} "its own proof red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} {:new-red #{'tq.rule/n}} "a new red beyond its product"]
+             [:implement #{} #{} {} {} {:proofs #{}} "an Implement step declaring no proof"]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} {:proofs #{'tq.rule/p}} "its proof red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} nil "a done step has no unmet clause"]]]
+      (is (= expected (unmet step proofs product head fork-point)) why))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."

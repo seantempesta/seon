@@ -156,48 +156,67 @@
                :seon.context/proof-list entries}))))))
 
 (defn- designed-red?
-  "True when the head entry `entry` is red only by failing assertions or errors typed `:seon.error/unimplemented`."
+  "True when the head entry `entry` is red by at least one failing report: a failing assertion or an error its body
+  raised. A red with no report ran nothing; a test that cannot load never runs."
   {:malli/schema [:=> [:cat [:maybe :seon.context/observed]] :boolean]}
   [entry]
-  (let [failures (:seon.context/proof-failures entry)]
-    (boolean
-     (and (= :red (:seon.context/proof-status entry)) (seq failures)
-          (every? #(or (= :fail (:type %))
-                       (and (= :error (:type %))
-                            (= :seon.error/unimplemented (:seon.error/type %))))
-                  failures)))))
+  (boolean (and (= :red (:seon.context/proof-status entry)) (seq (:seon.context/proof-failures entry)))))
+
+(defn- reds
+  "The head's reds split by the fork point: `:seon.context/broken`, present there and not red there;
+  `:seon.context/new-red`, absent there."
+  {:malli/schema [:=> [:cat :seon.context/head :seon.context/fork-point]
+                  [:map [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]]]}
+  [head fork-point]
+  (let [red (into #{} (comp (filter #(= :red (:seon.context/proof-status (val %)))) (map key)) head)]
+    {:seon.context/broken (into #{} (filter #(false? (get fork-point %))) red)
+     :seon.context/new-red (into #{} (remove #(contains? fork-point %)) red)}))
+
+(defn unmet
+  "Each clause of the step's done rule that `observation` does not meet, by clause, with the tests or functions
+  it names: `:proofs`, its proofs not green at the head (empty when an Implement step declares none);
+  `:product`, a Prove step's product tests at the head red by no failing report (empty when it
+  declares none); `:product-absent`, those the head lacks; `:broken`, what its change
+  broke; `:new-red`, new reds outside its proofs (Implement) or product (Prove); and
+  `:uncontracted`, the functions its merge would refuse. Empty when the step is done; `step-status`
+  judges by it."
+  {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/unmet]}
+  [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
+    head :seon.context/head fork-point :seon.context/fork-point uncontracted :seon.context/uncontracted}]
+  (let [{broken :seon.context/broken new-red :seon.context/new-red} (reds head fork-point)
+        [owed-clause owed] (if (= :prove step) [:product product] [:proofs proofs])
+        clauses (cond-> {:proofs (into #{} (remove #(= :green (get-in head [% :seon.context/proof-status]))) proofs)
+                         :broken broken
+                         :new-red (into #{} (remove owed) new-red)}
+                  (= :prove step) (assoc :product (into #{} (filter #(and (head %) (not (designed-red? (head %))))) product)
+                                         :product-absent (into #{} (remove head) product))
+                  (= :implement step) (assoc :uncontracted (set uncontracted)))]
+    (cond-> (into {} (filter (comp seq val)) clauses)
+      (empty? owed) (assoc owed-clause #{}))))
 
 (defn step-status
   "The status of a step from one observation: `:seon.context/broken`, the head's reds present at the fork point
   and not red there; `:seon.context/new-red`, the head's reds absent there; `:seon.context/green-before`, its
   proofs known green there, when any; and `:seon.task/status`. An `:implement` step is `:satisfied` when its
-  proofs are nonempty, all green and all known green at the fork point: it has nothing to do. Else it is `:done`
-  when its proofs are nonempty and all green, nothing is broken and every new red is a proof. A `:prove` step is
-  done when its own proofs are all green, its product is nonempty and every product test is red at the head by
-  failing assertions or an unimplemented stub, nothing is broken and every new red is a product test (the rest its
-  fork point already held red); it is `:satisfied` when its fork point already held its whole product red and
-  nothing is new: main holds its product. A declared product test absent at the head keeps it `:working`. An `:implement` step is
-  done only when its merge would accept it: a function it changed with no complete contract
-  (`:seon.context/uncontracted`) keeps it `:working` and is named beside its status. Any other step is
-  `:working`."
+  proofs are nonempty, all green and all known green at the fork point: it has nothing to do. A step is `:done`
+  when its done rule has no `unmet` clause: an Implement step's proofs nonempty and all green, nothing broken,
+  every new red a proof and no function its merge would refuse for lacking a complete contract
+  (`:seon.context/uncontracted`, named beside its status); a Prove step's own proofs all green, its product
+  nonempty and every product test red at the head by a failing report (a failing assertion or an error its body
+  raised), nothing broken and every new red a product test (the rest its fork point already held red). A Prove
+  step is `:satisfied` when its fork point already held its whole product red and nothing is new: main holds its
+  product. Any other step is `:working`."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
-    head :seon.context/head fork-point :seon.context/fork-point uncontracted :seon.context/uncontracted}]
-  (let [status #(get-in head [% :seon.context/proof-status])
-        reds (into #{} (comp (map key) (filter #(= :red (status %)))) head)
-        broken (into #{} (filter #(false? (get fork-point %))) reds)
-        new-red (into #{} (remove #(contains? fork-point %)) reds)
+    head :seon.context/head fork-point :seon.context/fork-point uncontracted :seon.context/uncontracted :as observation}]
+  (let [{broken :seon.context/broken new-red :seon.context/new-red} (reds head fork-point)
         green-before (into #{} (filter #(false? (get fork-point %))) proofs)
-        green? (fn [tests] (every? #(= :green (status %)) tests))
+        green? (fn [tests] (every? #(= :green (get-in head [% :seon.context/proof-status])) tests))
         satisfied? (case step
                      :implement (and (seq proofs) (green? proofs) (= (count green-before) (count proofs)))
                      :prove (and (seq product) (green? proofs) (empty? broken) (empty? new-red)
-                                 (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product)))
-        done? (case step
-                :implement (and (seq proofs) (green? proofs) (empty? broken) (every? proofs new-red) (empty? uncontracted))
-                :prove (and (green? proofs) (seq product) (empty? broken) (every? product new-red)
-                            (every? (comp designed-red? head) product)))]
-    (cond-> {:seon.task/status (cond satisfied? :satisfied done? :done :else :working)
+                                 (every? #(true? (get fork-point %)) product) (every? (comp designed-red? head) product)))]
+    (cond-> {:seon.task/status (cond satisfied? :satisfied (empty? (unmet observation)) :done :else :working)
              :seon.context/broken broken :seon.context/new-red new-red}
       (seq green-before) (assoc :seon.context/green-before green-before)
       (and (= :implement step) (seq uncontracted)) (assoc :seon.context/uncontracted uncontracted))))
@@ -377,18 +396,19 @@
 
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, the tests its
-  rule counted broken and new red (what keeps it from done), then each
+  rule counted broken and new red, for a working step each clause of its done rule it does not meet (`unmet`), then each
   test that keeps it from done beside its proofs: the tests its change broke, for a Prove step the product it
   owes its successors, and any other new red; each with its status and, when red, its failing assertions; and
   the functions its merge would refuse for lacking a complete contract. Lists are absent when empty."
   {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product head :seon.context/head
     broken :seon.context/broken new-red :seon.context/new-red status :seon.task/status
-    uncontracted :seon.context/uncontracted gaps :seon.context/contract-gaps}]
+    uncontracted :seon.context/uncontracted gaps :seon.context/contract-gaps :as verdict}]
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
         product (when (= :prove step) product)
         other (remove (into (set proofs) product) new-red)]
     (cond-> {:seon.task/step step :seon.task/status status :seon.context/broken broken :seon.context/new-red new-red}
+      (= :working status) (assoc :seon.context/unmet (unmet verdict))
       (seq broken) (assoc :seon.context/broken-tests (entries broken))
       (seq product) (assoc :seon.context/product-tests (entries product))
       (seq other) (assoc :seon.context/new-red-tests (entries other))

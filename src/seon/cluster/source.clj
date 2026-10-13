@@ -1070,7 +1070,7 @@
   "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
   `source`: the named run on S complete, each of its `:seon.task/proofs` a
   member, every member green (`red-test-refusal`) except the prepared merge's
-  `:seon.task/product` red only by design (`seon.test.runner/designed-red?`),
+  `:seon.task/product` red by design (`seon.test.runner/designed-red?`),
   every added or replaced function reached by a green member or a designed red,
   and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
@@ -1116,7 +1116,7 @@
                 green (set (vals (select-keys members green-ids)))
                 unproven (vec (sort (remove (set (vals members)) proofs)))
                 by-symbol (when (vector? results) (into {} (map (juxt :seon.test/sym identity)) results))
-                ;; a Prove step's product red only by assertions or unimplemented stubs is its designed product,
+                ;; a Prove step's product red by a failing assertion or an error its body raised is its designed product,
                 ;; judged on its recorded reports (the run's totals carry none)
                 product-results (when-let [named (seq (filter (set product) (vals members)))]
                                   ((requiring-resolve 'seon.test.runner/latest-results) tested (vec named)))

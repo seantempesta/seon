@@ -185,6 +185,23 @@
                           (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s}
                                                 :seon.context/head head :seon.context/fork-point {}}))))))))))
 
+(deftest an-error-its-subject-throws-is-a-prove-steps-designed-red
+  ;; the gap a Prove step's product shows may be a throw: its test is red by error, and that red is its product
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s _ _]
+          (redeclare-probe!
+           connection s "(clojure.test/deftest probe (clojure.test/is (false? (stub))))"
+           "(defn stub {:malli/schema [:=> [:cat] :boolean]} [] (throw (IllegalArgumentException. \"odd map\")))")
+          (let [result (run-probe connection s)
+                head (#'context/head-entries (db/db connection) #{s})]
+            (is (= 1 (:seon.test/error-count result)) "the thrown exception is the test's one error")
+            (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s])))) "the merge gate's predicate counts it")
+            (is (= :done (:seon.task/status
+                          (context/step-status {:seon.task/step :prove :seon.task/proofs #{} :seon.task/product #{s}
+                                                :seon.context/head head :seon.context/fork-point {}}))))))))))
+
 (deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database
     (fn [connection]

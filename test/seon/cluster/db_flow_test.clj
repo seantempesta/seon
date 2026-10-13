@@ -1110,8 +1110,8 @@
 (deftest ^{:seon.test/long "Two chain worlds, each one Prove attempt and one gate (a nested seon.test/run on a fresh merge branch) over two db<->flow passes."
            :seon.test/long-ms 120000}
   a-prove-steps-red-product-merges-into-main
-  (doseq [[space stub designed?] [["tq.pvdesign" "(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))" true]
-                                  ["tq.pvsetup" "(throw (ex-info \"boom\" {}))" false]]]
+  (doseq [[space stub] [["tq.pvdesign" "(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))"]
+                        ["tq.pvthrow" "(throw (ex-info \"boom\" {}))"]]]
     (binding [*space* space]
       (test-support/with-database
        (fn [connection]
@@ -1122,16 +1122,11 @@
             (let [key-p (proved! handle connection stub)
                   database (db/db connection)
                   held? #(seq (db/datoms database :avet %1 %2))]
-              (if designed?
-                (testing "a red by an unimplemented stub, tagged with the step after it, is the Prove step's product"
-                  (is (= :merged (:seon.task/outcome (db/pull database [:seon.task/outcome] [:seon.task/assignment key-p])))
-                      "one pass merges the Prove step")
-                  (is (held? :seon.test/sym (symbol (str space "-rows") "twice-doubles")) "main holds its red deftest")
-                  (is (held? :seon.fn/sym (symbol (str space "-rows") "twice")) "and its contracted stub"))
-                (testing "a red by any other error is no design: nothing of the branch merges"
-                  (is (not= :merged (:seon.task/outcome (db/pull database [:seon.task/outcome] [:seon.task/assignment key-p]))))
-                  (is (not (held? :seon.test/sym (symbol (str space "-rows") "twice-doubles"))) "main lacks the deftest")
-                  (is (empty? (attempts connection "i")) "and the step after it waits")))))))))))
+              (testing "a red by an error its subject throws, an unimplemented stub or any other, tagged with the step after it, is the Prove step's product"
+                (is (= :merged (:seon.task/outcome (db/pull database [:seon.task/outcome] [:seon.task/assignment key-p])))
+                    "one pass merges the Prove step")
+                (is (held? :seon.test/sym (symbol (str space "-rows") "twice-doubles")) "main holds its red deftest")
+                (is (held? :seon.fn/sym (symbol (str space "-rows") "twice")) "and its contracted stub"))))))))))
 
 (deftest ^{:seon.test/long "One chain world, two attempts and one gate (a nested seon.test/run on a fresh merge branch) over three db<->flow passes."
            :seon.test/long-ms 120000}

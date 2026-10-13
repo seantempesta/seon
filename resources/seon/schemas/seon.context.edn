@@ -70,6 +70,8 @@
                                 [:seon.fn.contract/position :seon.fn.contract/position]
                                 [:seon.fn.contract/finding :seon.fn.contract/finding]]]
                :green-before [:set {:description "A step's proofs known green at its fork point, from the runs its branch already holds at the reach digest each had there (seon.test.runner/result-at-reach); derived, never stored. Producer: seon.context/step-status."} :seon.test/sym]
+               :unmet [:map-of {:description "Each clause of a step's done rule its observation does not meet, with the tests or functions it names: :proofs, its proofs not green at its head (empty when an Implement step declares none); :product, a Prove step's product tests red at its head by no failing report (empty when it declares none); :product-absent, those its head lacks; :broken, what its change broke; :new-red, new reds outside its proofs or product; :uncontracted, the functions its merge would refuse. Derived, never stored. Producer: seon.context/unmet."}
+                       [:enum :proofs :product :product-absent :broken :new-red :uncontracted] [:set :symbol]]
                :step-status [:map {:description "A step judged by its one rule. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :satisfied :working]]
                              [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
@@ -93,9 +95,10 @@
                :step [:map {:description "The held task's step as its one rule judged it (seon.context/step-status): its kind and status, then the tests beside its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step :seon.task/step] [:seon.task/status [:enum :done :satisfied :working]]
                       [:seon.context/broken :seon.context/broken] [:seon.context/new-red :seon.context/new-red]
+                      [:seon.context/unmet {:optional true :description "A working step's unmet done clauses: why it is not done."} :seon.context/unmet]
                       [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and, for a Prove step, of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
                       [:seon.context/broken-tests {:optional true :description "The tests its change broke."} [:vector :seon.context/test-entry]]
-                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, red by failing assertions or unimplemented stubs when done."} [:vector :seon.context/test-entry]]
+                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, each red by a failing assertion or an error its body raised when done."} [:vector :seon.context/test-entry]]
                       [:seon.context/new-red-tests {:optional true :description "Other tests red at its head and new since its fork point."} [:vector :seon.context/test-entry]]
                       [:seon.context/uncontracted {:optional true} :seon.context/uncontracted]
                                   [:seon.context/contract-gaps {:optional true} :seon.context/contract-gaps]]

@@ -2480,17 +2480,12 @@
                 (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))))))
 
 (defn designed-red?
-  "Whether `result` is a Prove step's designed red.
-  Red only by failing assertions or errors typed `:seon.error/unimplemented`,
-  never an unresolved symbol or a setup error."
+  "Whether `result` is a Prove step's designed red: an executed red with at
+  least one failing report, a failing assertion or an error its body raised.
+  A test that cannot load never runs, so it has no result to count."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [result]
-  (let [reports (:seon.test.failure/reports result)]
-    (boolean (and (red-result? result) (seq reports)
-                  (every? #(or (= :fail (:seon.test.failure/type %))
-                               (and (= :error (:seon.test.failure/type %))
-                                    (= :seon.error/unimplemented (:seon.error/type %))))
-                          reports)))))
+  (boolean (and (red-result? result) (seq (:seon.test.failure/reports result)))))
 
 (defn red-at-current-reach?
   "Whether `test-symbol`'s latest admitted result on `database` is red for its
