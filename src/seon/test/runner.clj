@@ -1300,31 +1300,111 @@
           :seon.error/offending tests}))
       :else (::digests entries))))
 
+(defn- closure-digests
+  "Each test's digest of its static closure on `database` and of the `extra-roots` its body executed outside it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                       [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
+                  [:or :seon.test/reach-digests :seon.test/unknown-error]]}
+  [database test-symbols extra-roots]
+  (let [extras (into #{} (comp (filter (comp (set test-symbols) key)) (mapcat val)) extra-roots)
+        digests (static-reach-digests database (into (vec test-symbols) (remove (set test-symbols)) (sort extras)))]
+    (if (seon.error.refusal/error? digests)
+      digests
+      (into {} (keep (fn [test-symbol]
+                       (when-let [digest (get digests test-symbol)]
+                         [test-symbol
+                          (if-let [roots (seq (get extra-roots test-symbol))]
+                            (id/id [digest (into (sorted-map) (map (juxt identity digests)) roots)] 64)
+                            digest)])))
+            test-symbols))))
+
+(declare tests-reaching)
+
+(defn- single-tags
+  "Each of `test-symbols` tagged with exactly one task on `database` (`:seon.task/tasks`), mapped to it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] [:map-of :seon.test/sym :seon.task/sym]]}
+  [database test-symbols]
+  (into {} (keep (fn [[test-symbol tags]] (when (= 1 (count tags)) [test-symbol (second (first tags))])))
+        (group-by first (db/q '[:find ?s ?t :in $ [?s ...] :where [?e :seon.test/sym ?s] [?e :seon.task/tasks ?t]]
+                              database test-symbols))))
+
+(defn task-input
+  "What a test reads of task `sym` on `database`, the request's own: its effective declaration
+  (`seon.task/effective`), absent when `database` holds no such task, and its obligations (`seon.task/obligations`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.test/task-input :seon.error/value]]}
+  [database sym]
+  (let [handle (:seon.task/id (db/pull database [:seon.task/id] [:seon.task/sym sym]))
+        effective (when handle ((requiring-resolve 'seon.task/effective) database handle))
+        obligations ((requiring-resolve 'seon.task/obligations) database sym)]
+    (or (first (filter seon.error.refusal/error? [effective obligations]))
+        (cond-> {:seon.task/sym sym :seon.task/obligations obligations}
+          effective (assoc :seon.task/effective effective)))))
+
+(defn- inputs-of
+  "Each of `test-symbols` whose closure calls the test namespace's task reader, mapped to the `task-input` of its task: `task`, else
+  its one tag (`single-tags`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] [:or :nil :seon.test/task]]
+                  [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]}
+  [database test-symbols task]
+  ;; The reader's name is built, not quoted: a quoted symbol is an analysed reference, so this harness function would
+  ;; reach it and every test running a nested request would read as a reader.
+  (let [readers (tests-reaching database (vec test-symbols) (symbol "seon.test" "task"))
+        reading (when (set? readers)
+                  (if task (zipmap readers (repeat task)) (single-tags database (vec readers))))
+        inputs (into {} (map (fn [sym] [sym (task-input database sym)])) (set (vals reading)))]
+    (or (when-not (set? readers) readers)
+        (first (filter seon.error.refusal/error? (vals inputs)))
+        (update-vals reading inputs))))
+
+(defn task-inputs
+  "Each of `test-symbols` whose closure calls the test namespace's task reader, mapped to the `task-input` it judges on `database`:
+  of `task`, a request's `:seon.test/task`, else of its one `:seon/tasks` tag."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                   [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] :seon.test/task]
+                   [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]]}
+  ([database test-symbols] (inputs-of database test-symbols nil))
+  ([database test-symbols task] (inputs-of database test-symbols task)))
+
+(defn- task-reach-digests
+  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its task input."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                       [:map-of :seon.test/sym :seon.test.member/dynamic-calls]
+                       [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]
+                  [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]}
+  [database test-symbols extra-roots inputs]
+  (let [digests (closure-digests database test-symbols extra-roots)]
+    (cond (seon.error.refusal/error? digests) digests
+          (seon.error.refusal/error? inputs) inputs
+          :else (reduce-kv (fn [result test-symbol input]
+                             (if-let [digest (get result test-symbol)]
+                               (assoc result test-symbol (id/id [digest input] 64))
+                               result))
+                           digests inputs))))
+
 (defn reach-digests
   "Each test's reach digest: the content of its static closure on `database`,
   and, given `extra-roots` (test -> the definitions its body executed outside
-  that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test with
-  no extra roots keeps its static digest."
+  that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test whose
+  closure calls the test namespace's task reader also keys the task input it judges
+  (`task-inputs`): of `task`, the request's `:seon.test/task`, else of its one
+  `:seon/tasks` tag."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
                         [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
-                   [:or :seon.test/reach-digests :seon.test/unknown-error]]]}
+                   [:or :seon.test/reach-digests :seon.test/unknown-error]]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
+                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls] :seon.test/task]
+                   [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]]}
   ([database test-symbols]
    (reach-digests database test-symbols {}))
   ([database test-symbols extra-roots]
-   (let [extras (into #{} (comp (filter (comp (set test-symbols) key)) (mapcat val)) extra-roots)
-         digests (static-reach-digests database (into (vec test-symbols) (remove (set test-symbols)) (sort extras)))]
-     (if (seon.error.refusal/error? digests)
-       digests
-       (into {} (keep (fn [test-symbol]
-                        (when-let [digest (get digests test-symbol)]
-                          [test-symbol
-                           (if-let [roots (seq (get extra-roots test-symbol))]
-                             (id/id [digest (into (sorted-map) (map (juxt identity digests)) roots)] 64)
-                             digest)])))
-             test-symbols)))))
+   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols)))
+  ([database test-symbols extra-roots task]
+   (task-reach-digests database test-symbols extra-roots (task-inputs database test-symbols task))))
 
 (defn reach-memberships
   "The tested closure's function names, including unresolved targets.
@@ -1355,17 +1435,24 @@
   [database test-symbols target]
   (try
     (let [{::keys [nodes]} (when (seq test-symbols) (reach-graph database test-symbols))
-          callers (persistent!
-                   (reduce-kv (fn [m caller node]
-                                (reduce (fn [m callee] (assoc! m callee (conj (get m callee []) caller)))
-                                        m (::out node)))
-                              (transient {}) nodes))
-          reaching (loop [pending (get callers target []) seen (transient #{})]
-                     (if-let [n (peek pending)]
-                       (if (contains? seen n)
-                         (recur (pop pending) seen)
-                         (recur (into (pop pending) (get callers n)) (conj! seen n)))
-                       (persistent! seen)))]
+          walk (fn [] (let [callers (persistent!
+                                     (reduce-kv (fn [m caller node]
+                                                  (reduce (fn [m callee] (assoc! m callee (conj (get m callee []) caller)))
+                                                          m (::out node)))
+                                                (transient {}) nodes))]
+                        (loop [pending (get callers target []) seen (transient #{})]
+                          (if-let [n (peek pending)]
+                            (if (contains? seen n)
+                              (recur (pop pending) seen)
+                              (recur (into (pop pending) (get callers n)) (conj! seen n)))
+                            (persistent! seen)))))
+          revisions (reach-revision-key database)
+          ;; One walk per target and graph: the program's whole index serves every request of that program.
+          whole? (and revisions (identical? nodes (::nodes (cache/present ::reach-index-by-revision revisions))))
+          reaching (if revisions
+                     (cache/lookup ::reaching (if whole? [revisions target] [revisions target (set test-symbols)])
+                                   #(* reach-node-name-bytes (+ 8 (count %))) walk)
+                     (walk))]
       (into #{} (filter #(and (get nodes %) (not= % target) (contains? reaching %))) test-symbols))
     (catch Exception failure (reach-unavailable `tests-reaching failure test-symbols))))
 
@@ -1895,7 +1982,8 @@
     destination :seon.test.run/branch
     reach-unknown :seon.test/reach-unknown
     carried-digests :seon.test/reach-digests
-    carried-reaches :seon.test/reaches}]
+    carried-reaches :seon.test/reaches
+    task :seon.test/task}]
   (let [tested-branch (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run))
         tested (or tested-database
                    (when (= tested-branch (get-in database [:config :branch]))
@@ -1904,7 +1992,9 @@
         run (cond-> (assoc run :seon.test.run/branch destination)
               (not= tested-branch destination) (assoc :seon.test.run/tested-branch tested-branch))
         digests (or carried-digests
-                    (when tested (reach-digests tested (mapv :seon.test/sym results))))
+                    (when tested (if task
+                                   (reach-digests tested (mapv :seon.test/sym results) {} task)
+                                   (reach-digests tested (mapv :seon.test/sym results)))))
         derived-reaches (when tested
                           (reach-memberships tested
                             (into [] (comp (map :seon.test/sym)
@@ -2244,7 +2334,9 @@
                             :seon.test/reach-digests
                             ;; A result whose body ran a definition other than the
                             ;; tested one keys nothing: it is kept and never reused.
-                            (let [digests (reach-digests tested test-symbols dynamic)]
+                            (let [digests (if-let [task (:seon.test/task completion)]
+                                            (reach-digests tested test-symbols dynamic task)
+                                            (reach-digests tested test-symbols dynamic))]
                               (cond->> digests (not (seon.error.refusal/error? digests)) (#(apply dissoc % stale))))
                             :seon.test/reaches reaches)
                      completion)

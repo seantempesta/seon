@@ -311,12 +311,22 @@
  [:and {:description "The durable authority a request admits and records on. It holds the execution branch; it never grants a test body custody."}
   :seon.db/connection]
  :seon.test/policy :seon.test.run/policy
+ :seon.test/task
+ [:and {:description "The task a test request's members judge (`seon.test/task`): a clone's own step, read on the request's database. Absent: each member judges its one `:seon/tasks` tag."}
+  :seon.task/sym]
+ :seon.test/task-input
+ [:map {:description "What a member's body reads of the task it judges (`seon.test/task`), read on the request's own database: a clone's effective declaration and obligations live on its branch, never in the member's world."}
+  [:seon.task/sym :seon.task/sym]
+  [:seon.task/effective {:optional true} :seon.task/effective]
+  [:seon.task/obligations :seon.task/obligations]]
+ :seon.test/task-inputs [:map-of :seon.test/sym :seon.test/task-input]
  :seon.test/request
  [:map
   [:seon.test/execution :seon.test/execution]
   [:seon.test/recording-connection :seon.test/recording-connection]
   [:seon.db/writer {:optional true :description "Writes the run's admission and stop on the recording connection."} :seon.db/writer]
   [:seon.test/policy :seon.test/policy]
+  [:seon.test/task {:optional true} :seon.test/task]
   [:seon.test/identities {:optional true} [:set :seon.test/sym]]
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/changed {:optional true} :seon.test/changed]

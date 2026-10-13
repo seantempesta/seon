@@ -13,6 +13,7 @@
   [:seon.test.run/policy {:optional true} :seon.test.run/policy]
   [:seon.test/include-long? {:optional true} :boolean]
   [:seon.test/rerun? {:optional true} :boolean]
+  [:seon.test/task {:optional true} :seon.test/task]
   [:seon.test/since-previous-run? {:optional true} :boolean]
   [:seon.test.run/evaluator {:optional true} :seon.test.run/evaluator]]
  :seon.test.selection/input-digest

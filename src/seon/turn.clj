@@ -5195,15 +5195,20 @@
                        (let [stale (@test-stale database (vec proofs))]
                          (or (:seon.error/at stale) (seq stale))))))))))
 
+(defn- held-task
+  "The symbol of the task `agent-id` holds on `database`, the agent's branch; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.task/sym :seon.error/value]]}
+  [database agent-id]
+  (let [handle (task/agent-task database agent-id)]
+    (if (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])) handle)))
+
 (defn- task-obligations
   "The obligations of the task `agent-id` holds on `database`, the agent's branch, over its assigned basis
   (`seon.task/assigned-obligations`); nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.task/obligations :seon.error/value]]}
   [database agent-id]
-  (let [handle (task/agent-task database agent-id)
-        sym (when (string? handle)
-              (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))]
-    (cond (:seon.error/at handle) handle
+  (let [sym (held-task database agent-id)]
+    (cond (:seon.error/at sym) sym
           sym (task/assigned-obligations database sym))))
 
 (defn- task-proofs
@@ -5229,7 +5234,7 @@
 
 (defn- run-proofs
   "Run the tests the step of the task `agent-id` holds is judged by (`step-tests`), but those in `excluded`, on
-  `execution` as one test request bounded by `limit-ms`; nil when none is left."
+  `execution` as one test request bounded by `limit-ms` judging that task (`:seon.test/task`); nil when none is left."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int? [:set :seon.test/sym]]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
   [execution agent-id limit-ms excluded]
@@ -5240,6 +5245,7 @@
           (empty? proofs) nil
           :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
                             :seon.test/policy :named :seon.test/identities proofs
+                            :seon.test/task (held-task (db/db connection) agent-id)
                             :seon.test/check-time-limit-ms limit-ms}))))
 
 (defn- first-proof-run-t

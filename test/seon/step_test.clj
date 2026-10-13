@@ -62,14 +62,12 @@
   (boolean (and (seq product) (every? #(some-> (results %) runner/designed-red?) product))))
 
 (defn- judged
-  "The task a default deftest judges, its one `:seon/tasks` tag (no `:seon.test/task` input names another), with its
-  effective intent and obligations on the bound database."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:tuple :seon.db/database-value :seon.task/effective :seon.task/obligations]]}
-  [test-var]
-  (let [database (db/db)
-        sym (first (:seon/tasks (meta test-var)))
-        handle (:seon.task/id (db/pull database [:seon.task/id] [:seon.task/sym sym]))]
-    [database (task/effective database handle) (task/obligations database sym)]))
+  "The task this default deftest judges (`seon.test/task`: the request's `:seon.test/task`, else its one tag): the
+  member's database, the task's effective declaration and its obligations, both read on the request's database."
+  {:malli/schema [:=> [:cat] [:tuple :seon.db/database-value :seon.task/effective :seon.task/obligations]]}
+  []
+  (let [{effective :seon.task/effective obligations :seon.task/obligations} (seon.test/task)]
+    [(db/db) effective obligations]))
 
 (def ^:private worked-results
   "The worked example's product result: an executed run of the table test with one failing assertion."
@@ -77,11 +75,11 @@
    {:seon.test/pass-count 4 :seon.test/fail-count 1 :seon.test/error-count 0 :seon.test.failure/reports [{:type :fail}]}})
 
 (deftest ^{:seon/tasks #{'seon.step/survey}} survey-handoff
-  (let [[database {intent :seon.task/intent}] (judged #'survey-handoff)]
+  (let [[database {intent :seon.task/intent}] (judged)]
     (is (= [] (document-gaps database intent ["problem" "what-exists"])) "Problem and What exists have content and every reference resolves")))
 
 (deftest ^{:seon/tasks #{'seon.step/define}} define-handoff
-  (let [[database {intent :seon.task/intent}] (judged #'define-handoff)]
+  (let [[database {intent :seon.task/intent}] (judged)]
     (is (= [] (document-gaps database intent ["problem" "what-exists" "examples" "expected-cost"]))
         "Examples and Expected cost join the earlier sections")
     (is (= #{} (unmeasured-claims database (get (sections intent) "expected-cost"))) "a section citing no deftest makes no claim")
@@ -92,13 +90,13 @@
         "a cited deftest calling seon.profile/measure meets it")))
 
 (deftest ^{:seon/tasks #{'seon.step/design}} design-handoff
-  (let [[database {intent :seon.task/intent}] (judged #'design-handoff)]
+  (let [[database {intent :seon.task/intent}] (judged)]
     (is (= [] (document-gaps database intent ["problem" "what-exists" "examples" "expected-cost" "approach"]))
         "Approach joins the earlier sections")
     (is (= #{} (uncontracted database (get (sections intent) "approach"))) "every function Approach cites is contracted")))
 
 (deftest ^{:seon/tasks #{'seon.step/prove}} prove-handoff
-  (let [[database {intent :seon.task/intent} {step :seon.task/step}] (judged #'prove-handoff)
+  (let [[database {intent :seon.task/intent} {step :seon.task/step}] (judged)
         product (set (keys worked-results))]
     (is (= :prove step))
     (is (= [] (document-gaps database intent ["problem" "what-exists" "examples" "expected-cost" "approach"])))
@@ -108,7 +106,7 @@
         "a green product test is no designed red")))
 
 (deftest ^{:seon/tasks #{'seon.step/implement}} implement-handoff
-  (let [[database {intent :seon.task/intent} {step :seon.task/step}] (judged #'implement-handoff)]
+  (let [[database {intent :seon.task/intent} {step :seon.task/step}] (judged)]
     (is (= :implement step))
     (is (= [] (document-gaps database intent ["problem" "what-exists" "examples" "expected-cost" "approach"]))
         "the cumulative document holds and its references resolve")))
@@ -152,3 +150,34 @@
          (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'work "fix")]
                                            :seon.task/intent "Fix the observed failure and its neighbor."]])
          (is (false? (survey-green?)) "an approval of an earlier intent stays red"))))))
+
+(deftest a-default-judges-the-task-it-is-given
+  ;; `docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`: a clone runs its copied default with
+  ;; `:seon.test/task`; the inputless run judges the template; evidence never crosses tasks.
+  (support/with-database
+   (fn [connection]
+     (task/chain! connection {:seon.task/ns 'work :seon.task/name "fix" :seon.task/intent "Fix the observed failure."}
+                  '[seon.step/define] {})
+     (let [run (fn [task] (seon.test/run (cond-> {:seon.test/execution (support/execution-handle connection)
+                                                  :seon.test/recording-connection connection :seon.test/policy :named
+                                                  :seon.test/identities #{'seon.step-test/define-handoff}}
+                                           task (assoc :seon.test/task task))))
+           counts (juxt :seon.test/passed? :seon.test/executed-count :seon.test/reused-count)
+           template (run nil)
+           clone (run 'work/define-fix)
+           clone-again (run 'work/define-fix)
+           template-again (run nil)]
+       (is (= [true 1 0] (counts template)) "the inputless run judges its one tagged template, whose worked example passes")
+       (is (= [false 1 0] (counts clone)) "the clone's document has no Problem section: its run executes, never reusing the template's green")
+       (is (= [false 0 1] (counts clone-again)) "the same task input reuses its own result")
+       (is (= [true 1 0] (counts template-again)) "the latest result is the clone's, so the template's input executes again")
+       (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'work "fix")] :seon.task/intent
+                                         (str "## Problem\n\nIt fails.\n\n## What exists\n\nThe owner.\n\n"
+                                              "## Examples\n\nOne.\n\n## Expected cost\n\nNone claimed.\n")]])
+       (let [database (db/db connection)
+             {intent :seon.task/intent} (task/effective database (task/task-handle 'work "define-fix"))]
+         (is (= [] (document-gaps database intent ["problem" "what-exists" "examples" "expected-cost"]))
+             "the refined clone document has every Define section"))
+       (is (= [true 1 0] (counts (run 'work/define-fix))) "a refined clone document runs again and passes")
+       (task/chain! connection {:seon.task/ns 'work :seon.task/name "other" :seon.task/intent "Another goal."} '[seon.step/define] {})
+       (is (= [true 0 1] (counts (run 'work/define-fix))) "a write to another task leaves the clone's input unchanged")))))

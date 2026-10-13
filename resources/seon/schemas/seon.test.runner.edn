@@ -33,7 +33,8 @@
                     [:seon.test.runner/results
                      :seon.test.runner/captured-results]
                     [:seon.test/run-basis-t :seon.test/run-basis-t]
-                    [:seon.test/run-at :seon.test/run-at]],
+                    [:seon.test/run-at :seon.test/run-at]
+                    [:seon.test/task {:optional true} :seon.test/task]],
                    :record-request
                    [:map
                     [:seon.test.runner/run-result

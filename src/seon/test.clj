@@ -127,6 +127,20 @@
   Nil outside a member body."
   nil)
 
+(def ^:dynamic ^:private *task*
+  "What the member whose test body runs on this thread reads of the task it judges, bound by `seon.test/run` beside
+  `*member*`; read through `task`."
+  nil)
+
+(defn task
+  "What the running member body reads of the task it judges (`seon.test.runner/task-inputs`): the request's
+  `:seon.test/task`, else the test's one `:seon/tasks` tag, read on the request's database, so a clone's declaration
+  on its own branch reaches a member whose world holds only the program. A test calling it keys its results by that
+  input. Nil outside such a body."
+  {:malli/schema [:=> [:cat] [:or :nil :seon.test/task-input]]}
+  []
+  *task*)
+
 (def ^:private acquire-context!
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 
@@ -270,6 +284,7 @@
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                         [:seon.test/member {:optional true} :seon.agent/execution-handle]
                         [:seon.test/effect-attempt? {:optional true} :boolean]
+                        [:seon.test/task-input {:optional true} :seon.test/task-input]
                         [:seon.config.test.cost/top {:optional true} :seon.config.test.cost/top]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
@@ -326,7 +341,8 @@
                           ;; `*member*` is SCI's copy, which reads this binding.
                           (with-bindings {(:context @attempt-writers) context
                                           #'clojure.test/*test-out* (java.io.Writer/nullWriter)
-                                          #'*member* member}
+                                          #'*member* member
+                                          #'*task* (:seon.test/task-input custody)}
                           (with-test-loader
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed (it may evaluate its own SCI
@@ -344,7 +360,7 @@
                               ;; declared per-test bound; `duration-failures` fails
                               ;; any body that completes over it.
                               (sci.eval/run-test
-                               (assoc (dissoc custody :seon.test/member :seon.test/effect-attempt?)
+                               (assoc (dissoc custody :seon.test/member :seon.test/effect-attempt? :seon.test/task-input)
                                       :seon.test/var test-var
                                       :seon.sci.eval/time-limit-ms
                                       (or (:seon.test/long-ms
@@ -828,7 +844,7 @@
   [{database :seon.db/db cluster :seon.test.run/cluster
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
     supplied-basis :seon.test.run/change-basis-t rerun? :seon.test/rerun?
-    evaluator :seon.test.run/evaluator :as request}]
+    evaluator :seon.test.run/evaluator task-sym :seon.test/task :as request}]
   (try
     (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
@@ -1164,12 +1180,14 @@
                             ;; result's body ran outside the static closure.
                             (if (seq recorded)
                               (selection-read!
-                               (runner/reach-digests database recorded
-                                                     (into {} (keep (fn [test-symbol]
-                                                                      (when-let [ran (get-in facts [(second (get latest test-symbol))
-                                                                                                    :seon.test.member/dynamic-calls])]
-                                                                        [test-symbol (set ran)])))
-                                                           recorded)))
+                               (let [ran (into {} (keep (fn [test-symbol]
+                                                         (when-let [ran (get-in facts [(second (get latest test-symbol))
+                                                                                       :seon.test.member/dynamic-calls])]
+                                                           [test-symbol (set ran)])))
+                                              recorded)]
+                                (if task-sym
+                                  (runner/reach-digests database recorded ran task-sym)
+                                  (runner/reach-digests database recorded ran))))
                               {}))
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
@@ -2437,9 +2455,11 @@
                       ;; `bounded-result` hands `run-var!`.
                       #(bounded-result
                         sci.eval/loaded-identity since test-symbol resolve! remaining-ms
-                        {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
-                         :seon.test/member child :seon.test/effect-attempt? effect-attempt?
-                         :seon.config.test.cost/top top}
+                        (into {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
+                               :seon.test/member child :seon.test/effect-attempt? effect-attempt?
+                               :seon.config.test.cost/top top}
+                              (when-let [input (get-in request-handle [:seon.test/task-inputs test-symbol])]
+                                {:seon.test/task-input input}))
                         (fn [watched?]
                           (release! watched?)
                           (when watched? (exited! @cleanup-failure))
@@ -2668,6 +2688,7 @@
                                 :seon.test.run/evaluator evaluator
                                 :seon.test/include-long? (true? (:seon.test/include-long? request))}
                          (:seon.test/rerun? request) (assoc :seon.test/rerun? true)
+                         (:seon.test/task request) (assoc :seon.test/task (:seon.test/task request))
                          (:seon.test/since-previous-run? request) (assoc :seon.test/since-previous-run? true)
                          (seq identities) (assoc :seon.test/identities (set identities))
                          (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
@@ -2711,6 +2732,11 @@
             ;; here on, before or during a member, makes that member unknown.
             since @sci.eval/loaded-identity
             reach (when (seq runnable) (runner/reach-digests database runnable))
+            ;; What each task-reading member judges, read once on the request's database (a clone lives on its branch).
+            task-inputs (when (seq runnable)
+                          (if-let [task (:seon.test/task request)]
+                            (runner/task-inputs database runnable task)
+                            (runner/task-inputs database runnable)))
             tested-branch (get-in database [:config :branch])
             destination (get-in (db/db recording) [:config :branch])
             provenance (cond-> (:seon.test.run/provenance selection)
@@ -2732,6 +2758,7 @@
           (:seon.error/at selection) selection
           (:seon.error/at exclusions) exclusions
           (:seon.error/at reach) reach
+          (:seon.error/at task-inputs) task-inputs
           (:seon.error/at armed) armed
           :else
           (let [platform? (fn [test-symbol]
@@ -2767,12 +2794,14 @@
                              written)
                 recording-completion
                 (fn [batch-provenance results terminated?]
-                  {:seon.db/db database
+                  (cond->
+                   {:seon.db/db database
                    :seon.test.runner/results results
                    :seon.test/run-basis-t (:seon.test.run/basis-t batch-provenance)
                    :seon.test/run-at (:seon.test.run/at batch-provenance)
                    :seon.test.run/provenance batch-provenance
-                   :seon.test.run/terminated? terminated?})
+                   :seon.test.run/terminated? terminated?}
+                  (:seon.test/task request) (assoc :seon.test/task (:seon.test/task request))))
                 admit! (fn [index members]
                          (let [batch-provenance (cond-> provenance
                                                   (pos? index) (assoc :seon.test.run/id (id/id)))
@@ -2813,7 +2842,8 @@
                                      (vreset! held-handle
                                               (cond-> (assoc (clean-request-handle execution recording cluster effective)
                                                              :seon.test/interpreted-files? (= :interpreted evaluator))
-                                                (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted))))
+                                                (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted)
+                                                (seq task-inputs) (assoc :seon.test/task-inputs task-inputs))))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose closure names the effect owner, from one reverse
                 ;; walk of the reached graph (all 2,365 tests 18 ms, where every
