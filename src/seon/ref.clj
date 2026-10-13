@@ -6,7 +6,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
+            [malli.core :as m]
             [malli.error :as me]
+            [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.cache :as cache]
             [seon.db :as db]
@@ -15,6 +17,7 @@
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.internal :as internal]
             [seon.test.cache :as test.cache])
   (:import [java.net URI URISyntaxException]
            [org.commonmark.ext.front.matter YamlFrontMatterExtension]
@@ -285,8 +288,9 @@
 
 (defn- library-name
   "A qualified symbol resolved read-only from the host's loaded Vars, else, when its namespace is not loaded,
-  from the dependency cache's definition (never loading it), with its pinned revision."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved :seon.ref/problem]]}
+  from the dependency cache's definition (never loading it): the function it names, with its doc line, arglists
+  and pinned revision."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved-name :seon.ref/problem]]}
   [reference]
   (let [loaded? (find-ns (symbol (namespace reference)))
         v (when loaded? (find-var reference))
@@ -296,24 +300,11 @@
         arglists (or (:arglists m) (::analyzer/arglists unloaded))
         doc (or (:doc m) (::analyzer/doc unloaded))]
     (if (or v unloaded)
-      (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference) (list 'clojure.repl/source reference)]}
+      (cond-> {:seon.ref/name reference :seon.fn/sym reference}
         arglists (assoc :arglists arglists)
-        doc (assoc :doc (first (str/split-lines (:summary (docstring doc)))))
+        doc (assoc :seon.fn/doc (first (str/split-lines (:summary (docstring doc)))))
         pin (assoc :seon.ref/pin pin))
       {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
-
-(defn- stored-form
-  "A function's stored arglists or contract text read as data in its own namespace: `::k` is
-  its namespace's keyword, `::alias/k` resolves through the loaded aliases."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.schema/value]}
-  [function text]
-  ;; stored as source text until PR-25 stores the arglists as data
-  (let [home (symbol (namespace function))
-        aliases (some-> (find-ns home) ns-aliases)]
-    (edamame/parse-string text {:auto-resolve (fn [requested]
-                                                (if (= :current requested)
-                                                  home
-                                                  (or (some-> (get aliases requested) ns-name) requested)))})))
 
 (defn- namespace-name
   "A namespace named `reference`, stored or loaded on the host, as its name, doc line and the form that lists it;
@@ -362,8 +353,8 @@
           :else (let [library (library-name reference)]
                   (if (:seon.ref/problem-kind library)
                     library
-                    (cond-> (select-keys library [:seon.ref/name :doc])
-                      true (assoc :seon.render/operations [(list 'doc reference)])))))))))
+                    (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference)]}
+                      (:seon.fn/doc library) (assoc :doc (:seon.fn/doc library))))))))))
 
 (declare named?)
 
@@ -388,74 +379,101 @@
   [entry references]
   (cond-> entry (seq references) (assoc :seon.ref/references references)))
 
+(defn- declared-render
+  "The render pair `schema-key` declares for its values on `database`'s schema: its `:seon.render/ai` and
+  `:seon.render/html` properties, an entity row's included; once per projection."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] :seon.ref/render-pair]}
+  [database schema-key]
+  (let [projection (schema/projection-from-database database)]
+    (schema/projection-cache-value
+     projection [::render schema-key]
+     #(select-keys (some-> (mr/schema (:seon.schema.projection/registry projection) schema-key)
+                           (as-> s (or (internal/entity-properties s) (m/properties s))))
+                   [:seon.render/ai :seon.render/html]))))
+
+(defn- declarations
+  "Each identity attribute's declaration on `database`'s schema, once per projection: the attributes its entity
+  is pulled as (itself and its source attribute, a program family's whole definition, else its row's own
+  attributes that are not refs) and its row schema."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :seon.ref/declaration]]}
+  [database]
+  (let [projection (schema/projection-from-database database)]
+    (schema/projection-cache-value
+     projection ::declarations
+     (fn []
+       (let [registry (:seon.schema.projection/registry projection)
+             forms (:seon.schema.projection/forms projection)
+             ref? (fn [form] (or (= :seon.db/ref form) (and (vector? form) (= :seon.db/ref (peek form)))))]
+         (into {} (keep (fn [attribute]
+                          (let [{row :seon.program/row-schema source :seon.program/source-attribute}
+                                (some-> (mr/schema registry attribute) m/properties)
+                                definition (some->> row (mr/schema registry))]
+                            (when definition
+                              [attribute {:seon.ref/pull (if source
+                                                           [attribute source]
+                                                           (into [] (comp (map first) (filter qualified-keyword?) (remove #(ref? (get forms %))))
+                                                                 (internal/entity-entries definition)))
+                                          :seon.ref/row row}]))))
+               (keys forms)))))))
+
+(defn- identity-of
+  "The identity attribute whose index holds `reference` on `database`, or nil: an index probe."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] [:maybe :qualified-keyword]]}
+  [database reference]
+  (some #(when (seq (db/datoms database :avet % reference)) %)
+        (cond (keyword? reference) [:seon.schema/key]
+              (simple-symbol? reference) [:seon.ns/name]
+              :else [:seon.fn/sym :seon.test/sym :seon.task/sym])))
+
+(defn- own-prose
+  "The text an entity's own content cites names in: its docstring, intent and instructions, and its schema form's
+  description."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [entity]
+  (let [form (some-> (:seon.schema/form entity) edn/read-string)
+        description (when (and (vector? form) (map? (second form))) (:description (second form)))]
+    (str/join "\n\n" (keep identity (conj (mapv entity [:seon.fn/doc :seon.ns/doc :seon.task/intent :seon.task/instructions])
+                                          description)))))
+
 (defn- resolve-name
-  "One referenced name resolved to its current definition on `database`: a program function's source, whole, and
-  its contract as the agent writes it, with the forms that read its callers and reaching tests; a schema key's
-  form; a test's source; a task's intent; or a problem. Each carries the references its own content makes, one
-  level (`inner`)."
+  "One referenced name identified on `database`: the entity its identity attribute's index holds, pulled as that
+  identity declares (`declarations`), with its row's declared render pair as its own render keys and the references
+  its own content makes, one level (`inner`); a namespace loaded only on the host, or a library Var, as the same kind
+  of entity; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
                     :seon.ref/message (problem-messages :unresolved)}
-        subject (list 'quote reference)]
+        attribute (identity-of database reference)
+        known (declarations database)
+        render #(declared-render database (:seon.ref/row (known %)))]
     (cond
-      (simple-symbol? reference) (or (namespace-name database reference) unresolved)
-      (qualified-keyword? reference)
-      (let [found (schema-documentation database reference reference)
-            form (:form found)
-            properties (when (and (vector? form) (map? (second form))) (second form))]
-        (cond
-          (:seon.sci.eval/documentation-unavailable found) unresolved
-          (:seon.error/at found) found
-          :else (with-inner {:seon.ref/name reference :seon.ref/schema-form form}
-                  (inner database #{reference} (:description properties "") #{}))))
-      :else
-      (let [function (db/pull database [:seon.fn/sym :seon.fn/source :seon.fn/arglists :seon.fn/spec :seon.fn/doc :seon.fn/calls]
-                              [:seon.fn/sym reference])
-            test-entity (when-not (:seon.fn/sym function)
-                          (db/pull database [:seon.test/sym :seon.test/source :seon.fn/calls] [:seon.test/sym reference]))
-            task (when-not (or (:seon.fn/sym function) (:seon.test/sym test-entity))
-                   (db/pull database [:seon.task/sym :seon.task/intent :seon.task/instructions] [:seon.task/sym reference]))]
-        (cond
-          (:seon.error/at function) function
-          (:seon.fn/sym function)
-          (with-inner
-            (cond-> {:seon.ref/name reference}
-              (:seon.fn/source function) (assoc :seon.fn/source (:seon.fn/source function))
-              ;; a declaration with no stored source shows what it declares
-              (and (nil? (:seon.fn/source function)) (:seon.fn/doc function))
-              (assoc :doc (first (str/split-lines (:summary (docstring (:seon.fn/doc function))))))
-              (and (nil? (:seon.fn/source function)) (:seon.fn/arglists function))
-              (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
-              (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
-              true (assoc :seon.render/operations [(list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]))
-            (inner database #{reference} (:seon.fn/doc function "") (set (:seon.fn/calls function))))
-          (:seon.error/at test-entity) test-entity
-          (:seon.test/sym test-entity)
-          (with-inner (cond-> {:seon.ref/name reference}
-                        (:seon.test/source test-entity) (assoc :seon.test/source (:seon.test/source test-entity)))
-            (inner database #{reference} "" (set (:seon.fn/calls test-entity))))
-          (:seon.error/at task) task
-          (:seon.task/sym task) (with-inner (merge {:seon.ref/name reference} (select-keys task [:seon.task/intent :seon.task/instructions]))
-                                  (inner database #{reference}
-                                         (str/join "\n\n" (keep task [:seon.task/intent :seon.task/instructions])) #{}))
-          :else (library-name reference))))))
+      attribute
+      (let [pull (:seon.ref/pull (known attribute))
+            found (db/pull database (into pull [:seon.fn/doc :seon.ns/doc :seon.fn/calls]) [attribute reference])]
+        (if (:seon.error/at found)
+          found
+          (with-inner (merge (select-keys found pull) {:seon.ref/name reference} (render attribute))
+            (inner database #{reference} (own-prose found) (set (:seon.fn/calls found))))))
+      (keyword? reference) unresolved
+      (simple-symbol? reference)
+      (if (find-ns reference) (merge {:seon.ref/name reference :seon.ns/name reference} (render :seon.ns/name)) unresolved)
+      :else (let [library (library-name reference)]
+              (cond-> library (not (:seon.ref/problem-kind library)) (merge (render :seon.fn/sym)))))))
 
 (declare resolve-path based-file)
 
 (defn- named?
-  "Does resolve-only `reference` name an entity on `database`, by its identity attribute's index, or a Var loaded on
-  the host? An index probe, so a prose word that names nothing costs no resolution."
+  "Does resolve-only `reference` name an entity on `database`, by its identity attribute's index, or a namespace or
+  Var loaded on the host? An index probe, so a prose word that names nothing costs no resolution."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] :boolean]}
   [database reference]
-  (let [indexed? #(seq (db/datoms database :avet % reference))]
-    (boolean
-     (cond
-       (keyword? reference) (indexed? :seon.schema/key)
-       (simple-symbol? reference) (or (indexed? :seon.ns/name) (find-ns reference))
-       :else (or (indexed? :seon.fn/sym) (indexed? :seon.test/sym) (indexed? :seon.task/sym)
-                 (and (find-ns (symbol (namespace reference))) (find-var reference)))))))
+  (boolean
+   (or (identity-of database reference)
+       (cond (keyword? reference) false
+             (simple-symbol? reference) (find-ns reference)
+             :else (and (find-ns (symbol (namespace reference))) (find-var reference))))))
 
 (defn- directory?
   "Does based `path` name a directory? A directory is not an entity."
@@ -628,8 +646,8 @@
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
 
 (defn- resolve-path
-  "A based path with an optional anchor as its document entry: heading, pin, its one read and the names its text
-  cites, one level; or a problem."
+  "A based path with an optional anchor as its document entry: heading, pin, the render pair
+  `:seon.ref/resolved-doc` declares and the names its text cites, one level; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem :seon.error/value]]}
   [database {:seon.ref/keys [path anchor]}]
   (let [reference (cond-> path anchor (str "#" anchor))
@@ -640,7 +658,25 @@
                 :seon.ref/message (problem-messages :anchor-missing)}
       (-> found
           (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
-          (assoc :seon.render/operations [(list 'my.fs/section reference)])
+          (merge (declared-render database :seon.ref/resolved-doc))
           ;; only a Markdown document's text is prose; a source or data file is code
           (with-inner (when (str/ends-with? path ".md") (inner database #{} (:seon.ref/text found) #{})))))))
 
+(defn render-doc-ai
+  "A document or section reference as data: its path, anchor, heading and pin, the one read of its text, and the
+  names its text cites, one level."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.ref/doc-view]}
+  [unit]
+  (let [{:seon.ref/keys [path anchor] :as entry} (or (:seon.render/value unit) unit)]
+    (-> entry
+        (dissoc :seon.render/ai :seon.render/html)
+        (assoc :seon.render/operations [(list 'my.fs/section (cond-> path anchor (str "#" anchor)))]))))
+
+(defn render-doc-html
+  "Render a document or section reference: its heading and the path it names."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [{:seon.ref/keys [path anchor heading]} (or (:seon.render/value unit) unit)]
+    [:article {:class "seon-family-entry seon-doc"}
+     [:header [:p {:class "seon-kicker"} "Document"] [:h3 heading]]
+     [:p [:code (cond-> path anchor (str "#" anchor))]]]))

@@ -127,18 +127,18 @@
     (is (= "docs/seon/architecture/vocabulary.md" (:seon.ref/path link)) "a relative Markdown link is a path reference")
     (doseq [entry [malli agents link]]
       (is (not (contains? entry :seon.ref/text)) "the block never carries the document's text")
-      (let [[operation] (:seon.render/operations entry)]
+      (let [[operation] (:seon.render/operations (ref/render-doc-ai {:seon.render/value entry}))]
         (is (= 'my.fs/section (first operation)))
         (is (= (:seon.ref/heading entry) (:seon.ref/heading (ref/section (second operation)))) "the one read answers that section")))
     (is (= [:unresolved :anchor-missing] (mapv :seon.ref/problem-kind [missing-file missing-heading])))
     (is (= "no-such-heading" (:seon.ref/anchor missing-heading)))))
 
-(deftest a-referenced-function-offers-its-callers-and-reaching-tests-as-forms
+(deftest a-referenced-function-is-its-entity-with-its-declared-render
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (= ['(my.program/callers 'seon.ref/section) '(my.program/tests-reaching 'seon.ref/section)]
-           (:seon.render/operations entry))
-        "the forms that read its callers and its reaching tests")
-    (is (= #{:seon.ref/name :seon.fn/source :malli/schema :seon.render/operations :seon.ref/references} (set (keys entry)))
+    (is (= ['seon.ref/section 'seon.render.ns/function-ai 'seon.render.ns/function-html]
+           ((juxt :seon.fn/sym :seon.render/ai :seon.render/html) entry))
+        "its identity and the render pair its row declares")
+    (is (= #{:seon.ref/name :seon.fn/sym :seon.fn/source :seon.render/ai :seon.render/html :seon.ref/references} (set (keys entry)))
         "its own content only: no callers or tests pulled in")))
 
 (deftest a-held-path-resolves-as-a-span-does
@@ -153,7 +153,8 @@
 
 (deftest a-referenced-test-shows-its-own-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
-    (is (= #{:seon.ref/name :seon.test/source :seon.ref/references} (set (keys entry))) "a test resolves to its own content, like any reference")
+    (is (= #{:seon.ref/name :seon.test/sym :seon.test/source :seon.render/ai :seon.render/html :seon.ref/references} (set (keys entry)))
+        "a test resolves to its own content and declared render, like any reference")
     (is (re-find #"a-span-of-a-name-and-more-words-is-prose" (:seon.test/source entry)))))
 
 (defn- cited
@@ -181,8 +182,8 @@
 
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (= [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]] (:malli/schema entry))
-        "the contract is the :malli/schema form, as data")
+    (is (str/includes? (:seon.fn/source entry) "[:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]")
+        "the contract is in its source, as the agent wrote it")
     (is (not (contains? entry :seon.fn/spec)))
     (is (not (contains? entry :seon.ref/line)) "a reference carries no line in its text")))
 
@@ -230,8 +231,7 @@
   "The docstring section headings written as `Name:` lines, which the heading sweep converts to `## Name`."
   #{"Example:" "Examples:" "Edge cases:" "Errors:" "Known issues:"})
 
-(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
-  all-prose-uses-one-reference-rule
+(deftest all-prose-uses-one-reference-rule
   (test-support/with-running-agent
    (fn [running agent-id _]
      (let [database (db/db)]
@@ -269,8 +269,7 @@
                      sym))
            "no docstring keeps a colon heading")))))
 
-(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
-  each-reference-kind-uses-its-declared-render
+(deftest each-reference-kind-uses-its-declared-render
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)

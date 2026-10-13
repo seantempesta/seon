@@ -55,35 +55,40 @@
            :revision [:string {:min 40 :max 40}]
            :pin [:map {:description "The reference-code project and pinned revision a library definition loads from."}
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
-           :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
            :brief [:map {:description "A name a referent's own content cites, shown one level: its name, a one-line summary and the form that reads it, never its content. Producer: seon.ref/brief."}
                    [:seon.ref/name :seon.ref/name] [:doc {:optional true} :string]
                    [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
            :references [:vector {:description "The references a referent's own content makes (a docstring's or intent's or schema description's or doc section's cited names, a function's or test's program calls), each one level."}
                         [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]
-           :resolved-name [:map {:description "A name resolved to its own content by one rule: a function's source, whole, and its contract as the agent writes it (:malli/schema), with the forms that read its callers and reaching tests; a schema key's form; a test's source; a task's intent; each with the references its content makes, one level."}
+           :resolved-name [:map {:description "A name identified as its entity: the attributes its identity attribute declares it is pulled as (a program family's source, else its row's own attributes; a library Var its doc line, arglists and pin), its row's render pair as its own :seon.render/ai and :seon.render/html keys, and the references its content makes, one level. Producer: seon.ref/resolve-name."}
                            [:seon.ref/name :seon.ref/name]
-                           [:seon.fn/source {:optional true} :seon.fn/source]
                            [:seon.ref/references {:optional true} :seon.ref/references]
                            [:seon.ref/line {:optional true} :seon.ref/line]
                            [:arglists {:optional true} :seon.ref/arglists]
-                           [:malli/schema {:optional true} :seon.schema/value]
-                           [:doc {:optional true} :string]
-                           [:seon.ref/pin {:optional true} :seon.ref/pin]
-                           [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
-                           [:seon.test/source {:optional true} :seon.test/source]
-                           [:seon.task/intent {:optional true} :seon.task/intent]
-                           [:seon.task/instructions {:optional true} :seon.task/instructions]
-                           [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
-           :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin, the one read operation and the names its text cites, one level; never its text."}
+                           [:seon.ref/pin {:optional true} :seon.ref/pin]]
+           :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, pin and the names its text cites, one level; never its text."
+                                :seon.render/ai seon.ref/render-doc-ai :seon.render/html seon.ref/render-doc-html}
                           [:seon.ref/path :seon.ref/path]
                           [:seon.ref/anchor {:optional true} :seon.ref/anchor]
                           [:seon.ref/heading :seon.ref/heading]
                           [:seon.ref/pin {:optional true} :seon.ref/pin]
                           [:seon.ref/line {:optional true} :seon.ref/line]
-                          [:seon.render/operations [:vector :seon.render/read-form]]
                           [:seon.ref/references {:optional true} :seon.ref/references]]
+           :doc-view [:map {:description "A document reference as an agent reads it: the entry without its render keys, with the one read of its text. Producer: seon.ref/render-doc-ai."}
+                      [:seon.ref/path :seon.ref/path]
+                      [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                      [:seon.ref/heading :seon.ref/heading]
+                      [:seon.ref/pin {:optional true} :seon.ref/pin]
+                      [:seon.ref/line {:optional true} :seon.ref/line]
+                      [:seon.render/operations [:vector :seon.render/read-form]]
+                      [:seon.ref/references {:optional true} :seon.ref/references]]
+           :render-pair [:map {:description "The renderers a schema declares for its values, as symbols."}
+                         [:seon.render/ai {:optional true} :qualified-symbol] [:seon.render/html {:optional true} :qualified-symbol]]
+           :pull [:vector {:description "The attributes an identity's entity is pulled as when it is referenced."} :qualified-keyword]
+           :row :qualified-keyword
+           :declaration [:map {:description "An identity attribute's reference declaration, read from the schema: what its entity is pulled as and its row schema. Producer: seon.ref/declarations."}
+                         [:seon.ref/pull :seon.ref/pull] [:seon.ref/row :seon.ref/row]]
            :resolved [:or {:description "A reference resolved: a name to its definition, or a path to its document."}
                       :seon.ref/resolved-name :seon.ref/resolved-doc]
            :reference-text [:string {:min 1 :description "A based relative path with an optional #anchor, as an agent writes it."}]
