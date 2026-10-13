@@ -97,7 +97,8 @@
 ;;; What boot leaves standing
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/fixture-observation "The assertions observe boot-created root agents, maintenance tasks and started graphs, absent from an ordinary branch fixture."} boot-seeds-the-root-agent-and-starts-the-loop
+(deftest ^{:seon/tasks #{'seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds}
+           :seon.test/fixture-observation "The assertions observe boot-created root agents, maintenance tasks and started graphs, absent from an ordinary branch fixture."} boot-seeds-the-root-agent-and-starts-the-loop
   (with-cluster
     "started"
     (fn [instance]
@@ -110,15 +111,11 @@
                  (db/q '[:find ?id . :in $ ?id
                         :where [?agent :seon.agent/id ?id]]
                       @connection "root"))))
-        (testing "root owns the five queryable maintenance tasks"
+        (testing "root owns the three queryable maintenance tasks"
           (is (= #{["root/maintenance/footprint"
                     "root/maintenance/footprint-schedule"]
-                   ["root/maintenance/reap-dead-roots"
-                    "root/maintenance/reap-dead-roots-schedule"]
                    ["root/maintenance/rotate-logs"
                     "root/maintenance/rotate-logs-schedule"]
-                   ["root/maintenance/process-census"
-                    "root/maintenance/process-census-schedule"]
                    ["root/maintenance/compact"
                     "root/maintenance/compact-schedule"]}
                  (db/q '[:find ?task-id ?schedule-id
@@ -167,7 +164,8 @@
                    "https://"))
               (is (not (contains? targets :seon.ai/backup))))))))))
 
-(deftest ^{:seon.test/fixture-observation "Two real cluster boots must acquire distinct live program contexts over the same published root."} two-clusters-in-one-jvm-own-distinct-live-program-contexts
+(deftest ^{:seon/tasks #{'seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds}
+           :seon.test/fixture-observation "Two real cluster boots must acquire distinct live program contexts over the same published root."} two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
@@ -211,7 +209,8 @@
           (boot/stop! right)
           (boot/stop! left))))))
 
-(deftest ^{:seon.test/fixture-observation "The observation is that the complete boot and initial wake spend no model call, not merely that database facts exist."} booting-spends-no-model-call
+(deftest ^{:seon/tasks #{'seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds}
+           :seon.test/fixture-observation "The observation is that the complete boot and initial wake spend no model call, not merely that database facts exist."} booting-spends-no-model-call
   ;; The system-authored bootstrap plan evaluates locally; boot must not
   ;; spend a provider call. After that one run, an empty wake stays free.
   (let [calls (atom 0)]
@@ -252,7 +251,8 @@
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/fixture-observation "The observation requires the booted agent graph and fault committer to persist and route a proc fault."} an-escaped-throwable-becomes-a-fact-and-a-message
+(deftest ^{:seon/tasks #{'seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds}
+           :seon.test/fixture-observation "The observation requires the booted agent graph and fault committer to persist and route a proc fault."} an-escaped-throwable-becomes-a-fact-and-a-message
   (with-cluster
     "faulting"
     (fn [instance]
@@ -343,7 +343,8 @@
                   (flow/ping-proc graph :seon.agent/turn
                                   :timeout-ms 5000)))))))))
 
-(deftest ^{:seon.test/fixture-observation "The failure is injected at the first real boot resume transition, before an ordinary branch fixture has any running proc."} the-first-cluster-proc-fault-at-resume-becomes-a-fact
+(deftest ^{:seon/tasks #{'seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds}
+           :seon.test/fixture-observation "The failure is injected at the first real boot resume transition, before an ordinary branch fixture has any running proc."} the-first-cluster-proc-fault-at-resume-becomes-a-fact
   (let [name "first-cluster-fault"
         root (str "tmp/armed-test/" name)
         db<->flow agent/db<->flow

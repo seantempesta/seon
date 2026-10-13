@@ -2031,7 +2031,8 @@
 ;;; The second agent-facing value: a form that sends
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+(deftest ^{:seon/tasks #{'seon.turn/a-send-inside-a-do-form-leaves-a-message}}
+  a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -2079,7 +2080,8 @@
           (is (nil? (turn/next-agent-work database (request connection "agent-b")))))))))
 
 
-(deftest a-refused-delivery-becomes-a-durable-error-fact
+(deftest ^{:seon/tasks #{'seon.cluster.message/a-refused-delivery-test-asserts-the-undeliverable-error}}
+  a-refused-delivery-becomes-a-durable-error-fact
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -2964,7 +2966,8 @@
            (recur (dec tries))))
        @ledger)))))
 
-(deftest ^{:seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
+(deftest ^{:seon/tasks #{'seon.turn/a-green-proof-completes-the-task}
+           :seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
            :seon.test/long-ms 60000}
   a-model-request-is-help-own-exchanges-and-the-block-last
   (test-support/with-running-agent

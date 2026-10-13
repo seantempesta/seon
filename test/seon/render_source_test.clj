@@ -60,7 +60,8 @@
     :seon.sci.admit/caps caps
     :seon.config.eval/time-limit-ms 2000}))
 
-(deftest preview-cache-is-memory-only-and-invalidates-on-read-changes
+(deftest ^{:seon/tasks #{'seon.render/a-source-contract-records-its-output-refs-and-source}}
+  preview-cache-is-memory-only-and-invalidates-on-read-changes
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "memory-preview")
@@ -223,7 +224,8 @@
        (is (= 'seon.render/render-default-ai-source
               (:seon.render.selection/selected decision)))))))
 
-(deftest source-contracts-execute-in-memory-and-terminal-transcripts-never-reexecute
+(deftest ^{:seon/tasks #{'seon.render/a-source-contract-records-its-output-refs-and-source}}
+  source-contracts-execute-in-memory-and-terminal-transcripts-never-reexecute
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "source-contract")

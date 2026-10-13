@@ -286,7 +286,8 @@
 ;;; The loop
 ;;; ---------------------------------------------------------------------------
 
-(deftest completion-prose-does-not-erase-failed-evaluations
+(deftest ^{:seon/tasks #{'seon.turn/the-planner-terminal-census-sees-every-form-within-its-bound}}
+  completion-prose-does-not-erase-failed-evaluations
   ;; A completion reply is delivered, but it does not rewrite prior errors.
   (with-gen-cluster
    (fn [cluster]

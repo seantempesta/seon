@@ -13,7 +13,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
-(deftest ordered-evaluation-retains-one-explicit-basis-without-publication
+(deftest ^{:seon/tasks #{'seon.turn/an-identical-re-record-conflicts-with-itself}}
+  ordered-evaluation-retains-one-explicit-basis-without-publication
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "preview-batch")

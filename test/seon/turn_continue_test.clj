@@ -183,10 +183,12 @@
 
 
 ; Each independent real cluster scenario fits the runner's existing task bound.
-(deftest read-results-arrive-before-done
+(deftest ^{:seon/tasks #{'seon.turn/a-green-proof-completes-the-task}}
+  read-results-arrive-before-done
   (prove-session :read-then-done [read-source done-source] 3 2 :wait))
 
-(deftest provider-progress-has-its-own-bound
+(deftest ^{:seon/tasks #{'seon.turn/turn-continue-read-results-arrive-before-done-takes-six-seconds}}
+  provider-progress-has-its-own-bound
   (prove-session :slow-provider [done-source] 3 1 :wait))
 
 
@@ -277,7 +279,7 @@
               600)
        @ledger))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-wake-reopens-a-finished-task}
+(deftest ^{:seon/tasks #{'seon.turn/a-green-proof-completes-the-task 'seon.turn/a-wake-reopens-a-finished-task}
            :seon.test/long "Two setup evaluations with their test steps, then one fixture-model pass and its test step."
            :seon.test/long-ms 30000}
   a-done-agent-opens-no-work-turn
@@ -295,7 +297,8 @@
        (is (= 1 (model-turns (db/db connection) agent-id)) "the model was not called again")))))
 
 
-(deftest ^{:seon.test/long "Two setup evaluations with their test steps, then one fixture-model pass and its test step."
+(deftest ^{:seon/tasks #{'seon.turn/a-green-proof-completes-the-task}
+           :seon.test/long "Two setup evaluations with their test steps, then one fixture-model pass and its test step."
            :seon.test/long-ms 30000}
   a-model-defines-through-its-eval-tool
   (support/with-running-agent
