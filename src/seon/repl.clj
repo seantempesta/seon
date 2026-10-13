@@ -390,9 +390,12 @@
   (let [answer (reply-text emission)]
     (str (input-text emission) (when answer (str "\n" answer)))))
 
-(defn- token-boundary? [character]
+(defn- token-boundary?
+  "True when `character` is whitespace or one of the fifteen Clojure delimiters."
+  {:malli/schema [:=> [:cat [:fn {:error/message "should be a character" :gen/elements [\a \( \space \;]} clojure.core/char?]] :boolean]}
+  [character]
   (or (Character/isWhitespace ^char character)
-      (some #{character} "()[]{}\";,`~@^'")))
+      (boolean (some #{character} "()[]{}\";,`~@^'"))))
 
 (defn syntax-tokens
   "Lossless character lexer for displayed Clojure, including incomplete replies.
