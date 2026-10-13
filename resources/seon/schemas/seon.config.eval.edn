@@ -28,6 +28,11 @@
                       :seon.repl/with [:seon.eval/uncontracted :seon.eval/contract-gaps]
                       :seon.repl/fix "Contract every function you define: put {:malli/schema [:=> [:cat :int] :int]} (your own input and output schemas) after the docstring or name, e.g. (defn inc2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2)). Uncontracted definitions are refused at merge."}
                      [:<= 0]]
+                    [:seon.eval/unrequired-namespaces
+                     {:optional true
+                      :seon.repl/finding :unrequired-namespace
+                      :seon.repl/fix "Your definition names a namespace its ns form does not require. SCI resolves it because the namespace is loaded, but the merge's file analysis refuses the file: add [that.namespace :as alias] to the ns form's :require, re-evaluate the ns form, and call it through the alias."}
+                     [:set {:max 0} :symbol]]
                     [:seon.eval/budget-override
                      {:optional true
                       :seon.repl/finding :budget-override

@@ -167,7 +167,7 @@
                                               :seon.eval/elisions :seon.eval/full :seon.eval/budget-override
                                               :seon.eval/value-class
                                               :seon.eval/uncontracted :seon.eval/uncontracted-count
-                                              :seon.eval/contract-gaps]))
+                                              :seon.eval/contract-gaps :seon.eval/unrequired-namespaces]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -1128,6 +1128,7 @@
    :seon.eval/uncontracted
    :seon.eval/uncontracted-count
    :seon.eval/contract-gaps
+   :seon.eval/unrequired-namespaces
    :seon.eval/print-length
    :seon.eval/print-level
    :seon.eval/print-budget])
@@ -4430,6 +4431,7 @@
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
                                              (get uncontracted ordinal)
+                                             (turn.batch/analysis-measures entry)
                                              (code-evidence entry)
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)

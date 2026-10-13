@@ -31,6 +31,11 @@
    ;; Malli contracts. Preserve each finding while syntax/name/arity errors
    ;; remain blocking.
    {:type-mismatch {:level :warning}}
+   ;; The checkout's `:output :include-files` filters the CLI's printed
+   ;; findings by filename; a submitted form is analyzed as stdin, whose
+   ;; `<stdin>` matches none, so it would drop every finding of the REPL's
+   ;; analysis. Analysis keeps every finding; the caller judges them.
+   :output {:include-files ^:replace []}
    :analysis
    {:arglists true
     :var-usages true
@@ -44,7 +49,8 @@
                             :meta true}}})
 
 (def ^:private finding-keys
-  [:filename :row :col :end-row :end-col :level :message :type
+  ;; `:ns`: the namespace an `:unresolved-namespace` finding names
+  [:filename :row :col :end-row :end-col :level :message :type :ns
    :lang :cljc :langs])
 
 (def ^:private publication-config

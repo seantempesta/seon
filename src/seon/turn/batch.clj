@@ -326,6 +326,16 @@
                  :when why]
              {:seon.schema/key k :seon.schema/installed? false :seon.error/message why})))))
 
+(defn- unrequired-namespaces
+  "The namespaces one analyzed form names that its namespace's ns form does
+  not require: clj-kondo's `:unresolved-namespace` findings in the form's own
+  rows, which the merge's file analysis refuses (`seon.cluster.source/write-back`)."
+  {:malli/schema [:=> [:cat :map] [:set :symbol]]}
+  [{a :seon.fn/analysis [[first-row last-row]] :seon.fn/source-spans}]
+  (into (sorted-set)
+        (comp (filter #(= :unresolved-namespace (::analyzer/type %))) (keep ::analyzer/ns))
+        (::analyzer/findings (#'sfn/source-analysis a first-row last-row))))
+
 (defn derive-form
   "One form's program change from its ordered writes, against `working`."
   {:malli/schema [:=> [:cat :seon.batch/request :map :seon.db/database-value :seon.batch/entry [:vector :seon.batch/write]]
@@ -391,6 +401,7 @@
         removed-ns (into #{} (keep (fn [[k [tag]]] (when (= :removed-ns tag) k))) program)
         entities (vec (keep (fn [[_ [tag x]]] (when (= :entity tag) x)) program))
         schema-keys (changed-schema-keys request working)
+        unrequired (when analyzed (unrequired-namespaces (:analysis analyzed)))
         change {:seon.batch/entities entities
                 :seon.batch/removals (vec (keep (fn [[k [tag]]] (when (#{:removed :removed-ns :withdrawn} tag) k)) program))
                 :seon.batch/schema-keys schema-keys
@@ -404,7 +415,8 @@
                 :seon.batch/notes (into (schema-notes request working schema-keys)
                                         (keep (fn [w] (when-let [e (:seon.batch/arm-error w)]
                                                         {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error e})))
-                                        writes)}]
+                                        writes)}
+        change (cond-> change (seq unrequired) (assoc :seon.batch/unrequired-namespaces unrequired))]
     {:seon.batch/change change :seon.batch/derive-state (assoc state :declared declared)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -709,12 +721,19 @@
       (throw (ex-info (:seon.error/message facts) facts))
       facts)))
 
+(defn analysis-measures
+  "The analysis measures one settled entry records: `:seon.eval/unrequired-namespaces`,
+  the namespaces its definitions name that its namespace does not require."
+  {:malli/schema [:=> [:cat :map] [:map [:seon.eval/unrequired-namespaces {:optional true} :seon.eval/unrequired-namespaces]]]}
+  [{{unrequired :seon.batch/unrequired-namespaces} :seon.batch/change}]
+  (cond-> {} (seq unrequired) (assoc :seon.eval/unrequired-namespaces (set unrequired))))
+
 (defn- entry-evaluation
   "One settled entry's terminal facts, as its run records them and its reply
   prints them."
   {:malli/schema [:=> [:cat :seon.batch/entry] :seon.turn.loop/evaluation]}
   [{:seon.batch/keys [shown shown-map error facts-error duration-ms] :as entry}]
-  (cond-> {}
+  (cond-> (analysis-measures entry)
     ;; the reply's :ms, as an SCI evaluation records it
     duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
     shown (assoc :seon.eval/shown shown)

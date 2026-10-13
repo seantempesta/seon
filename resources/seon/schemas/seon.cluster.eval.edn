@@ -96,6 +96,7 @@
                      [:seon.eval/uncontracted {:optional true} :seon.eval/uncontracted]
                      [:seon.eval/uncontracted-count {:optional true} :seon.eval/uncontracted-count]
                      [:seon.eval/contract-gaps {:optional true} :seon.eval/contract-gaps]
+                     [:seon.eval/unrequired-namespaces {:optional true} :seon.eval/unrequired-namespaces]
                      [:seon.eval/print-length
                       {:optional true}
                       :seon.eval/print-length]
