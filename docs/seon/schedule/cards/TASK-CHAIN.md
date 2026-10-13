@@ -1,227 +1,166 @@
 ---
-title: "TASK-CHAIN: one task handoff, one proof selector, one successful merge"
+title: "TASK-CHAIN: ordinary tasks, one proof selector, accepted merges"
 type: spec
-status: LOCKED design; implementation pending the acceptance proofs below
+status: LOCKED target; implementation starts with red acceptance deftests
 created: 2026-10-11
 ---
 
 # TASK-CHAIN
 
-Tasks, assignments, branches, test evidence and the listened `seon.cluster.agent/db<->flow` already exist.
-Compose their owners over immutable data; delete the competing selectors and completion policies. **LOCKED means
-these are the implementation decisions, not that the target is installed.** The owner's current rulings supersede
-older designs, including the dated reviews retained below. Superseded decided text remains in Git.
+Tasks, branches, deftests and the listened `seon.cluster.agent/db<->flow` already exist. Compose their owners;
+delete duplicate decisions. **Target, not installed behavior; §§1–7 supersede the dated reviews below.**
 
-## 1. Data
+**Owner rulings, 2026-10-13 (binding):**
 
-**Intake (root) → Survey → Define → Design → Prove → Implement → Land/Retrospective (root).** Every worker,
-including root, has an ordinary task. A subject owns component `:seon.task/children`; sibling `:seon.task/needs`
-refs impose order. Successors fork main after their needs merge. An agent writes its own branch; root alone
-applies effects on main. Graphs and SCI contexts remain live resources in their existing registry; lifecycle
-intent, assignments, ends, evidence and outcomes are database data.
+> “What do we need to control and change and expand upon as the chain progresses... only what exists is useful
+> and is easy for an agent to write up at each stage.” “Start from need, not from names.”
+>
+> “ONE prose parser for ALL prose everywhere” — “DO NOT RECREATE”.
+>
+> “Stages don't own sections; it's all data agents update.” “Proofs exist to advance the chain automatically
+> and adapt to each task (root/agents add, change or drop deftests per task).”
+>
+> “Templates: everything predetermined for progressing through a stage lives on the template off the shelf”;
+> “Templates are ordinary tasks in resources/seon/tasks/seon.step.edn.”
+>
+> “Markdown edits: Clojure functions that read/replace/append one section by span” — “only if a stage actually
+> needs section edits; otherwise refine! of whole prose is enough.”
+>
+> “one proof selector (seon.task/obligations), one success authority (merge's accepted candidate, incl.
+> my.root/merge!), one write builds a chain, schema-derived member lists, cost regressions are failing tests,
+> deftests only as gates, NO GUARDS OR FENCES, shared small pure functions”.
 
-The subject's `:seon.task/intent` is **one growing Markdown document**, revised in place: Problem, What exists,
-Examples, Expected cost, Approach, Results. Steps carry `:seon.task/instructions`. `seon.task/effective` merges
-schema-declared content down children, root first, step last; never along needs. `my.task/refine!` writes intent
-and product to `seon.task/goal-owner`, instructions and copied proofs to the held step, preserving every other
-declaration member. This routing expresses ownership; allowed members come from the schemas.
-References remain derived: `seon.task/with-references` passes every string value the task holds, recursively,
-to `seon.ref/names`; resolution uses `seon.ref/references` over those same strings. Symbols remain the stored
-reference set; schema keywords and document paths resolve from text without changing that set's meaning.
+## 1. Need → fields
 
-Five templates are ordinary held task entries in `resources/seon/tasks/seon.step.edn`, named
-`seon.step/survey`, `seon.step/define`, `seon.step/design`, `seon.step/prove`, `seon.step/implement`.
-`seon.task/chain!` constructs the subject and **all** clone declarations, children and needs in memory, then
-calls `seon.task/adopt-tasks-tx` once through the checked writer. Identity comes from `seon.task/task-handle`
-and `seon.task/task-sym`. Only the subject initially has `:held`; clones inherit execution. One later
-`:running` fact readies exactly Survey. Repeating the same construction changes nothing.
+**Intake (root) → Survey → Define → Design → Prove → Implement.** Root reviews and publishes accepted work.
+Successors fork main after their needs merge.
 
-Clone instructions, step and the template's selected proof-symbol set as plain `:seon.task/proofs` data.
-Root customizes the clone's instructions/proofs; removing a copied proof changes that set, while removing a
-locally tagged proof changes its test tag. **`:seon.task/template` is the only new persisted attribute**:
-an optional peer task ref, provenance only, never consulted for execution or proof selection; deleting a template
-sweeps this optional ref, while history retains provenance. Template edits affect future clones only; changes to
-a selected test's body still follow ordinary program identity. Reuse the existing proofs schema as an authored
-optional set in declaration/entry/task; absent means no copied proofs. Extend the step enum with `:survey :define :design`. No notes, PRD, goals, examples, expected-cost, declares, exit or verdict attributes.
-
-`:seon.test/task` is an explicit **test request input**, not a new stored lifecycle attribute: the held step's
-handle, carried through request → member custody → `:seon.task/id` binding. Its effective declaration and
-selected obligations come from the member's candidate database. Include their content and captured read evidence
-in the existing member evidence identity; changing task input invalidates reuse, unrelated facts do not.
-No test discovers its subject from the test agent's assignment; no handoff test recursively runs the test runner.
-
-## 2. Rules: datum → reaction
-
-| Datum → reaction | One policy owner (effect helpers do not decide again) |
+| Need | Data and consumer |
 |---|---|
-| Subject declaration + ordered templates → one cloned population | `seon.task/chain!` |
-| Inherited execution + needs + accepted assignment outcomes → ready leaves and derived subject completion | `seon.task/ready-rules`; `seon.task/ready`, `seon.task/done?` query these same rules |
-| Ready leaves, open attempts, registry observations and existing capacity dial → assign/start/pause/resume/stop/cancel | `seon.cluster.agent/plan`; `seon.task/assign!` owns assignment writes for direct and reconciler entrances |
-| First attempt, changed program/task inputs or stale selected evidence → run obligations and reaching tests, acquire candidate evidence | `seon.turn/test-step`; `seon.turn/prove-turn` delegates to it before any model call |
-| Current candidate observation → working or proposed `:done` | `seon.context/step-status`, consuming the shared verdict |
-| Unanswered work and remaining budget → next work | `seon.turn/next-agent-work` |
-| Candidate proposal, disposition or spent budget → attempt end | `seon.turn/task-end` |
-| End with no open evaluation → record end and close admission | `seon.turn/end-task-call`; `:done` proposes acceptance, never completes the task |
-| End + accepted/refused merge + remaining work + relaunch dial + actual resource exit → merge/close/relaunch/publish/retire actions | `seon.cluster.agent/assignment-actions`, made the shared pure end-to-action function used by `next-actions`, `close!` and `failed-pass!` |
-| Candidate, effective task, obligations and current evidence accepted → declarations, task refinements and `:merged` outcome in one writer transaction | `seon.cluster.source/accept-merge!`, for automatic merges **and** `my.root/merge!` through `seon.merge/merge!` |
-| Accepted declarations awaiting publication → write-back, reindex and Git commit; then release branch after execution exits | `seon.merge/publish!`; existing publication facts feed `assignment-actions` |
-| Recorded friction → root works its ordinary retrospective task | `seon.cluster.agent/plan`, as for other ready tasks; root uses the ordinary task writers |
+| Grow the goal, observations, examples, approach and results | Subject `:seon.task/intent`, one Markdown document; `seon.task/effective` supplies it to every step. |
+| Tell this step what to do | Copied `:seon.task/instructions`; agents fill gaps and revise through `my.task/refine!`. |
+| Order, start, pause, stop | Existing `:seon.task/children`, `:seon.task/needs`, `:seon.task/execution`; readiness and Flow consume them. |
+| Judge work | Deftests tagged `:seon/tasks`; `seon.task/obligations` selects them. Existing `:seon.task/product` names the behavior tests Prove supplies and Implement makes green. |
+| Freeze selected defaults without copying test bodies | Existing value schema `:seon.task/proofs`, newly admitted as an optional declaration/entry/task member, consumed only through obligations. This is the one added storage role: tags on the template alone cannot freeze a clone's selection. |
 
-**Success belongs to the accepted candidate.** `seon.merge/merge-tx` consumes the acceptance decision; it no
-longer infers `:merged` from “end is not sent-back.” Task-only, empty-program-delta and manually requested pre-end
-merges take the same acceptance path, with task inputs from the actual candidate. A no-op still proves its
-obligations on main and records its successful assignment. Delete `:satisfied` throughout. A sent-back or other
-unsuccessful end may transfer its authorized facts; it never writes successful completion. A later send-back
-reopens its target through the existing ready rules and blocks successors until that target merges again.
+No new task attribute names or template provenance ref. A copied task suffices. Extend the existing step enum
+with Survey, Define and Design. Derive member lists from schemas; normalize declared sets only. `seon.task/effective` merges content down children, never needs; product is inherited,
+copied proofs are local. `my.task/refine!` routes intent/product to `seon.task/goal-owner`, instructions to the held
+step, preserving other members. No gating-proof route. Whole-prose replacement suffices: **no section-edit API** or stage-owned headings.
 
-Static candidate acquisition (three-way, proposed files, lint, contracts, references) and test acquisition
-(current members, reach, product and baseline observations) feed **one** pure verdict. Branch preview and merge
-use that predicate over their respective held candidates; a preview is not a promise about a future main.
-`prepare-merge!` still tests the combined candidate. `accept-merge!` carries its task/program read basis into
-the existing writer comparison, including unchanged dependencies the proofs read, so it cannot accept different
-inputs from those tested. No whole-head timestamp, independent exit validator or refusal-class whitelist.
+## 2. Rules and owners
 
-The turn acquires evidence once per changed input; context only reads it. Use existing recorded test/error/evaluation
-facts and content-keyed `seon.cache` derivations, not agent verdict attributes. Missing/evicted acquisition is
-unknown and the next test step acquires it before proposing an end. Refused post-end merges use the same end-to-action
-rule and existing relaunch allowance, preserving end commit and merge base; an unchanged green relaunch takes zero
-model calls. Caps/stalls with work use that rule too. Exhaustion remains visible to root. Remove taskless lifecycle
-arms by supplying ordinary tasks at their creation entrances; remove parked/mailbox refusal counters as lifecycle
-policy by recording the existing error end at its producer. Actual-exit ownership remains with Flow's resource owner.
-Publication is a separate durable effect: a refused publication stays visible and retains its branch; `:merged`
-readies successors on main, but does **not** claim disk/Git publication succeeded.
+- **Construct once.** New `seon.task/chain!` submits subject, five copies and needs together through
+  `seon.task/adopt-tasks-tx`. Clone namespace/file are the subject's; name = template name + `-` + subject name;
+  `seon.task/task-handle`/`seon.task/task-sym` derive identities. Copy instructions, step and selected defaults,
+  never worked-example intent. Only the subject starts held; running readies Survey. Identical reconstruction
+  has no delta; template edits affect future copies.
+- **Select once.** `seon.task/obligations`: copied defaults ∪ own tagged tests; Implement also takes subject-tagged
+  tests and effective product. Prove runs product before green handoff proofs. Delete successor-tag inference.
+  Admission, first-proof detection, staleness, runs, context, task edges, merge and error resolution use this value.
+  `seon.task/assign!` and `seon.cluster.agent/write-attempt!` share `seon.task/assignment-read` and attempt writes.
+- **Adapt without self-certification.** Root customizes gates before assignment; agents add/change/drop tests for
+  later work. Required gate identities come from the assigned target basis, not the candidate's removal of a
+  tag/proof. Root revises assignments through ordinary writers; hold that basis, add no anti-removal check.
+  Candidate refinements/new proofs still enter acceptance. Contradictions go back with a counterexample.
+- **Accept once.** `seon.cluster.source/accept-merge!` judges the combined candidate for automatic and
+  `my.root/merge!` paths, including task-only/no-op/pre-end. `seon.merge/merge-tx` consumes acceptance; only
+  `:merged` completes a leaf. Delete `:satisfied`. Carry tested task/program/read basis into writer comparison.
+  Prove's deftest alone judges designed red; merge admits product reds by membership. Required green proofs,
+  reaching regressions and static checks retain their owners; missing/stale execution is not success.
+- **React once.** `seon.cluster.agent/plan` derives start/pause/stop from task facts. `seon.turn/test-step` and
+  `seon.turn/prove-turn` acquire evidence before model work; context reads it. `seon.cluster.agent/assignment-actions`
+  derives end actions from remaining work, allowance and actual exit. `seon.task/ready` excludes ended attempts
+  without relaunch, deleting its terminal-end literal. `seon.merge/publish!` remains separate: refusal stays visible
+  and retains the branch. Root reviews costs after `seon.task/done?`; no retrospective trigger or sixth stage.
 
-## 3. Shared functions and schemas
+## 3. Shared functions, one prose path
 
-Names marked **new** are proposed interfaces, not live claims; new named value schemas add no persisted attributes.
-The observation holds the prepared candidate, effective task, obligations, current test results, captured basis/read
-evidence and static errors under their existing schema names; acquisition failures remain errors, never empty success.
-
-| Owner | Contract vocabulary and composition |
+| Owner | Shared transformation / deletion |
 |---|---|
-| `seon.task/declaration` | `:seon.schema/projection` × task value → `:seon.task/declaration`; `malli.core/children`, `deref-all`, `type` derive members, cardinality and ref conversion. Normalize only declared sets; preserve vectors, tuples, order and duplicates. Constructors, refinement, pulls and write-back consume this derivation, including scalar template refs. |
-| `seon.task/effective` | `:seon.db/database-value` × `:seon.task/handle` → `:seon.task/effective`; derive the content selector from that schema. It includes product, not structural children/needs or inherited clone proof sets. |
-| `seon.task/obligations` | database × `:seon.task/sym` → `:seon.task/obligations`. Green proofs = copied set ∪ own tagged deftests; Implement additionally takes subject-tagged behavior proofs and effective product. Prove selects its effective product separately for designed-red evidence. Delete inference from every successor tag: it would misclassify green template proofs as red product. Convert existing Prove declarations in that cut. |
-| `seon.test.runner/designed-red?` | `:seon.test/result` → boolean; the only predicate over executed failure reports, used by the verdict and template test. Missing execution/load failure is not designed red. |
-| `seon.cluster.source/merge-verdict` (**new**) | named `:seon.source/merge-observation` → vector of `:seon.error/value`; compose extracted static and test predicates over acquired values. Positive complete evidence required; green obligations, Prove's nonempty designed-red product, reaching regressions, coverage, file equivalence, lint, contracts and dangling refs retain their existing owners. |
-| `seon.cluster.agent/assignment-actions` | `:seon.flow.plan/held-assignment` with acquired work/relaunch/exit observations → `:seon.flow.plan/actions`; extend these existing value schemas, collapse the policies in `close!`, `failed-pass!`, `refused-merge-relaunch` and `relaunch-reason`. |
+| `seon.task/declaration`, `seon.task/effective` | Members and held lineage shared with goal-owner/context; use `malli.core/children`, `malli.core/deref-all`, `malli.core/type`. |
+| `seon.task/obligations` | Remove caller tag queries and Prove selection. `seon.error/proof` uses it and `seon.test/green?`; retain current/completed evidence checks. |
+| New `seon.cluster.source/merge-verdict` | Candidate/obligations/results/static findings → errors, shared by preview and merge; no exit validator. |
+| `seon.cluster.agent/assignment-actions` | Assignment/observations → actions; delete policy from close!, failed-pass!, refused-merge-relaunch and ready; share held values. |
+| `seon.ref/document`, `seon.ref/candidate`, `seon.ref/names`, `seon.ref/references` | One CommonMark parse/candidate rule for task prose, every function/test/namespace docstring, schema descriptions, documents and help. |
 
-All proof consumers use `obligations`: assignment/admission, first-proof detection, staleness, execution, context,
-merge and task-edge display. They may project its result, never query another proof set. Prove runs product first,
-then handoff proofs that inspect those recorded results, then remaining reaching tests; Implement runs the same
-product as required green tests. The runner's existing evidence key includes task input; no clone-specific runner.
+Index docstrings with `seon.ref/names`, as task text is indexed: function/test/namespace references become stored,
+derived data consumed by context and `seon.task/task-edges`. Preserve keyword/path candidates through the same
+resolver; do not overload the existing symbol set. Delete authored `:seon/must-read` / `:seon/see-also` ingestion
+and their stored metadata path, converting consumers to derived references. Delete `seon.sci.lookup/docstring-parts`;
+summary/example reads use document spans from the same parser. Close namespace-name resolution and test/namespace
+docstring and `(help)` coverage. `seon.bootstrap/help-value` keeps general guidance; stage guidance comes **only**
+from instructions, replacing its prove/implement groups and context's Prove-only guidance.
 
-Cost follows declaration members/strings, lineage depth, selected tests and changed candidate files. A chain is one
-write proportional to clones plus edges. Candidate acquisition is not just validation: charge lint, baseline tests,
-recording, merge and publication separately. Historical static-only measurements are not full-loop budgets.
-Define records workload/proportionality and expected cost in intent; Prove expresses it with `seon.profile/measure`
-deftests. Prove authors a cost deftest comparing its measured probe with `seon.db/stored-costs`, using the existing
-`seon.batch/cost-diff` comparison and the same workload, evaluator, scope and captured baseline. A comparable
-regression is a failing assertion; no resurrected COST-REG verdict/dial system. A missing or
-incomparable sample is unknown, requiring measurement, never a green result. Performance claims need end-to-end
-parent/change measurements; line estimates are information, not limits.
+**Syntax choice: keep backticks required (recommended).** Qualified symbols/keywords, namespace names and based
+paths/links resolve; code blocks and opaque handles do not. Resolve-only bare names add token discovery/lookups and
+silently lose typos; backticks cost two characters and keep unresolved citations visible.
 
-## 4. Template instructions and default deftests
+Cost follows changed prose, members, lineage, selected tests/files; reuse content-valid acquisition. Commonality
+A7/A10/A16's bases, latest-attempt/count and branch/three-way diffs are not equivalent; do not collapse them.
 
-The five defaults live in `test/seon/step_test.clj`, tagged to their matching template task. They read the explicit
-task input and use the existing `seon.ref` CommonMark parser for document sections; extend that owner for strings,
-not a new Markdown/EDN mini-language. Section checks prove presence, **not relevance or design quality**. Root
-customizes with subject-specific deftests; agents exercise judgment in Survey/Design and Implement's send-back.
+## 4. Off-the-shelf templates
 
-| Stage/template | Instructions summary → default proof and assertions |
+Ordinary tasks in `resources/seon/tasks/seon.step.edn`, named survey/define/design/prove/implement, contain structured
+Markdown instructions (work, examples, completion) and a worked-example intent. Their default deftests in
+`test/seon/step_test.clj` are each tagged to one corresponding template. A run without explicit `:seon.test/task`
+uses that single tag's task; a clone supplies its own task. The runner binds the selected task, never its test
+agent's assignment; effective task content/read evidence belongs in reuse identity. Template self-tests must pass. Prove uses canonical fixture evidence on a disposable branch, never a permanently
+red example on main or recursive test runs. Copies never inherit example evidence.
+
+| Template | Instructions → default deftest (proposed) |
 |---|---|
-| Intake (root task) | Reuse/file the subject, state the problem and instantiate the chain. Its construction proof is A3 below; no second Intake template. |
-| Survey | Reproduce at the entrance; inspect libraries, history and consumers; put localization and observations in What exists, with inline references. `seon.step-test/survey-handoff`: Problem and What exists sections contain content; all cited references resolve on the candidate. Recorded repro is cited; an incident's exact input/expected/actual becomes a subject-specific regression, not printed-value parsing. |
-| Define | Refine Problem, Examples and Expected cost: success, boundaries, workload and proportionality. `seon.step-test/define-handoff`: those sections contain content and references resolve. Prove turns their examples/costs into executable tests; this default does not pretend prose is an oracle. |
-| Design | Trace data/interfaces, contracts, consumers and deletions in Approach; reuse existing interfaces, stub only genuinely new ones. `seon.step-test/design-handoff`: Approach contains content; cited interfaces resolve and function contracts compile in the candidate registry using `malli.core/schema` and the shared contract owner. Add step-tagged interface deftests for bounded samples and new stubs: invoke a stub and assert its declared unimplemented error, supplying green coverage for the Design merge. Prove later writes the red behavior product. Generators require a supported law. |
-| Prove | Add exact/boundary cases to existing tests where possible; declare product on the subject, tag behavior tests to the subject/Implement; measure costs through the real entrance. `seon.step-test/prove-handoff`: product nonempty, every product symbol resolves to a deftest with current designed-red evidence, and product is a subset of Implement's selected obligations. It reads results, never runs them recursively. |
-| Implement | Read intent and proofs, send back a contradiction with counterexample; change the producer, convert callers, delete replacements, turn product green. `seon.step-test/implement-handoff`: effective document references resolve. Behavior/cost proofs and candidate acceptance supply the substantive completion evidence; the default does not duplicate their judgment. |
-| Land/Retrospective (root task) | Merge after each step; publish; inspect costs/friction and improve future templates. A2/A5 assert accepted/merged/written identity and positive Git evidence; retrospective follow-ups carry red proofs. No mandatory model call for an uneventful retrospective. |
+| Survey | Reproduce; read owners, libraries and history; record observations/references → `seon.step-test/survey-handoff`: Problem and What exists have content, references resolve. |
+| Define | Specify outcomes, boundary examples and cost workload → `seon.step-test/define-handoff`: previous content plus Examples and Expected cost (or explicit no cost claim). |
+| Design | Specify approach, interfaces/contracts and deletions; reuse existing interfaces → `seon.step-test/design-handoff`: cumulative content plus Approach, contracts compile. New stub interface tests assert the instrumented input contract, not the temporary body. |
+| Prove | Add exact/boundary cases, declare subject product, write cost assertions where claimed → `seon.step-test/prove-handoff`: nonempty product with current executed designed-red reports, using `seon.test.runner/designed-red?`. This is the sole designed-red judgment. |
+| Implement | Check intent/proofs; change the producer and callers; turn behavior/cost tests green or send back → `seon.step-test/implement-handoff`: cumulative document/reference checks; selected behavior tests prove the result. |
 
-## 5. Acceptance deftests (implementation must start red)
+Defaults share a data-checking helper but keep single-tag entries. Sections prove presence, not quality; anyone
+may update them. Root adapts defaults per task.
+A cost claim requires a `seon.profile/measure` deftest against comparable `seon.db/stored-costs` at the candidate's
+merge base, using `seon.batch/cost-diff`: regression fails, missing/incomparable evidence requires measurement.
 
-These are **specified, not newly implemented or run by this docs slice**. Existing-source counterexamples are in
-[the review](../../../research/agent-platform/2026-10-13/review-lifecycle-astra.md) and both narrow checks.
-Each test carries `:seon/tasks` metadata for its phase task below; no phase is assigned until its red reproduces.
+## 5. Acceptance deftests — red first
 
-| ID / proposed deftest | Required counterexample and assertion |
+**Specified, not implemented/run here.** Slice 0 reproduces reds; each tags exactly one phase. Extend existing
+tests where they cover the class.
+
+| ID / proposed deftest | Concrete counterexample → assertion |
 |---|---|
-| A1 `seon.task-test/one-selector-serves-every-proof-consumer` | On indexed branch analysis, census every proof-selection entrance and assert it reaches `obligations` with no independent task-tag query. Behavior table: template-only first attempt, customized copied set, subject proof inherited by Implement, Prove product distinct from green handoffs. Assert identical selected sets in run, display and merge; no checkout-source census. |
-| A2 `seon.cluster.merge-test/only-an-accepted-candidate-completes-a-task` | Automatic and `my.root/merge!`, with/without an end, changed/task-only/no-op candidates: red or stale task proof cannot produce `:merged`; a valid candidate does, in the same transaction as refinement. Change main/task input after preview; acceptance uses the actual combined value. Include Prove red-product and unrelated reaching-red cases; no empty-delta bypass. |
-| A3 `seon.task-test/one-write-clones-a-chain-and-one-running-readies-survey` | Count the construction transaction, pull all clones and edges; children have no explicit execution. One subject `:running` yields only Survey. Change template instructions/tags and customize a clone: existing selection stays fixed, next clone changes. Task-file round trip preserves it. |
-| A4 `my.task-test/refine-preserves-every-declared-member` | Through create → refine → pull → write-back → re-ingest, product/copied proofs/template survive. A local schema extension with a vector preserves order/duplicates/empty vector; only declared sets normalize. Derive tested members from schema. References from every string reach the same resolver. |
-| A5 `seon.cluster.db-flow-test/a-scripted-full-chain-completes-without-hand-acts` | Canonical isolated fixture, scripted replies injected through `:seon.turn.loop/complete`, zero paid calls or Var redefinitions. One construction and launch; real listens, five agents, SCI, test runner, merges, disposable checkout publication. Each successor reads the accumulated intent and predecessor's program on main; product red at Prove, green at Implement; every assignment merged, subject done, publication/Git observed and branches retired after actual exit. Record calls, timings/allocation and zero post-launch hand acts. Table variants cover send-back, capped continuation, moved-main refusal then zero-call green relaunch, publication refusal visible, and root/scheduled agent creation with tasks. |
+| A1 `seon.task-test/one-selector-serves-every-proof-consumer` | Template-only first attempt through direct/reconciler admission; two clones with different content; inputless default → run/display/merge/error resolution select the same obligations, evidence never crosses tasks. Removing the attempt's own gate/tag does not remove the assigned obligation. Census analysed `:seon.task/tasks` readers by role, including error/proof; only obligations selects proofs. |
+| A2 `seon.cluster.merge-test/only-an-accepted-candidate-completes-a-task` | Automatic/manual × program/task-only/no-op × ended/pre-end; red/stale gate or moved task input → no merged outcome; accepted candidate → refinement and outcome together. Prove product red passes only with its handoff green; reaching regression fails. |
+| A3 `seon.task-test/one-write-clones-a-chain-and-one-running-readies-survey` | Count construction transaction; pull all five children/needs; run subject → only Survey ready. Repeated identical construction changes nothing; template instruction/tag edits affect next copy only; root-customized selection survives write-back. |
+| A4 `my.task-test/refine-preserves-every-declared-member` | Create/refine/pull/write-back/re-ingest preserves product/copied proofs and a local schema's ordered vector with duplicates; derive tested members from schema. |
+| A5 `seon.ref-test/all-prose-uses-one-reference-rule` | Same citation in each prose site above, including namespace name → same resolved identity and stored docstring edges; unresolved backticks remain problems, bare names ignored, code blocks excluded. Metadata/splitter duplicates are absent. |
+| A6 `seon.cluster.db-flow-test/ends-share-one-action-owner` | Sent-back sender, refused done, cap/stall and spent allowance → one action derivation; sender does not restart without relaunch, target reopens, exhausted work stays visible, retirement waits for exit. Separate `seon.cluster.db-flow-test/every-agent-start-has-a-task` covers root/scheduled creation. |
+| A7 `seon.cluster.db-flow-test/a-scripted-full-chain-completes-without-hand-acts` | One launch, scripted replies through `:seon.turn.loop/complete`, real SCI/listens/tests/five merges/disposable publication → cumulative intent, red then green product, done subject, Git evidence and retired branches; zero post-launch hand acts/paid calls. |
 
-## 6. Implementation phases and file ownership
+Keep moved-main relaunch, send-back and publication-refusal scenarios as separate full-loop deftests, not A7 rows.
+Each full-loop test declares a measured bound naming `seon.cluster.source/prepare-merge!`; slice 0 records it and
+obtains owner authorization if over ten seconds. Do not invent a timing pass before measuring.
 
-**Status: all phases pending; no implementation acceptance claimed.** Serial where files overlap. Each row is a
-phase task in `resources/seon/tasks/seon.task.edn`; tag the named acceptance deftests with that task symbol. A5 is the final full-loop proof; earlier action
-variants are `seon.cluster.db-flow-test/ends-share-one-action-owner` and
-`seon.cluster.db-flow-test/every-agent-start-has-a-task`, tagged to `seon.task/chain-actions`; they use ordinary
-task declarations and do not wait on the later template constructor. Every phase must turn its own proof green.
-Deletions and every caller/schema/test conversion commit together; no dual verdict writer between phases. Each
-candidate must lint, publish/reload its changed schemas and boot through `bin/lane commit --test` before commit.
+## 6. Phases
 
-| Phase task / proof | Delete first; replacement and complete file groups |
+**All pending; serial (shared owners).** Update status each commit; convert deletions and last callers together.
+
+| Slice | Work / proof / owners |
 |---|---|
-| `seon.task/chain-declarations` / A4 | Delete constructor, effective-content, ref and file-member hand lists, blanket sequential→set normalization. Derive from schemas; preserve product and references; admit copied proofs, template ref and stage enum here so A4 round-trips the complete declaration. `src/seon/task.clj`, `src/my/task.clj`, `src/seon/ref.clj`, `src/seon/cluster/source.clj`; schemas `seon.task.edn`, `my.task.edn`, `seon.ref.edn`; tests `task_test.clj`, `ref_test.clj`, `my/task_test.clj`, `cluster/write_back_test.clj`. |
-| `seon.task/chain-obligations` / A1 | Delete duplicate tag selectors and implicit successor-product selection with all consumers converted. Add explicit test input/evidence and use the admitted copied proofs. `src/seon/{task,turn,context,test}.clj`, `src/seon/test/runner.clj`, `src/seon/cluster/{agent,source}.clj`, `src/seon/merge.clj`; matching task/test/context/flow-plan schemas, `seon.test.member.edn`, schema parity; `test/seon/{task,test,context}_test.clj`; convert existing Prove entries in `resources/seon/tasks/` found by census. |
-| `seon.task/chain-acceptance` / A2 | Delete `unmet`, context's designed-red/contracts/base-results copies, broken/new-red verdict production and readers, `:satisfied`, facts-only success and empty-delta refusal. Extract shared observation/verdict and route both merge entrances through acceptance. `src/seon/{context,turn,task,merge}.clj`, `src/seon/cluster/source.clj`, `src/seon/cluster/agent.clj`, `src/my/root.clj`; schemas `seon.{agent,context,task,task.attempt,turn.loop,source,render.walk}.edn`, parity; tests `context_test.clj`, `test_failure_facts_test.clj`, `cluster/{merge,db_flow}_test.clj`, `my/root_test.clj`; retire quoted deleted symbols in owning task files. |
-| `seon.task/chain-actions` / A2, A5 variants | Delete `fixable-refusals`, duplicate relaunch decisions, taskless actions and local refusal-count lifecycle. Compose `assignment-actions`; root, outside and schedule creation supply tasks. `src/seon/{turn,cluster,mcp,schedule}.clj`, `src/seon/cluster/{agent,host}.clj`, `src/my/agent.clj`; their configuration/schema/default owners and `test/seon/cluster/{db_flow,agent,boot}_test.clj`, `test/seon/schedule_test.clj`, `test/my/agent_test.clj`, `test/seon/turn_continue_test.clj`. Census actual creation entrances before editing; no orphan root or taskless compatibility path. |
-| `seon.task/chain-templates` / A3, A4 | Replace hand-built chain setup with one population writer and five cloned templates. `src/seon/task.clj`, `resources/seon/tasks/seon.step.edn`, `test/seon/{task,step}_test.clj`, `test/my/task_test.clj`, `src/seon/bootstrap.clj`, `docs/seon/architecture/vocabulary.md`. |
-| `seon.task/chain-loop` / A5 | Delete superseded two-step-only fixture setup; use templates and canonical fixture. `test/seon/cluster/db_flow_test.clj`, shared `test/seon/test_support.clj` only for reusable setup, `test/seon/step_test.clj`, this card's phase status. Add measured cost regression cases through `seon.profile/measure` and existing stored-cost comparison owners; no separate cost gate. |
+| 0 | Write red acceptance tests and file phase tasks in `resources/seon/tasks/seon.task.edn`, tagged one-to-one. Record exact failures and bounds; do not launch a phase with an already-green proof. |
+| 1 · `seon.task/chain-declarations` | Schema-derived task members/refinement / A4 / task, my.task, source write-back, task schemas and their tests. |
+| 2 · `seon.task/chain-prose` | One prose path and derived docstring edges / A5 / ref, fn indexing, lookup, instrument, context, bootstrap, task-edges, schema/render consumers and tests. |
+| 3 · `seon.task/chain-obligations` | Obligations and task-aware test inputs / A1 / task, turn, context, test/runner, error, cluster.agent, bootstrap and schemas/tests. Delete successor inference and stage help together. |
+| 4 · `seon.task/chain-acceptance` | Accepted candidate is success / A2 / source, merge, my.root, turn, context, bootstrap and schemas/tests; replace observation production/consumption together, delete satisfied. |
+| 5 · `seon.task/chain-actions` | One end-to-action owner, every entrant has a task / A6 and separate creation proof / cluster.agent, task/ready, turn, my.root and tests. Remove parked/mailbox refusal counters as lifecycle policy; errors are facts at their producer. |
+| 6 · `seon.task/chain-templates` | Templates and one-write constructor / A3 / task, step tasks/default tests and write-back tests. |
+| 7 · `seon.task/chain-loop` | Full loop / A7 and separate scenario proofs / db-flow tests; root reviews measured costs and actual publication. |
 
-The observed namespace-source defect remains a prerequisite producer fix, not a lifecycle exception:
-`seon.fn/runtime-require-specs` feeds `seon.sci.eval/namespace-context-row`, replacing `declared-source` append;
-`my.program/source` shows the resulting namespace form. Files: `src/seon/{fn,sci/eval}.clj`, `src/my/program.clj`,
-`src/seon/bootstrap.clj`, their task files and `test/seon/cluster/write_back_test.clj`, `test/my/program_test.clj`.
-Tag `seon.cluster.write-back-test/repl-requires-never-corrupt-the-written-ns-form` to
-`seon.task/chain-namespace-source`: replay cross-request require history and clean `ns` repair through file proof.
-Do not teach the repair before this red passes. This slice may precede the serial phases; it adds no lifecycle rule.
+## 7. Narrow-check questions
 
-## 7. Narrow-check questions and evidence limits
-
-Before filing each phase, verify on the installed system or its disposable candidate:
-
-1. Does the schema-derived round trip preserve scalar template refs, copied sets and vectors, including refine of
-   an existing product? Does one population write omit child `:held` without a repair transaction?
-2. Does the selector census cover admission, first proof, stale detection, task-edge/context displays and both
-   merge entrances? Can the member read explicit task input before assignment, and does changed intent invalidate reuse?
-3. Does the candidate include task refinements **before** tests run? Are all read dependencies compared in the
-   writer, including a task-only/no-op merge and a root request with no end? Can any other writer produce `:merged`?
-4. Can default proofs inspect current product evidence without recursion? Can the same test body run for two
-   clones without borrowing the other's green? Does a template proof-membership edit leave old clones unchanged?
-5. Does the action census include direct assignment, root/MCP/schedule creation, close/cancel/error and actual exit?
-   Does every declared post-end refusal reach the new attempt/root with no class list? Publication refusal is not success.
-6. Does A5 run through real listen wakes rather than manually advancing phases? Does the injected completion
-   remain zero paid calls on all variants? What are full acquisition/test/merge/publication costs, not just validator CPU?
-
-Source and JVM-read evidence underpinning the decisions: [review](../../../research/agent-platform/2026-10-13/review-lifecycle-astra.md),
-[hybrid](../../../research/agent-platform/2026-10-13/hybrid-lifecycle.md),
-[first narrow check](../../../research/agent-platform/2026-10-13/narrow-lifecycle.md),
-[second narrow check](../../../research/agent-platform/2026-10-13/narrow-lifecycle-2.md),
-[reference inventory](../../../research/agent-platform/2026-10-13/reference-reading-list.md),
-[cost history](../../../research/agent-platform/2026-10-13/cost-estimates-history.md),
-[stage history](../../../research/agent-platform/2026-10-13/chain-steps-history.md),
-[lifecycle dig](../../../research/agent-platform/2026-10-13/dig-step-lifecycle.md).
-The latest owner rulings settle those documents' open questions about templates, stage order, cost proofs and exit attributes.
-
-[Commonality inventory](../../../research/agent-platform/2026-10-13/lifecycle-commonality.md), source-checked:
-A1/A2/A3/A5/A6/A17 collapse into the owners above. Do not add its proposed parallel `proof-syms`, `judged-tests`
-or `end-kind` policies. An enum supplies allowed values, not reactions. `seon.test/green?` supplies count judgment
-(expose the existing function); completed/terminated evidence and current reach remain separate facts. A7's merge-base
-fallbacks, A10's latest-attempt/count and A16's branch-delta/three-way comparison are **not equivalent** and are not
-collapsed by assertion. Keep the merge's basis owner; share held assignment/task values across callers instead of
-re-pulling handles. `seon.task/effective`/`goal-owner` and context share one lineage acquisition, while readiness
-keeps the existing Datalog rules. No new generic accessor family.
-
-Dependency seams checked locally: Malli `malli.core/children`, `malli.core/deref-all`, `malli.core/type` and
-`malli.core/validator`; Datahike `datahike.versioning/merge!` and `datahike.writing/merge-writer!` retain the
-serialized writer and final-report validation; `sci.core/fork` isolates definitions; Flow stop requests stop,
-not actual exit. Reuse Seon's owners of those seams. Cheap live JVM reads reproduced the missing constructor/stages,
-reference derivation and existing proof-set schema; they do not prove the new design. Default's reported faults
-and unrelated working-tree changes are foreign to this documentation slice; no restart or root SCI is needed.
-
+Can every red reproduce without root SCI/paid calls? Does inputless Prove pass without a permanently red main
+fixture? Does held gate identity survive tag deletion without another policy? Does writer comparison cover proof
+inputs? Are sent-back/refused-done readiness correct? Can the prose cut remove both duplicates without a ref/lookup
+load cycle? Does each phase boot? Walk the dropped-message subject; measure time/allocation and hand acts.
 
 ## 8. Reviews
 
@@ -462,3 +401,45 @@ Top three changes: **(1)** one stage-aware proof selection with explicit task in
 handoff through the task/agent owners, **(3)** pre-merge diff review and behavior-based proofs, deleting the three fences
 above. This lane changes only this review; no new runtime task or code was written. The branch-proof admission and
 retirement gaps above already have task identities; new chain-specific gaps are requirements for this unbuilt card.
+
+### 8.3 Rewrite evidence (2026-10-13)
+
+Inputs: [Opus's 13 findings](../../../research/agent-platform/2026-10-13/review-spec-opus.md) at bcf638361,
+[prose references](../../../research/agent-platform/2026-10-13/prose-references.md),
+[Markdown sections](../../../research/agent-platform/2026-10-13/markdown-sections.md),
+[commonality](../../../research/agent-platform/2026-10-13/lifecycle-commonality.md) and
+[Astra's lifecycle review](../../../research/agent-platform/2026-10-13/review-lifecycle-astra.md).
+The old decided text is in 40dd25678; §§8.1–8.2 above are preserved verbatim, not current instructions.
+
+Source at bcf638361 confirms the metadata reader/consumer, docstring splitter, duplicate proof queries,
+hard-coded help and reconciler admission gap. No source definition authors must-read/see-also metadata.
+The inspected owners match default's 371a754df archive. Malli pin dd13ff8113 supplies children/deref-all/type
+and its cached validator; no new schema walker is needed.
+
+One MCP JVM read (root/default, explicit connection; no root SCI or reload) returned: obligations,
+assignment-read, write-attempt!, document, names and docstring-parts exist; chain! does not; installed steps
+are `[:prove]`. `(seon.ref/names "Read `my.agent` and `seon.task/obligations`.")` returned only the qualified
+function. Evaluation: 3 ms; request: 39.8 ms, 0.9 MB attributed allocation (entrance 7.9 MB), no reply errors.
+This verifies existing seams/gaps, not the proposed chain.
+
+Foreign boundary: both status entrances reported default faulted (two open faults, 17 errored receipts,
+three agent-error signatures; no missing boot layers). Default and other lanes' files were left untouched.
+Full `clj-kondo --lint src script test --cache false --parallel`: 0 errors, 1,645 warnings, 5,530 ms.
+Documentation-only change; source/test delta zero. Commit-gate foundation tests and their recorded results
+are in the commit evidence; they do not establish the proposed acceptance deftests.
+
+The candidate checks have an unresolved storage/fixture interaction; no source fix is claimed:
+
+| Selection / basis | Run | Result / test time |
+|---|---|---|
+| Three tests / first candidate | dd0997c91730 | Reference test passed; readiness errored at `seon.db/sink-digests` (missing node); effective-task returned empty data; 8,717 ms. |
+| Task pair / HEAD | dc3a5e3bc8d7 | 11 passes, zero failures/errors; 8,156 ms (31,894 ms total). |
+| Three tests / exact candidate | 2975c2e1e605 | Same two task reds; reference passed; 8,627 ms. |
+| Three tests / HEAD | fb0d414727e8 | 13 passes, zero failures/errors; 8,587 ms (26,981 ms total). |
+| Task pair / exact candidate | 1f43b2084c3d | 11 passes, zero failures/errors; 8,191 ms (28,773 ms total). |
+
+The task pair is `seon.task-test/a-running-subject-readies-its-first-step-only` and
+`seon.task-test/a-steps-effective-task-is-its-subjects-merged-with-its-own`; the reference test is
+`seon.ref-test/one-text-yields-names-paths-and-line-citations-by-the-same-rules`. Final commit checks the task
+pair separately with `--at-candidate`; the reference test's positive candidate evidence is above. The combined
+candidate failure remains a foreign verification limit, not a claimed pass or a diagnosed root cause.
