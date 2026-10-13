@@ -178,8 +178,8 @@
   `:product`, a Prove step's product tests at the head red by no failing report (empty when it
   declares none); `:product-absent`, those the head lacks; `:broken`, what its change
   broke; `:new-red`, new reds outside its proofs (Implement) or product (Prove); and
-  `:uncontracted`, the functions its merge would refuse. Empty when the step is done; `step-status`
-  judges by it."
+  `:uncontracted`, the functions its merge would refuse, for every step: done means the merge would accept.
+  Empty when the step is done; `step-status` judges by it."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/unmet]}
   [{step :seon.task/step proofs :seon.task/proofs product :seon.task/product
     head :seon.context/head fork-point :seon.context/fork-point uncontracted :seon.context/uncontracted}]
@@ -189,8 +189,8 @@
                          :broken broken
                          :new-red (into #{} (remove owed) new-red)}
                   (= :prove step) (assoc :product (into #{} (filter #(and (head %) (not (designed-red? (head %))))) product)
-                                         :product-absent (into #{} (remove head) product))
-                  (= :implement step) (assoc :uncontracted (set uncontracted)))]
+                                         :product-absent (into #{} (remove head) product)))
+        clauses (assoc clauses :uncontracted (set uncontracted))]
     (cond-> (into {} (filter (comp seq val)) clauses)
       (empty? owed) (assoc owed-clause #{}))))
 
@@ -199,9 +199,9 @@
   and not red there; `:seon.context/new-red`, the head's reds absent there; `:seon.context/green-before`, its
   proofs known green there, when any; and `:seon.task/status`. An `:implement` step is `:satisfied` when its
   proofs are nonempty, all green and all known green at the fork point: it has nothing to do. A step is `:done`
-  when its done rule has no `unmet` clause: an Implement step's proofs nonempty and all green, nothing broken,
-  every new red a proof and no function its merge would refuse for lacking a complete contract
-  (`:seon.context/uncontracted`, named beside its status); a Prove step's own proofs all green, its product
+  when its done rule has no `unmet` clause, and for every step no function its merge would refuse for lacking a
+  complete contract (`:seon.context/uncontracted`, named beside its status): an Implement step's proofs nonempty
+  and all green, nothing broken and every new red a proof; a Prove step's own proofs all green, its product
   nonempty and every product test red at the head by a failing report (a failing assertion or an error its body
   raised), nothing broken and every new red a product test (the rest its fork point already held red). A Prove
   step is `:satisfied` when its fork point already held its whole product red and nothing is new: main holds its
@@ -219,7 +219,7 @@
     (cond-> {:seon.task/status (cond satisfied? :satisfied (empty? (unmet observation)) :done :else :working)
              :seon.context/broken broken :seon.context/new-red new-red}
       (seq green-before) (assoc :seon.context/green-before green-before)
-      (and (= :implement step) (seq uncontracted)) (assoc :seon.context/uncontracted uncontracted))))
+      (seq uncontracted) (assoc :seon.context/uncontracted uncontracted))))
 
 (defn held-task
   "The effective task `agent-id` holds, read on `database`, its world (its branch holds its assignment): its
@@ -360,8 +360,8 @@
   (`seon.task/obligations`), the head's entries for them and for `judged`, the tests the agent's test step
   found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
   present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
-  supplies the step's last record, each proof's known result at the fork point (`base-results`) replaces it and,
-  for an implement step, the contract gaps its merge would refuse (`contract-gaps`) are observed."
+  supplies the step's last record, each proof's known result at the fork point (`base-results`) replaces it and
+  the contract gaps its merge would refuse (`contract-gaps`) are observed, for every step."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym
                        [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
                   [:or :seon.context/step-observation :seon.error/value]]}
@@ -374,7 +374,7 @@
                (head-entries database (into broken (concat new-red (:seon.task/proofs owed) (:seon.task/product owed)))))
         base (when (and (not judged) (map? head) (not (:seon.error/at head)))
                (base-results database (set (filter head (:seon.task/proofs owed)))))
-        refused (when (and (not judged) (= :implement (:seon.task/step owed))) (contract-gaps database agent-id))]
+        refused (when-not (or judged (:seon.error/at owed)) (contract-gaps database agent-id))]
     (or (some #(when (:seon.error/at %) %) [owed head base refused])
         (cond-> (assoc owed :seon.context/head head
                             :seon.context/fork-point (merge (into {} (for [s (keys head) :when (not (new-red s))] [s (not (broken s))]))

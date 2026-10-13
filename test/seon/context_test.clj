@@ -483,11 +483,12 @@
   ;; one rule judges the step and names, as data, each clause that keeps it from done; a done step has none
   (let [red {:seon.context/proof-status :red :seon.context/proof-failures [{:type :fail}]}
         green {:seon.context/proof-status :green}
-        unmet (fn [step proofs product head fork-point]
-                (let [observation {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
-                                   :seon.context/head head :seon.context/fork-point fork-point}]
+        unmet (fn [step proofs product head fork-point uncontracted]
+                (let [observation (cond-> {:seon.task/step step :seon.task/proofs proofs :seon.task/product product
+                                           :seon.context/head head :seon.context/fork-point fork-point}
+                                    uncontracted (assoc :seon.context/uncontracted uncontracted))]
                   (:seon.context/unmet (context/step-section (merge observation (context/step-status observation))))))]
-    (doseq [[step proofs product head fork-point expected why]
+    (doseq [[step proofs product head fork-point expected why uncontracted]
             [[:prove #{} #{'tq.rule/s 'tq.rule/l} {'tq.rule/s red} {} {:product-absent #{'tq.rule/l}} "a declared product test nobody wrote"]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s green} {} {:product #{'tq.rule/s}} "a product test green at the head"]
              [:prove #{} #{} {} {} {:product #{}} "a Prove step declaring no product"]
@@ -495,8 +496,12 @@
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red 'tq.rule/n red} {} {:new-red #{'tq.rule/n}} "a new red beyond its product"]
              [:implement #{} #{} {} {} {:proofs #{}} "an Implement step declaring no proof"]
              [:implement #{'tq.rule/p} #{} {'tq.rule/p red} {'tq.rule/p true} {:proofs #{'tq.rule/p}} "its proof red"]
+             [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} {:uncontracted #{'tq.rule/h}}
+              "a Prove step's red product beside a helper its merge would refuse for lacking a contract" ['tq.rule/h]]
+             [:implement #{'tq.rule/p} #{} {'tq.rule/p green} {'tq.rule/p true} {:uncontracted #{'tq.rule/h}}
+              "an Implement step's green proof beside an uncontracted helper" ['tq.rule/h]]
              [:prove #{} #{'tq.rule/s} {'tq.rule/s red} {} nil "a done step has no unmet clause"]]]
-      (is (= expected (unmet step proofs product head fork-point)) why))))
+      (is (= expected (unmet step proofs product head fork-point uncontracted)) why))))
 
 (deftest ^{:seon/tasks #{'seon.context/reached-reds-are-invisible-to-the-agent}
            :seon.test/long "An own-branch agent's setup, one change through its eval request with its test step and one fork-point run, and two reads of its block."
@@ -588,6 +593,36 @@
                   :seon.fn.contract/position [:seon.fn.contract.position/input 0]}]
                 (:seon.context/contract-gaps step))
              "the section names the function, the slot and the finding")
+         (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup, two eval requests with their test steps, and two reads of its block."
+           :seon.test/long-ms 30000}
+  an-uncontracted-helper-keeps-a-prove-step-working
+  ;; done means the merge would accept, for a Prove step too: a scratch helper defined beside the red product
+  ;; would be merged with it and refused for lacking a contract, so the step is working and its section names it
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "prove-uncontracted-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           ;; the Prove step declares the one test it writes, so it is assigned before that test exists
+           _ (task/index-tasks! {:seon.db/connection connection
+                                 :seon.task/files {"resources/seon/tasks/tq.pvu.edn"
+                                                   (str "[#:seon.task{:name \"prove\" :intent \"Prove it.\" :step :prove :product #{tq.pvu-test/rows}}\n"
+                                                        " #:seon.task{:name \"implement\" :intent \"Implement it.\" :needs #{[:seon.task/sym tq.pvu/prove]}}]")}})
+           id (:seon.task/id (db/pull (db/db connection) [:seon.task/id] [:seon.task/sym 'tq.pvu/prove]))
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.pvu-test)")]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+       (evaluate running agent-id (str "(ns tq.pvu-test (:require [clojure.test :refer [deftest is]]))\n"
+                                       "(deftest ^{:seon/tasks #{'tq.pvu/implement}} rows (is (= 1 2)))"))
+       (is (= :done (:seon.task/status (:seon.context/step (block running agent-id)))) "the red product alone is done")
+       (evaluate running agent-id "(in-ns 'tq.pvu-test)\n(defn rv [s] s)")
+       (let [step (:seon.context/step (block running agent-id))]
+         (is (= {:seon.task/status :working :seon.context/uncontracted ['tq.pvu-test/rv]
+                 :seon.context/unmet {:uncontracted #{'tq.pvu-test/rv}}}
+                (select-keys step [:seon.task/status :seon.context/uncontracted :seon.context/unmet]))
+             "the helper keeps the step working, named as its unmet clause")
          (is (false? (context/task-done? (db/db target) agent-id)) "as the end reads it"))))))
 
 (deftest

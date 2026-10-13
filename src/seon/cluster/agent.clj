@@ -2179,9 +2179,10 @@
     relaunches))
 
 (def ^:private fixable-refusals
-  "The merge refusals the attempt's agent can fix on its branch, and its block shows: a merge refused for one is
-  relaunched from the attempt's end commit like a capped end with work (`refused-merge-relaunch`)."
-  #{:seon.source/uncontracted-error :seon.source/lint-error})
+  "The merge refusals the attempt's agent can fix on its branch, and its block shows, by error type, or by type and
+  `:seon.source/write-back-refused` reason for a write-back refusal: a merge refused for one is relaunched from
+  the attempt's end commit like a capped end with work (`refused-merge-relaunch`)."
+  #{:seon.source/uncontracted-error :seon.source/lint-error [:seon.source/write-back-error :not-analyzable]})
 
 (defn- refused-merge-relaunch
   "The facts relaunching assignment `key`, whose merge was refused for a reason its agent can fix
@@ -2225,7 +2226,8 @@
                     (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
         unmerged (when (and owned? merge?)
                    (source/unmerged-count (db/db connection) (handle-store handle) (:seon.task/branch action)))
-        relaunch (when (and unmerged (fixable-refusals type)) (refused-merge-relaunch handle action reason unmerged))]
+        fixable? (or (fixable-refusals type) (fixable-refusals [type (:seon.source/write-back-refused (ex-data cause))]))
+        relaunch (when (and unmerged fixable?) (refused-merge-relaunch handle action reason unmerged))]
     (cond
       relaunch
       (write! connection (mapv (fn [[attribute value]] [:db/add [:seon.task/assignment key] attribute value]) (sort relaunch)))

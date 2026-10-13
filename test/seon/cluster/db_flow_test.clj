@@ -1247,6 +1247,48 @@
                   (is (= (digest branch-2-value (symbol rows "twice")) (digest main (symbol rows "twice")))
                       "and the body of twice only attempt 1 changed")))))))))))
 
+;;; F65: a merge whose candidate file would not analyze relaunches, the finding in its reason.
+
+(deftest ^{:seon.test/long "One chain world, one attempt's merge refused at its file proof and its relaunch over three db<->flow passes."
+           :seon.test/long-ms 120000}
+  a-merge-refused-for-an-unrequired-namespace-relaunches-with-the-finding
+  (binding [*space* "tq.unanalyzable"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        ;; z, already green, only gives the world a program to define
+        connection {"u" [#{} nil] "z" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                rows (str *space* "-rows")
+                problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" %))]))]
+            (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                   (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                        "(deftest ^{:seon/tasks #{'" *space* "/u}} proves-u (is (= 4 (twice 2))))\n")})
+            (pass! handle routing)
+            (let [[[key-1 branch-1]] (seq (attempts connection "u"))
+                  on-1 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-1})]
+              (await-on! on-1 #(not-empty (proof-runs (db/db on-1) (symbol rows "proves-u"))) ::proved)
+              ;; the work calls a namespace SCI has loaded and the file does not require
+              (define-on! on-1 (symbol rows) (str "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] "
+                                                  "(* x (count (clojure.set/union #{x} #{(- x)}))))"))
+              (test-support/transacted! on-1 [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
+                                              [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit (db/commit-id (db/db on-1))]])
+              (pass! handle routing)
+              (let [first-row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task.attempt/reason :seon.task.attempt/relaunch]
+                                       [:seon.task/assignment key-1])
+                    reason (str (:seon.task.attempt/reason first-row))]
+                (is (= :error (:seon.task.attempt/end first-row)) "the refused merge ends the attempt")
+                (is (str/includes? reason ":seon.source/write-back-error") "naming the refusal")
+                (is (str/includes? reason "clojure.set") "and the finding the agent can fix")
+                (is (string? (:seon.task.attempt/relaunch first-row)) "and relaunches it, as a capped end with work")
+                (is (nil? (problem key-1)) "with no problem task for root"))
+              (pass! handle routing)
+              (is (string? (ffirst (remove #(= key-1 (first %)) (attempts connection "u")))) "the second attempt starts")))))))))
+
 ;;; H5: a capped attempt with work continues from its end commit, up to :seon.config.run/relaunches.
 
 (defn- relaunch-row

@@ -1407,7 +1407,11 @@
                                                 (into (set (keys expected)) (keys actual)))))]
         (cond
           (not actual)
-          (refuse :not-analyzable "The candidate file does not analyze cleanly; its namespace form may lack a require the accepted declarations use."
+          (refuse :not-analyzable
+                  (str "The candidate file does not analyze cleanly; its namespace form may lack a require the accepted declarations use: "
+                       (str/join "; " (map (fn [{::analyzer/keys [row col type message]}] (str path ":" row ":" col " " type " " message))
+                                           (:seon.fn/findings reindexed)))
+                       ". Require the namespace, or unmap the declaration (my.program/ns-unmap!), and request the merge again.")
                   {:seon.error/offending (:seon.fn/findings reindexed)})
           (seq differing)
           (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
