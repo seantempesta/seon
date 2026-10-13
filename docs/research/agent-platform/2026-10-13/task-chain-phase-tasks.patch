@@ -1,0 +1,166 @@
+diff --git a/resources/seon/tasks/seon.task.edn b/resources/seon/tasks/seon.task.edn
+index 45ab4ab..c6a1d72 100644
+--- a/resources/seon/tasks/seon.task.edn
++++ b/resources/seon/tasks/seon.task.edn
+@@ -31,4 +31,31 @@
+  #:seon.task{:name "a-step-selects-its-obligations-by-its-kind"
+   :intent "Phase P2 of hybrid-step-semantics.md (platform slice). The step kind is one fact on the task: `:seon.task/step` [:enum :prove :implement] on `:seon.task/task` (absent reads :implement; vocabulary row under 'subject, step'); `:seon.task.attempt/end` gains :error; `:seon.task.attempt/relaunch` (why an ended attempt is relaunched); `:seon.error/unimplemented`, the variant Design's contracted stubs fail with. One selector, `seon.task/obligations` (database, task-sym) -> {:seon.task/step k :seon.task/proofs own tagged deftests :seon.task/product deftests tagged with the tasks whose :seon.task/needs name this one}, two reads over :seon.task/tasks, replaces every other reader of a step's proofs: `seon.task/assign!`'s refusal, the test step (`seon.turn/task-proofs` goes), `seon.context/proofs`, `seon.context/task-done?`'s own selection, `seon.turn/task-end` and `seon.cluster.agent/plan-facts`' validity. Proof: seon.task-test/obligations-select-by-step (table: implement; prove with dependents; prove with own proofs; absent step = implement). Files: resources/seon/schemas/seon.task.edn, seon.task.attempt.edn, seon.error.edn, docs/seon/architecture/vocabulary.md, src/seon/task.clj, test/seon/task_test.clj. Read `seon.task/task-edges` and `docs/research/agent-platform/2026-10-12/hybrid-step-semantics.md`."}
+  #:seon.task{:name "a-task-root-writes-on-main-survives-a-fresh-install"
+-             :intent "(task-write-back §5 question 2, root 2026-10-12) A task root writes directly on main (`seon.merge/conflict-task!`'s squash conflicts, `seon.task/adopt-tasks-call`'s adoption conflicts, `seon.contracts/task`'s generated contract tasks) never passes through a merge, so `seon.cluster.source/merge-accepted` never names it and `seon.merge/publish!` never writes it to its task file: a fresh install loses it. Decide whether such a task is rederivable data or is written back, once one is observed lost. Read docs/research/agent-platform/2026-10-12/task-write-back.md#5-open-questions-with-recommended-answers."}]
++             :intent "(task-write-back §5 question 2, root 2026-10-12) A task root writes directly on main (`seon.merge/conflict-task!`'s squash conflicts, `seon.task/adopt-tasks-call`'s adoption conflicts, `seon.contracts/task`'s generated contract tasks) never passes through a merge, so `seon.cluster.source/merge-accepted` never names it and `seon.merge/publish!` never writes it to its task file: a fresh install loses it. Decide whether such a task is rederivable data or is written back, once one is observed lost. Read docs/research/agent-platform/2026-10-12/task-write-back.md#5-open-questions-with-recommended-answers."}
++ #:seon.task{:name "chain-prose"
++             :intent "TASK-CHAIN phase 2 (`docs/seon/schedule/cards/TASK-CHAIN.md#3-shared-functions-one-prose-path`, `docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`): one prose path. `seon.ref/references` and `seon.ref/names` read every prose site by the one `seon.ref/document` parse and candidate rule: bare qualified symbols, keywords and `path#anchor` resolve when they name an existing entity, an existing namespace such as `my.agent` resolves by `:seon.ns/name`, an anchor-only link with no document is a problem, self-citations, directories and fenced example code are not references. Function, test and namespace docstring citations union into the existing `:seon.fn/references` edge. `seon.ref/resolve-name` only identifies the entity; display follows each kind's declared render (`seon.render.ns/function-ai`, `seon.render.test/render-ai`, `seon.render.ns/task-ai`, `seon.render.ns/render-ai`, `seon.render.schema/render-ai`, new seon.ref/render-doc-ai on `:seon.ref/resolved-doc`). Delete `seon.sci.lookup/docstring-parts` and the ref→lookup require in the same commit as the heading sweep (no `Examples:` colon headings left). Measure selected test counts and edit/retest time before and after. Done when seon.ref-test/all-prose-uses-one-reference-rule and seon.ref-test/each-reference-kind-uses-its-declared-render are green."}
++ #:seon.task{:name "chain-obligations"
++             :intent "TASK-CHAIN phase 3 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-rules-and-owners`, `docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`): `seon.task/obligations` is the one proof selector, over the assigned target basis (main head, candidate and merge base), with task-aware member identity through the new :seon.test/task request input. Convert `seon.turn/task-proofs`, `seon.context/proofs`, `seon.error/proof` and `seon.task/task-edges`' proofs member to it; delete successor-tag inference and stage help. Done when seon.task-test/one-selector-serves-every-proof-consumer is green."
++             :needs #{[:seon.task/sym seon.task/chain-prose]}}
++ #:seon.task{:name "chain-acceptance"
++             :intent "TASK-CHAIN phase 4 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-rules-and-owners`, `docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`): `seon.cluster.source/prepare-merge!`'s gate and `seon.cluster.source/accept-merge!` converge into one new seon.cluster.source/merge-verdict for the automatic and `my.root/merge!` paths; `seon.merge/merge-tx` compares the tested obligations and task basis inside the writer; only `:merged` completes a leaf; `:satisfied` is deleted. Done when seon.cluster.merge-test/only-an-accepted-candidate-completes-a-task is green."
++             :needs #{[:seon.task/sym seon.task/chain-obligations]}}
++ #:seon.task{:name "chain-actions"
++             :intent "TASK-CHAIN phase 5 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-rules-and-owners`, `docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`): `seon.cluster.agent/assignment-actions` is the one end-to-action owner (sent-back, refused done, cap or stall, spent allowance, actual exit); `seon.task/ready` excludes ended attempts without its terminal-end literal; every entrant has a task. Done when seon.cluster.db-flow-test/ends-share-one-action-owner and seon.cluster.db-flow-test/every-agent-start-has-a-task are green."
++             :needs #{[:seon.task/sym seon.task/chain-acceptance]}}
++ #:seon.task{:name "chain-intake-search"
++             :intent "TASK-CHAIN slice I0 (`docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`): `my.program/search` closes the gaps of `docs/research/agent-platform/2026-10-13/link-statement-experiment.md`: vocabulary bridging, ranking by recorded use, a schema-key hit with its key and producer, owners before tests, token cost per candidate before expansion; no second index or prose parser. Done when my.program-test/intake-search-finds-owners-with-candidate-costs is green."}
++ #:seon.task{:name "chain-intake-replies"
++             :intent "TASK-CHAIN slice I1 (`docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`): a `my.message/send` to the user persists a displayable question; a POST through `seon.render.web/message-bar-html`'s reply form records `:seon.message/from` and `:seon.message/caused-by`, and root's `seon.cluster.agent/db<->flow` delivers it to the recipient's own branch (`my.message/inbox`, an unanswered wake); no new reply-to attribute. Done when seon.render.web-test/a-user-reply-post-wakes-the-addressed-agent is green."}
++ #:seon.task{:name "chain-intake-answer"
++             :intent "TASK-CHAIN slice I2 (`docs/seon/schedule/cards/TASK-CHAIN.md#1-need--fields`): the new my.agent/answer! validates a reply's answer against the task-declared answer schema and stores it as ordinary data keeping the user message's identity and the subject intent it approves; a later reply supersedes it. Names and admits the answer schema/value task members at their producer. Done when my.agent-test/an-answer-is-validated-and-keeps-its-message is green."
++             :needs #{[:seon.task/sym seon.task/chain-intake-replies]}}
++ #:seon.task{:name "chain-intake-approval"
++             :intent "TASK-CHAIN slice I3 (`docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`): Survey's default deftest reads the latest answer from the user for the current subject intent; missing, negative, superseded or earlier-intent answers stay red, and only an ordinary accepted merge advances the chain. Done when seon.step-test/survey-waits-for-the-latest-user-approval is green."
++             :needs #{[:seon.task/sym seon.task/chain-intake-answer] [:seon.task/sym seon.task/chain-acceptance]}}
++ #:seon.task{:name "chain-templates"
++             :intent "TASK-CHAIN phase 6 (`docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`): the five templates are ordinary tasks in resources/seon/tasks/seon.step.edn with default deftests in test/seon/step_test.clj; the new seon.task/chain! submits subject, five copies and needs in one `seon.task/adopt-tasks-tx`; one running fact readies Survey only. Done when seon.task-test/one-write-clones-a-chain-and-one-running-readies-survey is green."
++             :needs #{[:seon.task/sym seon.task/chain-actions] [:seon.task/sym seon.task/chain-intake-approval]}}
++ #:seon.task{:name "chain-loop"
++             :intent "TASK-CHAIN phase 7 (`docs/seon/schedule/cards/TASK-CHAIN.md#5-acceptance-deftests--red-first`): one launch runs the full chain with scripted replies through `:seon.turn.loop/complete`, real SCI, listens, tests, five merges and disposable publication, with zero paid calls and no hand act after the subject's running fact; its long bound is measured and owner-authorized before it gates. Done when seon.cluster.db-flow-test/a-scripted-full-chain-completes-without-hand-acts is green."
++             :needs #{[:seon.task/sym seon.task/chain-templates]}}]
+diff --git a/test/seon/task_test.clj b/test/seon/task_test.clj
+index 593a71e..2303fff 100644
+--- a/test/seon/task_test.clj
++++ b/test/seon/task_test.clj
+@@ -344,3 +344,13 @@
+        (is (= #{(handle "implement")} (task/ready (after running [[["prove" :merged]]]))))
+        (is (= #{} (task/ready (after running [[["implement" :execution :held]] [["prove" :merged]]])))
+            "a step's own :held keeps it held")))))
++
++(deftest ^{:seon/tasks #{'seon.task/chain-obligations}}
++  one-selector-serves-every-proof-consumer
++  ;; TASK-CHAIN A1, census half: over analysis data, only `seon.task/obligations` reads `:seon.task/tasks` to select
++  ;; proofs; writers, links, dangling and triage read it for their own purpose.
++  (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/candidate-dangling seon.task/open-tasks
++                   seon.task/task-findings}
++        readers (db/q '[:find [?s ...] :where [?e :seon.fn/keywords :seon.task/tasks] [?e :seon.fn/sym ?s]] (db/db))]
++    (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
++        "no other source function selects proofs by tag")))
+diff --git a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+index ce346d657..e3c933765 100644
+--- a/test/seon/ref_test.clj
++++ b/test/seon/ref_test.clj
+@@ -1,11 +1,13 @@
+ (ns seon.ref-test
+   (:require [clojure.data.json :as json]
+             [clojure.string :as str]
+-            [clojure.test :refer [are deftest is]]
++            [clojure.test :refer [are deftest is testing]]
++            [seon.config :as config]
+             [seon.db :as db]
+             [seon.error]
+             [seon.mcp :as mcp]
+             [seon.ref :as ref]
++            [seon.render :as render]
+             [seon.test-support :as test-support]))
+ 
+ (defn- shown
+@@ -213,3 +215,91 @@
+         below (first (filter #(= 'seon.context/task-sections (:seon.ref/name %)) (:seon.ref/references current)))]
+     (is (some? (:seon.fn/source task-sections)) "at top level the name shows its content")
+     (is (= {:seon.ref/name 'seon.context/task-sections} below) "below it is cited by name only")))
++
++;;; TASK-CHAIN §5 A5 and A5b: one reference rule for all prose, one declared render per kind.
++
++(defn- identities
++  "The identity of each reference `text` makes on `database`, problems included: a name, or a path and anchor, and
++  the problem kind when it has one."
++  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:vector :seon.schema/value]]}
++  [database text]
++  (mapv (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
++        (ref/references database {:seon.ref/text text})))
++
++(def ^:private colon-headings
++  "The docstring section headings written as `Name:` lines, which the heading sweep converts to `## Name`."
++  #{"Example:" "Examples:" "Edge cases:" "Errors:" "Known issues:"})
++
++(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
++  all-prose-uses-one-reference-rule
++  (test-support/with-running-agent
++   (fn [running agent-id _]
++     (let [database (db/db)]
++       (testing "explicit and bare forms of one name resolve to the same identity"
++         (doseq [[explicit bare] [["`seon.task/obligations`" "seon.task/obligations"]
++                                  ["`:seon.task/intent`" ":seon.task/intent"]
++                                  ["`docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`" "docs/seon/schedule/cards/TASK-CHAIN.md#6-phases"]]]
++           (is (seq (identities database explicit)) "the explicit form resolves")
++           (is (= (identities database explicit) (identities database (str "Read " bare " first.")))
++               "the bare form names the same entity")))
++       (are [text expected] (= expected (identities database text))
++         ;; a namespace that exists resolves by its name
++         "`my.agent`" [['my.agent nil nil nil]]
++         ;; neither a dependency file nor a Java class is a problem
++         "`deps.edn` and `java.lang.String`" [[nil "deps.edn" nil nil]]
++         ;; an explicit qualified name that resolves to nothing stays a problem
++         "`seon.nope/x`" [['seon.nope/x nil nil :unresolved]]
++         ;; a bare token naming nothing is prose
++         "Then seon.nope/x and :seon.nope/y follow." []
++         ;; fenced code is code
++         "```clojure\n(seon.task/obligations db)\n```\n" [])
++       (is (= [:anchor-missing] (keep :seon.ref/problem-kind (ref/references database {:seon.ref/text "See [the phases](#6-phases)."})))
++           "an anchor-only link in prose with no document is a problem")
++       (testing "a docstring's citations are its definition's references"
++         (shown running agent-id
++                (str "(ns tq.prose-refs)\n"
++                     "(defn cites\n  \"Return 1, after reading `seon.task/obligations` and seon.task/effective; it is `tq.prose-refs/cites`.\n\n"
++                     "  ## Examples\n\n  ```clojure\n  (seon.task/declaration 1)\n  ```\"\n"
++                     "  {:malli/schema [:=> [:cat] :int]}\n  [] 1)"))
++         (is (= #{'seon.task/obligations 'seon.task/effective}
++                (shown running agent-id "(set (:seon.fn/references (seon.db/pull (seon.db/db) [:seon.fn/references] [:seon.fn/sym 'tq.prose-refs/cites])))"))
++             "mid-docstring explicit and bare citations, never itself or its fenced example code"))
++       (is (empty? (for [[sym doc] (db/q '[:find ?s ?d :where [?e :seon.fn/doc ?d] [?e :seon.fn/sym ?s]] database)
++                         :when (some (comp colon-headings str/trim) (str/split-lines doc))]
++                     sym))
++           "no docstring keeps a colon heading")))))
++
++(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
++  each-reference-kind-uses-its-declared-render
++  (test-support/with-database
++   (fn [connection]
++     (let [database (db/db connection)
++           request {:seon.db/db database :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
++                    :seon.render/output :seon.render/ai :seon.sci.admit/caps (config/result-caps config/defaults)
++                    :seon.sci.eval/time-limit-ms 2000}
++           selected (fn [text]
++                      (let [[answer :as answers] (ref/references database {:seon.ref/text text})]
++                        [(count answers) ((juxt :seon.ref/name :seon.ref/path :seon.ref/anchor) answer)
++                         (:seon.render.selection/selected (render/selection (assoc request :seon.render/value answer)))]))]
++       (doseq [[kind text expected render]
++               [[:function "Merged by `seon.task/effective` down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
++                [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
++                [:deftest "`seon.ref-test/fenced-code-and-prose-spans-are-not-references`"
++                 ['seon.ref-test/fenced-code-and-prose-spans-are-not-references nil nil] 'seon.render.test/render-ai]
++                [:task "`seon.ref/a-reference-with-no-path-is-a-missing-file`"
++                 ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
++                [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.ns/function-ai]
++                [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.schema/render-ai]
++                [:attribute "`:seon.task/intent`" [:seon.task/intent nil nil] 'seon.render.schema/render-ai]
++                [:error-type "`:my.fs/not-found-error`" [:my.fs/not-found-error nil nil] 'seon.render.schema/render-ai]
++                [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.schema/render-ai]
++                [:namespace "`my.agent`" ['my.agent nil nil] 'seon.render.ns/render-ai]
++                [:document "`docs/seon/schedule/cards/TASK-CHAIN.md`" [nil "docs/seon/schedule/cards/TASK-CHAIN.md" nil] 'seon.ref/render-doc-ai]
++                [:section-link "See [the phases](docs/seon/schedule/cards/TASK-CHAIN.md#6-phases)."
++                 [nil "docs/seon/schedule/cards/TASK-CHAIN.md" "6-phases"] 'seon.ref/render-doc-ai]
++                [:reference-code-section "`reference-code/malli/README.md#quickstart`"
++                 [nil "reference-code/malli/README.md" "quickstart"] 'seon.ref/render-doc-ai]]]
++         (testing (name kind)
++           (is (= [1 expected render] (selected text)) "one reference, its entity, then its declared render")))
++       (is (= [] (ref/references database {:seon.ref/text "Then seon.nope/x follows."}))
++           "an unknown bare form is neither a reference nor a problem")))))

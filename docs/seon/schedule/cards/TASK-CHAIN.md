@@ -169,6 +169,7 @@ A7 is expected to exceed ten seconds: existing two-world chain tests declare `:s
 ## 6. Phases
 
 **All pending; serial (shared owners).** Update status each commit; convert deletions and last callers together.
+**Phase status (slice 0, partial, 2026-10-13):** written and run red on HEAD c74b2a9cb (untagged `bin/seon check`, run bab42fd270b3, 4,955 ms for both): A5 `seon.ref-test/all-prose-uses-one-reference-rule` (bare name/keyword/path#anchor resolve to nothing, `my.agent` unresolved, an anchor-only link is no problem, a docstring's citations are not in `:seon.fn/references`, 67 docstrings keep colon headings) and A5b `seon.ref-test/each-reference-kind-uses-its-declared-render` (all 13 kinds select `seon.render.value/render-ai`; bare and namespace forms resolve nothing). Written, not run: A1's census half (`seon.task/task-edges`, `seon.error/proof` and `seon.cluster.agent/render-identity-html` read `:seon.task/tasks` on default). These tests and the phase 2–7 and I0–I3 task entries wait in `docs/research/agent-platform/2026-10-13/task-chain-phase-tasks.patch`, because `resources/seon/tasks/seon.task.edn` and `test/seon/task_test.clj` are held by phase 1 and a tag naming an unfiled task is refused (`dangling-id`). Not written: A1's selection half, A2, A3, A6, A7 and I0–I3 (the slice 0 report lists the interface each one needs decided first).
 
 | Slice | Work / proof / owners |
 |---|---|
