@@ -571,3 +571,42 @@
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (support/delete-root! root)))))
+
+(deftest a-merged-db-only-task-gets-a-fresh-task-file
+  ;; A task that lives only in the database (a chain `seon.task/chain!` made at
+  ;; runtime) has no task file; its merge writes one, started from an empty
+  ;; vector as a fresh namespace's file starts from empty text.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        task-ns (str "tq.wbfresh" suffix)
+        path (str "resources/seon/tasks/" task-ns ".edn")
+        identity [:seon.task/sym (symbol task-ns "a")]
+        root (support/temp-root (str "write-back-fresh-task-" suffix))
+        c (keyword (str "write-back-fresh-task-c-" suffix))]
+    (try
+      (let [base (db/commit-id (db/db h-conn))
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (is (= {:seon.task/changed? true}
+                 (select-keys (db/with-branch {:seon.db/connection c-conn}
+                                              #(task/index-tasks! {:seon.db/connection c-conn
+                                                                   :seon.task/files {path "[#:seon.task{:name \"a\" :intent \"Do it.\"}]"}}))
+                              [:seon.task/changed? :seon.error/message]))
+              "the branch holds the task in the database only")
+          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+                                             :seon.source/accepted {:seon.program/identities #{identity}
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})
+                projection (db/carried-projection (db/db c-conn))]
+            (is (= [identity] (get-in written [:seon.source/files 0 :seon.source/added])) "the task is added to a new file")
+            (is (= [(symbol task-ns "a")]
+                   (mapv :seon.task/sym (task/file-declarations projection path (slurp (io/file root path)))))
+                "the fresh file declares the merged task"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-root! root)))))

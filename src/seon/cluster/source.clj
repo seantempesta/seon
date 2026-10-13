@@ -1752,6 +1752,8 @@
   ns/name]` of one namespace) are declared in, under `root`, with each entry as
   `after` declares it: replaced, removed or appended by `task-file-text`. A file
   entry declaring neither `before`'s nor `after`'s value is a `:conflict`.
+  A namespace with no task file yet (its tasks lived only in the database)
+  starts from an empty vector, as `proven-file` starts a fresh namespace's file.
   Proven by reading the candidate back through ingestion's reader
   (`seon.task/file-declarations`): each written entry declares `after`'s value
   or is absent with it, and every other entry reads as it did."
@@ -1760,8 +1762,9 @@
   [before after identities root]
   (let [path (task-path (second (first identities)))
         file (io/file root path)
-        base-bytes (when (.isFile file) (Files/readAllBytes (.toPath file)))
-        base-text (some-> ^bytes base-bytes (String. "UTF-8"))
+        fresh? (not (.isFile file))
+        base-bytes (if fresh? (.getBytes "[]" "UTF-8") (Files/readAllBytes (.toPath file)))
+        base-text (String. ^bytes base-bytes "UTF-8")
         projection (db/carried-projection after)
         held (fn [database sym] (task/task-declaration database (task/task-handle (symbol (namespace sym)) (name sym))))
         rows (vec (for [[_ sym :as identity] (sort-by str identities)] [identity (held before sym) (held after sym)]))
@@ -1771,15 +1774,14 @@
                         (catch clojure.lang.ExceptionInfo failure
                           (if (:seon.task/refused (ex-data failure)) nil (throw failure))))
         digest-of #(if % (id/digest 64 [%]) :seon.program/absent)
-        ours (some-> base-text read-file)
+        ours (read-file base-text)
         refuse (fn [reason message evidence] (write-back-refusal reason message (assoc evidence :seon.source/path path)))]
     (cond
-      (nil? base-bytes) (refuse :file-absent "The changed tasks' file is absent under the root." {})
       (nil? ours) (refuse :not-analyzable "The task file as it is now does not read as task declarations." {})
       :else
       (let [conflicting (into {} (keep (fn [[[_ sym :as identity] was now]]
                                          (let [file-held (get ours sym)]
-                                           (when-not (#{was now} file-held)
+                                           (when-not (or (= was file-held) (= now file-held))
                                              [identity {:seon.program/base-digest (digest-of was)
                                                         :seon.program/branch-digest (digest-of now)
                                                         :seon.program/head-digest (digest-of file-held)}]))))
@@ -1799,7 +1801,7 @@
           (seq differing)
           (refuse :not-equivalent "The candidate task file does not declare exactly the merged tasks."
                   {:seon.error/offending differing})
-          :else {:seon.source/path path :seon.source/base-digest (sha-256 base-bytes)
+          :else {:seon.source/path path :seon.source/base-digest (sha-256 (if fresh? (byte-array 0) base-bytes))
                  :seon.source/candidate-bytes (.getBytes ^String candidate "UTF-8") :seon.source/proof-rows rows})))))
 
 (defn- identity-namespace

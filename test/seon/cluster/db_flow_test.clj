@@ -355,7 +355,7 @@
                           :seon.config/manifest (assoc (test-support/provider-config server) :seon.config.ai/no-provider false)})
           (body handle)))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt 'seon.context/a-proof-green-before-the-work-is-not-done}}
+(deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   a-task-satisfied-at-the-base-opens-no-model-turn
   ;; the prove pass runs the proof at the base program: green there, the merge would accept, so no model turn opens
   (binding [*space* "tq.chaing"]
@@ -552,7 +552,7 @@
 
 (def ^:private twice-work "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
 
-(deftest ^{:seon.test/long "Two chain worlds (the keep dial off and on), each one attempt's accepted merge (a nested seon.test/run on a fresh merge branch) over three db<->flow passes; measured 6.6-7.4 s."
+(deftest ^{:seon.test/long "Two chain worlds (the keep dial off and on), each one attempt's accepted merge (a nested seon.test/run on a fresh merge branch) and its publication over four db<->flow passes; measured 6.6-7.4 s."
            :seon.test/long-ms 30000}
   an-ended-attempt-reaches-main-in-one-transaction-and-its-branch-is-deleted
   (doseq [keep? [false true]]
@@ -590,18 +590,20 @@
                       "its graph is stopped"))
                 (pass! handle routing)
                 (is (= 1 (count (copies (db/db connection) branch))) "a second pass merges nothing")
+                ;; that pass published the merge; publication's own write wakes the pass that deletes the branch
+                (pass! handle routing)
                 (if keep?
                   (is (contains? (registry/branches store) branch) "the dial keeps the ended branch for audit")
                   (is (eventually #(not (contains? (registry/branches store) branch)))
                       "with no merge request the branch is deleted"))
-                (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))
+                (is (empty? (db/q '[:find [?m ...] :where [?e :seon.error/signature] [?e :seon.error/message ?m]] (db/db connection)))
                     "with no fault recorded"))))))))))
 
-(deftest ^{:seon.test/long "One chain world, one attempt's accepted merge (a nested seon.test/run on a fresh merge branch) and two db<->flow passes; measured 6.6 s."
+(deftest ^{:seon.test/long "One chain world, one attempt's accepted merge (a nested seon.test/run on a fresh merge branch), its publication, its sibling's merge and up to six db<->flow passes; measured 6.6 s."
            :seon.test/long-ms 30000}
   a-merged-assignment-whose-graph-survived-a-crash-is-stopped-and-deleted
   ;; root merged the end (its merge base is the branch head) and the process went down before the graph stopped:
-  ;; the next pass derives the stop and the deletion from the facts alone
+  ;; the passes after it derive the stop, the publication and the deletion from the facts alone
   (binding [*space* "tq.crashmerged"]
     (test-support/with-database
      (fn [connection]
@@ -619,7 +621,11 @@
               (pass! handle routing)
               (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
                   "one pass stops it")
-              (is (eventually #(not (contains? (registry/branches store) branch))) "and deletes its branch")
+              ;; each pass's own writes (the publication, the deletion, the sibling z's end) wake the next, as in production
+              (let [due #(agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))]
+                (dotimes [_ 4] (when (seq (due)) (pass! handle routing)))
+                (is (empty? (mapv :seon.flow.plan/op (due))) "the passes its writes wake leave nothing to derive"))
+              (is (not (contains? (registry/branches store) branch)) "and its branch is deleted")
               (is (= "Refined on the branch." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
                                                                           [:seon.task/id (chain-handle "e")])))
                   "while main keeps what merged")

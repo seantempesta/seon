@@ -519,8 +519,7 @@
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
-(deftest ^{:seon/tasks #{'seon.context/a-proof-green-before-the-work-is-not-done}}
-  a-result-at-the-base-reach-digest-survives-later-runs
+(deftest a-result-at-the-base-reach-digest-survives-later-runs
   ;; the proof runs green at the base program, then red once the change reaches it: its base run stays readable by
   ;; the reach digest it had there, while the newest execution is the red one
   (test-support/with-database
