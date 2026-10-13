@@ -1,0 +1,35 @@
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 9d4a08031..be25db6b2 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2849,7 +2849,9 @@
+                 ;; walk of the reached graph (all 2,365 tests 18 ms, where every
+                 ;; member's closure took 7.8 s and 13.7 GB, 2026-10-07).
+                 effect-reach (when (seq ordered)
+-                               (let [reaching (runner/tests-reaching database (vec ordered) 'seon.effect/request*)]
++                               (let [;; Built, not quoted: a quoted symbol is an analysed reference, which made this
++                                     ;; request an effect caller and every test reaching it an effect-reaching member.
++                                     reaching (runner/tests-reaching database (vec ordered) (symbol "seon.effect" "request*"))]
+                                  (if (:seon.error/at reaching)
+                                    (throw (ex-info "Effect reach is unreadable." reaching))
+                                    reaching)))
+diff --git a/test/seon/test/reach_test.clj b/test/seon/test/reach_test.clj
+index 313802178..68b77a0a0 100644
+--- a/test/seon/test/reach_test.clj
++++ b/test/seon/test/reach_test.clj
+@@ -120,3 +120,15 @@
+        (is (= #{reaching} (runner/tests-reaching database symbols 'seon.id/id)))
+        (is (= #{} (runner/tests-reaching database symbols reaching))
+            "a test never counts as reaching itself")))))
++
++(deftest ^{:seon/tasks #{'seon.test/an-effect-attempt-opens-only-for-a-test-reaching-an-effect-owner}}
++  a-test-running-a-request-does-not-reach-the-effect-owner
++  (support/with-database
++   (fn [connection]
++     (let [database (db/db connection)
++           symbols (vec (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database)))
++           runner-test 'seon.test-reaching-test/a-fresh-branch-with-unchanged-program-entities-derives-nothing]
++       (is (contains? (runner/tests-reaching database symbols 'seon.test/run) runner-test)
++           "the fixture test runs a request")
++       (is (not (contains? (runner/tests-reaching database symbols 'seon.effect/request*) runner-test))
++           "running a request is not an effect call")))))
