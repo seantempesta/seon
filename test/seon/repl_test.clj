@@ -508,3 +508,23 @@
                                                    :seon.ns/name 'user
                                                    :seon.eval/shown "3"}))))
       "the form as sent opens the evaluation: no namespace prompt for a model to copy"))
+
+(deftest ^{:seon/tasks #{'seon.repl/implement-a-token-boundary-answers-true-or-false}}
+  every-token-boundary-answer-is-a-boolean
+  (let [result (check/quick-check
+                300
+                (prop/for-all [c gen/char]
+                  (boolean? (#'seon.repl/token-boundary? c)))
+                :seed 20261013)]
+    (support/assert-check! result)))
+
+(deftest ^{:seon/tasks #{'seon.repl/implement-a-token-boundary-answers-true-or-false}}
+  token-boundary-is-true-exactly-for-whitespace-and-the-fifteen-delimiters
+  (doseq [[character expected] [[\( true] [\) true] [\[ true] [\] true]
+                                [\{ true] [\} true] [\" true] [\; true]
+                                [\, true] [\` true] [\~ true] [\@ true]
+                                [\^ true] [\' true] [\space true] [\newline true] [\tab true]
+                                [\a false] [\Z false] [\1 false] [\: false] [\# false]
+                                [\\ false] [\- false] [\_ false] [\. false]]]
+    (is (= expected (#'seon.repl/token-boundary? character))
+        "token-boundary? must answer the documented truth value")))
