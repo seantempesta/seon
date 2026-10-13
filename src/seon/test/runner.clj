@@ -1379,19 +1379,17 @@
       (conj :seon.source/digest)))
 
 (defn program-written-since?
-  "Whether any datom of an attribute the program digest reads was written after
-  `basis-t` on `database`'s lineage: O(datoms since `basis-t`). A value with no
-  such write has the program digest of its `basis-t` value, which lets the
-  writer's in-transaction value (no commit id, so no memo) confirm a digest
-  its caller derived instead of deriving it again."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
-                  [:or :boolean :seon.db/invalid-read-error]]}
+  "Whether an attribute the program digest reads may have been written after
+  `basis-t` on `database`'s lineage, by Datahike's revisions
+  (`seon.db/changed-attributes`): one stored commit record per commit after
+  `basis-t`. A value with no such write has the program digest of its
+  `basis-t` value, which lets the writer's in-transaction value (no commit id,
+  so no memo) confirm a digest its caller derived instead of deriving it again."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t] :boolean]}
   [database basis-t]
-  (let [written (db/q '[:find ?entity . :in $ [?attribute ...] :where [?entity ?attribute]]
-                      (db/since (db/history database) basis-t)
-                      (vec (program-digest-read-attributes
-                            (or (db/carried-projection database) (schema/handed-projection)))))]
-    (if (seon.error.refusal/error? written) written (some? written))))
+  (boolean (seq (db/changed-attributes basis-t database
+                                       (program-digest-read-attributes
+                                        (or (db/carried-projection database) (schema/handed-projection)))))))
 
 (defn program-revisions
   "Datahike's revisions of the program attributes, including speculative values.

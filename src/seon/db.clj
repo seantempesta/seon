@@ -24,6 +24,7 @@
             [datahike.pull-api :as pull-api]
             [datahike.schema :as datahike.schema]
             [datahike.store :as datahike.store]
+            [datahike.writing :as datahike.writing]
             [datalog.parser.impl.proto :as parser]
             [datalog.parser.impl :as parser.impl]
             [datalog.parser.type :as parser.type]
@@ -3544,14 +3545,32 @@
     (into {} (map (fn [attribute] [attribute (get attribute-revisions attribute conservative-revision)]))
           attributes)))
 
+(defn- basis-revisions
+  "The stored revisions of the newest commit at or before transaction `basis` on
+  `database`'s first-parent lineage: one stored commit record read per commit
+  after `basis`. Nil when the lineage holds no such commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
+                  [:or :nil [:map [:datahike.cache/conservative-revision :uuid]
+                             [:datahike.cache/attribute-revisions {:optional true} [:map-of :qualified-keyword :uuid]]]]]}
+  [database basis]
+  (let [origin (schema-database database)
+        store (:store origin)]
+    (loop [commit (get-in origin [:meta :datahike/commit-id])]
+      (when-let [stored (when commit (k/get store commit nil {:sync? true}))]
+        (if (<= (:max-tx stored) basis)
+          (datahike.writing/stored-revisions stored)
+          (recur (first (get-in stored [:meta :datahike/parents]))))))))
+
 (defn changed-attributes
   "Attributes whose datoms may differ, using Datahike's native revisions.
-  A transaction basis or a value without revisions leaves every attribute to be read."
+  A transaction basis reads the revisions of its commit on `after`'s lineage,
+  walking only the commits after it; a value without revisions leaves every
+  attribute to be read."
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t]
                        :seon.db/database-value [:set :qualified-keyword]]
                   [:set :qualified-keyword]]}
   [before after attributes]
-  (let [before-context (when (instance? DB before) (:cache-context before))
+  (let [before-context (if (instance? DB before) (:cache-context before) (basis-revisions after before))
         after-context (when (instance? DB after) (:cache-context after))
         revision (fn [context attribute]
                    (get (:datahike.cache/attribute-revisions context) attribute
