@@ -112,12 +112,13 @@ instantiate one.
 
 | Term | Meaning and grounding | Legacy spellings |
 |---|---|---|
+| reference | Any span of prose that names exactly one entity; explicit backticks or resolve-only bare qualified symbols/keywords and path#anchor, anywhere in prose. `seon.ref` owns parsing/resolution; the entity’s declared render owns display (TASK-CHAIN §3). | reference as a display copy |
 | functions, schemas, tests | ordinary Clojure constructs | verbs |
 | database, `db` | the `seon.db` authority | store, inventory, memory |
 | boot / environment / running | boot is the 0→1 construction in dependency order (REPL first); the environment is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`), scoped per agent; running code receives it | the runtime, the platform, the tower, ambient |
 | call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | ambient injection, batteries |
-| **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this entry when it is merged | tile, live-tile, world |
-| surface; card (CSS only) | a context render; a visual component | tile |
+| **[TARGET] canvas** | the primary agent surface: the most recently updated by default, with a pin overriding recency. Target in TASK-CHAIN’s user UI section; no installed canvas selection is claimed | tile, live-tile, world |
+| surface; card (CSS only) | every HTML render an agent produces; a chat or schema-rendered data has its own surface. Card is only the CSS word | tile |
 | web UI | `/`, `/ns/{namespace}`, `/agent/{id}`, their debug routes, and `/data` (`src/seon/render/route.clj`) | inspector |
 | cluster | one database branch, its agents, and shared plumbing; produces one environment | environment (for the cluster itself) |
 | attributes + connections | the Datahike model | entity kind/type |
@@ -135,7 +136,7 @@ instantiate one.
 | every `fn` body entrance | where sci calls the `:interrupt-fn` | safepoint |
 | `ctx`, `fork` | sci's own names (`reference-code/sci/src/sci/core.cljc`) | warm base, the agent's world |
 | `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`) | eval pool, wait pool |
-| entity, entity map, datom, transaction data | Datahike's terms: a datom is `[e a v tx added?]`; an entity is the datoms sharing one `e` (a pull returns it as a map); transaction data is the entity maps and `[:db/add e a v]` a writer submits. A function, namespace, schema declaration or config is an entity identified by its identity attribute (`:seon.fn/sym`, `:seon.ns/name`, `:seon.schema/key`, `:seon.config/cluster`) | row (owner 2026-10-12, CN-25), program row, schema row, config row |
+| entity, entity map, datom, transaction data | Datahike's terms: a datom is `[e a v tx added?]`; an entity is what a reference names, unique by its identity attribute: the datoms sharing one `e` (a pull returns it as a map); transaction data is the entity maps and `[:db/add e a v]` a writer submits. A function, namespace, schema declaration or config is an entity identified by its identity attribute (`:seon.fn/sym`, `:seon.ns/name`, `:seon.schema/key`, `:seon.config/cluster`) | row (owner 2026-10-12, CN-25), program row, schema row, config row |
 | session | The agent’s ongoing REPL, with its namespace and evaluations attached to the agent. This names the REPL relationship, not a new entity between the agent and its evaluations (agent-loop.md §3.4; AGENTS.md “Model from the agent outward”). | runtime (for the session), SCI world (for its stored state) |
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization entities, transaction data | Static source population is admitted transaction data. The static prefix is `(help)`; there is no opening or input eval request (agent-loop.md §3.4). | bootstrap-plan rows, seed bundle |
@@ -149,7 +150,7 @@ instantiate one.
 | `my.program/callers` | Direct `:seon.fn/calls` referrers with the caller declaration's byte span and recorded argument counts (`my.program/callers`). `:seon.fn/references` stays a separate relation. | usages, dependents |
 | `my.program/reads-key` | Contract references, declared writes and literal keyword mentions, as separate groups; mentions do not assert a read or block retraction (`my.program/reads-key`; `seon.fn/functions-using`). | keyword consumers |
 | `my.program/history` | Source assertion/retraction events with exact root datom values and transaction provenance; optional `:seon.db/tx` selects the requested as-of definition, including metadata changed after its source assertion (`my.program/history`; `reference-code/datahike/src/datahike/db.cljc`, `as-of-pred`). | definition archive |
-| referrer; caller; reference; subject; reach | Referrer is a live entity naming the subject; caller means `:seon.fn/calls`, reference means `:seon.fn/references`, test subject is a present claim, and reach is advisory evidence from a past run. The program read preserves these relations separately (`resources/seon/schemas/seon.program.edn`). | dependency (without its attribute) |
+| referrer; caller; reference; subject; reach | Referrer is a live entity naming the subject; caller means `:seon.fn/calls`, prose references are recorded in `:seon.fn/references`, test subject is a present claim, and reach is advisory evidence from a past run. The program read preserves these relations separately (`resources/seon/schemas/seon.program.edn`). | dependency (without its attribute) |
 | redefinition; retraction | Redefinition replaces definition facts at one identity; retraction removes facts and leaves the past to history/as-of (`seon.program/exact-replacement-tx`, Datahike `retractEntity`). On an agent branch, a REPL-valid change returns with findings for surviving dangling referrers; root enforces integrity at diff and merge (agent-loop.md §1.1; merge.md §2). | soft delete, retirement |
 | proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`, `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`) | invented scheduler nouns |
 | `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
