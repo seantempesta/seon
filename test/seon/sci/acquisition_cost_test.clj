@@ -155,7 +155,7 @@
        (is (= 1 (:seon.sci.eval/installed (:seon.profile/value measurement))))
        (is (zero? (profile/calls-of measurement 'seon.sci.eval/loaded-database)))))))
 
-(deftest ^{:seon/tasks #{'seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte}}
+(deftest
   a-data-only-commit-reuses-the-program-overlay
   (support/with-database
    (fn [connection]

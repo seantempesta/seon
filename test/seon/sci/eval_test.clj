@@ -2609,9 +2609,17 @@
      (let [ctx (test-support/fork-cluster-ctx connection)]
        (eval/enter-namespace! ctx (quote seon.db-test))
        (is (eval/source-namespace? ctx (quote seon.db-test)))
-       (is (map? @(sci/resolve ctx 'seon.db-test/fixture-projection)))))))
+       (is (map? @(sci/resolve ctx 'seon.db-test/fixture-projection)))
+       (eval/enter-namespace! ctx 'seon.repl-parity-test)
+       (is (true? (:macro (meta (sci/resolve ctx 'seon.repl-parity-test/defparity)))))
+       (is (= 'clojure.test/deftest
+              (first (:seon.sci.admit/value
+                      (run-in ctx "(macroexpand-1 '(seon.repl-parity-test/defparity \"F27\" :passing true))" 2000)))))
+       (is (= {:parity/pass? true :parity/expected :same :parity/actual :same}
+              (:seon.sci.admit/value
+               (run-in ctx "(#'seon.repl-parity-test/compared :same :same)" 2000))))))))
 
-(deftest ^{:seon/tasks #{'seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte}}
+(deftest
   a-branch-that-wrote-no-program-keeps-the-program-of-the-commit-it-opened-at
   (let [handle (test-support/execution-handle nil)
         base (:seon.sci.eval/base-ctx handle)

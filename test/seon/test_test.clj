@@ -10,6 +10,7 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.profile :as profile]
+            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
@@ -324,11 +325,10 @@
          (is (integer? (get-in entity [:seon.test.run/selection-tx :db/id])))
          (is (not (seq (:seon.test.run/members entity)))))))))
 
-(deftest ^{:seon/tasks #{'seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte}}
+(deftest
   one-interpreted-test-run-allocates-a-bounded-multiple-of-its-body
-  ;; The body allocates about 6.5 MB; forking a member and interpreting its
-  ;; namespace's rows is bounded by the test, not the program: 100 MB. The
-  ;; first run acquires the JVM's cluster base once; the second is measured.
+  ;; Warm acquisition once, then measure the entire interpreted check.
+  ;; Remaining setup cost: `seon.test/one-test-run-repeats-whole-program-setup`.
   (let [execution (assoc (test-support/execution-handle nil) :seon.agent/id "one-interpreted-test")
         run! #(sut/run {:seon.test/execution execution
                         :seon.test/recording-connection (:seon.db/connection execution)
@@ -336,10 +336,24 @@
                         :seon.test/rerun? true
                         :seon.test/changed ['seon.id-test/a-host-object-has-no-identity]})
         _ (run!)
+        began (System/currentTimeMillis)
         measured (profile/measure run!)
+        ended (System/currentTimeMillis)
         result (:seon.profile/value measured)]
+    (when-let [path (System/getenv "SEON_F27_MEASUREMENTS")]
+      (spit path (value/core-text
+                  (assoc (select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes
+                                               :seon.cost/jvm-window])
+                         :began began :ended ended
+                         :seon.profile/ranked-by-self (vec (take 8 (:seon.profile/ranked-by-self measured)))
+                         :calls (select-keys (:seon.profile/called measured)
+                                             '[seon.sci.eval/install-row! seon.sci.eval/loaded-database
+                                               seon.sci.eval/install-caller-host-bindings!
+                                               seon.sci.eval/bind-lazy-members! seon.sci.eval/promote-member!]))) :append true))
     (is (= 1 (:seon.test/executed-count result)))
     (is (true? (:seon.test/passed? result)))
+    (is (< (:seon.profile/ms measured) 200))
+    (is (< (get-in measured [:seon.cost/jvm-window :seon.cost/alloc-mb]) 220))
     (is (< (:seon.profile/alloc-bytes measured) 100000000))))
 
 (deftest ^{:seon.test/long "One isolated member acquisition and one canonical problems fixture (measured 1,572 ms run on default)."

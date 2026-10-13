@@ -306,7 +306,7 @@
        (is (< (:seon.profile/alloc-bytes read) (* 8 1024 1024)) "the assignment's read allocates under 8 MB")
        (is (:seon.task/assignment (:seon.profile/value assigned)))
        ;; measured 1,193,221,736 bytes in a check JVM (run 60c4370fa87e); the proof run's own cost is
-       ;; seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte
+       ;; seon.test/one-test-run-repeats-whole-program-setup
        (is (< (:seon.profile/alloc-bytes assigned) (* 2 1024 1024 1024)) "the assignment with its one proof run allocates under 2 GB")))))
 
 (defn- ignored-roots

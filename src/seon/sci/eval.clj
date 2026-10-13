@@ -2122,30 +2122,30 @@
         core-gap
         (fn [referred]
           (into {} (filter (fn [[local-name host-var]]
-                             (and (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
+                             (and (var? host-var)
+                                  (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
                                   (not (contains? sci-core local-name)))))
                 referred))
         own-bindings
         (fn [namespace-name]
           (let [host (find-ns namespace-name)]
             (if (source-namespace? ctx namespace-name)
-              (core-gap (if host (ns-refers host) (ns-publics 'clojure.core)))
-              (when host (merge (core-gap (ns-refers host)) (ns-interns host))))))
-        installs
-        (for [row namespace-rows
-              :let [namespace-name (:seon.ns/name row)
-                    {:keys [aliases refers]} (row-bindings row)]
-              [target interns]
-              (cons [namespace-name (own-bindings namespace-name)]
-                    (for [target (distinct (concat (vals aliases)
-                                                   (map (comp symbol namespace) (vals refers))))
-                          :when (and (not= 'clojure.core target)
-                                     (not (contains? (::test-namespaces @(::kernel/program-snapshot ctx)) target)))]
-                      [target (some-> (find-ns target) ns-interns)]))
-              :when (seq interns)]
-          [target interns])]
-    (doseq [[target interns] installs
-            :let [present (get-in @(:env ctx) [:namespaces target])]]
+              (core-gap (if host (ns-map host) (ns-publics 'clojure.core)))
+              (when host (merge (core-gap (ns-map host)) (ns-interns host))))))
+        own (set (map :seon.ns/name namespace-rows))
+        test-namespaces (::test-namespaces @(::kernel/program-snapshot ctx))
+        targets (distinct
+                 (mapcat (fn [row]
+                           (let [{:keys [aliases refers]} (row-bindings row)]
+                             (cons (:seon.ns/name row)
+                                   (remove #(or (= 'clojure.core %) (contains? test-namespaces %))
+                                           (concat (vals aliases)
+                                                   (map (comp symbol namespace) (vals refers)))))))
+                         namespace-rows))]
+    (doseq [target targets
+            :let [interns (if (own target) (own-bindings target) (some-> (find-ns target) ns-interns))
+                  present (get-in @(:env ctx) [:namespaces target])]
+            :when (seq interns)]
       (install-host-namespace! ctx target (remove (fn [[local-name]] (contains? present local-name))
                                                   interns)))))
 
@@ -2166,7 +2166,7 @@
           :when (not (contains? (:namespaces @(:env ctx)) target))]
     (load-host-namespace {:namespace target :ctx ctx})))
 
-(declare install-selected! record-acquisition-refusals!)
+(declare install-selected! record-acquisition-refusals! bind-lazy-members!)
 
 (defn- source-closure
   "The source namespaces among `namespace-names` (`source-namespace?`) and the
@@ -2186,9 +2186,8 @@
       found)))
 
 (defn- interpret-source-namespaces!
-  "Interpret every function and test row of the source namespaces
-  `namespace-names` in `ctx` from `database` (`install-selected!`), each after
-  those it binds, recording the refusals; the acquisition."
+  "Acquire source namespaces with lazy function roots and eager macros, values
+  and tests in binding order; return the acquisition with its refusals."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:set :symbol]] :map]}
   [ctx database namespace-names]
   (let [snapshot @(::kernel/program-snapshot ctx)
@@ -2205,6 +2204,7 @@
                                     [?function :seon.schema.admission/source ?admission]
                                     [(get-else $ ?function :seon.fn/private? false) ?private]]
                                   database names))
+        eager (set (bind-lazy-members! ctx database (map first function-rows)))
         test-rows (db/q '[:find ?sym ?source ?namespace-name ?admission
                           :in $ [?namespace-name ...]
                           :where [?namespace :seon.ns/name ?namespace-name]
@@ -2217,7 +2217,7 @@
                   ctx database
                   (install-selected!
                    ctx database (select-keys (:namespaces snapshot) names)
-                   function-rows (vec test-rows) (into #{} (map first) function-rows)
+                   (filterv (comp eager first) function-rows) (vec test-rows) eager
                    (-> (::acquisition snapshot)
                        (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
                        (assoc :seon.schema/projection (context-projection ctx))))
@@ -3089,7 +3089,8 @@
   [ctx database members]
   (let [functions (set (db/q '[:find [?sym ...] :in $ [?sym ...]
                                :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]
-                                      [(not= "()" ?arglists)]]
+                                      [(not= "()" ?arglists)]
+                                      (not [?f :seon.fn/macro? true])]
                              database (vec members)))]
     (sci.ctx-store/with-ctx ctx
       (reduce
