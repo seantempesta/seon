@@ -885,17 +885,67 @@
              (throw (ex-info (:seon.error/message refusal "Could not compare the branch with main.") refusal))))
          (finally (release! [(:base compared) (:branch compared)])))))
 
+(defn tested-task-basis
+  "What selects task `sym`'s merge run: its `seon.task/obligations` over `main`, the `candidate` and their merge
+  `base`, and the declarations `main` holds for it and each ancestor up `:seon.task/children`, by handle. A
+  merge's writer recomputes it (`task-basis-refusal`), so a task or tag moved on main since the run refuses."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value :seon.task/sym]
+                  [:or :seon.source/tested-task-basis :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [main candidate base sym]
+  (let [obligations (task/obligations main candidate base sym)
+        handles (db/q '[:find [?h ...] :in $ % ?s :where [?t :seon.task/sym ?s] (self-or-under ?p ?t) [?p :seon.task/id ?h]]
+                      main task/ready-rules sym)
+        declarations (when (vector? handles) (mapv #(task/task-declaration main %) handles))]
+    (or (some #(when (db/read-refusal? %) %) (concat [obligations handles] declarations))
+        {:seon.task/sym sym :seon.task/obligations obligations :seon.task/basis (zipmap handles declarations)})))
+
+(defn task-basis-refusal
+  "The `:seon.source/test-evidence-error` refusing `tested` (a `:seon.source/tested-task-basis`, naming the run it
+  selected) when `tested-task-basis` over `main`, `candidate` and `base` no longer equals it; nil when it holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value
+                       :seon.source/tested-task-basis]
+                  [:or :nil :seon.source/test-evidence-error :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [main candidate base tested]
+  (let [held (tested-task-basis main candidate base (:seon.task/sym tested))]
+    (cond
+      (db/read-refusal? held) held
+      (not= (dissoc tested :seon.test.run/id) held)
+      (seon.error.refusal/error :seon.source/test-evidence-error
+       {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/merge-verdict
+        :seon.error/message "The task's proofs or declarations moved on the target since the merge's run selected them; prepare the merge again."
+        :seon.error/member :seon.source/tested-task-basis
+        :seon.error/expected (select-keys tested [:seon.task/obligations :seon.task/basis])
+        :seon.error/offending (select-keys held [:seon.task/obligations :seon.task/basis])
+        :seon.source/refused-test-run (:seon.test.run/id tested)}))))
+
+(defn task-basis-held-tx
+  "Transaction data that refuses, inside the writer on `database`, unless `tested` (a
+  `:seon.source/tested-task-basis` with its run) still holds over the commits `candidate-commit` and `base-commit`
+  (`task-basis-refusal`): the comparison a task's completion makes, so a proof input moved between the verdict and
+  the write never completes it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/tested-task-basis :seon.source/commit-id :seon.source/commit-id]
+                  [:= []]]}
+  [database tested candidate-commit base-commit]
+  (let [candidate (db/commit-database database candidate-commit)
+        base (db/commit-database database base-commit)]
+    (try (when-let [refused (task-basis-refusal database candidate base tested)]
+           (throw (ex-info (:seon.error/message refused) refused)))
+         []
+         (finally (release! [candidate base])))))
+
+(declare merge-verdict)
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
-  `source`'s head H on a fresh branch S of H through the save gate, with the
-  `proofs` (the test symbols that prove the change: a merge task's proofs),
-  and answer the prepared merge `accept-merge!` takes: the whole run's verdict and
-  tally, and its red members by name, which refuse acceptance (AGENTS.md,
+  `source`'s head H on a fresh branch S of H through the save gate, with task
+  `task-sym`'s proofs over H, the candidate and its merge base (`tested-task-basis`), a Prove
+  step's product beside them, and answer the prepared merge `accept-merge!` takes: the whole run's verdict and
+  tally, the tested task basis, and its red members by name (`merge-verdict`), which refuse acceptance (AGENTS.md,
   merge). A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
-  empty delta refuses.
+  empty delta runs the proofs alone, so a task-only change is accepted like any other.
 
   An `:selection` option of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
@@ -908,14 +958,14 @@
   (`proven-files` over the merged value, `seon.db/with`): a declaration naming
   a namespace its file does not require refuses before any test runs."
   {:malli/schema [:function
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs]
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/sym]
                    [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/sym
                         [:map [:selection {:optional true} :seon.program/identity-set]
                          [:root {:optional true} :seon.fn/root]]]
                    [:or :seon.source/prepared :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
-  ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs {}))
-  ([source held-store candidate proofs {:keys [selection root]}]
+  ([source held-store candidate task-sym] (prepare-merge! source held-store candidate task-sym {}))
+  ([source held-store candidate task-sym {:keys [selection root]}]
   (let [{:keys [c-id base branch head changed maps three]}
         (let [head (db/db (:seon.db/connection source))]
           (compare-branch held-store candidate head (get-in head [:config :branch])))]
@@ -930,11 +980,17 @@
             delta (if (and whole selection)
                     (into selection (filter whole) (for [[_ v] selection :when (qualified-symbol? v)] [:seon.ns/name (symbol (namespace v))]))
                     whole)
-            tx (when (and (seq delta) (empty? unchanged) (empty? reach))
-                 (replacement branch head delta))
+            tx (when (and delta (empty? unchanged) (empty? reach))
+                 (if (seq delta) (replacement branch head delta) []))
+            ;; the proofs and product the run is selected by, over the values the comparison holds
+            tested (when (and delta (not (:seon.error/at base))) (tested-task-basis head branch base task-sym))
+            {:seon.task/keys [step] owed :seon.task/proofs designed :seon.task/product} (:seon.task/obligations tested)
+            product (when (= :prove step) designed)
+            proofs (into (set owed) product)
             ;; The file the merge would write back, proven before any test runs.
             root-error (when root (root-refusal root))
-            proof (when (and root (nil? root-error) (vector? tx))
+            ;; (an empty delta writes no file)
+            proof (when (and root (nil? root-error) (seq tx))
                     (let [merged (db/with head {:tx-data tx})]
                       (if (:seon.error/at merged) merged (proven-files head merged delta root))))
             ;; The bar a lane commit holds (bin/lane): no clj-kondo error in a file the merge publishes.
@@ -950,7 +1006,7 @@
             (:seon.db/invalid-read reach) reach
             (seq reach) (refuse "A selected declaration reaches an unselected change; select that change too."
                                 {:seon.program/identities reach :seon.program/unselected (set (remove selection whole))})
-            (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
+            (db/read-refusal? tested) tested
             (:seon.error/at tx) tx
             (:seon.error/at proof) proof
             (seq lint)
@@ -973,24 +1029,32 @@
                              (into (into delta touched) (map #(vector :seon.test/sym %)) proofs)))
                   gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write!)
                   run (:seon.source/gate-run gate)
-                  ;; Missing coverage refuses by name: every proof is a member.
-                  answered (set (map :seon.test/sym (:seon.test/results run)))
-                  unselected (vec (sort (remove answered proofs)))
-                  red (vec (sort (keep #(when-not (and (pos? (:seon.test/pass-count %)) (zero? (:seon.test/fail-count %))
-                                                       (zero? (:seon.test/error-count %)))
-                                          (:seon.test/sym %))
-                                       (:seon.test/results run))))]
+                  ;; one predicate: a red is the change's unless main is red under the same evaluator
+                  reds (when-not (:seon.error/at run)
+                         (into [] (comp (filter (requiring-resolve 'seon.test.runner/red-result?)) (map :seon.test/sym))
+                               (:seon.test/results run)))
+                  on-main (when (seq reds)
+                            ((requiring-resolve 'seon.test/fork-point-red) source (db/commit-id head) reds nil))
+                  prepared (when-not (or (:seon.error/at run) (:seon.error/at on-main))
+                             (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
+                                            :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
+                                            :seon.task/proofs proofs
+                                            :seon.source/tested-task-basis (assoc tested :seon.test.run/id (:seon.test.run/id run))
+                                            :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
+                                            ;; The merge advances the branch's base to the value it merged.
+                                            :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
+                                                                              :seon.branch/base-t (db/basis-t branch)))
+                               (seq product) (assoc :seon.task/product product)
+                               (some true? (vals on-main)) (assoc :seon.source/red-on-target
+                                                                  (into #{} (keep (fn [[k red?]] (when red? k))) on-main))))
+                  ;; the gate's judgment is the merge's: the red members its verdict names
+                  red (when prepared
+                        (into [] (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (distinct))
+                              (merge-verdict head branch base prepared)))]
               (cond
                 (:seon.error/at run) run
-                (seq unselected) (refuse "The gate answered none of these proofs." unselected)
-                :else (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
-                                     :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
-                                     :seon.task/proofs proofs
-                                     :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
-                                     ;; The merge advances the branch's base to the value it merged.
-                                     :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
-                                                                       :seon.branch/base-t (db/basis-t branch)))
-                        (seq red) (assoc :seon.source/red red)))))
+                (:seon.error/at on-main) on-main
+                :else (cond-> prepared (seq red) (assoc :seon.source/red (vec (sort red)))))))
           (finally (release! [base branch]))))))))
 
 (defn- red-test-verdicts
@@ -1066,22 +1130,102 @@
   [database identities]
   (gap-symbols (contract-gaps database identities)))
 
+(defn merge-verdict
+  "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the
+  `candidate` and their merge `base` hold and the tested branch's stored run: the named run complete on the tested
+  branch, each of its `:seon.task/proofs` a member, every member green (`red-test-refusal`) except the
+  `:seon.task/product` red by design (`seon.test.runner/designed-red?`), the program unwritten since the run,
+  every function it carries contracted (`contract-gaps`) and every added or replaced one reached by a green member
+  or a designed red, every task handle it names admitted on `main`, and its tested task basis unmoved on `main`
+  (`task-basis-refusal`). Empty only for acceptance; the one judgment `prepare-merge!`'s gate and `accept-merge!`
+  share. Reads only.
+
+  ## Example
+
+  ```clojure
+  (seon.cluster.source/merge-verdict main candidate base prepared)
+  ```"
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value :seon.source/prepared]
+                  :seon.source/refusals]}
+  [main candidate base {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
+                        proofs :seon.task/proofs product :seon.task/product on-target :seon.source/red-on-target
+                        basis :seon.source/tested-task-basis}]
+  (let [refuse (fn [message offending]
+                 (seon.error.refusal/error :seon.source/test-evidence-error
+                  {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/merge-verdict
+                   :seon.error/message message
+                   :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s}))
+        tested (db/branch-database main s)]
+    (if (nil? tested)
+      [(refuse "The tested branch holds no commit." s)]
+      (try
+        (let [delta (set (keys expected))
+              run (db/pull tested [:seon.test.run/branch :seon.test.run/tested-branch :seon.test.run/basis-t]
+                           [:seon.test.run/id run-id])
+              results ((requiring-resolve 'seon.test.runner/run-results) tested run-id)
+              members (into {} (db/q '[:find ?m ?sym :in $ ?id :where [?r :seon.test.run/id ?id]
+                                       (or [?r :seon.test.run/members ?m] [?r :seon.test.run/covered-by ?m])
+                                       [?m :seon.test.member/symbol ?sym]] tested run-id))
+              green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
+              green (set (vals (select-keys members green-ids)))
+              unproven (vec (sort (remove (set (vals members)) proofs)))
+              ;; a Prove step's product red by a failing assertion or an error its body raised is its designed product,
+              ;; judged on its recorded reports (the run's totals carry none)
+              product-results (when-let [named (seq (filter (set product) (vals members)))]
+                                ((requiring-resolve 'seon.test.runner/latest-results) tested (vec named)))
+              designed (into #{} (comp (filter #(and (map? %) ((requiring-resolve 'seon.test.runner/designed-red?) %)))
+                                       (map :seon.test/sym))
+                             (when (vector? product-results) product-results))
+              not-green (vec (remove (into green designed) (vals members)))
+              red-tests (when (vector? results)
+                          (red-test-verdicts run-id results not-green (set (remove (set on-target) not-green))))
+              ;; A retracted function has nothing to cover: its surviving callers are the writer's refs and the
+              ;; run's reaching tests. The REPL admits an uncontracted sketch with a warning; merge is where the
+              ;; contract becomes required. Macros and host-bound declarations carry no arity contract.
+              gaps (contract-gaps tested delta)
+              uncontracted (gap-symbols gaps)
+              uncovered (vec (for [[a f] delta :when (= :seon.fn/sym a)
+                                   :when (:db/id (db/pull tested [:db/id] [a f]))
+                                   :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f))
+              dangling ((requiring-resolve 'seon.task/candidate-dangling) tested main delta)
+              moved (task-basis-refusal main candidate base basis)]
+          (cond-> []
+            (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
+            (conj (refuse "The named run was not recorded on the tested branch." run))
+            (:seon.error/at results) (conj results)
+            (or (empty? proofs) (seq unproven)) (conj (refuse "Every proof must be a member of the named run." unproven))
+            (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
+            (conj (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run)))
+            (:seon.error/at product-results) (conj product-results)
+            (seq red-tests) (conj (red-test-refusal run-id s red-tests))
+            (seq uncontracted)
+            (conj (seon.error.refusal/error :seon.source/uncontracted-error
+                   {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/merge-verdict
+                    :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
+                                             "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
+                                             ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
+                                             "schemas or named predicates, contract them on the candidate branch, run their tests and "
+                                             "request the merge again.")
+                    :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps
+                    :seon.source/refused-test-run run-id :seon.test.run/branch s}))
+            (seq uncovered) (conj (refuse "A replaced function reaches no green test of the named run." uncovered))
+            (:seon.error/at dangling) (conj dangling)
+            (and (not (:seon.error/at dangling)) (seq dangling))
+            (conj (refuse "The merged program names tasks the destination has not admitted." dangling))
+            moved (conj moved)))
+        (finally (d/release-materialized-db tested))))))
+
 (defn accept-merge!
-  "Merge exactly the program tested by `prepare-merge!`'s prepared merge into
-  `source`: the named run on S complete, each of its `:seon.task/proofs` a
-  member, every member green (`red-test-refusal`) except the prepared merge's
-  `:seon.task/product` red by design (`seon.test.runner/designed-red?`),
-  every added or replaced function reached by a green member or a designed red,
-  and S's program unwritten since. The
-  writer refuses, before any datom lands, a merged declaration whose digest on
-  the head moved from the prepared merge's `:seon.source/expected-digests`; writes to
-  other rows never stale it. The merge commit's parents add the candidate and
-  S's head, and it writes the merged branch's fork entity with its advanced
-  base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
-  head refuses, by handle and holder. Answers the accepted merge `write-back!`
-  takes: its identities, the commit before it, its merge commit and the run.
-  The `merging` transaction data and metadata (root's merge of the assignment's
-  facts, `seon.merge/merge!`) ride in the same transaction.
+  "Merge exactly the program tested by `prepare-merge!`'s prepared merge into `source` when `merge-verdict` over its
+  head, the candidate and their merge base refuses nothing; else answer its first refusal. The writer refuses,
+  before any datom lands, a merged declaration whose digest on the head moved from the prepared merge's
+  `:seon.source/expected-digests`; writes to other rows never stale it. The merge commit's parents add the
+  candidate and S's head, and it writes the merged branch's fork entity with its advanced base-t, so the next
+  comparison's merge base is the value merged. The writer, first, recomputes the tested task basis
+  (`task-basis-held-tx`) on the head before this merge's own writes, so a task or tag moved between the verdict and
+  the write refuses as `:seon.source/test-evidence-error`. Answers the accepted merge `write-back!` takes: its
+  identities, the commit before it, its merge commit and the run. The `merging` transaction data and metadata
+  (root's merge of the assignment's facts, `seon.merge/merge!`) ride in the same transaction.
 
   ## Example
 
@@ -1095,86 +1239,29 @@
                    [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]]}
   ([source held-store prepared] (accept-merge! source held-store prepared {:tx-data []}))
   ([source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs product :seon.task/product merged :parents advanced :seon.source/advanced-base}
+                      merged :parents advanced :seon.source/advanced-base basis :seon.source/tested-task-basis :as prepared}
    {merging :tx-data meta :tx-meta}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
-      (let [tested (commit-database held-store e-id)
-            head (db/db (:seon.db/connection source))
-            delta (set (keys expected))
-            refuse (fn [message offending]
-                     (seon.error.refusal/error :seon.source/test-evidence-error
-                      {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
-                       :seon.error/message message
-                       :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s}))]
+      (let [head (db/db (:seon.db/connection source))
+            candidate (commit-database held-store (first merged))
+            base (merge-base candidate head (get-in head [:config :branch]) (:seon.branch/name advanced))
+            base-commit (registry/base-commit-id candidate (:seon.branch/name advanced))
+            tested (commit-database held-store e-id)
+            delta (set (keys expected))]
         (try
-          (let [run (db/pull tested [:seon.test.run/branch :seon.test.run/tested-branch :seon.test.run/basis-t]
-                             [:seon.test.run/id run-id])
-                results ((requiring-resolve 'seon.test.runner/run-results) tested run-id)
-                members (into {} (db/q '[:find ?m ?sym :in $ ?id :where [?r :seon.test.run/id ?id]
-                                         (or [?r :seon.test.run/members ?m] [?r :seon.test.run/covered-by ?m])
-                                         [?m :seon.test.member/symbol ?sym]] tested run-id))
-                green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
-                green (set (vals (select-keys members green-ids)))
-                unproven (vec (sort (remove (set (vals members)) proofs)))
-                by-symbol (when (vector? results) (into {} (map (juxt :seon.test/sym identity)) results))
-                ;; a Prove step's product red by a failing assertion or an error its body raised is its designed product,
-                ;; judged on its recorded reports (the run's totals carry none)
-                product-results (when-let [named (seq (filter (set product) (vals members)))]
-                                  ((requiring-resolve 'seon.test.runner/latest-results) tested (vec named)))
-                designed (into #{} (comp (filter #(and (map? %) ((requiring-resolve 'seon.test.runner/designed-red?) %)))
-                                         (map :seon.test/sym))
-                               (when (vector? product-results) product-results))
-                not-green (vec (remove (into green designed) (vals members)))
-                ;; one predicate: a red is the change's unless main is red under the same evaluator
-                reds (filter #(some-> (by-symbol %) ((requiring-resolve 'seon.test.runner/red-result?))) not-green)
-                on-main (when (seq reds)
-                          ((requiring-resolve 'seon.test/fork-point-red) source (db/commit-id head) (vec reds) nil))
-                red-tests (when (and (vector? results) (not (:seon.error/at on-main)))
-                            (red-test-verdicts run-id results not-green (set (remove #(true? (get on-main %)) reds))))
-                ;; A retracted function has nothing to cover: its surviving
-                ;; callers are the writer's refs and the run's reaching tests.
-                ;; What an agent merges back is specified (owner 2026-09-27): the
-                ;; REPL admits an uncontracted sketch with a warning; merge is
-                ;; where the contract becomes required. Macros and host-bound
-                ;; declarations carry no arity contract (sci/eval.clj:1005-1011).
-                gaps (contract-gaps tested delta)
-                uncontracted (gap-symbols gaps)
-                uncovered (for [[a f] delta :when (= :seon.fn/sym a)
-                                :when (:db/id (db/pull tested [:db/id] [a f]))
-                                :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
-                tx (when (seq delta) (replacement tested head delta))
-                dangling ((requiring-resolve 'seon.task/candidate-dangling) tested head delta)]
+          (let [refusals (if (:seon.error/at base) [base] (merge-verdict head candidate base prepared))
+                tx (when (and (empty? refusals) (seq delta)) (replacement tested head delta))]
             (cond
-              (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
-              (refuse "The named run was not recorded on the tested branch." run)
-              (:seon.error/at results) results
-              (or (empty? proofs) (seq unproven))
-              (refuse "Every proof must be a member of the named run." unproven)
-              (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
-              (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
-              (:seon.error/at product-results) product-results
-              (:seon.error/at on-main) on-main
-              (seq red-tests) (red-test-refusal run-id s red-tests)
-              (seq uncontracted)
-              (seon.error.refusal/error :seon.source/uncontracted-error
-               {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
-                :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
-                                         "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
-                                         ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
-                                         "schemas or named predicates, contract them on the candidate branch, run their tests and "
-                                         "request the merge again.")
-                :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps
-                :seon.source/refused-test-run run-id :seon.test.run/branch s})
-              (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
+              (seq refusals) (first refusals)
               (:seon.error/at tx) tx
-              (empty? tx) (refuse "The destination already holds the tested entities." (vec delta))
-              (:seon.error/at dangling) dangling
-              (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         (cond-> {:tx-data (-> [[:db.fn/call declarations-held-tx expected] advanced]
+                                         ;; the writer's comparisons read the head before this merge's own writes
+                                         (cond-> {:tx-data (-> [[:db.fn/call declarations-held-tx expected]
+                                                                [:db.fn/call task-basis-held-tx basis (first merged) base-commit]
+                                                                advanced]
                                                                   (into tx) (into merging))
                                                   :parents (conj merged e-id)}
                                            meta (assoc :tx-meta meta)))]
@@ -1183,16 +1270,15 @@
                     (let [merged-db (commit-database held-store (first merged))]
                       (try (registry/advance-base! merged-db (:seon.branch/name advanced))
                            (finally (d/release-materialized-db merged-db))))
-                  {:seon.program/identities delta :seon.test.run/id run-id
-                   ;; The head this commit merged into is its parent other than
-                   ;; the merged ones: Datahike's own lineage. A report's
-                   ;; `:db-before` is the writer's uncommitted value and can name
-                   ;; an older commit (datahike writer.cljc:210).
-                   :seon.source/base-commit-id
-                   (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
-                   :seon.source/commit-id (db/commit-id (:db-after report))})
+                    {:seon.program/identities delta :seon.test.run/id run-id
+                     ;; The head this commit merged into is its parent other than the merged ones: Datahike's own
+                     ;; lineage. A report's `:db-before` is the writer's uncommitted value and can name an older
+                     ;; commit (datahike writer.cljc:210).
+                     :seon.source/base-commit-id
+                     (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
+                     :seon.source/commit-id (db/commit-id (:db-after report))})
                   report))))
-          (finally (d/release-materialized-db tested))))))))
+          (finally (release! [candidate base tested]))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Write-back: an accepted merge's replacements, back into their one file

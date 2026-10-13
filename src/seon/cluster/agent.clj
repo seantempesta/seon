@@ -1997,13 +1997,14 @@
   (true? (config/agent-cluster-dial database agent-id :seon.config.agent/keep-ended-branches?)))
 
 (defn- publication-due?
-  "Whether an assignment's publication is due, from its `row` on main: merged, its merge commit recorded,
-  its merge moved declarations or tasks (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes
-  beside its merge commit), and no git commit and no refusal recorded. A merge moving no declaration is never due."
+  "Whether an assignment's publication is due, from its `row` on main: its merge commit recorded, its merge
+  moved declarations or tasks (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes beside its merge
+  commit), and no git commit and no refusal recorded, whether or not the merge completed its task (a refinement
+  merged before its agent ends publishes too). A merge moving no declaration is never due."
   {:malli/schema [:=> [:cat :map] :boolean]}
-  [{outcome :seon.task/outcome commit :seon.task/merge-commit moved :seon.task/merged-declarations
+  [{commit :seon.task/merge-commit moved :seon.task/merged-declarations
     git :seon.task/git-commit refused :seon.task/refusal}]
-  (boolean (and (= :merged outcome) commit moved (not git) (not refused))))
+  (boolean (and commit moved (not git) (not refused))))
 
 (defn- branch-admission-end
   "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on `branch`'s head, read from main

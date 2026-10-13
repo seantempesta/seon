@@ -177,8 +177,10 @@
   `database` under main's `projection`: the three-way from its merge base (`:seon.task/merge-base`, else `fork`,
   the commit its branch forked at) to `commit` against `database`, with the base moved to `commit` in the same
   transaction, so a repeat adds nothing; [] when the base already is `commit`. An assignment with no outcome is
-  closed in the same transaction: `:closed` when its source ended `:sent-back` (its work goes back to its
-  target), else `:merged`. A `:root` conflict keeps main's value (`merge!` answers it)."
+  closed in the same transaction by its source's end: `:closed` when it ended `:sent-back` (its work goes back to
+  its target), `:merged` when it ended `:done`, which `merge!` carries only inside an accepted candidate's
+  transaction (`seon.cluster.source/accept-merge!`); any other source, one not yet ended among them, merges its
+  facts and stays open. A `:root` conflict keeps main's value (`merge!` answers it)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
                    :seon.store/transaction-data]
@@ -194,10 +196,10 @@
    (let [base-commit (or (:v (first (d/datoms database :eavt a :seon.task/merge-base))) fork)]
      (if (= base-commit commit)
        []
-       (let [{:keys [tx-data end]} (merged database a commit projection base-commit)]
+       (let [{:keys [tx-data end]} (merged database a commit projection base-commit)
+             outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))]
          (cond-> (conj tx-data [:db/add a :seon.task/merge-base commit])
-           (empty? (d/datoms database :eavt a :seon.task/outcome))
-           (conj [:db/add a :seon.task/outcome (if (= :sent-back end) :closed :merged)])))))))
+           outcome (conj [:db/add a :seon.task/outcome outcome])))))))
 
 (defn- assigned-task
   "The symbol of the task assignment `a` on main `database` assigns."
@@ -252,19 +254,20 @@
       (let [{a :db/id branch :seon.task/branch base :seon.task/merge-base} row
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
             target (db/db connection)
-            ;; one comparison with main decides whether declarations merge; their proofs are the assignment's
-            ;; task's over its assigned basis (main, the branch head, the merge base), a Prove step's product
-            ;; beside them; with no merge base recorded, what the head holds beyond main is its addition. A
-            ;; sent-back source merges its facts only.
+            ;; prepare-merge! selects the proofs of the assignment's task over its assigned basis (main, the
+            ;; branch head, the merge base), a Prove step's product beside them
             task-sym (assigned-task target a)
-            unmerged (when (and (uuid? commit) (not= base commit))
-                       (source/unmerged-count target store branch))
-            owed (when (and unmerged (pos? unmerged))
-                   (let [head (db/commit-database target commit)
-                         was (when (uuid? base) (db/commit-database target base))]
-                     (try (when-not (= :sent-back (:v (first (d/datoms head :eavt a :seon.task.attempt/end))))
-                            (task/obligations target head (or was target) task-sym))
-                          (finally (source/release! [head was])))))
+            ;; a source that ended :done is accepted through a candidate, a task-only or empty change included,
+            ;; and only so completes its task; a sent-back one merges its facts only; any other source merges
+            ;; its facts alone, or its declarations through an accepted candidate when it changed any
+            end (when (and (uuid? commit) (not= base commit))
+                  (let [head (db/commit-database target commit)]
+                    (try (:v (first (d/datoms head :eavt a :seon.task.attempt/end)))
+                         (finally (source/release! [head])))))
+            accepted? (case end
+                        :done true
+                        :sent-back false
+                        (and (uuid? commit) (not= base commit) (pos? (source/unmerged-count target store branch))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]
@@ -287,8 +290,7 @@
         (cond
           (not (uuid? commit)) commit
           (= base commit) {:seon.task/assignment key :seon.task/merge-base commit :seon.merge/conflicts []}
-          (:seon.error/at owed) owed
-          (nil? owed)
+          (not accepted?)
           (let [report (db/transact! connection {:tx-data merge-call :tx-meta meta})]
             (if (:db-after report)
               (let [result (answer (:db-before report) (:db-after report))]
@@ -296,11 +298,9 @@
                 result)
               report))
           :else
-          (let [product (when (= :prove (:seon.task/step owed)) (:seon.task/product owed))
-                prepared (source/prepare-merge! context store branch (into (:seon.task/proofs owed) product)
-                                                (cond-> {} root (assoc :root root)))
+          (let [prepared (source/prepare-merge! context store branch task-sym (cond-> {} root (assoc :root root)))
                 accepted (when (:seon.source/candidate prepared)
-                           (source/accept-merge! context store (cond-> prepared (seq product) (assoc :seon.task/product product))
+                           (source/accept-merge! context store prepared
                                                  {:tx-data merge-call :tx-meta meta}))
                 _ (when (:seon.source/candidate prepared)
                     (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)}))
@@ -327,13 +327,13 @@
   the store it holds or its SCI context's environment holds) as ONE
   transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
   facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
-  when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`) and its source did not
-  end `:sent-back`, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
-  proofs of the assignment's task over main, C and the merge base (`seon.task/obligations`), a Prove step's product beside them (red by
-  design, `seon.cluster.source/accept-merge!` takes it), and
-  the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
-  `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold
-  are proven before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
+  when its source ended `:done`, or did not end `:sent-back` and changed declarations main lacks
+  (`seon.cluster.source/unmerged-count`), whatever declarations it changed, none included, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task
+  over main, C and the merge base (`seon.cluster.source/tested-task-basis`), a Prove step's product beside them,
+  and the tests reaching them on a fresh merge branch of main; `seon.cluster.source/accept-merge!` judges them by
+  `seon.cluster.source/merge-verdict` and carries `merge-tx` in its transaction, so only an accepted candidate
+  completes the task, then the merge branch is deleted; the files the checkout `root` would hold are proven
+  before any test runs. Main's commit is recorded as `:seon.task/merge-commit`, beside
   `:seon.task/merged-declarations`, how many declarations and tasks it moved
   (`seon.cluster.source/merge-accepted`) when any, on either path; publishing the
   merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.

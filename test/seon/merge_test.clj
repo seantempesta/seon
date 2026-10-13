@@ -526,7 +526,8 @@
                           (cluster.agent/lifecycle-facts main (:seon.store/store (support/execution-handle connection))
                                                          {:seon.flow.plan/started #{} :seon.flow.plan/paused #{}}))]
             (is (uuid? (:seon.task/merge-commit merged)) "the facts merged")
-            (is (= :merged (:seon.task/outcome (db/pull main [:seon.task/outcome] a))))
+            (is (nil? (:seon.task/outcome (db/pull main [:seon.task/outcome] a)))
+                "a source not yet ended merges its facts and completes nothing")
             (is (nil? (:seon.task/merged-declarations (db/pull main [:seon.task/merged-declarations] a)))
                 "a merge of facts alone records no moved declarations")
             (is (map? row) "the assignment is held")
@@ -596,7 +597,7 @@
           (let [main (db/db connection)
                 measured (profile/measure #(merge/merge-tx main a (db/commit-id (db/db fork))
                                                             (db/carried-projection main)))]
-            (is (= 4 (count (:seon.profile/value measured))) "the intent's retraction and assertion, the moved base and the outcome")
+            (is (= 3 (count (:seon.profile/value measured))) "the intent's retraction and assertion and the moved base: an unended source writes no outcome")
             (is (<= (:seon.profile/ms measured) 20)))))))))
 
 (defn- maybe-schemas

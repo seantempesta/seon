@@ -16,7 +16,16 @@
             [seon.fn :as fn]
             [seon.id :as id]
             [seon.program :as program]
+            [seon.task :as task]
             [seon.test-support :as support]))
+
+(defn- proved!
+  "Index the one task these merges prove, `tq.write-back/fix`, on `connection`; its symbol, each proof's tag."
+  [connection]
+  (task/index-tasks! {:seon.db/connection connection
+                      :seon.task/files {"resources/seon/tasks/tq.write-back.edn"
+                                        "[#:seon.task{:name \"fix\" :intent \"Merge and write back the tested change.\"}]"}})
+  'tq.write-back/fix)
 
 (defn- fixture-source
   "One small namespace: a callee and its caller. The test reaching both is the
@@ -119,7 +128,7 @@
         file (io/file root path)
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
-        proofs #{(symbol (str fixture-ns) "caller-check")}
+        proofs (proved! h-conn)
         c (keyword (str "write-back-c-" suffix))
         agent-id (str "write-back-" suffix)
         made (volatile! [c])]
@@ -133,7 +142,7 @@
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             ;; The test is the agent's own, written at its REPL on H before the lane forks.
             _ (with-agent! h-conn cluster-name (str agent-id "-author") fixture-ns
-                #(submit! % "(clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
+                #(submit! % "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} caller-check (clojure.test/is (= 3 (caller 2))))"))
             before (digests entities)
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
@@ -201,8 +210,8 @@
         added-fn [:seon.fn/sym (symbol (str fixture-ns) "triple")]
         added-test [:seon.test/sym (symbol (str fixture-ns) "triple-check")]
         function-source "(defn triple\n  \"Triple.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (* 3 x))"
-        test-source "(clojure.test/deftest triple-check (clojure.test/is (= 9 (triple 3))))"
-        proofs #{(second added-test)}
+        test-source "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} triple-check (clojure.test/is (= 9 (triple 3))))"
+        proofs (proved! h-conn)
         c (keyword (str "write-back-add-c-" suffix))
         made (volatile! [c])]
     (io/make-parents file)
@@ -255,7 +264,7 @@
 (defn- merge-world!
   "The fixture file indexed onto H and a lane C where the agent submits
   `forms` (each a function of the fixture namespace), proved by its test
-  `test-name`; calls `body` with the world, then retires C and every
+  `test-name` (tagged with `tq.write-back/fix`); calls `body` with the world, then retires C and every
   branch `body` conj'd onto `:made`, and deletes the root."
   [label test-name forms body]
   (let [target (support/execution-handle nil)
@@ -272,6 +281,7 @@
     (try
       (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            proofs (proved! h-conn)
             _ (registry/fork! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
@@ -279,7 +289,7 @@
         (try
           (with-agent! c-conn (:seon.cluster/name target) (str label suffix) fixture-ns
             (fn [request] (doseq [form forms] (submit! request (form fixture-ns)))))
-          (body {:target target :store store :c c :proofs #{(symbol (str fixture-ns) test-name)} :root root :file file :fixture-ns fixture-ns :made made})
+          (body {:target target :store store :c c :proofs proofs :root root :file file :fixture-ns fixture-ns :made made})
           (finally (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
@@ -293,7 +303,7 @@
   ;; (`seon.turn.batch/auto-require!`), so the merge carries the namespace and
   ;; the written file's `ns` form requires it.
   (merge-world! "wbreq" "set-check"
-                [(fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
+                [(fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
                 (fn [{:keys [target store c proofs root file fixture-ns made]}]
                   (let [h-conn (:seon.db/connection target)
                         check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
@@ -317,7 +327,7 @@
   ;; Chain 4's merge 5f7fc3f7b published an `is` message printing a value; HEAD then failed
   ;; lint and every lane commit was refused. The merge holds the lane commit's bar.
   (merge-world! "wblint" "lint-check"
-                [(fn [_] "(clojure.test/deftest lint-check (clojure.test/is (= 1 1) (pr-str :x)))")]
+                [(fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} lint-check (clojure.test/is (= 1 1) (pr-str :x)))")]
                 (fn [{:keys [target store c proofs root file made]}]
                   (let [before (slurp file)
                         refused (source/prepare-merge! target store c proofs {:root root})
@@ -340,7 +350,7 @@
   (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set] [clojure.test]))")]
     (merge-world!
      "wbns" "set-check"
-     [ns-form (fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
+     [ns-form (fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
      (fn [{:keys [target store proofs c root file fixture-ns made]}]
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
@@ -380,6 +390,7 @@
         test-source (str "(ns " test-ns "\n  \"Write-back test fixture.\"\n  (:require [clojure.test] [" fixture-ns "]))\n")
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         check [:seon.test/sym (symbol (str test-ns) "callee-check")]
+        proved (proved! h-conn)
         c (keyword (str "wbtwo-c-" suffix))
         made (volatile! [c])]
     (doseq [[path text] (map vector paths [(fixture-source fixture-ns) test-source])]
@@ -396,9 +407,9 @@
           (with-agent! c-conn (:seon.cluster/name target) (str "wbtwo-" suffix) fixture-ns
             (fn [request]
               (submit! request "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
-              (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest callee-check (clojure.test/is (= 3 ("
+              (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} callee-check (clojure.test/is (= 3 ("
                                     fixture-ns "/callee 2))))"))))
-          (let [prepared (source/prepare-merge! target store c #{(second check)} {:root root})
+          (let [prepared (source/prepare-merge! target store c proved {:root root})
                 _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 written (when (:seon.source/commit-id accepted)

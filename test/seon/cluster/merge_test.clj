@@ -34,6 +34,14 @@
 
 (defn- write! [connection entities] (support/transacted! connection (vec entities)) (db/commit-id (db/db connection)))
 
+(defn- proved-task!
+  "Index the one task `ns/fix` on `connection` and answer its symbol: a merge's proofs are its tagged tests."
+  [connection ns]
+  (task/index-tasks! {:seon.db/connection connection
+                      :seon.task/files {(str "resources/seon/tasks/" ns ".edn")
+                                        "[#:seon.task{:name \"fix\" :intent \"Merge the tested change.\"}]"}})
+  (symbol ns "fix"))
+
 (deftest ^{:seon.test/long "Three prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, measured in lane-nsa-slice4-2026-09-23.md)."
            :seon.test/long-ms 90000}
   a-candidate-merges-only-its-tested-green-program
@@ -41,24 +49,24 @@
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
         fn-entity #(entity (db/db %1) :fn %2 %3)
-        proofs #{(sym "merge-check")}
+        proved (proved-task! h-conn "tq.merge-green")
         c (keyword (str "merge-test-c-" (id/id)))
         _ (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
                           (fn-entity h-conn "merge-caller" "(defn merge-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/merge-callee))")])
-        _ (write! h-conn [(entity (db/db h-conn) :test "merge-check" "(clojure.test/deftest merge-check (clojure.test/is (= 1 (seon.cluster.merge-test/merge-caller))))")])
+        _ (write! h-conn [(entity (db/db h-conn) :test "merge-check" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-green/fix}} merge-check (clojure.test/is (= 1 (seon.cluster.merge-test/merge-caller))))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
         digest #(:seon.program/definition-digest (db/pull (db/db %1) [:seon.program/definition-digest] [:seon.fn/sym (sym %2)]))
         made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target store c proofs)]
+        prepare #(let [p (source/prepare-merge! target store c proved)]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)]
     (try
-      (testing "an equal revert is unchanged: nothing to merge"
+      (testing "an equal revert is unchanged: its proofs run, and it carries nothing to merge"
         (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (+ 0 1))")])
         (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")])
-        (is (= :seon.program/scope (:seon.program/missing-evidence (prepare)))))
+        (is (= {} (:seon.source/expected-digests (prepare)))))
       (testing "a red replacement is tested but its evidence refuses acceptance"
         (let [_ (write! h-conn [(fn-entity h-conn "merge-extra" "(defn merge-extra {:malli/schema [:=> [:cat] :int]} [] 0)")])
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
@@ -109,17 +117,17 @@
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
-        proofs #{(sym "merge-other")}
+        proved (proved-task! h-conn "tq.merge-alone")
         c (keyword (str "merge-test-c-" (id/id)))
         _ (write! h-conn [(entity (db/db h-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")
-                          (entity (db/db h-conn) :test "merge-other" "(clojure.test/deftest merge-other (clojure.test/is true))")])
+                          (entity (db/db h-conn) :test "merge-other" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-alone/fix}} merge-other (clojure.test/is true))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)]
     (try
       (write! c-conn [(entity (db/db c-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] (inc 0))")])
-      (let [prepared (source/prepare-merge! target store c proofs)
+      (let [prepared (source/prepare-merge! target store c proved)
             before (db/commit-id (db/db h-conn))
             refusal (source/accept-merge! target store prepared)]
         (is (true? (:seon.test/passed? prepared)) "the test owner selects no test and refuses nothing")
@@ -193,15 +201,16 @@
         test-entity #(entity (db/db %1) :test %2 %3)
         callee #(str "(defn gate-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
         c (keyword (str "merge-test-c-" (id/id)))
+        proved (proved-task! h-conn "tq.merge-gate")
         _ (write! h-conn [(fn-entity h-conn "gate-callee" (callee 1))])
-        _ (write! h-conn [(test-entity h-conn "gate-proof" "(clojure.test/deftest gate-proof (clojure.test/is (pos? (seon.cluster.merge-test/gate-callee))))")
+        _ (write! h-conn [(test-entity h-conn "gate-proof" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-gate/fix}} gate-proof (clojure.test/is (pos? (seon.cluster.merge-test/gate-callee))))")
                           (test-entity h-conn "gate-exact" "(clojure.test/deftest gate-exact (clojure.test/is (= 1 (seon.cluster.merge-test/gate-callee))))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                            :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
         made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target store c #{(sym "gate-proof")})]
+        prepare #(let [p (source/prepare-merge! target store c proved)]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         refused-tests #(set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests %)))
         ;; main may record its own side of a red (seon.test/fork-point-red); its program stays as it was
@@ -371,7 +380,8 @@
              (is (nil? (:seon.error/message merged)) "the merge answers no refusal")
              (is (= fix (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'tq.land/area])))
                  "main holds the agent's definition")
-             (is (= :merged (:seon.task/outcome (assignment-row connection request))) "the assignment is merged")
+             (is (nil? (:seon.task/outcome (assignment-row connection request)))
+                 "its agent has not ended: the declarations merge without completing the task")
              (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge commit")
              (is (= 1 (:seon.task/merged-declarations (assignment-row connection request)))
                  "the merge records, in its own transaction, the one declaration it moved")
@@ -492,6 +502,8 @@
              "main holds the refined intent")
          (is (= 1 (:seon.task/merged-declarations (assignment-row connection key)))
              "the merge counts the one declaration it moved, so its publication is due")
+         (is (nil? (:seon.task/outcome (assignment-row connection key)))
+             "the refinement reaches main without completing the task: its agent has not ended")
          (pass! running)
          (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection key)
                text (slurp file)]
@@ -799,8 +811,9 @@
         test-entity #(entity (db/db %1) :test %2 %3)
         callee #(str "(defn unrun-callee {:malli/schema [:=> [:cat] :int]} [] " % ")")
         c (keyword (str "merge-test-c-" (id/id)))
+        proved (proved-task! h-conn "tq.merge-unrun")
         _ (write! h-conn [(fn-entity h-conn "unrun-callee" (callee 1))])
-        _ (write! h-conn [(test-entity h-conn "unrun-proof" "(clojure.test/deftest unrun-proof (clojure.test/is (pos? (seon.cluster.merge-test/unrun-callee))))")
+        _ (write! h-conn [(test-entity h-conn "unrun-proof" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-unrun/fix}} unrun-proof (clojure.test/is (pos? (seon.cluster.merge-test/unrun-callee))))")
                           (test-entity h-conn "unrun-broken" "(clojure.test/deftest unrun-broken (clojure.test/is (= 0 (seon.cluster.merge-test/unrun-callee))))")])
         _ (registry/fork! {:seon.store/store store :seon.store/branch c
                            :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
@@ -809,7 +822,7 @@
         made (volatile! [])]
     (try
       (write! c-conn [(fn-entity c-conn "unrun-callee" (callee "(* 1 1)"))])
-      (let [prepared (source/prepare-merge! target store c #{(sym "unrun-proof")})
+      (let [prepared (source/prepare-merge! target store c proved)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             refusal (source/accept-merge! target store prepared)]
         (is (= [(sym "unrun-broken")] (:seon.source/red prepared)) "the gate ran it red")
@@ -857,7 +870,6 @@
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)
         merge-verdict (requiring-resolve 'seon.cluster.source/merge-verdict)
-        proofs #{(sym "accept-check")}
         c (keyword (str "merge-test-c-" (id/id)))
         _ (task/index-tasks! {:seon.db/connection h-conn
                               :seon.task/files {"resources/seon/tasks/tq.accept.edn"
@@ -872,7 +884,7 @@
         made (volatile! [])]
     (try
       (write! c-conn [(entity (db/db c-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 1)")])
-      (let [prepared (source/prepare-merge! target store c proofs)
+      (let [prepared (source/prepare-merge! target store c 'tq.accept/fix)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             main (db/db h-conn)
             base (db/commit-database main (registry/base-commit-id main c))]

@@ -468,6 +468,38 @@
                                                           [:seon.task/assignment key-r])))
                    "naming its target on the attempt")))))))))))
 
+(defn- define-on!
+  "Define `source` in namespace `ns-sym` on `connection`'s branch, as an agent of the chain world would."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol :string] :seon.schema/value]}
+  [connection ns-sym source]
+  (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                      :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                    (db/db connection) connection)
+                                      :seon.batch/sink (seon.batch/sink)
+                                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                      :seon.agent/id "tq-chain-author"})
+                        ns-sym source))
+
+(defn- checkout!
+  "Name a disposable git checkout holding `files` (relative path to text) as the chain world's
+  `:seon.config.fs/working-root` on `connection`, its `test` files declared on main as publication declares
+  them: the checkout its merges are proven against and published into. Its path."
+  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string :string]] :string]}
+  [connection files]
+  (let [root (test-support/temp-root "chain-checkout")]
+    (doseq [[path text] files]
+      (.mkdirs (.getParentFile (java.io.File. root ^String path)))
+      (spit (java.io.File. root ^String path) text))
+    (doseq [args [["init" "-q"] ["config" "user.email" "chain@test.invalid"] ["config" "user.name" "chain-test"]
+                  ["add" "."] ["commit" "-q" "-m" "fixture"]]]
+      (apply shell/sh "git" "-C" root args))
+    (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                    :seon.config/manifest {:seon.config.fs/working-root root}})
+    (let [entities (seon.fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})]
+      (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) entities
+                                                                 (mapv seon.program/row-identity entities))))
+    root))
+
 ;;; P2: an attempt's end lands on main from its branch, once, and its branch goes or stays.
 
 (defn- end-on-branch!
@@ -637,20 +669,30 @@
     (test-support/with-database
      (fn [connection]
        (chain-world
-        connection {"a" [#{} "(clojure.test/is (= 1 2))"] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
+        connection {"a" [#{} nil] "b" [#{"a"} "(clojure.test/is (= 1 2))"]}
         (fn [handle]
-          (let [routing (:seon.agent/routing handle)]
+          (let [routing (:seon.agent/routing handle)
+                rows (str *space* "-rows")]
             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
                             :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}})
+            ;; a's red proof lives in the checkout, beside the function it reaches: a's merge is accepted into it
+            (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                   (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                        "(deftest ^{:seon/tasks #{'" *space* "/a}} proves-a (is (= 4 (twice 2))))\n")})
             (pass! handle routing)
             (let [[[key-a branch-a agent-a]] (seq (attempts connection "a"))
-                  a-db #(db/branch-database (db/db connection) branch-a)]
+                  a-db #(db/branch-database (db/db connection) branch-a)
+                  on-a (registry/active-branch-connection {:seon.store/store (agent/handle-store handle) :seon.store/branch branch-a})]
               (is (= (row-ids (db/db connection) key-a agent-a) (row-ids (a-db) key-a agent-a))
                   "a fork of main after the attempt write inherits its row and agent")
-              (test-support/transacted! connection
+              ;; a's agent does its work and ends :done on its own branch; only the accepted merge completes it
+              (await-on! on-a #(not-empty (proof-runs (db/db on-a) (symbol rows "proves-a"))) ::proved)
+              (define-on! on-a (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
+              (test-support/transacted! on-a
                                         [[:db/add [:seon.task/assignment key-a] :seon.task.attempt/end :done]
                                          [:db/add [:seon.task/assignment key-a] :seon.task.attempt/commit
-                                          (db/commit-id (a-db))]])
+                                          (db/commit-id (db/db on-a))]])
               (pass! handle routing)
               (let [[[key-b branch-b agent-b]] (seq (attempts connection "b"))
                     b-db (db/branch-database (db/db connection) branch-b)
@@ -734,9 +776,10 @@
     (test-support/with-database
      (fn [connection]
        (chain-world
-        connection {"r" [#{} "(clojure.test/is (= 1 2))"]}
+        connection {"r" [#{} nil] "s" [#{"r"} "(clojure.test/is (= 1 2))"]}
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
+                rows (str *space* "-rows")
                 h (chain-handle "r")
                 declaration (fn [database] (task/declaration (db/carried-projection database) (db/pull database '[*] [:seon.task/id h])))
                 refine! (fn [conn agent-id intent]
@@ -748,11 +791,16 @@
                 problems #(set (db/q '[:find [?s ...] :where [?t :seon.task/sym ?s] [(namespace ?s) ?n] [(= ?n "seon.task")]
                                        [(str ?s) ?text] [(clojure.string/includes? ?text "squash-conflict")]]
                                      (db/db connection)))]
+            ;; r's red proof lives in the checkout, beside the function it reaches: r's merge is accepted into it
+            (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
+                                   (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+                                        "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] x)\n\n"
+                                        "(deftest ^{:seon/tasks #{'" *space* "/r}} proves-r (is (= 4 (twice 2))))\n")})
             (pass! handle routing)
             (let [[[key branch agent-id]] (seq (attempts connection "r"))
                   on-branch (registry/active-branch-connection {:seon.store/store (agent/handle-store handle)
                                                                 :seon.store/branch branch})]
-              (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "r"))) ::proved)
+              (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (symbol rows "proves-r"))) ::proved)
               (is (true? (:seon.task/changed? (refine! on-branch agent-id "Refined by the agent."))) "the agent refines its task")
               (is (true? (:seon.task/changed? (task/create! {:seon.db/connection on-branch :seon.agent/id agent-id
                                                              :seon.task/ns (symbol *space*) :seon.task/name "rc"
@@ -760,6 +808,8 @@
               (is (= "Do r." (intent)) "main's intent is unchanged while the attempt runs")
               (is (nil? (:seon.task/intent (child))) "and main holds no child task yet")
               (is (true? (:seon.task/changed? (refine! connection "root" "Refined by root."))) "root edits the same intent on main")
+              ;; its work, so its :done end is accepted
+              (define-on! on-branch (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
               (test-support/transacted! on-branch
                                         [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :done]
                                          [:db/add [:seon.task/assignment key] :seon.task.attempt/commit (db/commit-id (db/db on-branch))]])
@@ -1041,38 +1091,6 @@
                 "Prove starts with own proofs or a successor declaration")
             (is (= (set (map chain-handle ["r" "s"])) (:seon.flow.plan/invalid observed))
                 "Prove without either and Implement without proofs cannot start"))))))))
-
-(defn- define-on!
-  "Define `source` in namespace `ns-sym` on `connection`'s branch, as an agent of the chain world would."
-  {:malli/schema [:=> [:cat :seon.db/connection :symbol :string] :seon.schema/value]}
-  [connection ns-sym source]
-  (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
-                                      :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
-                                                                                    (db/db connection) connection)
-                                      :seon.batch/sink (seon.batch/sink)
-                                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
-                                      :seon.agent/id "tq-chain-author"})
-                        ns-sym source))
-
-(defn- checkout!
-  "Name a disposable git checkout holding `files` (relative path to text) as the chain world's
-  `:seon.config.fs/working-root` on `connection`, its `test` files declared on main as publication declares
-  them: the checkout its merges are proven against and published into. Its path."
-  {:malli/schema [:=> [:cat :seon.db/connection [:map-of :string :string]] :string]}
-  [connection files]
-  (let [root (test-support/temp-root "chain-checkout")]
-    (doseq [[path text] files]
-      (.mkdirs (.getParentFile (java.io.File. root ^String path)))
-      (spit (java.io.File. root ^String path) text))
-    (doseq [args [["init" "-q"] ["config" "user.email" "chain@test.invalid"] ["config" "user.name" "chain-test"]
-                  ["add" "."] ["commit" "-q" "-m" "fixture"]]]
-      (apply shell/sh "git" "-C" root args))
-    (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
-                    :seon.config/manifest {:seon.config.fs/working-root root}})
-    (let [entities (seon.fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})]
-      (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) entities
-                                                                 (mapv seon.program/row-identity entities))))
-    root))
 
 (defn- rows-source
   "The Prove step's work in the checkout's namespace `<space>-rows`: the contracted stub `twice` with body `stub`

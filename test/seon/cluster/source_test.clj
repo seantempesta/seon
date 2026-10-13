@@ -376,17 +376,20 @@
         write! #(test-support/transacted! %1 (vec %2))
         handle (task/task-handle 'scratch.merge-tasks "merge-task")
         tag 'scratch.merge-tasks/merge-task
-        proofs #{(sym "merge-tasked-check")}
+        proved 'tq.merge-tasks-proof/fix
+        _ (task/index-tasks! {:seon.db/connection h-conn
+                              :seon.task/files {"resources/seon/tasks/tq.merge-tasks-proof.edn"
+                                                "[#:seon.task{:name \"fix\" :intent \"Merge the tested change.\"}]"}})
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
                           (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked {:malli/schema [:=> [:cat] :int]} [] 1)")])
-        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")])
+        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest ^{:seon/tasks #{'tq.merge-tasks-proof/fix}} merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")])
         _ (registry/fork! {:seon.store/store held-store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
         made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target held-store c proofs)]
+        prepare #(let [p (source/prepare-merge! target held-store c proved)]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
     (try
