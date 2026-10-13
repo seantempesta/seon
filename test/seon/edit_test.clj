@@ -10,7 +10,11 @@
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [clojure.string :as str]
+            [clojure.test.check.generators]
+            [clojure.test.check]
+            [clojure.test.check.properties])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.util Arrays]))
@@ -461,3 +465,44 @@
             "and it must carry the exact path it refused")
         (.delete (java.io.File. outside))
         (.delete (.getParentFile (java.io.File. outside)))))))
+
+(deftest ^{:seon/tasks #{'seon.edit/implement-an-unreadable-odd-map-is-not-one-form}}
+  an-odd-map-anywhere-is-not-one-form
+  (doseq [[source expected]
+          [["(a)" true]
+           ["x" true]
+           ["(a) ;; c" true]
+           ["{:a 1}" true]
+           ["#?(:clj 1)" true]
+           ["#(inc %)" true]
+           ["::x" true]
+           ["(a) (b)" false]
+           ["" false]
+           ["{:a 1 :b}" false]
+           ["{:a}" false]
+           ["[{:a}]" false]
+           ["(f {:a 1 :b})" false]]]
+    (is (= expected (seon.edit/single-form? source))
+        (str "single-form? must answer its declared boolean for " source))))
+
+(deftest ^{:seon/tasks #{'seon.edit/implement-an-unreadable-odd-map-is-not-one-form}}
+  every-source-holding-an-odd-map-is-not-one-form
+  (let [check
+        (clojure.test.check/quick-check
+         300
+         (clojure.test.check.properties/for-all
+          [ks (clojure.test.check.generators/such-that
+               (comp odd? count)
+               (clojure.test.check.generators/vector
+                clojure.test.check.generators/keyword 1 7))
+           w (clojure.test.check.generators/choose 0 2)]
+          (let [map-text (str "{" (clojure.string/join " " ks) "}")
+                source (case w
+                         0 map-text
+                         1 (str "[" map-text "]")
+                         2 (str "(f " map-text ")"))]
+            (false? (seon.edit/single-form? source))))
+         :seed 20261013)]
+    (seon.test-support/assert-check!
+     check
+     "Every source holding an odd-map literal must not be one form.")))
