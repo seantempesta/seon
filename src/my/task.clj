@@ -42,6 +42,7 @@
 
   `:seon.task/intent` is the goal: it is written on the subject, the task that declares the goal my step
   reads (`seon.task/goal-owner`), so every step of my chain reads it next (`seon.task/effective`).
+  `:seon.task/product` names the deftests my chain's Prove step supplies, written on the subject beside the goal.
   `:seon.task/instructions` is my step's own work, written on the task I hold. Both are prose naming their
   references inline: backticked fully qualified symbols and keywords, tasks as `ns/task-name`, and paths
   with `#heading` anchors. My next context resolves them. Answers the handle of the task I hold, whether a
@@ -52,14 +53,16 @@
   (my.task/refine! {:seon.task/instructions \"The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`.\"})"
   {:malli/schema [:=> [:cat :my.task/refine-request]
                   [:or :my.task/refined :seon.task/refused-error :seon.task/conflict-error :my.task/no-task-error :seon.error/value]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent instructions :seon.task/instructions}]
+  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent instructions :seon.task/instructions
+    product :seon.task/product}]
   (let [database (db/db connection)
         handle (task/agent-task database agent-id)
-        subject (when (and intent (string? handle)) (task/goal-owner database handle))
+        subject (when (and (or intent product) (string? handle)) (task/goal-owner database handle))
         ;; each task the refinement writes, with the members written on it
         writes (when (string? handle)
                  (cond-> {}
-                   (string? subject) (assoc subject {:seon.task/intent intent})
+                   (string? subject) (assoc subject (cond-> {} intent (assoc :seon.task/intent intent)
+                                                      product (assoc :seon.task/product product)))
                    instructions (update handle merge {:seon.task/instructions instructions})))
         write! (fn [target changes]
                  (let [held (db/pull (db/db connection) [:seon.task/ns] [:seon.task/id target])

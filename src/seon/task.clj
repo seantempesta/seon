@@ -9,6 +9,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.registry :as mr]
+            [malli.util :as mu]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
@@ -95,16 +96,22 @@
   [result]
   (when (refusal/error? result) result))
 
+(defn declaration-members
+  "The members of `:seon.task/declaration` under `projection`, in schema order, each with whether its schema is a set."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector [:tuple :qualified-keyword :boolean]]]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::declaration-members
+   #(mapv (fn [[k _ s]] [k (= :set (m/type (m/deref-all s)))])
+          (m/children (m/deref-all (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))))))
+
 (defn declaration
-  "A stored or proposed task's `:seon.task/declaration`: its declared members, sets as sets."
+  "A stored or proposed task's `:seon.task/declaration`: its declared members, a set member as a set."
   {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :map]] [:maybe :seon.task/declaration]]}
   [projection task]
   (when task
-    (let [members (schema/projection-cache-value
-                   projection ::declaration-members
-                   #(mapv first (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection)
-                                                              :seon.task/declaration)))))]
-      (update-vals (select-keys task members) #(if (sequential? %) (set %) %)))))
+    (into {} (keep (fn [[k set?]] (when-let [[_ v] (find task k)] [k (if set? (set v) v)])))
+          (declaration-members projection))))
 
 (defn- edn-forms
   "Every EDN form of `text`, in order."
@@ -115,6 +122,14 @@
     (loop [forms []]
       (let [form (edn/read {:eof eof} reader)]
         (if (identical? eof form) forms (recur (conj forms form)))))))
+
+(defn- entry-file-schema
+  "A task file's schema under `projection`: a vector of `:seon.task/declaration`s, closed."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.instrument/compiled-schema]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::entry-file-schema
+   #(m/schema [:vector (mu/closed-schema (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration))])))
 
 (defn file-declarations
   "Read one task file's EDN forms with `clojure.edn` (nothing evaluated), require one
@@ -127,13 +142,11 @@
                    (catch clojure.lang.EdnReader$ReaderException failure (refuse-task! :unreadable-file text {:seon.error/throwable failure})))
         _ (when-not (task-path? path) (refuse-task! :misplaced-file path {}))
         _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse-task! :not-one-vector forms {}))
-        ;; Only an empty set at an optional set member is absence (#{} clears);
-        ;; every other member, empty or not, meets the closed entry schema.
-        registry (:seon.schema.projection/registry projection)
-        absent-when-empty (into #{} (keep (fn [[k props s]] (when (and (:optional props) (= :set (m/type (m/deref-all s)))) k)))
-                                (m/children (m/deref (mr/schema registry :seon.task/entry))))
-        entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
-    (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
+        ;; Only an empty set at a set member is absence (#{} clears); every
+        ;; other member, empty or not, meets the declaration, closed.
+        set-member? (into #{} (keep (fn [[k set?]] (when set? k))) (declaration-members projection))
+        entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (set-member? k) (= #{} v)))) %) %) (first forms))]
+    (when-let [explanation (m/explain (entry-file-schema projection) (mapv #(if (map? %) (assoc % :seon.task/ns ns) %) entries))]
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
     (let [children (into #{} (comp (mapcat :seon.task/children) (map second)) entries)]
       (mapv (fn [{:seon.task/keys [name] :as entry}]
@@ -641,18 +654,15 @@
   Example:
   (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-                             [:seon.task/intent {:optional true} :seon.task/intent]
-                             [:seon.task/instructions {:optional true} :seon.task/instructions]
-                             [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs]
+                             [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
                    :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{connection :seon.db/connection agent-id :seon.agent/id task-name :seon.task/name :as request}]
   (if-not (symbol-name? task-name)
     (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
-    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/step :seon.task/intent
-                                                    :seon.task/instructions :seon.task/children :seon.task/needs]) agent-id)
+    (let [entity (task-entity (select-keys request (map first (declaration-members (db/carried-projection (db/db connection)))))
+                              agent-id)
           tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
           report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
       (if (:seon.error/at report)
@@ -966,23 +976,25 @@
 
 (defn effective
   "The effective task of `handle` in `database`: its handle and symbol, and `clojure.core/merge` of the
-  `:seon.task/intent` and `:seon.task/instructions` each task declares from its root subject down
+  `:seon.task/intent`, `:seon.task/instructions` and `:seon.task/product` each task declares from its root subject down
   `:seon.task/children` to it, its own keys last. Content merges down children only, never along needs.
   nil when `database` holds no such task."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/effective :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database handle]
-  (let [content [:seon.task/intent :seon.task/instructions]
+  (let [content [:seon.task/intent :seon.task/instructions :seon.task/product]
+        set-member? (into #{} (keep (fn [[k set?]] (when set? k))) (declaration-members (db/carried-projection database)))
+        declared (fn [task] (into {} (map (fn [[k v]] [k (if (set-member? k) (set v) v)])) task))
         step (db/pull database (into [:db/id :seon.task/id :seon.task/sym] content) [:seon.task/id handle])]
     (if (or (nil? step) (read-error step))
       step
       ;; the declarations from the step up to its root, then merged root first
-      (loop [eid (:db/id step) lineage (list (select-keys step content))]
+      (loop [eid (:db/id step) lineage (list (declared (select-keys step content)))]
         (let [parent (db/q '[:find ?p . :in $ ?c :where [?p :seon.task/children ?c]] database eid)
               pulled (when (int? parent) (db/pull database content parent))]
           (cond (read-error parent) parent
                 (read-error pulled) pulled
-                (int? parent) (recur parent (conj lineage (or pulled {})))
+                (int? parent) (recur parent (conj lineage (declared (or pulled {}))))
                 :else (apply merge (select-keys step [:seon.task/id :seon.task/sym]) lineage)))))))
 
 (defn goal-owner

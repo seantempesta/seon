@@ -1587,14 +1587,14 @@
 (defn- task-entry-node
   "`declaration` as a task file entry in the layout of `old`, the entry it
   replaces or the neighbour it follows (`relaid`): members in `old`'s order,
-  then the declaration's own, and namespaced as `old` is."
-  {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] :seon.task/declaration] [:fn rewrite-clj.node/node?]]}
-  [old declaration]
+  then in `order`'s (`seon.task/declaration-members`), and namespaced as `old` is."
+  {:malli/schema [:=> [:cat [:fn rewrite-clj.node/node?] :seon.task/declaration [:vector :qualified-keyword]] [:fn rewrite-clj.node/node?]]}
+  [old declaration order]
   (let [[qualifier inner] (if (= :namespaced-map (node/tag old)) (node/children old) [nil old])
         prefix (some-> qualifier node/string (subs 1))
         members (dissoc declaration :seon.task/ns)
         order (distinct (concat (keep #(when (keyword? %) %) (map node/sexpr (remove node/whitespace-or-comment? (node/children inner))))
-                                [:seon.task/name :seon.task/step :seon.task/intent :seon.task/instructions :seon.task/children :seon.task/needs]))
+                                order))
         value (node/coerce (apply array-map (mapcat (fn [k] (when (contains? members k)
                                                               [(if (= prefix (namespace k)) (keyword (name k)) k) (members k)]))
                                                     order)))
@@ -1606,26 +1606,27 @@
   `edits` applied by rewrite-clj: the entry named `name` replaced
   (`task-entry-node`), removed with the whitespace before it when
   `declaration` is nil, or appended after the last entry, separated as the
-  last two are. Every other node keeps its text."
-  {:malli/schema [:=> [:cat :string [:sequential [:tuple :seon.task/name [:maybe :seon.task/declaration]]]] :string]}
-  [text edits]
+  last two are, its members in `projection`'s declaration order. Every other node keeps its text."
+  {:malli/schema [:=> [:cat :seon.schema/projection :string [:sequential [:tuple :seon.task/name [:maybe :seon.task/declaration]]]] :string]}
+  [projection text edits]
   (let [outer (z/find (z/of-string text) z/right #(= :vector (z/tag %)))
+        order (mapv first (task/declaration-members projection))
         edit (fn [children [task-name declaration]]
                (let [significant (vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) children))
                      at (some #(when (= task-name (:seon.task/name (node/sexpr (nth children %)))) %) significant)
                      before (last (filter #(< % (or at 0)) significant))
                      splice (fn [from to nodes] (into (into (subvec children 0 from) nodes) (subvec children to)))]
                  (cond
-                   (and at declaration) (assoc children at (task-entry-node (nth children at) declaration))
+                   (and at declaration) (assoc children at (task-entry-node (nth children at) declaration order))
                    (and at before) (splice (inc before) (inc at) [])
                    at (splice at (or (some #(when (> % at) %) significant) (count children)) [])
                    (nil? declaration) children
-                   (empty? significant) (splice 0 0 [(node/coerce (dissoc declaration :seon.task/ns))])
+                   (empty? significant) (splice 0 0 [(task-entry-node (node/coerce {}) declaration order)])
                    :else (let [end (peek significant)
                                gap (if (< 1 (count significant))
                                      (subvec children (inc (peek (pop significant))) end)
                                      [(node/newlines 1) (node/spaces 1)])]
-                           (splice (inc end) (inc end) (conj gap (task-entry-node (nth children end) declaration)))))))
+                           (splice (inc end) (inc end) (conj gap (task-entry-node (nth children end) declaration order)))))))
         children (reduce edit (vec (node/children (z/node outer))) edits)]
     (z/root-string (z/replace outer (node/replace-children (z/node outer) children)))))
 
@@ -1668,7 +1669,7 @@
                               rows)
             written (map (comp second first) rows)
             candidate (when (empty? conflicting)
-                        (task-file-text base-text (mapv (fn [[[_ sym] _ now]] [(name sym) now]) rows)))
+                        (task-file-text projection base-text (mapv (fn [[[_ sym] _ now]] [(name sym) now]) rows)))
             read (some-> candidate read-file)
             differing (when read
                         (into (vec (keep (fn [[[_ sym :as identity] _ now]] (when-not (= now (get read sym)) identity)) rows))
