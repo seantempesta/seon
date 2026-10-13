@@ -283,7 +283,7 @@
           :else (try (program/changed-identities (db/basis-t base) database source/merge-bound)
                      (finally (source/release! [base]))))))
 
-(defn- current-results
+(defn current-results
   "The recorded result of each of `tests` that `database` holds at its current reach digest there: its latest
   completed execution, when it ran at that digest; a test absent there, unrun at that reach or with no completed
   outcome has none."

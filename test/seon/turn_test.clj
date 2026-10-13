@@ -2050,11 +2050,43 @@
        (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
        (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'tq.noproof "a")] :seon.task/execution :running]])
        (support/transacted! connection (task/attempt-tx (db/db connection) (task/task-handle 'tq.noproof "a") agent-id :tq-noproof))
-       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
+       (is (true? (turn/step-proved? (db/db connection) agent-id))
            "a task naming no proof has proved first once its attempt is written")
        (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
               (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))
            "the attempt itself is the work whose product the model turn writes")))))
+
+(defn- run-proof!
+  "Run the test `proof` on `connection` through the one runner, as a pass records it; a refused run is surfaced."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym] :seon.test/run-result]}
+  [connection proof]
+  (let [ran (seon.test/run {:seon.test/execution (support/context-source connection)
+                            :seon.test/recording-connection connection :seon.test/policy :named
+                            :seon.test/identities #{proof}})]
+    (when (:seon.error/at ran) (throw (ex-info (:seon.error/message ran) ran)))
+    ran))
+
+(deftest a-proof-result-at-its-current-reach-proves-the-attempt
+  ;; Lane M13: root ran the red proof before the attempt existed, so every later run reuses that result and
+  ;; records no run of the proof after the attempt
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.reused.edn"
+                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+     (support/declare-proof! connection 'tq.reused-test 'proves-a 'tq.reused/a)
+     (let [agent-id "tq-reused-agent"
+           handle (task/task-handle 'tq.reused "a")
+           situation #(:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))]
+       (is (= 1 (:seon.test/executed-count (run-proof! connection 'tq.reused-test/proves-a)))
+           "root records the red proof before any attempt")
+       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+       (support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
+       (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-reused))
+       (is (= :open (situation)) "its red result at the unchanged reach is the attempt's work: a model turn")
+       (is (= 1 (:seon.test/reused-count (run-proof! connection 'tq.reused-test/proves-a)))
+           "a pass at the same reach reuses the result and runs nothing")
+       (is (= :open (situation)) "a reused result proves as a new one does: never :prove again")))))
 
 (deftest ^{:seon/tasks #{'seon.test.runner/a-forked-value-reads-the-results-it-inherited}}
   a-predecessors-proof-run-does-not-count-as-the-attempts
@@ -2065,27 +2097,19 @@
                                            "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
      (support/declare-proof! connection 'tq.preds-test 'proves-a 'tq.preds/a)
      (let [agent-id "tq-pred-agent"
-           proof-run! (fn []
-                        (let [database (db/db connection)
-                              provenance (runner/provenance database)]
-                          (support/transacted!
-                           connection [[:db.fn/call seon.test/admit-run
-                                        {:seon.test.run/provenance provenance
-                                         :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name (support/execution-handle connection))]
-                                         :seon.test.run/input-digest (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
-                                         :seon.test.run/policy :named :seon.test.run/include-long? false
-                                         :seon.test.run/identities #{'tq.preds-test/proves-a}
-                                         :seon.test.run/members [{:seon.test.member/symbol 'tq.preds-test/proves-a
-                                                                  :seon.test.member/reasons #{:named}}]}]])))]
+           handle (task/task-handle 'tq.preds "a")
+           situation #(:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))]
+       ;; a predecessor's result of the proof at an earlier program, inherited by the value the attempt works on
+       (run-proof! connection 'tq.preds-test/proves-a)
+       (support/declare-source! connection 'tq.preds-test
+                                (str "(ns tq.preds-test (:require [clojure.test :refer [deftest is]]))\n"
+                                     "(deftest ^{:seon/tasks #{'tq.preds/a}} proves-a (is (= 1 3)))\n"))
        (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
-       ;; a predecessor's run of the same proof, inherited by the value the attempt works on
-       (proof-run!)
-       (support/transacted! connection (task/attempt-tx (db/db connection) (task/task-handle 'tq.preds "a") agent-id :tq-pred))
-       (is (false? (turn/proof-run-recorded? (db/db connection) agent-id))
-           "a run recorded before the attempt is its predecessor's: the attempt still proves first")
-       (proof-run!)
-       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
-           "the attempt's own run of its proofs is its proving first")))))
+       (support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
+       (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-pred))
+       (is (= :prove (situation)) "a result at another program's reach is its predecessor's: the attempt proves first")
+       (run-proof! connection 'tq.preds-test/proves-a)
+       (is (= :open (situation)) "a result at the proof's current reach is the attempt's proving")))))
 
 (deftest a-prove-attempts-first-product-test-run-after-its-eval-is-its-proof-run
   ;; Run 18 (F53): the attempt defined the first of its two declared product tests, and the run after that
@@ -2108,16 +2132,8 @@
        (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-prodloop))
        ;; the agent's eval request defines the table, and its test step runs what that change reaches
        (support/declare-proof! connection 'tq.prodloop-test 'table 'tq.prodloop/body)
-       (let [database (db/db connection)]
-         (support/transacted!
-          connection [[:db.fn/call seon.test/admit-run
-                       {:seon.test.run/provenance (runner/provenance database)
-                        :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name (support/execution-handle connection))]
-                        :seon.test.run/input-digest (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
-                        :seon.test.run/policy :named :seon.test.run/include-long? false
-                        :seon.test.run/members [{:seon.test.member/symbol 'tq.prodloop-test/table
-                                                 :seon.test.member/reasons #{:reaches-changed}}]}]]))
-       (is (true? (turn/proof-run-recorded? (db/db connection) agent-id))
+       (run-proof! connection 'tq.prodloop-test/table)
+       (is (true? (turn/step-proved? (db/db connection) agent-id))
            "the run after the eval request ran the product test the step is judged by")
        (is (= :open (:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})))
            "its red run is the attempt's work, answered by a model turn")))))
