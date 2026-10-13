@@ -176,8 +176,8 @@
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
            (is (= "Render one node with `tn.a/f`.\nThen stop." (:seon.task/intent shown)))
            (is (= #{'tn.a/f} (:seon.task/references shown)))
-           (is (= (list 'seon.task/task-edges (list 'seon.db/db) (list 'quote 'tn.a/render-node)) (sut/task-form (unit [:seon.task/id handle] 1)))
-               "the form face is the edges read")
+           (is (= (list 'seon.task/obligations (list 'seon.db/db) (list 'quote 'tn.a/render-node)) (sut/task-form (unit [:seon.task/id handle] 1)))
+               "the form face is the obligations read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
        (testing "a schema's AI face is data: the form it replaces and what names the key"
          (let [usage (render.schema/render-ai

@@ -5203,29 +5203,34 @@
                        (let [stale (@test-stale database (vec proofs))]
                          (or (:seon.error/at stale) (seq stale))))))))))
 
-(defn- task-proofs
-  "The proofs of the task `agent-id` holds, read on `database`, the agent's branch; empty when it holds none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
+(defn- task-obligations
+  "The obligations of the task `agent-id` holds on `database`, the agent's branch, over its assigned basis
+  (`seon.task/assigned-obligations`); nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.task/obligations :seon.error/value]]}
   [database agent-id]
   (let [handle (task/agent-task database agent-id)
         sym (when (string? handle)
               (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))]
     (cond (:seon.error/at handle) handle
-          (nil? sym) #{}
-          :else (set (:seon.task/proofs (task/task-edges database sym))))))
+          sym (task/assigned-obligations database sym))))
 
-(defn- step-tests
-  "The tests the step of the task `agent-id` holds is judged by on `database`, the agent's branch: its proofs and,
-  for a `:prove` step, the product tests `database` already holds (`seon.task/obligations`), so the run at its fork
-  point shows whether main holds its product."
+(defn- task-proofs
+  "The proofs of the task `agent-id` holds, read on `database`, the agent's branch (`task-obligations`); empty when
+  it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
   [database agent-id]
-  (let [proofs (task-proofs database agent-id)
-        handle (when-not (:seon.error/at proofs) (task/agent-task database agent-id))
-        sym (when (string? handle) (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
-        owed (when sym (task/obligations database sym))]
-    (cond (:seon.error/at proofs) proofs
-          (:seon.error/at owed) owed
+  (let [owed (task-obligations database agent-id)]
+    (if (:seon.error/at owed) owed (set (:seon.task/proofs owed)))))
+
+(defn- step-tests
+  "The tests the step of the task `agent-id` holds is judged by on `database`, the agent's branch
+  (`task-obligations`): its proofs and, for a `:prove` step, the product tests `database` already holds, so the run
+  at its fork point shows whether main holds its product."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
+  [database agent-id]
+  (let [owed (task-obligations database agent-id)
+        proofs (set (:seon.task/proofs owed))]
+    (cond (:seon.error/at owed) owed
           (= :prove (:seon.task/step owed))
           (into proofs (filter #(seq (db/datoms database :avet :seon.test/sym %))) (:seon.task/product owed))
           :else proofs)))

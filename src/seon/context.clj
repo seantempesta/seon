@@ -139,16 +139,17 @@
                           failures (assoc :seon.context/proof-failures failures))]))))))
 
 (defn proofs
-  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof with
+  "The proofs section for the task `sym` on `database` (the agent's branch), its assigned obligations'
+  (`seon.task/assigned-obligations`): counts first, then each proof with
   its status and, when red, its failures. Its source is its resolution among the task's references
   (`task-sections`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :nil :seon.context/proofs :seon.error/value]]}
   [database sym]
-  (let [edges (task/task-edges database sym)
-        names (when-not (:seon.error/at edges) (vec (sort (:seon.task/proofs edges))))]
+  (let [owed (task/assigned-obligations database sym)
+        names (when-not (:seon.error/at owed) (vec (sort (:seon.task/proofs owed))))]
     (if (empty? names)
-      (when (:seon.error/at edges) edges)
+      (when (:seon.error/at owed) owed)
       (let [head (head-entries database (set names))]
         (or (when (:seon.error/at head) head)
             (let [entries (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) names)]
@@ -356,7 +357,7 @@
 
 (defn step-observation
   "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
-  (`seon.task/obligations`), the head's entries for them and for `judged`, the tests the agent's test step
+  over its assigned basis (`seon.task/assigned-obligations`), the head's entries for them and for `judged`, the tests the agent's test step
   found red there (`seon.turn/record-broken!`), and the fork point as that step observed it: each judged test
   present there unless it was new, red there unless it was broken. Called with `judged` nil, the agent's row
   supplies the step's last record, a test the fork point (`seon.turn/fork-commit`, main at the merge base) lacks is
@@ -367,7 +368,7 @@
                        [:maybe [:map [:seon.context/broken [:set :seon.test/sym]] [:seon.context/new-red [:set :seon.test/sym]]]]]
                   [:or :seon.context/step-observation :seon.error/value]]}
   [database agent-id sym judged]
-  (let [owed (task/obligations database sym)
+  (let [owed (task/assigned-obligations database sym)
         row (when-not judged (db/pull database [:seon.agent/broken :seon.agent/new-red] [:seon.agent/id agent-id]))
         broken (set (or (:seon.context/broken judged) (:seon.agent/broken row)))
         new-red (set (or (:seon.context/new-red judged) (:seon.agent/new-red row)))
@@ -448,27 +449,17 @@
       handled
       (into [] (remove (comp (set handled) :my.message/id)) items))))
 
-(defn- main-database
-  "Main's head seen from the branch `database`, for comparing the branch's stored costs with it:
-  root's home branch (root's row names it) through this process's connection to it; nil on main
-  itself or when no root row names another branch."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/database-value]]}
-  [database]
-  (let [branch (db/q '[:find ?branch . :where [?root :seon.agent/id "root"] [?root :seon.agent/branch ?branch]] database)]
-    (when (and (keyword? branch) (not= branch (get-in database [:config :branch])))
-      (some-> (db/branch-connection database branch) db/db))))
-
 (defn- branch-cost
   "The branch's stored cost entities (`:seon.fn.cost/entity`) that differ from
   main's (a sample digest main does not hold, or main stores none for that
   symbol and scope), as `seon.batch/cost-diff` comparisons, like with like
   only: the most self time spent first, at most `:seon.config.test.cost/top`,
   the dials of the branch's effective configuration. Main is read, for this
-  comparison only, as root's home branch (`main-database`). Nil on main itself, the branch stores none, its program
+  comparison only, as root's home branch (`seon.task/main-head`). Nil on main itself, the branch stores none, its program
   declares no cost entities or its configuration is refused."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cost/diff]]}
   [database]
-  (let [main (main-database database)
+  (let [main (task/main-head database)
         cluster (when main (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database))
         effective (when cluster (config/effective database cluster))
         cost-keys (when (and effective (not (:seon.error/at effective)))

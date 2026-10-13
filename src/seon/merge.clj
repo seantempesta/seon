@@ -253,16 +253,18 @@
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
             target (db/db connection)
             ;; one comparison with main decides whether declarations merge; their proofs are the assignment's
-            ;; task's, read on the branch head, a Prove step's product beside them. A sent-back source merges
-            ;; its facts only.
+            ;; task's over its assigned basis (main, the branch head, the merge base), a Prove step's product
+            ;; beside them; with no merge base recorded, what the head holds beyond main is its addition. A
+            ;; sent-back source merges its facts only.
             task-sym (assigned-task target a)
             unmerged (when (and (uuid? commit) (not= base commit))
                        (source/unmerged-count target store branch))
             owed (when (and unmerged (pos? unmerged))
-                   (let [head (db/commit-database target commit)]
+                   (let [head (db/commit-database target commit)
+                         was (when (uuid? base) (db/commit-database target base))]
                      (try (when-not (= :sent-back (:v (first (d/datoms head :eavt a :seon.task.attempt/end))))
-                            (task/obligations head task-sym))
-                          (finally (source/release! [head])))))
+                            (task/obligations target head (or was target) task-sym))
+                          (finally (source/release! [head was])))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]
@@ -327,7 +329,7 @@
   facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
   when the branch changed declarations main lacks (`seon.cluster.source/unmerged-count`) and its source did not
   end `:sent-back`, those declarations, gated first: `seon.cluster.source/prepare-merge!` tests them with the
-  proofs of the assignment's task on C (`seon.task/obligations`), a Prove step's product beside them (red by
+  proofs of the assignment's task over main, C and the merge base (`seon.task/obligations`), a Prove step's product beside them (red by
   design, `seon.cluster.source/accept-merge!` takes it), and
   the tests reaching them on a fresh merge branch of main, `seon.cluster.source/accept-merge!` carries
   `merge-tx` in its transaction, then the merge branch is deleted; the files the checkout `root` would hold

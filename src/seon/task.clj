@@ -519,28 +519,64 @@
                (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))))
 
 (defn obligations
-  "The step kind, own proofs and product tests for task `sym` at `database`: the product is the tests the step
-  declares (`:seon.task/product`) and those tagged with a task that needs it."
+  "The step kind, proofs and product tests of task `sym` over the assigned target basis: `main`'s head, the
+  `candidate` and their merge `base`. Each set is main's ∪ (the candidate's − the base's), so root's revisions on main
+  apply, the candidate's own additions join, and its removal of a gate it inherited does not; the step is the
+  candidate's. On one database value (an unassigned task) it is that value's own: the tests tagged with the task, and
+  for its product the tests it declares (`:seon.task/product`) and those tagged with a task that needs it."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.task/sym]
+                   [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]
+                  [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.db/database-value :seon.task/sym]
+                   [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]]}
+  ([database sym] (obligations database database database sym))
+  ([main candidate base sym]
+   (let [at (fn [database]
+              (let [task (db/pull database [:seon.task/step :seon.task/product] [:seon.task/sym sym])
+                    proofs (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database sym)
+                    product (db/q '[:find [?s ...] :in $ ?t :where [?task :seon.task/sym ?t]
+                                    [?next :seon.task/needs ?task] [?next :seon.task/sym ?n]
+                                    [?e :seon.task/tasks ?n] [?e :seon.test/sym ?s]] database sym)]
+                (or (some read-error [task proofs product])
+                    {:seon.task/step (get task :seon.task/step :implement)
+                     :seon.task/proofs (set proofs) :seon.task/product (into (set product) (:seon.task/product task))})))
+         ours (at candidate)
+         theirs (if (identical? main candidate) ours (at main))
+         was (cond (identical? base candidate) ours (identical? base main) theirs :else (at base))
+         basis (fn [k] (into (get theirs k) (remove (get was k)) (get ours k)))]
+     (or (some read-error [ours theirs was])
+         (assoc ours :seon.task/proofs (basis :seon.task/proofs) :seon.task/product (basis :seon.task/product))))))
+
+(defn main-head
+  "Main's head seen from the branch `database`: root's home branch (root's row names it) through this process's
+  connection to it; nil on main itself or when no root row names another branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.db/database-value]]}
+  [database]
+  (let [branch (db/q '[:find ?branch . :where [?root :seon.agent/id "root"] [?root :seon.agent/branch ?branch]] database)]
+    (when (and (keyword? branch) (not= branch (get-in database [:config :branch])))
+      (some-> (db/branch-connection database branch) db/db))))
+
+(defn assigned-obligations
+  "Task `sym`'s `obligations` as the agent on the branch `database` is held to them: over main's head (`main-head`),
+  the branch and the commit its base ref retains (`seon.cluster.registry/base-commit-id`), the merge base. On main,
+  where no base ref is held, the obligations at `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database sym]
-  (let [task (db/pull database [:seon.task/step :seon.task/product] [:seon.task/sym sym])
-        proofs (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database sym)
-        product (db/q '[:find [?s ...] :in $ ?t :where [?task :seon.task/sym ?t]
-                        [?next :seon.task/needs ?task] [?next :seon.task/sym ?n]
-                        [?e :seon.task/tasks ?n] [?e :seon.test/sym ?s]] database sym)]
-    (or (some read-error [task proofs product])
-        {:seon.task/step (get task :seon.task/step :implement)
-         :seon.task/proofs (set proofs) :seon.task/product (into (set product) (:seon.task/product task))})))
+  (let [commit (registry/base-commit-id database (get-in database [:config :branch]))
+        main (when commit (main-head database))
+        base (when main (db/commit-database database commit))]
+    (if base (obligations main database base sym) (obligations database sym))))
 
 (defn task-edges
-  "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
+  "A task's subjects (functions, namespaces), proofs (its `obligations`' own), and the definitions,
   namespaces and tasks whose must-read (a definition's) or references (a task's) name one of its subjects, over one held value.
   The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
   [database sym]
   (let [tagged (fn [attribute] (db/q [:find '[?s ...] :in '$ '?t :where ['?e :seon.task/tasks '?t] ['?e attribute '?s]] database sym))
-        proofs (tagged :seon.test/sym)
+        owed (obligations database sym)
+        proofs (if (read-error owed) owed (:seon.task/proofs owed))
         subject-reads (when-not (read-error proofs) [(tagged :seon.fn/sym) (tagged :seon.ns/name)])
         subjects (when-not (some read-error subject-reads) (set (apply concat subject-reads)))
         referrers (when (seq subjects)
@@ -550,7 +586,7 @@
                           [[:seon.fn/must-read :seon.fn/sym] [:seon.fn/must-read :seon.test/sym]
                            [:seon.fn/must-read :seon.ns/name] [:seon.task/references :seon.task/sym]]))]
     (or (read-error proofs) (some read-error subject-reads) (some read-error referrers)
-        {:seon.task/subjects subjects :seon.task/proofs (set proofs)
+        {:seon.task/subjects subjects :seon.task/proofs proofs
          :seon.task/referrers (set (apply concat referrers))})))
 
 (defn open-tasks

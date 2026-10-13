@@ -1090,36 +1090,35 @@
           database function)))
 
 (defn- proof
-  "Whether task `handle`'s proof holds in `database`: at least one test names its
-  symbol (`:seon.task/tasks`) and each such test's latest stored run is green (passes,
-  no failure or error, terminated) and completed after the transaction that
-  wrote `producer`'s current definition digest. A task no test names has no
-  proof. The answer is derived, never stored."
+  "Whether task `handle`'s proof holds in `database`: the task has proofs (`seon.task/obligations`) and each one's
+  latest stored run is green (passes, no failure or error, terminated) and completed after the transaction that
+  wrote `producer`'s current definition digest. A task with no proofs has no proof. The answer is derived, never
+  stored."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.fn/sym]
                   [:or :boolean :seon.db/error-result]]}
   [database handle producer]
   (let [fixed (db/q '[:find (max ?tx) . :in $ ?producer
                       :where [?f :seon.fn/sym ?producer] [?f :seon.program/definition-digest _ ?tx]]
                     database producer)
-        runs (db/q '[:find ?test ?done ?pass ?fail ?error :in $ ?handle
-                     :where [?task :seon.task/id ?handle] [?task :seon.task/sym ?s]
-                            [?t :seon.task/tasks ?s] [?t :seon.test/sym ?test]
-                            [?m :seon.test.member/symbol ?test]
-                            [?m :seon.test.member/completed-tx ?done]
-                            [?m :seon.test.member/terminated-tx]
-                            [?m :seon.test.member/pass-count ?pass]
-                            [?m :seon.test.member/fail-count ?fail]
-                            [?m :seon.test.member/error-count ?error]]
-                   database handle)
-        named (db/q '[:find [?test ...] :in $ ?handle
-                      :where [?task :seon.task/id ?handle] [?task :seon.task/sym ?s]
-                             [?t :seon.task/tasks ?s] [?t :seon.test/sym ?test]]
-                    database handle)
+        sym (db/q '[:find ?s . :in $ ?handle :where [?task :seon.task/id ?handle] [?task :seon.task/sym ?s]] database handle)
+        ;; seon.task requires this namespace through seon.fn, so the one proof selector is resolved at the call
+        owed (when (symbol? sym) ((requiring-resolve 'seon.task/obligations) database sym))
+        named (when (and (map? owed) (not (:seon.error/at owed))) (vec (:seon.task/proofs owed)))
+        runs (when (seq named)
+               (db/q '[:find ?test ?done ?pass ?fail ?error :in $ [?test ...]
+                       :where [?m :seon.test.member/symbol ?test]
+                              [?m :seon.test.member/completed-tx ?done]
+                              [?m :seon.test.member/terminated-tx]
+                              [?m :seon.test.member/pass-count ?pass]
+                              [?m :seon.test.member/fail-count ?fail]
+                              [?m :seon.test.member/error-count ?error]]
+                     database named))
         latest (when (set? runs) (into {} (map (juxt first identity)) (sort-by second runs)))]
     (cond
       (map? fixed) fixed
+      (map? sym) sym
+      (:seon.error/at owed) owed
       (map? runs) runs
-      (map? named) named
       (or (empty? named) (nil? fixed)) false
       :else (every? (fn [test]
                       (let [[_ done pass fail error] (get latest test)]

@@ -112,10 +112,10 @@
         (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task)))))))
 
 (defn task-form
-  "The read of a task's edges. Shown, never executed."
+  "The read of a task's obligations (`seon.task/obligations`). Shown, never executed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
-  (list 'seon.task/task-edges '(seon.db/db) (list 'quote (:seon.task/sym (or (:seon.render/value unit) unit)))))
+  (list 'seon.task/obligations '(seon.db/db) (list 'quote (:seon.task/sym (or (:seon.render/value unit) unit)))))
 
 (defn task-html
   "Render one task as a card: intent and the references it cites. Its subjects and
