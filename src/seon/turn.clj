@@ -2221,11 +2221,12 @@
 (declare attempt-t latest-answering-turn-t step-proved? prove-turn step-limit-ms)
 
 (defn- attempt-running?
-  "True when the task `handle` an agent holds runs under execution :running on `database`, its branch (forked
-  from the main commit db<->flow wrote its attempt in): its own, else its subject's (`seon.task/execution`)."
+  "True when the task `handle` an agent holds runs under execution :running at its authority, main's head seen
+  from `database`, the agent's branch (`seon.task/main-head`; `database` itself on main): its own, else its
+  subject's (`seon.task/execution`). Root decides execution on main; the branch's copy is never read."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
-  (= :running (task/execution database handle)))
+  (= :running (task/execution (or (task/main-head database) database) handle)))
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose step is proved on `database`, its branch
@@ -2250,8 +2251,8 @@
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
-  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
-  read in its own world (its branch holds its attempt row);
+  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`) of a task under execution :running,
+  read in its own world (its branch holds its attempt row): a :held task opens no model turn;
   a held task whose intent is :running (db<->flow started the attempt) and
   whose step is not proved on the agent's branch (`step-proved?`) is `:prove` first
   (`prove-turn`: proofs only, no model call), and a red proving is its work: the next pass
@@ -2303,8 +2304,7 @@
           (admission-closed? db agent-id) nil
           (map? held) held
           ;; A FRESH ATTEMPT OF A :running TASK PROVES FIRST: its proofs run on its branch
-          ;; before any model call, and proofs already green end it with none (`prove-turn`);
-          ;; a :held task root assigned by hand waits for its wakes as before
+          ;; before any model call, and proofs already green end it with none (`prove-turn`)
           (and (string? held) (attempt-running? db held) (not (step-proved? db agent-id)))
           {:seon.turn.work/situation :prove :seon.agent/id agent-id}
           (and (map? deferred)
@@ -2312,7 +2312,8 @@
                (contains? deferred :seon.error/layer)
                (contains? deferred :seon.error/operation))
           deferred
-          (string? held)
+          ;; A :held TASK OPENS NO MODEL TURN: its wakes wait until someone sets it :running
+          (and (string? held) (attempt-running? db held))
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
               ;; a task whose proofs are all green continues nothing, before or after its end closes the agent

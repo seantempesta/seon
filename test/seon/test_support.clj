@@ -759,21 +759,37 @@
             (vals @operator.runtime/running-instances))
       (execution-handle connection)))
 
+(defn running!
+  "Set the task `handle` :running on `connection`, as root launches it, and return `handle`: only a :running
+  task's agent opens model turns."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle] :seon.task/handle]}
+  [connection handle]
+  (transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
+  handle)
+
 (defn assign-task!
-  "Assign `agent-id` a task of its own whose proof has not run: a model turn needs an assignment."
+  "Assign `agent-id` a task of its own under execution :running and run its red proof on `connection`, as the
+  agent's first pass proves (`seon.turn/run-proofs`): a model turn needs an assignment of a :running task, and the
+  first wake's turn answers both the red proof and the wake."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
   [connection agent-id]
   (let [slug (str/replace (str/lower-case agent-id) #"[^a-z0-9]+" "-")
-        task-name (str "work-" slug)]
-    (declare-proof! connection 'tq.assigned (symbol (str "proves-" slug)) (symbol "tq.assigned" task-name))
+        task-name (str "work-" slug)
+        proof (symbol "tq.assigned" (str "proves-" slug))]
+    (declare-proof! connection 'tq.assigned (symbol (name proof)) (symbol "tq.assigned" task-name))
     (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
                                  :seon.task/name task-name :seon.task/intent "Work."})]
+      (running! connection (:seon.task/id created))
       (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
                                     :seon.task/agent [:seon.agent/id agent-id]
                                     :seon.task/branch (get-in (db/db connection) [:config :branch])
                                     :seon.agent/context-source (context-source connection)})]
         ;; a refused fixture write is surfaced, never left for the turn to miss
         (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned))))
+      (let [proved (seon.test/run {:seon.test/execution (context-source connection)
+                                   :seon.test/recording-connection connection :seon.test/policy :named
+                                   :seon.test/identities #{proof} :seon.test/task (symbol "tq.assigned" task-name)})]
+        (when (:seon.error/at proved) (throw (ex-info (:seon.error/message proved) proved))))
       nil)))
 
 (defn running-cluster

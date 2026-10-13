@@ -2040,6 +2040,25 @@
                        [:seon.task/assignment (id/id [h 1])]))
            "the end names the task the work went back to, as a ref on the attempt")))))
 
+(deftest ^{:seon/tasks #{'seon.turn/a-held-task-opens-no-model-turn}} a-held-task-opens-no-model-turn
+  (support/with-database
+   (fn [connection]
+     (task/index-tasks! {:seon.db/connection connection
+                         :seon.task/files {"resources/seon/tasks/tq.holds.edn"
+                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+     (let [agent-id "tq-held-agent"
+           handle (task/task-handle 'tq.holds "a")]
+       (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
+       (support/transacted! connection (task/attempt-tx (db/db connection) handle agent-id :tq-held))
+       (support/transacted! connection [{:seon.message/id "tq-held-wake" :seon.message/to [:seon.agent/id agent-id]
+                                         :seon.message/content "Work your task."}])
+       (is (= :held (task/execution (db/db connection) handle)) "a task nobody set :running is :held")
+       (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id}))
+           "a :held task's wake opens no model turn")
+       (support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/execution :running]])
+       (is (= :open (:seon.turn.work/situation (turn/next-agent-work (db/db connection) {:seon.agent/id agent-id})))
+           "the same wake opens the model turn once the task runs")))))
+
 (deftest a-fresh-attempt-of-a-task-naming-no-proof-is-work
   (support/with-database
    (fn [connection]

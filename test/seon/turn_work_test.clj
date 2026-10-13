@@ -266,9 +266,10 @@
 
 (def ^:private states
   "Every state the derivation must answer, with its crash-walk entity."
-  [{::label "idle: no trigger, no run"
+  [{::label "no trigger, no run: the running attempt's red proof run is its work"
     ::build (fn [_connection] nil)
-    ::expect nil}
+    ::expect {:seon.turn.work/situation :open
+              :seon.agent/id agent-id}}
 
    {::label "entity 1 — trigger committed, nothing else (also the boot pass)"
     ::build (fn [connection] (add-trigger! connection))
