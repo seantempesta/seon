@@ -1,6 +1,7 @@
 (ns seon.render.test
   "Entity projections for tests; execution remains in seon.test."
-  (:require [seon.db :as db]
+  (:require [clojure.string :as str]
+            [seon.db :as db]
             [seon.id :as id]
             [seon.test :as test]
             [seon.render.block :as block]
@@ -21,10 +22,11 @@
     (if-let [database (:seon.db/db unit)]
       (let [stored (db/pull database evidence-selector [:seon.test/sym (:seon.test/sym entity)])
             result (if (:seon.test/run entity) entity
-                       (test/recorded-result database (:seon.test/sym entity)))]
-        (if-let [failure (first (filter :seon.error/at [stored result]))]
-          (assoc entity :seon.test/reach-unknown (:seon.error/message failure))
-          (merge entity stored result)))
+                       (test/recorded-result database (:seon.test/sym entity)))
+            [failure] (filter :seon.error/at [stored result])]
+        ;; a read that refuses is named; what the other read found still shows
+        (cond-> (apply merge entity (remove :seon.error/at [stored result]))
+          failure (assoc :seon.test/reach-unknown (:seon.error/message failure))))
       entity)))
 
 (defn- state
@@ -49,9 +51,9 @@
    :seon.test.failure/expected :seon.test.failure/actual])
 
 (defn render-ai
-  "A test's result as data: its name and, once it has run, its state; beyond distance zero also
-  where it runs, its failed assertions and, when red, the definitions changed
-  since it last passed.
+  "A test as data: its name and, once it has run, its state; beyond distance zero also
+  its source as its lines (what it asserts), where it runs, its failed assertions and, when red, the definitions
+  changed since it last passed.
 
   ## Costs
 
@@ -70,6 +72,7 @@
       (cond-> (merge named
                      (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t
                                           :seon.test/failure-message :seon.test/reach-unknown]))
+        (:seon.test/source entity) (assoc :seon.render.ns/source-lines (str/split-lines (:seon.test/source entity)))
         ;; the host report without the symbol the view already names
         read? (assoc :seon.render.test/host (let [host (test/host database test-name)]
                                               (cond-> host (map? host) (dissoc :seon.test/sym))))
