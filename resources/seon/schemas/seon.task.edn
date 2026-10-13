@@ -22,7 +22,8 @@
  :declaration [:map {:description "A task's declared content, compared as its revision (7.16), and the one list of its members (seon.task/declaration-members): a task file entry is one, closed, its :seon.task/ns the file's and empty sets absent; create! writes these members. Its handle and symbol derive from it."}
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
                [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
-               [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]]
+               [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
+               [:seon.task/proofs {:optional true} :seon.task/proofs]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.cluster
               :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
@@ -36,6 +37,7 @@
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
         [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
+        [:seon.task/proofs {:optional true} :seon.task/proofs]
         [:seon.task/execution {:optional true} :seon.task/execution]
         [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
@@ -148,7 +150,13 @@
  :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done."} :qualified-symbol]
  :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
- :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set :symbol]
+ :subjects [:set :symbol] :referrers [:set :symbol]
+ :proofs [:set {:description "The copied part of seon.task/obligations: the default deftests a chain copy took from its template (seon.task/chain!) or root chose for it, by symbol, joined with the task's own tagged tests; local to the task, never inherited."} :symbol]
+ :templates [:vector {:min 1 :description "The templates a chain copies, in chain order, distinct: ordinary tasks, the off-the-shelf ones in resources/seon/tasks/seon.step.edn."} :seon.task/sym]
+ :customization [:map {:description "Root's choices for one template's copy, applied over what the copy takes from its template before assignment."}
+                 [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/proofs {:optional true} :seon.task/proofs]
+                 [:seon.task/product {:optional true} :seon.task/product]]
+ :customizations [:map-of {:description "Each template's customization, by template symbol."} :seon.task/sym :seon.task/customization]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
  :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]

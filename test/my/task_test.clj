@@ -93,7 +93,7 @@
            full {:seon.task/ns 'tq.members :seon.task/name "prove" :seon.task/step :prove
                  :seon.task/intent "Scan." :seon.task/instructions "Add rows to `tq.members-test/rows`."
                  :seon.task/children #{[:seon.task/sym 'tq.members/child]} :seon.task/needs #{[:seon.task/sym 'tq.members/first]}
-                 :seon.task/product #{'tq.members-test/rows}}]
+                 :seon.task/product #{'tq.members-test/rows} :seon.task/proofs #{'tq.members-test/rows}}]
        (is (= (set (map first (task/declaration-members projection))) (set (keys full)))
            "the fixture declares every member of the declaration schema")
        (create! {:seon.task/ns 'tq.members :seon.task/name "first" :seon.task/intent "First."})

@@ -392,8 +392,7 @@
   "The five off-the-shelf templates, in chain order."
   '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement])
 
-(deftest ^{:seon/tasks #{'seon.task/chain-templates}}
-  one-write-clones-a-chain-and-one-running-readies-survey
+(deftest one-write-clones-a-chain-and-one-running-readies-survey
   ;; TASK-CHAIN A3 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`)
   (test-support/with-database
    (fn [connection]
@@ -416,7 +415,7 @@
        (is (= (:seon.task/instructions (db/pull database [:seon.task/instructions] [:seon.task/sym 'seon.step/survey]))
               (:seon.task/instructions (pulled 'seon.step/survey)))
            "a copy carries its template's instructions")
-       (is (= '#{tq.gates/root-gate} (:seon.task/proofs (pulled 'seon.step/prove))) "root's customization is on its copy")
+       (is (= '#{tq.gates/root-gate} (set (:seon.task/proofs (pulled 'seon.step/prove)))) "root's customization is on its copy")
        (is (= [:held nil nil nil nil nil]
               (mapv #(:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id %]))
                     (cons (task/task-handle 'work "fix") (map copy step-templates))))
@@ -424,9 +423,16 @@
        (is (= #{(copy 'seon.step/survey)}
               (task/ready (db/with database [[:db/add [:seon.task/id (task/task-handle 'work "fix")] :seon.task/execution :running]])))
            "running the subject readies Survey only")
-       (is (empty? (remove #(= (:e %) (:tx %)) (:tx-data (chain! connection subject step-templates
+       (is (empty? (filter #(= "seon.task" (namespace (:a %))) (:tx-data (chain! connection subject step-templates
                                                                {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}}))))
-           "an identical construction changes nothing")))))
+           "an identical construction changes no task fact")
+       (is (= '#{seon.step-test/survey-handoff} (set (:seon.task/proofs (pulled 'seon.step/survey))))
+           "a copy takes its template's default deftests as its proofs")
+       (test-support/transacted! connection [[:db/add [:seon.task/sym 'seon.step/survey] :seon.task/instructions "## Work\n\nRevised."]])
+       (chain! connection (assoc subject :seon.task/name "other") step-templates {})
+       (let [instructions #(:seon.task/instructions (db/pull (db/db connection) [:seon.task/instructions] [:seon.task/id (task/task-handle 'work %)]))]
+         (is (= "## Work\n\nRevised." (instructions "survey-other")) "a template edit reaches the next copy")
+         (is (= (:seon.task/instructions (pulled 'seon.step/survey)) (instructions "survey-fix")) "an earlier copy keeps what it took"))))))
 
 (deftest only-a-merge-completes-a-leaf
   ;; TASK-CHAIN phase 4: :satisfied is deleted; an empty delta merges as an accepted no-op
