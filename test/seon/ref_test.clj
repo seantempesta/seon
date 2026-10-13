@@ -1,11 +1,13 @@
 (ns seon.ref-test
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
-            [clojure.test :refer [are deftest is]]
+            [clojure.test :refer [are deftest is testing]]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.error]
             [seon.mcp :as mcp]
             [seon.ref :as ref]
+            [seon.render :as render]
             [seon.test-support :as test-support]))
 
 (defn- shown
@@ -213,3 +215,91 @@
         below (first (filter #(= 'seon.context/task-sections (:seon.ref/name %)) (:seon.ref/references current)))]
     (is (some? (:seon.fn/source task-sections)) "at top level the name shows its content")
     (is (= {:seon.ref/name 'seon.context/task-sections} below) "below it is cited by name only")))
+
+;;; TASK-CHAIN §5 A5 and A5b: one reference rule for all prose, one declared render per kind.
+
+(defn- identities
+  "The identity of each reference `text` makes on `database`, problems included: a name, or a path and anchor, and
+  the problem kind when it has one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:vector :seon.schema/value]]}
+  [database text]
+  (mapv (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
+        (ref/references database {:seon.ref/text text})))
+
+(def ^:private colon-headings
+  "The docstring section headings written as `Name:` lines, which the heading sweep converts to `## Name`."
+  #{"Example:" "Examples:" "Edge cases:" "Errors:" "Known issues:"})
+
+(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
+  all-prose-uses-one-reference-rule
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [database (db/db)]
+       (testing "explicit and bare forms of one name resolve to the same identity"
+         (doseq [[explicit bare] [["`seon.task/obligations`" "seon.task/obligations"]
+                                  ["`:seon.task/intent`" ":seon.task/intent"]
+                                  ["`docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`" "docs/seon/schedule/cards/TASK-CHAIN.md#6-phases"]]]
+           (is (seq (identities database explicit)) "the explicit form resolves")
+           (is (= (identities database explicit) (identities database (str "Read " bare " first.")))
+               "the bare form names the same entity")))
+       (are [text expected] (= expected (identities database text))
+         ;; a namespace that exists resolves by its name
+         "`my.agent`" [['my.agent nil nil nil]]
+         ;; neither a dependency file nor a Java class is a problem
+         "`deps.edn` and `java.lang.String`" [[nil "deps.edn" nil nil]]
+         ;; an explicit qualified name that resolves to nothing stays a problem
+         "`seon.nope/x`" [['seon.nope/x nil nil :unresolved]]
+         ;; a bare token naming nothing is prose
+         "Then seon.nope/x and :seon.nope/y follow." []
+         ;; fenced code is code
+         "```clojure\n(seon.task/obligations db)\n```\n" [])
+       (is (= [:anchor-missing] (keep :seon.ref/problem-kind (ref/references database {:seon.ref/text "See [the phases](#6-phases)."})))
+           "an anchor-only link in prose with no document is a problem")
+       (testing "a docstring's citations are its definition's references"
+         (shown running agent-id
+                (str "(ns tq.prose-refs)\n"
+                     "(defn cites\n  \"Return 1, after reading `seon.task/obligations` and seon.task/effective; it is `tq.prose-refs/cites`.\n\n"
+                     "  ## Examples\n\n  ```clojure\n  (seon.task/declaration 1)\n  ```\"\n"
+                     "  {:malli/schema [:=> [:cat] :int]}\n  [] 1)"))
+         (is (= #{'seon.task/obligations 'seon.task/effective}
+                (shown running agent-id "(set (:seon.fn/references (seon.db/pull (seon.db/db) [:seon.fn/references] [:seon.fn/sym 'tq.prose-refs/cites])))"))
+             "mid-docstring explicit and bare citations, never itself or its fenced example code"))
+       (is (empty? (for [[sym doc] (db/q '[:find ?s ?d :where [?e :seon.fn/doc ?d] [?e :seon.fn/sym ?s]] database)
+                         :when (some (comp colon-headings str/trim) (str/split-lines doc))]
+                     sym))
+           "no docstring keeps a colon heading")))))
+
+(deftest ^{:seon/tasks #{'seon.task/chain-prose}}
+  each-reference-kind-uses-its-declared-render
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           request {:seon.db/db database :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                    :seon.render/output :seon.render/ai :seon.sci.admit/caps (config/result-caps config/defaults)
+                    :seon.sci.eval/time-limit-ms 2000}
+           selected (fn [text]
+                      (let [[answer :as answers] (ref/references database {:seon.ref/text text})]
+                        [(count answers) ((juxt :seon.ref/name :seon.ref/path :seon.ref/anchor) answer)
+                         (:seon.render.selection/selected (render/selection (assoc request :seon.render/value answer)))]))]
+       (doseq [[kind text expected render]
+               [[:function "Merged by `seon.task/effective` down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
+                [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
+                [:deftest "`seon.ref-test/fenced-code-and-prose-spans-are-not-references`"
+                 ['seon.ref-test/fenced-code-and-prose-spans-are-not-references nil nil] 'seon.render.test/render-ai]
+                [:task "`seon.ref/a-reference-with-no-path-is-a-missing-file`"
+                 ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
+                [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.ns/function-ai]
+                [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.schema/render-ai]
+                [:attribute "`:seon.task/intent`" [:seon.task/intent nil nil] 'seon.render.schema/render-ai]
+                [:error-type "`:my.fs/not-found-error`" [:my.fs/not-found-error nil nil] 'seon.render.schema/render-ai]
+                [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.schema/render-ai]
+                [:namespace "`my.agent`" ['my.agent nil nil] 'seon.render.ns/render-ai]
+                [:document "`docs/seon/schedule/cards/TASK-CHAIN.md`" [nil "docs/seon/schedule/cards/TASK-CHAIN.md" nil] 'seon.ref/render-doc-ai]
+                [:section-link "See [the phases](docs/seon/schedule/cards/TASK-CHAIN.md#6-phases)."
+                 [nil "docs/seon/schedule/cards/TASK-CHAIN.md" "6-phases"] 'seon.ref/render-doc-ai]
+                [:reference-code-section "`reference-code/malli/README.md#quickstart`"
+                 [nil "reference-code/malli/README.md" "quickstart"] 'seon.ref/render-doc-ai]]]
+         (testing (name kind)
+           (is (= [1 expected render] (selected text)) "one reference, its entity, then its declared render")))
+       (is (= [] (ref/references database {:seon.ref/text "Then seon.nope/x follows."}))
+           "an unknown bare form is neither a reference nor a problem")))))

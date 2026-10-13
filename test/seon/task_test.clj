@@ -344,3 +344,13 @@
        (is (= #{(handle "implement")} (task/ready (after running [[["prove" :merged]]]))))
        (is (= #{} (task/ready (after running [[["implement" :execution :held]] [["prove" :merged]]])))
            "a step's own :held keeps it held")))))
+
+(deftest ^{:seon/tasks #{'seon.task/chain-obligations}}
+  one-selector-serves-every-proof-consumer
+  ;; TASK-CHAIN A1, census half: over analysis data, only `seon.task/obligations` reads `:seon.task/tasks` to select
+  ;; proofs; writers, links, dangling, triage and task-edges' subjects read it for their own purpose.
+  (let [allowed '#{seon.task/obligations seon.fn/task-links seon.task/candidate-dangling seon.task/open-tasks seon.task/task-edges
+                   seon.task/task-findings}
+        readers (db/q '[:find [?s ...] :where [?e :seon.fn/keywords :seon.task/tasks] [?e :seon.fn/sym ?s]] (db/db))]
+    (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
+        "no other source function selects proofs by tag")))
