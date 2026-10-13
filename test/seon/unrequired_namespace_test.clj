@@ -5,11 +5,11 @@
             [seon.test-support :as support]))
 
 (defn- finding-of
-  "The reply's `:seon.repl/findings` entry of kind `:unrequired-namespace`, or nil."
+  "The reply's `:seon.repl/findings` entry of kind `:auto-required`, or nil."
   [reply]
-  (some #(when (= :unrequired-namespace (:seon.repl/finding %)) %) (:seon.repl/findings reply)))
+  (some #(when (= :auto-required (:seon.repl/finding %)) %) (:seon.repl/findings reply)))
 
-(deftest a-defn-naming-an-unrequired-namespace-carries-the-merge-finding
+(deftest a-defn-naming-an-unrequired-namespace-requires-it-and-says-so
   (support/with-running-agent
    (fn [running agent-id _]
      (let [call (fn [code]
@@ -18,5 +18,5 @@
                                                              "arguments" {"cluster" running "agent" agent-id "code" code}})))))
            unrequired (call "(ns my.urn) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")
            required (call "(ns my.urr (:require [clojure.string])) (defn f {:malli/schema [:=> [:cat :string] :string]} [s] (clojure.string/upper-case s))")]
-       (is (= #{'clojure.string} (set (:seon.eval/unrequired-namespaces (finding-of unrequired)))))
+       (is (= #{'clojure.string} (set (:seon.eval/auto-required (finding-of unrequired)))))
        (is (nil? (finding-of required)))))))

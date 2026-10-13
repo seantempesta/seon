@@ -167,7 +167,7 @@
                                               :seon.eval/elisions :seon.eval/full :seon.eval/budget-override
                                               :seon.eval/value-class
                                               :seon.eval/uncontracted :seon.eval/uncontracted-count
-                                              :seon.eval/contract-gaps :seon.eval/unrequired-namespaces]))
+                                              :seon.eval/contract-gaps :seon.eval/auto-required]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -1128,7 +1128,7 @@
    :seon.eval/uncontracted
    :seon.eval/uncontracted-count
    :seon.eval/contract-gaps
-   :seon.eval/unrequired-namespaces
+   :seon.eval/auto-required
    :seon.eval/print-length
    :seon.eval/print-level
    :seon.eval/print-budget])
@@ -4171,6 +4171,7 @@
   [{world :seon.batch/world delta :seon.sci.batch/delta current :seon.turn/namespace-cursor
     frame :seon.turn/frame-request :as _request} form working]
   (let [ordinal (:seon.batch/ordinal world)
+        namespace-name @current
         request (assoc (frame ordinal @current)
                        :seon.db/db working
                        :seon.sci.eval/form form
@@ -4178,7 +4179,11 @@
         evaluation (schema/call-with-registration-delta
                     (assoc delta :seon.schema.delta/projection (db/carried-projection working))
                     #(sci.eval/evaluate request))
-        value (:seon.sci.admit/value evaluation)]
+        value (:seon.sci.admit/value evaluation)
+        ;; a definition's namespace requires what the definition names, as its file will
+        required (when (and (instance? sci.lang.Var value) (not (:seon.cluster.eval/error evaluation)))
+                   (turn.batch/auto-require! (get-in world [:seon.sci.eval/ctx]) namespace-name form))
+        evaluation (cond-> evaluation (seq required) (assoc :seon.eval/auto-required required))]
     (vreset! current (:seon.sci.eval/ending-ns evaluation))
     (cond
       (:seon.sci.eval/untrusted evaluation)
@@ -4431,7 +4436,6 @@
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
                                              (get uncontracted ordinal)
-                                             (turn.batch/analysis-measures entry)
                                              (code-evidence entry)
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)

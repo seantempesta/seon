@@ -285,20 +285,31 @@
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-root! root)))))
 
-(deftest ^{:seon.test/long "One agent turn on C and one prepare-merge! whose file proof (one analysis of a one-file fixture) refuses before the gate runs."
-           :seon.test/long-ms 30000}
-  a-declaration-naming-an-unrequired-namespace-refuses-at-prepare-before-any-test-runs
+(deftest ^{:seon.test/long "One agent turn on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
+           :seon.test/long-ms 90000}
+  a-declaration-naming-an-unrequired-namespace-merges-with-its-ns-form-requiring-it
   ;; The dogfood class: the agent's SCI world resolves `clojure.set/union`
-  ;; unrequired, so the merge gate passed and only write-back refused.
+  ;; unrequired. Its evaluation requires it in the agent's namespace
+  ;; (`seon.turn.batch/auto-require!`), so the merge carries the namespace and
+  ;; the written file's `ns` form requires it.
   (merge-world! "wbreq" "set-check"
                 [(fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
-                (fn [{:keys [target store c proofs root file made]}]
-                  (let [before (slurp file)
-                        refused (source/prepare-merge! target store c proofs {:root root})]
-                    (some->> (:seon.source/candidate refused) (vswap! made conj))
-                    (is (= :not-analyzable (:seon.source/write-back-refused refused)))
-                    (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
-                    (is (= before (slurp file)))))))
+                (fn [{:keys [target store c proofs root file fixture-ns made]}]
+                  (let [h-conn (:seon.db/connection target)
+                        check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
+                        namespace-entity [:seon.ns/name fixture-ns]
+                        prepared (source/prepare-merge! target store c proofs {:selection #{check} :root root})
+                        _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+                        _ (is (true? (:seon.test/passed? prepared)))
+                        accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
+                    (is (= #{check namespace-entity} (:seon.program/identities accepted)))
+                    (when (:seon.source/commit-id accepted)
+                      (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
+                      (let [requires (:seon.ns/requires (db/pull (db/db h-conn) [:seon.ns/requires] namespace-entity))
+                            analysis (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+                        (is (contains? (set requires) 'clojure.set) "the merged namespace requires what its definition names")
+                        (is (str/includes? (slurp file) "clojure.set") "the written ns form requires it")
+                        (is (not (:seon.fn/index-refused analysis)) "the written file analyzes clean")))))))
 
 (deftest ^{:seon.test/long "One agent turn on C and one prepare-merge! whose file proof (one analysis and one lint of a one-file fixture) refuses before the gate runs."
            :seon.test/long-ms 30000}
