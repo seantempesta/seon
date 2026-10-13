@@ -20,8 +20,8 @@
   they share nothing but the JVM.
 
   NO MODEL CALL EVER HAPPENS IN THIS SUITE, and one test asserts exactly
-  that about boot itself: `seon.ai/complete` is redefined to count and
-  throw, so a call would both fail the count and fail loudly."
+  that about boot itself: its boot names a model call that counts and
+  throws, so a call would both fail the count and fail loudly."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.data.json :as json]
@@ -64,17 +64,19 @@
         (d/unlisten connection key)))))
 
 (defn- with-cluster
-  "Boot one real cluster and always stop it."
-  [name body]
-  (let [root (str "tmp/armed-test/" name)]
+  "Boot one real cluster, its turns making the model call `complete` when named, and always stop it."
+  ([cluster-name body] (with-cluster cluster-name nil body))
+  ([cluster-name complete body]
+  (let [root (str "tmp/armed-test/" cluster-name)]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [instance (boot/start! {:seon.boot/cluster-name name
-                                    :seon.boot/root root})]
+    (let [instance (boot/start! (cond-> {:seon.boot/cluster-name cluster-name
+                                         :seon.boot/root root}
+                                  complete (assoc :seon.turn.loop/complete complete)))]
       (try
         (body instance)
         (finally
-          (boot/stop! instance))))))
+          (boot/stop! instance)))))))
 
 (defn- errors
   [db]
@@ -213,11 +215,11 @@
   ;; The system-authored bootstrap plan evaluates locally; boot must not
   ;; spend a provider call. After that one run, an empty wake stays free.
   (let [calls (atom 0)]
-    (with-redefs [ai/complete (fn [_projection _]
-                                (swap! calls inc)
-                                (throw (ex-info "boot made a model call" {})))]
       (with-cluster
         "idle"
+        (fn [_projection _]
+          (swap! calls inc)
+          (throw (ex-info "boot made a model call" {})))
         (fn [instance]
           (let [routing (:seon.agent/routing instance)
                 entry (seon.cluster.agent/started routing "root")
@@ -244,7 +246,7 @@
               (is (= 1 (run-count))
                   "a wake with no facts to act on is not work"))
             (is (zero? @calls)
-                "and nothing anywhere called the model")))))))
+                "and nothing anywhere called the model"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
@@ -363,12 +365,12 @@
                       {}))
             (db<->flow state transition)))
          ([state input message]
-          (db<->flow state input message)))
-       ai/complete
-       (fn [_projection _request]
-         {:seon.ai/text "(seon.run/complete \"fault observed\")"})]
+          (db<->flow state input message)))]
       (let [instance (boot/start! {:seon.boot/cluster-name name
-                                      :seon.boot/root root})]
+                                   :seon.boot/root root
+                                   :seon.turn.loop/complete
+                                   (fn [_projection _request]
+                                     {:seon.ai/text "(seon.run/complete \"fault observed\")"})})]
         (try
           (let [connection (:seon.boot/cluster-connection instance)
                 fact

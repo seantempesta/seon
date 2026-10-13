@@ -28,6 +28,7 @@
             [seon.cluster.wake :as wake]
             [seon.fault :as fault]
             [seon.turn :as turn]
+            [seon.ai :as ai]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
@@ -3449,7 +3450,12 @@
                       (:seon.flow/work-launcher instance)
                       plan-channel stream-channel completion)
          :seon.flow/executor io-executor
-         :seon.agent/routing routing)
+         :seon.agent/routing routing
+         ;; The model call is the handle's external effect: the Var in
+         ;; production, so a reload of `seon.ai` reaches the next turn; a
+         ;; boot request may name its own function of the same contract.
+         :seon.turn.loop/complete
+         (get-in instance [:seon.boot/config :seon.turn.loop/complete] #'ai/complete))
         ;; the render pipeline's external ports (F2 §1): the wake
         ;; channel route! delivers into, the pages channel the proc's
         ;; snapshots exit on (multed here, tapped per tab), the watched

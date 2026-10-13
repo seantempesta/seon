@@ -87,6 +87,7 @@
                      :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
                      :seon.db.process/id :not-a-process
                      :seon.turn.loop/completion completion
+                     :seon.turn.loop/complete #'ai/complete
                      :seon.flow/executor
                      (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                      :seon.agent/fault-channel @faults

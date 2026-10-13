@@ -8,7 +8,6 @@
             [seon.db :as db]
             [datahike.core :as datahike]
             [sci.core :as sci]
-            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.message :as message]
@@ -147,32 +146,11 @@
                      [?receipt :seon.cluster.eval/result-edn ?result]]
                    db)))))
 
-(deftest ^{:seon.test/fixture-observation "Agent-authored code must survive real cluster shutdown and physical-store reopen before another agent calls it."} an-agent-definition-survives-restart-and-another-agent-calls-it
-  (let [root (str "tmp/program-restart-test/" (random-uuid))
-        cluster-name (str "program-restart-" (random-uuid))]
-    (.mkdirs (io/file root))
-    (try
-      (test-support/populate-published-root! root)
-      (let [first-instance
-            (boot/start! {:seon.boot/cluster-name cluster-name
-                             :seon.boot/root root})
-            connection (:seon.boot/cluster-connection first-instance)]
-        (try
-          (cluster/ensure-entity!
-           connection
-           (get-in first-instance
-                   [:seon.turn.loop/cluster
-                    :seon.db.process/id])
-           {:seon.agent/id "restart-a"
-            :seon.cluster/name cluster-name
-            :seon.ns/name 'my.agents.restart-a})
-          (test-support/assign-task! connection "restart-a")
-          (with-redefs
-            [ai/complete
-             (fn [_projection _]
-               {:seon.ai/text
-                (if (= "restart-a" (active-agent-id @connection))
-                  (str
+(defn- restart-completer
+  "The model call both boots of `cluster-name` make: each agent's one reply by
+  the agent whose run is open on that cluster's connection."
+  [cluster-name]
+  (let [replies {"restart-a" (str
                      "(require '[seon.schema :as schema] "
                      "'[seon.bootstrap :refer [help dir doc]])\n"
                      "(require '[clojure.string :as s1])\n"
@@ -203,12 +181,40 @@
                      "(find-ns 'my.agents.restart-a) "
                      "(symbol \"removed-before-restart\"))\n"
                      "(seon.run/complete \"program committed\")")
-                  "(seon.run/complete \"unexpected agent\")")})]
-            (await-commit!
-             connection
-             authored-program-settled?
-             #(transact-inbound! connection "restart-a"
-                                 "Define a durable function, schema, and test.")))
+                 "restart-b" (str
+                   "(my.agents.restart-a/persisted \"ok\")\n"
+                   "(seon.run/complete \"restarted definition called\")")}]
+    (fn [_projection _]
+      {:seon.ai/text
+       (get replies (active-agent-id @(boot/connection cluster-name))
+            "(seon.run/complete \"unexpected agent\")")})))
+
+(deftest ^{:seon.test/fixture-observation "Agent-authored code must survive real cluster shutdown and physical-store reopen before another agent calls it."} an-agent-definition-survives-restart-and-another-agent-calls-it
+  (let [root (str "tmp/program-restart-test/" (random-uuid))
+        cluster-name (str "program-restart-" (random-uuid))]
+    (.mkdirs (io/file root))
+    (try
+      (test-support/populate-published-root! root)
+      (let [first-instance
+            (boot/start! {:seon.boot/cluster-name cluster-name
+                          :seon.boot/root root
+                          :seon.turn.loop/complete (restart-completer cluster-name)})
+            connection (:seon.boot/cluster-connection first-instance)]
+        (try
+          (cluster/ensure-entity!
+           connection
+           (get-in first-instance
+                   [:seon.turn.loop/cluster
+                    :seon.db.process/id])
+           {:seon.agent/id "restart-a"
+            :seon.cluster/name cluster-name
+            :seon.ns/name 'my.agents.restart-a})
+          (test-support/assign-task! connection "restart-a")
+          (await-commit!
+           connection
+           authored-program-settled?
+           #(transact-inbound! connection "restart-a"
+                               "Define a durable function, schema, and test."))
           (is (program-present? @connection))
           (is (= 21 (authored-receipt-count @connection "restart-a"))
               "twenty valid forms and one independent refusal settle")
@@ -256,7 +262,8 @@
 
       (let [second-instance
             (boot/start! {:seon.boot/cluster-name cluster-name
-                             :seon.boot/root root})
+                          :seon.boot/root root
+                          :seon.turn.loop/complete (restart-completer cluster-name)})
             connection (:seon.boot/cluster-connection second-instance)]
         (try
           (is (program-present? @connection)
@@ -337,20 +344,11 @@
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})
           (test-support/assign-task! connection "restart-b")
-          (with-redefs
-            [ai/complete
-             (fn [_projection _]
-               {:seon.ai/text
-                (if (= "restart-b" (active-agent-id @connection))
-                  (str
-                   "(my.agents.restart-a/persisted \"ok\")\n"
-                   "(seon.run/complete \"restarted definition called\")")
-                  "(seon.run/complete \"unexpected agent\")")})]
-            (await-commit!
-             connection
-             restarted-call-present?
-             #(transact-inbound! connection "restart-b"
-                                 "Call the restarted durable function.")))
+          (await-commit!
+           connection
+           restarted-call-present?
+           #(transact-inbound! connection "restart-b"
+                               "Call the restarted durable function."))
           (is (restarted-call-present? @connection)
               "a fresh agent ctx acquired and called the prior definition")
           (finally

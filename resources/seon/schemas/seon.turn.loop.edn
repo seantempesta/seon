@@ -260,6 +260,11 @@
                   [:seon.db/db :seon.db/database-value]],
                  :terminal-refusal-settlement-refused :seon.turn/rule,
                  :forms-run [:int {:min 0}],
+                 ; The model call the turn makes: `seon.ai/complete` (its Var) in
+                 ; production, a function of the same contract from a test. It is
+                 ; the handle's external effect, carried like its channels.
+                 :complete
+                 [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/completion],
                  ; The cluster HANDLE is the value boot produced and the
                  ; instance retains: it outlives its own liveness, because a
                  ; stopped instance still holds it. `:seon.db/connection` is
@@ -279,6 +284,7 @@
                    {:optional true}
                    :seon.flow/channel]
                   [:seon.turn.loop/completion :seon.flow/channel]
+                  [:seon.turn.loop/complete :seon.turn.loop/complete]
                   [:seon.sci.admit/caps :seon.sci.admit/caps]
                   [:seon.config.eval/time-limit-ms
                    :seon.config.eval/time-limit-ms]

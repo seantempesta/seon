@@ -9,6 +9,7 @@
             [clojure.string :as str]
             [clojure.test :as test]
             [datahike.api :as d]
+            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.boot :as boot]
@@ -537,6 +538,7 @@
             :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))
             :seon.turn.loop/completion (async/promise-chan)
+            :seon.turn.loop/complete #'ai/complete
             :seon.sci.admit/caps (config/result-caps decisions)
             :seon.config.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms decisions)

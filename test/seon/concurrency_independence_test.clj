@@ -13,7 +13,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
@@ -62,13 +61,15 @@
         (d/unlisten connection listener-key)))))
 
 (defn- with-cluster
-  [body]
+  "Boot one real cluster whose turns make the model call `complete`."
+  [complete body]
   (let [root "tmp/concurrency-independence-test"
         cluster-name "concurrency-independence"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
     (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
-                                    :seon.boot/root root})]
+                                 :seon.boot/root root
+                                 :seon.turn.loop/complete complete})]
       (try
         (let [root-entry (agent/started (:seon.agent/routing instance) "root")
               graph (:seon.flow/graph root-entry)]
@@ -595,12 +596,11 @@
 
 (deftest ^{:seon.test/fixture-observation "The observation concerns concurrent agent graphs acquired by a complete cluster boot, with real listener and shutdown ownership."} n-agents-fold-independently-on-one-live-cluster
   (let [model-calls (atom [])]
-    (with-redefs [ai/complete
-                  (fn [_projection request]
-                    (swap! model-calls conj request)
-                    {:seon.ai/text
-                     "(seon.run/complete \"unexpected model call\")"})]
-      (with-cluster
+    (with-cluster
+        (fn [_projection request]
+          (swap! model-calls conj request)
+          {:seon.ai/text
+           "(seon.run/complete \"unexpected model call\")"})
         (fn [instance]
           (let [calls-before @model-calls
                 timings
@@ -613,4 +613,4 @@
             (is (= calls-before @model-calls)
                 "scenario work came from system-authored plans, never a provider")
             (println "concurrency-independence timings"
-                     (pr-str timings))))))))
+                     (pr-str timings)))))))

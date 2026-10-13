@@ -23,6 +23,7 @@
               seon.cluster/cluster-name?]],
             :config
             [:map
+             [:seon.turn.loop/complete {:optional true} :seon.turn.loop/complete]
              [:seon.boot/cluster-name :seon.boot/cluster-name]
              [:seon.boot/root :seon.boot/root]
              [:seon.boot/prepl-host :seon.boot/prepl-host]
@@ -88,6 +89,7 @@
             :log-dir [:string {:min 1}],
             :overrides
             [:map
+             [:seon.turn.loop/complete {:optional true} :seon.turn.loop/complete]
              [:seon.boot/cluster-name
               {:optional true}
               :seon.boot/cluster-name]
@@ -132,6 +134,7 @@
             :start-instant :inst,
             :start-request
             [:map
+             [:seon.turn.loop/complete {:optional true} :seon.turn.loop/complete]
              [:seon.boot/cluster-name
               {:optional true}
               :seon.boot/cluster-name]

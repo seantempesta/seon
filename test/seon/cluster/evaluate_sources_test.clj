@@ -1,5 +1,6 @@
 (ns seon.cluster.evaluate-sources-test
-  (:require [clojure.core.async :as async]
+  (:require [seon.ai :as ai]
+            [clojure.core.async :as async]
             [clojure.test :refer [deftest is]]
             [seon.blob :as blob]
             [seon.agent :as my.agent]
@@ -64,6 +65,7 @@
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
+                           :seon.turn.loop/complete #'ai/complete
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000})
            raw-source (str "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"later-agent\"])\n"
@@ -241,6 +243,7 @@
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
+                           :seon.turn.loop/complete #'ai/complete
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000})
            sources (mapv (fn [ordinal]

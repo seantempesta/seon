@@ -5,7 +5,6 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
-            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.instrument :as instrument]
@@ -34,19 +33,15 @@
       (test-support/populate-published-root! root)
       (let [instance
             (boot/start! {:seon.boot/cluster-name cluster-name
-                             :seon.boot/root root})]
+                          :seon.boot/root root
+                          :seon.turn.loop/complete
+                          (fn [_projection request]
+                            (async/offer! attempt-requests request)
+                            {:seon.ai/text
+                             "(seon.run/complete \"instrumented acquisition ran\")"})})]
         (try
-          (let [connection (:seon.boot/cluster-connection instance)]
-            (with-redefs
-              [ai/complete
-               (fn [_projection request]
-                 (async/offer! attempt-requests request)
-                 {:seon.ai/text
-                  "(seon.run/complete \"instrumented acquisition ran\")"})]
-              ;; The boot above armed every loaded contract with its
-              ;; supplied-default plan; the test re-arms nothing, as a
-              ;; whole-JVM `apply!` would strip those plans.
-                (let [applied (instrument/instrumented)]
+          (let [connection (:seon.boot/cluster-connection instance)
+                applied (instrument/instrumented)]
                   (is (seq applied))
                   (is (contains?
                        applied
@@ -67,7 +62,7 @@
                                   :where
                                   [?error :seon.instrument/check _]
                                   [?error :seon.instrument/fn _]]
-                                @connection))))))))
+                                @connection))))))
           (finally
             (boot/stop! instance))))
       (finally

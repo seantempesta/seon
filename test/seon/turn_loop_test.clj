@@ -177,6 +177,7 @@
                                 :seon.cluster.wake/channel channel
                                 :seon.render/context-channel channel
                                 :seon.turn.loop/completion channel
+                                :seon.turn.loop/complete #'ai/complete
                                 :seon.sci.admit/caps (config/result-caps defaults)
                                 :seon.config.eval/time-limit-ms 2000})
                 outcome
@@ -371,7 +372,12 @@
        (with-render-context-proc
         cluster
         (fn [cluster]
-          (with-redefs [ai/agent-overlay
+          (let [cluster (assoc cluster :seon.turn.loop/complete (fn [_projection request]
+                          (swap! requests conj request)
+                          (let [completion (first @completions)]
+                            (swap! completions subvec 1)
+                            completion)))]
+            (with-redefs [ai/agent-overlay
                         (fn [db id]
                           (swap! overlays conj [db id])
                           (let [value (overlay-fn db id)]
@@ -382,13 +388,7 @@
                           (let [resolved
                                 (settings-fn cluster-settings agent-settings)]
                             (swap! resolutions conj resolved)
-                            resolved))
-                        ai/complete
-                        (fn [_projection request]
-                          (swap! requests conj request)
-                          (let [completion (first @completions)]
-                            (swap! completions subvec 1)
-                            completion))]
+                            resolved))]
             (turn/turn
              {:seon.turn.loop/cluster cluster
               :seon.turn.work/next
@@ -455,7 +455,7 @@
                 (is (= "after-apply"
                        (:seon.config.ai/model
                         (edn/read-string
-                         (:seon.ai.attempt/settings-edn last-entity))))))))))))))
+                         (:seon.ai.attempt/settings-edn last-entity)))))))))))))))
 
 ;;; THE class regression for the self-feeding fault loop (2026-08-08 live
 ;;; drive). Delivery is the wake attribute, so any message a refused phase

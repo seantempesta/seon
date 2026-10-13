@@ -111,8 +111,7 @@
                  (let [outside-t (turn/outside-wake-t @connection "juniper")]
                    ; Replace only the external provider response, as the reply tests do.
                    ; The proc, attempt writer, SCI, prompt and work derivation stay real.
-                   (with-redefs [ai/complete
-                                 (fn [_projection request]
+                   (let [handle (assoc handle :seon.turn.loop/complete (fn [_projection request]
                                    (when (= scenario :slow-provider)
                                      (Thread/sleep 10000)
                                      (async/offer! @provider-progress true)
@@ -123,7 +122,7 @@
                                        (ai/completion-text
                                         {"choices" [{"message" {"content" reply}
                                                      "finish_reason" "stop"}]})
-                                       reply)))]
+                                       reply))))]
                      (try
                        (agent/start-flow! {:seon.turn.loop/cluster handle
                                     :seon.agent/routing routing :seon.agent/id "juniper"})

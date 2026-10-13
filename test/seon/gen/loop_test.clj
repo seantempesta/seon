@@ -12,7 +12,6 @@
             [clojure.test :refer [deftest is]]
             [datahike.core :as datahike]
             [seon.db :as db]
-            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
@@ -297,13 +296,12 @@
        ;; every owner is mute; only the planner ever answers, and it
        ;; answers by claiming it is done
        (let [run-id
-             (with-redefs [ai/complete
-                           (fn [_projection {prompt :seon.ai/prompt}]
+             (let [cluster (assoc cluster :seon.turn.loop/complete (fn [_projection {prompt :seon.ai/prompt}]
                              {:seon.ai/text
                               (if (= "planner" (prompt-agent-id prompt))
                                 (str program
                                      "(seon.run/complete \"the program is built\")")
-                                "(seon.run/wait \"saying nothing\")")})]
+                                "(seon.run/wait \"saying nothing\")")}))]
                (drive! cluster 12 7))
              db @connection]
          (is (= "the program is built"

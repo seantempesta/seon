@@ -4057,7 +4057,7 @@
         (fail! refusal)
 
         :else
-        (let [completion (ai/complete
+        (let [completion ((:seon.turn.loop/complete cluster)
                           (db/carried-projection db)
                           ;; What is sent is derivable again: `model-context` at the
                           ;; attempt's recorded basis, laid out by `seon.ai/messages`.
