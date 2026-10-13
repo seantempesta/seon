@@ -1413,7 +1413,8 @@
         "an unchanged stamp answers the same derivation, so the per-row
          caller pays one stamp and never a resource merge")))
 
-(deftest indexed-and-evaluated-declarations-are-the-same-entities
+(deftest ^{:seon/tasks #{'seon.program/an-evaluated-namespace-keeps-its-read-source-and-call-edges}}
+  indexed-and-evaluated-declarations-are-the-same-entities
   (let [source (slurp (io/resource "test/fixtures/program_facts_s1/source.txt"))
         fixture-forms (:seon.schema.edn/forms
                        (#'schema.edn/resource-population

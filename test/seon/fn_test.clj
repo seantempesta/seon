@@ -24,6 +24,7 @@
             [seon.cluster.source :as source]
             [seon.id :as id]
             [seon.problems]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -168,20 +169,16 @@
                :seon.fn/arglists "([])"
                :seon.fn/private? false
                :seon.schema.admission/source :agent}}]
-            analyze analyzer/analyze
-            calls (atom 0)
-            results
-            (with-redefs [analyzer/analyze
-                          (fn [request]
-                            (swap! calls inc)
-                            (analyze request))]
-              (seon.fn/analyze-forms @connection requests))
+            ;; the armed analyzer's own entry count, read from its profile
+            ;; counters, so the compiled and the interpreted body observe it alike
+            measured (profile/measure #(seon.fn/analyze-forms @connection requests))
+            results (:seon.profile/value measured)
             shadow-entity (second (first results))
             qualified-entity (second (second results))
             called-symbols
             (fn [entity]
               (set (:seon.fn/calls entity)))]
-        (is (= 1 @calls) "all defining sources enter kondo together")
+        (is (= 1 (profile/calls-of measured 'seon.fn.analyzer/analyze)) "all defining sources enter kondo together")
         (is (contains? (called-symbols shadow-entity) (quote clojure.core/identity)))
         (is (not (contains? (called-symbols shadow-entity) (quote clojure.core/map)))
             "a let-bound map is a local, never a clojure.core/map call")
@@ -717,11 +714,12 @@
                            (::analyzer/message finding)))))))
 
 (deftest publication-veto-is-exactly-the-cant-load-finding-classes
+  ;; The owners take the analysis as a value: a synthetic finding is data in,
+  ;; the veto or the warning data out (no Var redefinition).
   (let [root (fixture-root)
         source-file
         (write-source! root "audit/valid.clj"
                        "(ns audit.valid)\n(defn value [] 1)\n")
-        request {:seon.fn/roots [(.getPath root)]}
         base-analysis
         (analyzer/analyze
          {::analyzer/paths [(.getCanonicalPath source-file)]})
@@ -732,39 +730,28 @@
            ::analyzer/col 1
            ::analyzer/level :error
            ::analyzer/type finding-type
-           ::analyzer/message (str "synthetic " (name finding-type))})]
+           ::analyzer/message (str "synthetic " (name finding-type))})
+        with-findings #(assoc base-analysis ::analyzer/findings %)]
     (doseq [finding-type
             [:syntax :unresolved-symbol :unresolved-namespace
              :unresolved-var :private-call :invalid-arity]]
       (testing (name finding-type)
-        (let [failure
-              (with-redefs
-                [analyzer/analyze
-                 (fn [_]
-                   (assoc base-analysis ::analyzer/findings
-                          [(finding finding-type)]))]
-                (try
-                  (seon.fn/build-manifest request)
-                  nil
-                  (catch clojure.lang.ExceptionInfo error error)))]
+        (let [failure (try
+                        (#'seon.fn/assert-clean-analysis! (with-findings [(finding finding-type)]) #{})
+                        nil
+                        (catch clojure.lang.ExceptionInfo error error))]
           (is (true? (:seon.fn/index-refused (ex-data failure)))))))
     (testing "an elevated non-load finding remains visible as a warning"
-      (with-redefs
-        [analyzer/analyze
-         (fn [_]
-           (assoc base-analysis ::analyzer/findings
-                  [(finding :unused-binding)]))]
-        (let [manifest (seon.fn/build-manifest request)]
-          (is (= [:warning]
-                 (mapv ::analyzer/level
-                       (:seon.fn.manifest/findings manifest)))))))))
+      (let [analysis (with-findings [(finding :unused-binding)])]
+        (is (nil? (#'seon.fn/assert-clean-analysis! analysis #{})))
+        (is (= [:warning]
+               (mapv ::analyzer/level (#'seon.fn/publication-findings analysis #{}))))))))
 
 (deftest my-web-cascade-class-warns-without-vetoing-publication
   (let [root (fixture-root)
         source-file
         (write-source! root "my/web.clj"
                        "(ns my.web)\n(defn fetch [] :ok)\n")
-        request {:seon.fn/roots [(.getPath root)]}
         base-analysis
         (analyzer/analyze
          {::analyzer/paths [(.getCanonicalPath source-file)]})
@@ -777,17 +764,12 @@
             ::analyzer/level :error
             ::analyzer/type :unused-binding
             ::analyzer/message (str "my.web cascade " ordinal)})
-         (range 44))]
-    (with-redefs
-      [analyzer/analyze
-       (fn [_]
-         (assoc base-analysis ::analyzer/findings cascade))]
-      (let [manifest (seon.fn/build-manifest request)
-            findings (:seon.fn.manifest/findings manifest)]
-        (is (= 44 (count findings)))
-        (is (every? #(= :warning (::analyzer/level %)) findings))
-        (is (some #{[:seon.fn/sym (quote my.web/fetch)]}
-                  (:seon.fn.manifest/identities manifest)))))))
+         (range 44))
+        analysis (assoc base-analysis ::analyzer/findings cascade)
+        findings (#'seon.fn/publication-findings analysis #{})]
+    (is (nil? (#'seon.fn/assert-clean-analysis! analysis #{})) "the cascade vetoes nothing")
+    (is (= 44 (count findings)))
+    (is (every? #(= :warning (::analyzer/level %)) findings))))
 
 (deftest file-artifacts-and-manifests-are-byte-digested-and-deterministic
   (let [root (fixture-root)
@@ -2390,10 +2372,13 @@
                   scratch (#'seon.fn/shared-dependency-analysis (::analyzer/unanalyzed-namespaces scratch)))
         contexts (#'seon.fn/source-contexts [file])
         first-party (#'seon.fn/first-party-function-symbols analysis)
+        projection (schema/handed-projection)
+        ;; the invoked attributes' declared targets, as `seon.fn/build-artifact` passes them
+        targets (#'seon.fn/program-targets
+                 nil (#'seon.fn/population-targets projection (#'seon.fn/invoked-attributes analysis))
+                 first-party)
         emitted (get (#'seon.fn/analysis-entities-by-file
-                      analysis first-party contexts
-                      (schema/handed-projection)
-                      (schema/handed-projection))
+                      analysis first-party contexts targets projection)
                      path)
         kept (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]})
         attributes (fn [entities] (into #{} (mapcat keys) entities))

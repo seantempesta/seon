@@ -9,7 +9,7 @@
             [seon.test-support :as support]))
 
 (deftest shifted-findings-update-only-positions-at-one-ten-and-one-hundred-definitions
-  (let [root (.toFile (java.nio.file.Files/createTempDirectory "seon-lint-identity-" (make-array java.nio.file.attribute.FileAttribute 0)))
+  (let [root (io/file (support/temp-root "seon-lint-identity-"))
         file (io/file root "sample/lint.clj")
         artifact #(functions/build-artifact {:seon.fn/source-path (.getCanonicalPath file)
                                               :seon.fn/root (.getCanonicalPath root)
@@ -40,7 +40,7 @@
              (is (= #{:seon.lint/row} (set (map :a facts))))
              (is (= (* 2 (count findings)) (count facts))
                  "each finding changes one position, regardless of population size")))))
-      (finally (support/delete-recursively! root)))))
+      (finally (support/delete-root! (.getPath root))))))
 
 (deftest a-new-file-stamp-does-not-rewrite-already-analyzed-declarations
   (support/with-database

@@ -174,7 +174,8 @@
        (is (seq (:seon.program/referrers refusal)))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))))))
 
-(deftest ^{:seon.test/fixture-observation
+(deftest ^{:seon/tasks #{'seon.fn/the-outside-caller-publication-test-analyzes-the-whole-checkout}
+           :seon.test/fixture-observation
            "A database branch cannot isolate fixture files and the physical-store head retained after a refused second publication."}
   source-publication-refuses-an-outside-caller-and-keeps-its-head
   (let [root (io/file "tmp/reset-publication" (id/id))

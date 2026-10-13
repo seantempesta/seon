@@ -51,5 +51,4 @@
           [(keyword "\u00e9") "surface-_e9_"]
           [(keyword "\u00aa") "surface-_aa_"]
           [(keyword "\u0663") "surface-_663_"]]]
-   (is (= expected (block/surface-id name))
-       (str "surface-id of " (pr-str name)))))
+   (is (= expected (block/surface-id name)))))
