@@ -489,23 +489,33 @@
     :seon.program/definition-digest
     :seon.schema.admission/source})
 
-(defn- source-names
-  "The names `source` spells: `:qualifiers`, the alias part of each qualified
-  symbol, auto-resolved keyword and auto-resolved map qualifier, and
-  `:symbols`, each unqualified symbol."
-  {:malli/schema [:=> [:cat :string] [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]]]}
-  [source]
-  (reduce (fn [names n]
-            (let [{:keys [value k auto-resolved? prefix]} n]
-              (cond
-                (symbol? value) (if-let [q (namespace value)]
-                                  (update names :qualifiers conj (symbol q))
-                                  (update names :symbols conj value))
-                (and auto-resolved? (keyword? k) (namespace k)) (update names :qualifiers conj (symbol (namespace k)))
-                (and auto-resolved? prefix) (update names :qualifiers conj (symbol prefix))
-                :else names)))
-          {:qualifiers #{} :symbols #{}}
-          (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))
+(defn- source-resolver-names
+  "The candidate alias and refer names spelled by `source`."
+  {:malli/schema [:=> [:cat :string [:set :symbol] [:set :symbol]]
+                  [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]]]}
+  [source qualifiers symbols]
+  (let [derive
+        (fn []
+          (reduce (fn [names n]
+                    (let [{:keys [value k auto-resolved? prefix]} n
+                          qualifier (cond
+                                      (symbol? value) (some-> value namespace symbol)
+                                      (and auto-resolved? (keyword? k)) (some-> k namespace symbol)
+                                      (and auto-resolved? prefix) (symbol prefix))]
+                      (cond-> names
+                        (contains? qualifiers qualifier) (update :qualifiers conj qualifier)
+                        (and (symbol? value) (nil? (namespace value)) (contains? symbols value))
+                        (update :symbols conj value))))
+                  {:qualifiers #{} :symbols #{}}
+                  (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))]
+    #?(:clj
+       (seon.cache/lookup
+        ::source-resolver-names (id/id [source qualifiers symbols] 64)
+        (fn [names]
+          (+ 256 (reduce (fn [bytes sym] (+ bytes 128 (* 2 (count (name sym)))))
+                         0 (concat (:qualifiers names) (:symbols names)))))
+        derive)
+       :cljs (derive))))
 
 (defn- used-resolver-context
   "The part of a namespace's resolver context `row`'s own usages resolve
@@ -521,7 +531,9 @@
         used-namespaces (into #{} (keep #(some-> % namespace symbol))
                               (concat used (:seon.fn/keywords entity)))
         source (some->> (row-identity entity) first shape :seon.program/source-attribute (get entity))
-        {:keys [qualifiers symbols]} (when (string? source) (source-names source))]
+        {:keys [qualifiers symbols]}
+        (when (string? source)
+          (source-resolver-names source (set (keys aliases)) (set (keys refers))))]
     {:requires (into #{} (filter used-namespaces) requires)
      :aliases (into {} (filter (if qualifiers (comp qualifiers key) (comp used-namespaces val))) aliases)
      :refers (into {} (filter (if symbols (comp symbols key) (comp used val))) refers)

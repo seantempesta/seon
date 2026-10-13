@@ -1,0 +1,436 @@
+{:lane "publish-cost"
+ :model "gpt-6-astra"
+ :date "2026-10-13"
+ :design {:classification :equivalent
+          :flow "seon.fn analysis and seon.db writer validation both call seon.program/definition-digest, then used-resolver-context."
+          :change "Replace source-names with source-resolver-names: accept the namespace's alias/refer candidates and retain only their spelled names. Cache by the structural SHA-256 of source and candidate sets, not by retained source text. The sole caller still selects targets from its own resolver context."
+          :disappears "Repeated rewrite-clj parsing of equal source/resolver inputs; retained source strings and unrelated local names from the rejected cache experiment."
+          :cost "Miss: linear parse of source plus candidate lookup. Hit: linear content hashing, then a cache lookup and filtering the small namespace context. No cache outside seon.cache."
+          :alternative "Reusing already parsed analyzer facts requires changing the digest producer/consumer interface; the chosen change preserves existing digests and confines the slice to their owner."}
+ :seams [{:symbol rewrite-clj.parser/parse-string-all :revision "60782e501aaf312cb90c9ff0bee05d5da5125563" :guarantee "One rewrite-clj node tree, including map qualifiers and auto-resolved keywords."}
+         {:symbol seon.cache/lookup :guarantee "Content-keyed Caffeine cache, weighed once and bounded by the process budget; no source or parse tree retained in this kind."}
+         {:symbol seon.id/id :guarantee "Structural SHA-256; 64 hex characters used for cache identity."}
+         {:symbol malli.core/validator :revision "dd13ff81139159778edb0a67b491eccc0baa991d" :guarantee "Existing named contracts remain instrumented; the cache-health assertion uses the projection's compiled validator."}
+         {:symbol clj-kondo.core/run! :revision "57252e07975710aa579b24f0d1b2b1e04195caa2" :guarantee "The probe clones seon.fn.analyzer/cache-directory, the actual dependency-set directory, like seon.cluster/rehearse-source!."}
+         {:symbol datahike.api/branch! :revision "c9e57c6fb65365d5ce92b59854fb02ea59054fe7" :guarantee "Each sample publishes to its own overlay over the same held parent store; the fixture does not mutate default."}]
+ :probe {:test seon.publication-cost-test/publication-cost-follows-changed-inputs
+         :operation seon.cluster/full-source-refresh!
+         :inputs ["src/seon/cluster.clj" "src/seon/fn.clj" "src/seon/db.clj" "src/seon/turn.clj" "src/seon/instrument.clj" "src/seon/context.clj" "src/seon/ref.clj" "src/seon/schema.clj"]
+         :source-bytes-approximately 1461545 :source-lines-approximately 27341
+         :change "Prepend one comment to each input; all authored declaration spans move."
+         :samples 3
+         :setup "Copy-on-write clone candidate source and the JVM's dependency-set cache. Publish each sample on a fresh private overlay from one captured store. All three measured calls count, including first-use work."
+         :reproduce-parent "bin/seon check test/seon/publication_cost_test.clj --test seon.publication-cost-test/publication-cost-follows-changed-inputs"
+         :reproduce-change "bin/seon check src/seon/program.cljc test/seon/publication_cost_test.clj --test seon.publication-cost-test/publication-cost-follows-changed-inputs"}
+ :comparison {:parent "251d408057ae1ffa14c336b5f01b3be5192fd920"
+              :parent-candidate "3869fc9c81bbc6d4e217a72bed2d55e07686d278" :parent-run "3122b0ef1f57"
+              :change-candidate "c85ce7ab81b95d3590c362301973060500243c93" :change-run "1a03e76599a4"
+              :parent-ms [4954.52 3453.82 3323.85] :change-ms [4346.62 2961.46 3106.84]
+              :total-parent-ms 11732.19 :total-change-ms 10414.92 :elapsed-reduction-percent 11.23
+              :warm-thread-allocation-parent-mb [4098.52 4097.92] :warm-thread-allocation-change-mb [3328.85 3328.51]
+              :warm-jvm-allocation-parent-mb [6668.03 6666.81] :warm-jvm-allocation-change-mb [5152.93 5152.41]
+              :limitation "First calling-thread allocation rose 5071.33 to 5983.38 MB, while first all-thread allocation fell 8178.15 to 8077.87 MB. Across all samples, all-thread allocation fell about 14.6%; do not present calling-thread allocation as total allocation."
+              :scope "Same eight inputs and probe on separate quiet throwaway JVMs, same parent revision. No JFR during these acceptance measurements. Initial comparisons across a changing HEAD are excluded."}
+ :cache {:prior-experiment-bytes 61802606 :prior-experiment-hit-percent 37 :prior-experiment-byte-percent 33
+         :narrow-bytes-approximately 9800000 :narrow-hit-percent 35 :narrow-byte-percent 10
+         :discipline-warning false
+         :note "Lifetime hit rate includes first publication of every source input during boot; repeated publication reuses those source/resolver entries."}
+ :remaining-cost {:warm-transact-call-ms-approximately 990 :warm-invoke-kondo-ms-approximately 650
+                  :warm-parsed-facts-ms-approximately 200
+                  :analyzer-calls 1 :transactions 2 :changed-inputs 8
+                  :warning "transact-call includes waiting for the writer: its elapsed time overlaps writer functions and cannot be added to them."
+                  :sample-recording "docs/research/agent-platform/2026-10-13/publish-cost-warm.jfr.gz"
+                  :sample-candidate "6531cbf363b53dcc98925f599c3ca0cb2989d5b3" :sample-run "26ecba26583c"
+                  :sample-event jdk.ExecutionSample :sample-period-ms 2
+                  :sample-count 1112 :caller-samples 781 :writer-samples 331
+                  :direct-validation-caller-samples 183 :direct-validation-writer-samples 57
+                  :interpretation "About 22% of samples are directly in Malli validation (first Seon/library frame is Malli, with a validator frame before the next Seon frame). Merely containing an outer Malli wrapper is not counted as validation time."
+                  :writer-inclusive-samples {seon.db/write-owned-values-error 104 seon.fn/reconcile-tx-in 41 seon.db/write-digest-error 34}
+                  :next-owner "The existing seon.db/the-checked-writer-is-slow-on-a-fresh-branch task covers the remaining writer cost. Contract-fact construction and validation are additional material work on the caller thread. No unmeasured second optimization is included."
+                  :read-recording "gunzip -c docs/research/agent-platform/2026-10-13/publish-cost-warm.jfr.gz > /private/tmp/publish-cost-warm.jfr; jfr print --json --stack-depth 128 --events jdk.ExecutionSample /private/tmp/publish-cost-warm.jfr"}
+ :proof {:red-candidate "0ae4e79c12ef97f76b39c129a76eedb878770790" :red-run "4aa00a3eb7b6"
+         :red "Parent has two measured allocation failures, 4107327016 and 4107588072 bytes against 3800000000."
+         :assertions "Three successful end-to-end publications; all measured elapsed time under 12000 ms in aggregate; subsequent publication calling-thread allocation under 3800000000 bytes; no cache-discipline warning. Elapsed improvement is independently measured above, not inferred from counts."
+         :budget-note "The earlier 5000 ms per-call and 11000 ms aggregate timing experiments were too close to first-use variance. The final elapsed bound includes the first sample; the allocation regression is deterministic on the parent."
+         :pre-existing-red seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities
+         :pre-existing-red-evidence "Two failures on unchanged parent run f8aecf206f87: missing recursive call facts and namespace source/digest mismatch. Excluded from selected tests, not changed."}
+ :lint {:command "clj-kondo --lint src script test --cache false" :ms 6896 :errors 0 :warnings 1657}
+ :verification {:candidate "0067c56e85f2cb15f50df92ad98b8eb54dd8f12e" :run "ade323ff8026"
+                :tests 7 :pass 31 :fail 0 :error 0 :test-ms 17351
+                :note "The commit gate reruns these seven tests after task retirement and preserving the old scanner's bare-symbol rule."
+                :selected [seon.publication-cost-test/publication-cost-follows-changed-inputs
+                           seon.program-test/a-require-a-definition-does-not-use-leaves-its-digest-unchanged
+                           seon.db-test/one-owner-digests-a-definition-with-its-stored-namespace
+                           seon.db-test/a-namespace-entity-change-re-derives-its-declarations-digests
+                           seon.program-test/identical-runtime-redeclaration-builds-no-datoms
+                           seon.program-test/changed-runtime-redeclaration-builds-a-real-replacement
+                           seon.db-test/a-program-entity-keeps-only-the-definition-digest-it-produces]}
+ :operations {:default "Never restarted, stopped or reset by this lane. Root advanced HEAD/default during the work; paired acceptance measurements above share 251d40805."
+              :foreign-boundary "Prior turn's source.clj unmatched bracket belonged to another lane and was not edited. Current files are claimed exclusively. Other changes to db.clj/test runner were kept out of the paired comparison."
+              :sentinel "script/seon/sentinel.clj left untouched; it is not read-only: evaluates SCI as root on default and creates branches."
+              :restart "RESTART NEEDED"}
+ :profiles {
+:narrow-parent-0 [
+{:seon.profile/ms 4954.52,
+ :seon.profile/alloc-bytes 5071334464,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 8178.145416,
+    :cpu-ms 13296.187}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 1473}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 935}
+#:seon.profile{:sym seon.program/source-names,
+ :calls 2268,
+ :self-ms 419}
+#:seon.profile{:sym seon.db/pull-logical, :calls 163, :self-ms 370}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 240}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 190}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 166}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 116}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 97}
+#:seon.profile{:sym seon.ref/names, :calls 1689, :self-ms 94}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 90}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 327748,
+ :self-ms 83}
+#:seon.profile{:sym seon.ref/span-candidate, :calls 8320, :self-ms 75}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 74}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 67}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8081,
+ :self-ms 63}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 62}
+#:seon.profile{:sym seon.db/vector-query-call, :calls 22, :self-ms 62}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 54}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 53}
+nil
+]
+:narrow-parent-1 [
+{:seon.profile/ms 3453.82,
+ :seon.profile/alloc-bytes 4098518408,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 6668.033352,
+    :cpu-ms 5169.151}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 1094}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 574}
+#:seon.profile{:sym seon.program/source-names,
+ :calls 2268,
+ :self-ms 407}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 169}
+#:seon.profile{:sym seon.db/pull-logical, :calls 160, :self-ms 165}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 143}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 139}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 114}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 88}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 86}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 312942,
+ :self-ms 72}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 71}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 66}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 59}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 53}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 52}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8067,
+ :self-ms 50}
+#:seon.profile{:sym seon.id/structural-digest, :calls 3908, :self-ms 45}
+#:seon.profile{:sym seon.fn/assert-clean-analysis!,
+ :calls 2,
+ :self-ms 42}
+#:seon.profile{:sym seon.ref/names, :calls 839, :self-ms 38}
+nil
+]
+:narrow-parent-2 [
+{:seon.profile/ms 3323.85,
+ :seon.profile/alloc-bytes 4097923824,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 6666.814744,
+    :cpu-ms 4493.737}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 1098}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 528}
+#:seon.profile{:sym seon.program/source-names,
+ :calls 2268,
+ :self-ms 405}
+#:seon.profile{:sym seon.db/pull-logical, :calls 160, :self-ms 169}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 168}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 156}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 143}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 116}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 91}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 312910,
+ :self-ms 74}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 66}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 60}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 57}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 53}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 53}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8065,
+ :self-ms 48}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 48}
+#:seon.profile{:sym seon.id/structural-digest, :calls 3908, :self-ms 45}
+#:seon.profile{:sym seon.ref/names, :calls 839, :self-ms 39}
+#:seon.profile{:sym seon.db/carried-projection,
+ :calls 19411,
+ :self-ms 37}
+nil
+]
+:narrow-quiet-0 [
+{:seon.profile/ms 4346.62,
+ :seon.profile/alloc-bytes 5983383000,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 8077.871984,
+    :cpu-ms 7892.559}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 1056}
+#:seon.profile{:sym seon.db/pull-logical, :calls 163, :self-ms 899}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 546}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 178}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 167}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 158}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 128}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 100}
+#:seon.profile{:sym seon.ref/names, :calls 1689, :self-ms 86}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 335286,
+ :self-ms 85}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 78}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 77}
+#:seon.profile{:sym seon.id/structural-digest, :calls 6184, :self-ms 69}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 67}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 66}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 59}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 59}
+#:seon.profile{:sym seon.db/vector-query-call, :calls 22, :self-ms 59}
+#:seon.profile{:sym seon.ref/span-candidate, :calls 8320, :self-ms 56}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8081,
+ :self-ms 49}
+#:seon.cache{:kind :seon.program/source-resolver-names,
+ :hits 2442,
+ :misses 12554,
+ :evictions 0,
+ :bytes 9787080,
+ :load-ms 2326,
+ :hit-percent 16,
+ :byte-percent 10}
+]
+:narrow-quiet-1 [
+{:seon.profile/ms 2961.46,
+ :seon.profile/alloc-bytes 3328846456,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 5152.932184,
+    :cpu-ms 3794.353}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 889}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 504}
+#:seon.profile{:sym seon.db/pull-logical, :calls 160, :self-ms 166}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 164}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 155}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 135}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 125}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 97}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 79}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 312910,
+ :self-ms 78}
+#:seon.profile{:sym seon.id/structural-digest, :calls 6176, :self-ms 66}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 65}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 64}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 57}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 56}
+#:seon.profile{:sym seon.fn/assert-clean-analysis!,
+ :calls 2,
+ :self-ms 48}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8065,
+ :self-ms 47}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 45}
+#:seon.profile{:sym seon.ref/names, :calls 839, :self-ms 38}
+#:seon.profile{:sym seon.db/carried-projection,
+ :calls 19411,
+ :self-ms 37}
+#:seon.cache{:kind :seon.program/source-resolver-names,
+ :hits 4710,
+ :misses 12554,
+ :evictions 0,
+ :bytes 9787080,
+ :load-ms 2326,
+ :hit-percent 27,
+ :byte-percent 10}
+]
+:narrow-quiet-2 [
+{:seon.profile/ms 3106.84,
+ :seon.profile/alloc-bytes 3328509136,
+ :seon.cost/jvm-window
+   #:seon.cost{:scope :jvm-window,
+    :attribution :includes-unrelated-work,
+    :alloc-accuracy :approximate-counter,
+    :cpu-accuracy :os-counter,
+    :alloc-mb 5152.40884,
+    :cpu-ms 3898.474}}
+#:seon.profile{:sym seon.db/transact-call, :calls 2, :self-ms 906}
+#:seon.profile{:sym seon.fn.analyzer/invoke-kondo,
+ :calls 1,
+ :self-ms 502}
+#:seon.profile{:sym seon.db/pull-logical, :calls 160, :self-ms 183}
+#:seon.profile{:sym seon.fn.analyzer/parsed-facts,
+ :calls 8,
+ :self-ms 181}
+#:seon.profile{:sym seon.fn.analyzer/analyze, :calls 1, :self-ms 159}
+#:seon.profile{:sym seon.db/write-owned-values-error,
+ :calls 2,
+ :self-ms 140}
+#:seon.profile{:sym seon.schema/contract-references,
+ :calls 1742,
+ :self-ms 127}
+#:seon.profile{:sym seon.program/with-contract-facts,
+ :calls 1321,
+ :self-ms 100}
+#:seon.profile{:sym seon.schema/projection-cache-value,
+ :calls 312910,
+ :self-ms 80}
+#:seon.profile{:sym seon.fn/analyzed-artifacts, :calls 2, :self-ms 79}
+#:seon.profile{:sym seon.id/structural-digest, :calls 6176, :self-ms 68}
+#:seon.profile{:sym seon.db/declaration-value, :calls 1142, :self-ms 68}
+#:seon.profile{:sym seon.program/contract-facts,
+ :calls 803,
+ :self-ms 66}
+#:seon.profile{:sym seon.schema/arity-references,
+ :calls 803,
+ :self-ms 60}
+#:seon.profile{:sym seon.schema/compiled-contract-product,
+ :calls 803,
+ :self-ms 58}
+#:seon.profile{:sym seon.fn/analysis-entities-by-file,
+ :calls 1,
+ :self-ms 56}
+#:seon.profile{:sym seon.fn/assert-clean-analysis!,
+ :calls 2,
+ :self-ms 50}
+#:seon.profile{:sym seon.db/write-entity-value,
+ :calls 8065,
+ :self-ms 48}
+#:seon.profile{:sym seon.db/carried-projection,
+ :calls 19411,
+ :self-ms 38}
+#:seon.profile{:sym seon.ref/names, :calls 839, :self-ms 38}
+#:seon.cache{:kind :seon.program/source-resolver-names,
+ :hits 6978,
+ :misses 12554,
+ :evictions 0,
+ :bytes 9787080,
+ :load-ms 2326,
+ :hit-percent 35,
+ :byte-percent 10}
+]
+}}
