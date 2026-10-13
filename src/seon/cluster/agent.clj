@@ -2102,9 +2102,7 @@
       ;; publication reads main alone: the merge commit, then the checkout
       publish? (conj (action :publish))
       ;; deletion reads main after the merge and its publication: their own writes wake the next pass
-      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch))
-      ;; a satisfied step has nothing to merge: once main holds its end, its branch holds nothing to keep
-      (and (= :satisfied end) main-end) (conj (action :delete-branch)))))
+      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch)))))
 
 (defn- taskless-actions
   "The actions that carry taskless agent `row` through its end, in order (`next-actions`): ended, its graph
@@ -2127,8 +2125,7 @@
   (copied to main before merge bases existed); any other end main lacks is written there (`:close`); a merge
   whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
   a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
-  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass;
-  a satisfied end has nothing to merge, so its branch is deleted once main holds the end.
+  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
   A taskless agent (a row naming no `:seon.task/assignment`) follows the same rule with merged read as nothing
   unmerged (`taskless-actions`).
   Pure; each action is idempotent by identity, by head = merge base or by the git commit main records."
@@ -2247,9 +2244,7 @@
   "Write a `:close` action's end on main through `connection` (`store` holds the branch) and merge nothing else.
   Root's problem task first, then ONE transaction with the assignment's end facts its branch head holds,
   carrying the branch and commit they came from as transaction metadata. A `:cancelled` end is db<->flow's own:
-  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide. A `:satisfied`
-  end, a step whose product main already holds, is closed the same way with its branch's end facts and no
-  problem task: it meets its successors' needs (`seon.task/ready-rules`). A `:capped` or `:stalled` end at a
+  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide. A `:capped` or `:stalled` end at a
   commit whose branch holds declarations main lacks, while its task's relaunched attempts are fewer than
   `relaunches` (`:seon.config.run/relaunches`), is relaunched instead: `:seon.task.attempt/relaunch` in the same
   transaction and no problem task, so `seon.task/ready` admits the task again and its next attempt forks that
@@ -2268,8 +2263,7 @@
                                     :in $ ?k :where [?a :seon.task/assignment ?k]]
                                   head key)
                             :db/id))
-            facts (cond-> facts (= :satisfied end) (assoc :seon.task/outcome :closed))
-            unmerged (when-not (#{:cancelled :satisfied} end) (source/unmerged-count (db/db connection) store branch))
+            unmerged (when-not cancelled? (source/unmerged-count (db/db connection) store branch))
             relaunch (when (and (pos-int? unmerged) (#{:capped :stalled} end) (:seon.task.attempt/commit facts))
                        (relaunch-reason (db/db connection) h (str "Ended " (name end)) unmerged relaunches))
             facts (cond-> facts relaunch (assoc :seon.task.attempt/relaunch relaunch))]

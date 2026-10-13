@@ -75,7 +75,7 @@
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
  :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing, or an assignment's publication (seon.merge/publish!), met (a red gate, a write-back or commit refusal); the merge stays as it is for root, and no pass publishes it again until root retracts this."}]
  :refused-tests [:set {:description "The tests whose red verdict refused a merge task's landing."} :seon.test/sym]
- :end [:enum {:description "How an agent's task ended: its proofs green, its step satisfied at its fork point (seon.context/step-status: nothing to merge), given back with my.task/send-back!, its turns spent, stalled (the loop stopped calling it before its proofs passed), or sent back to the task my.task/send-back! named as its :my.task/target. The end closes the agent's admission (seon.turn/end-task-call). Producer: seon.turn/task-end."} :done :satisfied :given-back :capped :stalled :sent-back]
+ :end [:enum {:description "How an agent's task ended: its proofs green (a merge decides; an empty delta merges as an accepted no-op), given back with my.task/send-back!, its turns spent, stalled (the loop stopped calling it before its proofs passed), or sent back to the task my.task/send-back! named as its :my.task/target. The end closes the agent's admission (seon.turn/end-task-call). Producer: seon.turn/task-end."} :done :given-back :capped :stalled :sent-back]
  :calls [:int {:min 0 :description "The model calls an ended task's agent took."}]
  :prompt-tokens [:int {:min 0 :description "The prompt tokens an ended task's model calls sent."}]
  :completion-tokens [:int {:min 0 :description "The completion tokens an ended task's model calls received."}]
@@ -95,7 +95,7 @@
          [:seon.task/completion-tokens {:optional true} :seon.task/completion-tokens]
          [:seon.task/end-unknown {:optional true} :seon.task/end-unknown]
          [:seon.render/operations [:vector :seon.render/read-form]]]
- :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored. :satisfied: every proof was already known green at its fork point, so no model turn opens."} :working :satisfied :requested :done :bailed :capped]
+ :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored."} :working :requested :done :bailed :capped]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
  :assignment [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/assignment-row
                        :description "seon.id/id over [task attempt-number]: one attempt of a task by an agent on its branch (seon.task/attempt-tx), written on the cluster; rows written before attempts were numbered derive from [task agent branch]."}]
@@ -145,7 +145,7 @@
               [:seon/tasks {:optional true} [:set :seon.task/quoted-symbol]]]
  :links [:map {:description "Stage 3: the edges one holder's annotation produces."}
          [:seon.task/tasks {:optional true} :seon.task/tasks]]
- :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done or satisfied."} :qualified-symbol]
+ :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done."} :qualified-symbol]
  :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set :symbol]

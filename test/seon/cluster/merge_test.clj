@@ -863,8 +863,7 @@
 
 ;;; TASK-CHAIN A2 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one verdict, and the writer compares the tested task basis.
 
-(deftest ^{:seon/tasks #{'seon.task/chain-acceptance}
-           :seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
+(deftest ^{:seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
            :seon.test/long-ms 60000}
   only-an-accepted-candidate-completes-a-task
   (let [target (support/execution-handle nil)

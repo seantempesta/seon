@@ -462,8 +462,7 @@
             :seon.test/run-basis-t 1 :seon.test/run-at #inst "2026-10-13T00:00:00Z" :seon.test/run [:seon.test.run/id "a1b2c3d4e5f6"]}
      reports (assoc :seon.test.failure/reports reports))))
 
-(deftest ^{:seon/tasks #{'seon.task/chain-acceptance}}
-  a-step-is-done-only-when-its-merge-would-accept
+(deftest a-step-is-done-only-when-its-merge-would-accept
   ;; the step's status is the one results judgment the merge makes over its run, here over the branch's own
   ;; recorded results: done exactly when it refuses nothing, and a working step names each refusal's type
   (let [database (db/db *connection*)

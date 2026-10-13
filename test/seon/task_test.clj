@@ -7,6 +7,7 @@
             [seon.error.refusal :as refusal]
             [seon.id :as id]
             [seon.profile :as profile]
+            [seon.schema :as schema]
             [seon.task :as task]
             [seon.test-support :as test-support]))
 
@@ -426,3 +427,10 @@
        (is (empty? (remove #(= (:e %) (:tx %)) (:tx-data (chain! connection subject step-templates
                                                                {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}}))))
            "an identical construction changes nothing")))))
+
+(deftest only-a-merge-completes-a-leaf
+  ;; TASK-CHAIN phase 4: :satisfied is deleted; an empty delta merges as an accepted no-op
+  (let [projection (schema/handed-projection)]
+    (doseq [attribute [:seon.task.attempt/end :seon.task/end :seon.task/status]]
+      (is (not ((schema/projection-validator projection attribute) :satisfied)) "no end or status admits :satisfied")))
+  (is (not-any? #{:satisfied} (flatten task/ready-rules)) "a leaf is done only by its merged outcome"))
