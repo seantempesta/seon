@@ -287,7 +287,8 @@
                                 (fn [_] (< before (or (closed-runs @connection) 0))))
           (is (< before (closed-runs @connection)) "the branch's route listener woke the idle agent"))))))
 
-(deftest retirement-closes-admission-at-the-writer-and-races-submission
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-submission-racing-retirement-answers-a-value}}
+  retirement-closes-admission-at-the-writer-and-races-submission
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [branch (branch!)
@@ -413,7 +414,8 @@
           (is (= "[true [my.agents.host-probe/check-square-test]]" shown)
               "exactly the test reaching the change runs, green"))))))
 
-(deftest an-agent-creates-a-task-at-its-repl-and-it-is-a-cluster-task
+(deftest ^{:seon/tasks #{'seon.cluster.host/an-agents-repl-task-reaches-main-by-its-merge}}
+  an-agent-creates-a-task-at-its-repl-and-it-is-a-cluster-task
   ;; Before, no runtime entrance wrote a task (7.8): tasks came only from task
   ;; EDN files, so an agent could not record work at its REPL.
   (with-host-world {}

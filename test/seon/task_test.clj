@@ -356,7 +356,8 @@
        (is (= #{} (task/ready (after running [[["implement" :execution :held]] [["prove" :merged]]])))
            "a step's own :held keeps it held")))))
 
-(deftest one-selector-serves-every-proof-consumer
+(deftest ^{:seon/tasks #{'seon.task/chain-obligations}}
+  one-selector-serves-every-proof-consumer
   ;; TASK-CHAIN A1 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one selector over main, candidate and base
   (test-support/with-database
    (fn [connection]

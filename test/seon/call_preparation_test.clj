@@ -530,7 +530,8 @@
              (is (contains? (:seon.call-preparation/supplied-defaults changed)
                             :test/alternate-database)))))))))
 
-(deftest a-new-branch-at-a-derived-commit-reads-the-held-snapshot
+(deftest ^{:seon/tasks #{'seon.call-preparation/a-sibling-branch-at-the-same-commit-reads-that-commit}}
+  a-new-branch-at-a-derived-commit-reads-the-held-snapshot
   (testing "a sibling branch at the same commit is the same program: its first
             snapshot is the commit tier's, never a derivation"
     (let [[fixed-projection commit earlier]
@@ -1083,7 +1084,8 @@
 ;;; version ship dead.
 ;;; ---------------------------------------------------------------------------
 
-(deftest an-acquired-cluster-context-prepares-its-calls
+(deftest ^{:seon/tasks #{'seon.call-preparation/an-acquired-context-test-resolves-its-probes}}
+  an-acquired-cluster-context-prepares-its-calls
   (testing "the production installation path, not a ctx this test built"
     (test-support/with-database
      (fn [connection]
@@ -1114,7 +1116,8 @@
                  (str "(seon.call-preparation-test/probe-received-database?"
                       " \"a\")"))))))))))
 
-(deftest an-acquired-context-supplies-a-leading-database-to-a-first-party-read
+(deftest ^{:seon/tasks #{'seon.call-preparation/an-acquired-context-test-resolves-its-probes}}
+  an-acquired-context-supplies-a-leading-database-to-a-first-party-read
   (testing "a real first-party call uses its contracted shorter shape"
     (test-support/with-database
      (fn [connection]

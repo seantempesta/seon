@@ -252,7 +252,8 @@
                                   database (:seon.turn/id submitted)))
                     "and no evaluation without a terminal fact")))))))
 
-(deftest a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-jvm-batch-answers-the-forms-around-a-failed-read}}
+  a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
   ;; A failed read is its form's read error; the forms around it run, and no
   ;; error rides another form.
   (with-started-agent
@@ -281,7 +282,8 @@
        (is (= :seon.sci.reader/form
               (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))
 
-(deftest a-run-whose-open-is-refused-still-answers-its-values
+(deftest ^{:seon/tasks #{'seon.call-preparation/a-positional-database-is-not-supplied}}
+  a-run-whose-open-is-refused-still-answers-its-values
   ;; A form that closes its own agent's admission outside the run's custody
   ;; leaves the run unopenable and its settlement refused. The path is total:
   ;; the values return, unrecorded, the refusal beside them.
