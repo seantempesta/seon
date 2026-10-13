@@ -55,8 +55,11 @@
   `:my.test/after-recording`, and the pass's test step runs its tests right
   after recording, in the same reply.
 
-  Example:
-  (my.test/check {:seon.test/changed ['my.turn/wait]})"
+  ## Example
+
+  ```clojure
+  (my.test/check {:seon.test/changed ['my.turn/wait]})
+  ```"
   {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
                    :seon.error/value]]}
@@ -84,8 +87,11 @@
   host-bound change until my branch changes again. Synchronous: it takes the
   throwaway JVM's boot plus the tests.
 
-  Example:
-  (my.test/check-platform {:seon.program/identities #{[:seon.fn/sym 'seon.test/tally]}})"
+  ## Example
+
+  ```clojure
+  (my.test/check-platform {:seon.program/identities #{[:seon.fn/sym 'seon.test/tally]}})
+  ```"
   {:malli/schema [:=> [:cat :my.test/check-platform-request] [:or :seon.test.platform/answer [:map [:seon.test/unreached :seon.test/unreached]] :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection
     tests :seon.test/identities identities :seon.program/identities}]
@@ -134,8 +140,11 @@
   The namespace is :seon.ns/name, else my assigned namespace.
   Returns each test's result; [] means none are declared.
 
-  Example:
-  (my.test/run-owned {})"
+  ## Example
+
+  ```clojure
+  (my.test/run-owned {})
+  ```"
   {:malli/schema [:=> [:cat :my.test/run-request]
                   [:or :seon.test/results :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection
@@ -169,8 +178,11 @@
   result is recorded on my connection. An unchanged green test returns its
   recorded result with :seon.test/unchanged and no execution.
 
-  Example:
-  (my.test/run)"
+  ## Example
+
+  ```clojure
+  (my.test/run)
+  ```"
   ([] (list 'my.test/run {}))
   ([request]
    `(my.test/run-owned (merge {:seon.ns/name (ns-name *ns*)} ~request))))

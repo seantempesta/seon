@@ -24,9 +24,9 @@
   (apply str (repeat 64 "d")))
 
 (def ^:private subject-source
-  (str "(ns tq.a {:seon/tasks #{'tq.a/prove-ingestion} :seon/must-read ['tq.a/f]}\n"
+  (str "(ns tq.a {:seon/tasks #{'tq.a/prove-ingestion}}\n"
        "  (:require [clojure.test :refer [deftest is]] [clojure.string :as s]))\n"
-       "(defn f {:seon/tasks #{'tq.a/prove-ingestion} :seon/must-read ['tq.a/g] :seon/see-also [`s/join]} [v] v)\n"
+       "(defn f {:seon/tasks #{'tq.a/prove-ingestion}} [v] v)\n"
        "(defn g {:seon/tasks #{'tq.a/prove-ingestion}} [v] (:seon/tasks {:seon/tasks #{::x}}))\n"
        "(deftest ^{:seon/tasks #{'tq.a/prove-ingestion}} proves (is (= 2 (f 1))) (is (= #{} (:seon/tasks {:seon/tasks #{}}))))\n"))
 
@@ -77,11 +77,10 @@
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= '#{tq.a/g} (set (:seon.task/references (db/pull @connection [:seon.task/references] [:seon.task/id handle]))))
            "the writer derives the qualified symbols the intent cites")
-       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :referrers #{'tq.a 'tq.a/f tag}}
+       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :referrers #{tag}}
               (task/task-edges @connection tag))
            "a task's edges are its subjects and referrers; its proofs are its obligations'")
        (is (= '#{tq.a/proves} (:seon.task/proofs (task/obligations @connection tag))))
-       (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
        (is (= #{tag} (task/open-tasks @connection '[:seon.fn/sym tq.a/g])))
        (is (not-any? #(contains? % tag) (vals (task/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
@@ -155,8 +154,7 @@
     (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/tasks #{::b/x}} [v] v)\n")))))
     (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/tasks #{\"043df611d179\"}} [v] v)\n"))))
         "a task is tagged by its symbol, never a handle")
-    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn ^:seon/tasks f [v] v)\n")))))
-    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/must-read [clojure.core/inc]} [v] v)\n")))))))
+    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn ^:seon/tasks f [v] v)\n")))))))
 
 (deftest publication-ingests-tasks-and-refuses-a-dangling-tag
   ;; The destination is a branch of the live program, so the checkout's own task

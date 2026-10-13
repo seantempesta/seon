@@ -2162,12 +2162,13 @@
 
   ## Examples
 
+  ```clojure
   (reply-value database contract-refusal)
 
   For `(total-area [{:w 2 :h 3} {:w 1 :h \"4\"}])` against a vector of
   maps of non-negative integers, the one problem is path `[1 :scratch.fbr/h]`,
   expected `[:int {:min 0}]`, offending `\"4\"`, example `0`.
-
+  ```
   ## Costs
 
   Unarmed, measured at default 2026-09-27 (tmp/feedback-renders/proof.clj):
@@ -2299,8 +2300,9 @@
 
   ## Examples
 
+  ```clojure
   (seon.error/finding (seon.db/db) \"69ab7a53…\" 1)
-
+  ```
   ## Costs
 
   - One pull of the signature with its bounded occurrences, its resolution
@@ -2557,7 +2559,12 @@
   An error is assigned when it names a function in a namespace the agent
   stewards, when one of its occurrences happened in the agent's work, or
   when the writer notified the agent of it. Resolution removes nothing.
-  Example: (seon.error/for-agent (seon.db/db) \"root\")"
+
+  ## Example
+
+  ```clojure
+  (seon.error/for-agent (seon.db/db) \"root\")
+  ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or [:vector :seon.db/pulled-entity] :seon.db/error-result]]}
   [database agent-id]

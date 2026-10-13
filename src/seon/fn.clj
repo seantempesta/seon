@@ -18,6 +18,7 @@
             [seon.print :as print]
             [seon.fs :as fs]
             [seon.program :as program]
+            [seon.ref :as ref]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -351,23 +352,28 @@
     (usage-symbol usage)))
 
 (defn- references-by-caller
-  "Quoted target symbols: named, not exercised (`call-target`). A nil caller
-  is retained, with every usage it holds, when this analysis has no
-  declaration to own it."
+  "Quoted target symbols: named, not exercised (`call-target`), and the qualified symbols each declaration's
+  docstring cites (`seon.ref/names`), never itself. A nil caller is retained, with every usage it holds, when this
+  analysis has no declaration to own it."
   ([analysis first-party-functions]
    (references-by-caller analysis first-party-functions first-party-functions))
   ([analysis _first-party-functions declared-callers]
-   (reduce
-    (fn [references usage]
-      (let [caller (usage-caller usage)
-            target (usage-symbol usage)]
-        (if (and target
-                 (or (::analyzer/reference usage)
-                     (not (declared-callers caller))))
-          (update references (when (declared-callers caller) caller)
-                  (fnil conj #{}) target)
-          references)))
-    {} (::analyzer/var-usages analysis))))
+   (let [quoted (reduce
+                 (fn [references usage]
+                   (let [caller (usage-caller usage)
+                         target (usage-symbol usage)]
+                     (if (and target
+                              (or (::analyzer/reference usage)
+                                  (not (declared-callers caller))))
+                       (update references (when (declared-callers caller) caller)
+                               (fnil conj #{}) target)
+                       references)))
+                 {} (::analyzer/var-usages analysis))]
+     (reduce (fn [references {doc ::analyzer/doc :as definition}]
+               (let [caller (symbol (str (::analyzer/ns definition)) (str (::analyzer/name definition)))
+                     cited (when (and (string? doc) (declared-callers caller)) (disj (ref/names doc) caller))]
+                 (cond-> references (seq cited) (update caller (fnil into #{}) cited))))
+             quoted (::analyzer/var-definitions analysis)))))
 
 (defn- external-target?
   [first-party-functions target]
@@ -654,23 +660,20 @@
     (throw (ex-info (:seon.error/message refusal) refusal (:seon.error/throwable members)))))
 
 (defn- task-links
-  "One holder's `:seon.task/annotation`, validated, as its `:seon.task/links`: task,
-  must-read and see-also quoted symbols resolved through the namespace's aliases.
+  "One holder's `:seon.task/annotation`, validated, as its `:seon.task/links`: its task quoted symbols resolved
+  through the namespace's aliases.
   A map naming `:seon/tasks` after a deftest's name refuses."
   {:malli/schema [:=> [:cat :seon.schema/projection :map :symbol :map] :seon.task/links]}
   [projection context holder entry]
-  (let [authored (select-keys (::analyzer/meta entry) [:seon/tasks :seon/must-read :seon/see-also])
+  (let [authored (select-keys (::analyzer/meta entry) [:seon/tasks])
         refuse! #(task-refused! 'seon.fn/task-links %1 holder %2 (assoc %3 :seon.fn/index-refused true))
         link #(some->> (get authored %) (map (fn [[_ target]] (seed-symbol context target))) seq (into (sorted-set)))]
     (when (and (::analyzer/test entry) (::analyzer/task-map-after-name? entry))
       (refuse! :metadata-after-test-name (::analyzer/name entry) {}))
     (when-let [explanation (schema/explain-candidate-value projection :seon.task/annotation authored)]
       (refuse! :malformed-annotation authored {:seon.task/explanation (me/humanize explanation)}))
-    (let [tasks (link :seon/tasks) must-read (link :seon/must-read) see-also (link :seon/see-also)]
-     (cond-> {}
-      tasks (assoc :seon.task/tasks tasks)
-      must-read (assoc :seon.fn/must-read must-read)
-      see-also (assoc :seon.fn/see-also see-also)))))
+    (let [tasks (link :seon/tasks)]
+      (cond-> {} tasks (assoc :seon.task/tasks tasks)))))
 
 (defn- declared-function-targets
   "Literal targets of explicitly declared invocation attributes."
@@ -2826,7 +2829,9 @@
   "Direct caller files of declarations whose signature the committed report
   changed: identity, arglists, arities, privacy, macro or inline status.
 
-  Costs: two reads proportional to the changed signatures and their direct
+  ## Costs
+
+  two reads proportional to the changed signatures and their direct
   callers; a contract or schema change selects nothing (measured 2026-09-26:
   four changed schema keys had selected 241 of the program's files, 10.7 s
   warm and most of a 47 s boot publication)."

@@ -8,8 +8,11 @@
   Returns {:my.turn/disposition :wait :my.turn/note string}. Return it as
   the form's result to pause until a later outside wake.
 
-  Example:
-  (my.turn/wait {:my.turn/note \"Waiting for the missing source data.\"})"
+  ## Example
+
+  ```clojure
+  (my.turn/wait {:my.turn/note \"Waiting for the missing source data.\"})
+  ```"
   {:malli/schema [:=> [:cat [:map [:my.turn/note :my.turn/note]]] [:or :my.turn/wait :my.turn/blank-note-error]]}
   [request]
   (run/wait (:my.turn/note request)))

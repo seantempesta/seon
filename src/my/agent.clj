@@ -15,8 +15,11 @@
   Returns :my.agent/id, with :my.agent/namespace and :my.agent/steward
   when assigned. My database and identity are supplied.
 
-  Example:
-  (my.agent/identity)"
+  ## Example
+
+  ```clojure
+  (my.agent/identity)
+  ```"
   {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.agent/identity :seon.error/value]]}
   [request]
   (agent/identity (:seon.db/db request) (:seon.agent/id request)))
@@ -28,8 +31,11 @@
   nothing. Omitted settings inherit cluster defaults;
   seon.agent/effective-settings reads effective values.
 
-  Example:
-  (my.agent/settings)"
+  ## Example
+
+  ```clojure
+  (my.agent/settings)
+  ```"
   {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.agent/settings :seon.error/value]]}
   [request]
   (agent/settings (:seon.db/db request) (:seon.agent/id request)))
@@ -42,8 +48,11 @@
   Returns a map of :seon.config setting overrides for my agent. My connection
   and identity are supplied.
 
-  Example:
-  (my.agent/settings! {:seon.config.eval/time-limit-ms 10000})"
+  ## Example
+
+  ```clojure
+  (my.agent/settings! {:seon.config.eval/time-limit-ms 10000})
+  ```"
   {:malli/schema [:=> [:cat :seon.config/agent-overlay :seon.db/connection :seon.agent/id]
                   [:or :seon.config/agent-overlay :seon.error/value]]}
   [overrides connection agent-id]
@@ -57,8 +66,11 @@
   acquisition of that branch decided (seon.cluster.agent/acquire-context!),
   read from its entry in my execution's registry; neither is derived from a cluster name.
 
-  Example:
-  (my.agent/branch)"
+  ## Example
+
+  ```clojure
+  (my.agent/branch)
+  ```"
   {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]
                              [:my.program/context :my.program/context]]]
                   [:map [:seon.agent/branch :seon.agent/branch]
@@ -96,8 +108,11 @@
 
   My context is supplied.
 
-  Example:
-  (my.agent/branches)"
+  ## Example
+
+  ```clojure
+  (my.agent/branches)
+  ```"
   {:malli/schema [:=> [:cat :my.agent/branch-context] [:or :my.agent/branches :seon.error/value]]}
   [{store :seon.store/store :as context}]
   (if-not store
@@ -112,8 +127,11 @@
   cluster's own branch and an existing name refuse. Returns the branch, the commit it forks and
   that commit's basis. My context is supplied.
 
-  Example:
-  (my.agent/create-branch! {:seon.store/branch :my-lane})"
+  ## Example
+
+  ```clojure
+  (my.agent/create-branch! {:seon.store/branch :my-lane})
+  ```"
   {:malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/created-branch :seon.error/value]]}
   [{lane :seon.store/branch} {store :seon.store/store connection :seon.db/connection :as context}]
@@ -174,8 +192,11 @@
   deletes it once nothing on it is unmerged. Its data goes when retention
   collects. My context is supplied.
 
-  Example:
-  (my.agent/retire-branch! {:seon.store/branch :my-lane})"
+  ## Example
+
+  ```clojure
+  (my.agent/retire-branch! {:seon.store/branch :my-lane})
+  ```"
   {:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}
    :malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/retired-branch :seon.error/value]]}

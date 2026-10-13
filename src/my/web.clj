@@ -13,8 +13,11 @@
   :my.web/body, with extraction data when available. In the example,
   example-url is the URL of the resource you want to read.
 
-  Example:
-  (my.web/fetch {:my.web/url example-url})"
+  ## Example
+
+  ```clojure
+  (my.web/fetch {:my.web/url example-url})
+  ```"
   {:malli/schema
    [:=> [:cat :my.web/fetch-request]
     [:or :my.web/fetch-result :my.web/error]]
@@ -30,8 +33,11 @@
   :my.web/results and a blob digest for the provider response. The cluster
   config selects the endpoint and credential.
 
-  Example:
-  (my.web/search {:my.web/query \"Clojure documentation\" :my.web/max-results 3})"
+  ## Example
+
+  ```clojure
+  (my.web/search {:my.web/query \"Clojure documentation\" :my.web/max-results 3})
+  ```"
   {:malli/schema
    [:=> [:cat :my.web/search-request]
     [:or :my.web/search-result :my.web/error]]

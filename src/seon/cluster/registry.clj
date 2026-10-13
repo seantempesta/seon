@@ -140,8 +140,11 @@
   hold answers `:seon.cluster.registry/branch-missing-error`, naming the store
   and the branch, so no caller mistakes absence for a commit.
 
-  Example:
-  (branch-commit-id {:seon.store/store store :seon.store/branch :current-src})"
+  ## Example
+
+  ```clojure
+  (branch-commit-id {:seon.store/store store :seon.store/branch :current-src})
+  ```"
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
                   [:or :seon.source/commit-id :seon.cluster.registry/branch-missing-error]]}
   [{:keys [:seon.store/store :seon.store/branch]}]

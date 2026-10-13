@@ -15,6 +15,7 @@
             [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
+            [seon.ref :as ref]
             [seon.schema :as schema]
             [seon.sci.reader :as reader]))
 
@@ -182,16 +183,6 @@
                  (not [?function :seon.fn/internal? true])]
         database program-documentation-selector namespace-name))
 
-(defn- documentation-unavailable
-  {:malli/schema [:=> [:cat :seon.sci.eval/authored-reference] :seon.sci.eval/documentation-unavailable-error]}
-  [requested]
-  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.lookup/documentation-unavailable
-   {:seon.error/message "No public documentation is available; request an installed public declaration."
-    :seon.error/offending requested
-    :seon.sci.eval/documentation-unavailable requested
-    :seon.error/member :seon.fn/sym
-    :seon.error/expected :seon.sci.eval/public-documentation}))
-
 (defn- declaration-absent
   "The typed unknown `doc` and `dir` show for an absent declaration.
 
@@ -206,59 +197,6 @@
     :seon.error/offending attribute
     :seon.sci.eval/missing-declaration attribute
     :seon.error/expected :seon.sci.eval/present-declaration}))
-
-(def ^:private section-headings
-  "The fixed docstring headings that open a section and so end an Example."
-  ["Edge cases:" "Costs:" "Recommendations:" "Errors:" "Known issues:" "## "])
-
-(defn- example-start
-  "The first-form text after an Example heading line (`Example:`, `Examples:`,
-  `## Example`, `## Examples`), or nil when the line opens no Example."
-  {:malli/schema [:=> [:cat :string] [:or :nil :string]]}
-  [line]
-  (or (some #(when (str/starts-with? line %) (str/trim (subs line (count %))))
-            ["Examples:" "Example:"])
-      (when (#{"## Example" "## Examples"} line) "")))
-
-(defn docstring-parts
-  "Split a declared docstring into its summary (the first sentence of its first
-  paragraph, whole), the body that follows, and the final Example section.
-
-  The Example section runs from its heading to the next fixed heading (Edge
-  cases, Costs, Recommendations, Errors, Known issues, any `## ` heading) or the
-  end; the sections around it stay in the body. `Example: (form)` on one line
-  yields that form."
-  {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body {:optional true} [:string {:min 1}]]
-                                      [:example {:optional true} [:string {:min 1}]]]]}
-  [docstring]
-  (let [abbreviations #{"e.g." "i.e." "etc." "vs."}
-        sentence-end (fn [flat]
-                       (loop [from 0]
-                         (let [stop (str/index-of flat ". " from)]
-                           (cond
-                             (nil? stop) nil
-                             (some #(str/ends-with? (subs flat 0 (inc stop)) %) abbreviations)
-                             (recur (inc stop))
-                             :else stop))))
-        lines (mapv str/trim (str/split-lines (or docstring "")))
-        lines (vec (drop-while str/blank? lines))
-        [paragraph after] (split-with (complement str/blank?) lines)
-        flat (str/join " " paragraph)
-        stop (sentence-end flat)
-        summary (if stop (subs flat 0 (inc stop)) flat)
-        leftover (when stop (str/trim (subs flat (+ stop 2))))
-        lines (vec (concat (when (seq leftover) [leftover]) after))
-        start (last (keep-indexed #(when (example-start %2) %1) lines))
-        heading? (fn [line] (some #(str/starts-with? line %) section-headings))
-        end (when start
-              (or (first (filter #(heading? (lines %)) (range (inc start) (count lines))))
-                  (count lines)))
-        join #(str/trim (str/join "\n" %))
-        body (join (if start (concat (subvec lines 0 start) (subvec lines end)) lines))]
-    ;; an empty section is absent
-    (cond-> {:summary summary}
-      (seq body) (assoc :body body)
-      start (assoc :example (join (cons (example-start (lines start)) (subvec lines (inc start) end)))))))
 
 (defn- arglists-reader
   "The function that reads one arglists text as the namespace's own source
@@ -382,7 +320,7 @@
                          (boolean (some #{(:seon.fn/sym row)} overrides))))))
   ([database row metadata overridden?]
    (merge (when-let [doc (:doc metadata)]
-            (docstring-parts doc))
+            (ref/docstring doc))
           {:arglists (if-let [arglists (:arglists metadata)]
                        (agent-arglists database (:seon.fn/sym row) arglists)
                        (declaration-absent :seon.fn/arglists))}
@@ -423,10 +361,10 @@
                                                 (agent-arglists database (:seon.fn/sym row) (read-arglists arglists))
                                                 (declaration-absent :seon.fn/arglists))}
                                    (when-let [doc (:seon.fn/doc row)]
-                                     {:doc (:summary (docstring-parts doc))})
+                                     {:doc (:summary (ref/docstring doc))})
                                    (agent-documentation-contract database row)))
                           functions)})
-      :else (documentation-unavailable namespace-name))))
+      :else (ref/documentation-unavailable namespace-name))))
 
 (defn reference-in
   "The qualified symbol of the Var an authored symbol resolves to in the calling
@@ -436,21 +374,6 @@
   (if-let [resolved (and (symbol? authored) (sci/resolve ctx authored))]
     (sci/var->symbol resolved)
     authored))
-
-(defn schema-documentation
-  "The declared form of the schema named `key`, with its description property."
-  {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
-                  [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
-  [database key authored]
-  (let [row (db/pull database [:seon.schema/key :seon.schema/form] [:seon.schema/key key])]
-    (cond
-      (db/read-refusal? row) row
-      (not (:seon.schema/form row)) (documentation-unavailable authored)
-      :else
-      (let [form (edn/read-string (:seon.schema/form row))
-            description (when (and (vector? form) (map? (second form))) (:description (second form)))]
-        (cond-> {:key key :form form}
-          description (assoc :description description))))))
 
 (defn- namespace-documentation
   "The documentation of the namespace `namespace-name`: its docstring parts and
@@ -465,13 +388,13 @@
     (cond
       (db/read-refusal? row) row
       (db/read-refusal? functions) functions
-      (not (or sci-ns (:seon.ns/name row) (seq functions))) (documentation-unavailable authored)
+      (not (or sci-ns (:seon.ns/name row) (seq functions))) (ref/documentation-unavailable authored)
       :else
       (let [doc (or (:seon.ns/doc row) (:doc (meta sci-ns)))
             scoped (when sci-ns
                      (map #(symbol (str namespace-name) (str %))
                           (keys (sci.namespaces/sci-ns-publics* ctx sci-ns))))]
-        (merge (when doc (docstring-parts doc))
+        (merge (when doc (ref/docstring doc))
                {:publics (vec (sort (distinct (concat (map :seon.fn/sym functions) scoped))))})))))
 
 (defn documentation-value
@@ -480,8 +403,8 @@
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [ctx database authored resolved]
   (cond
-    (qualified-keyword? resolved) (schema-documentation database resolved authored)
-    (not (symbol? resolved)) (documentation-unavailable authored)
+    (qualified-keyword? resolved) (ref/schema-documentation database resolved authored)
+    (not (symbol? resolved)) (ref/documentation-unavailable authored)
     (namespace resolved)
     (let [row (db/pull database
                        program-documentation-selector
@@ -496,9 +419,9 @@
         (:seon.fn/sym row)
         (function-doc-map database row metadata overridden?)
         (or (:doc metadata) (:arglists metadata))
-        (merge (when-let [doc (:doc metadata)] (docstring-parts doc))
+        (merge (when-let [doc (:doc metadata)] (ref/docstring doc))
                (when-let [arglists (:arglists metadata)] {:arglists arglists}))
-        :else (documentation-unavailable authored)))
+        :else (ref/documentation-unavailable authored)))
     :else (namespace-documentation ctx database resolved authored)))
 
 (defn- program-doc-var

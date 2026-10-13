@@ -40,7 +40,9 @@
   counts, plus :my.edit/source-window and its line bounds. A stale digest
   or ambiguous target returns a flat error without editing.
 
-  Example:
+  ## Example
+
+  ```clojure
   (let [file (my.fs/write! {:my.fs/path \"example.clj\"
                             :my.fs/content {:my.fs/text \"(def example 1)\"}
                             :my.fs/precondition {:my.fs/expected-absence? true}})]
@@ -48,7 +50,8 @@
                     :my.edit/expected-digest (:my.fs/after-digest file)
                     :my.edit/form {:my.edit.form/head 'def :my.edit.form/name 'example}
                     :my.edit/operation :replace
-                    :my.edit/source \"(def example 2)\"}))"
+                    :my.edit/source \"(def example 2)\"}))
+  ```"
   {:malli/schema
    [:=> [:cat :my.edit/form-request]
     [:or :my.edit/result :my.edit/tool-error]]
@@ -64,14 +67,17 @@
   counts, plus :my.edit/source-window and its line bounds. A stale digest
   or ambiguous target returns a flat error without editing.
 
-  Example:
+  ## Example
+
+  ```clojure
   (let [file (my.fs/write! {:my.fs/path \"example.clj\"
                             :my.fs/content {:my.fs/text \"(def example 1)\"}
                             :my.fs/precondition {:my.fs/expected-absence? true}})]
     (my.edit/exact! {:my.edit/path \"example.clj\"
                     :my.edit/expected-digest (:my.fs/after-digest file)
                      :my.edit/old-string \"(def example 1)\"
-                     :my.edit/new-string \"(def example 2)\"}))"
+                     :my.edit/new-string \"(def example 2)\"}))
+  ```"
   {:malli/schema
    [:=> [:cat :my.edit/exact-request]
     [:or :my.edit/result :my.edit/tool-error]]
@@ -92,7 +98,9 @@
   counts, plus :my.edit/source-window and its line bounds. A stale digest
   or ambiguous target returns a flat error without editing.
 
-  Example:
+  ## Example
+
+  ```clojure
   (let [file (my.fs/write! {:my.fs/path \"example.clj\"
                             :my.fs/content {:my.fs/text \"(def example 1)\"}
                             :my.fs/precondition {:my.fs/expected-absence? true}})]
@@ -102,7 +110,8 @@
                      ;; the example file has no trailing newline; a file with
                      ;; one needs \"...\\n\" in both windows
                      :my.edit/old-window \"(def example 1)\"
-                     :my.edit/new-window \"(def example 2)\"}))"
+                     :my.edit/new-window \"(def example 2)\"}))
+  ```"
   {:malli/schema
    [:=> [:cat :my.edit/lines-request]
     [:or :my.edit/result :my.edit/tool-error]]

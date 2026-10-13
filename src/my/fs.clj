@@ -45,8 +45,11 @@
   :my.fs/digest appears only for a complete read. Page with
   :my.fs/byte-offset and :my.fs/max-bytes.
 
-  Example:
-  (my.fs/read {:my.fs/path \"AGENTS.md\" :my.fs/max-bytes 1024})"
+  ## Example
+
+  ```clojure
+  (my.fs/read {:my.fs/path \"AGENTS.md\" :my.fs/max-bytes 1024})
+  ```"
   {:malli/schema
    [:=> [:cat :my.fs/read-request]
     [:or :my.fs/read-result :my.fs/tool-error]]
@@ -63,10 +66,13 @@
   Returns :my.fs/path, :my.fs/after-digest, :my.fs/bytes-written and
   :my.fs/changed?.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.fs/write! {:my.fs/path \"example.txt\"
                  :my.fs/content {:my.fs/text \"Verified.\"}
-                 :my.fs/precondition {:my.fs/expected-absence? true}})"
+                 :my.fs/precondition {:my.fs/expected-absence? true}})
+  ```"
   {:malli/schema
    [:=> [:cat :my.fs/write-request]
     [:or :my.fs/write-result :my.fs/tool-error]]
@@ -81,9 +87,12 @@
   Returns :my.fs/paths, :my.fs/examined, :my.fs/returned and :my.fs/complete?.
   Supply :my.fs/max-depth and :my.fs/max-results to bound the search.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.fs/glob {:my.fs/root \".\" :my.fs/pattern \"*.md\"
-               :my.fs/max-depth 1 :my.fs/max-results 10})"
+               :my.fs/max-depth 1 :my.fs/max-results 10})
+  ```"
   {:malli/schema
    [:=> [:cat :my.fs/glob-request]
     [:or :my.fs/glob-result :my.fs/tool-error]]
@@ -99,8 +108,11 @@
   :my.fs/symbolic-link?, with :my.fs/byte-size and :my.fs/modified-at
   when available.
 
-  Example:
-  (my.fs/stat {:my.fs/path \"AGENTS.md\"})"
+  ## Example
+
+  ```clojure
+  (my.fs/stat {:my.fs/path \"AGENTS.md\"})
+  ```"
   {:malli/schema
    [:=> [:cat :my.fs/stat-request]
     [:or :my.fs/stat-result :my.fs/tool-error]]
@@ -114,9 +126,10 @@
 
   ## Examples
 
+  ```clojure
   (my.fs/section \"AGENTS.md#data-and-contracts\")
   (my.fs/section \"reference-code/malli/README.md#quickstart\")
-
+  ```
   ## Errors
 
   A missing file or heading answers an error naming the nearest files or headings."

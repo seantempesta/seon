@@ -340,8 +340,11 @@
   A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
   with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
 
-  Example:
-  (seon.merge/merge! execution \"0123456789ab\" \"/Users/me/src/project\")"
+  ## Example
+
+  ```clojure
+  (seon.merge/merge! execution \"0123456789ab\" \"/Users/me/src/project\")
+  ```"
   {:malli/schema [:function
                   [:=> [:cat :seon.merge/execution :seon.task/assignment]
                    [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]
@@ -404,8 +407,11 @@
   the merged bytes on disk installs them again unchanged, and paths HEAD already holds answer the commit
   that names this merge.
 
-  Example:
-  (seon.merge/publish! execution \"0123456789ab\")"
+  ## Example
+
+  ```clojure
+  (seon.merge/publish! execution \"0123456789ab\")
+  ```"
   {:malli/schema [:=> [:cat :seon.merge/publication :seon.task/assignment]
                   [:or :seon.merge/published :seon.error/value]]}
   [{connection :seon.db/connection cluster-name :seon.cluster/name} key]

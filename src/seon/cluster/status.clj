@@ -49,7 +49,11 @@
   traverse the store's files. Open faults are `seon.problems/open-faults`'s,
   shown by the health report beside this value.
 
-  Example: (seon.cluster.status/snapshot {})"
+  ## Example
+
+  ```clojure
+  (seon.cluster.status/snapshot {})
+  ```"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
                   [:or :seon.cluster.status/value :seon.error/base
                    :seon.cluster.status/unavailable-error]]}
@@ -103,7 +107,11 @@
   blobs; shared blobs count once per agent. Cost is provider-reported USD,
   unknown when any attempt omits it, never inferred from current prices.
 
-  Example: (seon.cluster.status/agents {})"
+  ## Example
+
+  ```clojure
+  (seon.cluster.status/agents {})
+  ```"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
                   [:or [:vector :seon.cluster.status/agent] :seon.error/value
                    :seon.cluster.status/unavailable-error]]}

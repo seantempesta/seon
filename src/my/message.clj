@@ -12,8 +12,11 @@
   with :my.message/from when the sender is known.
   Pass :seon.db/since to select messages newer than a transaction basis.
 
-  Example:
-  (my.message/inbox)"
+  ## Example
+
+  ```clojure
+  (my.message/inbox)
+  ```"
   {:malli/schema [:=> [:cat :my.message/inbox-request] [:or :my.message/inbox :seon.error/value]]}
   [request]
   (message/inbox request))
@@ -24,8 +27,11 @@
   Returns the stored :seon.message/id, :seon.message/content and refs;
   a missing identity returns a flat :seon.error value.
 
-  Example:
-  (my.message/read {:my.message/id \"example-message\"})"
+  ## Example
+
+  ```clojure
+  (my.message/read {:my.message/id \"example-message\"})
+  ```"
   {:malli/schema [:=> [:cat :my.message/read-request] [:or :seon.message/message :seon.error/value]]}
   [request]
   (message/read (:my.message/id request) (:seon.db/db request)))
@@ -38,8 +44,11 @@
   fact. Acknowledging an acknowledged message is inert. A missing identity
   returns a flat :seon.error value. My connection and identity are supplied.
 
-  Example:
-  (my.message/received! \"example-message\")"
+  ## Example
+
+  ```clojure
+  (my.message/received! \"example-message\")
+  ```"
   {:malli/schema [:=> [:cat :seon.message/id :seon.db/connection :seon.agent/id]
                   [:or :seon.message/message :seon.error/value]]}
   [message-id connection agent-id]

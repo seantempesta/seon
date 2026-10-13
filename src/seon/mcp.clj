@@ -104,7 +104,9 @@
 
   ## Examples
 
-      ((requiring-resolve 'seon.mcp/tools))"
+  ```clojure
+      ((requiring-resolve 'seon.mcp/tools))
+  ```"
   {:malli/schema [:=> [:cat] :string]}
   []
   (json/write-str
@@ -498,7 +500,9 @@
 
   ## Examples
 
-      ((requiring-resolve 'seon.mcp/call) \"{\\\"name\\\":\\\"eval_clj\\\",\\\"arguments\\\":{\\\"code\\\":\\\"(+ 1 2)\\\"}}\")"
+  ```clojure
+      ((requiring-resolve 'seon.mcp/call) \"{\\\"name\\\":\\\"eval_clj\\\",\\\"arguments\\\":{\\\"code\\\":\\\"(+ 1 2)\\\"}}\")
+  ```"
   {:malli/schema [:=> [:cat :string] :string]}
   [request]
   (try

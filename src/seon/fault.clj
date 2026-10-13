@@ -112,7 +112,9 @@
 
   ## Examples
 
-  (into settle-tx (seon.fault/folded-tx connection))"
+  ```clojure
+  (into settle-tx (seon.fault/folded-tx connection))
+  ```"
   {:malli/schema [:=> [:cat :seon.db/connection] :seon.store/transaction-data]}
   [connection]
   (let [branch (get-in (db/db connection) [:config :branch])]

@@ -1083,8 +1083,11 @@
   The `merging` transaction data and metadata (root's merge of the assignment's
   facts, `seon.merge/merge!`) ride in the same transaction.
 
-  Example:
-  (accept-merge! source store prepared {:tx-data [] :tx-meta {}})"
+  ## Example
+
+  ```clojure
+  (accept-merge! source store prepared {:tx-data [] :tx-meta {}})
+  ```"
   {:malli/schema [:function
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.source/prepared]
                    [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]
@@ -1892,8 +1895,11 @@
   a relative path or one inside a `data/source` archive is refused as
   `:root-refused` and nothing is written.
 
-  Example:
-  (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"})"
+  ## Example
+
+  ```clojure
+  (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/Users/me/src/project\"})
+  ```"
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
   [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root}]
@@ -2023,8 +2029,11 @@
   does, so neither interleaves with a concurrent lane commit. A commit git made that is not exactly the written paths on the previous head
   is answered as a refusal naming what it carries; history is never rewritten.
 
-  Example:
-  (commit! \"/Users/me/src/project\" written acceptance)"
+  ## Example
+
+  ```clojure
+  (commit! \"/Users/me/src/project\" written acceptance)
+  ```"
   {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
   [root written acceptance]

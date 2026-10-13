@@ -647,8 +647,11 @@
    back off a compiled predicate. A `:=>` without an output schema is refused
    as `::missing-output-schema`, naming the form.
 
-   Example:
-   (canonical-definition [:=> [:cat :int] :int])"
+   ## Example
+
+   ```clojure
+   (canonical-definition [:=> [:cat :int] :int])
+   ```"
   {:malli/schema
    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/definition]}
   [definition]
@@ -1675,12 +1678,15 @@
    stable identity derive from installed attribute declarations; no map-level
    entity-kind marker is required.
 
-   Example:
+   ## Example
+
+   ```clojure
      (register! ::api-key [:string {:min 1}])
      (register! ::timeout [:int {:min 1000 :max 600000}])
      (register! :seon.eval [:map {:seon.db/attributes true
                                   :seon.render/ai 'foo}
-                            [:seon.eval/id ...] ...])"
+                            [:seon.eval/id ...] ...])
+   ```"
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
                          [::definition [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The authored form can be any value; the refusal for one Malli cannot parse is returned with Malli's own reason.", :gen/elements [nil 0 :k [] {}]}]]]
                   [:or ::registration ::registration-refused-error]]}

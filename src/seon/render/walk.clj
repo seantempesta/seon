@@ -1165,9 +1165,10 @@
 
   ## Examples
 
+  ```clojure
   (seon.render.walk/related {:seon.render.walk/lookup [:seon.fn/sym 'seon.test/run]
                              :seon.related/attribute :seon.fn/_calls :seon.related/offset 4})
-
+  ```
   ## Costs
 
   One `graph` level plus one explicit render per shown item, unarmed on

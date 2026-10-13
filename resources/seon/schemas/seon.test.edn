@@ -124,7 +124,7 @@
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
-             [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read] [:seon.fn/see-also {:optional true} :seon.fn/see-also]
+             [:seon.task/tasks {:optional true} :seon.task/tasks]
              [:seon.test/seed {:optional true} :seon.test/seed]
              [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/fixture-observation {:optional true}

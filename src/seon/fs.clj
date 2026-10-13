@@ -262,7 +262,9 @@
   path operation, no filesystem read. Anything else (a relative path, a path
   outside `directory`) answers [[relative-path]]'s filesystem result.
 
-  Costs: none for a canonical path under `directory`; [[relative-path]]'s
+  ## Costs
+
+  none for a canonical path under `directory`; [[relative-path]]'s
   two canonicalizations otherwise."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [directory path]
@@ -307,7 +309,9 @@
   keeps one file per key, so this is the store's key count, the growth a
   status reader sees.
 
-  Costs: unarmed, one directory listing proportional to its entries:
+  ## Costs
+
+  unarmed, one directory listing proportional to its entries:
   1,053,786 entries in 1,329 ms on 2026-09-28 (default's `data/store` before
   its first successful collection)."
   {:malli/schema [:=> [:cat :string] [:int {:min 0}]]}
@@ -318,7 +322,9 @@
   "The bytes of the regular files under `root`; symbolic links are leaves of
   zero size and are never followed, and an absent root is zero.
 
-  Costs: unarmed, proportional to the tree's entries, one attribute read each
+  ## Costs
+
+  unarmed, proportional to the tree's entries, one attribute read each
   (`Files/readAttributes` with NOFOLLOW_LINKS). Only a deletion's log and a
   whole-store collection pay it; decisions read `filesystem-space`. Loads in
   babashka, which runs this namespace for the operator."

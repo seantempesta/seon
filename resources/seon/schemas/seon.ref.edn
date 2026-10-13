@@ -1,4 +1,4 @@
-#:seon.ref{:name [:or {:description "A referenced Seon or library definition: a qualified symbol or a schema key."} :qualified-symbol :qualified-keyword]
+#:seon.ref{:name [:or {:description "A referenced Seon or library definition: a qualified symbol, a schema key, or a namespace's name."} :qualified-symbol :qualified-keyword simple-symbol?]
            :path [:string {:min 1 :description "A checkout-relative path, an RFC 3986 relative reference."}]
            :anchor [:string {:min 1 :description "A heading's anchor, as GitHub and commonmark's heading-anchor extension derive it."}]
            :line [:int {:min 1 :description "A 1-based line in the text, as an editor shows it."}]
@@ -11,21 +11,38 @@
                            [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/line :seon.ref/line]]
            :span-entry [:map [:seon.ref/span :seon.ref/span] [:seon.ref/line :seon.ref/line]]
            :link-entry [:map [:seon.ref/link :seon.ref/link] [:seon.ref/line :seon.ref/line]]
-           :document [:map {:description "Markdown text's headings and its code spans and links in document order; fenced and indented code contribute nothing."}
+           :word [:string {:min 1 :description "A prose word with a `/`, the punctuation around it left off: a reference only when it names an entity."}]
+           :word-entry [:map [:seon.ref/word :seon.ref/word] [:seon.ref/line :seon.ref/line]]
+           :code [:string {:description "A fenced code block's code."}]
+           :code-block [:map [:seon.ref/code :seon.ref/code] [:seon.ref/line :seon.ref/line]]
+           :end-line :seon.ref/line
+           :first-paragraph [:map {:description "The lines of a text's first paragraph."} [:seon.ref/line :seon.ref/line] [:seon.ref/end-line :seon.ref/end-line]]
+           :document [:map {:description "Markdown text's headings, its code spans, links and prose words with a `/` in document order, its first paragraph's lines and its fenced code blocks; code contributes no candidate."}
                       [:seon.ref/headings [:vector :seon.ref/heading-entry]]
-                      [:seon.ref/spans [:vector [:or :seon.ref/span-entry :seon.ref/link-entry]]]
+                      [:seon.ref/spans [:vector [:or :seon.ref/span-entry :seon.ref/link-entry :seon.ref/word-entry]]]
+                      [:seon.ref/code-blocks [:vector :seon.ref/code-block]]
+                      [:seon.ref/first-paragraph {:optional true} :seon.ref/first-paragraph]
                       [:seon.ref/line-count :seon.ref/line-count]]
+           :docstring [:map {:description "A docstring's summary (its first paragraph's first sentence), the body after it and its Example section's code; an empty part is absent. Producer: seon.ref/docstring."}
+                       [:summary :string] [:body {:optional true} [:string {:min 1}]] [:example {:optional true} [:string {:min 1}]]]
+           :resolve-only [:= {:description "The candidate is a prose word or an unqualified span: a reference only when it names an entity, else prose."} true]
+           :subject [:or {:description "The entity whose own prose this is: it never cites itself."} :seon.ref/name]
            :problem-kind [:enum :unresolved :anchor-missing :line-reference]
            :candidate [:or
-                       [:map [:seon.ref/name :seon.ref/name] [:seon.ref/line {:optional true} :seon.ref/line]]
+                       [:map [:seon.ref/name :seon.ref/name] [:seon.ref/line {:optional true} :seon.ref/line]
+                        [:seon.ref/resolve-only {:optional true} :seon.ref/resolve-only]]
                        [:map [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
                         [:seon.ref/problem-kind {:optional true} [:enum :line-reference]]
-                        [:seon.ref/line {:optional true} :seon.ref/line]]]
+                        [:seon.ref/line {:optional true} :seon.ref/line]
+                        [:seon.ref/resolve-only {:optional true} :seon.ref/resolve-only]]
+                       [:map {:description "An anchor-only link in a text with no document: it names no heading."}
+                        [:seon.ref/problem-kind [:enum :anchor-missing]] [:seon.ref/anchor {:optional true} :seon.ref/anchor]]]
            :source [:map {:description "Markdown text that can carry references (an intent or docstring alone, a doc with its path), with the names and paths held beside it."}
                     [:seon.ref/text :string]
                     [:seon.ref/names {:optional true} [:set :seon.ref/name]]
                     [:seon.ref/paths {:optional true :description "Held based paths with optional #anchors, each read as a code span is."} [:set [:string {:min 1}]]]
-                    [:seon.ref/document-path {:optional true} :seon.ref/path]]
+                    [:seon.ref/document-path {:optional true} :seon.ref/path]
+                    [:seon.ref/subject {:optional true} :seon.ref/subject]]
            :problem [:map {:description "A reference that does not resolve, and why."}
                      [:seon.ref/problem-kind :seon.ref/problem-kind]
                      [:seon.ref/message :seon.ref/message]

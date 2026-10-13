@@ -65,8 +65,6 @@
   single line naming the thing destroyed (\"an operator root's whole data/
   directory\"), never the mechanism and never wrapped source prose: a newline
   reaches the reader escaped inside the rendered form."}],
-          :must-read [:set {:seon.db/index true :seon.program/definition-edge true :description "Functions this definition's :seon/must-read names: a quoted qualified symbol in code, resolved through the namespace's aliases; a typed edge, never a body reference."} :seon.program/edge-symbol],
-          :see-also [:set {:seon.db/index true :description "Functions this definition's :seon/see-also names, as :seon.fn/must-read does."} :seon.program/edge-symbol],
           :references [:set {:seon.db/index true :seon.program/definition-edge true :description "Source-observed function names without a resolved call shape. Names survive target retraction; selection follows them conservatively."} :seon.program/edge-symbol],
           :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed. Analyzer usages with :clj-kondo/unknown-namespace have no target identity and cannot enter this target-keyed relation."} :seon.program/edge-symbol],
           :writes
@@ -164,7 +162,7 @@
            [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
            [:seon.fn/writes {:optional true} :seon.fn/writes]
            [:seon.fn/keywords {:optional true} :seon.fn/keywords]
-           [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read] [:seon.fn/see-also {:optional true} :seon.fn/see-also]
+           [:seon.task/tasks {:optional true} :seon.task/tasks]
            [:seon.fn/arities {:optional true} :seon.fn/arities]
            [:seon.fn/workload {:optional true} :seon.fn/workload]
            [:seon.fn/external-sink

@@ -944,9 +944,12 @@
      ::links       - Vector of link maps
      ::sections    - Vector of section maps
 
-   Example:
+   ## Example
+
+   ```clojure
      (parse {::content \"---\\ntype: component\\n---\\n# Title\\n\\nBody\"})
-   Returns the original content, frontmatter, headings, links, and sections."
+   Returns the original content, frontmatter, headings, links, and sections.
+   ```"
   {:malli/schema [:=> [:cat :seon.dev.markdown/parse-request] :seon.dev.markdown/document]}
   [{::keys [content]}]
   (let [[frontmatter _remaining _fm-end-line] (parse-frontmatter content)
@@ -976,9 +979,12 @@
      ::violations - Vector of violation maps
      ::document   - Parsed document structure
 
-   Example:
+   ## Example
+
+   ```clojure
      (validate {::content \"# Test\\n\"})
-   Returns validity, violations, and the parsed document."
+   Returns validity, violations, and the parsed document.
+   ```"
   {:malli/schema
    [:=> [:cat :seon.dev.markdown/validate-request] :seon.dev.markdown/validate-response]}
   [{::keys [content rules gitlinks vault-root file-path]}]
@@ -1013,9 +1019,12 @@
    Response keys:
      Same as validate
 
-   Example:
+   ## Example
+
+   ```clojure
      (validate-file {::file-path \"docs/seon/components/database.md\"
-                     ::vault-root \"docs\"})"
+                     ::vault-root \"docs\"})
+   ```"
   {:malli/schema
    [:=> [:cat :seon.dev.markdown/validate-file-request] :seon.dev.markdown/validate-response]}
   [{::keys [file-path vault-root repository-root]}]
@@ -1093,8 +1102,11 @@
    Response keys:
      ::formatted - Formatted string
 
-   Example:
-     (format-violations {::violations [...] ::max-length 500})"
+   ## Example
+
+   ```clojure
+     (format-violations {::violations [...] ::max-length 500})
+   ```"
   {:malli/schema
    [:=>
     [:cat :seon.dev.markdown/format-violations-request]
@@ -1145,9 +1157,12 @@
      ::content     - Fixed content
      ::fixed-count - Number of fixes applied
 
-   Example:
+   ## Example
+
+   ```clojure
      (fix {::content \"# No blank after\\ntext\"})
-   Returns the corrected content and the number of formatting fixes."
+   Returns the corrected content and the number of formatting fixes.
+   ```"
   {:malli/schema [:=> [:cat :seon.dev.markdown/fix-request] :seon.dev.markdown/fix-response]}
   [{::keys [content]}]
   (reduce

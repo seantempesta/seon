@@ -31,8 +31,11 @@
   :my.shell/stderr with the argv and cwd. Optional stdin is one of
   :my.shell/stdin-text, :my.shell/stdin-bytes or :seon.blob/digest (a blob).
 
-  Example:
-  (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"] :my.shell/cwd \".\"})"
+  ## Example
+
+  ```clojure
+  (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"] :my.shell/cwd \".\"})
+  ```"
   {:malli/schema
    [:=> [:cat :my.shell/run-request]
     [:or :my.shell/run-result :my.shell/tool-error]]

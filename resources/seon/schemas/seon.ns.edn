@@ -30,7 +30,7 @@
            [:seon.ns/aliases {:optional true} :seon.ns/aliases]
            [:seon.ns/imports {:optional true} :seon.ns/imports]
            [:seon.ns/refers {:optional true} :seon.ns/refers]
-           [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read] [:seon.fn/see-also {:optional true} :seon.fn/see-also]
+           [:seon.task/tasks {:optional true} :seon.task/tasks]
            [:seon.ns/steward
             {:optional true
              :seon.program/written-by seon.cluster.agent/steward-call}

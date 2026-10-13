@@ -550,8 +550,11 @@
   does. A test with NO program row has no known call graph and the answer is
   the typed unknown — absence of edges is never read as safe.
 
-  Example:
-  (seon.test/host (seon.db/db) \"seon.cluster.boot-test/a-real-boot\")"
+  ## Example
+
+  ```clojure
+  (seon.test/host (seon.db/db) \"seon.cluster.boot-test/a-real-boot\")
+  ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
                   [:or :seon.test/host-report :seon.error/value]]}
   [database test-symbol]

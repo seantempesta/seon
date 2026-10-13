@@ -778,7 +778,9 @@
   attribute plan does); only refused members are retracted, by their native
   `[e a v]`. Work is one AEVT range read of the attribute.
 
-  Edge cases: a `[:vector …]` many attribute whose declaration is unchanged
+  ## Edge cases
+
+  a `[:vector …]` many attribute whose declaration is unchanged
   retracts nothing (validating a set against it refused every value). An
   element held in a vector cell is retracted from its parent, `[:db/retract
   parent a v]`, so the vector request renumbers the survivors instead of
@@ -2232,7 +2234,9 @@
   that `database` (that commit's value) publishes carries the published digest,
   else nil. A loaded file the commit does not publish is no program of it.
 
-  Costs: one indexed read per loaded file (about 500 at boot)."
+  ## Costs
+
+  one indexed read per loaded file (about 500 at boot)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id
                        :seon.source/relative-file-digests]
                   [:maybe [:map [:seon.source/commit-id :seon.source/commit-id]]]]}
@@ -2329,7 +2333,9 @@
   (an adoption failed mid-reload) or the adopted commit is another store's (a
   fixture's root), so every reached declaration names another analyzer.
 
-  Costs: one indexed read of the adopted commit's file digests; no projection
+  ## Costs
+
+  one indexed read of the adopted commit's file digests; no projection
   and no program-wide read."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.source/relative-file-digests]}
   [store]
@@ -2907,11 +2913,15 @@
   entities then adopt it on a fork of its branch (`rehearsal-adoption!`). A
   refusal is returned as the error value boot would have stopped on.
 
-  Known issues: host code does not reload, so a candidate's changed boot or
+  ## Known issues
+
+  host code does not reload, so a candidate's changed boot or
   publication code is not exercised (a boot write naming an attribute the
   cluster adopts only after boot passes here and refuses at boot).
 
-  Costs: proportional to the files that differ from the published program,
+  ## Costs
+
+  proportional to the files that differ from the published program,
   plus one copy of the analyzer cache (about 6 MB, 0.2 s); the overlay holds the
   rehearsal's writes in heap until it is dropped. Measured
   2026-09-28 on default, unarmed rehearsal code: HEAD 1.6 s, one changed test

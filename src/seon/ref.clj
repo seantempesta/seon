@@ -2,7 +2,8 @@
   "References in Markdown text (a task intent, a doc, a docstring), found by one
   parse and resolved by one rule: a code span is a candidate name or path, a
   link is a path."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
             [malli.error :as me]
@@ -14,12 +15,11 @@
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.lookup :as lookup]
             [seon.test.cache :as test.cache])
   (:import [java.net URI URISyntaxException]
            [org.commonmark.ext.front.matter YamlFrontMatterExtension]
            [org.commonmark.ext.heading.anchor IdGenerator]
-           [org.commonmark.node AbstractVisitor Code FencedCodeBlock Heading IndentedCodeBlock Link Node SourceSpan]
+           [org.commonmark.node AbstractVisitor Code FencedCodeBlock Heading IndentedCodeBlock Link Node Paragraph SourceSpan Text]
            [org.commonmark.parser IncludeSourceSpans Parser]
            [org.commonmark.renderer.text TextContentRenderer]))
 
@@ -37,15 +37,34 @@
 
 (def ^:private ^TextContentRenderer text-renderer (.build (TextContentRenderer/builder)))
 
+(defn- words
+  "The whitespace-separated words of prose `text`, with the punctuation around a word left off."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [^String text]
+  (let [opening (set "([{\"'`")
+        closing (set ".,;:!?)]}\"'`")
+        trimmed (fn [^String word]
+                  (let [from (count (take-while opening word))
+                        to (- (count word) (count (take-while closing (reverse word))))]
+                    (when (< from to) (subs word from to))))]
+    (into [] (comp (partition-by #(Character/isWhitespace (char %)))
+                   (remove #(Character/isWhitespace (char (first %))))
+                   (keep #(trimmed (apply str %))))
+          text)))
+
 (defn- parsed
-  "The headings and the code spans and links of `text`, in document order."
+  "The headings, the code spans, links and bare prose words of `text` in document order, its first paragraph's lines
+  and its fenced code blocks."
   {:malli/schema [:=> [:cat :string] :seon.ref/document]}
   [^String text]
   (let [ids (.build (IdGenerator/builder))
         headings (java.util.ArrayList.)
         spans (java.util.ArrayList.)
+        blocks (java.util.ArrayList.)
+        paragraph (volatile! nil)
         ;; commonmark's 0-based line index as the line an editor shows
-        line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node)))))]
+        line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node)))))
+        last-line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (last (.getSourceSpans node)))))]
     (.accept (.parse parser text)
              (proxy [AbstractVisitor] []
                (visit [node]
@@ -54,16 +73,26 @@
                              (.add headings {:seon.ref/level (.getLevel ^Heading node) :seon.ref/heading heading
                                              :seon.ref/anchor (.generateId ids heading) :seon.ref/line (line node)})
                              (proxy-super visitChildren node))
+                   Paragraph (do (when-not @paragraph
+                                   (vreset! paragraph {:seon.ref/line (line node) :seon.ref/end-line (last-line node)}))
+                                 (proxy-super visitChildren node))
                    Code (.add spans {:seon.ref/span (.getLiteral ^Code node) :seon.ref/line (line node)})
                    Link (do (.add spans {:seon.ref/link (.getDestination ^Link node) :seon.ref/line (line node)})
                             (proxy-super visitChildren node))
+                   ;; a prose word is a candidate only when it names an entity (`answer`)
+                   Text (let [at (line node)]
+                          ;; only a word with a `/` can be a qualified name or a based path
+                          (doseq [word (words (.getLiteral ^Text node)) :when (str/includes? word "/")]
+                            (.add spans {:seon.ref/word word :seon.ref/line at})))
                    ;; code is never a reference
-                   FencedCodeBlock nil
+                   FencedCodeBlock (.add blocks {:seon.ref/code (.getLiteral ^FencedCodeBlock node) :seon.ref/line (line node)})
                    IndentedCodeBlock nil
                    (proxy-super visitChildren node)))))
-    {:seon.ref/headings (vec headings)
-     :seon.ref/spans (vec spans)
-     :seon.ref/line-count (count (str/split-lines text))}))
+    (cond-> {:seon.ref/headings (vec headings)
+             :seon.ref/spans (vec spans)
+             :seon.ref/code-blocks (vec blocks)
+             :seon.ref/line-count (count (str/split-lines text))}
+      @paragraph (assoc :seon.ref/first-paragraph @paragraph))))
 
 (defn document
   "Markdown text's headings and reference candidates, parsed once per digest."
@@ -72,6 +101,78 @@
   (cache/lookup ::document (schema/sha-256 [(.getBytes text "UTF-8")])
                 #(* 64 (+ (count (:seon.ref/headings %)) (count (:seon.ref/spans %))))
                 #(parsed text)))
+
+;;; ---------------------------------------------------------------------------
+;;; A docstring's parts, read from its one parse
+;;; ---------------------------------------------------------------------------
+
+(defn- first-sentence
+  "The first sentence of `flat` prose and the text after it; a period after an abbreviation ends no sentence."
+  {:malli/schema [:=> [:cat :string] [:tuple :string :string]]}
+  [flat]
+  (let [abbreviations #{"e.g." "i.e." "etc." "vs."}
+        stop (loop [from 0]
+               (let [stop (str/index-of flat ". " from)]
+                 (cond
+                   (nil? stop) nil
+                   (some #(str/ends-with? (subs flat 0 (inc stop)) %) abbreviations) (recur (inc stop))
+                   :else stop)))]
+    (if stop [(subs flat 0 (inc stop)) (str/trim (subs flat (+ stop 2)))] [flat ""])))
+
+(defn docstring
+  "A docstring's summary (the first sentence of its first paragraph), the body after it and the code of its
+  `## Example` or `## Examples` section, each read from the one parse (`seon.ref/document`); an empty part is absent."
+  {:malli/schema [:=> [:cat :string] :seon.ref/docstring]}
+  [^String text]
+  (let [{:seon.ref/keys [headings code-blocks first-paragraph line-count]} (document text)
+        lines (mapv str/trim (str/split-lines text))
+        line-text #(get lines (dec %) "")
+        {from :seon.ref/line to :seon.ref/end-line} first-paragraph
+        [summary leftover] (if from (first-sentence (str/join " " (map line-text (range from (inc to))))) ["" ""])
+        example (last (filter #(#{"Example" "Examples"} (:seon.ref/heading %)) headings))
+        example-end (when example
+                      (or (some #(when (and (> (:seon.ref/line %) (:seon.ref/line example))
+                                            (<= (:seon.ref/level %) (:seon.ref/level example)))
+                                   (:seon.ref/line %))
+                                headings)
+                          (inc line-count)))
+        inside? #(and example (<= (:seon.ref/line example) % (dec example-end)))
+        code (str/trim (str/join "\n" (keep #(when (inside? (:seon.ref/line %)) (:seon.ref/code %)) code-blocks)))
+        body (str/trim (str/join "\n" (cons leftover (keep #(when-not (inside? %) (line-text %))
+                                                           (range (inc (or to 0)) (inc (count lines)))))))]
+    (cond-> {:summary summary}
+      (seq body) (assoc :body body)
+      (seq code) (assoc :example code))))
+
+;;; ---------------------------------------------------------------------------
+;;; A schema's documentation
+;;; ---------------------------------------------------------------------------
+
+(defn documentation-unavailable
+  "The refusal for a reference no public documentation answers."
+  {:malli/schema [:=> [:cat :seon.sci.eval/authored-reference] :seon.sci.eval/documentation-unavailable-error]}
+  [requested]
+  (refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.ref/documentation-unavailable
+   {:seon.error/message "No public documentation is available; request an installed public declaration."
+    :seon.error/offending requested
+    :seon.sci.eval/documentation-unavailable requested
+    :seon.error/member :seon.fn/sym
+    :seon.error/expected :seon.sci.eval/public-documentation}))
+
+(defn schema-documentation
+  "The declared form of the schema named `key`, with its description property."
+  {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
+                  [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [database key authored]
+  (let [row (db/pull database [:seon.schema/key :seon.schema/form] [:seon.schema/key key])]
+    (cond
+      (db/read-refusal? row) row
+      (not (:seon.schema/form row)) (documentation-unavailable authored)
+      :else
+      (let [form (edn/read-string (:seon.schema/form row))
+            description (when (and (vector? form) (map? (second form))) (:description (second form)))]
+        (cond-> {:key key :form form}
+          description (assoc :description description))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Candidates
@@ -125,21 +226,42 @@
                        ;; a span that does not read is prose
                        (catch Exception _ nil))
             [form & more] forms]
-        ;; only a span of exactly one qualified symbol or keyword is a name
-        (when (and (nil? more) (or (qualified-symbol? form) (qualified-keyword? form)))
-          {:seon.ref/name form})))))
+        ;; only a span of exactly one qualified symbol or keyword is a name; a dotted bare symbol may name a namespace
+        (cond
+          (some? more) nil
+          (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
+          (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 
 (defn- candidate
-  "One span or link read as a reference: a qualified name, a based path with an optional anchor, a line citation, or nil (prose)."
-  {:malli/schema [:=> [:cat [:set :string] [:maybe :seon.ref/path] [:or :seon.ref/span-entry :seon.ref/link-entry]]
+  "One span, link or prose word read as a reference: a qualified name, a namespace name, a based path with an
+  optional anchor, a line citation, an anchor with no document (a problem), or nil (prose). A prose word or an
+  unqualified span is only resolve-only: it is a reference when it names an entity, else prose."
+  {:malli/schema [:=> [:cat [:set :string] [:maybe :seon.ref/path] [:or :seon.ref/span-entry :seon.ref/link-entry :seon.ref/word-entry]]
                   [:maybe :seon.ref/candidate]]}
   [roots document-path entry]
   (if-let [destination (:seon.ref/link entry)]
     (if (str/starts-with? destination "#")
-      ;; an anchor alone names the document itself
-      (when document-path (relative document-path (subs destination 1)))
+      ;; an anchor alone names the document itself; with no document it names nothing
+      (if document-path
+        (relative document-path (subs destination 1))
+        (cond-> {:seon.ref/problem-kind :anchor-missing}
+          (< 1 (count destination)) (assoc :seon.ref/anchor (subs destination 1))))
       (link-candidate document-path destination))
-    (span-candidate roots (:seon.ref/span entry))))
+    (if-let [word (:seon.ref/word entry)]
+      (when-let [found (span-candidate roots word)]
+        (when-not (simple-symbol? (:seon.ref/name found)) (assoc found :seon.ref/resolve-only true)))
+      (span-candidate roots (:seon.ref/span entry)))))
+
+(defn- candidates
+  "The distinct candidates of `entries` in first-seen order; one is resolve-only only when every mention of it is."
+  {:malli/schema [:=> [:cat [:sequential :seon.ref/candidate]] [:vector :seon.ref/candidate]]}
+  [found]
+  (let [identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
+        explicit (into #{} (comp (remove :seon.ref/resolve-only) (map identity-of)) found)
+        first-of (reduce (fn [kept c] (cond-> kept (not (contains? kept (identity-of c))) (assoc (identity-of c) c))) {} found)]
+    (into [] (comp (map identity-of) (distinct)
+                   (map #(cond-> (first-of %) (explicit %) (dissoc :seon.ref/resolve-only))))
+          found)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Resolution
@@ -176,7 +298,7 @@
     (if (or v unloaded)
       (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference) (list 'clojure.repl/source reference)]}
         arglists (assoc :arglists arglists)
-        doc (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts doc)))))
+        doc (assoc :doc (first (str/split-lines (:summary (docstring doc)))))
         pin (assoc :seon.ref/pin pin))
       {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
 
@@ -193,19 +315,38 @@
                                                   home
                                                   (or (some-> (get aliases requested) ns-name) requested)))})))
 
+(defn- namespace-name
+  "A namespace named `reference`, stored or loaded on the host, as its name, doc line and the form that lists it;
+  nil when no namespace has that name."
+  {:malli/schema [:=> [:cat :seon.db/database-value simple-symbol?] [:or :nil :seon.ref/resolved-name :seon.error/value]]}
+  [database reference]
+  (let [found (db/pull database [:seon.ns/name :seon.ns/doc] [:seon.ns/name reference])
+        loaded (find-ns reference)
+        doc (or (:seon.ns/doc found) (some-> loaded meta :doc))]
+    (cond
+      (:seon.error/at found) found
+      (or (:seon.ns/name found) loaded)
+      (cond-> {:seon.ref/name reference :seon.render/operations [(list 'dir reference)]}
+        (seq doc) (assoc :doc (first (str/split-lines (:summary (docstring doc)))))))))
+
 (defn brief
   "One name a referent's own content names, shown one level: its name, a one-line summary and the form that reads
   it; never its content."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]}
   [database reference]
   (let [read-form (list 'my.program/source (if (keyword? reference) reference (list 'quote reference)))
-        summary #(first (str/split-lines (:summary (lookup/docstring-parts %))))]
-    (if (qualified-keyword? reference)
-      (let [found (lookup/schema-documentation database reference reference)]
+        summary #(first (str/split-lines (:summary (docstring %))))]
+    (cond
+      (simple-symbol? reference)
+      (or (namespace-name database reference)
+          {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})
+      (qualified-keyword? reference)
+      (let [found (schema-documentation database reference reference)]
         (cond (:seon.sci.eval/documentation-unavailable found)
               {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
               (:seon.error/at found) found
               :else {:seon.ref/name reference :seon.render/operations [read-form]}))
+      :else
       (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/intent :seon.task/instructions]
                            (cond (seq (db/datoms database :avet :seon.fn/sym reference)) [:seon.fn/sym reference]
                                  (seq (db/datoms database :avet :seon.test/sym reference)) [:seon.test/sym reference]
@@ -224,6 +365,8 @@
                     (cond-> (select-keys library [:seon.ref/name :doc])
                       true (assoc :seon.render/operations [(list 'doc reference)])))))))))
 
+(declare named?)
+
 (defn- inner
   "The references a referent's own content makes, each shown one level (`brief`): the names its `text` cites by
   the one rule and the program functions it `calls`, in that order, the `excluded` names (itself) left out; nil
@@ -232,10 +375,12 @@
                   [:or :nil [:vector [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]]]}
   [database excluded text calls]
   (let [roots (set (.list (io/file (fs/source-directory))))
-        cited (keep #(:seon.ref/name (candidate roots nil %)) (:seon.ref/spans (document text)))
+        cited (filter :seon.ref/name (candidates (keep #(candidate roots nil %) (:seon.ref/spans (document text)))))
+        only (into #{} (comp (filter :seon.ref/resolve-only) (map :seon.ref/name)) cited)
         program (filter #(seq (db/datoms database :avet :seon.fn/sym %)) (sort-by str calls))
-        names (into [] (comp (remove excluded) (distinct)) (concat cited program))]
-    (when (seq names) (mapv #(brief database %) names))))
+        names (into [] (comp (remove excluded) (distinct)) (concat (map :seon.ref/name cited) program))]
+    ;; a resolve-only name that names nothing is prose
+    (not-empty (into [] (keep #(when-not (and (only %) (not (named? database %))) (brief database %))) names))))
 
 (defn- with-inner
   "`entry` with the references its own content makes, one level, when it makes any."
@@ -254,8 +399,10 @@
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
                     :seon.ref/message (problem-messages :unresolved)}
         subject (list 'quote reference)]
-    (if (qualified-keyword? reference)
-      (let [found (lookup/schema-documentation database reference reference)
+    (cond
+      (simple-symbol? reference) (or (namespace-name database reference) unresolved)
+      (qualified-keyword? reference)
+      (let [found (schema-documentation database reference reference)
             form (:form found)
             properties (when (and (vector? form) (map? (second form))) (second form))]
         (cond
@@ -263,6 +410,7 @@
           (:seon.error/at found) found
           :else (with-inner {:seon.ref/name reference :seon.ref/schema-form form}
                   (inner database #{reference} (:description properties "") #{}))))
+      :else
       (let [function (db/pull database [:seon.fn/sym :seon.fn/source :seon.fn/arglists :seon.fn/spec :seon.fn/doc :seon.fn/calls]
                               [:seon.fn/sym reference])
             test-entity (when-not (:seon.fn/sym function)
@@ -277,7 +425,7 @@
               (:seon.fn/source function) (assoc :seon.fn/source (:seon.fn/source function))
               ;; a declaration with no stored source shows what it declares
               (and (nil? (:seon.fn/source function)) (:seon.fn/doc function))
-              (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
+              (assoc :doc (first (str/split-lines (:summary (docstring (:seon.fn/doc function))))))
               (and (nil? (:seon.fn/source function)) (:seon.fn/arglists function))
               (assoc :arglists (stored-form reference (:seon.fn/arglists function)))
               (:seon.fn/spec function) (assoc :malli/schema (stored-form reference (:seon.fn/spec function)))
@@ -294,17 +442,40 @@
                                          (str/join "\n\n" (keep task [:seon.task/intent :seon.task/instructions])) #{}))
           :else (library-name reference))))))
 
-(declare resolve-path)
+(declare resolve-path based-file)
+
+(defn- named?
+  "Does resolve-only `reference` name an entity on `database`, by its identity attribute's index, or a Var loaded on
+  the host? An index probe, so a prose word that names nothing costs no resolution."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name] :boolean]}
+  [database reference]
+  (let [indexed? #(seq (db/datoms database :avet % reference))]
+    (boolean
+     (cond
+       (keyword? reference) (indexed? :seon.schema/key)
+       (simple-symbol? reference) (or (indexed? :seon.ns/name) (find-ns reference))
+       :else (or (indexed? :seon.fn/sym) (indexed? :seon.test/sym) (indexed? :seon.task/sym)
+                 (and (find-ns (symbol (namespace reference))) (find-var reference)))))))
+
+(defn- directory?
+  "Does based `path` name a directory? A directory is not an entity."
+  {:malli/schema [:=> [:cat :seon.ref/path] :boolean]}
+  [path]
+  (boolean (some-> (based-file path) :seon.ref/file io/file .isDirectory)))
 
 (defn- answer
-  "One candidate resolved on `database`, or its problem with what it means."
+  "One candidate resolved on `database`, or its problem with what it means; nil for a directory, and for a
+  resolve-only candidate that names nothing (it is prose)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
-                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database {:seon.ref/keys [problem-kind] reference :seon.ref/name :as found}]
-  (cond
-    reference (resolve-name database reference)
-    problem-kind (assoc found :seon.ref/message (problem-messages problem-kind))
-    :else (resolve-path database found)))
+                  [:or :nil :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database {:seon.ref/keys [problem-kind resolve-only path] reference :seon.ref/name :as found}]
+  (let [resolved (cond
+                   (and resolve-only reference (not (named? database reference))) nil
+                   reference (resolve-name database reference)
+                   problem-kind (assoc (dissoc found :seon.ref/resolve-only) :seon.ref/message (problem-messages problem-kind))
+                   (directory? path) nil
+                   :else (resolve-path database found))]
+    (when-not (and resolve-only (:seon.ref/problem-kind resolved)) resolved)))
 
 (defn- cite-once
   "`answers` with each name shown once: a name resolved at top level, or already shown below an earlier referent, is
@@ -324,31 +495,36 @@
              [shown []] answers))))
 
 (defn references
-  "Each reference `source`'s text makes, resolved on `database` or a problem.
+  "Each reference `source`'s text makes, resolved on `database` or a problem; its subject never cites itself.
 
   Held names come first, sorted, then the held paths (each read as a code span is), then the text's in first-seen
-  order."
+  order: code spans and links, and the prose words that name an entity."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.ref/keys [text names paths document-path]}]
+  [database {:seon.ref/keys [text names paths document-path subject]}]
   (let [roots (set (.list (io/file (fs/source-directory))))
         held (concat (map (fn [reference] {:seon.ref/name reference}) (sort names))
                      (keep #(span-candidate roots %) (sort paths)))
-        found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))
-        identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)]
-    (->> (concat held found)
-         (reduce (fn [[seen kept] c] (if (seen (identity-of c)) [seen kept] [(conj seen (identity-of c)) (conj kept c)]))
-                 [#{} []])
-         second
-         (mapv #(answer database %))
+        found (keep #(candidate roots document-path %) (:seon.ref/spans (document text)))]
+    (->> (candidates (concat held (remove #(and subject (= subject (:seon.ref/name %))) found)))
+         (into [] (keep #(answer database %)))
          cite-once)))
 
 (defn names
-  "The qualified symbols `text` cites as code spans, read by the one rule `references` resolves."
+  "The qualified symbols `text` cites, read by the one rule `references` resolves: each code span naming one, and
+  each prose word naming one in a namespace whose source the loaded commit holds, so the same text always cites
+  the same names."
   {:malli/schema [:=> [:cat :string] [:set :qualified-symbol]]}
   [text]
-  (let [roots (set (.list (io/file (fs/source-directory))))]
-    (into #{} (comp (keep #(candidate roots nil %)) (keep :seon.ref/name) (filter qualified-symbol?))
+  (let [source (fs/source-directory)
+        roots (set (.list (io/file source)))
+        sourced? (fn [cited]
+                  (let [stem (str/replace (munge (namespace cited)) "." "/")]
+                    (some (fn [[root extension]] (.isFile (io/file source root (str stem extension))))
+                          (for [root ["src" "test" "script"] extension [".clj" ".cljc"]] [root extension]))))]
+    (into #{} (comp (keep #(candidate roots nil %))
+                    (filter (comp qualified-symbol? :seon.ref/name))
+                    (keep (fn [{cited :seon.ref/name only :seon.ref/resolve-only}] (when (or (not only) (sourced? cited)) cited))))
           (:seon.ref/spans (document text)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -465,5 +641,6 @@
       (-> found
           (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
           (assoc :seon.render/operations [(list 'my.fs/section reference)])
-          (with-inner (inner database #{} (:seon.ref/text found) #{}))))))
+          ;; only a Markdown document's text is prose; a source or data file is code
+          (with-inner (when (str/ends-with? path ".md") (inner database #{} (:seon.ref/text found) #{})))))))
 

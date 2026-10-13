@@ -7,7 +7,7 @@
   (:require [clojure.string :as str]
             [seon.error.refusal]
             [seon.db :as db]
-            [seon.sci.lookup :as lookup]
+            [seon.ref :as ref]
             [seon.sci.reader :as reader]
             [seon.task :as task]
             [seon.render.route :as route]))
@@ -247,7 +247,7 @@
      :seon.repl/rows (mapv (fn [{function-name :seon.fn/sym arglists :seon.fn/arglists doc :seon.fn/doc}]
                              [function-name
                               (when arglists (read-arglists namespace-name aliases arglists))
-                              (when doc (:summary (lookup/docstring-parts doc)))])
+                              (when doc (:summary (ref/docstring doc)))])
                            (public-rows pulled))}))
 
 (defn render-ai

@@ -580,8 +580,8 @@
     (if base (obligations main database base sym) (obligations database sym))))
 
 (defn task-edges
-  "A task's subjects (functions, namespaces) and the definitions, namespaces and tasks whose must-read (a
-  definition's) or references (a task's) name one of its subjects, over one held value; its proofs are its
+  "A task's subjects (functions, namespaces) and the tasks whose references name one of its subjects, over one
+  held value; its proofs are its
   `obligations`. The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
   [database sym]
@@ -592,8 +592,7 @@
                     (mapv (fn [[reader holder]]
                             (db/q [:find '[?h ...] :in '$ '[?target ...] :where ['?e reader '?target] ['?e holder '?h]]
                                   database (vec subjects)))
-                          [[:seon.fn/must-read :seon.fn/sym] [:seon.fn/must-read :seon.test/sym]
-                           [:seon.fn/must-read :seon.ns/name] [:seon.task/references :seon.task/sym]]))]
+                          [[:seon.task/references :seon.task/sym]]))]
     (or (some read-error subject-reads) (some read-error referrers)
         {:seon.task/subjects subjects :seon.task/referrers (set (apply concat referrers))})))
 
@@ -695,8 +694,11 @@
   waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the intent and
   instructions; a step declares its own `:seon.task/instructions` and takes the goal it omits from its subject.
 
-  Example:
-  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})"
+  ## Example
+
+  ```clojure
+  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})
+  ```"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
@@ -836,9 +838,12 @@
   in its own world, and proofs already green end the attempt with no model call.
   Answers the assignment; it offers no operation, since nothing is yet worked.
 
-  Example:
+  ## Example
+
+  ```clojure
   (seon.task/assign! {:seon.task/assigned \"a1b2c3d4e5f6\" :seon.task/agent [:seon.agent/id \"mcp/fix\"]
-                      :seon.task/branch :fix})"
+                      :seon.task/branch :fix})
+  ```"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.task/assigned :seon.task/assigned]
                              [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]
                              [:seon.agent/context-source {:optional true} :seon.agent/context-source]]]
@@ -966,8 +971,11 @@
   Root's decline (`my.root/close!`) ends here; root's merge closes in its own transaction (`seon.merge/merge-tx`).
   Answers the closed assignment.
 
-  Example:
-  (seon.task/close! context \"0123456789ab\" :closed \"The change belongs in seon.db.\")"
+  ## Example
+
+  ```clojure
+  (seon.task/close! context \"0123456789ab\" :closed \"The change belongs in seon.db.\")
+  ```"
   {:malli/schema [:=> [:cat :seon.task/close-context :seon.task/assignment :seon.task/outcome [:maybe :seon.task/reason]]
                   [:or :seon.task/closed :seon.error/value]]}
   [{connection :seon.db/connection :as context} key outcome reason]
@@ -1100,7 +1108,9 @@
 
   ## Examples
 
-  (seon.task/resolution (seon.db/db) \"6cc772cb3f60\")"
+  ```clojure
+  (seon.task/resolution (seon.db/db) \"6cc772cb3f60\")
+  ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/resolution :seon.db/error-result]]}
   [database handle]

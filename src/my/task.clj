@@ -5,8 +5,11 @@
   task ends when its proofs are green. Call preparation supplies my database
   and identity.
 
-  Example:
-  (my.task/current {})"
+  ## Example
+
+  ```clojure
+  (my.task/current {})
+  ```"
   (:require [clojure.string :as str]
             [seon.context :as context]
             [seon.db :as db]
@@ -23,9 +26,11 @@
   for a Prove step, the product I owe; the latest send-back; then every other reference my task makes. Holding
   no task answers my agent id alone.
 
-  Example:
-  (my.task/current {})
+  ## Example
 
+  ```clojure
+  (my.task/current {})
+  ```
   ## Costs
 
   One assignment query and one task pull, then the proofs' reach digests and latest results on my branch and
@@ -48,9 +53,12 @@
   with `#heading` anchors. My next context resolves them. Answers the handle of the task I hold, whether a
   declaration changed, and each reference that does not resolve as its problem.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.task/refine! {:seon.task/intent \"Make `seon.db/q` answer its refusal as data; see docs/seon/specs/merge.md#1-the-merge-request.\"})
-  (my.task/refine! {:seon.task/instructions \"The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`.\"})"
+  (my.task/refine! {:seon.task/instructions \"The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`.\"})
+  ```"
   {:malli/schema [:=> [:cat :my.task/refine-request]
                   [:or :my.task/refined :seon.task/refused-error :seon.task/conflict-error :my.task/no-task-error :seon.error/value]]}
   [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent instructions :seon.task/instructions
@@ -103,10 +111,13 @@
   `:seon.task.attempt/target`, or `:given-back` without one
   (`seon.turn/task-end`), and root hears it in my end message.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.task/send-back! {:my.task/reason \"The proof asserts the old shape; the intent asks for the new one.\"
                        :my.task/target 'seon.task/an-example-task
-                       :my.task/counterexample {:expected 1 :actual 2}})"
+                       :my.task/counterexample {:expected 1 :actual 2}})
+  ```"
   {:malli/schema [:=> [:cat :my.task/send-back-request] [:or :my.task/sent-back :seon.error/value]]}
   [{reason :my.task/reason :as request}]
   (let [completed (run/complete reason)]

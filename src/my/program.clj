@@ -4,8 +4,11 @@
   Reads use one supplied database value. Writes check those facts before
   changing SCI; referrers, past reach and unknown coverage remain separate.
 
-  Example:
-  (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
+  ## Example
+
+  ```clojure
+  (my.program/breaks {:seon.program/subject 'seon.turn/open?})
+  ```"
   (:require [seon.error.refusal]
             [seon.db :as db]
             [clojure.set :as set]
@@ -16,7 +19,7 @@
             [seon.render.value :as render.value]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
-            [seon.sci.lookup]
+            [seon.ref]
             [seon.test]))
 
 (defn- read-result
@@ -140,8 +143,12 @@
   "Read each direct caller once, as a call site with its declaration span and recorded call arity, and the subject's declared arities once.
 
   Empty groups are absent; unknown coverage remains explicit. A bare subject reads the current database.
-  Example:
-  (my.program/callers 'seon.turn/open?)"
+
+  ## Example
+
+  ```clojure
+  (my.program/callers 'seon.turn/open?)
+  ```"
   {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
@@ -157,8 +164,12 @@
   "Read the current gate set, derived by seon.fn/gate-set.
 
   This is current test selection, not recorded reach from a past test run.
-  Example:
-  (my.program/tests-reaching 'seon.turn/open?)"
+
+  ## Example
+
+  ```clojure
+  (my.program/tests-reaching 'seon.turn/open?)
+  ```"
   {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.program/subject :seon.program/subject]]
                                  :seon.program/subject]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
@@ -210,8 +221,12 @@
   "Read contract references, declared writes and literal keyword mentions.
 
   Mentions are membership evidence only, never a read or write claim.
-  Example:
-  (my.program/reads-key :seon.db/connection)"
+
+  ## Example
+
+  ```clojure
+  (my.program/reads-key :seon.db/connection)
+  ```"
   {:malli/schema [:=> [:cat [:or [:map [:seon.db/db {:optional true} :seon.db/database-value] [:seon.schema/key :seon.schema/key]]
                                  :seon.schema/key]]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
@@ -255,8 +270,11 @@
   argument count are counted under :seon.program/unknown. A supplied contract
   is advisory: argument shapes require the existing candidate test gate.
 
-  Example:
-  (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
+  ## Example
+
+  ```clojure
+  (my.program/breaks {:seon.program/subject 'seon.turn/open?})
+  ```"
   {:seon/tasks #{'my.program/breaks-plans-a-contract-change-as-a-retraction}
    :malli/schema [:=> [:cat :my.program/breaks-request]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
@@ -341,8 +359,12 @@
 
   Supply :seon.db/tx for the source visible as of that transaction; omit it
   for ordered assertion and retraction events. Refs remain entity ids.
-  Example:
-  (my.program/history {:seon.program/subject 'seon.turn/open?})"
+
+  ## Example
+
+  ```clojure
+  (my.program/history {:seon.program/subject 'seon.turn/open?})
+  ```"
   {:malli/schema [:=> [:cat :my.program/history-request]
                   [:or :seon.program/history-report :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject at :seon.db/tx :as request}]
@@ -525,8 +547,11 @@
   surviving referrers. :seon.program/unknown counts call sites without a
   recorded argument count; dispatch and macro callers are not modelled.
 
-  Example:
-  (my.program/ns-unmap! 'user/helper)"
+  ## Example
+
+  ```clojure
+  (my.program/ns-unmap! 'user/helper)
+  ```"
   {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context subject]
@@ -543,8 +568,11 @@
   schema declarations refuses: declaration-only deletion would leave its
   database attributes.
 
-  Example:
-  (my.program/remove-ns! 'my.scratch)"
+  ## Example
+
+  ```clojure
+  (my.program/remove-ns! 'my.scratch)
+  ```"
   {:malli/schema [:=> [:cat :my.program/context :symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context namespace-name]
@@ -558,7 +586,12 @@
   indexed calls do not retain which alias spelling resolved their targets.
   Until seam B lands this refusal comes from breaks alone; dispatch and macro
   callers are not modelled.
-  Example: (my.program/ns-unalias! 'my.scratch 'str)"
+
+  ## Example
+
+  ```clojure
+  (my.program/ns-unalias! 'my.scratch 'str)
+  ```"
   {:malli/schema [:=> [:cat :my.program/context :symbol :symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context namespace-name alias-name]
@@ -681,11 +714,17 @@
 (defn source
   "Read a declaration's source, a schema keyword's definition or a namespace's declarations.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.program/source 'seon.task/create!)
   (my.program/source :seon.task/id)
   (my.program/source 'seon.task)
-  Errors: an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
+  ```
+
+  ## Errors
+
+  an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
                   [:or :my.program/declaration-source :seon.sci.eval/schema-doc
                    [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
@@ -693,7 +732,7 @@
                    :seon.program/not-found-error]]}
   [database subject]
   (cond
-    (keyword? subject) (let [found (seon.sci.lookup/schema-documentation database subject subject)]
+    (keyword? subject) (let [found (seon.ref/schema-documentation database subject subject)]
                          (if (:form found) found (not-found database subject)))
     (simple-symbol? subject) (namespace-declarations database subject)
     :else (declaration-source database subject)))
@@ -731,10 +770,17 @@
 
   Ranked: name matches, then functions before tests, then most hits. The query is the text, or
   {:text text :limit n}. :line counts from the declaration's first line (my.program/source gives its file line).
-  Example:
+
+  ## Example
+
+  ```clojure
   (my.program/search :seon.render/form)
   (my.program/search {:text \"java.util.Date.\" :limit 25})
-  Costs: scans every indexed source once; a few hundred ms."
+  ```
+
+  ## Costs
+
+  scans every indexed source once; a few hundred ms."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:or :string :keyword [:map [:text [:or :string :keyword]] [:limit {:optional true} [:int {:min 1}]]]]]
                   :map]}
@@ -751,8 +797,11 @@
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).
 
-  Example:
-  (my.program/sizes 'seon.task)"
+  ## Example
+
+  ```clojure
+  (my.program/sizes 'seon.task)
+  ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :map]}
   [database ns-sym]
   (let [rows (->> (concat (db/q database '[:find ?s ?src :in $ ?n :where [?ns :seon.ns/name ?n] [?e :seon.fn/ns ?ns]
@@ -843,10 +892,19 @@
   (`my.program/declaration-diff`). The same comparison merge takes
   (`seon.cluster.source/compare-branch`).
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.program/diff)
-  Edge cases: holding the cluster's own branch answers empty.
-  Costs: one fork-point read and digests of the changed declarations only."
+  ```
+
+  ## Edge cases
+
+  holding the cluster's own branch answers empty.
+
+  ## Costs
+
+  one fork-point read and digests of the changed declarations only."
   {:malli/schema [:=> [:cat :my.program/context] [:or :map :seon.error/value]]}
   [context]
   (let [comparison (head-comparison context)]
@@ -862,10 +920,19 @@
   (`seon.fs/checkout-root?`): a relative path or one inside `data/source`
   is refused (`:root-refused`) and nothing is written.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.program/write-branch! {:seon.fn/root \"/Users/me/src/project\"})
-  Edge cases: holding the cluster's own branch answers the empty difference; nothing is written.
-  Costs: one fork-point read (as `my.program/diff`) and one analysis per written file."
+  ```
+
+  ## Edge cases
+
+  holding the cluster's own branch answers the empty difference; nothing is written.
+
+  ## Costs
+
+  one fork-point read (as `my.program/diff`) and one analysis per written file."
   {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.fn/root :seon.fn/root]
                              [:seon.program/identities {:optional true} :seon.program/identity-set]]]
                   [:or :seon.source/written :seon.source/write-back-error :seon.error/value]]}
@@ -889,11 +956,23 @@
 (defn declaration-diff
   "One declaration's source on the cluster head (:before) and on your branch (:after).
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.program/declaration-diff 'my.program/source)
-  Errors: a symbol neither the head nor your branch declares returns a not-found error.
-  Edge cases: holding the cluster's own branch answers the empty difference.
-  Costs: as `my.program/diff`."
+  ```
+
+  ## Errors
+
+  a symbol neither the head nor your branch declares returns a not-found error.
+
+  ## Edge cases
+
+  holding the cluster's own branch answers the empty difference.
+
+  ## Costs
+
+  as `my.program/diff`."
   {:malli/schema [:=> [:cat :my.program/context :qualified-symbol] [:or :map :seon.error/value]]}
   [context sym]
   (let [comparison (head-comparison context)]

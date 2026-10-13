@@ -242,7 +242,9 @@
 
   ## Examples
 
-      (seon.problems/open-faults (seon.db/db))"
+  ```clojure
+      (seon.problems/open-faults (seon.db/db))
+  ```"
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value]
                    [:or [:vector :seon.problems/error-signature] :seon.db/error-result]]

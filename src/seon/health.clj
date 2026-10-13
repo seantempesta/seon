@@ -294,7 +294,9 @@
 
   ## Examples
 
-      (seon.health/findings (seon.db/db) (seon.health/report {:seon.boot/cluster-name \"default\"}))"
+  ```clojure
+      (seon.health/findings (seon.db/db) (seon.health/report {:seon.boot/cluster-name \"default\"}))
+  ```"
   {:malli/schema [:=> [:cat :seon.db/database-value :map] [:vector :seon.health/finding]]}
   [database report]
   (let [projection (db/carried-projection database)
@@ -514,8 +516,9 @@
 
   ## Examples
 
+  ```clojure
       (seon.health/regressions (seon.db/db))
-
+  ```
   ## Costs
 
   Proportional to the process records stored: one query with a pull
@@ -554,8 +557,9 @@
 
   ## Examples
 
+  ```clojure
       (seon.health/report {:seon.boot/cluster-name \"default\"})
-
+  ```
   ## Costs
 
   See the namespace: warm, the Flow ping and the profile observations

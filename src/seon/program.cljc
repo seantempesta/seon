@@ -202,8 +202,11 @@
       An empty vector means this database has no overrides. JVM callers continue
       running their compiled definitions until write-back and reload.
 
-      Example:
-      (seon.program/overrides (seon.db/db connection))"
+      ## Example
+
+      ```clojure
+      (seon.program/overrides (seon.db/db connection))
+      ```"
      {:malli/schema [:=> [:cat :seon.db/database-value]
                      [:or [:vector :seon.fn/sym] :seon.db/invalid-read-error]]}
      [database]

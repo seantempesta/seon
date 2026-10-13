@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.program :as program]
             [seon.sci.eval :as evaluation]
+            [seon.ref :as ref]
             [seon.sci.lookup :as lookup]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -89,10 +90,10 @@
        (doseq [result [directory documentation missing missing-ns]]
          (is (empty? (:seon.cluster.eval/output result))))
        (is (symbol? (get-in missing [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
-       (is (= 'seon.sci.lookup/documentation-unavailable
+       (is (= 'seon.ref/documentation-unavailable
               (get-in missing [:seon.sci.admit/value :seon.error/operation])))
        (is (symbol? (get-in missing-ns [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
-       (is (= 'seon.sci.lookup/documentation-unavailable
+       (is (= 'seon.ref/documentation-unavailable
               (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
        (is (= {:schemas {} :functions []} (select-keys (:seon.sci.admit/value empty-ns) [:schemas :functions])))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
@@ -365,18 +366,16 @@
        (is (= "Source not found\n" (:seon.cluster.eval/output missing)))
        (is (= stored (lookup/stored-source (db/db connection) 'my.agent/settings!)))))))
 
-(deftest an-example-ends-at-the-next-fixed-heading
-  ;; The example ran to the docstring's end, so a heading after it (Costs,
-  ;; Errors, `## Known issues`) was read as example forms (tasks eba5d142ef12,
-  ;; eaf75398383c); a one-line `Example: (form)` yielded no example.
+(deftest an-example-is-its-sections-fenced-code
+  ;; The example is the fenced code under its `## Example` heading, ending at the next heading of its level; prose and
+  ;; other sections stay in the body (tasks eba5d142ef12, eaf75398383c).
   (is (= {:summary "Read one." :example "(a 1)\n(b 2)"
-          :body "Edge cases: none.\nCosts: one query.\n\n## Known issues\n\nx"}
-         (lookup/docstring-parts
-          "Read one.\n\n  Example:\n  (a 1)\n  (b 2)\n  Edge cases: none.\n  Costs: one query.\n\n  ## Known issues\n\n  x")))
-  (is (= "(trim \"a \")" (:example (lookup/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
+          :body "## Edge cases\n\nnone.\n\n## Known issues\n\nx"}
+         (ref/docstring
+          "Read one.\n\n  ## Example\n\n  ```clojure\n  (a 1)\n  (b 2)\n  ```\n\n  ## Edge cases\n\n  none.\n\n  ## Known issues\n\n  x")))
   (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/current)"}
-         (lookup/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/current)")))
-  (is (nil? (find (lookup/docstring-parts "No example here.") :example)) "an empty section is absent"))
+         (ref/docstring "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  ## Examples\n\n  ```clojure\n  (my.task/current)\n  ```")))
+  (is (nil? (find (ref/docstring "No example here.") :example)) "an empty section is absent"))
 
 (deftest a-refused-schema-read-keeps-its-refusal
   ;; A database that has not installed the schema attributes refuses the pull;
@@ -384,7 +383,7 @@
   (let [config {:store {:backend :memory :id (random-uuid)} :schema-flexibility :read}
         _ (d/create-database config)
         connection (d/connect config)
-        refused (#'lookup/schema-documentation (d/db connection) :a/b :a/b)]
+        refused (ref/schema-documentation (d/db connection) :a/b :a/b)]
     (is (db/read-refusal? refused))
     (is (not (contains? refused :seon.sci.eval/documentation-unavailable)))
     (d/release connection)
@@ -414,7 +413,7 @@
 
 (deftest a-summary-runs-past-an-abbreviation
   (is (= "Classify one refusal (a map, e.g. an ex-info's data) by its type."
-         (:summary (seon.sci.lookup/docstring-parts "Classify one refusal (a map, e.g. an ex-info's data) by its type. Then more."))))
+         (:summary (ref/docstring "Classify one refusal (a map, e.g. an ex-info's data) by its type. Then more."))))
   (is (= "Read the head, i.e. the newest commit."
-         (:summary (seon.sci.lookup/docstring-parts "Read the head, i.e. the newest commit. Then more."))))
-  (is (= "Read one." (:summary (seon.sci.lookup/docstring-parts "Read one. Then more.")))))
+         (:summary (ref/docstring "Read the head, i.e. the newest commit. Then more."))))
+  (is (= "Read one." (:summary (ref/docstring "Read one. Then more.")))))

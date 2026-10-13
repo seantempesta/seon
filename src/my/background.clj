@@ -26,10 +26,13 @@
   [:seon.effect/id string] for poll or await. The background operation has
   its own deadline and can outlive the submitting turn.
 
-  Example:
+  ## Example
+
+  ```clojure
   (my.background/background
     (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
-                    :my.shell/cwd \".\"}))"
+                    :my.shell/cwd \".\"}))
+  ```"
   [& forms]
   (let [[execution call] (if (= 2 (count forms)) forms [nil (first forms)])]
     (if (and (<= 1 (count forms) 2)
@@ -53,11 +56,14 @@
   with :seon.effect/id and :seon.effect/request-edn, plus result or
   interruption evidence when settled. Missing work returns a flat error.
 
-  Example:
+  ## Example
+
+  ```clojure
   (let [work (my.background/background
                (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
                                :my.shell/cwd \".\"}))]
-    (my.background/poll {:my.background/result work}))"
+    (my.background/poll {:my.background/result work}))
+  ```"
   {:seon/tasks #{'seon.effect/background-poll-answers-edn-strings}
    :malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
@@ -71,12 +77,15 @@
   It does not block.
   Return that value as the form's result to pause the session.
 
-  Example:
+  ## Example
+
+  ```clojure
   (let [work (my.background/background
                (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
                                :my.shell/cwd \".\"}))]
     (my.background/await {:my.background/result work
-                          :my.turn/note \"Waiting for the process result.\"}))"
+                          :my.turn/note \"Waiting for the process result.\"}))
+  ```"
   {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result] [:my.turn/note :my.turn/note]]] [:or :my.background/receipt :my.turn/wait :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
   (background/await (:my.background/result request) (:my.turn/note request)))

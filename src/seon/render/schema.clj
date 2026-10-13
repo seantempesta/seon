@@ -30,11 +30,12 @@
 
   ## Examples
 
+  ```clojure
   (usage database :seon.task/intent [:string {:min 400}])
 
   On default 2026-09-27 this named the previous form `[:string {:min 1}]`,
   the three task schemas referencing it and `seon.task/create!`'s contract.
-
+  ```
   ## Costs
 
   Three indexed queries; no validation."

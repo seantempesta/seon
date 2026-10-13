@@ -3,8 +3,11 @@
   closing one without merging, and the task ends agents report. Call
   preparation supplies root's world.
 
-  Example:
-  (my.root/merge-requests)"
+  ## Example
+
+  ```clojure
+  (my.root/merge-requests)
+  ```"
   (:require [seon.cluster.message :as message]
             [seon.cluster.source :as source]
             [seon.context :as context]
@@ -23,8 +26,11 @@
 (defn instructions
   "The laws root applies to merge requests and agents, as data.
 
-  Example:
-  (my.root/instructions)"
+  ## Example
+
+  ```clojure
+  (my.root/instructions)
+  ```"
   {:malli/schema [:=> [:cat] :my.root/instructions]}
   []
   {:my.root/laws laws})
@@ -57,8 +63,11 @@
   `seon.merge/merge-tx`), with its task, branch, merge base and its end (main's, else its branch head's), each
   offering its merge and its close.
 
-  Example:
-  (my.root/merge-requests)"
+  ## Example
+
+  ```clojure
+  (my.root/merge-requests)
+  ```"
   {:malli/schema [:=> [:cat :my.root/merge-request-read] [:or :my.root/merge-requests :seon.db/error-result]]}
   [{database :seon.db/db}]
   (let [found (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned :seon.task/branch :seon.task/merge-base
@@ -90,8 +99,11 @@
   lifecycle pass publishes its declarations into the checkout in one git commit (`seon.merge/publish!`), then
   deletes its branch. Answers the merge, or the first refusal as data; a red gate leaves the assignment open.
 
-  Example:
-  (my.root/merge! {:seon.task/assignment \"0123456789ab\"})"
+  ## Example
+
+  ```clojure
+  (my.root/merge! {:seon.task/assignment \"0123456789ab\"})
+  ```"
   {:malli/schema [:=> [:cat :my.root/merge-request-request]
                   [:or :seon.merge/merged :seon.source/conflict-error :seon.error/value]]}
   [{context :my.program/context key :seon.task/assignment}]
@@ -107,8 +119,11 @@
   records `:closed` and deletes the source branch, closing its agent (`seon.task/close!`). Answers the closed
   assignment.
 
-  Example:
-  (my.root/close! {:seon.task/assignment \"0123456789ab\" :seon.task/reason \"The change belongs in seon.db.\"})"
+  ## Example
+
+  ```clojure
+  (my.root/close! {:seon.task/assignment \"0123456789ab\" :seon.task/reason \"The change belongs in seon.db.\"})
+  ```"
   {:malli/schema [:=> [:cat :my.root/close-request] [:or :seon.task/closed :seon.error/value]]}
   [{context :my.program/context key :seon.task/assignment reason :seon.task/reason}]
   (let [connection (:seon.db/connection context)
@@ -124,8 +139,11 @@
   for (`seon.context/ended`): the task, how it ended, its proofs, the agent's
   calls and errors, and its merge request.
 
-  Example:
-  (my.root/ended)"
+  ## Example
+
+  ```clojure
+  (my.root/ended)
+  ```"
   {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.root/ended :seon.error/value]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [items (message/inbox database agent-id)]

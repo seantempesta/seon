@@ -141,13 +141,10 @@
                  [:seon.task/sym {:optional true} :seon.task/sym]]
  :key [:string {:min 1 :description "What names a merge task: the assignment identity."}]
  :quoted-symbol [:cat [:= quote] :qualified-symbol]
- :annotation [:map {:description "Stage 1: the task and link members of one attribute map."}
-              [:seon/tasks {:optional true} [:set :seon.task/quoted-symbol]]
-              [:seon/must-read {:optional true} [:or [:vector :seon.task/quoted-symbol] [:set :seon.task/quoted-symbol]]]
-              [:seon/see-also {:optional true} [:or [:vector :seon.task/quoted-symbol] [:set :seon.task/quoted-symbol]]]]
+ :annotation [:map {:description "Stage 1: the task member of one attribute map."}
+              [:seon/tasks {:optional true} [:set :seon.task/quoted-symbol]]]
  :links [:map {:description "Stage 3: the edges one holder's annotation produces."}
-         [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read]
-         [:seon.fn/see-also {:optional true} :seon.fn/see-also]]
+         [:seon.task/tasks {:optional true} :seon.task/tasks]]
  :product [:set {:description "The deftests a Prove step supplies its successors, by symbol: authored on the step for each test it must write, joined at seon.task/obligations with the tests already tagged with a task that needs it, so a declared test no one wrote yet keeps the step from done or satisfied."} :qualified-symbol]
  :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]

@@ -561,8 +561,10 @@
 
   ## Examples
 
+  ```clojure
   (producer (ex-data refusal) refusal)
-  ;; => {:seon.error/producer seon.turn/open-call :seon.error/caller seon.turn/open-call}"
+  ;; => {:seon.error/producer seon.turn/open-call :seon.error/caller seon.turn/open-call}
+  ```"
   {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]]
                   [:map [:seon.error/producer {:optional true} :seon.error/producer]
                    [:seon.error/producer-digest {:optional true} :seon.error/producer-digest]
@@ -723,8 +725,9 @@
 
   ## Examples
 
+  ```clojure
   (error :my.fs/error {:seon.error/operation 'my.fs/read :seon.error/message \"No such file.\"})
-
+  ```
   ## Costs
 
   One [[diagnostic]] plus one cached-explainer call; the refusal path adds a

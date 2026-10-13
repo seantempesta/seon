@@ -29,7 +29,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
-            [seon.sci.lookup :as lookup]))
+            [seon.ref :as ref]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -285,7 +285,7 @@
                                             :where [?function :seon.fn/sym ?function-symbol]
                                                    [?function :seon.fn/doc ?doc]]
                                           function-symbol))))]
-      (when-let [example (:example (lookup/docstring-parts doc))]
+      (when-let [example (:example (ref/docstring doc))]
         (not-empty (edamame/parse-string-all example {:auto-resolve (constantly 'user)}))))
     (catch Throwable _ nil)))
 
