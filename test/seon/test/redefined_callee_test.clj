@@ -40,6 +40,33 @@
        (is (true? (:seon.test/passed? again)) "an unchanged check stays green")
        (is (= 1 (:seon.test/reused-count again)) "an unchanged check reuses the recorded green")))))
 
+(deftest ^{:seon.test/long "Three eval requests of an own-branch agent, each with its automatic test step."
+           :seon.test/long-ms 15000}
+  a-test-step-runs-the-redefinitions-its-eval-request-made
+  ;; The agent's base context held each evaluated root it was given at settlement, and the
+  ;; agent context kept its own Vars of b and a after the base reacquired the program with
+  ;; Vars of its own: the redefined test, analyzed against the agent's Var of a, read that
+  ;; Var's first root in the test world forked from the base, so (a) was 11.
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "stale-step-" (random-uuid))
+           step (fn [code]
+                  (support/mcp-tests (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                                "arguments" {"code" code "agent" agent-id "cluster" running}})))))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(ns rc.stale (:require [clojure.test :refer [deftest is]]))\n"
+                   "(defn b \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                   "(defn a \"Ten more than b.\" {:malli/schema [:=> [:cat] :int]} [] (+ 10 (b)))\n"
+                   "(deftest a-test (is (= 11 (a))))"))
+           _ (step "(in-ns 'rc.stale)\n(defn b \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)")
+           redefined (step (str "(in-ns 'rc.stale)\n"
+                                "(defn c \"A hundred.\" {:malli/schema [:=> [:cat] :int]} [] 100)\n"
+                                "(defn a \"c plus b.\" {:malli/schema [:=> [:cat] :int]} [] (+ (c) (b)))\n"
+                                "(deftest a-test (is (= 102 (a))))"))]
+       (is (= {:seon.test/passed? true :seon.turn.loop/red []} (:seon.turn.loop/reaching redefined))
+           "the step runs the bodies the eval request defined")))))
+
 (deftest ^{:seon.test/long "Four eval requests of an own-branch agent, each with its automatic test step: about 3 s measured on default's JVM."
            :seon.test/long-ms 15000}
   a-test-reruns-when-a-function-it-calls-by-a-computed-name-changes

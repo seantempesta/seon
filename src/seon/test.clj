@@ -2279,17 +2279,13 @@
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
                        [#(store/release-branch! connection) retire! drop!])))
     (let [database (db/db connection)
-          ;; The world's program: the loaded program with the candidate's
-          ;; changes interpreted on a fork (`sci.eval/base-ctx`). Built on that
-          ;; loaded program, the candidate holds the world's program, so the
-          ;; execution's acquisition of it serves; else the world's is acquired.
-          ;; Never the agent's live context, whose inherited bodies may call a
-          ;; Var its fork replaced (interim until context-owned SCI Var bindings:
-          ;; `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`).
-          held (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution))
-          source (cond (not= built-on base) (sci.eval/base-ctx database)
-                       (and held (sci.eval/acquired-database? held candidate)) held
-                       :else (sci.eval/base-ctx candidate))
+          ;; The world's program by content: the loaded program with the
+          ;; candidate's changes interpreted on a fork (`sci.eval/base-ctx`, one
+          ;; cache entry per program). Built on that loaded program, the
+          ;; candidate holds the world's program; else the world's is acquired.
+          ;; Never an execution's context: its base also holds the roots the
+          ;; agent's evaluations settled, analyzed against the agent's own Vars.
+          source (sci.eval/base-ctx (if (= built-on base) candidate database))
           environment (or (env/of execution)
                           (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))
           ;; Acquired once on a fork, never on the execution's own context:
