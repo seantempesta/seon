@@ -1051,6 +1051,21 @@
 ;;; the intents and the attempts' ends, with no scheduler state. Recursion is positive (`under`,
 ;;; `needs*`) and negation applies only to finished relations, which Datahike evaluates.
 
+(def ^:private end-kinds
+  "Per attempt end, what follows it (`end-kind`): the one table every end decision reads."
+  {:done :merge :sent-back :merge :capped :relaunch :stalled :relaunch :given-back :close :error :close
+   :cancelled :cancel})
+
+(defn end-kind
+  "What follows attempt end `end` (`:seon.task.attempt/kind`)."
+  {:malli/schema [:=> [:cat :seon.task.attempt/end] :seon.task.attempt/kind]}
+  [end]
+  (end-kinds end))
+
+(def ^:private blocking-ends
+  "The ends whose attempt keeps its task from being ready again until db<->flow relaunches it: those that merge nothing."
+  (into #{} (remove (comp #{:merge} end-kind)) (keys end-kinds)))
+
 (def ready-rules
   "The stratified rules `ready` reads: `leaf-done` (an assignment of it merged on main, outcome
   :merged, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
@@ -1117,20 +1132,21 @@
 (defn ready
   "The handles of every task that should be running now in `database` (main's): the leaves whose
   execution is :running (their own, else their nearest ancestor's, the `execution` rule: ingestion writes
-  :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without a terminal end other
-  than :done that db<->flow did not relaunch (`:seon.task.attempt/relaunch`; an :error end, a failed start among them, is
-  terminal too: no pass assigns it again by itself), minus those a need blocks.
+  :held on every new task no task owns, so one :running fact on a subject launches its steps), not done, without an attempt db<->flow did not relaunch (`:seon.task.attempt/relaunch`) whose end merges nothing
+  (`end-kind`; an :error end, a failed start among them, is terminal too: no pass assigns it again by itself) or whose
+  merge was refused (`:seon.task/refusal`) and closed, minus those a need blocks.
   The execution is bound to a variable, then compared: Datahike loses the rule's binding of `?t` for the
   later negated rules when the call carries the constant. Two reads: `blocked` evaluated once, unbound, since negating a recursive rule per leaf costs a
   hundred times more. A leaf with an open attempt stays in it; the registry tells running from launch."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
   [database]
-  (let [eligible (db/q '[:find ?t ?h :in $ % :where (execution ?t ?x) [(= ?x :running)]
+  (let [eligible (db/q '[:find ?t ?h :in $ % ?blocking :where (execution ?t ?x) [(= ?x :running)]
                          [?t :seon.task/id ?h] (not [?t :seon.task/children _]) (not (leaf-done ?t))
-                         (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
-                                   [(contains? #{:given-back :capped :stalled :cancelled :error} ?e)]
-                                   [(missing? $ ?a :seon.task.attempt/relaunch)])]
-                       database ready-rules)
+                         (not-join [?t ?blocking] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end ?e]
+                                   [(contains? ?blocking ?e)] [(missing? $ ?a :seon.task.attempt/relaunch)])
+                         (not-join [?t] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/end _] [?a :seon.task/refusal _]
+                                   (not [?a :seon.task/outcome :merged]) [(missing? $ ?a :seon.task.attempt/relaunch)])]
+                       database ready-rules blocking-ends)
         blocked (when-not (read-error eligible) (db/q '[:find [?t ...] :in $ % :where (blocked ?t)] database ready-rules))]
     (or (read-error eligible) (read-error blocked)
         (let [blocked (set blocked)] (into #{} (keep (fn [[t h]] (when-not (blocked t) h))) eligible)))))

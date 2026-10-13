@@ -145,12 +145,17 @@
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [facts] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
                                  :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
-                                 :seon.flow.plan/head c1 :seon.flow.plan/started? false :seon.flow.plan/kept? false}
-                                facts))]
+                                 :seon.flow.plan/head c1 :seon.flow.plan/started? false :seon.flow.plan/kept? false
+                                 :seon.flow.plan/allowance-left 0 :seon.flow.plan/work-left? false :seon.flow.plan/refused? false}
+                                facts
+                                {:seon.flow.plan/exited? (not (:seon.flow.plan/started? facts))}))]
     (doseq [[facts expected why]
             [[{:seon.flow.plan/head c2 :seon.flow.plan/started? true} [] "running: no end anywhere"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :merge]
-              "ended on its branch: the graph stops, then the branch merges"]
+             [{:seon.flow.plan/head c2 :seon.flow.plan/started? true :seon.flow.plan/publish? true} [:publish]
+              "running, with declarations root merged: they publish"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop]
+              "ended on its branch: the graph stops first"]
+             [{:seon.task.attempt/end :done :seon.flow.plan/head c2} [:merge] "then, exited, the branch merges"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1} [:delete-branch]
               "root merged it: deleted"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
@@ -163,8 +168,11 @@
               "no merge base yet: written first"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.task/merge-base nil :seon.flow.plan/head c2}
               [:delete-branch] "copied to main before merge bases existed"]
-             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop :close]
-              "an end that merges nothing: written on main"]
+             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop]
+              "an end that merges nothing stops first"]
+             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2} [:problem :close]
+              "then, with no allowance, is written on main with root's problem"]
+             [{:seon.task.attempt/end :cancelled :seon.flow.plan/head c2} [:close] "a cancelled end closes with nothing for root"]
              [{:seon.task.attempt/end :capped :seon.flow.plan/main-end :capped :seon.flow.plan/head c2} [] "and kept"]
              [{:seon.task.attempt/end :error :seon.flow.plan/main-end :error :seon.flow.plan/head c2} []
               "a failed merge's :error end stops the lifecycle"]]]
@@ -440,8 +448,8 @@
                 (is (= :released @(:wrapped-atom branch-connection)))
                 (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})))
                 (is (not (contains? (registry/branches store) branch)))
-                (is (= 1 (count (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection))))
-                    "the refused merge is the only fault"))))))))))
+                (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]] (db/db connection)))
+                    "the refused merge is the candidate's, never a fault"))))))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/a-fresh-attempt-is-work-without-a-message 'seon.turn/a-send-back-names-its-target-on-the-attempt}}
   a-red-fresh-attempt-takes-one-model-turn-whose-send-back-names-its-target
@@ -646,7 +654,7 @@
             (pass! handle routing)
             (let [[key branch] (end-on-branch! handle connection "e" :given-back)
                   problem #(db/pull (db/db connection) [:seon.task/intent]
-                                    [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" key))])]
+                                    [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key))])]
               (pass! handle routing)
               (is (= #{[key branch (str "attempt/" key) :given-back]} (attempts connection "e")) "main holds the end")
               (is (= "Do e." (intent)) "and no refinement")
@@ -679,7 +687,7 @@
             (pass! handle routing)
             (let [[key] (end-on-branch! handle connection "e" :capped)
                   intent #(str (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
-                                                           [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" key))])))]
+                                                           [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key))])))]
               (pass! handle routing)
               (is (= 1 (count (attempts connection "e"))) "an end with no work is not relaunched")
               (is (not (str/includes? (intent) "my.root/merge!")) "an empty diff offers no merge")
@@ -770,7 +778,8 @@
 (deftest ^{:seon/tasks #{'seon.cluster.agent/a-requested-green-end-merges-and-publishes-with-no-hand-act}}
   a-requested-end-whose-files-no-checkout-holds-merges-nothing
   ;; db<->flow merges a requested green end like any done end; this world's cluster names no checkout that
-  ;; holds the proofs' file, so the gate refuses before acceptance: nothing reaches main but the :error end
+  ;; holds the proofs' file, so the gate refuses before acceptance: nothing reaches main but the refusal and,
+  ;; with no relaunch allowed, the end closed for root
   (binding [*space* "tq.endcustody"]
     (test-support/with-database
      (fn [connection]
@@ -778,6 +787,8 @@
         connection ["g"] {"g" [#{} "(clojure.test/is (= 1 2))"]}
         (fn [handle]
           (let [routing (:seon.agent/routing handle)]
+            (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                            :seon.config/manifest {:seon.config.run/relaunches 0}})
             (pass! handle routing)
             (let [[[key branch agent-id]] (seq (attempts connection "g"))
                   a (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))
@@ -788,9 +799,10 @@
                   head (db/branch-database database branch)]
               (is (not= (db/commit-id head) (:seon.task/merge-base (db/pull database [:seon.task/merge-base] a)))
                   "its base did not move")
-              (is (= {:seon.task.attempt/end :error}
-                     (select-keys (db/pull database [:seon.task.attempt/end :seon.task/outcome] a) [:seon.task.attempt/end :seon.task/outcome]))
-                  "the refused merge is the assignment's :error end, not an outcome")
+              (is (= {:seon.task.attempt/end :done :seon.task/refusal :seon.source/write-back-error}
+                     (select-keys (db/pull database [:seon.task.attempt/end :seon.task/outcome :seon.task/refusal] a)
+                                  [:seon.task.attempt/end :seon.task/outcome :seon.task/refusal]))
+                  "the refused merge is recorded beside the assignment's own end, not an outcome")
               (let [intents (db/q '[:find [?i ...] :in $ ?k :where [?t :seon.task/sym ?s] [(namespace ?s) ?n] [(= ?n "seon.task")]
                                     [?t :seon.task/intent ?i] [(clojure.string/includes? ?i ?k)]]
                                   database key)]
@@ -798,8 +810,8 @@
                 (is (every? #(clojure.string/includes? % ":seon.source/write-back-error") intents) "which names the refusal's type"))
               (is (contains? (registry/branches (agent/handle-store handle)) branch) "its branch stays")
               (is (.isTerminated ^java.util.concurrent.ExecutorService graph) "its graph was stopped and joined")
-              (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] database)))
-                  "and the refusal is one fault for root")))))))))
+              (is (empty? (db/q '[:find ?e :where [?e :seon.error/signature]] database))
+                  "and the candidate's refusal is no fault of Seon's")))))))))
 
 (deftest ^{:seon/tasks #{'seon.task/a-refinement-on-a-branch-reaches-main-only-at-the-end}}
   a-refinement-on-a-branch-reaches-main-only-at-the-end
@@ -963,7 +975,7 @@
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
                 problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/sym ?s] [(namespace ?s) ?ns] [(= ?ns "seon.task")]
-                                       [(name ?s) ?n] [(clojure.string/starts-with? ?n "attempt-ended-")]]
+                                       [(name ?s) ?n] [(clojure.string/starts-with? ?n "unfinished-task-")]]
                                      (db/db connection)))]
             (pass! handle routing)
             (let [[[key branch]] (seq (attempts connection "c"))]
@@ -1253,7 +1265,7 @@
                 rows (str *space* "-rows")
                 doubled (symbol rows "doubled")
                 problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
-                                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" %))]))]
+                                                     [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" %))]))]
             ;; u's red proof lives in the checkout, beside the function it reaches
             (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
                                    (str "(ns " rows "\n  (:require [clojure.test :refer [deftest is]]))\n\n"
@@ -1270,11 +1282,12 @@
               (test-support/transacted! on-1 [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
                                               [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit (db/commit-id (db/db on-1))]])
               (pass! handle routing)
-              (let [first-row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task.attempt/reason :seon.task.attempt/relaunch]
+              (is (= :seon.source/uncontracted-error
+                     (:seon.task/refusal (db/pull (db/db connection) [:seon.task/refusal] [:seon.task/assignment key-1])))
+                  "the merge's returned refusal is recorded on the assignment")
+              (let [first-row (db/pull (db/db connection) [:seon.task.attempt/end :seon.task.attempt/relaunch]
                                        [:seon.task/assignment key-1])]
-                (is (= :error (:seon.task.attempt/end first-row)) "the refused merge ends the attempt")
-                (is (str/includes? (str (:seon.task.attempt/reason first-row)) ":seon.source/uncontracted-error")
-                    "naming the refusal")
+                (is (= :done (:seon.task.attempt/end first-row)) "main holds the attempt's own end")
                 (is (string? (:seon.task.attempt/relaunch first-row)) "and relaunches it, as a capped end with work")
                 (is (nil? (problem key-1)) "with no problem task for root"))
               (pass! handle routing)
@@ -1318,7 +1331,7 @@
           (let [routing (:seon.agent/routing handle)
                 store (agent/handle-store handle)
                 problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
-                                                     [:seon.task/sym (symbol "seon.task" (str "attempt-ended-" %))]))
+                                                     [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" %))]))
                 work 'tq.relaunch-work/worked
                 holds-work? #(some? (db/q '[:find ?f . :in $ ?s :where [?f :seon.fn/sym ?s]] % work))]
             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
@@ -1382,17 +1395,14 @@
               "so does a done end whose merge was refused"]
              [{:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0 :seon.flow.plan/refused? true} #{:close :problem}
               "spent allowance leaves the unfinished work visible: closed with a problem, never relaunched or deleted"]
-             [{:seon.task.attempt/end :sent-back :seon.task.attempt/target [:seon.task/id b] :seon.task.attempt/reason "The proof is wrong."}
-              #{:merge :reopen} "a send-back merges its work and reopens its target, never relaunching the sender"]
+             [{:seon.task.attempt/end :sent-back :seon.task.attempt/reason "The proof is wrong."}
+              #{:merge} "a send-back merges its work, whose merge reopens its target, never relaunching the sender"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/exited? false
                :seon.flow.plan/work-left? false}
               #{} "an accepted end retires only after its graph exits"]
              [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/work-left? false}
               #{:delete-branch} "and then retires"]]]
       (is (= expected (op-set observed)) why))
-    (is (= [[:seon.task/id b]] (keep :seon.task.attempt/target (filter #(= :reopen (:seon.flow.plan/op %))
-                                                       (actions {:seon.task.attempt/end :sent-back :seon.task.attempt/target [:seon.task/id b]}))))
-        "the reopen action names its target")
     (is (= #{:unfinished-task} (set (keep :seon.flow.plan/class (actions {:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0}))))
         "the problem is an unfinished task")))
 

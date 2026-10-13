@@ -347,7 +347,7 @@
   "Assignment `key`'s merge and publication facts on main."
   [connection key]
   (db/pull (db/db connection) [:seon.task/outcome :seon.task/merge-commit :seon.task/merged-declarations
-                                :seon.task/git-commit :seon.task/refusal]
+                                :seon.task/git-commit :seon.task/publication-refusal]
            [:seon.task/assignment key]))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-accepted-merge-is-published-by-the-next-pass
@@ -397,7 +397,7 @@
              (let [measured (profile/measure #(pass! running))]
                (is (< (:seon.profile/ms measured) 1000) "one small file's publication pass stays under a second")
                (is (< (:seon.profile/alloc-bytes measured) (* 256 1024 1024)) "and allocates under 256 MB on its thread"))
-             (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection request)]
+             (let [{git-commit :seon.task/git-commit refused :seon.task/publication-refusal} (assignment-row connection request)]
                (is (nil? refused) "the publication answers no refusal")
                (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
                (is (= before (git! root "rev-parse" "HEAD^")) "one commit on the previous head")
@@ -505,7 +505,7 @@
          (is (nil? (:seon.task/outcome (assignment-row connection key)))
              "the refinement reaches main without completing the task: its agent has not ended")
          (pass! running)
-         (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection key)
+         (let [{git-commit :seon.task/git-commit refused :seon.task/publication-refusal} (assignment-row connection key)
                text (slurp file)]
            (is (nil? refused) "the publication answers no refusal")
            (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
@@ -557,7 +557,7 @@
                    merged (merge! execution request)]
                (is (nil? (:seon.error/message merged)) "the merge answers no refusal")
                (pass! running)
-               (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection request)
+               (let [{git-commit :seon.task/git-commit refused :seon.task/publication-refusal} (assignment-row connection request)
                      text (when (.isFile (io/file root path)) (slurp (io/file root path)))]
                  (is (nil? refused) "the publication answers no refusal")
                  (is (= git-commit (git! root "rev-parse" "HEAD")) "main records the checkout's new HEAD")
@@ -602,7 +602,7 @@
          (is (= fix (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'tq.land/area])))
              "main holds the agent's definition")
          (pass! running)
-         (let [{git-commit :seon.task/git-commit refused :seon.task/refusal} (assignment-row connection key)]
+         (let [{git-commit :seon.task/git-commit refused :seon.task/publication-refusal} (assignment-row connection key)]
            (is (nil? refused) "its publication answers no refusal")
            (is (= git-commit (git! root "rev-parse" "HEAD")) "the next pass publishes it as the checkout's new HEAD")
            (is (= before (git! root "rev-parse" "HEAD^")) "in one commit"))

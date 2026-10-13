@@ -2,8 +2,10 @@
 {:end [:enum {:seon.db/index true :seon.wake/starts true
               :description "How an attempt ended, asserted once on its assignment row by seon.turn/end-task-call: proofs green (a merge decides; an empty delta merges as an accepted no-op), given back, turns spent, stalled, sent back to :seon.task.attempt/target, cancelled, or failed to execute (runtime-follows-db §2)."}
        :done :given-back :capped :stalled :sent-back :cancelled :error]
- :relaunch [:string {:min 1 :seon.db/index true :seon.wake/starts true :description "Why db<->flow relaunches this :capped or :stalled attempt (seon.cluster.agent/close!), or one whose merge was refused for a reason its agent can fix (seon.cluster.agent/failed-pass!), written with its end on main while its branch holds work and :seon.config.run/relaunches allows: the next attempt forks its :seon.task.attempt/commit and keeps its :seon.task/merge-base (seon.task/relaunched)."}]
+ :relaunch [:string {:min 1 :seon.db/index true :seon.wake/starts true :description "Why db<->flow relaunches this :capped or :stalled attempt, or one whose merge returned a refusal (:seon.task/refusal) (seon.cluster.agent/assignment-actions), written with its end on main while its branch holds work and :seon.config.run/relaunches allows: the next attempt forks its :seon.task.attempt/commit and keeps its :seon.task/merge-base (seon.task/relaunched)."}]
  :target [:and {:description "The task a :sent-back end sends the work back to."} :seon.db/ref]
  :number [:int {:min 1 :description "Which attempt of its task this row is: one more than the task's :seon.task/attempts-made when it was written (seon.task/attempt-tx); with the task's handle it derives the row's identity."}]
  :reason [:string {:min 1 :description "Why an attempt ended other than :done."}]
+ :kind [:enum {:description "What follows an attempt end (seon.task/end-kind): its branch merges (a :sent-back merge carries its target's reopening to main), it continues from its end commit while work and allowance are left, it is written to main for root, or it is written closed with nothing for root."}
+        :merge :relaunch :close :cancel]
  :commit [:and {:description "The attempt's branch commit at its end: what its merge takes, keyed by commit id, never t."} :seon.source/commit-id]}

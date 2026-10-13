@@ -403,7 +403,7 @@
   ledger (lane `merge-<key>`), then `:seon.task/git-commit` written. A path another lane claims, or one
   with uncommitted changes the merge's claim does not cover, waits: nothing is written and the
   publication stays due (`:seon.merge/waiting`). A refusal is recorded on the assignment as
-  `:seon.task/refusal`, its error type, and answered. A crash anywhere leaves it due: a write-back finding
+  `:seon.task/publication-refusal`, its error type, and answered. A crash anywhere leaves it due: a write-back finding
   the merged bytes on disk installs them again unchanged, and paths HEAD already holds answer the commit
   that names this merge.
 
@@ -423,7 +423,7 @@
         paths (when-not (:seon.error/at accepted) (source/merge-paths connection accepted))
         waiting (when paths (source/waiting-paths root lane paths))
         refuse (fn [refused]
-                 (let [recorded (db/transact! connection [[:db/add a :seon.task/refusal (:seon.error/type refused)]])]
+                 (let [recorded (db/transact! connection [[:db/add a :seon.task/publication-refusal (:seon.error/type refused)]])]
                    (if (:db-after recorded) refused recorded)))]
     (cond
       (:seon.error/at accepted) (refuse accepted)

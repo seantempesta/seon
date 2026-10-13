@@ -1941,11 +1941,12 @@
   nil)
 
 (defn- write-problem!
-  "Write the problem task a `:problem` action names, by identity, so a repeat writes nothing."
+  "Write the problem task a `:problem` action names, by identity (its class and its assignment, else its task), so a
+  repeat writes nothing."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action] :nil]}
-  [handle {h :seon.task/assigned class :seon.flow.plan/class intent :seon.task/intent}]
+  [handle {key :seon.task/assignment h :seon.task/assigned class :seon.flow.plan/class intent :seon.task/intent}]
   (let [created (task/create! {:seon.db/connection (:seon.db/connection handle) :seon.agent/id "root"
-                               :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" h)
+                               :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" (or key h))
                                :seon.task/intent intent})]
     (when (:seon.error/at created) (throw (ex-info (:seon.error/message created "The problem task was refused.") created)))
     nil))
@@ -1966,28 +1967,26 @@
            (:pause :resume :cancel) (follow! handle routing action)
            ;; an open assignment's :stop follows its intent; an ended one's names its entity
            :stop (if (:db/id action) (apply-lifecycle! handle routing action) (follow! handle routing action))
-           (:merge-base :merge :publish :close :delete-branch) (apply-lifecycle! handle routing action))
+           (:merge-base :merge :publish :close :relaunch :delete-branch) (apply-lifecycle! handle routing action))
          ;; a translation: the failure names the action it stopped, so the boundary can end its assignment
          (catch Exception cause
            (throw (ex-info (or (ex-message cause) "db<->flow's action failed.") {:seon.flow.plan/action action} cause)))))
   nil)
 
 (defn- branch-end
-  "The end `branch`'s head records on attempt `key`, read from main `database`'s store; {} when the head records
-  none."
+  "The end and reason `branch`'s head records on attempt `key`, read from main `database`'s store; {} when the head
+  records none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.task/assignment]
-                  [:map [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]]]}
+                  [:map [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                   [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]]]}
   [database branch key]
   (if-let [head (db/branch-database database branch)]
-    (try (let [end (db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+    (try (let [row (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/reason]) . :in $ ?k
+                           :where [?a :seon.task/assignment ?k]]
                          head key)]
-           (if (keyword? end) {:seon.task.attempt/end end} {}))
+           (if (keyword? (:seon.task.attempt/end row)) (select-keys row [:seon.task.attempt/end :seon.task.attempt/reason]) {}))
          (finally (source/release! [head])))
     {}))
-
-(def ^:private merged-ends
-  "The ends whose branch squash-merges onto main; every other end only reaches main as the end itself."
-  #{:done :sent-back})
 
 (defn- kept?
   "Whether `agent-id`'s merged branch stays on main `database`: its agent's cluster keeps ended branches. A
@@ -1999,11 +1998,11 @@
 (defn- publication-due?
   "Whether an assignment's publication is due, from its `row` on main: its merge commit recorded, its merge
   moved declarations or tasks (`:seon.task/merged-declarations`, which `seon.merge/merge!` writes beside its merge
-  commit), and no git commit and no refusal recorded, whether or not the merge completed its task (a refinement
+  commit), and no git commit and no publication refusal recorded, whether or not the merge completed its task (a refinement
   merged before its agent ends publishes too). A merge moving no declaration is never due."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [{commit :seon.task/merge-commit moved :seon.task/merged-declarations
-    git :seon.task/git-commit refused :seon.task/refusal}]
+    git :seon.task/git-commit refused :seon.task/publication-refusal}]
   (boolean (and commit moved (not git) (not refused))))
 
 (defn- branch-admission-end
@@ -2037,13 +2036,30 @@
                                       :seon.flow.plan/unmerged (source/unmerged-count database store b)))))))
           (sort-by second rows))))
 
+(defn- allowance-left
+  "How many relaunches task `h` has left on main `database`: `:seon.config.run/relaunches` of agent `agent-id`'s
+  cluster less the task's relaunched attempts; an unreadable dial throws."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id] :seon.flow.plan/allowance-left]}
+  [database h agent-id]
+  (let [cluster (config/agent-cluster database agent-id)
+        relaunches (when (string? cluster) (:seon.config.run/relaunches (config/effective database cluster)))
+        used (db/q '[:find (count ?b) . :in $ ?h :where [?b :seon.task/assigned ?h] [?b :seon.task.attempt/relaunch _]]
+                   database h)]
+    (when-not (and (int? relaunches) (or (nil? used) (int? used)))
+      (throw (ex-info "db<->flow could not read the relaunch allowance."
+                      {:seon.error/message "db<->flow could not read the relaunch allowance."
+                       :seon.config.run/relaunches relaunches :seon.agent/id agent-id})))
+    (max 0 (- relaunches (or used 0)))))
+
 (defn lifecycle-facts
   "What db<->flow reads before it derives the ended assignments' and taskless agents' actions (`next-actions`).
   Every assignment on main `database` whose branch the `store` holds: its end on main, else on its branch head
   (one branch read per assignment main holds no end for or whose head is not merged), its merge base and branch head commit, whether
-  `registry` runs its graph, whether its publication is due, and, ended to merge, whether its branch stays once
-  merged (`kept?`); then every taskless agent's end and unmerged change (`taskless-agents`), so an ended one
-  holding an unmerged change is listed here for root."
+  `registry` runs its graph (its exit is its absence), whether its publication is due, whether main records a
+  refusal its merge returned, ended to merge, whether its branch stays once merged (`kept?`), and, exited with an
+  end main has not decided that does not simply merge, whether its branch holds work main lacks and how many
+  relaunches its task has left (`allowance-left`); then every taskless agent's end and unmerged change
+  (`taskless-agents`), so an ended one holding an unmerged change is listed here for root."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.flow.plan/registry] :seon.flow.plan/held]}
   [database store {started :seon.flow.plan/started}]
   (let [rows (db/q '[:find ?a ?k ?h ?b ?id
@@ -2058,51 +2074,96 @@
                              ;; an assignment holding none of these yet pulls as nil
                              (or (db/pull database [:seon.task.attempt/end :seon.task/merge-base :seon.task/outcome
                                                     :seon.task/merge-commit :seon.task/merged-declarations
-                                                    :seon.task/git-commit :seon.task/refusal] a)
+                                                    :seon.task/git-commit :seon.task/refusal :seon.task/publication-refusal] a)
                                  {})
                              head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b})
                              ;; the branch is read while it holds something unmerged
-                             {on-branch :seon.task.attempt/end}
+                             {on-branch :seon.task.attempt/end reason :seon.task.attempt/reason}
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
                              ;; a cancelled task's attempt holding no end of its own is closed :cancelled
                              end (or main-end on-branch
                                      (when (= :cancelled (task/execution database h))
                                        :cancelled))
+                             kind (some-> end task/end-kind)
+                             started? (contains? started id)
+                             refused? (boolean (and (:seon.task/refusal row) (not= :merged (:seon.task/outcome row))))
+                             ;; work and allowance decide only an exited end main has not decided that does not simply merge
+                             judged? (and end (nil? main-end) (not started?) (or refused? (#{:relaunch :close} kind)))
                              publish? (publication-due? row)]
                          (when (uuid? head)
                            (cond-> {:db/id a :seon.task/assignment k :seon.task/assigned h :seon.task/branch b
                                     :seon.agent/id id :seon.flow.plan/head head
-                                    :seon.flow.plan/started? (contains? started id)
-                                    :seon.flow.plan/kept? (boolean (and (merged-ends end) (kept? database id)))}
+                                    :seon.flow.plan/started? started? :seon.flow.plan/exited? (not started?)
+                                    :seon.flow.plan/refused? refused?
+                                    :seon.flow.plan/work-left? (boolean (and judged? (pos-int? (source/unmerged-count database store b))))
+                                    :seon.flow.plan/allowance-left (if judged? (allowance-left database h id) 0)
+                                    :seon.flow.plan/kept? (boolean (and (= :merge kind) (kept? database id)))}
                              end (assoc :seon.task.attempt/end end)
+                             reason (assoc :seon.task.attempt/reason reason)
+                             refused? (assoc :seon.task/refusal (:seon.task/refusal row))
                              publish? (assoc :seon.flow.plan/publish? true)
                              main-end (assoc :seon.flow.plan/main-end main-end)
                              base (assoc :seon.task/merge-base base)))))))
           (sort-by second rows))
           (taskless-agents database store branches started))))
 
-(defn- assignment-actions
-  "The actions that carry ended assignment `row` through its lifecycle, in order (`next-actions`)."
+(defn- unfinished-intent
+  "Root's problem text for ended assignment `row`, closed with its work unfinished: no relaunch left, or an end
+  that only root decides."
+  {:malli/schema [:=> [:cat :seon.flow.plan/held-assignment] :seon.task/intent]}
+  [{key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch end :seon.task.attempt/end
+    reason :seon.task.attempt/reason work-left? :seon.flow.plan/work-left? refusal :seon.task/refusal}]
+  (str "Attempt " key " of task " h " ended " (name end) (when reason (str ": " reason))
+       (when refusal (str ", and its merge was refused " refusal)) ". Nothing was merged to main;"
+       " its branch " (name branch) " is kept. "
+       (if work-left? "It holds declarations main lacks, and no relaunch is left" "Its program is unchanged from main")
+       ": close it with (my.root/close! {:seon.task/assignment \"" key "\" :seon.task/reason why})."))
+
+(defn assignment-actions
+  "The actions that carry ended assignment `row` through its lifecycle, in order, from its end's kind
+  (`seon.task/end-kind`) and the observations db<->flow acquired (`lifecycle-facts`); an assignment not ended only
+  publishes what root merged of it. An ended graph that has not exited only stops. After exit, with main's end undecided: a merge that returned a refusal, or a :capped or
+  :stalled end, relaunches from its end commit while its branch holds work and its task has allowance left, else
+  it closes with root's `:unfinished-task` problem, as a :given-back or :error end always does; a :cancelled end
+  closes with nothing for root; a :done or :sent-back end merges (a send-back's merge carries its target's
+  reopening, `seon.task/ready-rules`' `leaf-done`). Merged work publishes, then its branch, unless kept, is
+  deleted."
   {:malli/schema [:=> [:cat :seon.flow.plan/held-assignment] :seon.flow.plan/actions]}
   [{end :seon.task.attempt/end main-end :seon.flow.plan/main-end base :seon.task/merge-base
-    head :seon.flow.plan/head started? :seon.flow.plan/started? kept? :seon.flow.plan/kept?
-    publish? :seon.flow.plan/publish? :as row}]
-  (let [action #(assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
-                                         :seon.task/branch :seon.task.attempt/end])
-                       :seon.flow.plan/op %)
+    head :seon.flow.plan/head started? :seon.flow.plan/started? exited? :seon.flow.plan/exited?
+    kept? :seon.flow.plan/kept? publish? :seon.flow.plan/publish? allowance :seon.flow.plan/allowance-left
+    work-left? :seon.flow.plan/work-left? refused? :seon.flow.plan/refused? :as row}]
+  (let [action (fn [op extra] (into (assoc (select-keys row [:db/id :seon.task/assigned :seon.task/assignment :seon.agent/id
+                                                              :seon.task/branch :seon.task.attempt/end])
+                                           :seon.flow.plan/op op)
+                                    extra))
+        kind (some-> end task/end-kind)
         ;; an end main holds with no merge base was copied before merge bases existed
         copied? (and main-end (nil? base))
-        merge? (and (merged-ends end) (or (nil? main-end) (merged-ends main-end)))]
-    (cond-> []
-      ;; the graph stops first, so the merge takes the head its last pass left
-      (and end started?) (conj (action :stop))
-      (and merge? (nil? base) (not copied?)) (conj (action :merge-base))
-      (and merge? (not copied?) (not= head base)) (conj (action :merge))
-      (and end (nil? main-end) (not (merged-ends end))) (conj (action :close))
-      ;; publication reads main alone: the merge commit, then the checkout
-      publish? (conj (action :publish))
-      ;; deletion reads main after the merge and its publication: their own writes wake the next pass
-      (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch)))))
+        undecided? (nil? main-end)
+        continue? (and undecided? (or refused? (= :relaunch kind)))
+        merge? (and (= :merge kind) (not refused?) (or undecided? (= :merge (task/end-kind main-end))))]
+    (cond
+      ;; the graph stops first, so what follows reads the head its last pass left
+      (and end (not exited?)) (if started? [(action :stop {})] [])
+      (and continue? work-left? (pos? allowance))
+      [(action :relaunch {:seon.task.attempt/relaunch
+                          (str "Ended " (name end) (when refused? " and its merge was refused")
+                               " with work main lacks: relaunched from its end commit, "
+                               (dec allowance) " relaunches left.")})]
+      ;; root's problem first: once main holds the end, no pass derives it again
+      (or continue? (and undecided? (= :close kind)))
+      [(action :problem {:seon.flow.plan/class :unfinished-task :seon.task/intent (unfinished-intent row)})
+       (action :close {})]
+      :else
+      (cond-> []
+        (and merge? (nil? base) (not copied?)) (conj (action :merge-base {}))
+        (and merge? (not copied?) (not= head base)) (conj (action :merge {}))
+        (and undecided? (= :cancel kind)) (conj (action :close {}))
+        ;; publication reads main alone: the merge commit, then the checkout
+        publish? (conj (action :publish {}))
+        ;; deletion reads main after the merge and its publication: their own writes wake the next pass
+        (and merge? (or copied? (= head base)) (not kept?) (not publish?)) (conj (action :delete-branch {}))))))
 
 (defn- taskless-actions
   "The actions that carry taskless agent `row` through its end, in order (`next-actions`): ended, its graph
@@ -2117,15 +2178,8 @@
 
 (defn next-actions
   "The actions that carry each ended assignment and taskless agent in `held` through its lifecycle, as a vector,
-  in order. Derived from the facts alone, never from a marker, so a pass after any crash derives what is left: an
-  ended assignment's graph stops first, letting its last pass finish (`:stop`); an end to merge (:done,
-  :sent-back) with no merge base gets one (`:merge-base`) and merges while its branch head differs from its
-  merge base and main holds no other end (`:merge`: its facts, and the declarations the agent's merge request
-  names once `seon.cluster.source/prepare-merge!`'s gate passes), unless main holds its end with no merge base
-  (copied to main before merge bases existed); any other end main lacks is written there (`:close`); a merge
-  whose declarations main has not published is published into the checkout (`:publish`, `seon.merge/publish!`);
-  a branch already merged (head = merge base, or so copied) and published that nothing keeps is deleted
-  (`:delete-branch`), so whether it stays is read on main after its merge, whose own write wakes that pass.
+  in order. Derived from the facts alone, never from a marker, so a pass after any crash derives what is left:
+  each ended assignment's actions come from its one owner (`assignment-actions`).
   A taskless agent (a row naming no `:seon.task/assignment`) follows the same rule with merged read as nothing
   unmerged (`taskless-actions`).
   Pure; each action is idempotent by identity, by head = merge base or by the git commit main records."
@@ -2133,142 +2187,53 @@
   [held]
   (into [] (mapcat #(if (:seon.task/assignment %) (assignment-actions %) (taskless-actions %))) held))
 
-(defn- ended-problem!
-  "Write root's problem task for the non-merged end of assignment `key`, named by it, so a repeat writes nothing.
-  It names the `unmerged` declarations its branch holds and offers closing."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action :seon.task.attempt/end [:maybe :seon.task.attempt/reason] :seon.flow.plan/unmerged] :nil]}
-  [connection {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} end reason unmerged]
-  (let [created (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'seon.task
-                               :seon.task/name (str "attempt-ended-" key)
-                               :seon.task/intent (str "Attempt " key " of task " h " ended " (name end)
-                                                      (when reason (str ": " reason)) ". Nothing was merged to main;"
-                                                      " its branch " (name branch) " is kept. "
-                                                      (if (pos? unmerged)
-                                                        (str "It holds " unmerged " declarations main lacks, and no relaunch is left")
-                                                        "Its program is unchanged from main")
-                                                      ": close it with (my.root/close! {:seon.task/assignment \""
-                                                      key "\" :seon.task/reason why}).")})]
-    (when (:seon.error/at created)
-      (throw (ex-info (:seon.error/message created "The ended attempt's problem task was refused.") created)))
-    nil))
-
-(defn- relaunch-reason
-  "Why task `h`'s attempt, ended for `why` with `unmerged` declarations main lacks, is relaunched, while its
-  relaunched attempts on main `database` are fewer than `relaunches` (`:seon.config.run/relaunches`); nil once
-  the dial is used."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :string pos-int? :seon.config.run/relaunches]
-                  [:maybe :seon.task.attempt/relaunch]]}
-  [database h why unmerged relaunches]
-  (let [used (or (db/q '[:find (count ?b) . :in $ ?h :where [?b :seon.task/assigned ?h] [?b :seon.task.attempt/relaunch _]]
-                       database h)
-                 0)]
-    (when (and (int? used) (< used relaunches))
-      (str why " with " unmerged " declarations main lacks: relaunch " (inc used) " of " relaunches
-           " continues from its end commit."))))
-
-(defn- relaunch-dial
-  "The relaunch dial of `handle`'s cluster (`:seon.config.run/relaunches`); an unreadable dial throws."
-  {:malli/schema [:=> [:cat :seon.agent/context-source] :seon.config.run/relaunches]}
-  [handle]
-  (let [relaunches (:seon.config.run/relaunches (config/effective (db/db (:seon.db/connection handle)) (:seon.cluster/name handle)))]
-    (when-not (int? relaunches)
-      (throw (ex-info "db<->flow could not read the relaunch dial." {:seon.error/message "db<->flow could not read the relaunch dial."
-                                                                      :seon.config.run/relaunches relaunches})))
-    relaunches))
-
-(def ^:private fixable-refusals
-  "The merge refusals the attempt's agent can fix on its branch, and its block shows, by error type, or by type and
-  `:seon.source/write-back-refused` reason for a write-back refusal: a merge refused for one is relaunched from
-  the attempt's end commit like a capped end with work (`refused-merge-relaunch`)."
-  #{:seon.source/uncontracted-error :seon.source/lint-error [:seon.source/write-back-error :not-analyzable]})
-
-(defn- refused-merge-relaunch
-  "The facts relaunching assignment `key`, whose merge was refused for a reason its agent can fix
-  (`fixable-refusals`) with `unmerged` declarations main lacks on its `branch`: its `:error` end with the
-  refusal as its reason, its end commit from the branch head, and its relaunch (`relaunch-reason`); nil when
-  the dial is used or the branch head records no end commit."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.plan/action :string :seon.flow.plan/unmerged]
-                  [:maybe [:map [:seon.task.attempt/end :seon.task.attempt/end] [:seon.task.attempt/reason :seon.task.attempt/reason]
-                           [:seon.task.attempt/commit :seon.task.attempt/commit]
-                           [:seon.task.attempt/relaunch :seon.task.attempt/relaunch]]]]}
-  [handle {key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch} reason unmerged]
-  (let [main (db/db (:seon.db/connection handle))
-        head (db/branch-database main branch)
-        commit (when head
-                 (try (db/q '[:find ?c . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/commit ?c]] head key)
-                      (finally (source/release! [head]))))
-        relaunch (when (and (uuid? commit) (pos-int? unmerged))
-                   (relaunch-reason main h "Its merge was refused" unmerged (relaunch-dial handle)))]
-    (when relaunch
-      {:seon.task.attempt/end :error :seon.task.attempt/reason reason
-       :seon.task.attempt/commit commit :seon.task.attempt/relaunch relaunch})))
-
 (defn- failed-pass!
-  "db<->flow's one catch, the Flow proc's boundary, for its pass's `failure`.
-  The assignment a failed `:attempt`, `:start-flow`, `:merge-base` or `:merge` names ends `:error` on main with the
-  failure's message as its reason, so no later pass derives that action again (`seon.task/ready` reads
-  the end as terminal); the failure is recorded as db<->flow's fault. A `:merge` refused for a reason its agent can
-  fix (`fixable-refusals`) is relaunched instead, while the relaunch dial lasts (`refused-merge-relaunch`): the
-  agent's own mistake is delivered to its next attempt, never a fault. Any other refused `:merge` also delivers
-  root's problem task for that end (`ended-problem!`), naming the refusal's type and message."
+  "db<->flow's one catch, the Flow proc's boundary, for its pass's thrown `failure`: Seon's own fault, never the
+  candidate's (a merge's returned refusal is recorded by `:merge` itself, `apply-lifecycle!`). The assignment a
+  failed `:attempt`, `:start-flow`, `:merge-base` or `:merge` names ends `:error` on main with the failure's message
+  as its reason, so no later pass derives that action again (`seon.task/ready` reads the end as terminal), and
+  root gets its `:unfinished-task` problem; the failure is recorded as db<->flow's fault."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.error/throwable] :nil]}
   [handle failure]
-  (let [action (:seon.flow.plan/action (ex-data failure))
+  (let [{key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch op :seon.flow.plan/op :as action}
+        (:seon.flow.plan/action (ex-data failure))
         cause (or (when action (ex-cause failure)) failure)
-        key (:seon.task/assignment action)
         connection (:seon.db/connection handle)
-        merge? (= :merge (:seon.flow.plan/op action))
-        type (:seon.error/type (ex-data cause))
-        reason (str (when type (str (pr-str type) " ")) (or (not-empty (ex-message cause)) "db<->flow's merge was refused."))
-        owned? (and key (#{:attempt :start-flow :merge-base :merge} (:seon.flow.plan/op action))
-                    (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))
-        unmerged (when (and owned? merge?)
-                   (source/unmerged-count (db/db connection) (handle-store handle) (:seon.task/branch action)))
-        fixable? (or (fixable-refusals type) (fixable-refusals [type (:seon.source/write-back-refused (ex-data cause))]))
-        relaunch (when (and unmerged fixable?) (refused-merge-relaunch handle action reason unmerged))]
-    (cond
-      relaunch
-      (write! connection (mapv (fn [[attribute value]] [:db/add [:seon.task/assignment key] attribute value]) (sort relaunch)))
-
-      owned?
-      (do (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
-                              [:db/add [:seon.task/assignment key] :seon.task.attempt/reason
-                               (or (not-empty (ex-message cause)) "db<->flow's action failed.")]])
-          (when merge? (ended-problem! connection action :error reason unmerged))))
-    (when-not relaunch
-      (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
-                                           :seon.db.process/id (:seon.db.process/id handle)}))
+        reason (or (not-empty (ex-message cause)) "db<->flow's action failed.")
+        owned? (and key (#{:attempt :start-flow :merge-base :merge} op)
+                    (int? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key]))))]
+    (when owned?
+      (write! connection [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :error]
+                          [:db/add [:seon.task/assignment key] :seon.task.attempt/reason reason]])
+      (write-problem! handle {:seon.flow.plan/op :problem :seon.task/assignment key :seon.task/assigned h
+                              :seon.flow.plan/class :unfinished-task
+                              :seon.task/intent (str "Attempt " key " of task " h " failed in db<->flow's " (name op) ": "
+                                                     reason " It ended :error; its branch " (name branch) " is kept: close it with"
+                                                     " (my.root/close! {:seon.task/assignment \"" key "\" :seon.task/reason why}).")}))
+    (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow
+                                         :seon.db.process/id (:seon.db.process/id handle)})
     nil))
 
 (defn- close!
-  "Write a `:close` action's end on main through `connection` (`store` holds the branch) and merge nothing else.
-  Root's problem task first, then ONE transaction with the assignment's end facts its branch head holds,
-  carrying the branch and commit they came from as transaction metadata. A `:cancelled` end is db<->flow's own:
-  it writes the end, its reason and the `:closed` outcome, and root has nothing to merge or decide. A `:capped` or `:stalled` end at a
-  commit whose branch holds declarations main lacks, while its task's relaunched attempts are fewer than
-  `relaunches` (`:seon.config.run/relaunches`), is relaunched instead: `:seon.task.attempt/relaunch` in the same
-  transaction and no problem task, so `seon.task/ready` admits the task again and its next attempt forks that
-  commit (`seon.task/relaunched`)."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/store :seon.flow.plan/action :seon.config.run/relaunches] :nil]}
-  [connection store {a :db/id key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch end :seon.task.attempt/end
-                     :as action} relaunches]
+  "Write a `:close` or `:relaunch` action's end on main through `connection` and merge nothing else: ONE
+  transaction with the assignment's end facts its branch head holds and the action's relaunch beside them
+  (`seon.task/relaunched` then forks its next attempt at that end commit), carrying the branch and commit they
+  came from as transaction metadata. A `:cancelled` end is db<->flow's own: it writes the end, its reason and the
+  `:closed` outcome, and root has nothing to merge or decide."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.flow.plan/action] :nil]}
+  [connection {a :db/id key :seon.task/assignment branch :seon.task/branch end :seon.task.attempt/end
+               relaunch :seon.task.attempt/relaunch}]
   (let [head (db/branch-database (db/db connection) branch)]
     (try
-      (let [cancelled? (= :cancelled end)
-            facts (if cancelled?
-                    {:seon.task.attempt/end :cancelled :seon.task.attempt/reason "The task's intent is :cancelled."
-                     :seon.task/outcome :closed}
-                    (dissoc (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/commit
-                                                    :seon.task.attempt/reason]) .
-                                    :in $ ?k :where [?a :seon.task/assignment ?k]]
-                                  head key)
-                            :db/id))
-            unmerged (when-not cancelled? (source/unmerged-count (db/db connection) store branch))
-            relaunch (when (and (pos-int? unmerged) (#{:capped :stalled} end) (:seon.task.attempt/commit facts))
-                       (relaunch-reason (db/db connection) h (str "Ended " (name end)) unmerged relaunches))
-            facts (cond-> facts relaunch (assoc :seon.task.attempt/relaunch relaunch))]
-        (when (and unmerged (not (:seon.task.attempt/relaunch facts)))
-          (ended-problem! connection action (:seon.task.attempt/end facts) (:seon.task.attempt/reason facts) unmerged))
+      (let [facts (cond-> (if (= :cancelled end)
+                            {:seon.task.attempt/end :cancelled :seon.task.attempt/reason "The task's intent is :cancelled."
+                             :seon.task/outcome :closed}
+                            (dissoc (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/commit
+                                                            :seon.task.attempt/reason]) .
+                                            :in $ ?k :where [?a :seon.task/assignment ?k]]
+                                          head key)
+                                    :db/id))
+                    relaunch (assoc :seon.task.attempt/relaunch relaunch))]
         (write! connection {:tx-data (mapv (fn [[attribute value]] [:db/add a attribute value]) (sort facts))
                             :tx-meta {:seon.squash/source-branch branch :seon.squash/source-commit (db/commit-id head)}}))
       (finally (source/release! [head])))
@@ -2296,17 +2261,20 @@
                                                            {:seon.error/message "The assignment's branch retains no fork commit to merge from."
                                                             :seon.store/branch branch})))]])
       ;; the checkout the merged files are proven against before acceptance, as publish! will write them
+      ;; a returned refusal is the candidate's own: recorded on the assignment, the next derivation relaunches or
+      ;; closes it (`assignment-actions`); only a thrown failure is Seon's (`failed-pass!`)
       :merge (let [root (merge/checkout (db/db connection) (:seon.cluster/name handle))
                    merged (db/with-branch {:seon.db/connection connection}
                                           #(apply merge/merge! (assoc handle :seon.store/store (handle-store handle))
                                                           (:seon.task/assignment action)
                                                           (when (string? root) [root])))]
-               (when (:seon.error/at merged) (throw (ex-info (:seon.error/message merged "The merge was refused.") merged))))
+               (when (:seon.error/at merged)
+                 (write! connection [[:db/add a :seon.task/refusal (:seon.error/type merged)]])))
       ;; a refused publication is recorded on the assignment by publish! itself; the throw records the fault
       :publish (let [published (merge/publish! handle (:seon.task/assignment action))]
                  (when (:seon.error/at published)
                    (throw (ex-info (:seon.error/message published "The publication was refused.") published))))
-      :close (close! connection (handle-store handle) action (relaunch-dial handle))
+      (:close :relaunch) (close! connection action)
       ;; the stop lets the pass that wrote the end finish, then joins it
       :stop (do (when-let [registry (entry-registry routing agent-id)]
                   (stop-flow! {:seon.agent/id agent-id :seon.agent/routing registry :seon.agent/finish? true}))
@@ -2335,12 +2303,21 @@
 
 (defn- run-pass!
   "One db<->flow pass over cluster `handle` and its `routing`: the ended assignments' lifecycle first
-  (`next-actions`: merged to main, stopped, deleted), so the plan reads them ended (P2); then the attempts are written and Flow follows them (R1); then the agents with
+  (`next-actions`: stopped, then, derived again after the stop so it reads their exit, merged to main, then,
+  derived again after the merge so it reads its outcome, published, relaunched or closed; deleted), so the plan reads them ended (P2); then the attempts are written and Flow follows them (R1); then the agents with
   work that no attempt names start. The first failure stops the pass and reaches db<->flow's one catch."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
   [handle routing]
   (let [connection (:seon.db/connection handle)]
-    (apply-plan! handle routing (next-actions (lifecycle-facts @connection (handle-store handle) (registry-facts routing))))
+    (let [lifecycle! #(let [actions (next-actions (lifecycle-facts @connection (handle-store handle) (registry-facts routing)))]
+                        (apply-plan! handle routing actions)
+                        actions)]
+      ;; a stop and a merge each change what the derivation reads (the graph's exit; the merge's outcome or its
+      ;; refusal), so what follows them is derived in this pass and the plan never reads an ended attempt as open
+      (let [applied? (fn [op actions] (some #(= op (:seon.flow.plan/op %)) actions))
+            derived (lifecycle!)
+            derived (if (applied? :stop derived) (lifecycle!) derived)]
+        (when (applied? :merge derived) (lifecycle!))))
     (let [db @connection
           facts (plan-facts db)
           max-running (:seon.config.agent/max-running (config/effective db (:seon.cluster/name handle)))]

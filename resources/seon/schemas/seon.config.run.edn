@@ -8,4 +8,4 @@
  [:int
   {:seon.config/display-label "Relaunches" :min 0
    :seon.config/dial true
-   :description "How many times db<->flow relaunches a task whose attempt ended :capped or :stalled with work on its branch: each relaunch forks the ended commit and keeps the merge base (seon.cluster.agent/close!); once used, or for an end with no work, the attempt closes with a problem task for root."}]}
+   :description "How many times db<->flow relaunches a task whose attempt ended :capped or :stalled, or whose merge returned a refusal, with work on its branch: each relaunch forks the ended commit and keeps the merge base (seon.cluster.agent/assignment-actions); once used, or for an end with no work, the attempt closes with a problem task for root."}]}
