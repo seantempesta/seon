@@ -48,7 +48,6 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
-            [seon.operator.runtime :as operator.runtime]
             [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -74,10 +73,8 @@
   (config/result-caps config/defaults))
 
 (def ^:private process
-  "This suite's run-holder identity. The web service REQUIRES one —
-  which processes are alive is the one input no database value answers,
-  and a page that guessed it would either invent wedges or hide them."
-  "web-test-1")
+  "This suite's run-holder identity: the shared web service's."
+  support/web-process)
 
 (def ^:private agent-id "root")
 
@@ -569,7 +566,6 @@ handle))}}
                        (.attr "action")))
             "the page offers the explicit create control, posting to the namespace's agent")))))
 
-(declare service-request)
 
 (deftest a-request-that-throws-answers-its-error-value-never-a-stack-trace
   ;; Class regression (2026-09-27): POST action=system-turn answered HTTP 500
@@ -581,7 +577,7 @@ handle))}}
                              {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/turn
                               :seon.error/operation 'seon.turn/record-evaluated-tx
                               :seon.error/message "The record refused its request."})
-            response (#'web/failure-response (service-request connection {}) failure)]
+            response (#'web/failure-response (support/web-service connection {}) failure)]
         (is (= {:status 500 :content-type "text/html; charset=utf-8"}
                {:status (:status response)
                 :content-type (get-in response [:headers "content-type"])}))
@@ -1511,7 +1507,7 @@ handle))}}
             failure
               (try
                 (web/start!
-                 (service-request connection
+                 (support/web-service connection
                  {:seon.render.web/http
                   {:seon.render.web/run-server
                    (fn [_handler _options]
@@ -2092,27 +2088,6 @@ handle))}}
                 "the HTTP refusal is text, never a competing morph"))
           (finally (.close stream)))))))
 
-(defn- service-request
-  "The DECLARED `:seon.render.web/service`, with only what a test varies over
-  it. Its members are the ones a running cluster hands `start!` and
-  `inbound`; a map of the four a given assertion reads is a shape the
-  declared contract forbids."
-  [connection overrides]
-  (merge {:seon.store/connection-object connection
-          :seon.agent/id agent-id
-          :seon.sci.admit/caps caps
-          :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-          :seon.config.eval/time-limit-ms
-          (:seon.config.eval/time-limit-ms config/defaults)
-          :seon.db.process/id process
-          :seon.render.web/pages-mult
-          (async/mult (async/chan (async/sliding-buffer 1)))
-          :seon.render.web/registration (atom {})
-          :seon.render.web/latest-packages (atom {})
-          :seon.render.web/render-channel (async/chan (async/sliding-buffer 1))
-          :seon.render.web/fault-channel (async/chan (async/dropping-buffer 1))}
-         overrides))
-
 (deftest transaction-refusals-map-to-http-without-success
   (support/with-database
     (fn [connection]
@@ -2122,7 +2097,7 @@ handle))}}
                           {:seon.agent/id agent-id
                            :seon.cluster/name "web-write-refusal"
                            :seon.ns/name 'my.agents.root}))
-      (let [service (service-request connection {})
+      (let [service (support/web-service connection {})
             inbound {:seon.agent/id agent-id
                      :seon.message/inbound-content "accepted"}]
         (doseq [[result expected-status]
@@ -2145,7 +2120,7 @@ handle))}}
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "web-handler-throw")
-      (let [response ((web/handler (service-request connection {}))
+      (let [response ((web/handler (support/web-service connection {}))
                       {:request-method :post
                        :uri (str "/agent/" agent-id "/message")
                        :headers {}
@@ -2165,7 +2140,7 @@ handle))}}
       ;; writes one through the service's writer: here, a refusing writer.
       (let [result
             (support/refusal-data
-             #(web/start! (service-request
+             #(web/start! (support/web-service
                            connection
                            {:seon.db/writer
                             (fn [_connection _transaction]
@@ -2247,7 +2222,7 @@ handle))}}
       (let [taken (:seon.render.web/port first-server)
             ;; its own disposable view half: this test is about the PORT,
             ;; and the second view never opens a feed
-            second-service (service-request connection {:seon.render.web/port taken})
+            second-service (support/web-service connection {:seon.render.web/port taken})
             second-server (web/start! second-service)]
         (try
           (is (not= taken (:seon.render.web/port second-server))
@@ -2266,7 +2241,7 @@ handle))}}
 (deftest a-stopped-server-has-shut-down-its-worker-executor
   (with-server
     (fn [connection _first-server _graph]
-      (let [service (service-request connection {})
+      (let [service (support/web-service connection {})
             served (web/start! service)
             executor (:seon.render.web/executor served)]
         (is (instance? java.util.concurrent.ExecutorService executor)
@@ -2376,30 +2351,14 @@ handle))}}
   a-user-reply-post-wakes-the-addressed-agent
   (support/with-running-agent
    (fn [running bystander connection]
-     ;; the user: an addressable agent with an inbox and no model graph
-     (support/transacted! connection (support/agent-tx (db/db connection) "user"))
-     (let [{survey :seon.db/connection reply :seon.test/reply}
-           (support/own-branch-agent! running "survey"
-                                      "(my.message/send {:my.message/to \"user\" :my.message/content \"Approve this intent?\"})")
-           sent (:seon.repl/value (support/mcp-reply reply))
-           question (:seon.message/id sent)
-           handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
-           pass! #(cluster.agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
-                                           :seon.flow/plan :seon.agent/test-wake)]
+     (let [{sent :seon.test/sent question :seon.test/question response :seon.test/response survey :seon.db/connection}
+           (support/user-reply! running "survey" "Approve this intent?" "Approve")]
        (is (nil? (:seon.error/type sent)) "a send to the user is accepted though the user runs no graph")
        (is (string? question) "the send answers its accepted message id")
-       (pass!)
        (is (= "user" (get-in (db/pull (db/db connection) [{:seon.message/to [:seon.agent/id]}] [:seon.message/id question])
                              [:seon.message/to :seon.agent/id]))
            "the question to the user is persisted on main, where the user's chat shows it")
-       (let [response ((web/handler (service-request connection {:seon.agent/id "user"}))
-                       {:request-method :post :uri "/agent/survey/message"
-                        :headers {"content-type" "application/x-www-form-urlencoded"}
-                        :body (java.io.ByteArrayInputStream.
-                               (.getBytes (str "content=Approve&caused-by=" (URLEncoder/encode (str question) "UTF-8")) "UTF-8"))})]
-         (is (= 204 (:status response)) "the reply form's POST is admitted"))
-       ;; root's delivery to the recipient's branch
-       (pass!)
+       (is (= 204 (:status response)) "the reply form's POST is admitted")
        (let [branch (db/db survey)
              reply-id (db/q '[:find ?id . :in $ ?q
                               :where [?c :seon.message/id ?q] [?m :seon.message/caused-by ?c] [?m :seon.message/id ?id]]

@@ -846,3 +846,51 @@
            (is (= [path] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" git-commit)))
                "only the changed file is written"))
          (finally (support/delete-root! root)))))))
+
+;;; TASK-CHAIN A2 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one verdict, and the writer compares the tested task basis.
+
+(deftest ^{:seon/tasks #{'seon.task/chain-acceptance}
+           :seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
+           :seon.test/long-ms 60000}
+  only-an-accepted-candidate-completes-a-task
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        merge-verdict (requiring-resolve 'seon.cluster.source/merge-verdict)
+        proofs #{(sym "accept-check")}
+        c (keyword (str "merge-test-c-" (id/id)))
+        _ (task/index-tasks! {:seon.db/connection h-conn
+                              :seon.task/files {"resources/seon/tasks/tq.accept.edn"
+                                                "[#:seon.task{:name \"fix\" :intent \"Make accept-value one.\"}]"}})
+        _ (write! h-conn [(entity (db/db h-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 0)")
+                          (entity (db/db h-conn) :test "accept-check"
+                                  "(clojure.test/deftest ^{:seon/tasks #{'tq.accept/fix}} accept-check (clojure.test/is (int? (seon.cluster.merge-test/accept-value))))")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])]
+    (try
+      (write! c-conn [(entity (db/db c-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 1)")])
+      (let [prepared (source/prepare-merge! target store c proofs)
+            _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
+            main (db/db h-conn)
+            base (db/commit-database main (registry/base-commit-id main c))]
+        (is (true? (:seon.test/passed? prepared)) "the candidate's tested program is green")
+        (is (= {:seon.task/sym 'tq.accept/fix}
+               (select-keys (:seon.source/tested-task-basis prepared) [:seon.task/sym]))
+            "the prepared merge carries the task basis its run selected")
+        (is (= [] (merge-verdict main (db/db c-conn) base prepared)) "current green evidence is accepted")
+        ;; the target moves one proof input: a new deftest tagged with the task, written through the program owner
+        (write! h-conn [(entity (db/db h-conn) :test "accept-later"
+                                "(clojure.test/deftest ^{:seon/tasks #{'tq.accept/fix}} accept-later (clojure.test/is (= 1 (seon.cluster.merge-test/accept-value))))")])
+        (let [before (db/commit-id (db/db h-conn))
+              refused (source/accept-merge! target store prepared)]
+          (is (= :seon.source/test-evidence-error (:seon.error/type refused))
+              "the writer recomputes the task's obligations and refuses the moved proof input")
+          (is (= before (db/commit-id (db/db h-conn))) "no candidate datom is installed")
+          (is (not= :merged (:seon.task/outcome (db/pull (db/db h-conn) [:seon.task/outcome] [:seon.task/sym 'tq.accept/fix])))
+              "no merged outcome completes the task")))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

@@ -21,6 +21,7 @@
             [seon.env :as env]
             [seon.eval.drive :as drive]
             [seon.mcp :as mcp]
+            [seon.render.web :as web]
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.id :as id]
@@ -1542,3 +1543,75 @@
   (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))]
     (db/with-branch {:seon.db/connection connection}
       #(drive/inbound! connection (:seon.cluster/name handle) cluster/boot-process-identity agent-id text))))
+
+;;; ---------------------------------------------------------------------------
+;;; The web service and a user's reply through it
+
+(defn user-reply-delivered!
+  "Run root's db<->flow once on the running cluster `running`, as the wake of a written message asks: its delivery."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [running]
+  (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))]
+    (agent/db<->flow {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)}
+                     :seon.flow/plan :seon.agent/test-wake)))
+;;; ---------------------------------------------------------------------------
+
+(def web-process
+  "The run-holder identity a test's web service names: the web service REQUIRES one, since which processes are alive
+  is the one input no database value answers."
+  "web-test-1")
+
+(defn web-service
+  "The DECLARED `:seon.render.web/service` over `connection`, as a running cluster hands `start!` and `inbound`, for
+  agent \"root\" and `web-process`, with `overrides` (what a test varies) merged last."
+  {:malli/schema [:=> [:cat :seon.db/connection :map] :map]}
+  [connection overrides]
+  (merge {:seon.store/connection-object connection
+          :seon.agent/id "root"
+          :seon.sci.admit/caps (config/result-caps config/defaults)
+          :seon.sci.eval/ctx (fork-cluster-ctx connection)
+          :seon.config.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+          :seon.db.process/id web-process
+          :seon.render.web/pages-mult (async/mult (async/chan (async/sliding-buffer 1)))
+          :seon.render.web/registration (atom {})
+          :seon.render.web/latest-packages (atom {})
+          :seon.render.web/render-channel (async/chan (async/sliding-buffer 1))
+          :seon.render.web/fault-channel (async/chan (async/dropping-buffer 1))}
+         overrides))
+
+(defn user-post!
+  "POST `reply-text` from the admitted user to `asker` through the web route, caused by message `question`, then run
+  root's db<->flow once so it is delivered; the POST's Ring response."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.schema/value :string] :map]}
+  [running asker question reply-text]
+  (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
+        response ((web/handler (web-service (:seon.db/connection handle) {:seon.agent/id "user"}))
+                  {:request-method :post :uri (str "/agent/" asker "/message")
+                   :headers {"content-type" "application/x-www-form-urlencoded"}
+                   :body (java.io.ByteArrayInputStream.
+                          (.getBytes (str "content=" (java.net.URLEncoder/encode ^String reply-text "UTF-8")
+                                          "&caused-by=" (java.net.URLEncoder/encode (str question) "UTF-8"))
+                                     "UTF-8"))})]
+    (user-reply-delivered! running)
+    response))
+
+(defn user-reply!
+  "On the running cluster `running`: admit the graphless agent \"user\", host `asker` on a branch of its own whose
+  first eval request sends the user `question-text` (`my.message/send`), run root's db<->flow, POST `reply-text` to
+  `asker` through the web route as the user, caused by that question, and run db<->flow again so root delivers it.
+  The sent value, the question id, the POST response, the asker's branch connection and the running handle."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string :string] :map]}
+  [running asker question-text reply-text]
+  (let [handle (:seon.turn.loop/cluster (get @operator.runtime/running-instances running))
+        connection (:seon.db/connection handle)
+        pass! #(user-reply-delivered! running)
+        _ (transacted! connection (agent-tx (db/db connection) "user"))
+        {branch :seon.db/connection reply :seon.test/reply}
+        (own-branch-agent! running asker (str "(my.message/send {:my.message/to \"user\" :my.message/content "
+                                              (pr-str question-text) "})"))
+        sent (:seon.repl/value (mcp-reply reply))
+        question (:seon.message/id sent)
+        _ (pass!)
+        response (user-post! running asker question reply-text)]
+    {:seon.test/sent sent :seon.test/question question :seon.test/response response
+     :seon.db/connection branch :seon.turn.loop/cluster handle}))
