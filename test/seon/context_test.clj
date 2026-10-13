@@ -283,6 +283,35 @@
          (is (some #{(:seon.ref/revision pin)} path))
          (is (seq (:arglists entry))))))))
 
+(deftest each-must-read-shows-its-declared-render
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'kinds 'tq.cs/kinds)
+           base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
+           _ (task/create! (assoc base :seon.task/name "cited" :seon.task/intent "A cited task."))
+           id (:seon.task/id (task/create! (assoc base :seon.task/name "kinds"
+                                                  :seon.task/intent (str "Change `seon.context/step-start`, proven like "
+                                                                         "`seon.context-test/the-block-resolves-the-names-a-task-references`; "
+                                                                         "the key `:seon.task/intent`; after `tq.cs/cited`; read "
+                                                                         "`AGENTS.md#data-and-contracts`; validate with `malli.core/validator`."))))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+       (let [state (block running agent-id)
+             reads (:seon.context/must-reads state)
+             entry (fn [n] (some #(when (= n (:seon.ref/name %)) %) reads))
+             function (entry 'seon.context/step-start)
+             library (entry 'malli.core/validator)]
+         (is (= 6 (count reads)) "one must-read per cited name and path")
+         (is (not-any? #(and (map? %) (or (contains? % :seon.render/ai) (contains? % :seon.render/html))) (tree-seq coll? seq state))
+             "no must-read or proof shows the render keys it is rendered by")
+         (is (some #(re-find #":malli/schema" %) (:seon.render.ns/source-lines function))
+             "a function shows its source, which carries its contract")
+         (is (= ['(my.program/callers 'seon.context/step-start) '(my.program/tests-reaching 'seon.context/step-start)]
+                (:seon.render/operations function))
+             "a function offers the reads of its callers and of the tests reaching it")
+         (is (seq (:seon.ref/references function)) "a must-read keeps the references its content makes")
+         (is (seq (:arglists library)) "a library Var shows its arglists"))))))
+
 (deftest ^{:seon/tasks #{'seon.context/a-message-to-the-agent-is-not-in-the-model-context}}
   unread-shows-each-undelivered-item-once-with-its-identity
   (test-support/with-running-agent

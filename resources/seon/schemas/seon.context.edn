@@ -141,7 +141,14 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
-                [:seon.context/must-reads {:optional true} :seon.context/must-reads]
+                [:seon.context/must-reads {:optional true} [:vector :seon.context/must-read-view]]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
-                [:seon.context/turns :seon.context/turns]]}
+                [:seon.context/turns :seon.context/turns]]
+               :must-read-view
+               [:or {:description "One must-read as the AI face shows it: a problem as it is, else its entity through the render it declares beside its name and the references its content makes. Producer: seon.context/must-read-ai."}
+                :seon.ref/problem
+                [:map [:seon.ref/name {:optional true} :seon.ref/name]
+                 [:seon.ref/references {:optional true} :seon.ref/references]
+                 [:seon.context/rendered {:optional true} :seon.context/rendered]]]
+               :rendered [:and {:description "A must-read's declared render output that is not a map, such as AI text."} :seon.schema/value]}

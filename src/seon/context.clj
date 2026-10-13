@@ -644,7 +644,7 @@
               steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
                             (update proven :seon.context/proof-list
-                                    (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name) %))))
+                                    (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name :seon.render/ai :seon.render/html) %))))
               verdict (assoc :seon.context/step
                              (assoc (step-section verdict)
                                     :seon.context/start (step-start database held)))
@@ -694,13 +694,27 @@
           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
                                                     :seon.render/operations ['(my.message/inbox)]})))))
 
+(defn- must-read-ai
+  "One must-read as the agent reads it: its entity through the render it declares (`seon.render/render-ai`, one hop
+  beyond `unit`'s distance), beside its name and the references its content makes; a problem as it is."
+  {:malli/schema [:=> [:cat :seon.render/unit [:or :seon.ref/resolved :seon.ref/problem]] :seon.context/must-read-view]}
+  [unit entry]
+  (if-not (:seon.render/ai entry)
+    entry
+    (let [shown (seon.render/render-ai (assoc unit :seon.render/value entry
+                                         :seon.render/distance (inc (get unit :seon.render/distance 0))))
+          kept (select-keys entry [:seon.ref/name :seon.ref/references])]
+      (if (map? shown) (merge shown kept) (assoc kept :seon.context/rendered shown)))))
+
 (defn current-state-ai
-  "The block's sections as the agent reads them: the task by symbol and declaration, without its handle.
+  "The block's sections as the agent reads them: the task by symbol and declaration, without its handle, and each
+  must-read through its own declared render (`must-read-ai`).
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
   (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
-    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
+    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
+    (:seon.context/must-reads block) (update :seon.context/must-reads (partial mapv #(must-read-ai block %)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; What a model pass sends

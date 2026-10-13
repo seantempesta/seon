@@ -178,21 +178,27 @@
 
 (defn function-ai
   "A function node as data: its name and doc line; beyond distance zero its
-  authored source as its lines, which hold the doc, and its contract where the source does not carry it. What it calls
-  and what calls it are its related data."
+  authored source as its lines, which hold the doc, and its contract where the source does not carry it, else a
+  library Var's arglists, with the forms that read its callers and the tests reaching it (and a library Var's
+  source). What it calls and what calls it are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.ns/function-view]}
   [unit]
-  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec}
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec arglists :arglists}
         (or (:seon.render/value unit) unit)
         line (first-doc-line doc)
         near? (pos? (node-distance unit))
+        subject (list 'quote function-name)
         ;; the authored source carries its docstring, so a shown source is the doc
         named (cond-> {:seon.fn/sym function-name}
                 (and line (not (and source near? (str/includes? source line)))) (assoc :seon.fn/doc line))]
     (cond-> named
       (and source near?) (assoc :seon.render.ns/source-lines (str/split-lines source))
-      (and spec (pos? (node-distance unit)) (not (and source (str/includes? source ":malli/schema"))))
-      (assoc :seon.fn/spec spec))))
+      (and spec near? (not (and source (str/includes? source ":malli/schema"))))
+      (assoc :seon.fn/spec spec)
+      (and arglists near? (not source)) (assoc :arglists arglists)
+      near? (assoc :seon.render/operations
+                   (cond-> [(list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]
+                     (not source) (conj (list 'clojure.repl/source function-name)))))))
 
 (defn function-html
   "Render a function node: its doc and authored source."
