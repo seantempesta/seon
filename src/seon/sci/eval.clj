@@ -904,20 +904,6 @@
     (merge (select-keys effective [:seon.config.error/max-evidence-bytes])
            {:seon.sci.admit/caps (config/result-caps effective)})))
 
-(defn context-predicates
-  "The callable of each qualified `[:fn sym]` predicate `contract` names, as
-  `ctx` resolves it: a predicate defined on the context's branch is its own
-  interpreted function, a compiled one the Var's value."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value]
-                  [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
-  [ctx contract]
-  (sci.ctx-store/with-ctx ctx
-    (into {}
-          (keep (fn [predicate]
-                  (when-let [found (sci/resolve ctx predicate)]
-                    (when (ifn? @found) [predicate @found]))))
-          (#'schema/predicate-symbols-in contract))))
-
 (defn- arm-contract!
   "Arm `contract`, a function contract form, on `function-symbol`'s Var in
   `ctx`, its named predicates resolved as `ctx` resolves them."
@@ -940,9 +926,7 @@
         current (call-preparation/snapshot db (or (db/carried-projection db) projection))
         _ (when (db/read-refusal? current)
             (throw (ex-info (:seon.error/message current) current)))
-        projection (schema/with-predicate-functions
-                    projection (merge (schema/predicate-functions-in projection)
-                                      (context-predicates ctx contract)))]
+        projection (kernel/context-bound-projection ctx projection contract)]
     (sci/bind-root!
      ctx sci-var
      (instrument/wrap-interpreted

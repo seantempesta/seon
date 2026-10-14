@@ -261,7 +261,7 @@
 (defn- write-entity
   "The program row of one joined definition write, or the reason it has none.
   Its contract facts read `projection`, the one the write was armed under,
-  with the predicates its contract names as `ctx` resolves them."
+  bound as `ctx` binds its predicates (`seon.sci.kernel/context-bound-projection`)."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
   [ctx namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym :as write} declared]
   (let [coords (entry-coords analysis entry)
@@ -290,9 +290,8 @@
       ;; predicates symbols); they resolve as this context resolves them
       row {:seon.batch/row (if-let [spec (:seon.fn/spec row)]
                              (sfn/contract-facts-row
-                              (schema/with-predicate-functions
-                               projection (merge (schema/predicate-functions-in projection)
-                                                 (eval/context-predicates ctx (edn/read-string spec))))
+                              (sci.ctx-store/with-ctx ctx
+                                (kernel/context-bound-projection ctx projection (edn/read-string spec)))
                               (namespace-row (symbol (namespace sym)))
                               row)
                              row)}

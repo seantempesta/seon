@@ -294,15 +294,49 @@
                  :seon.fn/sym function-symbol})))))
   function-symbol)
 
+(defn context-bound-projection
+  "`base` with each predicate `ctx` holds apart from it bound to `ctx`'s SCI Var.
+
+  A predicate is held apart when `ctx` has its own binding of the Var (a
+  branch `defn` of a copied function, an affected caller interpreted onto
+  it) or the Var was born in an agent's context, among the predicates `base`'s
+  population and `form` name. A call of the bound Var reads the executing
+  context's binding, so a later redefinition recompiles nothing. Holding
+  nothing apart answers `base` itself. Compiled callers and the checked
+  writer keep the database's projection: they see a branch's predicate only
+  after merge (`seon.schema/with-bound-predicates`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/ctx :seon.schema/projection] :seon.schema/projection]
+                  [:=> [:cat :seon.sci.eval/ctx :seon.schema/projection :seon.schema/value]
+                   :seon.schema/projection]]}
+  ([ctx base] (context-bound-projection ctx base nil))
+  ([ctx base form]
+   (let [predicates (into (#'schema/population-predicate-symbols
+                           (:seon.schema.projection/forms base)
+                           (get base :seon.schema.projection/function-contracts {}))
+                          (#'schema/predicate-symbols-in form))
+         bindings (into {}
+                        (keep (fn [predicate]
+                                (when-let [sci-var (sci/resolve ctx predicate)]
+                                  (when (or (sci.vars/context-binding ctx sci-var)
+                                            (:sci/generation (meta sci-var)))
+                                    [predicate sci-var]))))
+                        predicates)]
+     (if (empty? bindings)
+       base
+       (schema/with-bound-predicates base bindings)))))
+
 (defn context-projection
-  "Return the latest immutable schema projection held by `ctx`."
+  "Return the latest immutable schema projection held by `ctx`, with the
+  predicates `ctx` holds apart bound as it binds them ([[context-bound-projection]])."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx]
                   [:or :nil :seon.schema/projection]]}
   [ctx]
-  (or (some-> (:seon.sci.eval/projection-state ctx)
-              deref
-              :seon.schema/projection)
-      (:seon.schema/projection ctx)))
+  (some->> (or (some-> (:seon.sci.eval/projection-state ctx)
+                       deref
+                       :seon.schema/projection)
+               (:seon.schema/projection ctx))
+           (context-bound-projection ctx)))
 
 (defn- record
   "The evaluation's record from its arm: entries, host calls, wall ms, the

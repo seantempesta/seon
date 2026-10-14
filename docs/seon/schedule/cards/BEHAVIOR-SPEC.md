@@ -242,7 +242,7 @@ positions once then binary search, exponent 1.01 (0.26 → 2.10 MB). Red on the 
 
 1. Done: an agent's `[:fn pred]` contract is admitted (the predicate-purity rule, which nothing could satisfy, is
    deleted), and a predicate defined on the branch resolves through the agent's SCI context
-   (`seon.sci.eval/context-predicates`). An agent's `[:fn]` still declares `:error/message` and a bounded generator.
+   (`seon.sci.kernel/context-bound-projection`). An agent's `[:fn]` still declares `:error/message` and a bounded generator.
    An unquoted predicate in REPL metadata is the ordinary form: the stored contract is the analysis's authored
    form and arming uses the evaluated one, so nothing prints and re-reads it.
 2. **Malli fork: seed and max size in `function-checker`** (§3). Owner: root's batched fork bump.

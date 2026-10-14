@@ -4,7 +4,7 @@
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster.host :as host]
             [seon.cluster.source :as source]
             [seon.db :as db]
@@ -307,6 +307,59 @@
       (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be an even integer\" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]} [x] (quot x 2))"
      'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
      "(halve 4)" 2 "(halve 3)"]]))
+
+(def ^:private form-request-taker
+  "An interpreted function contracted on `:my.edit/form-request`, whose predicate
+  `seon.edit/valid-form-operation?` the registry reaches."
+  "(ns bp.registered-predicate)
+   (defn takes {:malli/schema [:=> [:cat :my.edit/form-request] :boolean]} [request] true)")
+
+(defn- form-request-call
+  "A call of `function` with a request main's predicate admits."
+  {:malli/schema [:=> [:cat :symbol :keyword :string] :string]}
+  [function operation source-part]
+  (str "(" function " {:my.edit/path \"src/example.clj\" :my.edit/expected-digest \""
+       (apply str (repeat 64 "a")) "\" :my.edit/form {:my.edit.form/head 'defn :my.edit.form/name 'example}"
+       " :my.edit/operation " operation source-part "})"))
+
+(deftest ^{:seon.test/long "Ten MCP eval requests on three agent branches, each first request acquiring its branch's context."
+           :seon.test/long-ms 15000}
+  a-registered-predicate-runs-as-the-branch-defines-it
+  ;; each row: the branch's definitions, then the operation and source of a
+  ;; request main's predicate admits, which the branch's refuses. Each row's
+  ;; agent and a sibling get their own branches at their first call, before
+  ;; any row defines anything; the sibling still validates with main's predicate.
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id _]
+     (let [reply (fn [code agent] ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent running)))
+           taker-call (fn [operation source-part]
+                        (str form-request-taker "\n"
+                             (form-request-call 'bp.registered-predicate/takes operation source-part)))
+           sibling (str agent-id "-sibling")
+           rows [["(in-ns 'seon.edit)
+                   (defn valid-form-operation? {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate accepts arbitrary objects.\", :gen/elements [nil {}]}]] :boolean]} [request] false)"
+                  :delete ""]
+                 ;; the predicate is unchanged: it interprets as an affected caller of `seon.edit/single-form`
+                 ["(in-ns 'seon.edit)
+                   (defn- single-form {:malli/schema [:=> [:cat :string :string] [:or :map :my.edit/parse-refused-error]]} [source message] {:my.edit/parse-byte-count 1})"
+                  :replace " :my.edit/source \"(defn example [] nil)\""]]
+           agent-of (fn [operation] (str agent-id "-" (name operation)))]
+       (doseq [[_ operation source-part] rows
+               agent [(agent-of operation) sibling]]
+         (testing [operation agent]
+           (is (true? (:seon.repl/value (reply (form-request-call 'seon.edit/valid-form-operation? operation source-part)
+                                               agent)))
+               "main's predicate admits the request")))
+       (doseq [[definitions operation source-part] rows]
+         (testing operation
+           (is (false? (get (eval! definitions (agent-of operation) running) "isError"))
+               "the branch's definitions are admitted")
+           (is (= {:seon.error/type :seon.instrument/contract-error :seon.instrument/check :input}
+                  (select-keys (:seon.repl/error (reply (taker-call operation source-part) (agent-of operation)))
+                               [:seon.error/type :seon.instrument/check]))
+               "the branch's predicate refuses it")
+           (is (true? (:seon.repl/value (reply (taker-call operation source-part) sibling)))
+               "a sibling agent's branch validates with main's predicate")))))))
 
 (defn- stale-declarations
   "The functions and tests of `namespace-name` on `database` whose stored
