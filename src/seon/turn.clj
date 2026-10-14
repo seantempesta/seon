@@ -2111,12 +2111,14 @@
 
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
-  model turn chose no disposition, that reply does not continue (`continuing-reply?`) and no wake is unanswered."
+  turn chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an error before any reply,
+  a refused context or a failed provider call, never does) and no wake opens a turn: none is unanswered, or opening
+  waits for a new outside wake (`opening-deferred?`, as after a failed provider call)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
                          :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
-                         [?turn :seon.turn/id _ ?t] [?turn :seon.turn/closed-tx _] [?turn :seon.turn/reply-size _]]
+                         [?turn :seon.turn/id _ ?t] [?turn :seon.turn/closed-tx _]]
                        database agent-id)
         disposed? (when latest-t
                     (db/q '[:find ?turn . :in $ ?agent-id ?t
@@ -2125,7 +2127,8 @@
                           database agent-id latest-t))]
     (boolean (and latest-t (not disposed?)
                   (not (continuing-reply? database agent-id))
-                  (empty? (unanswered-wakes database agent-id {}))))))
+                  (or (empty? (unanswered-wakes database agent-id {}))
+                      (true? (opening-deferred? database agent-id)))))))
 
 (defn sent-back-to
   "The task the completed turn of `agent-id` on `database` sent its work back to (`:seon.turn/sent-back-to`), or nil."
@@ -5809,8 +5812,10 @@
                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
                                                       (/ (- (System/nanoTime) test-start) 1e6)))
                           ;; A MODEL PASS THAT CLOSED ITS TURN OBSERVES THE TASK'S END, after the
-                          ;; step recorded the proofs: the end closes the agent once.
-                          _ (when (and (nil? submission) (= :closed (:seon.turn.loop/outcome report)))
+                          ;; step recorded the proofs: the end closes the agent once. A pass whose turn
+                          ;; closed on an error (a refused context, a failed provider call) observes it
+                          ;; too: the loop stops calling the agent, so the end reads `:stalled`.
+                          _ (when (and (nil? submission) (#{:closed :error} (:seon.turn.loop/outcome report)))
                               (end-task! cluster agent-id))
                           ;; THE QUEUE IS THIS PROC'S STATE: a step runs only what its own run changed,
                           ;; so what it left joins the older queue, carried to the idle pass.
