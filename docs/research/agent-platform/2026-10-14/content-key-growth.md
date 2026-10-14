@@ -1,5 +1,6 @@
 ---
 title: Content-key-growth measurement and unresolved fix
+type: research
 date: 2026-10-14
 status: investigation-incomplete
 ---
