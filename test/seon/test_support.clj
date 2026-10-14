@@ -1104,6 +1104,18 @@
       (with-branched-database extra-schema body))))
 
 
+(defn task-input
+  "Write `tasks` (ordinary task maps; a negative `:db/id` links a `:seon.task/next`) through the task writer on
+  `connection`, and answer what a step's handoff test is supplied for the task `sym`: the task entity and the
+  requesting branch's database, captured after the write (`:seon.test/task`, `:seon.test/branch`)."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map] :seon.task/sym]
+                  [:map [:seon.test/task :map] [:seon.test/branch :seon.db/database-value]]]}
+  [connection tasks sym]
+  (let [handles (into #{} (map #(task/task-handle (:seon.task/ns %) (:seon.task/name %))) tasks)]
+    (transacted! connection (task/adopt-tasks-tx (db/db connection) tasks handles {}))
+    (let [branch (db/db connection)]
+      {:seon.test/task (db/pull branch '[*] [:seon.task/sym sym]) :seon.test/branch branch})))
+
 (defn turn-closed-at
   "The instant a turn closed, read THROUGH its closing transaction ref.
 
