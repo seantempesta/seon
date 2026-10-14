@@ -206,7 +206,8 @@
     :seon.error/expected :seon.sci.eval/public-documentation}))
 
 (defn schema-documentation
-  "The declared form of the schema named `key`, with its description property."
+  "The declared form of the schema named `key`, with its description property and `:returns`, the functions whose
+  output names it (`seon.db/contract-users`)."
   {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
                   [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database key authored]
@@ -217,7 +218,7 @@
       :else
       (let [form (edn/read-string (:seon.schema/form row))
             description (when (and (vector? form) (map? (second form))) (:description (second form)))]
-        (cond-> {:key key :form form}
+        (cond-> {:key key :form form :returns (db/contract-users database key :seon.fn.arity/output-refs)}
           description (assoc :description description))))))
 
 ;;; ---------------------------------------------------------------------------

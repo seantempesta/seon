@@ -248,8 +248,9 @@
                  :symbol :keyword :int :double :string :boolean :nil
                  [:sequential :seon.schema/value] [:map-of :seon.schema/value :seon.schema/value]],
                 :schema-doc
-                [:map {:description "The declared form of one schema key, with its description property when it has one."}
-                 [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]],
+                [:map {:description "The declared form of one schema key, with its description property when it has one, and the functions whose output names it."}
+                 [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]
+                 [:returns [:vector :qualified-symbol]]],
                 :namespace-doc
                 [:map {:description "A namespace's docstring parts when it has a docstring, and its public names."}
                  [:summary {:optional true} :string] [:body {:optional true} :string] [:example {:optional true} :string]

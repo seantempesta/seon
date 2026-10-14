@@ -4705,18 +4705,45 @@
   (when (get (dbi/-schema database) :seon.db.vector/cells)
     (:e (first (d/datoms database :avet :seon.db.vector/cells cell)))))
 
-(defn- attribute-holders
+(defn attribute-holders
   "The entities whose `attribute` holds `value`: through the cell holding it
-   when the attribute is stored in cells, else directly."
+   when the attribute is stored in cells, else directly. Under a read-evidence
+   sink each index seek is recorded as `datoms` records it, so a cached answer
+   holds until a matching datom changes; the work is proportional to the
+   holders, never the attribute's population."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value] [:vector :seon.db/entity-id]]}
   [database attribute value]
-  (into []
-        (keep (fn [datom]
-                (if (and (get (dbi/-schema database) :seon.db.vector/position)
-                         (first (d/datoms database :eavt (:e datom) :seon.db.vector/position)))
-                  (cell-owner database (:e datom))
-                  (:e datom))))
-        (d/datoms database :avet attribute value)))
+  (let [installed (dbi/-schema database)
+        cells? (and (get installed :seon.db.vector/position) (get installed :seon.db.vector/cells))
+        ;; One raw seek; its dependency is derived only when a sink collects it.
+        seek (fn [index & components]
+               (when *read-evidence-sink*
+                 (let [{plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
+                       (index-read-dependencies database index components)]
+                   (append-read-evidence!
+                    (cond-> {:seon.db/db database
+                             :seon.db/source-argument-position 0
+                             :datahike.read/dependency-plan plan}
+                      (instance? DB database) (assoc :seon.db/read-index-patterns [pattern])))))
+               (apply d/datoms database index components))]
+    (into []
+          (keep (fn [datom]
+                  (if (and cells? (first (seek :eavt (:e datom) :seon.db.vector/position)))
+                    (:e (first (seek :avet :seon.db.vector/cells (:e datom))))
+                    (:e datom))))
+          (seek :avet attribute value))))
+
+(defn contract-users
+  "The functions whose contract names schema key `k` in the arity role `role`,
+   sorted: key to arities to their functions through `attribute-holders`, never
+   a join over the arities population."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword
+                       [:enum :seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs]]
+                  [:vector :qualified-symbol]]}
+  [database k role]
+  (let [owners (into [] (comp (mapcat #(attribute-holders database :seon.fn/arities %)) (distinct))
+                     (attribute-holders database role k))]
+    (vec (sort (keep :seon.fn/sym (pull-many database [:seon.fn/sym] owners))))))
 
 (defn logical-datoms
   "`report`'s datoms as facts about the entities an agent reads: `[cell a v]`

@@ -869,6 +869,38 @@
 ;; `read-evidence-current?` declares its database by schema name, so an
 ;; agent call omitting it is supplied one (as `q`'s is); an upstream error in
 ;; that slot is refused by its contract instead of passed through.
+(deftest attribute-holders-follow-logical-membership-with-read-evidence
+  ;; TASK-CHAIN §3a S3d-3: a schema key's takers and returners are read through
+  ;; AVET seeks that follow a vector cell to its logical owner, with read evidence
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "holders")
+     (let [k :my.edit/parse-refused-error
+           holders (fn [attribute value]
+                     (let [captured (atom [])
+                           found (binding [db/*read-evidence-sink* captured]
+                                   (db/attribute-holders @connection attribute value))]
+                       [found (db/read-evidence @captured)]))
+           [none none-evidence] (holders :seon.fn.arity/input-refs k)]
+       (is (= [] none) "no contract takes the key yet")
+       (is (seq none-evidence) "an empty seek records its evidence")
+       (test-support/transacted!
+        connection [(test-support/namespace-entity @connection 'seon.db-test.holders)
+                    (test-support/program-fn-entity
+                     @connection 'seon.db-test.holders/taker
+                     "(defn taker {:malli/schema [:=> [:cat :my.edit/parse-refused-error] :int]} [_] 1)")])
+       (is (false? (db/read-evidence-current? @connection none-evidence))
+           "adding a matching arity invalidates the empty read")
+       (let [[arities arity-evidence] (holders :seon.fn.arity/input-refs k)
+             [owners owner-evidence] (holders :seon.fn/arities (first arities))]
+         (is (= 1 (count arities)) "the new arity takes the key")
+         (is (= ['seon.db-test.holders/taker]
+                (mapv #(:seon.fn/sym (db/pull @connection [:seon.fn/sym] %)) owners))
+             "a vector attribute answers its logical owner, never the cell holding it")
+         (test-support/transacted! connection (test-support/agent-tx @connection "unrelated-holder"))
+         (is (true? (db/read-evidence-current? @connection (into arity-evidence owner-evidence)))
+             "an unrelated write preserves the read"))))))
+
 (deftest read-evidence-currency-declares-its-database-by-schema-name
   (let [[_ inputs] (:malli/schema (meta #'db/read-evidence-current?))]
     (is (= :seon.db/database-value (second inputs)))))

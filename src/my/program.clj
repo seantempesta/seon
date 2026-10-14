@@ -185,21 +185,17 @@
                                             (if (:seon.db/invalid-read result)
                                               (throw (ex-info (:seon.error/message result) result)) result)))}))))))
 
+(defn- contract-users
+  "The functions whose contract names `schema-key` in any arity role, sorted."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key] [:vector :qualified-symbol]]}
+  [database schema-key]
+  (vec (sort (into #{} (mapcat #(db/contract-users database schema-key %))
+                   [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs]))))
+
 (defn- key-data
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key :int] :map]}
   [database schema-key _entity]
-  (let [contracts
-        (let [result (db/q database
-               '[:find [?name ...]
-                 :in $ ?key [?attribute ...]
-                 :where [?arity ?attribute ?key]
-                 [?function :seon.fn/arities ?arity]
-                 [?function :seon.fn/sym ?name]]
-               schema-key [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
-                       :seon.fn.arity/guard-refs])]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
+  (let [contracts (contract-users database schema-key)
         datoms (if (get-in (db/schema-database database) [:schema schema-key])
                  (let [result (db/datoms database :aevt schema-key)]
  (if (:seon.db/invalid-read result)
@@ -714,6 +710,44 @@
           (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
       (not-found database sym))))
 
+(defn- member-description
+  "A member schema described one level: its description, else its form; nothing for a key with no stored form."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
+                  [:map [:description {:optional true} :string] [:form {:optional true} :seon.schema/definition]]]}
+  [database k]
+  (if-let [form (some-> (db/pull database [:seon.schema/form] [:seon.schema/key k]) :seon.schema/form read-string)]
+    (let [text (when (and (vector? form) (map? (second form))) (:description (second form)))]
+      (if (string? text) {:description text} {:form form}))
+    {}))
+
+(defn- holder-names
+  "The `name-attribute` values of the entities whose `attribute` holds `k`, sorted."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :qualified-keyword]
+                  [:vector [:or :qualified-symbol :qualified-keyword]]]}
+  [database attribute k name-attribute]
+  (vec (sort-by str (keep name-attribute (db/pull-many database [name-attribute] (db/attribute-holders database attribute k))))))
+
+(defn- schema-source
+  "A schema key's code level (TASK-CHAIN §3a): its doc value with who takes and guards it, its members described one
+  level, the schemas naming it, the functions declaring its writes and an installed attribute's datom count, each
+  read through `seon.db/attribute-holders`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/key]
+                  [:or :my.program/schema-source :seon.program/not-found-error]]}
+  [database k]
+  (let [found (seon.ref/schema-documentation database k k)]
+    (if-not (:form found)
+      (not-found database k)
+      (cond-> (assoc found
+                     :takes (db/contract-users database k :seon.fn.arity/input-refs)
+                     :guards (db/contract-users database k :seon.fn.arity/guard-refs)
+                     :members (into (sorted-map)
+                                    (map (fn [member] [member (member-description database member)]))
+                                    (:seon.schema/references (db/pull database [:seon.schema/references] [:seon.schema/key k])))
+                     :referenced-by (holder-names database :seon.schema/references k :seon.schema/key)
+                     :writes (holder-names database :seon.fn/writes k :seon.fn/sym))
+        (get-in (db/schema-database database) [:schema k])
+        (assoc :datoms (count (db/datoms database :aevt k)))))))
+
 (defn source
   "Read a declaration's source, a schema keyword's definition or a namespace's declarations.
 
@@ -729,14 +763,13 @@
 
   an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
-                  [:or :my.program/declaration-source :seon.sci.eval/schema-doc
+                  [:or :my.program/declaration-source :my.program/schema-source
                    [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
                     [:seon.program/tests [:vector :qualified-symbol]]]
                    :seon.program/not-found-error]]}
   [database subject]
   (cond
-    (keyword? subject) (let [found (seon.ref/schema-documentation database subject subject)]
-                         (if (:form found) found (not-found database subject)))
+    (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
     :else (declaration-source database subject)))
 

@@ -20,6 +20,7 @@
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [malli.registry :as mr]
+            [my.program]
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.program :as program]
@@ -1569,3 +1570,28 @@
     (digest)
     (is (< (:seon.profile/ms (profile/measure digest)) 120)
         "a thousand definition digests cost no whole-population comparison")))
+
+(deftest a-schema-key-source-separates-takers-guards-and-members
+  ;; TASK-CHAIN §3a: a schema key's code level separates who takes, returns and guards it from what it holds
+  (let [database (db/db)
+        roles (fn [k] (select-keys (my.program/source database k) [:takes :returns :guards]))
+        section (my.program/source database :seon.ref/section)]
+    (is (= {:takes '[seon.ref/candidate seon.ref/directory? seon.ref/link-candidate seon.ref/locate seon.ref/section-error]
+            :returns [] :guards []}
+           (roles :seon.ref/path)))
+    (is (= {:takes '[seon.ref/section-view] :returns '[my.fs/section seon.ref/section] :guards []} (roles :seon.ref/section)))
+    (is (= #{:seon.ref/anchor :seon.ref/below :seon.ref/heading :seon.ref/lead :seon.ref/opening :seon.ref/path :seon.ref/pin :seon.ref/text :seon.ref/tokens}
+           (set (keys (:members section))))
+        "each member described one level")
+    (is (string? (get-in section [:members :seon.ref/path :description])) "a member shows its description")
+    (is (some #{:seon.ref/section} (:referenced-by (my.program/source database :seon.ref/path)))
+        "the schemas whose form names the key")))
+
+(deftest a-schema-key-source-costs-its-indexed-reads
+  ;; TASK-CHAIN §3a: through `seon.db/attribute-holders`, never the arities join (20-60 ms per key)
+  (let [database (db/db)
+        source my.program/source
+        _ (source database :seon.ref/section)
+        measured (profile/measure #(source database :seon.ref/section))]
+    (is (< (:seon.profile/ms measured) 5) "under 5 ms")
+    (is (< (:seon.profile/alloc-bytes measured) (* 5 1024 1024)) "under 5 MB")))

@@ -23,11 +23,9 @@
                     [:or {:description "A registration's recorded stored-data verdict, or the refusal that prevented it."}
                      :seon.schema.usage/stored-check :seon.error/base],
                     :referenced-by
-                    [:vector {:description "Schemas whose form names the key, the first eight sorted."} :qualified-keyword],
-                    :referenced-by-count [:int {:min 0}],
+                    [:vector {:description "Schemas whose form names the key, sorted."} :qualified-keyword],
                     :contracts
-                    [:vector {:description "Functions whose contract names the key, the first eight sorted."} :qualified-symbol],
-                    :contract-count [:int {:min 0}],
+                    [:vector {:description "Functions whose contract names the key, sorted."} :qualified-symbol],
                     :listing
                     [:map {:description "A schema listed among others: its key and description line."}
                      [:seon.schema/key :seon.schema/registry-key]
@@ -40,6 +38,4 @@
                      [:seon.schema.usage/new? {:optional true} :seon.schema.usage/new?]
                      [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]
                      [:seon.schema.usage/referenced-by {:optional true} :seon.schema.usage/referenced-by]
-                     [:seon.schema.usage/referenced-by-count {:optional true} :seon.schema.usage/referenced-by-count]
-                     [:seon.schema.usage/contracts {:optional true} :seon.schema.usage/contracts]
-                     [:seon.schema.usage/contract-count {:optional true} :seon.schema.usage/contract-count]]}
+                     [:seon.schema.usage/contracts {:optional true} :seon.schema.usage/contracts]]}

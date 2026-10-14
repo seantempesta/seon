@@ -362,3 +362,10 @@
            (is (= [1 expected render] (selected text)) "one reference, its entity, then its declared render")))
        (is (= [] (ref/references database {:seon.ref/text "Then seon.nope/x follows."}))
            "an unknown bare form is neither a reference nor a problem")))))
+
+(deftest a-schema-key-doc-names-who-returns-it
+  ;; TASK-CHAIN §3a: a schema key's doc is its form, description and `:returns`; takers wait for its code level
+  (let [doc (first (ref/references (db/db) {:seon.ref/text "Read `:my.edit/parse-refused-error` first."}))]
+    (is (= :doc (:seon.ref/level doc)))
+    (is (some #{'seon.edit/single-form} (:returns doc)) "the functions whose output names the key")
+    (is (not (contains? doc :takes)) "takers are the code level's")))

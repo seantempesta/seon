@@ -15,10 +15,6 @@
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]))
 
-(def ^:private names-shown
-  "Referencing schemas and contracts named before the count says the rest."
-  8)
-
 (defn usage
   "What registering `definition` under `schema-key` means for the program,
   or the first read the database refused.
@@ -26,7 +22,8 @@
   - `:seon.schema.usage/previous`: the committed form it replaces, when it
     differs; `:seon.schema.usage/new?` when the read found none committed.
   - `:seon.schema.usage/referenced-by` and `contracts`: the schemas and
-    function contracts naming the key, eight named, the rest counted.
+    function contracts naming the key, all of them; the value printer is the
+    only cap.
 
   ## Examples
 
@@ -38,36 +35,28 @@
   ```
   ## Costs
 
-  Three indexed queries; no validation."
+  One indexed form read and AVET seeks proportional to the referrers
+  (`seon.db/attribute-holders`); no validation."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value]
                   [:or :seon.schema.usage/report :seon.db/error-result]]}
   [database schema-key definition]
   (let [previous (db/q '[:find ?form . :in $ ?k
                          :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?form]]
-                       database schema-key)
-        referenced-by (db/q '[:find [?other ...] :in $ ?k
-                              :where [?s :seon.schema/references ?k] [?s :seon.schema/key ?other]]
-                            database schema-key)
-        contracts (db/q '[:find [?sym ...] :in $ ?k [?attribute ...]
-                          :where [?arity ?attribute ?k] [?f :seon.fn/arities ?arity]
-                          [?f :seon.fn/sym ?sym]]
-                        database schema-key
-                        [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
-                         :seon.fn.arity/guard-refs])]
-    (or (first (filter db/read-refusal? [previous referenced-by contracts]))
-        (let [previous (some-> previous edn/read-string)
-              referenced-by (sort referenced-by)
-              contracts (sort contracts)]
-          (cond-> {:seon.schema/key schema-key :seon.schema/definition definition}
-            (nil? previous) (assoc :seon.schema.usage/new? true)
-            (and (some? previous) (not= previous definition))
-            (assoc :seon.schema.usage/previous previous)
-            (seq referenced-by)
-            (assoc :seon.schema.usage/referenced-by (vec (take names-shown referenced-by))
-                   :seon.schema.usage/referenced-by-count (count referenced-by))
-            (seq contracts)
-            (assoc :seon.schema.usage/contracts (vec (take names-shown contracts))
-                   :seon.schema.usage/contract-count (count contracts)))))))
+                       database schema-key)]
+    (if (db/read-refusal? previous)
+      previous
+      (let [previous (some-> previous edn/read-string)
+            referenced-by (vec (sort (keep :seon.schema/key
+                                           (db/pull-many database [:seon.schema/key]
+                                                         (db/attribute-holders database :seon.schema/references schema-key)))))
+            contracts (vec (sort (into #{} (mapcat #(db/contract-users database schema-key %))
+                                       [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs])))]
+        (cond-> {:seon.schema/key schema-key :seon.schema/definition definition}
+          (nil? previous) (assoc :seon.schema.usage/new? true)
+          (and (some? previous) (not= previous definition))
+          (assoc :seon.schema.usage/previous previous)
+          (seq referenced-by) (assoc :seon.schema.usage/referenced-by referenced-by)
+          (seq contracts) (assoc :seon.schema.usage/contracts contracts))))))
 
 (defn- subject
   "The rendered schema: a registration's key, form and recorded check, or a
@@ -139,11 +128,10 @@
    [:code (str value)]])
 
 (defn- named-list
-  {:malli/schema [:=> [:cat :string [:vector :seon.render/hiccup] [:int {:min 0}]] :seon.render/hiccup]}
-  [label links total]
-  [:p {:class "seon-schema-usage-names"} (str label " (" total "): ")
-   (into [:span] (interpose " " links))
-   (when (> total (count links)) (str " and " (- total (count links)) " more"))])
+  {:malli/schema [:=> [:cat :string [:vector :seon.render/hiccup]] :seon.render/hiccup]}
+  [label links]
+  [:p {:class "seon-schema-usage-names"} (str label " (" (count links) "): ")
+   (into [:span] (interpose " " links))])
 
 (defn- check-html
   "The registration's recorded stored-data verdict, or its refusal."
@@ -165,8 +153,7 @@
   [unit]
   (if-let [{schema-key :seon.schema/key definition :seon.schema/definition :as chosen} (subject unit)]
     (let [report (selection unit chosen)
-          {:seon.schema.usage/keys [previous new? check referenced-by referenced-by-count
-                                    contracts contract-count]} report
+          {:seon.schema.usage/keys [previous new? check referenced-by contracts]} report
           form-text (fn [form] (render.value/html {:seon.render/value form :seon.db/db (:seon.db/db unit) :seon.render.value/root [::form schema-key (identical? form previous)]}))]
       (into
        [:article {:class "seon-family-entry seon-schema-entry"}
@@ -183,7 +170,7 @@
           :else [(form-text definition)])
         (when (some? check) [(check-html (:seon.db/db unit) check)])
         (when (seq referenced-by)
-          [(named-list "Schemas naming it" (mapv #(link :seon.schema/key %) referenced-by) referenced-by-count)])
+          [(named-list "Schemas naming it" (mapv #(link :seon.schema/key %) referenced-by))])
         (when (seq contracts)
-          [(named-list "Contracts naming it" (mapv #(link :seon.fn/sym %) contracts) contract-count)]))))
+          [(named-list "Contracts naming it" (mapv #(link :seon.fn/sym %) contracts))]))))
     [:p {:class "seon-schema-entry"} "Schema evidence is unavailable."]))
