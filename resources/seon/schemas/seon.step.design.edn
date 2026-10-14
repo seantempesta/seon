@@ -1,0 +1,5 @@
+#:seon.step.design{:check [:enum {:description "The handoff check a Design step failed (TASK-CHAIN section 4): a missing or blank What exists or Approach, a changed Problem, a reference that does not resolve, no producer or test cited, no schema key modeled."}
+                           :sections :problem-changed :references :producer-not-cited :data-not-modeled]
+                   :refusal [:and :seon.error/base
+                             [:map [:seon.step.design/check :seon.step.design/check]
+                              [:seon.error/offending {:optional true} :seon.schema/value]]]}
