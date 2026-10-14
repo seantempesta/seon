@@ -2913,6 +2913,59 @@
        (is (= (acquisition-refusals unbound) (acquisition-refusals bound))
            "the deriving thread's connection never reaches an init")))))
 
+(defn- outcome
+  "What `code` answers in a fork of the program context `value`: its value, or the class of what it threw."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :string] :any]}
+  [value code]
+  (try (sci/eval-string* (sci/fork value) code)
+       (catch Exception failure [:threw (.getName (class (or (ex-cause failure) failure)))])))
+
+(deftest a-program-derived-from-its-predecessor-equals-its-cold-derivation
+  ;; Each edit is acquired by one agent context, so its program context derives
+  ;; from the one before it; a cold derivation of the same program must agree.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'probe.chain)])
+     (let [agent-ctx (eval/base-ctx (db/db connection))
+           edit! (fn [local source]
+                   (test-support/transacted!
+                    connection (test-support/replacement-tx (db/db connection) [:seon.fn/sym (symbol "probe.chain" local)]
+                                                            source {:seon.schema.admission/source :agent}))
+                   (eval/acquire! {:seon.sci.eval/ctx agent-ctx :seon.db/db (db/db connection)})
+                   (eval/program-context (db/db connection)))
+           cold (fn []
+                  (let [database (db/db connection)
+                        loaded (#'eval/loaded-program database)
+                        projection (db/carried-projection database)]
+                    (binding [db/*conn* nil db/*read-database* nil]
+                      (#'eval/derive-program-context database loaded projection
+                                                     (#'eval/program-changes database loaded projection)))))
+           probes ["(probe.chain/f1)" "(probe.chain/g1)" "probe.chain/v4" "probe.chain/o"
+                   "(probe.chain/use-bad)" "(probe.chain/h)"]
+           answers (fn [value] (mapv #(outcome value %) probes))]
+       (edit! "f1" "(defn f1 [] 8)")
+       (edit! "g1" "(defn g1 [] (+ 100 (f1)))")
+       (edit! "o" "(defonce o 1)")
+       (edit! "bad" "(def bad 1)")
+       (edit! "use-bad" "(defn use-bad [] bad)")
+       (let [before (edit! "v4" "(def v4 (g1))")
+             after (edit! "f1" "(defn f1 [] 9)")]
+         (is (= [9 109 109 1] (subvec (answers after) 0 4)) "a changed callee reaches its callers and value rows")
+         (is (= [8 108 108 1] (subvec (answers before) 0 4)) "the predecessor still answers its own program")
+         (is (= 109 (binding [sci.ctx-store/*ctx* nil]
+                      ((sci/eval-string* (sci/fork after) "probe.chain/g1"))))
+             "a caller called with no active context answers the derived program's callee"))
+       (edit! "o" "(defonce o 2)")
+       (edit! "bad" "(def bad (seon.ref/brief nil 'seon.edit/single-form))")
+       (let [chained (edit! "h" "(defn h [] (probe.chain/f1))")
+             rebuilt (cold)]
+         (is (= 2 (outcome chained "probe.chain/o")) "a changed defonce takes its new init")
+         (is (vector? (outcome chained "(probe.chain/use-bad)")) "a refused row leaves no old root callable")
+         (is (= (answers rebuilt) (answers chained)) "the chained program answers what its cold derivation does")
+         (is (= (::eval/interpreted-count (::eval/acquisition rebuilt))
+                (::eval/interpreted-count (::eval/acquisition chained)))
+             "the chained program interprets what its cold derivation does"))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-an-agent-requires-is-interpreted-not-host-loaded}}
   an-interpreted-test-namespace-resolves-the-core-names-sci-lacks
   ;; seon.test.runner-test calls `ref`; SCI's clojure.core carries no STM

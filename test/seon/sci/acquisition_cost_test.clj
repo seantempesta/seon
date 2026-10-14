@@ -1,9 +1,11 @@
 (ns seon.sci.acquisition-cost-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.data.json :as json]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.mcp :as mcp]
             [seon.profile :as profile]
             [seon.render.value :as value]
             [seon.sci.eval :as evaluation]
@@ -183,3 +185,25 @@
        (is (< (:seon.profile/alloc-bytes head)
               (* 1.5 (:seon.profile/alloc-bytes direct)))
            "reading the head must not materialize and discard a second database")))))
+
+(deftest a-change-reinterprets-only-its-dependent-declarations
+  (support/with-running-agent
+   (fn [running agent-id _connection]
+     (let [request (fn [code] (json/write-str {"name" "eval_clj"
+                                                "arguments" {"code" code "agent" agent-id "cluster" running}}))]
+       (mcp/call (request (str "(ns probe.cost)"
+                               " (defn f1 [] 1) (defn g1 [] (+ 100 (f1))) (def v1 (f1)) (def v4 (g1))"
+                               " (defn h1 [] 3) (defn h2 [] (h1)) (defn h3 [x] (* x 2)) (def u1 10)")))
+       (mcp/call (request "(+ 1 2)"))
+       (let [measured (measured ::unrelated-defn #(json/read-str (mcp/call (request "(defn other [] 2)"))))
+             reply (:seon.profile/value measured)
+             cost (support/mcp-request reply)
+             {:keys [derive test-step]} (:seon.cost/stages cost)]
+         (is (false? (get reply "isError")))
+         (is (<= (profile/calls-of measured 'seon.sci.eval/install-row!) 2)
+             "an unrelated definition interprets itself, not the branch's other rows")
+         ;; parent 06bbba850: derive 17.9 + test-step 88.5 ms, step 153.4 MB
+         (is (< (+ (or derive 0.0) (or test-step 0.0)) 100.0)
+             "the derivation and test step cost less than the whole-plan derivation's")
+         (is (< (get-in cost [:seon.cost/step :seon.cost/alloc-mb]) 145.0)
+             "the request allocates less than the whole-plan derivation's"))))))

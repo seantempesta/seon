@@ -2997,6 +2997,7 @@
      ::added added
      ::namespaces namespaces
      ::tests tests
+     ::held held
      ;; What the plan's interpretation is a function of, by content only: its
      ;; definitions by digest, its namespaces by name, source and bindings, its
      ;; tests by row content. Entity ids differ per branch for equal programs.
@@ -3151,36 +3152,80 @@
        []
        members))))
 
+(defn- without-reinstalled
+  "The acquisition `state` a derivation carries, without the outcomes of the
+  rows it installs again: each row's refusal and load result is its latest
+  installation's."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
+  [state reinstalled]
+  (let [row-of #(or (:seon.sci.eval/refused-function %) (:seon.sci.eval/row-symbol %) (:seon.fn/sym %))
+        keep-row (fn [entries] (into [] (remove #(contains? reinstalled (row-of %))) entries))]
+    (cond-> state
+      (::acquisition-refusals state) (update ::acquisition-refusals keep-row)
+      (::agent-mistakes state) (update ::agent-mistakes keep-row)
+      (:seon.sci.eval/load-results state) (update :seon.sci.eval/load-results keep-row))))
+
+(defn- unbind-reinstalled!
+  "Unbind in `ctx` each Var of `symbols` it holds, keeping the Var: a row
+  installed again takes only its new definition's root, so a refused one
+  answers no predecessor's root and a `defonce` runs its init again."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:sequential :qualified-symbol]] :nil]}
+  [ctx symbols]
+  (sci.ctx-store/with-ctx ctx
+    (doseq [sym symbols
+            :let [held (sci/resolve ctx sym)]
+            :when (sci.utils/var? held)]
+      (sci.vars/unbind held))))
+
 (defn- interpret-overlay!
-  "Interpret the overlay `plan` on `ctx`: its overrides, its namespaces and its
-  tests now, and bind the compiled Vars of the functions it adds; its reverse
-  closure (functions, and the tests reaching them as interpreted tests) is
-  bound lazily (`bind-lazy-members!`) but for its host-bound members, which
-  keep the compiled Vars `ctx` binds, from `::closure` and `::closure-tests`
-  when the plan carries them, else walked from the overrides. The acquisition
-  advanced from the base's. What `ctx` already interprets, and the plan's
-  `::evaluated` definitions it holds as evaluated, are not installed again."
+  "Interpret the overlay `plan` on `ctx`: its rows whose definition digest
+  (`::held`) the plan `ctx` was derived with did not hold (Δ; on the loaded
+  base, every row), their namespaces and tests now, and bind the compiled Vars
+  of the functions it adds; the reverse closure of Δ (functions, and the tests
+  reaching them as interpreted tests) is bound again lazily
+  (`bind-lazy-members!`), its value definitions and macros interpreted now,
+  but for its host-bound members, which keep the compiled Vars `ctx` binds;
+  from `::closure` and `::closure-tests` when the plan carries them, else
+  walked from Δ. Each Var installed again is unbound first. The acquisition
+  advanced from the predecessor's, carrying this plan. A plan without
+  `::held` (an evaluation's `::evaluated` definitions, which `ctx` holds as
+  evaluated) changes its `::overridden` and keeps what `ctx` interprets."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
-  [ctx database {::keys [overridden added namespaces tests evaluated] :as plan}]
+  [ctx database {::keys [overridden added namespaces tests evaluated held] :as plan}]
   (let [snapshot @(::kernel/program-snapshot ctx)
-        already (into (set (::interpreted snapshot)) evaluated)
-        already-tests (set (::interpreted-tests snapshot))
+        ;; the plan this context's program was derived with: none on the loaded base
+        previous (::plan (::acquisition snapshot))
+        prior-held (::held previous {})
+        delta (if held
+                (into #{} (keep (fn [[sym digest]] (when-not (= digest (get prior-held sym)) sym))) held)
+                overridden)
         projection (or (db/carried-projection database) (:seon.schema/projection ctx))
         database (vary-meta database assoc :seon.schema/projection projection)
         closure (cond (contains? plan ::closure) {:seon.fn/affected (::closure plan)
                                                   :seon.fn/tests (::closure-tests plan)}
-                      (seq overridden) (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds overridden})
+                      (seq delta) (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds delta})
                       :else {:seon.fn/affected #{}})
         _ (when (:seon.db/invalid-read closure)
             (throw (ex-info "Cannot acquire the affected function closure." closure)))
-        interpreted (into overridden (:seon.fn/affected closure))
+        affected (set (:seon.fn/affected closure))
+        reached (set/difference affected delta)
+        ;; what the predecessor interpreted stays, but for Δ and what reaches it
+        already (cond-> (into (set (::interpreted snapshot)) evaluated)
+                  held (set/difference delta reached))
+        prior-tests (set (::tests previous))
+        already-tests (cond-> (set (::interpreted-tests snapshot))
+                        held (set/difference (into (set (:seon.fn/tests closure))
+                                                   (comp (remove prior-tests) (map first)) tests)))
+        interpreted (into overridden affected)
         tests (into [] (remove (comp already-tests first)) tests)
-        callers (into [] (remove #(or (already %) (contains? overridden %))) (sort (:seon.fn/affected closure)))
+        callers (into [] (remove #(or (already %) (contains? overridden %))) (sort reached))
         ;; A host-bound caller keeps the compiled Var the context binds; only
         ;; the macros and value definitions among the rest are interpreted now.
         macros (bind-lazy-members! ctx database
                                    (filter (interpretable-functions database callers) callers))
-        added-rows (function-rows-in database (remove interpreted added))
+        added-rows (function-rows-in database (remove #(or (contains? reached %) (contains? overridden %)
+                                                           (and held (not (contains? delta %))))
+                                                      added))
         entered (::entered-namespaces snapshot #{})
         ;; an added function of a source namespace has no compiled Var: it
         ;; interprets now, a test namespace's once that namespace is entered
@@ -3192,6 +3237,9 @@
                       added-rows)
         function-rows (function-rows-in database (into (vec (remove already overridden))
                                                        (concat macros sourced)))
+        namespace-key (juxt :seon.ns/name :seon.ns/source row-bindings)
+        prior-namespaces (into #{} (map namespace-key) (::namespaces previous))
+        namespaces (into [] (remove (comp prior-namespaces namespace-key)) namespaces)
         selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
         new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))
                              added-rows)
@@ -3199,7 +3247,8 @@
                      (db/pull-many database namespace-pattern
                                    (mapv #(vector :seon.ns/name %) (sort-by str (into selected new-namespaces)))))
         namespace-rows (vec (vals pulled))
-        namespace-row-by-name (select-keys pulled selected)]
+        namespace-row-by-name (select-keys pulled selected)
+        reinstalled (into (into #{} (map first) function-rows) (map first) tests)]
     (schema/call-with-projection
      projection
      (fn []
@@ -3223,17 +3272,21 @@
        ;; this JVM has one, exactly as the base binds the loaded program's.
        (install-first-party-namespaces! ctx [] namespace-rows added-rows)
        (install-required-libraries! ctx namespace-rows)
-       (record-acquisition-refusals!
-        ctx database
-        (install-selected!
-         ctx database namespace-row-by-name
-         function-rows tests (into #{} (map first) function-rows)
-         (-> (::acquisition snapshot)
-             (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
-             (assoc :seon.schema/projection projection
-                    :seon.sci.eval/interpreted-count
-                    (count (::interpreted @(::kernel/program-snapshot ctx))))))
-        (:seon.flow/commit-fault! snapshot))))))
+       (unbind-reinstalled! ctx (map first function-rows))
+       (let [acquired (record-acquisition-refusals!
+                       ctx database
+                       (install-selected!
+                        ctx database namespace-row-by-name
+                        function-rows tests (into #{} (map first) function-rows)
+                        (-> (::acquisition snapshot)
+                            (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
+                            (without-reinstalled reinstalled)
+                            (assoc :seon.schema/projection projection
+                                   :seon.sci.eval/interpreted-count
+                                   (count (::interpreted @(::kernel/program-snapshot ctx))))))
+                       (:seon.flow/commit-fault! snapshot))]
+         (cond-> acquired
+           held (assoc ::plan (select-keys plan [::held ::tests ::namespaces]))))))))
 
 (defn interpret-affected!
   "Interpret in `ctx` the callers and tests reaching `changed` it runs compiled.
@@ -3267,7 +3320,7 @@
     (when-not (or (identical? loaded database)
                   (and revisions (= revisions (program-revisions loaded projection))))
       (let [plan (overlay-plan database loaded)]
-        (when (some seq (vals (dissoc plan ::digest)))
+        (when (some seq (vals (dissoc plan ::digest ::held)))
           plan)))))
 
 (defn- overlay!
@@ -3786,19 +3839,26 @@
                0 (:namespaces (:env value)))))
 
 (defn- derive-overlay-ctx
-  "Interpret one program's `plan` on a builder forked from the loaded program
-  context `cluster`, with no custody or recorder, and freeze it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.db/database-value :seon.db/database-value
-                       :seon.schema/projection :map] :seon.sci.eval/program-context]}
-  [cluster database loaded projection plan]
-  ;; A program context is a function of its content: no init reads the
-  ;; deriving thread's connection or read basis.
-  (binding [db/*conn* nil db/*read-database* nil]
-    (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
-                     ::custody {} :seon.schema/projection projection)
-          acquired (overlay! ctx database plan)
-          value (freeze-program ctx)]
-      (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster))))))
+  "Interpret one program's `plan` on a builder forked from `parent`, the loaded
+  program context `cluster` or a program context derived from it, with no
+  custody or recorder, and freeze it. Its namespace entries are weighed against
+  `cluster`'s."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/program-context :seon.db/database-value :seon.db/database-value
+                        :seon.schema/projection :map] :seon.sci.eval/program-context]
+                  [:=> [:cat :seon.sci.eval/program-context :seon.sci.eval/program-context :seon.db/database-value
+                        :seon.db/database-value :seon.schema/projection :map] :seon.sci.eval/program-context]]}
+  ([cluster database loaded projection plan]
+   (derive-overlay-ctx cluster cluster database loaded projection plan))
+  ([parent cluster database loaded projection plan]
+   ;; A program context is a function of its content: no init reads the
+   ;; deriving thread's connection or read basis.
+   (binding [db/*conn* nil db/*read-database* nil]
+     (let [ctx (assoc (copy-base-ctx parent database loaded nil)
+                      ::custody {} :seon.schema/projection projection)
+           acquired (overlay! ctx database plan)
+           value (freeze-program ctx)]
+       (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster)))))))
 
 (defn- projection-delta
   "The digest of the schema forms and function contracts `database`'s
@@ -3830,22 +3890,77 @@
       (conj base-key (::digest plan) (projection-delta database loaded) (armed-dials database))
       base-key)))
 
+(defn- with-content-key
+  "`value` naming the key it is kept under, so a context forked from it names its predecessor."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context [:or :nil [:vector :seon.schema/value]]]
+                  :seon.sci.eval/program-context]}
+  [value content-key]
+  (cond-> value content-key (assoc-in [::kernel/program-snapshot ::program-content-key] content-key)))
+
+(defn- predecessor-plan
+  "The overlay `plan` derived from the held program context `parent` instead of
+  the loaded base: `plan` with Δ's closure, when `parent` holds a derived
+  program of the same loaded commit, projection and dials whose rows,
+  namespaces and tests `plan` still holds and no macro is among Δ and what
+  reaches it. Nil otherwise: the loaded base derives it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.sci.eval/program-context
+                       [:vector :seon.schema/value] [:vector :seon.schema/value] :map]
+                  [:or :nil :map]]}
+  [database parent parent-key content-key plan]
+  (let [previous (::plan (::acquisition parent))
+        names (fn [rows k] (into #{} (map k) rows))]
+    (when (and previous
+               (= (count parent-key) (count content-key))
+               (= (subvec parent-key 0 2) (subvec content-key 0 2))
+               (= (subvec parent-key 3) (subvec content-key 3))
+               (every? #(contains? (::held plan) %) (keys (::held previous)))
+               (set/subset? (names (::namespaces previous) :seon.ns/name) (names (::namespaces plan) :seon.ns/name))
+               (set/subset? (names (::tests previous) first) (names (::tests plan) first)))
+      (let [delta (into #{} (keep (fn [[sym digest]] (when-not (= digest (get (::held previous) sym)) sym)))
+                        (::held plan))
+            closure (if (seq delta)
+                      (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds delta})
+                      {:seon.fn/affected #{} :seon.fn/tests #{}})
+            _ (when (:seon.db/invalid-read closure)
+                (throw (ex-info "Cannot acquire the affected function closure." closure)))
+            reach (vec (into delta (:seon.fn/affected closure)))
+            macros (db/q '[:find [?sym ...] :in $ [?sym ...]
+                           :where [?f :seon.fn/sym ?sym] [?f :seon.fn/macro? true]]
+                         database reach)]
+        (when (db/read-refusal? macros)
+          (throw (ex-info (:seon.error/message macros) macros)))
+        (when (empty? macros)
+          (assoc plan ::closure (set (:seon.fn/affected closure)) ::closure-tests (set (:seon.fn/tests closure))))))))
+
 (defn- derive-program-context
   "Derive `database`'s program context: the loaded program's for no `plan`,
-  else the `plan` interpreted on a builder forked from the loaded one, which
-  is kept under its own key. The loaded program's derivation never looks up
-  its own key: a cache derivation that joins itself never completes."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
-                       [:or :nil :map]]
-                  :seon.sci.eval/program-context]}
-  [database loaded projection plan]
-  (if plan
-    (let [derive-base #(derive-base-ctx loaded)
-          cluster (if-let [base-key (cluster-base-key loaded)]
-                    (seon.cache/lookup ::program-context base-key context-weight derive-base)
-                    (derive-base))]
-      (derive-overlay-ctx cluster database loaded projection plan))
-    (derive-base-ctx loaded)))
+  else the `plan` interpreted on a builder forked from the program context
+  kept under `predecessor` when it holds this program but for Δ
+  (`predecessor-plan`), else from the loaded one, which is kept under its own
+  key. The loaded program's derivation never looks up its own key: a cache
+  derivation that joins itself never completes."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
+                        [:or :nil :map]]
+                   :seon.sci.eval/program-context]
+                  [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.schema/projection
+                        [:or :nil :map] [:or :nil [:vector :seon.schema/value]] [:or :nil :seon.schema/value]]
+                   :seon.sci.eval/program-context]]}
+  ([database loaded projection plan] (derive-program-context database loaded projection plan nil nil))
+  ([database loaded projection plan content-key predecessor]
+   (if plan
+     (let [base-key (cluster-base-key loaded)
+           derive-base #(with-content-key (derive-base-ctx loaded) base-key)
+           cluster (if base-key
+                     (seon.cache/lookup ::program-context base-key context-weight derive-base)
+                     (derive-base))
+           parent (when (and content-key (vector? predecessor) (not= predecessor content-key))
+                    (seon.cache/present ::program-context predecessor))
+           from-parent (when parent (predecessor-plan database parent predecessor content-key plan))]
+       (if from-parent
+         (derive-overlay-ctx parent cluster database loaded projection from-parent)
+         (derive-overlay-ctx cluster database loaded projection plan)))
+     (derive-base-ctx loaded))))
 
 (defn program-context
   "The program context of `database`'s program: a frozen SCI context holding
@@ -3856,13 +3971,20 @@
   content (`program-content-key`), so equal programs on many branches and
   commits answer the identical value; a commit's key is read once per program
   and dial revisions. Acquisition refusals are data on it (`::acquisition`).
-  `loaded` defaults to the loaded program `database`'s adoption record names."
+  `loaded` defaults to the loaded program `database`'s adoption record names.
+  A miss derives from the program context kept under `predecessor`, the
+  content key the acquiring context's program was kept under, when it holds
+  this program but for its changed rows (`derive-program-context`); the key
+  names content only, so the value is the same either way."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/program-context]
-    [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value]] :seon.sci.eval/program-context]]}
-  ([database] (program-context database nil))
-  ([database supplied-loaded]
+    [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value]] :seon.sci.eval/program-context]
+    [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] [:maybe :seon.schema/value]]
+     :seon.sci.eval/program-context]]}
+  ([database] (program-context database nil nil))
+  ([database supplied-loaded] (program-context database supplied-loaded nil))
+  ([database supplied-loaded predecessor]
    (let [projection (or (db/carried-projection database) (schema/projection-from-database database))
          loaded #(or supplied-loaded (loaded-program database))
          revisions (program-revisions database projection)
@@ -3877,7 +3999,9 @@
                                    (some-> supplied-loaded db/commit-id)]
                                   (constantly 1024) content-key)
                (content-key))
-         derive-value #(derive-program-context database (loaded) projection @plan)
+         derive-value #(with-content-key
+                         (derive-program-context database (loaded) projection @plan program-key predecessor)
+                         program-key)
          weigh #(if @plan (overlay-weight %) (context-weight %))
          value (if program-key
                  (seon.cache/lookup ::program-context program-key weigh derive-value)
@@ -3897,12 +4021,13 @@
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
     [:=> [:cat :seon.db/database-value
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
+           [::predecessor {:optional true} :seon.schema/value]]]
      :seon.sci.eval/ctx]]}
   ([database] (base-ctx database {}))
   ([database arm-request]
    (let [supplied (::loaded-database arm-request)
-         source (program-context database supplied)
+         source (program-context database supplied (::predecessor arm-request))
          loaded (or supplied (loaded-program database))
          dials (armed-dials database)
          recorder (:seon.flow/commit-fault! arm-request)
@@ -4035,6 +4160,8 @@
               source (loaded-source snapshot database)
               generated (base-ctx database
                                   (cond-> {::loaded-database (loaded-program source)}
+                                    (::program-content-key snapshot)
+                                    (assoc ::predecessor (::program-content-key snapshot))
                                     commit-fault!
                                     (assoc :seon.flow/commit-fault! commit-fault!)))
               acquired (::acquisition generated)
@@ -4271,7 +4398,9 @@
                                             arm-request projection)
           held @(::kernel/program-snapshot source)
           ctx (env/carry-state
-               (assoc (base-ctx db {::loaded-database (loaded-program (loaded-source held db))})
+               (assoc (base-ctx db (cond-> {::loaded-database (loaded-program (loaded-source held db))}
+                                     (::program-content-key held)
+                                     (assoc ::predecessor (::program-content-key held))))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state)]
