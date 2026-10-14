@@ -400,18 +400,17 @@
        (get-in (head-record (:store (db/schema-database database)) base) [:meta :datahike/commit-id])))))
 
 (defn- identity-digests
-  "The definition digest `database` holds for each of `identities` it holds."
+  "The definition digest `database` holds for each of `identities` it holds: two index probes per identity, its
+  identity datom and its entity's digest. A Datalog clause with the attribute as a variable is answered over an
+  as-of view by scanning the view's history."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.program/identity]]
                   [:map-of :seon.program/identity :seon.program/definition-digest]]}
   [database identities]
-  (if (empty? identities)
-    {}
-    (let [rows (db/q '[:find ?a ?v ?g :in $ [[?a ?v]]
-                       :where [?e ?a ?v] [?e :seon.program/definition-digest ?g]]
-                     database (vec identities))]
-      (when (db/read-refusal? rows)
-        (throw (ex-info (:seon.error/message rows) rows)))
-      (into {} (map (fn [[a v g]] [[a v] g])) rows))))
+  (into {} (keep (fn [[attribute value :as declaration]]
+                   (when-let [entity (:e (first (db/datoms database :avet attribute value)))]
+                     (when-let [digest (:v (first (db/datoms database :eavt entity :seon.program/definition-digest)))]
+                       [declaration digest]))))
+        identities))
 
 (defn- commit-digests
   "The definition digest of every declaration the commit `commit` of `database`'s store holds, derived once per
