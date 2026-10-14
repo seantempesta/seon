@@ -742,12 +742,11 @@
 
 (defn render-source-ai
   "A declaration's source as its own text: the code an agent can copy into a `defn`
-  unchanged, under a one-line location comment. The reply's other keys stay on the
-  live result."
+  unchanged. The reply's other keys, the file and line among them, stay on the live
+  result."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (let [{:keys [source file line]} (:seon.render/value unit)]
-    (if file (str ";; " file ":" line "\n" source) source)))
+  (:source (:seon.render/value unit)))
 
 (defn- use-count
   "A declaration's recorded use: the declarations calling it plus the tests whose reach holds it."

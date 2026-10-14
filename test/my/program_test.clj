@@ -451,3 +451,8 @@
            (is (not-any? (complement test-match?) (drop-while (complement test-match?) (:matches result)))
                "owners precede tests")
            (is (= result (program/search database query)) "ranking is deterministic")))))))
+
+(deftest source-answers-the-source-without-a-location-comment
+  (let [found (program/source (db/db) 'seon.id/id)]
+    (is (= (:source found) (program/render-source-ai {:seon.render/value found})) "the AI face is the source text alone")
+    (is (integer? (:line found)) "the line stays on the value as data")))
