@@ -48,7 +48,7 @@
 (defn- renamed-symbol
   "The replacement symbol node for token `node`, or nil: a qualified var of this rename, or in the
   agent's own file an unqualified one."
-  {:malli/schema [:=> [:cat :any :set :boolean] :any]}
+  {:malli/schema [:=> [:cat :any [:set :string] :boolean] :any]}
   [node alias-set own-file?]
   (when (and (= :token (n/tag node)) (symbol? (:value node)))
     (let [s (:value node) ns-part (namespace s) nm (name s)]
@@ -69,7 +69,7 @@
 
 (defn- rewrite-string
   "A string node reading as Clojure, rewritten as forms and escaped again; `node` when nothing changes or it does not read."
-  {:malli/schema [:=> [:cat :any :set :boolean] :any]}
+  {:malli/schema [:=> [:cat :any [:set :string] :boolean] :any]}
   [node alias-set _own-file?]
   (let [value (n/sexpr node)]
     (if-not (re-find #"seon\.flow\.plan|plan" value)
@@ -89,7 +89,7 @@
 
 (defn rewrite
   "`node` with the rename applied."
-  {:malli/schema [:=> [:cat :any :set :boolean] :any]}
+  {:malli/schema [:=> [:cat :any [:set :string] :boolean] :any]}
   [node alias-set own-file?]
   (cond
     (renamed-keyword node) (renamed-keyword node)
