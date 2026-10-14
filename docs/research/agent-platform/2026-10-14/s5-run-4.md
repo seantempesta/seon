@@ -712,3 +712,123 @@ to paste, because analysis failed before any context was rendered for a call.
 - The config applied before a restart is replaced by the boot overlay (Broken first 1). Either the operator applies
   after boot, or the overlay yields to applied facts.
 - `seon.db/carried-projection` is given a map from `seon.cluster.agent/acquire-context!` (fault `3506b09a`).
+
+## Run 5c: fifth Implement attempt, stalled on its first turn by a second path
+
+Lane `s5-run-5c` acted as root and watched, 18:01-18:10 UTC. Default had restarted onto 576009291 (a work branch
+interprets only what main has not moved past since its merge base, the 5b fix). Root applied the run config after the
+restart, which avoids 5b's Broken first 1, and verified it: `"deepseek-flash"`, no-provider absent, 30, relaunches 0.
+Root then ran `(my.root/run! {:seon.task/assigned "c12a57408f49"})`.
+
+**Broken first.**
+
+0. **Attempt 5 started by itself and stalled on its first turn, with the same message as 5b. There were 0 model calls.**
+   - Attempt `36da5b133005` (number 5, agent `attempt/36da5b133005`, eid 1024113) was written on
+     `:chain-f1f6dc8e6652` with merge base `6acf6fed…`, the same base as before. Its one turn, `0f2c9d074cf7`,
+     opened at 18:01:02.271 and closed at 18:01:02.949. It had 0 evaluations and 0 `:seon.turn/attempts`.
+   - Occurrence `355372430814` is on the branch:
+     - type `:seon.turn.loop/phase-failed-error`, failed step `seon.turn/phase`, `:phase "analysis"`;
+     - `:sci.impl/symbol seon.db/query-call-valid?`;
+     - message: "Unable to resolve symbol: seon.db/query-call-valid?".
+   - At 18:01:03.059 the attempt ended `:stalled`, outcome `:closed` ("The attempt ended :stalled."), and the task
+     went to `:held`. End facts: 0 calls, 0 tokens, 1 red proof. Root's pass wrote problem task `20e5c042a13d`
+     (`seon.task/unfinished-task-36da5b133005`) on main. §2.7's bail held.
+   - **576009291 works, and was not the path that failed.** All of these were measured on the branch head in JVM mode:
+     - `merge-sides` answers the base `6acf6fed…` and target `:cluster-default`.
+     - `(moved-past head sides [[:seon.fn/sym 'seon.db/q] [:seon.fn/sym 'seon.db/query-call-valid?]])` answers both.
+     - `overlay-plan` holds 7 overridden functions, all `seon.error/*`, 0 added, and neither `seon.db` symbol.
+     - The reverse closure of those 7 is 272 functions, and `seon.db/q` is not among them.
+     - In a fresh `(seon.sci.eval/base-ctx head)`, `(seon.db/q '[:find ?x . :in $ ?x] (seon.db/db) 1)` answers `1`,
+       by the compiled Var.
+   - **Cause: the turn's model-context phase documents `seon.db/q` from the branch's stale row.** 5b's run had
+     no-provider `true`, and that hid this path.
+     - `seon.turn` runs the model-context phase only when `:seon.config.ai/no-provider` is off.
+     - The call chain is `seon.context/model-context` → `seon.bootstrap/help-value` on the branch database →
+       `seon.sci.lookup/function-documentation` `'seon.db/q` → `agent-documentation-contract` →
+       `documentation-contract`.
+     - `documentation-contract` compiles the row's stored `:seon.fn/spec` with `malli.core/function-schema`. The
+       branch's spec for `seon.db/q` is the merge base's. It ends `[:fn {…} seon.db/query-call-valid?]`, and Malli's
+       SCI evaluation of that symbol throws. Main's spec has no `:fn` clause.
+     - The throw escapes `documentation-contract` and the help, and the turn stalls.
+   - Reproduction in JVM mode, with `head` the branch head:
+
+     ```clojure
+     (seon.sci.lookup/function-documentation head 'seon.db/q)  ;; throws "Unable to resolve symbol: seon.db/query-call-valid?"
+     (seon.sci.lookup/function-documentation main 'seon.db/q)  ;; => {:summary … :body … :arglists … :in … :out …}
+     (seon.bootstrap/help-value head)                          ;; throws the same
+     (seon.context/model-context head {:seon.db/connection conn :seon.sci.admit/caps caps
+                                       :seon.sci.eval/ctx (seon.sci.eval/base-ctx head)
+                                       :seon.sci.eval/time-limit-ms 30000}
+                                 "attempt/36da5b133005")
+     ;; throws from seon.sci.lookup/documentation-contract (via function-doc-map, function-documentation)
+     ```
+
+   - This is the same defect class as 5b, in a second reader. Documentation, and every other reader of a program row
+     on a work branch, reads the branch's row even when the branch never changed that function and main has moved past
+     it. 576009291 fixed the evaluator's choice (`seon.sci.eval/moved-past`). The documentation reader has no such
+     choice.
+   - Owners:
+     - the row that `seon.sci.lookup/function-documentation` (and `seon.bootstrap/help-value`) reads for a function
+       main moved past: one three-way rule, shared with `moved-past`, not a second copy;
+     - `seon.sci.lookup/documentation-contract`, which throws on an uncompilable stored spec where it should answer
+       its error value.
+   - Regression: on a branch forked before main changes a function's contract to drop an `:fn` predicate and
+     deletes the predicate, `(seon.bootstrap/help-value branch-head)` answers.
+1. **`seon.sci.eval/base-ctx`'s snapshot `:functions` carries the branch's stale source for every function**
+   (6,983 entries, `seon.db/q`'s included). The overlay does not bind them, so a direct call is compiled. Every reader
+   of `:seon.sci.eval/function-source` on a work branch is exposed to the same defect class. I did not verify any
+   other reader.
+2. Root's own path:
+   - My first watch form had the wrong attribute names (`:seon.task.attempt/task`, `:seon.fn/symbol`). JVM mode
+     answered a ClassCastException "PersistentArrayMap cannot be cast to Symbol" with no form position, the same
+     finding as runs 3 and 4b.
+   - `seon.db/q`'s "uninstalled attribute" refusal was correct and listed `:seon.fn/sym` among its candidates.
+
+**Run.**
+
+- About 18:00: root applied the run config after the restart and ran `my.root/run!`.
+- 18:01:02.27-18:01:03.06: attempt 5's turn, its stall and its end (Broken first 0).
+- 18:01:28, first watch: 36 threads, 44.67 GB cumulative allocated, heap 2.39 GB. Attempt 5 had already ended.
+- About 18:03: `bin/seon config apply default tmp/s5-restore.edn` (`converged? false`, 3 operations). Verified with
+  `seon.config/effective`: no-provider `true`, 100, relaunches 2, model `"deepseek-flash"`.
+- 18:05:41: 34 threads, 44.71 GB, heap 0.99 GB. The JVM was idle and there was no livelock. Most of the allocation
+  after the end was my diagnosis forms: `base-ctx` 1.39 GB and 840 ms, and `model-context` 749 MB and 530 ms.
+- Root was messaged with the end and the cause. No merge, so there was no merge message.
+
+**Grading form.** This is run 4b's form with `aid "attempt/36da5b133005"`. The agent's end facts answer it: 0 calls,
+0 prompt tokens and 0 completion tokens, and turn `0f2c9d074cf7` has no evaluations. There is no first block to paste,
+because the block the model would have read is what threw (`model-context`).
+
+| Task | Model calls | Prompt tokens | Completion | Wall time | Agent forms | End |
+|---|---|---|---|---|---|---|
+| Implement, attempt 5 (`36da5b133005`) | 0 | 0 | 0 | 0.8 s (18:01:02.27 to 18:01:03.06) | 0 | `:stalled` → `:closed`, task `:held`, problem task `20e5c042a13d` |
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 + 4b + 5 + 5b | **+ 5c** |
+|---|---|---|---|
+| Model calls | 38 | 157 | **157** (attempt 5: 0) |
+| Prompt tokens | 570k (310k cached) | 4.99M (3.90M cached) | **4.99M (3.90M cached)** |
+| Hand acts after `chain!` | 6 | 1 | **1**. 5c added none: root's `run!` is the designed resume, and the attempt ended and bailed by itself. |
+| Furthest point | Implement (write-back conflict) | attempt 4 stalled in SCI analysis (the overlay) | **attempt 5 got past the overlay and stalled in the model-context phase: the help documents the branch's stale `seon.db/q` contract** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** `merge-chains!`/`finish-chains!`, the published-diff review, the bb hook load and the fresh-agent `(str/subs "abc" 1)` check were not reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:held`, and attempts 1-5 are all
+  `:closed`.
+- Occurrence `355372430814` is on the branch. Problem task `20e5c042a13d` is on main. `my.root/merge-requests` is `[]`.
+  Main also still holds the other lane's chain fact `:chain-e439df9798c6`.
+- JVM `user` host helpers: `s5c-conn`, `s5c-aid`, `s5c-jvm`, `s5c-state`. `s5c-ctx` (a `base-ctx` of the branch) was unmapped.
+- No SCI eval as root by this lane. Config was restored and verified.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** on a work branch, `seon.sci.lookup/function-documentation`, and with it
+  `seon.bootstrap/help-value` and `seon.context/model-context`, compiles the branch's stale contract of a function
+  main moved past. Use one three-way rule for which row a branch reads, shared with `seon.sci.eval/moved-past`. This
+  chain cannot run again until that is fixed, or until root abandons the chain or builds a new one on current main.
+- `seon.sci.lookup/documentation-contract` throws on an uncompilable stored spec. Its caller then stalls the turn,
+  where the reply should carry the error value beside it.
+- Other readers of `:seon.sci.eval/function-source` or stored `:seon.fn/spec` on a work branch may share the class
+  (Broken first 1). Count them before designing.
