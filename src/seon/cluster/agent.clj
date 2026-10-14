@@ -2124,6 +2124,97 @@
                        (finally (source/release! [at-end]))))))))
   nil)
 
+(defn- chain-finishes
+  "The terminal attempts root merges, read on main `database` among the store's `branches`: on each chain's
+  `:seon.task/next` path, every attempt of a task with no next that ended :done holding no outcome and no recorded
+  merge refusal, which main does not hold yet (its one merge copies it there), with its chain branch, task and end
+  commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
+                  [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
+                            [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]]]]}
+  [database branches]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
+    (when (map? chains) (throw (ex-info (:seon.error/message chains "db<->flow could not read the chains.") chains)))
+    (into [] (mapcat (fn [[branch first-handle]]
+                       (when-let [head (when (contains? branches branch) (db/branch-database database branch))]
+                         (try
+                           (let [rows (db/q '[:find ?k ?h ?c :in $ [?h ...]
+                                              :where [?t :seon.task/id ?h] (not [?t :seon.task/next _]) [?a :seon.task/attempt-of ?t]
+                                              [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end :done]
+                                              [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])
+                                              (not [?a :seon.task/refusal _])]
+                                            head (task/chain-handles head first-handle))]
+                             (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)))
+                             (for [[k h c] (sort rows)
+                                   :when (nil? (:db/id (db/pull database [:db/id] [:seon.task/assignment k])))]
+                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned h :seon.task.attempt/commit c}))
+                           (finally (source/release! [head]))))))
+          (sort chains))))
+
+(defn- merge-chains!
+  "Merge every finished chain (`chain-finishes`) to main once through cluster `handle`: when the done rule
+  (`seon.cluster.source/done-refusals`) refuses nothing over the chain branch at the terminal attempt's end commit,
+  `seon.merge/merge!` with that attempt as its source, the files proven against the cluster's checkout; a refused
+  merge is recorded on the attempt on its chain branch (`:seon.task/refusal`), for root. Answers whether any merged."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] :boolean]}
+  [handle]
+  (let [store (handle-store handle)
+        connection (:seon.db/connection handle)
+        database @connection]
+    (boolean
+     (some identity
+           (doall
+            (for [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
+                  (chain-finishes database (registry/branches store))]
+              (on-branch store branch
+                         (fn [on-chain]
+                           (let [at-end (db/commit-database (db/db on-chain) commit)
+                                 done? (try (empty? (source/done-refusals at-end (done-judged database at-end branch h)))
+                                            (finally (source/release! [at-end])))]
+                             (when done?
+                               (let [root (merge/checkout database (:seon.cluster/name handle))
+                                     merged (db/with-branch {:seon.db/connection connection}
+                                                            #(apply merge/merge! (assoc handle :seon.store/store store) key
+                                                                    (when (string? root) [root])))]
+                                 (if (:seon.error/at merged)
+                                   (do (write! on-chain [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]])
+                                       false)
+                                   true))))))))))))
+
+(defn- finish-chains!
+  "Publish, then retire, every chain main `handle`'s connection holds merged (TASK-CHAIN §2.6): its terminal
+  attempt on main closed `:merged`. Due while main records for it no git commit and no publication refusal, its
+  merge commit derived from the merge itself (`seon.merge/merge-commit`), so a restart between acceptance and its
+  answer publishes exactly once; a merge that moved nothing publishes nothing. Once published, or with nothing to
+  publish, its branch is deleted (`seon.task/delete-branch!`, which joins its graphs) and its chain fact
+  retracted. A `:seon.merge/waiting` publication or a recorded refusal keeps both, for root."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
+  [handle routing]
+  (let [connection (:seon.db/connection handle)
+        store (handle-store handle)
+        database @connection
+        rows (db/q '[:find ?c ?b ?a ?k :where [?c :seon.chain/branch ?b] [?a :seon.task/branch ?b]
+                     [?a :seon.task/outcome :merged] [?a :seon.task/assignment ?k]]
+                   database)]
+    (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the merged chains.") rows)))
+    (doseq [[fact branch a key] (sort-by second rows)]
+      (let [recorded #(db/pull @connection [:seon.task/git-commit :seon.task/publication-refusal] a)
+            accepted (source/merge-accepted connection (merge/merge-commit database a))
+            _ (when (:seon.error/at accepted) (throw (ex-info (:seon.error/message accepted) accepted)))
+            moved? (seq (:seon.program/identities accepted))
+            {git :seon.task/git-commit refused :seon.task/publication-refusal} (recorded)
+            published (when (and moved? (not git) (not refused)) (merge/publish! handle key))]
+        (when (:seon.error/at published)
+          (throw (ex-info (:seon.error/message published "The chain's publication was refused.") published)))
+        (when (or (not moved?) (:seon.task/git-commit (recorded)))
+          (when (contains? (registry/branches store) branch)
+            (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
+                                                     :seon.agent/routing routing :seon.env/environment (env/of handle)}
+                                                    branch)]
+              (throw (ex-info (:seon.error/message refused "The merged chain's branch was not deleted.") refused))))
+          (write! connection [[:db/retractEntity fact]])))))
+  nil)
+
 (defn- entry-registry
   "The registry, `routing` or one of its branch children, holding `agent-id`'s started entry."
   {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/id] [:maybe :seon.agent/routing]]}
@@ -2519,6 +2610,9 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
   [handle routing]
   (let [connection (:seon.db/connection handle)]
+    ;; a finished chain merges first, so this pass's lifecycle publishes it and retires its branch
+    (merge-chains! handle)
+    (finish-chains! handle routing)
     (let [lifecycle! #(let [actions (next-actions (lifecycle-facts @connection (handle-store handle) (registry/branches (handle-store handle))
                                                                     (registry-facts routing)))]
                         (apply-actions! handle routing actions)

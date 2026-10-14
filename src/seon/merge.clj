@@ -414,10 +414,20 @@
                   :seon.fn/changed-paths (into #{} (map first) files)
                   :seon.source/previous-database database}))))
 
+(defn merge-commit
+  "The main commit that merged assignment `a` on main `database`: its recorded `:seon.task/merge-commit`, else the
+  commit of the transaction that closed it `:merged` (`seon.db/commit-at-t`), which acceptance writes in the merge's
+  own transaction, so a restart between the merge and its record still finds it; nil when it is not merged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:or :nil :seon.source/commit-id]]}
+  [database a]
+  (or (:v (first (d/datoms database :eavt a :seon.task/merge-commit)))
+      (when-let [closed (first (filter #(= :merged (:v %)) (d/datoms database :eavt a :seon.task/outcome)))]
+        (db/commit-at-t database (:tx closed)))))
+
 (defn publish!
   "Publish assignment `key`'s merged declarations, task entries included, into the cluster's checkout (`checkout`) through
   `execution` (root's world: main's connection and `:seon.cluster/name`): derived from main alone
-  (`seon.cluster.source/merge-accepted` of its `:seon.task/merge-commit`), written back
+  (`seon.cluster.source/merge-accepted` of its merge commit, `merge-commit`), written back
   (`seon.cluster.source/write-back!`, which proves and reindexes each file), main's record of those files
   analyzed again (`indexed!`), and committed as one git
   commit of exactly those paths (`seon.cluster.source/commit!`) under the merge's own claim in `bin/lane`'s
@@ -437,7 +447,8 @@
                   [:or :seon.merge/published :seon.error/value]]}
   [{connection :seon.db/connection cluster-name :seon.cluster/name} key]
   (let [database (db/db connection)
-        {a :db/id commit :seon.task/merge-commit} (db/pull database [:db/id :seon.task/merge-commit] [:seon.task/assignment key])
+        a (:db/id (db/pull database [:db/id] [:seon.task/assignment key]))
+        commit (merge-commit database a)
         lane (str "merge-" key)
         root (checkout database cluster-name)
         accepted (if (:seon.error/at root) root (source/merge-accepted connection commit))

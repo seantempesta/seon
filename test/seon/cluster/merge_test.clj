@@ -1009,6 +1009,10 @@
           (is (= #{[:seon.fn/sym (sym "chain-value")] [:seon.test/sym (sym "chain-check")]}
                  (:seon.program/identities (source/merge-accepted h-conn (:seon.task/merge-commit merged))))
               "publication writes the chain's program and no chain task: chain tasks are runtime data, never in a task file")
+          (let [a (:db/id (db/pull main [:db/id] [:seon.task/assignment (last attempts)]))]
+            (is (= (:seon.task/merge-commit merged)
+                   (seon.merge/merge-commit (db/with main {:tx-data [[:db/retract a :seon.task/merge-commit (:seon.task/merge-commit merged)]]}) a))
+                "a restart between acceptance and its record still finds the merge commit, from the merge's own transaction"))
           (is (= [:done :done :merged] (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
               "the earlier attempts keep :done and the terminal one is :merged")
           (is (= [] (filterv (set attempts) (map :seon.task/assignment ((requiring-resolve 'my.root/merge-requests) {:seon.db/db main}))))

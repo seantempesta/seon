@@ -3573,6 +3573,19 @@
           (datahike.writing/stored-revisions stored)
           (recur (first (get-in stored [:meta :datahike/parents]))))))))
 
+(defn commit-at-t
+  "The commit on `database`'s first-parent lineage that transaction `t` made (its stored `:max-tx` is `t`); nil when
+  the lineage holds none. One stored commit record read per commit after `t`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t] [:or :nil :uuid]]}
+  [database t]
+  (let [origin (schema-database database)
+        store (:store origin)]
+    (loop [commit (get-in origin [:meta :datahike/commit-id])]
+      (when-let [stored (when commit (k/get store commit nil {:sync? true}))]
+        (cond (= t (:max-tx stored)) commit
+              (< (:max-tx stored) t) nil
+              :else (recur (first (get-in stored [:meta :datahike/parents]))))))))
+
 (defn changed-attributes
   "Attributes whose datoms may differ, using Datahike's native revisions.
   A transaction basis reads the revisions of its commit on `after`'s lineage,

@@ -1755,3 +1755,57 @@
                 (doseq [execution (vals (:seon.agent/contexts @child))
                         :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                   (agent/release-context! execution))))))))))))
+
+(deftest ^{:seon.test/long "Three chain tasks each ending done at its start (one test step per agent) and one final merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is merge-test's measured bound for one)."
+           :seon.test/long-ms 120000}
+  a-three-task-chain-ends-merged-with-no-hand-act
+  ;; TASK-CHAIN S3b (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Finish): each task's proof is green at its
+  ;; start, so each ends done with no model call; root advances the chain, and the last task's done end is merged
+  ;; to main once, through `seon.merge/merge!` with the terminal attempt as its source; the branch and the chain
+  ;; fact are gone after
+  (binding [*space* "tq.chainmerged"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")}}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored" :seon.task/proofs #{(proof "u")}}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored" :seon.task/proofs #{(proof "u")}}])
+                branch (:seon.chain/branch chain)
+                handles (:seon.task/handles chain)
+                attempts (mapv #(id/id [% 1]) handles)]
+            (try
+              (doseq [[i k] (map-indexed vector attempts)]
+                (pass! handle routing)
+                (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                  (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                              (db/db on-branch) k)
+                             (keyword "seon.cluster.db-flow-test" (str "chain-task-" (inc i) "-ended")))))
+              (pass! handle routing)
+              (pass! handle routing)
+              (let [main (db/db connection)]
+                (is (= [:done :done :merged]
+                       (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
+                    "one merge admits every attempt: the earlier ones :done, the terminal one :merged")
+                (is (= (set handles) (set (db/q '[:find [?h ...] :in $ [?h ...] :where [_ :seon.task/id ?h]] main handles)))
+                    "main holds every chain task")
+                ;; the branch's deletion is io work on the launcher (`seon.task/delete-branch!`): await its exit
+                (is (not (loop [n 0] (if (and (contains? (registry/branches store) branch) (< n 50))
+                                       (do (Thread/sleep 100) (recur (inc n)))
+                                       (contains? (registry/branches store) branch))))
+                    "the chain branch is retired")
+                (is (nil? (db/pull main [:db/id] [:seon.chain/first (first handles)])) "and its chain fact is gone"))
+              (finally
+                (when-let [child (get-in @routing [:seon.agent/children branch])]
+                  (doseq [started (keys (:seon.agent/started @child))]
+                    (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                  (doseq [execution (vals (:seon.agent/contexts @child))
+                          :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                    (agent/release-context! execution)))
+                (when (contains? (registry/branches store) branch)
+                  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))))))
