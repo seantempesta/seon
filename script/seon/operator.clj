@@ -776,7 +776,8 @@
   bound to `checkout` in its configuration environment, unless its manifest or
   environment already decides that dial. A throwaway JVM's view binds a port the
   operating system chooses (`:seon.config.web/port` 0): its cluster is named like
-  the root's, so the derived port is the root's bookmark."
+  the root's, so the derived port is the root's bookmark. It never collects its
+  store (`:seon.config.maintenance/collect?` false): the store is deleted at exit."
   {:malli/schema [:=> [:cat :seon.operator/request :string] :seon.operator/request]}
   [request checkout]
   (let [throwaway? (:seon.operator/throwaway? request)
@@ -787,7 +788,11 @@
       (not (decided? :seon.config.fs/working-root))
       (assoc-in [:seon.config/environment :seon.config.fs/working-root] checkout)
       (and throwaway? (not (decided? :seon.config.web/port)))
-      (assoc-in [:seon.config/environment :seon.config.web/port] 0))))
+      (assoc-in [:seon.config/environment :seon.config.web/port] 0)
+      ;; A check store is deleted at exit; the template's due compact task
+      ;; would otherwise collect it at boot, under the tests.
+      (and throwaway? (not (decided? :seon.config.maintenance/collect?)))
+      (assoc-in [:seon.config/environment :seon.config.maintenance/collect?] false))))
 
 (defn- launch-child!
   "Launch one JVM whose program is the directory `source` and return its

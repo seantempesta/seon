@@ -233,6 +233,16 @@
     (testing "the root's own JVM keeps its derived port"
       (is (nil? (port {:seon.operator/managed-root "/root" :seon.operator/command :start}))))))
 
+(deftest a-throwaway-jvm-never-collects-its-store
+  ;; A check store is deleted whole at exit; a template whose compact task is
+  ;; due would otherwise run a real collection at boot, under the tests.
+  (let [dial (fn [request] (find (:seon.config/environment (operator/boot-request request "/checkout"))
+                                 :seon.config.maintenance/collect?))]
+    (is (= [:seon.config.maintenance/collect? false]
+           (dial {:seon.operator/managed-root "/check" :seon.operator/command :start
+                  :seon.operator/throwaway? true})))
+    (is (nil? (dial {:seon.operator/managed-root "/root" :seon.operator/command :start})))))
+
 (deftest check-slots-are-granted-in-ticket-order
   ;; One slot, a holder, then three waiters filed 150 ms apart (the first behind
   ;; a ticket whose process is dead): they must acquire in filing order.
