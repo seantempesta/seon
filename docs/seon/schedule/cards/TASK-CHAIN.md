@@ -440,7 +440,7 @@ general law holds. Prefer a new row in an existing table test. Run them: they mu
 missing, by a failing assertion or an error the code under test raises, never because the test does not load. Then
 write their symbols into the next task's proofs:
 `(my.task/update! next-task :seon.task/proofs (fnil into #{}) '[the.ns-test/a-case …])`, the next task being the one
-your block shows after you. Unmap scratch helpers and any deftest you do not mean as a proof (`my.program/ns-unmap!`): a
+your block shows after you. Unmap scratch helpers and any deftest you wrote that you do not mean as a proof (`my.program/ns-unmap!`); never unmap or change your own task's proofs, which judge your work (live-chain-rough-1.md: a Prove agent unmapped its own proof and parked): a
 red test outside the next task's proofs keeps you from done, and everything on the branch merges at the end. Define
 schemas in one request and the functions that use them in the next.
 
