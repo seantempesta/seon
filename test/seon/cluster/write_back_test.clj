@@ -610,3 +610,44 @@
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (support/delete-root! root)))))
+
+(deftest ^{:seon.test/long "Two analyses of a one-file fixture (the branch's definitions and the candidate's) and one write-back."
+           :seon.test/long-ms 20000}
+  a-function-in-a-new-namespace-writes-back-with-its-ns-form
+  ;; An agent's `defn` in a namespace main has no file for: naming the function
+  ;; alone writes the new file, its `ns` form included.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbnew" suffix ".core"))
+        path (str "src/wbnew" suffix "/core.clj")
+        defined (support/temp-root (str "write-back-new-ns-defined-" suffix))
+        root (support/temp-root (str "write-back-new-ns-" suffix))
+        added [:seon.fn/sym (symbol (str fixture-ns) "added")]
+        c (keyword (str "write-back-new-ns-c-" suffix))]
+    (io/make-parents (io/file defined path))
+    (spit (io/file defined path)
+          (str "(ns " fixture-ns ")\n\n(defn added\n  \"Add two.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 2))\n"))
+    (try
+      (let [base (db/commit-id (db/db h-conn))
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          ;; The branch holds the namespace and its function, as the agent's defn left them.
+          (let [entities (fn/analyze-entities {:seon.fn/root defined :seon.fn/roots ["src"]})]
+            (support/transacted! c-conn (fn/reconcile-tx (db/db c-conn) entities (mapv program/row-identity entities))))
+          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+                                             :seon.source/accepted {:seon.program/identities #{added}
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+            (is (= [path] (:seon.source/changed-paths written)) "the function's new file is written")
+            (is (= (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] added))
+                   (get (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})) added))
+                "the file reindexed from disk declares the branch's function"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (run! support/delete-root! [defined root])))))
+

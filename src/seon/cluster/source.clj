@@ -1442,32 +1442,35 @@
           identities)))
 
 (defn- proven-file
-  "The candidate bytes that write `identities` as `after` holds them over
+  "The candidate bytes that write the `named` declarations as `after` holds them over
   their one file under `root` as it is now, proven by the ordinary analyzer to
   declare the file's other declarations unchanged and exactly `after`'s rows of
-  `identities`; else the refusal. A file changed since `before` recorded it
+  them (a new file's namespace among them); else the refusal. A file changed since `before` recorded it
   (a sibling change landed) is read again: each written declaration must still
   hold its `before` digest there, else the write-back is a `:conflict`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
                   [:or :seon.source/proof :seon.source/write-back-error]]}
-  [before after identities root]
-  (let [identities (vec (sort-by str identities))
-        pull (fn [database identity]
+  [before after named root]
+  (let [pull (fn [database identity]
                (let [entity (db/pull database [:db/id :seon.fn/sym :seon.test/sym :seon.ns/name :seon.fn/form-span :seon.fn/source
                                             :seon.test/source :seon.ns/source :seon.program/definition-digest
                                             {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/relative-root
                                                             :seon.fn.file/digest]}]
                                   identity)]
                  (when (:db/id entity) entity)))
-        recorded (for [identity identities] [identity (pull before identity) (pull after identity)])
+        record (fn [identities] (vec (for [identity (sort-by str identities)] [identity (pull before identity) (pull after identity)])))
         source-of #(or (:seon.fn/source %) (:seon.test/source %) (:seon.ns/source %))
         file-of (fn [[[_ declared] was _]]
                   (cond was (:seon.fn/file was)
                         (qualified-symbol? declared) (namespace-path before (symbol (namespace declared)))))
-        files (into #{} (map file-of) recorded)
-        ;; A namespace main never published has no file: it starts as empty bytes, then its `ns` form.
-        fresh? (and (= #{nil} files) (every? (comp nil? second) recorded))
-        ns-source (when fresh? (:seon.ns/source (pull after [:seon.ns/name (identity-namespace (first identities))])))
+        files (into #{} (map file-of) (record named))
+        ;; A namespace main never published has no file: it starts as empty bytes, then its `ns` form,
+        ;; so its namespace is written with the declarations named.
+        fresh? (and (= #{nil} files) (every? (comp nil? second) (record named)))
+        namespace-identity [:seon.ns/name (identity-namespace (first (sort-by str named)))]
+        identities (vec (sort-by str (cond-> (set named) fresh? (conj namespace-identity))))
+        recorded (record identities)
+        ns-source (when fresh? (:seon.ns/source (pull after namespace-identity)))
         {path :seon.fn.file/relative-path recorded-digest :seon.fn.file/digest
          relative-root :seon.fn.file/relative-root} (if fresh? {:seon.fn.file/relative-path (new-path identities)} (first files))
         relative-root (if fresh? (first (str/split path #"/")) relative-root)
