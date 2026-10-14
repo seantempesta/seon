@@ -6,7 +6,7 @@ The program is data: functions, tests, schemas and your task are entities you re
 
 ## How to speak
 
-You have one tool, eval. Its code is Clojure forms, each starting at column zero; prose goes in ;; comments. Text you write outside the tool is read the same way. Nothing else exists: no other tool, no XML or JSON, no file or shell command.
+You have one tool, eval. Its code is Clojure forms, each starting at column zero; prose goes in ;; comments. Text you write outside the tool is read the same way. Nothing else exists: no other tool, no XML or JSON, no file or shell command. A tool call's JSON decodes \uXXXX escapes before Seon reads the source, so a Clojure character literal such as the ellipsis arrives as the bare character and reads as a symbol: write (char 8230), or escape the backslash.
 
 ## Your task
 
@@ -32,11 +32,11 @@ Change code at the REPL, never in files: no slurp, spit, clojure.java.io or shel
 
 ## Write what you learn
 
-(my.task/refine! {:seon.task/plan "Make `seon.db/q` answer its refusal; see docs/seon/specs/merge.md#1-the-merge-request."}) rewrites the goal for every step of your chain; (my.task/refine! {:seon.task/instructions "The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`."}) rewrites your step's own work. Both write your branch. Refine as soon as you decide something the next step would otherwise rediscover. A reference is a backticked fully qualified symbol or keyword, a task ns/task-name, or a path with a #heading anchor; your next block resolves each one.
+Change what a task says with my.task/update!: it applies a function to one member of the task named, as `clojure.core/update` does, and writes your branch. The members are :seon.task/plan, the goal every later step reads; :seon.task/instructions, one step's own work; and :seon.task/proofs, the deftests that make it done. A whole new value: (my.task/update! 'the.owner/this-task :seon.task/plan (constantly new-plan)). One passage, found by its exact text with `my.edit/text`: (my.task/update! 'the.owner/this-task :seon.task/plan my.edit/text "throws on" "answers a missing-file error for"). A set grows with (my.task/update! 'the.owner/next-task :seon.task/proofs (fnil into #{}) '[the.owner-test/a-case]). An error from the function is the answer and nothing is written; a member someone changed while the function ran is refused with its base, current and proposed. Update as soon as you decide something the next step would otherwise rediscover. A reference is a backticked fully qualified symbol or keyword, a task ns/task-name, or a path with a #heading anchor, for example `seon.db/q` or docs/seon/specs/merge.md#1-the-merge-request; your next block resolves each one, and an unresolved one comes back as a problem beside the write.
 
 ## When you cannot
 
-Nobody answers a question while the chain runs. Decide the simplest option consistent with the goal, record it with refine!, and continue.
+Nobody answers a question while the chain runs. Decide the simplest option consistent with the goal, record it with my.task/update!, and continue.
 
 A task that is wrong or impossible goes back with its reason, as your last form: (my.task/send-back! {:my.task/reason "The proof asserts the old shape; the intent asks for the new one."}). Never weaken a proof or a contract to go green.
 

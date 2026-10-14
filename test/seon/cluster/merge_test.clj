@@ -471,7 +471,7 @@
 
 (deftest ^{:seon.test/long "One own-branch agent's first request, assignment and request, one facts merge and two db<->flow passes."
            :seon.test/long-ms 120000}
-  a-refined-task-is-written-to-its-task-file-and-survives-re-ingestion
+  an-updated-task-is-written-to-its-task-file-and-survives-re-ingestion
   (support/with-running-agent
    (fn [running _ connection]
      (let [member (get-in (db/db connection) [:config :branch])
@@ -488,7 +488,7 @@
            handle (task/task-handle 'tq.written "area")
            intent "Make `tq.land/area` square its side."
            {key :seon.task/assignment}
-           (assigned-held! running connection handle (str "(my.task/refine! {:seon.task/plan \"" intent "\"})"))
+           (assigned-held! running connection handle (str "(my.task/update! 'tq.written/area :seon.task/plan (constantly \"" intent "\"))"))
            execution (support/running-cluster running)
            before (git! root "rev-parse" "HEAD")
            file (io/file root path)

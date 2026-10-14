@@ -158,12 +158,12 @@
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'attributes 'tq.cs/attributes)
            base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
            id (:seon.task/id (task/create! (assoc base :seon.task/name "attributes"
-                                                  :seon.task/plan "Use `seon.task/agent-task`; see `AGENTS.md#data-and-contracts`.")))]
+                                                  :seon.task/plan "Use `seon.task/agent-task`; see `docs/seon/schedule/cards/TASK-CHAIN.md#7-slices`.")))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [reads (shown running agent-id "(mapv #(select-keys % [:seon.ref/name :seon.ref/path :seon.task/plan]) (:seon.context/must-reads (seon.context/current-state)))")]
          (is (some #{{:seon.ref/name 'seon.task/agent-task}} reads) "the intent's names")
-         (is (some #{{:seon.ref/path "AGENTS.md"}} reads) "the paths the intent cites"))))))
+         (is (some #{{:seon.ref/path "docs/seon/schedule/cards/TASK-CHAIN.md"}} reads) "the paths the intent cites"))))))
 
 (defn- declaring-commit
   "The commit on `connection`'s branch whose transaction declared the test `sym`: walking back from the head, the
@@ -235,11 +235,11 @@
        (is (string? (:seon.ref/message (first (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
            "the problem says what failed and what to do")))))
 
-(deftest a-refined-intent-is-the-next-blocks-task-with-its-references-resolved
+(deftest an-updated-plan-is-the-next-blocks-task-with-its-references-resolved
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task running connection agent-id)
-     (let [refined (shown running agent-id "(my.task/refine! {:seon.task/plan \"Use `seon.task/agent-attempt`.\"})")
+     (let [refined (shown running agent-id "(my.task/update! 'tq.cs/shape :seon.task/plan (constantly \"Use `seon.task/agent-attempt`.\"))")
            state (block running agent-id)]
        (is (true? (:seon.task/changed? refined)) "the agent's own branch holds the new intent")
        (is (= "Use `seon.task/agent-attempt`." (get-in state [:seon.context/task :seon.task/plan])))
@@ -249,13 +249,13 @@
               (shown running agent-id "(:seon.task/references (seon.db/pull (seon.db/db) [:seon.task/references] [:seon.task/sym 'tq.cs/shape]))"))
            "the writer re-derives the task's references from the refined intent")))))
 
-(deftest a-refinement-naming-nothing-answers-its-problem
+(deftest an-update-naming-nothing-answers-its-problem
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task running connection agent-id)
      (is (= [{:seon.ref/name 'tq.cs/absent :seon.ref/problem-kind :unresolved}]
             (mapv #(select-keys % [:seon.ref/name :seon.ref/problem-kind])
-                  (:my.task/problems (shown running agent-id "(my.task/refine! {:seon.task/plan \"Fix `tq.cs/absent`.\"})"))))))))
+                  (:my.task/problems (shown running agent-id "(my.task/update! 'tq.cs/shape :seon.task/plan (constantly \"Fix `tq.cs/absent`.\"))"))))))))
 
 (deftest a-proof-the-intent-names-is-shown-once-beside-its-status
   (test-support/with-running-agent
@@ -293,7 +293,7 @@
                                                   :seon.task/plan (str "Change `seon.context/step-start`, proven like "
                                                                          "`seon.context-test/the-block-resolves-the-names-a-task-references`; "
                                                                          "the key `:seon.task/plan`; after `tq.cs/cited`; read "
-                                                                         "`AGENTS.md#data-and-contracts`; validate with `malli.core/validator`."))))]
+                                                                         "`docs/seon/schedule/cards/TASK-CHAIN.md#7-slices`; validate with `malli.core/validator`."))))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
        (let [state (block running agent-id)

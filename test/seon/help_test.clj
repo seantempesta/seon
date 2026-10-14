@@ -211,7 +211,7 @@
        (is (every? #(str/includes? text %)
                    [":seon.context/proofs" ":pending" ":seon.render/operations" "There is no done call"
                     "merge refuses it" "You have one tool, eval." "keep the ;; comments you were shown"
-                    "with-redefs" "(my.task/send-back!" "(my.task/refine!" "merges onto main by itself"])
+                    "with-redefs" "(my.task/send-back!" "(my.task/update!" "merges onto main by itself"])
            "each group says what it is for: the block's parts, done, the contract form, the REPL, the don'ts and the way out")))))
 
 (deftest help-teaches-the-common-gotchas-and-names-only-symbols-that-exist

@@ -14,14 +14,13 @@
                       :my.turn/completed
                       [:map [:my.task/target {:optional true} :my.task/target]
                        [:my.task/counterexample {:optional true} :my.task/counterexample]]]
-          :refine-request [:map {:description "A refinement of the task an agent holds: a new goal or product, written on the subject that declares the goal (seon.task/goal-owner), or new instructions, its own step's work; prose naming its references as backticked fully qualified symbols, keywords and tasks and paths with #heading anchors. Connection and agent are supplied by call preparation."}
-                           [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                           [:seon.task/plan {:optional true} :seon.task/plan]
-                           [:seon.task/instructions {:optional true} :seon.task/instructions]
-                           [:seon.task/product {:optional true} :seon.task/product]]
-          :refined [:map {:description "A refinement as my.task/refine! answers it: the held task's handle, whether a declaration changed on the agent's branch, and each reference of the new text that does not resolve."}
+          :content-key [:enum {:description "The task members my.task/update! changes: its plan, its instructions and its proofs. Identity, link and control members are not content."} :seon.task/plan :seon.task/instructions :seon.task/proofs]
+          :updated [:map {:description "An update as my.task/update! answers it: the task's handle, whether a declaration changed on the agent's branch, and each reference of the new text that does not resolve."}
                     [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]
                     [:my.task/problems {:optional true} :my.task/problems]]
-          :problems [:vector {:description "Each reference of a refined intent that does not resolve on the agent's branch, as its problem."} :seon.ref/problem]
-          :no-task-error [:and {:description "A task verb called by an agent that holds no task."} :seon.error/base [:map [:my.task/holder :my.task/holder]]]
-          :holder [:string {:min 1 :description "The id of the agent a task verb was called by, named in its refusal as an observed value."}]}
+          :update-answer [:or :my.task/updated :my.task/unknown-task-error :my.task/invalid-member-error :seon.task/refused-error :seon.task/conflict-error :seon.error/value]
+          :problems [:vector {:description "Each reference of an updated text that does not resolve on the agent's branch, as its problem."} :seon.ref/problem]
+          :task [:and {:description "The task symbol a task verb named that no task has, as an observed value."} :seon.task/sym]
+          :member [:and {:description "The content member whose new value my.task/update! refused."} :my.task/content-key]
+          :invalid-member-error [:and {:description "my.task/update! computed a value that does not satisfy the task declaration's schema."} :seon.error/base [:map [:my.task/member :my.task/member]]]
+          :unknown-task-error [:and {:description "my.task/update! named a task that does not exist."} :seon.error/base [:map [:my.task/task :my.task/task]]]}

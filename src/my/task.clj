@@ -1,6 +1,6 @@
 (ns ^{:seon.ns/context-relevant? true} my.task
   "My task: the one I hold with its proofs (`current`), its goal or my step's
-  instructions rewritten as the work clarifies them (`refine!`), and how I give it back when I cannot make
+  instructions changed as the work clarifies them (`update!`), and how I give it back when I cannot make
   its proofs green (`send-back!`). Success has no verb: my
   task ends when its proofs are green. Call preparation supplies my database
   and identity.
@@ -10,11 +10,11 @@
   ```clojure
   (my.task/current {})
   ```"
-  (:require [clojure.string :as str]
-            [seon.context :as context]
+  (:require [seon.context :as context]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.ref :as ref]
+            [seon.schema :as schema]
             [seon.run :as run]
             [seon.task :as task]))
 
@@ -42,63 +42,72 @@
       sections
       (assoc sections :seon.agent/id agent-id))))
 
-(defn refine!
-  "Rewrite my chain's goal or my step's own work on my branch; the merge carries it to main.
+(defn- member-updated
+  "Task `sym` with its member `k` replaced by `(apply f value args)`, written on `connection`'s branch."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
+                       [:vector :seon.schema/value]]
+                  [:or :my.task/updated :my.task/unknown-task-error :my.task/invalid-member-error :seon.task/refused-error
+                   :seon.task/conflict-error :seon.error/value]]}
+  [connection agent-id sym k f args]
+  (let [database (db/db connection)
+        handle (task/task-handle (symbol (namespace sym)) (name sym))
+        held (task/task-declaration database handle)]
+    (cond
+      (:seon.error/at held) held
+      (nil? held) (refusal/error :my.task/unknown-task-error {:seon.error/operation 'my.task/update! :my.task/task sym
+                                                              :seon.error/message "I named a task that does not exist."})
+      :else
+      (let [value (apply f (get held k) args)
+            valid? (schema/projection-validator (db/carried-projection database) :seon.task/declaration)]
+        (cond
+          (:seon.error/at value) value
+          (not (valid? (if (nil? value) (dissoc held k) (assoc held k value))))
+          (refusal/error :my.task/invalid-member-error {:seon.error/operation 'my.task/update! :my.task/member k
+                                                        :seon.error/message "The new value does not satisfy the member's schema."})
+          :else
+          (let [written (task/create! (assoc (if (nil? value) (dissoc held k) (assoc held k value))
+                                             :seon.db/connection connection :seon.agent/id agent-id
+                                             :seon.task/basis {handle held}))
+                resolved (when (and (string? value) (not (:seon.error/at written)))
+                           (ref/references (db/db connection) {:seon.ref/text value}))
+                problems (filterv :seon.ref/problem-kind resolved)]
+            (or (when (:seon.error/at written) written)
+                (some #(when (:seon.error/at %) %) resolved)
+                (cond-> written (seq problems) (assoc :my.task/problems problems)))))))))
 
-  `:seon.task/plan` is the goal: it is written on the subject, the task that declares the goal my step
-  reads (`seon.task/goal-owner`), so every step of my chain reads it next (`seon.task/effective`).
-  `:seon.task/product` names the deftests my chain's Prove step supplies, written on the subject beside the goal.
-  `:seon.task/instructions` is my step's own work, written on the task I hold. Both are prose naming their
-  references inline: backticked fully qualified symbols and keywords, tasks as `ns/task-name`, and paths
-  with `#heading` anchors. My next context resolves them. Answers the handle of the task I hold, whether a
-  declaration changed, and each reference that does not resolve as its problem.
+(defn update!
+  "Change one member of task `sym` as `clojure.core/update` does.
+
+  `f` is applied to the member's value and up to three `args`. `k` is `:seon.task/plan`,
+  `:seon.task/instructions` or `:seon.task/proofs`; `f` runs here, in my context, on the declaration I read,
+  and the new value is written on my branch through the task writer with that declaration as its basis. A
+  basis that changed meanwhile is refused with base, current and proposed; nothing retries. An error value
+  from `f` is the answer and nothing is written; an unchanged value writes nothing. Answers the task's
+  handle, whether a declaration changed, and each reference in the new text that does not resolve as its
+  problem; an unresolved reference never rejects the write.
 
   ## Example
 
   ```clojure
-  (my.task/refine! {:seon.task/plan \"Make `seon.db/q` answer its refusal as data; see docs/seon/specs/merge.md#1-the-merge-request.\"})
-  (my.task/refine! {:seon.task/instructions \"The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`.\"})
+  (my.task/update! 'seon.ref/fix-pathless-section :seon.task/proofs (fnil into #{}) '[seon.ref-test/a-case])
+  (my.task/update! 'seon.ref/fix-pathless-section :seon.task/plan my.edit/text \"throws on\" \"answers a missing-file error for\")
   ```"
-  {:malli/schema [:=> [:cat :my.task/refine-request]
-                  [:or :my.task/refined :seon.task/refused-error :seon.task/conflict-error :my.task/no-task-error :seon.error/value]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/plan instructions :seon.task/instructions
-    product :seon.task/product}]
-  (let [database (db/db connection)
-        handle (task/agent-task database agent-id)
-        subject (when (and (or intent product) (string? handle)) (task/goal-owner database handle))
-        ;; each task the refinement writes, with the members written on it
-        writes (when (string? handle)
-                 (cond-> {}
-                   (string? subject) (assoc subject (cond-> {} intent (assoc :seon.task/plan intent)
-                                                      product (assoc :seon.task/product product)))
-                   instructions (update handle merge {:seon.task/instructions instructions})))
-        write! (fn [target changes]
-                 (let [held (db/pull (db/db connection) [:seon.task/ns] [:seon.task/id target])
-                       ;; the declarations of the task's namespace as stored now: the basis the writer checks
-                       basis (when (:seon.task/ns held)
-                               (task/task-basis (db/db connection) {(str "resources/seon/tasks/" (:seon.task/ns held) ".edn") "[]"}))]
-                   (cond (:seon.error/at held) held
-                         (:seon.error/at basis) basis
-                         :else (task/create! (merge (get basis target) changes
-                                                    {:seon.db/connection connection :seon.agent/id agent-id
-                                                     :seon.task/basis (select-keys basis [target])})))))]
-    (cond
-      (:seon.error/at handle) handle
-      (nil? handle) (refusal/error :my.task/no-task-error {:seon.error/operation 'my.task/refine! :my.task/holder agent-id
-                                                           :seon.error/message "I hold no task to refine."})
-      (:seon.error/at subject) subject
-      :else
-      (let [written (reduce (fn [answers [target changes]]
-                              (let [answer (write! target changes)]
-                                (if (:seon.error/at answer) (reduced answer) (conj answers answer))))
-                            [] (sort-by key writes))
-            resolved (when-not (:seon.error/at written)
-                       (ref/references (db/db connection) {:seon.ref/text (str/join "\n\n" (keep identity [intent instructions]))}))
-            problems (filterv :seon.ref/problem-kind resolved)]
-        (or (when (:seon.error/at written) written)
-            (some #(when (:seon.error/at %) %) resolved)
-            (cond-> {:seon.task/id handle :seon.task/changed? (boolean (some :seon.task/changed? written))}
-              (seq problems) (assoc :my.task/problems problems)))))))
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]]
+                   :my.task/update-answer]
+                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
+                        :seon.schema/value]
+                   :my.task/update-answer]
+                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
+                        :seon.schema/value :seon.schema/value]
+                   :my.task/update-answer]
+                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
+                        :seon.schema/value :seon.schema/value :seon.schema/value]
+                   :my.task/update-answer]]}
+  ([connection agent-id sym k f] (member-updated connection agent-id sym k f []))
+  ([connection agent-id sym k f a] (member-updated connection agent-id sym k f [a]))
+  ([connection agent-id sym k f a b] (member-updated connection agent-id sym k f [a b]))
+  ([connection agent-id sym k f a b c] (member-updated connection agent-id sym k f [a b c])))
 
 (defn send-back!
   "Give my task back without green proofs.

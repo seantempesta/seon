@@ -494,7 +494,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   again (`my.root/run!`), abandons the chain or builds a new one. A question task declares its answer's Malli schema and
   `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read; `my.task/send-back!`,
   with a required reason and a counterexample, bails a broken or impossible task to root; an agent's other task verbs
-  are `my.task/current` and `my.task/update!` (`clojure.core/update` on a member; `my.task/refine!` until S1d-2), and
+  are `my.task/current` and `my.task/update!` (`clojure.core/update` on a member), and
   success has no verb; a reply is `my.message/send` then `my.turn/wait`; a model agent's own `:work` task ends by
   `my.turn/wait` or the call cap; the answered basis is `:seon.agent/answered-t`, and system turns and context capture
   are gone. Archive agents; budget exhaustion is loud, and a resumed task's next attempt has a new attempt and agent
