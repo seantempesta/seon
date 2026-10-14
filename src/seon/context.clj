@@ -739,6 +739,19 @@
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
     (:seon.context/must-reads block) (update :seon.context/must-reads (partial mapv #(must-read-ai block %)))))
 
+(def ^:private attempt-sections
+  "The block's sections that hold for the whole attempt: the task, its chain, its earlier attempts, its send-backs and
+  its must-reads. The model pass lays them before the history, so they join the provider's cached prefix."
+  [:seon.context/task :seon.context/chain :seon.context/attempts :seon.context/send-backs :seon.context/must-reads])
+
+(defn block-views
+  "The block's AI view (`current-state-ai`) in two parts: the attempt's sections (`attempt-sections`), the same at
+  every turn of the attempt, and the sections each turn changes (proofs, step, changes, cost, unread, turns)."
+  {:malli/schema [:=> [:cat :seon.context/current-state] [:tuple :seon.context/attempt-view :seon.context/current-state-view]]}
+  [unit]
+  (let [view (current-state-ai unit)]
+    [(select-keys view attempt-sections) (apply dissoc view attempt-sections)]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; What a model pass sends
 ;;; ---------------------------------------------------------------------------
@@ -773,8 +786,9 @@
 (defn model-context
   "What one model pass sends, as shown text.
 
-  The system message is `(help)`; then the agent's own model exchanges; then
-  the current-state block, last. The one assembler the model call reads."
+  The system message is `(help)` then the block's attempt sections (`block-views`), the same at every turn of the
+  attempt, so the provider caches them with the history after them; then the agent's own model exchanges; then the
+  block's turn sections, last. The one assembler the model call reads."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.sci.eval/shown-request :seon.agent/id]
                   [:or :seon.context/model-context :seon.error/value]]}
   [database request agent-id]
@@ -784,8 +798,7 @@
         profile (seon.render/request-profile request)
         shown #(sci.eval/shown-result %1 %2 nil)
         system (shown (bootstrap/help-value database) request)
-        ;; the root call names the producer whose declared AI render shows the block
-        prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))
+        [head tail] (when-not (:seon.error/at block) (block-views (merge block request)))
         ;; help carries its own AI render: a request that cannot run it (no context or no
         ;; caps) prints the help map whole, with no renderer; that is a refusal, never the
         ;; system message
@@ -801,6 +814,7 @@
                     :seon.error/fix "Carry the turn's context, caps and time limit, as the model pass does."}
              (:seon.cluster.eval/diagnostics system)
              (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics system)))))
-        {:seon.ai/system (:seon.eval/shown system)
+        {:seon.ai/system (cond-> (:seon.eval/shown system)
+                           (seq head) (str "\n\n" (:seon.eval/shown (shown head request))))
          :seon.context/exchanges history
-         :seon.ai/prompt (:seon.eval/shown prompt)})))
+         :seon.ai/prompt (:seon.eval/shown (shown tail request))})))

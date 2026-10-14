@@ -413,6 +413,29 @@
     (is (= :seon.render/request-error (:seon.error/type answer)))
     (is (not (contains? answer :seon.ai/system)) "never the printed help map as the system message")))
 
+(deftest the-blocks-attempt-sections-lead-and-its-turn-sections-follow-the-history
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [handle (test-support/running-cluster running)
+           _ (test-support/declare-proof! connection 'tq.cs-test 'split 'tq.cs/split)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+                                            :seon.task/name "split"
+                                            :seon.task/plan "Use `seon.task/agent-task`."}))
+           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
+                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           database (db/db connection)
+           world {:seon.db/db database :seon.agent/id agent-id
+                  :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}
+           [head view] (context/block-views (merge (context/current-state database agent-id) world))]
+       (is (= #{:seon.context/task :seon.context/must-reads} (set (keys head)))
+           "the task and its must-reads are the attempt's sections, laid before the history")
+       (is (contains? view :seon.context/turns) "the turn's sections follow the history")
+       (is (not-any? (set (keys head)) (keys view)) "each section is laid out once")
+       (is (every? string? ((juxt :seon.ai/system :seon.ai/prompt)
+                            (context/model-context database (dissoc world :seon.db/db :seon.agent/id) agent-id)))
+           "the model pass lays both parts out")))))
+
 (deftest the-block-shows-the-agents-cost-against-main
   (test-support/with-running-agent
    (fn [running agent-id connection]

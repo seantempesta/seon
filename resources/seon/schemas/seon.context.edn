@@ -119,10 +119,19 @@
                :cost [:vector {:description "The branch's stored function costs whose digest differs from main's beside main's value, most self time spent first, at most :seon.config.test.cost/top. Producer: seon.context/current-state."} :seon.cost/comparison]
                :exchanges :seon.ai/exchanges
                :model-context
-               [:map {:description "What one model pass sends: (help)'s shown text as the system message, the agent's own model exchanges, then the current-state block's shown text."}
+               [:map {:description "What one model pass sends: (help)'s shown text then the block's attempt sections as the system message, the agent's own model exchanges, then the block's turn sections' shown text."}
                 [:seon.ai/system :seon.ai/system]
                 [:seon.context/exchanges :seon.context/exchanges]
                 [:seon.ai/prompt :seon.ai/prompt]]
+               :attempt-view
+               [:map {:description "The block's sections that hold for the whole attempt as the AI face shows them, laid before the history so they join the cached prefix. Producer: seon.context/block-views."}
+                [:seon.context/task {:optional true}
+                 [:map [:seon.task/sym :seon.task/sym] [:seon.task/plan :seon.task/plan]
+                  [:seon.task/instructions {:optional true} :seon.task/instructions]]]
+                [:seon.context/chain {:optional true} :seon.context/chain]
+                [:seon.context/attempts {:optional true} :seon.context/attempts]
+                [:seon.context/send-backs {:optional true} :seon.context/send-backs]
+                [:seon.context/must-reads {:optional true} [:vector :seon.context/must-read-view]]]
                :current-state-view
                [:map {:description "The block as the AI face shows it: the task without its handle."}
                 [:seon.context/task {:optional true}
