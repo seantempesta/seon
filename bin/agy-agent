@@ -12,7 +12,10 @@
 #   bin/agy-agent status                   running lanes, and summaries of the last hour.
 #
 # Dials (env): AGY_MODEL (gemini-3.8-flash-high; also -low, -medium, gemini-4-argon-low|medium|high),
-# AGY_TIMEOUT (0 = until the turn completes; e.g. 30m), AGY_SID (resume another conversation).
+# AGY_TIMEOUT (0 = until the turn completes; e.g. 30m), AGY_SID (resume another conversation),
+# AGY_TREE (shared = the checkout, the default; archive = run in tmp/agy-trees/<name>, a `git archive HEAD`
+# copy that is not a git repository, with only AGY_OUT (a directory under docs/) added writable: for
+# patch-only lanes, so no git command they run can reset another lane's files).
 #
 # agy loads AGENTS.md, the .agents/skills and its configured MCP servers (`agy mcp list`;
 # seon is registered) by itself. Lanes run with --dangerously-skip-permissions: headless
@@ -26,9 +29,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 model=${AGY_MODEL:-gemini-3.8-flash-high}
 timeout=${AGY_TIMEOUT:-0}
+tree=${AGY_TREE:-shared}
 lane_rule="You are Seon lane NAME, run through bin/agy-agent. No edit hook runs for you: lint what you touch (clj-kondo --cache false) and commit only through bin/lane claim / bin/lane commit naming the reaching tests. Never stop or reset default, never push, never edit another lane's files. End with a short report: what changed, the commit, evidence, what is left."
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
 live() { [ -f "$1/pid" ] && kill -0 "$(cat "$1/pid")" 2>/dev/null; }
 
@@ -48,9 +52,20 @@ render() {
 launch() {  # $1 name, $2 state dir, $3 prompt, rest: extra agy args
   name=$1 state=$2 prompt=$3
   shift 3
+  dir=$root
+  if [ "$tree" = archive ]; then
+    dir="$root/tmp/agy-trees/$name"
+    [ -d "$dir" ] || { mkdir -p "$dir" && git -C "$root" archive HEAD | tar -x -C "$dir"; }
+    out="$root/${AGY_OUT:-docs/research}"
+    mkdir -p "$out"
+    set -- --add-dir "$out" "$@"
+    prompt="$prompt
+
+You run in $dir, a copy of HEAD that is not a git repository. Read code there. Write your note and patches only under $out (make patches with diff -u against the copy's files, paths relative to the repository root). Never cd into $root to edit or run git; root commits your outputs."
+  fi
   # The pipeline ends when agy exits; agy's own status goes through the status file.
-  { agy -p "$prompt" --model "$model" --dangerously-skip-permissions \
-        --print-timeout "$timeout" --output-format stream-json "$@" \
+  { (cd "$dir" && agy -p "$prompt" --model "$model" --dangerously-skip-permissions \
+        --print-timeout "$timeout" --output-format stream-json "$@") \
         2> "$state/stderr.log" &
     echo $! > "$state/pid"
     s=0; wait $! || s=$?; echo "$s" > "$state/status"

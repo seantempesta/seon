@@ -97,6 +97,15 @@ The launcher appends a short lane rule to the first spec: the lane's name, no ed
 commits only through `bin/lane`), never stop or reset default, never push, end with a report. No Seon edit hook runs
 for agy, so its edits are proven only by its own lint and `bin/lane commit`.
 
+## Patch-only lanes run in an archive copy
+
+A lane that only measures, audits or writes patches runs with `AGY_TREE=archive AGY_OUT=docs/research/agent-platform/<date>`:
+agy works in `tmp/agy-trees/<name>`, a `git archive HEAD` copy that is not a git repository, with only `AGY_OUT` added
+writable, and root commits its note and patches. In the shared tree an agy lane has no edit hook and can run any git
+command: on 2026-10-14 a patch-only Argon lane ran `git diff … > patch && git checkout -- <files>` and wiped two other
+lanes' claimed edits (lane writeback-overwrite, cc8d32aba). A prompt rule did not prevent it; the archive copy does.
+Only lanes that must commit code through `bin/lane` run in the shared tree.
+
 ## Ready specs
 
 Each is a quoted heredoc (`<<'SPEC'`: backticks in double quotes are command substitution). Fill in the brackets.
