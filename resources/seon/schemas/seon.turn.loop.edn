@@ -176,6 +176,8 @@
                   [:seon.turn.loop/red {:optional true} [:vector :seon.test/sym]]
                   [:seon.turn.loop/errored {:optional true} [:vector :seon.test/sym]]
                   [:seon.turn.loop/pending {:optional true} [:vector :seon.test/sym]]
+                  [:seon.turn.loop/nearest {:optional true :description "The reaching tests the step selected, when more reach the change than it selected; the summary then claims no pass."} [:int {:min 1}]]
+                  [:seon.turn.loop/reaching-count {:optional true :description "The tests reaching the change at any depth (seon.fn/reverse-closure), present with nearest."} [:int {:min 1}]]
                   [:seon.turn.loop/test-error {:optional true} :seon.error/value]],
                  :platform
                  [:map {:description "The proof a branch's host-bound change waits for: the compiled platform runs it on every branch, so its reaching tests prove nothing in SCI and run only in a JVM loaded from the branch (my.test/check-platform)."}

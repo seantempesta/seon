@@ -241,7 +241,7 @@
      (let [{:keys [red passed?]} (step-red equal-doc-line (str "branch-" agent-id) running)]
        (is (not (contains? red 'seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence))
            "the file proof ran interpreted against the branch's definition and passed")
-       (is (true? passed?) "every test reaching the redefinition ran green")))))
+       (is (not (false? passed?)) "no test reaching the redefinition ran red; a partial verdict claims no pass")))))
 
 (deftest an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
   (support/with-running-agent

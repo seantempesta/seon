@@ -79,6 +79,8 @@
   (delay (requiring-resolve 'seon.test/request-changes)))
 (defonce ^:private test-reaching
   (delay (requiring-resolve 'seon.test/reaching)))
+(defonce ^:private fn-reverse-closure
+  (delay (requiring-resolve 'seon.fn/reverse-closure)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -5382,6 +5384,27 @@
       proofs (assoc :seon.turn.loop/proofs (request-summary proofs))
       reaching (assoc :seon.turn.loop/reaching (request-summary reaching)))))
 
+;; the nearest-test walk stops at the first caller level holding a test, so the reaching request selects n of the
+;; m tests reaching the change; the summary then states n of m and claims no pass over tests that did not run
+(defn- partial-reaching
+  "The `summary` of the reaching request `run` with its extent stated: when more tests reach the functions among
+  `changed` (`seon.fn/reverse-closure`, read on `database`) than `run` selected, it drops `:seon.test/passed?` and
+  names `:seon.turn.loop/nearest` and `:seon.turn.loop/reaching-count`; else `summary` unchanged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed [:maybe :map] [:maybe :map]] [:maybe :map]]}
+  [database changed run summary]
+  (let [functions (changed-functions changed)]
+    (if (or (nil? run) (:seon.error/at run) (empty? functions))
+      summary
+      (let [closure (@fn-reverse-closure {:seon.db/db database :seon.fn/seeds (set functions)})
+            _ (when (db/read-refusal? closure) (throw (ex-info (:seon.error/message closure) closure)))
+            nearest (+ (count (:seon.test/results run)) (count (pending-syms run)))
+            reaching (count (:seon.fn/tests closure))]
+        (if (< nearest reaching)
+          (-> summary
+              (dissoc :seon.test/passed?)
+              (assoc :seon.turn.loop/nearest nearest :seon.turn.loop/reaching-count reaching))
+          summary)))))
+
 (defn- shown-tests
   "The step's `tests` as the reply shows them: the summaries alone, the commit being the queue's and the members' cost the cost's."
   {:malli/schema [:=> [:cat :seon.turn.loop/test-summary] :seon.turn.loop/test-summary]}
@@ -5484,6 +5507,8 @@
                               {:seon.error/message "The tests the change broke could not be judged."
                                :seon.error/exception-class (.getName (class failure))}))))]
           (some-> (summary (ran-something proofs) (ran-something reaching) platform)
+                  (cond-> (and (nil? platform) reaching (ran-something reaching))
+                    (update :seon.turn.loop/reaching #(partial-reaching (db/db connection) changed reaching %)))
                   (merge (test-costs (db/db connection) [proofs reaching]))
                   (cond-> (or (:seon.error/at red) (seq red)) (assoc :seon.turn.loop/broken red))))))
     (catch Throwable failure

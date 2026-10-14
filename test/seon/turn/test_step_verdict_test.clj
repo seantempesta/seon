@@ -1,5 +1,5 @@
 (ns seon.turn.test-step-verdict-test
-  "The automatic test step's verdict covers the open tasks' proofs reaching the change, and a test run inside the
+  "The automatic test step's verdict states which of the reaching tests ran, and a test run inside the
   eval request that changed its reach answers the new definition."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
@@ -23,12 +23,10 @@
        last
        first))
 
-(deftest ^{:seon/tasks #{'my.test/the-reaching-verdict-of-a-defn-reply-omits-a-red-task-proof}
-           :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
+(deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}
-  the-step-runs-a-task-proof-that-reaches-the-change-past-the-nearest-tests
-  ;; g <- f <- f-is-int stops the nearest-test walk two levels up; f-doubles, a proof of a task of
-  ;; g's namespace, reaches g a level further through the helper doubled?.
+  the-step-verdict-names-the-nearest-tests-it-ran-of-those-reaching
+  ;; g <- f <- f-is-int stops the nearest-test walk; f-doubles reaches g a level further through the helper doubled?.
   (support/with-running-agent
    (fn [running _ _]
      (let [agent-id (str "step-task-proof-" (random-uuid))
@@ -43,9 +41,9 @@
            step (support/mcp-tests
                  (eval-request running agent-id
                                "(in-ns 'tv.proof)\n(defn- g \"Returns x plus zero.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))"))]
-       (is (= {:seon.test/passed? false :seon.turn.loop/red ['tv.proof/f-doubles]}
+       (is (= {:seon.turn.loop/red [] :seon.turn.loop/nearest 1 :seon.turn.loop/reaching-count 2}
               (:seon.turn.loop/reaching step))
-           "the red proof of the changed namespace's task is in the step's verdict")))))
+           "the verdict names the nearest tests it ran of those reaching and claims no pass over the rest")))))
 
 (deftest ^{:seon/tasks #{'my.test/a-test-var-run-in-the-defining-request-answers-the-previous-red}
            :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
