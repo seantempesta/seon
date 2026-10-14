@@ -70,7 +70,8 @@ before launching. Gemini models (Flash and Argon) share one bucket with a five-h
 models in agy have their own. Measured 2026-10-14: about twenty long Gemini runs in one session used the whole
 five-hour window and a quarter of the weekly one; a lane past the limit ends `RESOURCE_EXHAUSTED (code 429):
 Individual quota reached ... Resets in <time>`. When Gemini is out, `claude-sonnet-5-5-*` and `claude-opus-5-5-*`
-run through the same `bin/agy-agent` on the separate bucket.
+run through the same `bin/agy-agent` on the separate bucket. The Gemini app (gemini.google.com) keeps its own limits for
+manual use without the repository; the standalone Gemini CLI (`gemini`) is deprecated.
 
 The Argon models need the Google AI Ultra plan on the signed-in account (`agy models` lists what the account can
 use; if Argon is missing, sign out and back in interactively in `agy`). Google rate-limits many small calls, so send
