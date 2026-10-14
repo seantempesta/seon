@@ -464,8 +464,10 @@ defines is reached by at least one of them.
 3. `:not-designed-red`: a proof has no current result, or its red does not come from its own assertion or the code
    under test (`seon.test.runner/designed-red?`); a green proof proves nothing.
 4. `:unreached`: a function in `(changed database :seon.fn/sym)`, or in `(cited-fns database approach)`, is reached by
-   none of the proofs (`seon.fn/tests-reaching`). The cited functions matter for a bug fix, which changes no function
-   during Prove (measured: without them a red proof that never touches the producer passed).
+   none of the proofs: it is in no proof's tested closure (`seon.test.runner/tests-reaching` over the proofs), however
+   many callers up, never a nearest-tests walk (`seon.fn/tests-reaching` stops two callers up once closer tests exist,
+   so a proof evaluating the subject through SCI was refused). The cited functions matter for a bug fix, which changes
+   no function during Prove (measured: without them a red proof that never touches the producer passed).
 
 Measured warm: 11–19 ms per run (15–26 MB). A one-task Prove trial needs a successor to receive its proofs: run Prove
 followed by a held Implement task, inspect the handoff, and stop the trial before the final merge until S3b is

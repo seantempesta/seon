@@ -1,7 +1,6 @@
 (ns seon.step.prove-test
   "The Prove stage's handoff (`docs/seon/schedule/cards/TASK-CHAIN.md#prove-seonstepprovetemplate`)."
   (:require [clojure.test :refer [deftest is]]
-            [seon.db :as db]
             [seon.step.prove :as sut]
             [seon.test]
             [seon.test-support :as test-support]))
@@ -10,8 +9,10 @@
   (str "(ns tq.prv (:require [clojure.test :refer [deftest is]]))\n"
        "(defn other {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
        "(defn producer {:malli/schema [:=> [:cat :int] :int]} [x] (inc (other x)))\n"
-       "(deftest assertion-red (is (= 3 (producer 1))))\n"
-       "(deftest body-error (is (= 1 (producer \"x\"))))\n"
+       "(defn middle {:malli/schema [:=> [:cat :int] :int]} [x] (producer x))\n"
+       "(defn outer {:malli/schema [:=> [:cat :int] :int]} [x] (middle x))\n"
+       "(deftest assertion-red (is (= 3 (outer 1))))\n"
+       "(deftest body-error (is (= 1 (outer \"x\"))))\n"
        "(deftest green (is (= 2 (producer 1))))\n"
        "(deftest green-nothing (is (= 1 1)))\n"
        "(deftest unreaching-red (is (= 1 2)))\n"
@@ -22,18 +23,20 @@
 (def ^:private rows
   "Row name, the plan's text, the successor's proofs (nil: no successor) and the exact refusals: each check with what
   it names. Every function of the fixture counts as changed (the test world has no fork point), so a function no
-  proof reaches is unreached, whether the plan cites it or not."
+  proof reaches is unreached, whether the plan cites it or not. The two red proofs reach `producer` three callers up,
+  through `outer` and `middle`, while closer tests call it directly: reach is the proof's tested closure, never a
+  nearest-tests walk."
   [["no successor" approach nil [[:no-proofs 'tq.prv/r1]]]
    ["empty proofs" approach #{} [[:no-proofs 'tq.prv/r2]]]
    ["not a deftest" approach '#{tq.prv/no-such-test} [[:not-a-deftest '[tq.prv/no-such-test]]
-                                                      [:unreached '[tq.prv/other tq.prv/producer]]]]
-   ["a green proof" approach '#{tq.prv/green} [[:not-designed-red '[tq.prv/green]]]]
-   ["a proof never run" approach '#{tq.prv/never-run} [[:not-designed-red '[tq.prv/never-run]]]]
-   ["assertion red reaching the producer" approach '#{tq.prv/assertion-red} []]
-   ["body error from the code under test" approach '#{tq.prv/body-error} []]
-   ["red reaching nothing" approach '#{tq.prv/unreaching-red} [[:unreached '[tq.prv/other tq.prv/producer]]]]
+                                                      [:unreached '[tq.prv/middle tq.prv/other tq.prv/outer tq.prv/producer]]]]
+   ["a green proof" approach '#{tq.prv/green} [[:not-designed-red '[tq.prv/green]] [:unreached '[tq.prv/middle tq.prv/outer]]]]
+   ["a proof never run" approach '#{tq.prv/never-run} [[:not-designed-red '[tq.prv/never-run]] [:unreached '[tq.prv/middle tq.prv/outer]]]]
+   ["assertion red reaching the producer through two callers" approach '#{tq.prv/assertion-red} []]
+   ["body error from the code under test, two callers up" approach '#{tq.prv/body-error} []]
+   ["red reaching nothing" approach '#{tq.prv/unreaching-red} [[:unreached '[tq.prv/middle tq.prv/other tq.prv/outer tq.prv/producer]]]]
    ["every failed check is reported" approach '#{tq.prv/green-nothing}
-    [[:not-designed-red '[tq.prv/green-nothing]] [:unreached '[tq.prv/other tq.prv/producer]]]]])
+    [[:not-designed-red '[tq.prv/green-nothing]] [:unreached '[tq.prv/middle tq.prv/other tq.prv/outer tq.prv/producer]]]]])
 
 (defn- chain
   "The task maps of row number `i`: the Prove task `tq.prv/r<i>` and, when the row has proofs, its successor."
