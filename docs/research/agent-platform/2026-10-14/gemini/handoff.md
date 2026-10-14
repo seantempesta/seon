@@ -164,3 +164,23 @@ for long open-ended performance hunts and independent plans. Reproduce every quo
 retire-this list before acting. Name the design invariants that matter in each brief (an Argon lane proposed removing
 the recording transaction). Resume a lane to finish its work; start fresh for a new question (a resume re-sends the
 whole conversation).
+
+## 8. TASK-CHAIN against the code (audit, re-checked after S1a landed)
+
+Flash-high audited `docs/seon/schedule/cards/TASK-CHAIN.md` against the working tree ([taskchain-audit-flash.md](taskchain-audit-flash.md),
+quotes real; Argon's [taskchain-audit-argon.md](taskchain-audit-argon.md) has one finding with invented excerpts).
+Re-checked by root after 243683f1d; each still holds:
+
+- The §7 status line "nothing of S1–S5 implemented" is stale: S1a (243683f1d, e6df7e213), S1d-1 (776a04249) and S1d-3
+  (f87629f9b) have landed.
+- §1's "869 measured" string names: the task files hold 872 (before S1a's changes; recount).
+- `my.root/run!` is described in the present tense (§2.2, §2.7, §5) and does not exist in `src/my/root.clj`: target
+  S3c-1; mark it as target.
+- §3a promises help sections teaching `(my.task/update! ...)`, `(my.edit/text ...)` and `editscript.core/diff` and a
+  `(help "change-a-member")` anchor; `resources/seon/help.md` has none of them and still teaches `my.task/refine!`.
+- §4 states `seon.test/task` "answers nil and never resolves tags"; today it resolves the test's one `:seon/tasks` tag
+  through `seon.test.runner/task-inputs` (target S2a; mark it as target).
+- Several present-tense sentences describe target behavior (`seon.cluster.agent/db<->flow` reading chain facts,
+  `seon.turn/step-proved?` reading only `proofs`, `my.root/ended`, `seon.ref/render-doc-ai`); the audits list them.
+
+Raw reports of the blind model tests are in [blind-tests/](blind-tests/).
