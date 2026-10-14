@@ -501,11 +501,13 @@
                       (io/file repository-root "managed"))]
     (try
       (declare-cluster-config! managed-root)
-      (let [result
+      (doseq [dry-run? [true false]]
+        (let [result
             (maintenance/collect!
              {:seon.operator/repository-root repository-root
               :seon.operator/managed-root managed-root
-              :seon.config.maintenance/collect? true})]
+              :seon.config.maintenance/collect? true
+              :seon.operator.collect/dry-run? dry-run?})]
         (is (uuid? (:seon.operator.collect/store-id result)))
         (is (= managed-root
                (:seon.operator.collect/managed-root result)))
@@ -521,7 +523,7 @@
                 (:seon.operator.collect/bytes-before result)))
         (is (zero?
              (:seon.operator.collect/verification-pass-swept result)))
-        (is (true? (:seon.operator.collect/complete? result))))
+        (is (true? (:seon.operator.collect/complete? result)))))
       (finally
         (test-support/delete-recursively! repository-root)))))
 
@@ -537,7 +539,10 @@
        (fn [held]
          (let [connection (:seon.store/connection-object held)
                evidence (#'maintenance/collection-evidence held)
-               held-before (#'maintenance/konserve-key-set held)
+               held-before (:seon.cluster.registry/observed-keys
+                            (registry/collect!
+                             held registry/plain-cutoff
+                             {:seon.operator.collect/dry-run? true}))
                recorded (:seon.source/commit-id
                          (first (:seon.operator.collect/branches evidence)))]
            (d/transact connection {:tx-data [{:db/ident ::marker

@@ -14,6 +14,7 @@
         juji/editscript {:local/root "reference-code/editscript"}
         metosin/malli {:local/root "reference-code/malli"}
         org.commonmark/commonmark-ext-heading-anchor {:mvn/version "0.24.0"}
+        org.commonmark/commonmark-ext-gfm-tables {:mvn/version "0.24.0"}
         org.commonmark/commonmark-ext-yaml-front-matter {:mvn/version "0.24.0"}
         clj-kondo/clj-kondo
         {:local/root "reference-code/clj-kondo"
@@ -42,7 +43,7 @@
                       org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
-         :git/sha "26444d372bf97de219d55c06d5d23bd6f5cfc634"
+         :git/sha "b4b896f24317d90f955405b950efefbb8b303512"
          :exclusions [org.clojure/clojurescript
                       org.clojars.mmb90/cljs-cache
                       com.github.pkpkpk/cljs-node-io

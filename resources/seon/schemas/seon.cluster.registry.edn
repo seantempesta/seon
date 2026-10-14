@@ -32,12 +32,14 @@
                         :branches [:set :keyword],
                         :retired [:set :seon.store/branch],
                         :swept [:int {:min 0}],
+                        :observed-keys [:set :seon.schema/value],
                         :key-count [:int {:min 0}],
                         :candidates [:set [:or :keyword :uuid :string]],
                         :mark-duration-ms [:int {:min 0}],
                         :inventory
                         [:map
                          [:seon.cluster.registry/key-count :seon.cluster.registry/key-count]
+                         [:seon.cluster.registry/observed-keys :seon.cluster.registry/observed-keys]
                          [:seon.cluster.registry/candidates :seon.cluster.registry/candidates]
                          [:seon.cluster.registry/mark-duration-ms :seon.cluster.registry/mark-duration-ms]
                          [:seon.cluster.registry/swept :seon.cluster.registry/swept]],

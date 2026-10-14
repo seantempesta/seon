@@ -757,20 +757,20 @@
   (let [started-ns (System/nanoTime)
         connection (:seon.store/connection-object store)
         heads (atom [])
-        key-count (atom 0)
         dry-run? (true? (:seon.operator.collect/dry-run? options))
-        candidates
+        {candidates :konserve.gc/candidates observed :konserve.gc/observed-keys}
         @(d/gc-storage
           connection remove-before
           (-> options
               (assoc :datahike.gc/reachable-extension
-                     (fn [{:datahike.gc/keys [branches] gc-store :datahike.gc/store}]
+                     (fn [{:datahike.gc/keys [branches]}]
                        (reset! heads (branch-heads store branches))
-                       (reset! key-count (count (k/keys gc-store {:sync? true})))
                        (referenced-blobs connection branches true)))
               (assoc-in [:datahike.gc/sweep-opts :konserve.gc/dry-run?]
-                        dry-run?)))]
-    {:seon.cluster.registry/key-count @key-count
+                        dry-run?)
+              (assoc-in [:datahike.gc/sweep-opts :konserve.gc/report?] true)))]
+    {:seon.cluster.registry/key-count (count observed)
+     :seon.cluster.registry/observed-keys observed
      :seon.cluster.registry/candidates candidates
      :seon.cluster.registry/branches @heads
      :seon.cluster.registry/mark-duration-ms (elapsed-ms started-ns)

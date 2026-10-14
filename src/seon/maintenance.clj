@@ -365,12 +365,6 @@
              true)
            {:sync? true})))
 
-(defn- konserve-key-set
-  {:malli/schema [:=> [:cat :seon.store/store] [:set :seon.schema/value]]}
-  [operation-store]
-  (into #{} (map :key) (k/keys (operation-konserve operation-store)
-                               {:sync? true})))
-
 (defn- root-verification
   "Verify every recorded root and NAME the first one that fails.
 
@@ -395,7 +389,7 @@
   root the collection lost: it is counted as
   `:seon.operator.collect/unstored-digests`, never silently dropped and never
   a refusal here."
-  {:malli/schema [:=> [:cat :seon.store/store [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]] [:set :seon.schema/value]] [:map [:seon.operator.collect/roots-verified? :boolean] [:seon.operator.collect/unstored-digests [:int {:min 0}]] [:seon.operator.collect/unverified-branch {:optional true} :seon.store/branch] [:seon.operator.collect/unverified-digest {:optional true} :seon.blob/digest]]]}
+  {:malli/schema [:=> [:cat :seon.store/store [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]] :seon.cluster.registry/observed-keys] [:map [:seon.operator.collect/roots-verified? :boolean] [:seon.operator.collect/unstored-digests [:int {:min 0}]] [:seon.operator.collect/unverified-branch {:optional true} :seon.store/branch] [:seon.operator.collect/unverified-digest {:optional true} :seon.blob/digest]]]}
   [operation-store evidence held-before]
   (let [digests (:seon.operator.collect/digests evidence)
         stored (filterv held-before digests)
@@ -499,7 +493,7 @@
         verification
         (root-verification
          operation-store (collection-evidence operation-store)
-         (konserve-key-set operation-store))
+         (:seon.cluster.registry/observed-keys inventory))
         result
         (merge
          (inventory-facts inventory)
@@ -537,10 +531,6 @@
         (get-in @(:seon.store/connection-object operation-store)
                 [:config :store :id])
         before (collection-observation operation-store)
-        ;; The roots this store HELD before anything was swept. Verification
-        ;; is a differential against this set, never a shape test over
-        ;; whatever the schema says looks like a digest.
-        held-before (konserve-key-set operation-store)
         base-result
         {:seon.operator.collect/store-id store-id
          :seon.operator.collect/managed-root managed-root
@@ -561,6 +551,11 @@
     (try
       (let [inventory
             (registry/collect! operation-store (collection-cutoff operation-store retention?) {})
+            ;; The roots this store HELD before anything was swept: the keys
+            ;; the collection's own enumeration observed. Verification is a
+            ;; differential against this set, never a shape test over
+            ;; whatever the schema says looks like a digest.
+            held-before (:seon.cluster.registry/observed-keys inventory)
             swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result

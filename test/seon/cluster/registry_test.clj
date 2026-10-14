@@ -417,6 +417,7 @@
           (is (= #{:seon.registry.test/orphan}
                  (:seon.cluster.registry/candidates result)))
           (is (= (count before) (:seon.cluster.registry/key-count result)))
+          (is (= before (:seon.cluster.registry/observed-keys result)))
           (is (zero? (:seon.cluster.registry/swept result)))
           (is (= before (set (map :key (k/keys konserve {:sync? true})))))
           (is (= bytes-before (store-bytes (:seon.store/dir opened))))
