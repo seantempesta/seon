@@ -359,25 +359,20 @@
      ::allocated-at-start allocated-at-start
      ::measurable (not (neg? allocated-at-start))}))
 
-(defn- own-arm
-  [guard ctx time-limit-ms]
-  ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
-  ;; inherits it), so pressure refuses new work and cuts none admitted. The
-  ;; unpressured path is one volatile read, before any contracted call.
-  (when-let [pressure (and @memory-pressure-state (memory-pressure))]
-    (let [refusal (memory-pressure-error pressure)]
-      (throw (ex-info (:seon.error/message refusal) refusal))))
+(defn- deadline-arm
+  "Install `armed` on this thread with its own deadline latch closing in
+  `time-limit-ms`; its `::stop!` restores `displaced` (nil removes)."
+  [guard armed time-limit-ms displaced]
   (let [^ThreadLocal thread-arm (::thread-arm guard)
-        base (new-armed)
         ;; The deadline as a value ON the arm, so work that BLOCKS can honour
         ;; it. The latch alone is reachable only from an interpreted function
         ;; entrance, and a thread parked in a host call makes none — which is
         ;; how an interrupted `my.shell/run` left its child running for its
         ;; natural lifetime while its receipt stayed open.
-        armed (assoc base
-                     ::ctx ctx
+        armed (assoc armed
                      ::deadline-nanos
-                     (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
+                     (+ (::started-at armed) (* (long time-limit-ms) 1000000)))
+        restore! #(if displaced (.set thread-arm displaced) (.remove thread-arm))]
     (.set thread-arm armed)
     (try
       (let [task (.schedule deadline-timer
@@ -396,12 +391,22 @@
            ;; never travelled has no other observer, so its task is cancelled.
            (when-not (.get ^AtomicBoolean (::travelled armed))
              (.cancel ^Future task false))
-           (.remove thread-arm)
+           (restore!)
            nil)
          ::record #(record armed %)})
       (catch Throwable failure
-        (.remove thread-arm)
+        (restore!)
         (throw failure)))))
+
+(defn- own-arm
+  [guard ctx time-limit-ms]
+  ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
+  ;; inherits it), so pressure refuses new work and cuts none admitted. The
+  ;; unpressured path is one volatile read, before any contracted call.
+  (when-let [pressure (and @memory-pressure-state (memory-pressure))]
+    (let [refusal (memory-pressure-error pressure)]
+      (throw (ex-info (:seon.error/message refusal) refusal))))
+  (deadline-arm guard (assoc (new-armed) ::ctx ctx) time-limit-ms nil))
 
 (defn- current-thread-arm
   "The arm installed on this thread, never an arm from a sibling thread."
@@ -419,15 +424,31 @@
                  {:seon.error.evidence/attribute ::guard
                   :seon.error.evidence/value :seon.error/unknown}}))))
     (if-let [armed (current-thread-arm guard)]
-      ;; Nested work shares the governing arm's deadline and counters (the
-      ;; same objects), and is the evaluation of ITS context for its extent:
-      ;; the arm names the context whose world a call receives (`world-ctx`).
-      (let [^ThreadLocal thread-arm (::thread-arm guard)]
-        (.set thread-arm (assoc armed ::ctx ctx))
-        {:interrupt-fn (::interrupt-fn guard)
-         ::built-in-calls (fn [] @(::built-in-calls armed))
-         ::stop! #(.set thread-arm armed)
-         ::record #(record armed %)})
+      ;; Nested work shares the governing arm's counters (the same objects),
+      ;; and is the evaluation of ITS context for its extent: the arm names
+      ;; the context whose world a call receives (`world-ctx`). Its limit is
+      ;; the smaller of its own and the governing arm's remainder: a smaller
+      ;; one gets its own latch and outcome, so it is cut at its own bound
+      ;; and the governing arm keeps running; the governing one is never
+      ;; extended.
+      (let [^ThreadLocal thread-arm (::thread-arm guard)
+            now (System/nanoTime)
+            remaining-ns (some-> (::deadline-nanos armed) (- now))]
+        (if (and remaining-ns (<= remaining-ns (* (long time-limit-ms) 1000000)))
+          (do (.set thread-arm (assoc armed ::ctx ctx))
+              {:interrupt-fn (::interrupt-fn guard)
+               ::built-in-calls (fn [] @(::built-in-calls armed))
+               ::stop! #(.set thread-arm armed)
+               ::record #(record armed %)})
+          (deadline-arm guard
+                        (assoc armed
+                               ::ctx ctx
+                               ::reached (AtomicBoolean. false)
+                               ::travelled (AtomicBoolean. false)
+                               ::outcome (volatile! nil)
+                               ::started-at now)
+                        time-limit-ms
+                        armed)))
       (own-arm guard ctx time-limit-ms))))
 
 (defn arm
@@ -438,10 +459,11 @@
   ThreadLocal, whichever SCI context it evaluates in: the same interpreter, a
   `sci/fork`, or another agent's context an evaluation deliberately opened. A
   sibling thread sees no current arm and therefore owns an independent one
-  even when it evaluates the same context concurrently. The outer deadline
-  keeps governing nested work, the returned `::stop!` is inert, and no second
-  timer exists: one thread serves one limit, the one that admitted the outer
-  evaluation. `::built-in-calls` reports the governing arm's observations.
+  even when it evaluates the same context concurrently. Nested work counts
+  into the governing arm's totals under the smaller of its own limit and the
+  governing arm's remainder: a smaller limit closes its own latch and leaves
+  the governing arm running, and the governing limit is never extended.
+  `::built-in-calls` reports the governing arm's observations.
 
   THE THREAD IS NOT THE ARM. Work that leaves this thread carries the arm as
   a value (`current-arm`) and the receiving thread installs it for the extent
@@ -494,8 +516,8 @@
   an instrumented `arm` call could install thread state and then fail while
   validating its returned map, before the caller had received `stop!`.
   `work` receives the acquired arm so it can read the diagnostic record and
-  built-in observations. Nested work in any context inherits the governing
-  arm and its inert stop remains safe."
+  built-in observations. Nested work in any context is governed by the
+  smaller of its own limit and the governing arm's remainder (`arm`)."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/ctx
          :seon.sci.eval/time-limit-ms
@@ -577,9 +599,8 @@
 
   The evaluation deadline is what ADMITTED the work, so blocking work must be
   able to ask how long it may block. Zero or a negative remainder means the
-  deadline has already passed; nil means this thread is serving no arm, or is
-  serving one that carries no deadline (an inherited nested arm), and the
-  caller keeps its own bound.
+  deadline has already passed; nil means this thread is serving no arm, and
+  the caller keeps its own bound.
 
   This is the interface change the timeout rule asks for: rather than bolting
   a second clock onto a handler, the arm publishes the one deadline it already

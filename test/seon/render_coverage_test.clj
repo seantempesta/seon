@@ -1,6 +1,6 @@
 (ns seon.render-coverage-test
   "Focused coverage for important root-runtime and effect receipt faces."
-  (:require [seon.schema.internal] [clojure.string :as str]
+  (:require [seon.schema.internal] [clojure.edn :as edn] [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
@@ -453,8 +453,8 @@
                   (:seon.render.unknown/producer refused)))
            (is (= probe-call-id (:seon.render.unknown/call refused)))
            (is (= :seon.render/ai (:seon.render.unknown/output refused)))
-           (is (= :seon.sci.kernel/time-limit
-                  (:seon.render.unknown/refusal refused)))))
+           (is (= 'seon.sci.kernel/failure-value
+                  (:seon.render.unknown/refused-operation refused)))))
 
        (testing "a producer that throws carries the throwable's class"
          (let [refused (probe-render database ctx value
@@ -462,8 +462,8 @@
            (is (= :refused (:seon.render.unknown/reason refused)))
            (is (= 'my.render-probe/boom
                   (:seon.render.unknown/producer refused)))
-           (is (= :seon.sci.kernel/invocation-failed
-                  (:seon.render.unknown/refusal refused)))
+           (is (= 'seon.sci.kernel/failure-value
+                  (:seon.render.unknown/refused-operation refused)))
            (is (string? (:seon.render.unknown/throwable refused)))))
 
        (testing "a producer whose declared contract refuses carries it"
@@ -472,19 +472,21 @@
            (is (= :refused (:seon.render.unknown/reason refused)))
            (is (= 'my.render-probe/contracted
                   (:seon.render.unknown/producer refused)))
-           (is (= :seon.instrument/contract-violated
-                  (:seon.render.unknown/refusal refused))
+           (is (= 'my.render-probe/contracted
+                  (:seon.render.unknown/refused-operation refused))
                "the contract's own refusal survives the render boundary")))
 
-       (testing "the unknown reads as ONE line of data the agent can act on"
+       (testing "the unknown reads as its declared schema and one map of data the agent can act on"
          (let [refused (probe-render database ctx value
                                      'my.render-probe/slow 50)
-               line (render/unknown-output :seon.render/ai refused)]
-           (is (= 1 (count (str/split-lines line))))
-           (is (not (str/starts-with? (str/triml line) ";"))
+               lines (str/split-lines (render/unknown-output :seon.render/ai refused))]
+           (is (= "Declared schemas: [:seon.render/unknown]" (first lines)))
+           (is (not-any? #(str/starts-with? (str/triml %) ";") lines)
                "never comment-shaped (ruling 45)")
-           (is (str/includes? line "my.render-probe/slow"))
-           (is (str/includes? line ":time-limit"))))
+           (is (= {:seon.render.unknown/producer 'my.render-probe/slow
+                   :seon.render.unknown/reason :time-limit}
+                  (select-keys (edn/read-string (last lines))
+                               [:seon.render.unknown/producer :seon.render.unknown/reason])))))
 
        (testing "and as one labeled block for a person"
          (let [refused (probe-render database ctx value

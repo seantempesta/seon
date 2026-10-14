@@ -123,6 +123,29 @@
         (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
 
+(deftest a-nested-arm-honours-its-own-smaller-limit
+  ;; outside-1: a render producer armed at 50 ms inside a test body's arm ran
+  ;; until the OUTER limit, because nested work inherited the outer deadline.
+  (let [outer (eval/build-base-ctx (schema/handed-projection))
+        nested (eval/build-base-ctx (schema/handed-projection))
+        [evaluation after]
+        (kernel/with-arm
+          outer 2000
+          (fn [_]
+            [(evaluate nested "(loop [] (recur))" 50)
+             [(kernel/deadline-reached?) (value outer "(+ 1 2)")]]))
+        record (:seon.sci.admit/record evaluation)]
+    (testing "the inner evaluation times out by its own limit, with the timeout error"
+      (is (= :time (:seon.eval/outcome record)))
+      (is (= :seon.eval/duration-ms
+             (get-in evaluation [:seon.sci.admit/value :seon.sci.kernel/guard-observation
+                                 :seon.error.evidence/attribute]))
+          "the fired deadline guard's observation is the timeout's evidence")
+      (is (< (:seon.eval/duration-ms record) 1000)
+          "cut near its own 50 ms limit, never at the outer 2000 ms"))
+    (testing "the outer arm is neither reached nor stopped by the inner deadline"
+      (is (= [false 3] after)))))
+
 (deftest memory-pressure-holds-until-usage-falls-below-its-resume-bound
   ;; Both OOMs of 2026-09-26 admitted new work into a JVM already past most of
   ;; its heap. A held pressure refuses by name, naming the work in flight when
