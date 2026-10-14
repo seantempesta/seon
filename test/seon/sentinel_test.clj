@@ -1,5 +1,8 @@
 (ns seon.sentinel-test
   (:require [clojure.test :refer [deftest is]]
+            [seon.cluster.registry :as registry]
+            [seon.mcp :as mcp]
+            [seon.operator.runtime :as runtime]
             [seon.sentinel :as sentinel]))
 
 (defn- probe
@@ -22,3 +25,10 @@
     (is (= 1 (count (:fresh result))))
     (is (= 210.0 (get-in result [:fresh 0 :ms])))
     (is (= 130.0 (get-in result [:defn :stages :settle])))))
+
+(deftest a-sentinel-run-leaves-the-stores-branches-as-it-found-them
+  (let [store (:seon.store/store (#'mcp/instance @runtime/running-instances "default"))
+        before (registry/branches store)
+        result (sentinel/run {:running-commit "test"})]
+    (is (= 5 (count (:agents result))))
+    (is (= before (registry/branches store)))))

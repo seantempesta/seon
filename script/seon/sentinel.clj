@@ -3,15 +3,22 @@
   Root calls `run` from its JVM REPL: each probe is an MCP eval request measured
   through `seon.profile/measure`, and its reply's request cost is the figure
   recorded. `summary` reduces the probes to one data map; `-main` prints it through
-  the value printer. Probe branches are retired by the caller, never here."
+  the value printer. `run` retires the branches of the agents it made before it
+  returns, so a run leaves the store's branches as it found them."
   (:require [clojure.edn :as edn]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [my.agent]
+            [seon.db :as db]
             [seon.mcp :as mcp]
+            [seon.operator.runtime :as runtime]
             [seon.profile :as profile]
             [seon.render.value :as value]))
 
-(def ^:private probe-namespace "seon.test")
+(def ^:private probe-namespace
+  "The scratch namespace every probe evaluates in, so the `defn` probe defines
+  nothing in a namespace the program owns."
+  "sentinel.scratch")
 
 (defn- eval-probe
   "One measured MCP eval request as `id` in `mode`: the measure window and the reply's request cost."
@@ -68,27 +75,46 @@
   []
   (str/trim (:out (shell/sh "git" "rev-parse" "--short" "HEAD"))))
 
+(defn- retire-agents!
+  "Retire the branch of each agent in `ids` on the running default cluster
+  through `my.agent/retire-branch!`, as root retires a lane's branch; answers
+  each retirement's value."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :map]]}
+  [ids]
+  (let [found (#'mcp/instance @runtime/running-instances "default")
+        handle (:seon.turn.loop/cluster found)
+        connection (:seon.db/connection handle)
+        context {:seon.store/store (:seon.store/store found) :seon.db/connection connection
+                 :seon.agent/routing (:seon.agent/routing handle)}]
+    (mapv (fn [id]
+            (my.agent/retire-branch!
+             {:seon.store/branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id id]))}
+             context))
+          ids)))
+
 (defn run
   "Run the probes on the running default cluster.
-  Returns the summary, HEAD, the running commit and the probe agent ids; the
-  caller retires those branches with my.agent/retire-branch!."
+  Returns the summary, HEAD, the running commit and the probe agent ids, whose
+  branches `run` has retired when it returns."
   {:malli/schema [:=> [:cat [:map [:running-commit :string]]] :map]}
   [{:keys [running-commit]}]
   (let [stamp (System/currentTimeMillis)
-        warm-id "sentinel-warm"
+        warm-id (str "sentinel-warm-" stamp)
         fresh-ids (mapv #(str "sentinel-fresh-" % "-" stamp) (range 3))
-        defn-id "sentinel-defn"
+        defn-id (str "sentinel-defn-" stamp)
         code "(+ 1 2)"
         agents (into [warm-id defn-id] fresh-ids)]
-    (dotimes [_ 2] (eval-probe warm-id "sci" code))
-    (let [warm (mapv (fn [_] (eval-probe warm-id "sci" code)) (range 5))
-          fresh (mapv #(eval-probe % "sci" code) fresh-ids)
-          definition (eval-probe defn-id "sci" "(defn sentinel-probe-inc [x] (inc x))")]
-      {:head (head-commit)
-       :running-commit running-commit
-       :summary (summary {:warm warm :fresh fresh :definition definition})
-       :fresh-failed? (mapv :failed? fresh)
-       :agents agents})))
+    (try
+      (dotimes [_ 2] (eval-probe warm-id "sci" code))
+      (let [warm (mapv (fn [_] (eval-probe warm-id "sci" code)) (range 5))
+            fresh (mapv #(eval-probe % "sci" code) fresh-ids)
+            definition (eval-probe defn-id "sci" "(defn sentinel-probe-inc [x] (inc x))")]
+        {:head (head-commit)
+         :running-commit running-commit
+         :summary (summary {:warm warm :fresh fresh :definition definition})
+         :fresh-failed? (mapv :failed? fresh)
+         :agents agents})
+      (finally (retire-agents! agents)))))
 
 (defn -main
   "Print the probes through the value printer.
