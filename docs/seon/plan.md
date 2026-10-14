@@ -50,6 +50,8 @@ only the task field; (2) the GC fork bump (Konserve b4b896f, Datahike 6d49110d; 
 (`drop-nextjournal-markdown.patch`); (4) the retention dial applied. After the restart: the sentinel with repeated
 samples; a stale-template check.
 
+**Next restart (batch 1b):** the GC fork bump (rebased patch 0d7005536; after lane-lifecycle-branch commits, since both touch `registry.clj`), `org.commonmark/commonmark-ext-gfm-tables` 0.24.0 (owner 2026-10-14, so a table is never a section's lead; S3d-2), and default picks up c2d555626 (markdown dependency removed). Batch 1 is done: S1a (e6df7e213, 243683f1d), restart onto 243683f1d and reset 2026-10-14 06:10Z.
+
 **Restart batch after that:** retire namespace agents (owner 2026-10-14: a task supersedes them; a namespace agent
 is a task about a namespace): delete `steward-call`, `:seon.ns/steward`, `:seon.error/of-steward`, `:my.agent/steward`,
 their readers and the unowned-namespace problem family in one slice with every caller converted
