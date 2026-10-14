@@ -2150,8 +2150,9 @@
         database agent-id))
 
 (defn task-end
-  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` when its step's
-  preview of the merge refuses nothing (`seon.context/step-verdict`), a proposal root's merge decides, `:sent-back` once a turn completed naming the task that owns the mistake
+  "How the task `agent-id` holds ended on `database`, its branch, with no turn open: `:done` when its step refuses
+  nothing (`seon.context/step-verdict`: a chain's task by the done rule, `seon.cluster.source/done-refusals`), a
+  proposal root re-judges, `:sent-back` once a turn completed naming the task that owns the mistake
   (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
   turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
   its admission is already closed."

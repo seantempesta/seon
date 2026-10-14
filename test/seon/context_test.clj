@@ -246,6 +246,29 @@
          (is (= [:seon.source/red-test-error] (mapv :seon.error/type (:seon.source/refusals step))) "its own done refusal")
          (is (not-any? merge-refusal? (:seon.source/refusals step)) "and no merge's"))))))
 
+(deftest a-chain-of-one-is-judged-by-the-done-rule
+  ;; outside-2 (`docs/research/agent-platform/2026-10-14/outside-2.md` Broken 1): a chain's only task, linked by no
+  ;; `:seon.task/next` either way, was judged by its merge's preview, so a reaching test with no recorded result held
+  ;; its done; TASK-CHAIN §2.4: every chain task is judged by `seon.cluster.source/done-refusals`. The chain fact is
+  ;; added by `seon.db/with`, so no root pass starts the chain's own attempt beside this agent
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [[only] (linked-chain! connection [{:seon.task/ns 'tq.c1 :seon.task/name "only" :seon.task/plan "Implement it."
+                                              :seon.task/instructions "Make the rows green."
+                                              :seon.task/proofs #{'tq.c1-test/rows 'tq.c1-test/edge}}])
+           branch (get-in (db/db connection) [:config :branch])
+           _ (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                            :seon.task/assigned only :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+           _ (evaluate running agent-id (str "(ns tq.c1-test (:require [clojure.test :refer [deftest is]]))\n"
+                                             "(deftest rows (is (= 1 1) \"one row\"))\n"
+                                             "(deftest edge (is (= 1 2) \"the edge\"))"))
+           step (context/step-verdict (db/with (db/db connection) [{:seon.chain/first only :seon.chain/branch branch}])
+                                      agent-id)]
+       (is (= [['seon.cluster.source/done-refusals :seon.source/red-test-error ['tq.c1-test/edge]]]
+              (mapv (juxt :seon.error/operation :seon.error/type #(mapv :seon.test/sym (:seon.source/red-tests %)))
+                    (:seon.source/refusals step)))
+           "its red proof is the done rule's refusal, never a merge's")))))
+
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
    (fn [running agent-id connection]

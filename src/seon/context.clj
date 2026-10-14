@@ -352,7 +352,8 @@
 
 (defn step-observation
   "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
-  over its assigned basis (`seon.task/assigned-obligations`), whether a chain links it (`:seon.task/next`), its
+  over its assigned basis (`seon.task/assigned-obligations`), whether it is a chain's (linked by `:seon.task/next`,
+  or the first a chain fact on main names, `:seon.chain/first`), its
   product (the proofs of the task after it and, for a Prove step, the tests its successors are tagged with), the
   branch as the candidate, main's head (`seon.task/main-head`; the branch itself on main) and the judgment's input:
   its proofs, the tests reaching the functions it changed since its merge base (`change`, `seon.fn/gate-sets`),
@@ -368,11 +369,12 @@
   (let [owed (task/assigned-obligations database sym)
         main (or (task/main-head database) database)
         following (when-not (:seon.error/at owed)
-                    (db/pull database [{:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
-        ;; a task linked by next is a chain's, judged by the done rule; any other by its merge's preview until
-        ;; TASK-CHAIN S3e deletes the subject/needs model
+                    (db/pull database [:seon.task/id {:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
+        ;; a chain's task (linked by next, or a chain's first: a chain of one links nothing) is judged by the done
+        ;; rule; any other by its merge's preview until TASK-CHAIN S3e deletes the subject/needs model
         previous (db/q '[:find ?p . :in $ ?s :where [?t :seon.task/sym ?s] [?p :seon.task/next ?t]] database sym)
-        chained? (or (some? (:seon.task/next following)) (some? previous))
+        first-of (when-let [id (:seon.task/id following)] (db/pull main [:seon.chain/branch] [:seon.chain/first id]))
+        chained? (or (some? (:seon.task/next following)) (some? previous) (some? (:seon.chain/branch first-of)))
         product (cond-> (set (get-in following [:seon.task/next :seon.task/proofs]))
                   (= :prove (:seon.task/step owed)) (into (:seon.task/product owed)))
         delta (when-not (:seon.error/at owed) (change database agent-id))
@@ -403,7 +405,7 @@
                    (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs (into proofs product)}
                      (seq product) (assoc :seon.task/product product)
                      (seq on-target) (assoc :seon.source/red-on-target on-target))))]
-    (or (some #(when (:seon.error/at %) %) [owed following previous delta reached results held head])
+    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta reached results held head])
         (cond-> (assoc owed :seon.task/product product :seon.context/chained chained?
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
           (set? delta) (assoc :seon.program/identities delta)
