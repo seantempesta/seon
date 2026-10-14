@@ -837,6 +837,7 @@
   (cond (nil? spec) value
         (map? value) (decode-vectors projection spec value)
         (sequential? value) (mapv #(decode-pulled projection spec %) value)
+        (set? value) (into #{} (map #(decode-pulled projection spec %)) value)
         :else value))
 
 (defn decode-vectors

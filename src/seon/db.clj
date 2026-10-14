@@ -2082,6 +2082,20 @@
             (fn [supplied]
               (schema.datahike/edn-encoded-attr-in? supplied attribute)))))))
 
+(defn- set-attribute?
+  "Whether `attribute` is installed cardinality-many and declared a set (not
+   `[:vector T]` or `[:sequential T]`): Datahike pulls its members as a
+   vector, and the reader is answered the set it was written."
+  [declarations attribute]
+  (and (= :db.cardinality/many
+          (get-in declarations [::installed-schema attribute :db/cardinality]))
+       (let [projection @(::read-projection declarations)]
+         (not (schema/projection-cache-value
+               projection [::vector-shaped? attribute]
+               #(ask-declarations
+                 declarations
+                 (fn [supplied] (schema.datahike/vector-shaped-attr-in? supplied attribute))))))))
+
 (defn- decode-attribute-value
   [declarations attribute value]
   (ask-declarations
@@ -2095,10 +2109,12 @@
     (reduce-kv
      (fn [decoded attribute child]
        (assoc decoded attribute
-              (if (and (keyword? attribute)
-                       (edn-encoded? declarations attribute))
-                (decode-attribute-value declarations attribute child)
-                (decode-attribute-maps declarations child))))
+              (cond
+                (not (keyword? attribute)) (decode-attribute-maps declarations child)
+                (edn-encoded? declarations attribute) (decode-attribute-value declarations attribute child)
+                (and (vector? child) (set-attribute? declarations attribute))
+                (into #{} (map #(decode-attribute-maps declarations %)) child)
+                :else (decode-attribute-maps declarations child))))
      (empty value)
      value)
 
@@ -2702,6 +2718,14 @@
              subpattern (:subpattern options)]
          (assoc decoded output-key
                 (cond
+                  ;; a cardinality-many set reads as the set it was written
+                  (let [read (if options (when (= display-key attribute) attribute) output-key)]
+                    (and (vector? value) (keyword? read)
+                         (not (edn-encoded? declarations read))
+                         (set-attribute? declarations read)))
+                  (set (if subpattern (decode-pull-child declarations subpattern value)
+                           (decode-attribute-maps declarations value)))
+
                   subpattern
                   (decode-pull-child declarations subpattern value)
 

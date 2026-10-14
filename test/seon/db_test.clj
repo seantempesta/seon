@@ -3380,3 +3380,24 @@
       (finally
         (store/release-store! opened)
         (test-support/delete-recursively! root)))))
+
+(deftest a-pulled-set-attribute-is-a-set
+  ;; Datahike pulls a cardinality-many attribute as a vector; one declared
+  ;; `[:set T]` reads back as the set it was written (S5 run 4b: a pulled
+  ;; `:seon.eval/private` vector refused `seon.repl/def-note`).
+  (test-support/with-database
+   (fn [connection]
+     (let [{task :seon.test/task} (test-support/task-input
+                                   connection
+                                   [{:seon.task/ns 'tq.pull :seon.task/name "one"
+                                     :seon.task/plan "## Problem\n\nSee `seon.db/pull`."
+                                     :seon.task/proofs #{'seon.db-test/a 'seon.db-test/b}}]
+                                   'tq.pull/one)
+           database (db/db connection)
+           lookup [:seon.task/id (:seon.task/id task)]]
+       (is (= #{'seon.db-test/a 'seon.db-test/b} (:seon.task/proofs (db/pull database '[*] lookup))))
+       (is (set? (:seon.task/references (db/pull database '[*] lookup))))
+       (is (set? (:seon.task/proofs (db/pull database [:seon.task/proofs] lookup))))
+       (is (set? (:seon.task/proofs (db/q '[:find (pull ?e [:seon.task/proofs]) . :in $ ?id
+                                            :where [?e :seon.task/id ?id]]
+                                          database (:seon.task/id task)))))))))
