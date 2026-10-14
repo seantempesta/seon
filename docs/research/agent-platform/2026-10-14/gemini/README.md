@@ -59,3 +59,11 @@ block parallel work, both confirmed by root in the code: `seon.test/recorded-res
 calling branch's database, and the `::changes` key in `seon.test` includes the branch name beside its content digest,
 so a test green on one agent's branch reruns on every sibling; and an outside agent's file edit dirties the shared
 checkout until it is committed, which is the only reason `bin/lane` claims exist.
+
+## Backlog root causes, Argon (high resumed on low, 22 min)
+
+`rootcause-argon.md`: 13 clusters said to retire 199 tasks, 38 "moot". Its counts fail verification: it reports 538
+generated contract tasks where the task files hold 14, and 7 of the 12 namespaces it calls deleted exist
+(`seon.sci.lookup`, `seon.test.accretion`, `seon.fault`, `seon.operator`, `seon.effect`, `seon.problems`,
+`seon.bootstrap`). Across both models, whole-backlog clusters are hypotheses about producers; their counts and every
+"subject is gone" claim are checked before any task is retired.
