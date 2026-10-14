@@ -2,7 +2,8 @@
  ; Provenance: owner ruling 2026-08-03. Ordinary/user roots retain history;
  ; isolated scratch and eval roots may explicitly choose false at creation.
  :seon.config.db/keep-history? true
- ; Unit: milliseconds of commit ancestry, before the newest observed store head,
+ ; Applies only when :seon.config.maintenance/retention? is true. Unit:
+ ; milliseconds of commit ancestry, before the newest observed store head,
  ; that the daily collection keeps (`seon.cluster.registry/retention-cutoff`,
  ; Datahike `gc-storage` remove-before). Every cluster must declare one or the
  ; collection refuses (`Every cluster configuration must declare snapshot
@@ -380,6 +381,12 @@
  ; (seon.cluster.registry-test); the daily root/maintenance/compact schedule
  ; reclaims the branches test requests unlink. Absent or false turns it off.
  :seon.config.maintenance/collect? true
+ ; Unit: boolean. false: the collection keeps every commit a live branch reaches
+ ; and sweeps only unreachable data (deleted branches); true: it also prunes
+ ; commit history by :seon.config.db/snapshot-window-ms. Provenance: owner
+ ; 2026-10-14, stop pruning so the store's true growth can be monitored and
+ ; its producers optimized; the window code stays so this can be turned back on.
+ :seon.config.maintenance/retention? false
 
  ; THE OPERATOR WAITS ON EVENTS, NEVER A FLAT OPERATION CLOCK. This is the
  ; one last-resort silence circuit breaker for a boot phase, prepl connect or

@@ -472,19 +472,23 @@
   5)
 
 (defn- collection-cutoff
-  "The scheduled collection's cutoff: the declared snapshot window, kept
-  behind every commit the store's facts name (`registry/retained-before`)."
-  {:malli/schema [:=> [:cat :seon.store/store] :inst]}
-  [operation-store]
-  (registry/retained-before operation-store (registry/retention-cutoff operation-store)))
+  "The scheduled collection's cutoff: `registry/plain-cutoff`, which keeps
+  every commit a live branch reaches, unless `retention?` is true; then the
+  declared snapshot window, kept behind every commit the store's facts name
+  (`registry/retained-before`)."
+  {:malli/schema [:=> [:cat :seon.store/store :boolean] :inst]}
+  [operation-store retention?]
+  (if retention?
+    (registry/retained-before operation-store (registry/retention-cutoff operation-store))
+    registry/plain-cutoff))
 
 (defn- dry-run-store!
-  {:malli/schema [:=> [:cat :string :seon.store/store] :seon.operator.collect/result]}
-  [managed-root operation-store]
+  {:malli/schema [:=> [:cat :string :seon.store/store :boolean] :seon.operator.collect/result]}
+  [managed-root operation-store retention?]
   (let [inventory
         (registry/collect!
          operation-store
-         (collection-cutoff operation-store)
+         (collection-cutoff operation-store retention?)
          {:seon.operator.collect/dry-run? true})
         ;; Reuse the inventory's logical key count; only physical bytes need
         ;; another observation.
@@ -527,8 +531,8 @@
       (incomplete-collection! result nil))))
 
 (defn- collect-store!
-  {:malli/schema [:=> [:cat :string :seon.store/store] :seon.operator.collect/result]}
-  [managed-root operation-store]
+  {:malli/schema [:=> [:cat :string :seon.store/store :boolean] :seon.operator.collect/result]}
+  [managed-root operation-store retention?]
   (let [store-id
         (get-in @(:seon.store/connection-object operation-store)
                 [:config :store :id])
@@ -556,7 +560,7 @@
          :seon.operator.collect/complete? false}]
     (try
       (let [inventory
-            (registry/collect! operation-store (collection-cutoff operation-store) {})
+            (registry/collect! operation-store (collection-cutoff operation-store retention?) {})
             swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result
@@ -573,7 +577,7 @@
                               (:seon.operator.collect/bytes after-first)))))]
         (try
           (let [verification-swept
-                (registry/collect! operation-store (collection-cutoff operation-store))
+                (registry/collect! operation-store (collection-cutoff operation-store retention?))
                 after (collection-observation operation-store)
                 evidence (collection-evidence operation-store)
                 verification
@@ -667,7 +671,10 @@
 
   Runs only when the request carries `:seon.config.maintenance/collect? true`
   (the cluster's config fact); absent or false answers the declared
-  `:seon.maintenance/collection-disabled-error` and opens no store."
+  `:seon.maintenance/collection-disabled-error` and opens no store. The
+  collection prunes by the snapshot window only when the request carries
+  `:seon.config.maintenance/retention? true`; otherwise it keeps every commit
+  a live branch reaches and sweeps what no branch reaches."
   {:malli/schema [:=> [:cat :seon.operator.collect/request]
                       [:or :seon.operator.collect/result :seon.operator/failed-error
                        :seon.maintenance/collection-disabled-error]]}
@@ -683,9 +690,10 @@
         (with-root-store!
           root
           (fn [held]
-            (if (:seon.operator.collect/dry-run? request)
-              (dry-run-store! root held)
-              (collect-store! root held))))))))
+            (let [retention? (true? (:seon.config.maintenance/retention? request))]
+              (if (:seon.operator.collect/dry-run? request)
+                (dry-run-store! root held retention?)
+                (collect-store! root held retention?)))))))))
 
 (defn observe-footprint!
   "Observe the volume holding this managed data directory through its own

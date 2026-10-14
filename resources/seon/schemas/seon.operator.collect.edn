@@ -6,7 +6,10 @@
                           :seon.operator/managed-root]
                          [:seon.operator.collect/dry-run?
                           {:optional true}
-                          :seon.operator.collect/dry-run?]]
+                          :seon.operator.collect/dry-run?]
+                         [:seon.config.maintenance/retention?
+                          {:optional true}
+                          :seon.config.maintenance/retention?]]
                         :dry-run? :boolean
                         :option-key :keyword
                         :store-id :seon.store/id

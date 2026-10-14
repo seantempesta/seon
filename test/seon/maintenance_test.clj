@@ -6,6 +6,8 @@
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.db :as db]
+            [konserve.core :as k]
+            [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
@@ -409,26 +411,89 @@
 
 
 (defn- declare-cluster-config!
-  "Give the root's store the one cluster configuration fact `collect!` reads,
-  carrying the SHIPPED default snapshot window: `retention-cutoff` refuses a
-  store whose clusters declare none, and an empty root holds no cluster."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [managed-root]
-  (let [window (get-in (config/compile-manifest {:seon.boot/cluster-name "collection-probe"})
-                       [:seon.config/effective :seon.config.db/snapshot-window-ms])]
-    (is (pos-int? window) "the shipped default declares a snapshot window")
-    (#'maintenance/with-root-store!
-     managed-root
-     (fn [held]
-       (d/transact (:seon.store/connection-object held)
-                   {:tx-data [{:db/ident :seon.config/cluster
-                               :db/valueType :db.type/string
-                               :db/cardinality :db.cardinality/one}
-                              {:db/ident :seon.config.db/snapshot-window-ms
-                               :db/valueType :db.type/long
-                               :db/cardinality :db.cardinality/one}
-                              {:seon.config/cluster "collection-probe"
-                               :seon.config.db/snapshot-window-ms window}]})))))
+  "Give the root's store the one cluster configuration fact `collect!` reads:
+  `retention-cutoff` refuses a store whose clusters declare none, and an empty
+  root holds no cluster. One argument carries the SHIPPED default snapshot
+  window; two carry the window given."
+  {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :string :int] :any]]}
+  ([managed-root]
+   (let [window (get-in (config/compile-manifest {:seon.boot/cluster-name "collection-probe"})
+                        [:seon.config/effective :seon.config.db/snapshot-window-ms])]
+     (is (pos-int? window) "the shipped default declares a snapshot window")
+     (declare-cluster-config! managed-root window)))
+  ([managed-root window]
+   (#'maintenance/with-root-store!
+    managed-root
+    (fn [held]
+      (d/transact (:seon.store/connection-object held)
+                  {:tx-data [{:db/ident :seon.config/cluster
+                              :db/valueType :db.type/string
+                              :db/cardinality :db.cardinality/one}
+                             {:db/ident :seon.config.db/snapshot-window-ms
+                              :db/valueType :db.type/long
+                              :db/cardinality :db.cardinality/one}
+                             {:seon.config/cluster "collection-probe"
+                              :seon.config.db/snapshot-window-ms window}]})))))
+
+(defn- collect-with-retention
+  "Collect a fresh root store whose snapshot window is zero, after `:db`
+  committed an old commit and then newer ones and a branch committed and was
+  retired, with the request's retention dial as given. Returns whether each
+  commit is still in the store."
+  {:malli/schema [:=> [:cat [:maybe :boolean]] [:map-of :keyword :boolean]]}
+  [retention?]
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath (io/file repository-root "managed"))]
+    (try
+      (declare-cluster-config! managed-root 0)
+      (let [[old-commit doomed-commit]
+            (#'maintenance/with-root-store!
+             managed-root
+             (fn [held]
+               (let [connection (:seon.store/connection-object held)
+                     marker! #(d/transact connection {:tx-data [{:db/ident %}]})
+                     _ (d/transact connection {:tx-data [{:db/ident ::marker
+                                                          :db/valueType :db.type/string
+                                                          :db/cardinality :db.cardinality/one}]})
+                     old (d/commit-id @connection)
+                     _ (Thread/sleep 50)
+                     _ (marker! ::newer-1)
+                     _ (Thread/sleep 50)
+                     _ (marker! ::newer-2)
+                     _ (registry/branch! {:seon.store/store held
+                                          :seon.cluster.registry/from :db
+                                          :seon.store/branch :doomed})
+                     doomed-connection (store/open-branch! held :doomed)
+                     _ (d/transact doomed-connection {:tx-data [{:db/ident ::doomed-marker}]})
+                     doomed (d/commit-id @doomed-connection)]
+                 (d/release doomed-connection)
+                 (registry/retire-branch! {:seon.store/store held :seon.store/branch :doomed})
+                 [old doomed])))]
+        (maintenance/collect!
+         (cond-> {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root
+                  :seon.config.maintenance/collect? true}
+           (some? retention?) (assoc :seon.config.maintenance/retention? retention?)))
+        (#'maintenance/with-root-store!
+         managed-root
+         (fn [held]
+           (let [konserve (:store @(:seon.store/connection-object held))
+                 present? #(boolean (k/exists? konserve % {:sync? true}))]
+             {:old-commit (present? old-commit)
+              :deleted-branch-commit (present? doomed-commit)}))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest collection-keeps-history-unless-retention-is-on
+  (is (= {:old-commit true :deleted-branch-commit false}
+         (collect-with-retention false))
+      "retention off keeps a live branch's old commit and sweeps a deleted branch")
+  (is (= {:old-commit true :deleted-branch-commit false}
+         (collect-with-retention nil))
+      "an absent dial is off")
+  (is (= {:old-commit false :deleted-branch-commit false}
+         (collect-with-retention true))
+      "retention on prunes the old commit by the snapshot window"))
 
 (deftest collection-reports-and-verifies-the-exact-store
   (let [repository-root (owned-root)

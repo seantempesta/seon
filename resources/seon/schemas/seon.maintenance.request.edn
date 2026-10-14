@@ -75,6 +75,9 @@
                             [:seon.config.maintenance/collect?
                              {:optional true}
                              :seon.config.maintenance/collect?]
+                            [:seon.config.maintenance/retention?
+                             {:optional true}
+                             :seon.config.maintenance/retention?]
                             [:seon.config.maintenance/min-usable-bytes
                              {:optional true}
                              :seon.config.maintenance/min-usable-bytes]
