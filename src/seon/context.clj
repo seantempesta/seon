@@ -206,6 +206,51 @@
                       {} (sort-by (comp str second) identities))]
     (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
 
+(defn- tested-names
+  "Every name the branch's `tests` tested as recorded on `database`: of each test with a result at its current
+  identity judging `task` (`seon.test.runner/current-results`), its static closure, which that result's reach
+  digest covers (`seon.test.runner/reach-memberships`), and the declarations its body ran outside it
+  (`:seon.test.member/dynamic-calls`). A test with no current result tested nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] :seon.task/sym]
+                  [:or [:set :symbol] :seon.error/value]]}
+  [database tests task]
+  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort tests))
+        results (if (seq names) (runner/current-results database names task) {})
+        recorded (when-not (:seon.error/at results)
+                   (into [] (filter #(and (:seon.test/sym %) (not (:seon.error/at %)))) (vals results)))
+        closures (if (seq recorded) (runner/reach-memberships database (mapv :seon.test/sym recorded)) {})]
+    (or (some #(when (:seon.error/at %) %) [results closures])
+        (into #{} (concat (mapcat val closures) (mapcat :seon.test.member/dynamic-calls recorded))))))
+
+(defn- branch-changes
+  "The declaration `identities` the branch changed since its merge base, shown on `database` by family in name order,
+  each by its name and the form that reads it; a function none of the branch's tests (its changed tests and the held
+  task `task`'s `proofs`) tested as recorded (`tested-names`) says so, with the form that removes it; a schema key no
+  function or test writes (`:seon.fn/keywords`) says exactly that, with no removal form (none exists); a declaration
+  the branch removed is named under `:seon.context/removed`. Families are absent when empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym] :seon.task/sym]
+                  [:or :seon.context/changes :seon.error/value]]}
+  [database identities proofs task]
+  (let [tested (tested-names database (into proofs (keep (fn [[a v]] (when (= :seon.test/sym a) v))) identities) task)
+        entry (fn [[attribute value]]
+                (let [read-form (list 'my.program/source (if (keyword? value) value (list 'quote value)))]
+                  (cond (and (= :seon.schema/key attribute)
+                             (empty? (db/q '[:find [?e ...] :in $ ?k :where [?e :seon.fn/keywords ?k]] database value)))
+                        {:seon.ref/name value :seon.context/used-by-no-function-or-test true :seon.render/operations [read-form]}
+                        (and (= :seon.fn/sym attribute) (not (contains? tested value)))
+                        {:seon.ref/name value :seon.context/reached-by-no-test true
+                         :seon.render/operations [read-form (list 'my.program/ns-unmap! (list 'quote value))]}
+                        :else {:seon.ref/name value :seon.render/operations [read-form]})))
+        shown (when-not (:seon.error/at tested)
+                (reduce (fn [shown [attribute value :as identity]]
+                          (if-let [family (merged-families attribute)]
+                            (if (seq (db/datoms database :avet attribute value))
+                              (update shown family (fnil conj []) (entry identity))
+                              (update shown :seon.context/removed (fnil conj []) {:seon.ref/name value}))
+                            shown))
+                        {} (sort-by (comp str second) identities)))]
+    (if (:seon.error/at tested) tested shown)))
+
 (defn- merged
   "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
   (`by-family`)."
@@ -674,7 +719,7 @@
   handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
   proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
   the task's earlier attempts, one entry each (`earlier-attempts`); every declaration the branch changed since its
-  merge base, by family, each name with the form that reads it (`by-family`), so a rerun sees its earlier work and
+  merge base, by family, each name with the form that reads it (`branch-changes`), so a rerun sees its earlier work and
   its scratch; and every other reference it makes, resolved on the attempt's starting value (`must-reads`). Empty when
   it holds none.
 
@@ -693,9 +738,9 @@
             sent-back (send-backs database (:seon.task/id held))
             steps (chain database (:seon.task/id held))
             earlier (earlier-attempts database (:seon.task/id held) agent-id)
-            changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
-                      (by-family database (:seon.program/identities verdict)))
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
+            changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
+                      (branch-changes database (:seon.program/identities verdict) proof-names (:seon.task/sym held)))
             reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             start (attempt-start database agent-id)

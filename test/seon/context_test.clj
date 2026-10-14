@@ -822,6 +822,7 @@
            _ (test-support/declare-source! connection 'tq.ra
                                            (str "(ns tq.ra (:require [clojure.test :refer [deftest is]]))\n"
                                                 "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(defn spare \"Unused.\" {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
                                                 "(deftest area-test (is (= 25 (area 5))))\n")
                                            "test")
            [first-task] (linked-chain! connection [{:seon.task/ns 'tq.ra :seon.task/name "implement" :seon.task/plan "Square."
@@ -844,16 +845,33 @@
            second-attempt (assign! agent-id)]
        (is (= [nil nil] (mapv :seon.error/type [first-attempt second-attempt])) "both attempts are assigned")
        (evaluate running agent-id (str "(in-ns 'tq.ra)\n(defn squared {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))\n"
-                                       "(def scratch 1)"))
+                                       "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] (+ r 0))\n(def scratch 1)\n(my.program/ns-unmap! 'tq.ra/spare)\n(seon.schema/register! :tq.ra/probe :string)"))
        (let [state (block running agent-id)
-             changed (into #{} (comp (mapcat val) (map :seon.ref/name)) (:seon.context/changes state))]
+             changes (:seon.context/changes state)
+             changed (into #{} (comp (mapcat val) (map :seon.ref/name)) (dissoc changes :seon.context/removed))
+             squared (some #(when (= 'tq.ra/squared (:seon.ref/name %)) %) (:seon.context/functions changes))]
          (is (= [{:seon.task.attempt/number 1 :seon.task.attempt/end :capped :seon.task/outcome :closed
                   :seon.task/reason "The attempt ended :capped." :seon.task/calls 0}]
                 (:seon.context/attempts state))
              "the earlier attempt, one entry: its number, end, outcome, reason and model calls")
          (is (every? changed ['tq.ra/squared 'tq.ra/scratch]) "the branch's new definitions, scratch included")
-         (is (every? #(seq (:seon.render/operations %)) (mapcat val (:seon.context/changes state)))
-             "each with the form that reads it"))
+         (is (every? #(seq (:seon.render/operations %)) (mapcat val (dissoc changes :seon.context/removed)))
+             "each with the form that reads it")
+         ;; the removed and unused names are built, not quoted: a quoted symbol or a literal keyword in this test's
+         ;; source is an analysed reference of it, which would refuse the removal and use the key
+         (is (= [{:seon.ref/name (symbol "tq.ra" "spare")}] (:seon.context/removed changes))
+             "a declaration the branch removed is named as removed, never as an unresolved problem")
+         (is (= {:seon.ref/name 'tq.ra/squared :seon.context/reached-by-no-test true
+                 :seon.render/operations ['(my.program/source 'tq.ra/squared) '(my.program/ns-unmap! 'tq.ra/squared)]}
+                squared)
+             "a function no test reaches says so, with the form that removes it, and no doc echo")
+         (is (= [{:seon.ref/name 'tq.ra/area :seon.render/operations ['(my.program/source 'tq.ra/area)]}]
+                (filterv #(= 'tq.ra/area (:seon.ref/name %)) (:seon.context/functions changes)))
+             "a changed function the recorded run of a branch test tested carries no flag")
+         (is (= [{:seon.ref/name (keyword "tq.ra" "probe") :seon.context/used-by-no-function-or-test true
+                  :seon.render/operations [(list 'my.program/source (keyword "tq.ra" "probe"))]}]
+                (:seon.context/schemas changes))
+             "a schema key the branch added that no function or test uses says exactly that, with no removal form"))
        ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))
