@@ -1,0 +1,124 @@
+diff --git a/resources/seon/schemas/seon.batch.edn b/resources/seon/schemas/seon.batch.edn
+index e4036feb7..cc717d28d 100644
+--- a/resources/seon/schemas/seon.batch.edn
++++ b/resources/seon/schemas/seon.batch.edn
+@@ -1,5 +1,5 @@
+ #:seon.batch
+-{:world [:map {:description "The one world an entrant hands the path; every stage reads it from the request, never from an ambient binding. It extends :seon.db/custody-request (the connection, whose current value is the database a call omitting one is supplied); it holds no database value. Built once by seon.turn.world/world (:seon.batch/world-base); the stages add their keys (ordinal, form sink, reads, scope, in-flight) onto it."}
++{:world [:map {:description "The one world an entrant hands the path; every stage reads it from the request, never from an ambient binding. It extends :seon.db/custody-request (the connection, whose current value is the database a call omitting one is supplied); it holds no database value but the request's own working value beside its applied facts. Built once by seon.turn.world/world (:seon.batch/world-base); the stages add their keys (ordinal, form sink, reads, scope, in-flight) onto it."}
+          [:seon.boot/cluster-name :seon.boot/cluster-name]
+          [:seon.agent/branch {:optional true} :seon.agent/branch]
+          [:seon.db/connection {:optional true} :seon.db/connection]
+@@ -23,7 +23,10 @@
+          [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its branches."} :seon.store/store]
+          [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]
+          [:seon.agent/context-source {:optional true :description "The running cluster's own handle with its store, never a hosted agent's branch handle: my.message/send hosts a stopped recipient through it."} :seon.agent/context-source]
+-         [:seon.batch/defined {:optional true} :seon.batch/defined]]
++         [:seon.batch/defined {:optional true} :seon.batch/defined]
++         [:seon.batch/basis {:optional true :description "With :seon.batch/applied: the value the request started from."} :seon.db/database-value]
++         [:seon.batch/working {:optional true :description "With :seon.batch/applied: the request's working value, its basis with the earlier forms' facts applied."} :seon.db/database-value]
++         [:seon.batch/applied {:optional true :description "The transaction data the request's earlier forms applied on its basis, in order: seon.turn.world/with-world binds it as seon.db/*working*, so a read of the world's connection answers its head with the request's own facts while the request still records them in its one transaction."} :seon.store/transaction-data]]
+ 
+  :world-request [:map {:description "What seon.turn.world/world builds a world from: the cluster and connection, and whatever identity, custody and context the entrant holds. The SCI context is the caller's fork. Its world-member entries are declared under seon.batch/given-* names, so a world is built only from what its caller gives: an omitted one is never supplied from the calling evaluation's world."}
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+diff --git a/src/seon/batch.clj b/src/seon/batch.clj
+index be0aea244..afe0c2a5b 100644
+--- a/src/seon/batch.clj
++++ b/src/seon/batch.clj
+@@ -590,7 +590,11 @@
+         t0 (System/nanoTime)
+         base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r (:seon.batch/line-cursor batch)))
+         world (cond-> (form-world request n)
+-                (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch)))
++                (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch))
++                ;; the earlier forms' facts, which this form's reads of its connection see
++                (seq (:seon.batch/applied batch)) (assoc :seon.batch/basis (:seon.batch/basis request)
++                                                         :seon.batch/working (:seon.batch/working batch)
++                                                         :seon.batch/applied (:seon.batch/applied batch)))
+         ;; the stages read the batch's working value from their request
+         request (assoc request :seon.batch/world world :seon.batch/working (:seon.batch/working batch))
+         writes (java.util.concurrent.ConcurrentLinkedQueue.)
+@@ -762,6 +766,7 @@
+           (dissoc :seon.batch/pending)
+           (cond-> (not refusal)
+             (-> (assoc :seon.batch/working after)
++                (cond-> validate? (update :seon.batch/applied (fnil into []) tx))
+                 (update :seon.batch/program #((:seon.batch/fold request) request % change))
+                 (update :seon.batch/defined defined-by change)
+                 (mark #(assoc % :seon.batch/change change)))
+diff --git a/src/seon/turn/world.clj b/src/seon/turn/world.clj
+index 17aefd06b..fc2d47d1e 100644
+--- a/src/seon/turn/world.clj
++++ b/src/seon/turn/world.clj
+@@ -88,7 +88,8 @@
+   "Run `f` with the world's bindings re-established on this thread: its
+   custody (the connection, when it has one) for the elided seon.db arities,
+   which read its current value, and the running evaluation's observation
+-  scope (`:seon.batch/scope`, the observer's bindings). A body moved to
++  scope (`:seon.batch/scope`, the observer's bindings) and the request's own facts so far (`seon.db/*working*`).
++  A body moved to
+   another thread (a compute-pool hop) carries the world as a value and calls
+   this; nothing is inherited from the submitting thread."
+   {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
+@@ -98,7 +99,11 @@
+                                                        {#'seon.batch/*world* world})
+                                           ;; a form's reads land in its own sink
+                                           (:seon.batch/reads world)
+-                                          (assoc #'db/*read-evidence-sink* (:seon.batch/reads world)))
++                                          (assoc #'db/*read-evidence-sink* (:seon.batch/reads world))
++                                          ;; a later form reads the request's own facts on its connection
++                                          (:seon.batch/applied world)
++                                          (assoc #'db/*working* (select-keys world [:seon.db/connection :seon.batch/basis
++                                                                                    :seon.batch/working :seon.batch/applied])))
+                            (f))))
+ 
+ 
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -179,6 +179,14 @@
+   connection semantics. Absence preserves current reads through *conn*."
+   nil)
+ 
++(def ^:dynamic *working*
++  "The running eval request's own facts on its connection, bound by `seon.turn.world/with-world` from the form's
++  world: `:seon.db/connection`, the request's `:seon.batch/basis`, its `:seon.batch/working` value and the
++  `:seon.batch/applied` transaction data that took the basis there. A read of that connection answers its head
++  with them applied, so a later form reads what an earlier form of the same request defined, while the request
++  still records them in its one transaction."
++  nil)
++
+ (def ^:dynamic ^:private *receipt*
+   "The current evaluation receipt lookup ref, bound with connection custody."
+   nil)
+@@ -330,12 +338,29 @@
+         projection (vary-meta assoc :seon.schema/projection projection)))
+     database))
+ 
++(declare with)
++
++(defn- with-working
++  "`database`, the head of `connection`, with the running request's own facts applied when `*working*` is that
++  connection's: the request's working value while the head is still its basis, else the head with the request's
++  applied transaction data (a form wrote to the branch directly), proportional to the request's own facts."
++  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
++                  [:or :seon.db/database-value :seon.db/error-result]]}
++  [connection database]
++  (let [{working-connection :seon.db/connection basis :seon.batch/basis working :seon.batch/working
++         applied :seon.batch/applied} *working*]
++    (cond
++      (not (identical? working-connection connection)) database
++      (= (dbi/-max-tx database) (dbi/-max-tx basis)) working
++      :else (with database applied))))
++
+ (defn- resolve-database-value
+   [connection]
+   (try
+     ;; Resolve latest exactly once at the public-call boundary.
+-    (let [database (carry-projection-state
+-                    (d/db connection) (connection-projection-state connection))]
++    (let [database (cond->> (carry-projection-state
++                             (d/db connection) (connection-projection-state connection))
++                     *working* (with-working connection))]
+       ;; Acquisition captures the caller's supplied construction projection.
+       ;; Reads subsequently consult only their immutable database value.
+       (if-let [projection (and (nil? (:seon.schema/projection (meta database)))
