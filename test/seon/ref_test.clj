@@ -241,7 +241,8 @@
 (deftest an-unresolved-reference-says-what-failed-and-what-to-do
   (let [[problem] (ref/references (db/db) {:seon.ref/text "`:seon.nope/missing-key`"})]
     (is (= :unresolved (:seon.ref/problem-kind problem)))
-    (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
+    (is (not (re-find #"(?i)create" (:seon.ref/message problem))) "it never tells the agent to create the name: the plan says that")
+    (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")))
 
 (deftest a-reference-with-no-path-is-a-missing-file
   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
