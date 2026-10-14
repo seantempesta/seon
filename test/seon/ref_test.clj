@@ -158,6 +158,10 @@
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Call `str/subs` and `m/validator`, not `seon.ref/references`."})]
     (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
 
+(deftest a-library-name-resolves-where-its-alias-form-is-code
+  (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Alias `m/validator`, name `malli.core/validator`."})]
+    (is (= [['malli.core/validator nil]] (mapv (juxt :seon.ref/name :seon.ref/problem-kind) found)))))
+
 (deftest a-span-of-a-name-and-more-words-is-prose
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Use `seon.ref/references`, not `seon.ref/section AGENTS.md` or `foo/bar baz`."})]
     (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
@@ -264,12 +268,12 @@
                  "  {:malli/schema [:=> [:cat] :int]}\n  [] 1)"))
      (let [kinds (shown running agent-id
                         (str "(let [[entry direct] (seon.ref/references (seon.db/db) "
-                             "{:seon.ref/text \"`tq.nested/cites` and `seon.nope/direct`\"})] "
+                             "{:seon.ref/text \"`tq.nested/cites` and `seon.ref/nope-direct`\"})] "
                              "{:inner (mapv (juxt :seon.ref/name :seon.ref/problem-kind) (:seon.ref/references entry)) "
                              ":direct ((juxt :seon.ref/name :seon.ref/problem-kind) direct)})"))]
        (is (= [] (:inner kinds))
            "a function cited at its doc carries its doc value, never the names its docstring cites")
-       (is (= ['seon.nope/direct :unresolved] (:direct kinds))
+       (is (= ['seon.ref/nope-direct :unresolved] (:direct kinds))
            "a name the task itself cites that resolves to nothing stays its problem")))))
 
 (deftest a-schema-is-described-once-in-one-shown-unit
@@ -310,7 +314,7 @@
          ;; neither a dependency file nor a Java class is a problem
          "`deps.edn` and `java.lang.String`" [[nil "deps.edn" nil nil]]
          ;; an explicit qualified name that resolves to nothing stays a problem
-         "`seon.nope/x`" [['seon.nope/x nil nil :unresolved]]
+         "`seon.ref/nope-x`" [['seon.ref/nope-x nil nil :unresolved]]
          ;; a bare token naming nothing is prose
          "Then seon.nope/x and :seon.nope/y follow." []
          ;; fenced code is code

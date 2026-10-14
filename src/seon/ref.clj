@@ -276,8 +276,6 @@
         ;; only a span of exactly one qualified symbol or keyword is a name; a dotted bare symbol may name a namespace
         (cond
           (some? more) nil
-          ;; a symbol whose namespace has no dot is an alias form (`str/subs`), which is code (TASK-CHAIN §3a)
-          (and (qualified-symbol? form) (not (str/includes? (namespace form) "."))) nil
           (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
           (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 
@@ -590,6 +588,19 @@
   [path]
   (boolean (some-> (based-file path) :seon.ref/file io/file .isDirectory)))
 
+(defn- alias-form?
+  "Is `reference` a qualified symbol whose namespace part names no namespace the resolver knows (a stored program
+  namespace, a loaded one, or a dependency-cache one)? Then it is an alias form, which is code and no reference
+  (TASK-CHAIN §3a)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ref/name]] :boolean]}
+  [database reference]
+  (boolean
+   (when (qualified-symbol? reference)
+     (let [space (symbol (namespace reference))]
+       (not (or (find-ns space)
+                (seq (db/datoms database :avet :seon.ns/name space))
+                (analyzer/cached-namespace space)))))))
+
 (defn- answer
   "One candidate resolved on `database`, or its problem with what it means; nil for a directory, and for a
   resolve-only candidate that names nothing (it is prose)."
@@ -601,6 +612,7 @@
                                      (not (seq (db/datoms database :avet :seon.test/sym reference)))
                                      (not (seq (db/datoms database :avet :seon.task/sym reference))))))
         resolved (cond
+                   (alias-form? database reference) nil
                    (and resolve-only reference (not (named? database reference))) nil
                    leveled? (at-level database reference level)
                    reference (resolve-name database reference)
