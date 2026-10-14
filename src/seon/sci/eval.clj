@@ -262,11 +262,13 @@
   {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
   [^clojure.lang.Var host-var sci-namespace]
   (let [copied (sci/copy-var* host-var sci-namespace)]
-    (when (.getThreadBinding host-var)
-      (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
-    ;; The new Var's own metadata, which every context's binding of it starts
-    ;; from; under an active context `alter-meta!` writes only that one's.
+    ;; The new Var's own root and metadata, which every context's binding of
+    ;; it starts from; under an active context `bindRoot` and `alter-meta!`
+    ;; write only that context's binding, and the root write would reach the
+    ;; evaluation's write observer as a definition.
     (sci.ctx-store/with-ctx nil
+      (when (.getThreadBinding host-var)
+        (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
       (alter-meta! copied #(merge (dissoc (meta host-var) :ns :name :test) %)))
     copied))
 

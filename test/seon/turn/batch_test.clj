@@ -374,3 +374,14 @@
      (eval! "(in-ns 'batch-test.rebound) (def fl2 5)" agent-id running)
      (is (= #:seon.fn{:arglists "()" :source "(def fl2 5)"}
             (db/pull (db/db connection) [:seon.fn/arglists :seon.fn/source] [:seon.fn/sym 'batch-test.rebound/fl2]))))))
+
+(deftest a-host-var-copied-during-an-evaluation-is-no-private-definition
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     ;; a thread-bound host dynamic Var copied into the context while a form
+     ;; evaluates (a host namespace entered mid-evaluation), as S5 run 4b's
+     ;; turn 31 copied seon.db/*conn* and seventeen more
+     (eval! "(in-ns 'user) (#'seon.sci.eval/copy-host-var (:sci.impl/host-var (meta #'seon.db/*conn*)) (the-ns 'seon.db))"
+            agent-id running)
+     (is (= #{} (into #{} (db/q '[:find [?p ...] :where [_ :seon.eval/private ?p]] (db/db connection))))
+         "the form defined nothing: no platform Var is recorded as the agent's private state"))))
