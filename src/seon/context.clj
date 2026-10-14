@@ -631,13 +631,52 @@
                                    (map #(list 'in-ns (list 'quote %)))
                                    (disj tests owner))}))
 
+(defn attempt-start
+  "`database` as of the transaction that assigned `agent-id` its held task: the attempt's starting value, which its
+  must-reads are read on so they stay the same for the whole attempt; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.db/database-value :seon.error/value]]}
+  [database agent-id]
+  (let [assigned (db/q '[:find (max ?tx) . :in $ ?id
+                         :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?tx]]
+                       database agent-id)]
+    (cond (:seon.error/at assigned) assigned
+          assigned (db/as-of database assigned))))
+
+(defn- summary-level?
+  "Is the resolved must-read `entry` a library or namespace-level reference: a namespace, a qualified symbol `database`
+  declares no function, test or task for (a library Var), or a keyword naming an attribute? Those are read at their
+  summary level from the start."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.ref/resolved :seon.ref/problem]] :boolean]}
+  [database {reference :seon.ref/name :as entry}]
+  (boolean
+   (and (not (:seon.ref/problem-kind entry))
+        (cond (simple-symbol? reference) true
+              (qualified-symbol? reference) (not-any? #(seq (db/datoms database :avet % reference))
+                                                      [:seon.fn/sym :seon.test/sym :seon.task/sym])
+              (qualified-keyword? reference) (seq (db/datoms database :avet :db/ident reference))
+              :else false))))
+
+(defn- must-reads
+  "The held task's references other than its proofs, read on the attempt's starting value `start`
+  (`attempt-start`), each library or namespace-level one at its summary (`seon.ref/brief`, `summary-level?`), a library Var with its pinned
+  revision."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
+                  [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
+  [start held proof-names]
+  (into [] (comp (remove #(contains? proof-names (:seon.ref/name %)))
+                 (map #(if (summary-level? start %)
+                         (merge (ref/brief start (:seon.ref/name %)) (select-keys % [:seon.ref/pin]) {:seon.ref/level :summary})
+                         %)))
+        (task-references start held #{})))
+
 (defn task-sections
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
   handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
   proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
   the task's earlier attempts, one entry each (`earlier-attempts`); every declaration the branch changed since its
   merge base, by family, each name with the form that reads it (`by-family`), so a rerun sees its earlier work and
-  its scratch; and every other reference it makes, resolved. Empty when it holds none.
+  its scratch; and every other reference it makes, resolved on the attempt's starting value (`must-reads`). Empty when
+  it holds none.
 
   ## Costs
 
@@ -657,10 +696,11 @@
             changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
                       (by-family database (:seon.program/identities verdict)))
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
-            reads (when-not (:seon.error/at proven) (task-references database held proof-names))
+            reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
-            others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
-        (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps earlier changes] reads))
+            start (attempt-start database agent-id)
+            others (when-not (or (nil? start) (:seon.error/at start)) (must-reads start held proof-names))]
+        (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps earlier changes start] reads others))
             (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/plan :seon.task/instructions])}
               steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
@@ -747,12 +787,14 @@
   [:seon.context/task :seon.context/chain :seon.context/attempts :seon.context/send-backs :seon.context/must-reads])
 
 (defn block-views
-  "The block's AI view (`current-state-ai`) in two parts: the attempt's sections (`attempt-sections`), the same at
-  every turn of the attempt, and the sections each turn changes (proofs, step, changes, cost, unread, turns)."
-  {:malli/schema [:=> [:cat :seon.context/current-state] [:tuple :seon.context/attempt-view :seon.context/current-state-view]]}
-  [unit]
-  (let [view (current-state-ai unit)]
-    [(select-keys view attempt-sections) (apply dissoc view attempt-sections)]))
+  "The block's AI view (`current-state-ai`) in two parts: the attempt's sections (`attempt-sections`), rendered on the
+  attempt's starting value `start` (`attempt-start`) so they are the same at every turn of the attempt, and the
+  sections each turn changes (proofs, step, changes, cost, unread, turns), rendered on the unit's own database."
+  {:malli/schema [:=> [:cat :seon.context/current-state [:maybe :seon.db/database-value]]
+                  [:tuple :seon.context/attempt-view :seon.context/current-state-view]]}
+  [unit start]
+  [(select-keys (current-state-ai (cond-> unit start (assoc :seon.db/db start))) attempt-sections)
+   (current-state-ai (apply dissoc unit attempt-sections))])
 
 ;;; ---------------------------------------------------------------------------
 ;;; What a model pass sends
@@ -827,14 +869,15 @@
         profile (seon.render/request-profile request)
         shown #(sci.eval/shown-result %1 %2 nil)
         system (shown (bootstrap/help-value database) request)
-        [head tail] (when-not (:seon.error/at block) (block-views (merge block request)))
+        start (attempt-start database agent-id)
+        [head tail] (when-not (some :seon.error/at [block start]) (block-views (merge block request) start))
         ;; help carries its own AI render: a request that cannot run it (no context or no
         ;; caps) prints the help map whole, with no renderer; that is a refusal, never the
         ;; system message
         unrendered (not (:seon.eval/renderer system))]
     ;; a request with no context or profile cannot render: that refusal is the answer, never
     ;; the printed help map as the system message
-    (or (some #(when (:seon.error/at %) %) [history block profile])
+    (or (some #(when (:seon.error/at %) %) [history block start profile])
         (when unrendered
           (seon.error.refusal/diagnostic
            (java.util.Date.) :seon.context/model-context `model-context

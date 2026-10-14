@@ -306,7 +306,8 @@
          (is (= "malli" (:seon.ref/project pin)))
          (is (= 40 (count (:seon.ref/revision pin))))
          (is (some #{(:seon.ref/revision pin)} path))
-         (is (seq (:arglists entry))))))))
+         (is (= :summary (:seon.ref/level entry)) "a library Var is read at its summary from the start")
+         (is (= ['(doc malli.core/validator)] (:seon.render/operations entry)) "with the form that reads its doc"))))))
 
 (deftest each-must-read-shows-its-declared-render
   (test-support/with-running-agent
@@ -331,7 +332,7 @@
              "no must-read or proof shows the render keys it is rendered by")
          (is (= :doc (:seon.ref/level function)) "a function cited with one backtick shows its doc")
          (is (seq (:arglists function)) "its doc carries its arglists")
-         (is (seq (:arglists library)) "a library Var shows its arglists"))))))
+         (is (= :summary (:seon.ref/level library)) "a library Var is read at its summary"))))))
 
 (deftest a-referenced-function-shows-its-doc-view
   ;; TASK-CHAIN §3a: bare is the summary, one backtick `(doc x)`, three or more `(source x)`
@@ -430,7 +431,8 @@
            world {:seon.db/db database :seon.agent/id agent-id
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}
-           [head view] (context/block-views (merge (context/current-state database agent-id) world))]
+           [head view] (context/block-views (merge (context/current-state database agent-id) world)
+                                            (context/attempt-start database agent-id))]
        (is (= #{:seon.context/task :seon.context/must-reads} (set (keys head)))
            "the task and its must-reads are the attempt's sections, laid before the history")
        (is (contains? view :seon.context/turns) "the turn's sections follow the history")
@@ -438,6 +440,29 @@
        (is (every? string? ((juxt :seon.ai/system :seon.ai/prompt)
                             (context/model-context database (dissoc world :seon.db/db :seon.agent/id) agent-id)))
            "the model pass lays both parts out")))))
+
+(deftest the-system-text-holds-for-the-attempt-when-a-must-read-changes
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [handle (test-support/running-cluster running)
+           _ (evaluate running agent-id "(ns tq.stable) (defn cited \"One.\" {:malli/schema [:=> [:cat :int] :int]} [n] n)")
+           _ (test-support/declare-proof! connection 'tq.stable-test 'held 'tq.stable/held)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.stable
+                                            :seon.task/name "held"
+                                            :seon.task/plan "Use `tq.stable/cited` and `clojure.core/subs`."}))
+           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
+                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           world #(hash-map :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle))
+           system #(:seon.ai/system (context/model-context (db/db connection) (world) agent-id))
+           before (system)
+           _ (evaluate running agent-id "(in-ns 'tq.stable) (defn cited \"Two, a changed docstring.\" {:malli/schema [:=> [:cat :int] :int]} [n] (inc n))")
+           reads (into {} (map (juxt :seon.ref/name identity))
+                       (:seon.context/must-reads (context/current-state (db/db connection) agent-id)))]
+       (is (string? before))
+       (is (= before (system)) "the attempt's sections read the attempt's starting value, so the cached prefix holds")
+       (is (= :summary (get-in reads ['clojure.core/subs :seon.ref/level])) "a library Var is read at its summary")
+       (is (not= :summary (get-in reads ['tq.stable/cited :seon.ref/level])) "a program function keeps its citation's level")))))
 
 (deftest an-older-history-unit-over-the-dial-is-shown-by-reference
   (test-support/with-running-agent
