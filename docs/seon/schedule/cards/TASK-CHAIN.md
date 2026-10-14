@@ -132,18 +132,31 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
 3. **Work** — the agent reads its block (`seon.context/current-state`: its task's plan, instructions and proofs with
    their status, the tasks before and after it) and works at the REPL. An agent reads its own task's execution on its
    own branch (`seon.turn/attempt-running?` changes from main's head to the branch: root is the only writer of a chain
-   task's execution, on the chain branch). After every eval request that evaluated a form, the runner runs: every test
-   defined or changed on the branch since its fork (`seon.test/changes`, the existing fork-relative owner, by behavior
-   change), the tests reaching changed functions, the next task's proofs when the task's own proofs read them, and
-   **then** the task's own proofs, so a proof that reads other tests' results reads current ones. Unchanged results are
+   task's execution, on the chain branch). After every eval
+   request that evaluated a form, the runner runs: every test defined or changed on the branch since its fork
+   (`seon.test/changes`, the existing fork-relative owner, by behavior change; a deftest defined in the request already
+   runs in it today, through `seon.turn/test-step`), the tests reaching changed functions, the next task's proofs, and
+   **then** the task's own proofs, so a proof that reads other tests' results reads current ones. A test world that
+   cannot be built is the request's error, never a member's recorded result (today a world refusal is recorded as a
+   red result that `seon.test.runner/designed-red?` accepts: fixed at that producer in S2a). Unchanged results are
    reused by reach digest. All green at the start ends the task with no model call.
 4. **Done** — the done rule, for every task: new `seon.cluster.source/done-refusals`
    `[:=> [:cat :seon.db/database-value :seon.db/database-value :seon.source/judged] :seon.source/refusals]`,
    arguments `[branch main judged]`, a function of recorded results that runs no test. It refuses: a proof with no
-   current result; a proof not green; a test the branch holds red whose result at the same reach main holds green; and
-   a function new or changed on the branch with non-empty `seon.contracts/gaps`. A test main holds no result for is
-   unknown, not a regression: the final merge runs its baselines (`prepare-merge!`). New red tests outside the task's
-   proofs (Prove's) are visible and never stop the task. The agent's turn proposes `:done` (`seon.turn/task-end`);
+   current result; a proof not green; a test the branch holds red that main holds green at main's own current reach
+   (`seon.context/current-results` over main's value: a change that breaks a test also changes its reach, so equal
+   reach digests would never fire, measured); a
+   test defined or changed on the branch that is red and is not one of the next task's proofs (`:stray-red`: a red the
+   chain did not plan never travels, and on the last task, which has no next, every red refuses, as the final merge
+   does); and a function new or changed on the branch with a contract gap
+   (`seon.cluster.source/contract-gaps`, the merge's own rule; `seon.contracts/gaps` also reports inherited findings).
+   The judged members are the task's proofs, the next task's proofs, every test defined or changed on the branch and
+   the tests reaching changed functions (`seon.context/step-observation` today omits branch tests that reach no
+   changed function). A test main holds no result for is unknown, not a regression: the final merge runs its baselines
+   (`prepare-merge!`). Main on default holds no test runs today, so mid-chain the regression check fires only once
+   main records results; the final merge is the check until then. Measured: about 2 ms per judgment, plus about 7 ms
+   to build the judged input. Prove's designed reds are the next task's
+   proofs, so they never stop Prove. The agent's turn proposes `:done` (`seon.turn/task-end`);
    root re-judges `done-refusals` over the branch value at the attempt's end commit (`:seon.task.attempt/commit`).
    `seon.cluster.source/results-verdict` stays the judge of the final merge only, its product clause deleted.
 5. **Advance** — root, in the lifecycle phase of `seon.cluster.agent/run-pass!`, one transaction on the chain branch
@@ -157,8 +170,9 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
    (`seon.merge/merge!` → `seon.cluster.source/prepare-merge!` → `seon.cluster.source/accept-merge!`) takes the chain
    branch and the terminal attempt as its source; `seon.merge/assignment-row`, `seon.merge/assigned-task` and
    `seon.cluster.source/tested-task-basis` read the held source branch, main only as the destination. The merge
-   judges the whole fork-to-head delta with `results-verdict`: the last task's proofs, every test the branch defines or
-   changes and every reaching test green, contracts complete, replaced functions covered. In its one transaction it
+   judges the whole fork-to-head delta with `results-verdict`, its members being the last task's proofs, every test
+   the branch defines or changes (`seon.test/changes`; measured: with members = proofs alone, a red test left on the
+   branch merged) and every reaching test, all green, contracts complete, replaced functions covered. In its one transaction it
    admits all the chain's tasks and attempts, closes every intermediate attempt (`:done`) and marks the terminal one
    `:merged`, so no earlier attempt appears on main as an open merge request. Then, in order: `seon.merge/publish!`
    (a `:seon.merge/waiting` or a publication refusal is not success: the chain fact stays and root sees it); on
@@ -269,8 +283,11 @@ Each template's proof is one contracted predicate in `src/seon/step.clj`,
 `[:=> [:cat :seon.db/database-value :seon.task/task] :seon.source/refusals]` (empty means satisfied; each refusal names
 the failed check), plus one deftest in `test/seon/step_test.clj` that (a) runs the predicate over a table of
 hand-built task values through the canonical writers on a test branch, red and green rows, so it is meaningful and
-green on main and on merge branches, and (b) when a task is bound (`(seon.test/task)`, the runner's one task input),
-asserts the predicate is empty for that task on the agent's branch. A task-reading test invoked without a task never
+green on main and on merge branches, and (b) when a task is bound, asserts the predicate is empty for that task on the agent's branch. The runner's one
+task input, read by `(seon.test/task)`, is a value: `{:seon.test/task <the task entity> :seon.test/branch <the
+requesting branch's database at the request's commit> :seon.test/main <main's database>}`. A member body runs in its
+own test world, where `(seon.db/db)` has no fork point, no recorded results and no main (measured), so predicates read
+these values, never the world. A task-reading test invoked without a task never
 falls back to a tag. Every failed check is reported, not only the first. Assertion messages are fixed prose.
 
 **Shared helpers** (in `seon.step`, each contracted):
@@ -283,6 +300,9 @@ falls back to a tag. Every failed check is reported, not only the first. Asserti
   `:seon.test/sym`, `:seon.schema/key`) whose `:seon.program/definition-digest` on the branch differs from, or is
   absent on, the fork database.
 - `results [database tests] → {test result}`: `seon.context/current-results` under the bound task input.
+- `deftest? [database sym] → boolean`: `sym` names a `:seon.test/sym` entity on the branch.
+- `cited-fns [database plan] → #{sym}`: the first-party functions (`:seon.fn/sym` on the branch) the plan's
+  `approach` section cites.
 
 ### Design: `seon.step/design`
 
@@ -339,7 +359,9 @@ general law holds. Prefer a new row in an existing table test. Run them: they mu
 missing, by a failing assertion or an error the code under test raises, never because the test does not load. Then
 write their symbols into the next task's proofs:
 `(my.task/update! next-task :seon.task/proofs into '[the.ns-test/a-case …])`, the next task being the one your block
-shows after you. Unmap scratch helpers (`my.program/ns-unmap!`): everything on the branch merges at the end.
+shows after you. Unmap scratch helpers and any deftest you do not mean as a proof (`my.program/ns-unmap!`): a red test
+outside the next task's proofs keeps you from done, and everything on the branch merges at the end. Define schemas in
+one request and the functions that use them in the next.
 
 ## Done
 
@@ -350,10 +372,16 @@ reached by at least one of them.
 `seon.step/prove-handoff` (proofs `#{seon.step-test/prove-handoff}`) refuses:
 
 1. `:no-proofs`: the next task (`:seon.task/next`, pulled on the branch) has no proofs.
-2. `:not-a-deftest`: a proof names no deftest on the branch (`:seon.test/sym`).
-3. `:not-designed-red`: a proof has no current result, or its result does not satisfy
-   `seon.test.runner/designed-red?` (a load failure has no result; a green proof proves nothing).
-4. `:unreached`: a function in `(changed database :seon.fn/sym)` is reached by none of them (`seon.fn/tests-reaching`).
+2. `:not-a-deftest`: a proof names no deftest on the branch. A deftest that fails to load has no entity, so it is
+   reported here; the reply's diagnostics say why it did not load.
+3. `:not-designed-red`: a proof has no current result, or its red does not come from its own assertion or the code
+   under test (`seon.test.runner/designed-red?`, a world refusal excluded); a green proof proves nothing.
+4. `:unreached`: a function in `(changed database :seon.fn/sym)`, or in `(cited-fns database plan)`, is reached by none
+   of the proofs (`seon.fn/tests-reaching`). The cited functions matter for a bug fix, which changes no function
+   during Prove: without them a red proof that never touches the producer would pass (measured).
+
+A red test Prove wrote but did not put in the next task's proofs is refused by the done rule (`:stray-red`): unmap it
+or add it. Measured warm: 11–19 ms per run (15–26 MB); the done rule 34–51 ms (about 55 MB).
 
 ### Implement: `seon.step/implement`
 
@@ -438,7 +466,7 @@ for real test execution.
 | S1b | Schema: `:seon.task/next` (one ref), `{:seon.task/owned true}` on `instructions` and `proofs`, outcome `:done` on the attempt, Malli `:default :held` on execution decoded in `seon.task/task-delta` and `held-tx`, `symbol-name?` in the name schema, the chain fact (`:seon.chain/*`, non-program, `:seon.wake/starts`) and its claim in `seon.cluster.registry/cluster-claims` | `seon.task-test/task-members-have-defaults-and-kinds`: `(m/decode :seon.task/task {} (mt/default-value-transformer {::mt/add-optional-keys true}))` gives `{:seon.task/execution :held}`; the owned members are exactly `#{instructions proofs}` by schema property; a bad name is refused by the writer; a branch named by a chain fact survives `retire-unclaimed!` | Sonnet | — |
 | S1c | The one task writer and `chain!` (§2.1); delete old `chain!`/`chain-copy`, `children`, `needs`, `effective`, `goal-owner` with their callers and tests | `seon.task-test/a-chain-is-linked-tasks-written-in-one-transaction-on-its-branch`: the branch exists; on `(seon.db/branch-database main b)` the first task's `next` path names the three derived symbols in order, all written in one transaction; each has its template's instructions and proofs, references derived; only the first has the plan; executions `[:running :held :held]`; main holds no chain task or attempt and holds the chain fact; a second identical call answers the same value and transacts nothing; the durable create measured end to end (`seon.profile/measure`) | Opus | — |
 | S1d | Agent verbs: `my.task/update!` (replacing `refine!`), `my.edit/text`, help as `resources/seon/help.md` through `seon.ref` | `my.task-test/update-applies-a-function-to-a-member-with-its-basis`: `into` on proofs, `my.edit/text` on the plan, a stale basis refused with the current value, an invalid value refused, an unresolved reference answered as a problem with the write kept; and `seon.bootstrap-test/every-reference-in-help-resolves` | Sonnet | — |
-| S2a | One task input: the explicit task value from selection through execution, recorded input identity and `seon.context/current-results` (Run 25's root cause, reproduced live: `seon.test.runner/reach-digests` with and without the task disagree) | `seon.task-test/a-tasks-proof-is-recorded-and-read-under-its-task`: two tasks sharing one template proof with different plans each record and read their own result at their own key; an unchanged second request reuses; a plan or next-proof change invalidates; a task-reading test with no task reports missing input, no tag fallback | Opus | — |
+| S2a | One task input: the explicit task value (task entity, requesting branch database, main database) from selection through execution, recorded input identity and `seon.context/current-results` (Run 25's root cause, reproduced live: `seon.test.runner/reach-digests` with and without the task disagree) | `seon.task-test/a-tasks-proof-is-recorded-and-read-under-its-task`: two tasks sharing one template proof with different plans each record and read their own result at their own key; an unchanged second request reuses; a plan or next-proof change invalidates; a task-reading test with no task reports missing input, no tag fallback; a world that cannot be built is the request's error, not a designed red | Opus | — |
 | S2b | The done rule (`done-refusals`) and whole-branch selection (`seon.test/changes` after every request; the task's own proofs run last) | `seon.cluster.source-test/done-refusals-judges-every-task-alike`, a table: proof red → refused; proof green with a new red test outside the proofs → done; a test main holds green now red → refused; a new function with a contract gap → refused; main holding no result → not a regression | Opus | — |
 | S2c | Proofs are the field: the tag sweep script and its commit; delete tags and every tag reader (§6), `obligations`, `single-tags`, the turn wrappers | the sweep's acceptance table (§6); every retained task's proofs equal its old tagged set | Sonnet | — |
 | S3a | Root reads chains: chain facts, `branch-database` reads cached by head, a chain's own `next` path only, attempts on the chain branch, a new agent per task, `attempt-running?` on the branch, the advance (§2.5) | `seon.cluster.db-flow-test/a-two-task-chain-reaches-its-second-model-call`: after `chain!` alone, task one ends done by the scripted model, task two's first model call happens with zero hand acts, three distinct agent ids would appear across three tasks, no chain task or attempt on main, an unrelated `:running` task on main is not launched on the chain | Opus | — |
@@ -456,7 +484,7 @@ Retired acceptance tests (they test the copies design): A1, A3, A4, A6's relaunc
 2026-10-13 table; I0 and A5/A5b stay green as they are. I1/I2 wait for the user-conversation task.
 
 **Status (2026-10-14):** spec being fleshed out with the owner; Design's predicate proven at the REPL
-(`design-stage-table.md`); Prove's table running. Nothing implemented.
+(`design-stage-table.md`); Prove's predicate proven at the REPL (`prove-stage-table.md`); the done rule proven at the REPL on all eight rows (`done-rule-table.md`). Nothing implemented.
 
 ## 8. Open questions
 
