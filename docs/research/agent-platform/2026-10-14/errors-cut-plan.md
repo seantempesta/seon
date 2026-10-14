@@ -256,6 +256,12 @@ the slice is proven by publish and reload on a branch of the live store, then jo
     `seon.cluster.boot/stand-cluster-runtime!`, `seon.cluster/development-source-refresh!`,
     `seon.turn/refusal-terminal-data`, `seon.turn/settle-batch-refusal!`, `seon.turn/record-attempt!`) stop passing
     `at`/`now`.
+- **World by reference (owner, 2026-10-14).** The occurrence records where it happened as references, never a copy:
+    the evaluation it happened in (which already carries agent, branch, namespace and basis t) and the commit id. From
+    them the failure's world is reproducible: Datahike's value exactly (`seon.db/commit-database`), and the agent's
+    SCI program context exactly (the base context is a pure function of the branch's program content at that commit,
+    86430115b); only the agent's private live state (atoms, host objects, result handles) is not, by design. This
+    replaces `:seon.error/world` on recorded facts as well as on values.
 - **Red proof.** `seon.error-test/an-occurrences-time-is-its-transactions`. Record one failure twice, then assert
   that `latest-fact`'s time `=` the `:db/txInstant` of the second recording transaction, and that no
   `:seon.error/at` datom exists on the entity.
