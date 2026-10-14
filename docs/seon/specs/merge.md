@@ -63,6 +63,20 @@ path into git, not a merge of the cluster.
   write-back, history);
 - the review's test decisions (§4 step 3: kept, folded, dropped).
 
+**A terminated result carries, red included; unknown does not** (owner 2026-10-14). A test's result is reused
+wherever the same test is asked of the same content: its identity is `[test reach digest, external-input digest,
+evaluator]`, the key `seon.test/select` reuses by on one branch. The recorded runs are the durable source: a request on
+any branch whose member has that identity reads the runs of main and of every other live branch, each branch head
+read directly once (`seon.test/carried-results`, one batched query per branch, no copy to main), and records the
+member on its own branch with `:seon.test.member/reused-run` naming the run that executed it, so that branch holds its
+own evidence (`seon.test/verified?`, `seon.cluster.branch-evidence/branch-evidence`) and later requests reuse it there.
+`seon.cache` holds each recorded outcome under that identity (`seon.test.runner/retain-results!`) as a pure speed-up.
+An outcome is retained and reused only when the body terminated with at least one assertion: a timeout, an interrupt,
+a recording failure, a boundary error or a member with no assertions is unknown and reruns. Reuse never converts an
+outcome: a reused red is red and blocks as an executed red does; its failure reports are read from the run that
+executed it. When one identity holds two outcomes the newest answers and a problem task is filed on the test naming
+the identity. An explicit rerun executes. Full suites run only when asked for.
+
 ## 2. The diff value
 
 One value, from `seon.cluster.source/compare-branch` and `seon.program/three-way`: every

@@ -135,6 +135,13 @@
   [konserve key]
   (k/get konserve key nil {:sync? true}))
 
+(defn held-branches
+  "The branches `database`'s store holds now, read from its `:branches` record: the store's one fact of which branches
+  exist (`branches` reads the same record through a connection)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.cluster.registry/branches]}
+  [database]
+  (set (head-record (:store database) :branches)))
+
 (defn branch-commit-id
   "The commit ID currently named by a branch. A branch the store does not
   hold answers `:seon.cluster.registry/branch-missing-error`, naming the store
@@ -372,7 +379,7 @@
                   [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.source/commit-id]]
                   [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches :seon.store/branch]
                    [:maybe :seon.source/commit-id]]]}
-  ([database branch] (base-commit-id database (set (head-record (:store database) :branches)) branch))
+  ([database branch] (base-commit-id database (held-branches database) branch))
   ([database held branch]
    (let [base (base-branch branch)]
      (when (contains? held base)

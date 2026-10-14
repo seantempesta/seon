@@ -2310,6 +2310,40 @@
                                  test-symbol)))
                    executed)}))
 
+(defn- retain-results!
+  "Retain each terminated outcome of run `run-id` on `database`, red included, in `seon.cache` under its reuse
+  identity `[sym reach-digest input-digest evaluator]`, the key `seon.test/select` reuses by, naming the run: any
+  branch asking that identity answers from it (`seon.test/carried-results`). A pure speed-up: the recorded runs
+  answer a miss. Called where a member's outcome or its exit commits, whichever lands last. Only an outcome the
+  body reached is retained: at least one assertion, no boundary error, terminated; a member that answered from
+  another run is never retained itself. A newer outcome at a held identity replaces it: the newest answers."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id] :nil]}
+  [database run-id]
+  (doseq [[test-symbol digest pass fail error inputs evaluator at]
+          (execution-read
+           (db/q '[:find ?symbol ?digest ?pass ?fail ?error ?inputs ?evaluator ?at :in $ ?id
+                   :where [?run :seon.test.run/id ?id] [?run :seon.test.run/selection-tx]
+                          [?run :seon.test.run/input-digest ?inputs] [?run :seon.test.run/evaluator ?evaluator]
+                          [?run :seon.test.run/at ?at]
+                          [?run :seon.test.run/members ?member]
+                          [?member :seon.test.member/symbol ?symbol]
+                          [?member :seon.test.member/reach-digest ?digest]
+                          [?member :seon.test.member/completed-tx] [?member :seon.test.member/terminated-tx]
+                          [?member :seon.test.member/pass-count ?pass]
+                          [?member :seon.test.member/fail-count ?fail] [?member :seon.test.member/error-count ?error]
+                          [(+ ?pass ?fail ?error) ?assertions] [(pos? ?assertions)]
+                          (not [?member :seon.test.member/error])
+                          (not [?member :seon.test.member/reused-run])]
+                 database run-id))
+          :let [reuse-key [test-symbol digest inputs evaluator]
+                outcome {:seon.test.run/id run-id :seon.test.run/at at :seon.test/pass-count pass
+                         :seon.test/fail-count fail :seon.test/error-count error}
+                held (cache/present ::result reuse-key)]]
+    (when (and held (not= run-id (:seon.test.run/id held)) (pos? (compare at (:seon.test.run/at held))))
+      (cache/evict! ::result reuse-key))
+    (cache/lookup ::result reuse-key (constantly 256) (constantly outcome)))
+  nil)
+
 (defn commit-results!
   "Commit captured test results and return those exact committed facts."
   {:malli/schema
@@ -2361,7 +2395,9 @@
                                (get by-symbol (symbol test-symbol))
                                (dissoc (db/pull after result-selector [:seon.test/sym test-symbol]) :db/id)))
                            results)]
-        (or (first (filter seon.error.refusal/error? recorded)) recorded)))))
+        (or (first (filter seon.error.refusal/error? recorded))
+            (do (when admitted? (retain-results! after (get-in completion [:seon.test.run/provenance :seon.test.run/id])))
+                recorded))))))
 
 (defn exit-tx
   "Record at the writer that `test-symbol`'s body in `run-id` has exited.
@@ -2383,7 +2419,10 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/id :seon.test/sym]
                   [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
   [connection run-id test-symbol]
-  (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]]))
+  (let [report (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]])]
+    (when-not (seon.error.refusal/error? report)
+      (retain-results! (:db-after report) run-id))
+    report))
 
 (defn record-interrupted!
   "Stop `completion`'s run with `:request-threw` and commit the results its
