@@ -38,6 +38,12 @@ lane-input-roots; then root commits the owner's experimental `src-clm/`). Retent
 the producers; deleted branches are still reclaimed; the window code stays). Documentation cleanup against
 TASK-CHAIN (Haiku inventories → Sonnet edits).
 
+**Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
+context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
+lanes, restarts and resumes them (owner 2026-10-14), so a restart never waits for every lane; a dependency or fork bump
+still commits only just before its restart. Design rounds in flight (reference levels, overlay rebuild) end as notes and
+a hybrid; reference levels implements as S3d-1, the overlay rebuild after S3a unless live runs show its cost blocking.
+
 **Next restart batch** (root opens it when the in-flight code lanes have committed): (1) S1a phase 2, with reset; db<->flow's decision is renamed first (`seon.cluster.agent/launch-actions`, `:seon.flow.actions/*`) so "plan" names
 only the task field; (2) the GC fork bump (Konserve b4b896f, Datahike 6d49110d; `gc-one-enumeration.patch`; retire
 `seon.db/node-not-found-carries-a-store-id-not-the-store`); (3) the `io.github.nextjournal/markdown` removal
