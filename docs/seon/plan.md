@@ -51,6 +51,12 @@ their readers and the unowned-namespace problem family in one slice with every c
 (`../research/agent-platform/2026-10-14/namespace-agents-inventory.md`, b80a0fc67); `:seon.agent/namespace` (the
 REPL's current namespace) stays. S3d-1 (doc views) runs beside S1b after the first batch (e962f5a11).
 
+**Before the red sweep: the bulk tier must finish.** At 46992f75b it hit the check's 600 s bound with 185 of 2,993
+members run (`../research/agent-platform/2026-10-14/red-triage.md`, 5036d2264). Opus (test runner) or Astra
+(performance): measure where the bulk tier's time goes and make it finish, before reds are classified. Known so far: 14
+deterministic reds (10 untracked, listed there), 3 load flakes in `seon.blob-*`; `bin/seon check` refuses a whole run
+when one named namespace has no eligible tests; `seon.repl-parity-test`'s macro-generated deftests may be untested.
+
 **Then, before S1b: the red sweep.** The bulk tier once on the restarted default; classify every red by the commit
 that turned it red (stored runs, `bin/seon check --at`); fix broken and surviving reds, skip what TASK-CHAIN §6
 deletes, file the rest. Known untracked reds: ten `seon.effect-test` vars, the `seon.edit-test` odd-map pair,
