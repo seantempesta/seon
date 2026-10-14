@@ -20,7 +20,6 @@ Bump the gitlink: `reference-code/clj-kondo` from `57252e07` to `eb245d82` (the 
 
 ## Tests root names
 
-- the red proof: `my.program/write-branch-panics-with-a-null-pointer-on-a-branch-that-changed-an-existing-file` (writeback-fix-hook-red-proof.patch, red run f936d07e1e61)
-- `seon.fn` tests reaching `seon.fn/lint-entities` (the hook finding now carries no foreign-context load)
-- `seon.cluster.source` write-back tests
-- `seon.fn.analyzer` tests (kondo `run!` with hooks)
+- the red proof: deftest `an-agent-writes-back-a-file-whose-analysis-runs-a-hook` in `test/my/program_test.clj` (task `my.program/write-branch-panics-with-a-null-pointer-on-a-branch-that-changed-an-existing-file`; patch writeback-fix-hook-red-proof.patch, red run f936d07e1e61)
+- `test/seon/fn_test.clj` and `test/seon/fn/` (tests reaching `seon.fn/lint-entities` and the analyzer's `run!` with hooks)
+- `test/seon/cluster/source_test.clj`, `source_database_test.clj`, `source_nochange_test.clj` (write-back)
