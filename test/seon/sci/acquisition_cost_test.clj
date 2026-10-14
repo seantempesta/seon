@@ -207,3 +207,24 @@
              "the derivation and test step cost less than the whole-plan derivation's")
          (is (< (get-in cost [:seon.cost/step :seon.cost/alloc-mb]) 145.0)
              "the request allocates less than the whole-plan derivation's"))))))
+
+(deftest an-unrelated-defn-leaves-a-value-rows-refusal-count-unchanged
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [request (fn [code] (json/write-str {"name" "eval_clj"
+                                                "arguments" {"code" code "agent" agent-id "cluster" running}}))
+           counted #(or (db/q '[:find (sum ?count) . :with ?occurrence
+                                :where [?occurrence :seon.error.occurrence/message ?message]
+                                [(clojure.string/includes? ?message "probe.once/L2")]
+                                [?occurrence :seon.error.occurrence/count ?count]]
+                              (db/db connection))
+                        0)]
+       (mcp/call (request (str "(ns probe.once) (def d (seon.db/db))"
+                               " (def L2 (seon.ref/brief d 'seon.edit/single-form))")))
+       (mcp/call (request "(+ 1 2)"))
+       (let [before (counted)]
+         (is (pos? before) "the value row's refusal is recorded")
+         (mcp/call (request "(defn other [] 2)"))
+         (mcp/call (request "(+ 1 3)"))
+         (is (= before (counted))
+             "an unrelated definition records no refusal of a row it does not change"))))))

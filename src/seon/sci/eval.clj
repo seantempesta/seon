@@ -2154,7 +2154,7 @@
           :when (not (contains? (:namespaces @(:env ctx)) target))]
     (load-host-namespace {:namespace target :ctx ctx})))
 
-(declare install-selected! record-acquisition-refusals! bind-lazy-members!)
+(declare install-selected! record-acquisition-refusals! bind-lazy-members! cluster-base-key record-refusals-once!)
 
 (defn- source-closure
   "The source namespaces among `namespace-names` (`source-namespace?`) and the
@@ -2414,7 +2414,7 @@
                   (error/commit-tx
                    db
                    (cond->
-                    {:seon.error/source refusal
+                    {:seon.error/source (dissoc refusal ::produced-in)
                      :seon.error/declared-schema
                      (if (:seon.sci.eval/refused-function refusal)
                        :seon.sci.eval/interpretation-error :seon.sci.eval/row-acquisition-error)
@@ -2595,7 +2595,9 @@
                            (into (set (keys namespace-row-by-name))
                                  (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
           ;; a stored cycle is the agent's mistake, delivered as its refusal
-          state (cond-> state cycle (update ::agent-mistakes (fnil into []) (cycle-refusals cycle)))
+          produced (::produced-in state)
+          stamp #(cond-> % produced (assoc ::produced-in produced))
+          state (cond-> state cycle (update ::agent-mistakes (fnil into []) (map stamp) (cycle-refusals cycle)))
           install-row
           (fn [state row]
             (try
@@ -2610,7 +2612,7 @@
                 (if (or (contains? installed :seon.instrument/check)
                         (:seon.sci.eval/refused-function installed))
                   (update state (refusal-member row) (fnil conj [])
-                          (acquisition-refusal row installed))
+                          (stamp (acquisition-refusal row installed)))
                   (cond-> (assoc state
                          :seon.schema/projection
                          (:seon.schema/projection installed)
@@ -2624,7 +2626,7 @@
                 (when (:seon.instrument/registration-observation (error/refusal failure))
                   (throw failure))
                 (update state (refusal-member row) (fnil conj [])
-                        (acquisition-refusal row failure)))))]
+                        (stamp (acquisition-refusal row failure))))))]
       ;; Interpreted callers and tests analyze against every other name their
       ;; file namespace reaches; only this branch's rows become SCI definitions.
       (doseq [namespace-name (sort-by str (distinct (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))]
@@ -2698,7 +2700,7 @@
         ;; Fixtures name functions and run around tests: they install last.
         (doseq [namespace-name order]
           (install-fixtures! ctx db namespace-name))
-        installed)))))
+        (dissoc installed ::produced-in))))))
 
 (defn- namespace-row
   "A pulled namespace row carrying its source, admission and authorship."
@@ -2852,6 +2854,7 @@
          (select-keys all-namespace-row-by-name selected-namespace-names)
          function-rows test-rows interpreted
          {:seon.schema/projection projection
+          ::produced-in (cluster-base-key db)
           :seon.sci.eval/interpreted-count (count interpreted)
           :seon.sci.eval/installed 0
           :seon.sci.eval/load-results
@@ -3273,18 +3276,16 @@
        (install-first-party-namespaces! ctx [] namespace-rows added-rows)
        (install-required-libraries! ctx namespace-rows)
        (unbind-reinstalled! ctx (map first function-rows))
-       (let [acquired (record-acquisition-refusals!
-                       ctx database
-                       (install-selected!
-                        ctx database namespace-row-by-name
-                        function-rows tests (into #{} (map first) function-rows)
-                        (-> (::acquisition snapshot)
-                            (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
-                            (without-reinstalled reinstalled)
-                            (assoc :seon.schema/projection projection
-                                   :seon.sci.eval/interpreted-count
-                                   (count (::interpreted @(::kernel/program-snapshot ctx))))))
-                       (:seon.flow/commit-fault! snapshot))]
+       (let [acquired (install-selected!
+                       ctx database namespace-row-by-name
+                       function-rows tests (into #{} (map first) function-rows)
+                       (-> (::acquisition snapshot)
+                           (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
+                           (without-reinstalled reinstalled)
+                           (assoc :seon.schema/projection projection
+                                  ::produced-in (::produced-in plan)
+                                  :seon.sci.eval/interpreted-count
+                                  (count (::interpreted @(::kernel/program-snapshot ctx))))))]
          (cond-> acquired
            held (assoc ::plan (select-keys plan [::held ::tests ::namespaces]))))))))
 
@@ -3304,8 +3305,12 @@
   (binding [sci.lang/*write-observer* nil
             sci.lang/*expansion-observer* nil]
     (sci.ctx-store/with-ctx ctx
-      (let [acquired (interpret-overlay! ctx database {::overridden (set changed) ::evaluated (set changed)
-                                                       ::added #{} ::namespaces [] ::tests []})]
+      (let [interpreted (interpret-overlay! ctx database
+                                            {::overridden (set changed) ::evaluated (set changed)
+                                             ::added #{} ::namespaces [] ::tests []
+                                             ::produced-in [::interpret-affected (db/basis-t database) (vec (sort changed))]})
+            acquired (record-refusals-once! ctx database interpreted
+                                            (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx)))]
         (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
         acquired))))
 
@@ -3949,7 +3954,8 @@
   ([database loaded projection plan] (derive-program-context database loaded projection plan nil nil))
   ([database loaded projection plan content-key predecessor]
    (if plan
-     (let [base-key (cluster-base-key loaded)
+     (let [plan (cond-> plan content-key (assoc ::produced-in content-key))
+           base-key (cluster-base-key loaded)
            derive-base #(with-content-key (derive-base-ctx loaded) base-key)
            cluster (if base-key
                      (seon.cache/lookup ::program-context base-key context-weight derive-base)
@@ -4014,8 +4020,8 @@
   "A fork of `database`'s program context (`program-context`) with the
   caller's custody, basis and fault recorder.
 
-  Acquisition refusals remain values on the context; the caller records them
-  in its custody and restores no private state. Every caller receives its own
+  Acquisition refusals remain values on the context; the caller holding custody
+  records them (`record-refusals-once!`) and restores no private state. Every caller receives its own
   SCI and kernel atoms."
   {:malli/schema
    [:function
@@ -4032,7 +4038,7 @@
          dials (armed-dials database)
          recorder (:seon.flow/commit-fault! arm-request)
          ctx (copy-base-ctx source database loaded recorder)
-         acquired (record-acquisition-refusals! ctx database (::acquisition source) recorder)]
+         acquired (::acquisition source)]
      (let [input (program-key-input database ctx)]
        (swap! (::kernel/program-snapshot ctx)
               #(cond-> (assoc % ::acquisition acquired ::armed-dials dials) input (assoc ::program-key input))))
@@ -4098,17 +4104,19 @@
   [database]
   {::acquired-basis (acquired-basis database)})
 
-(defn- record-refusals-once!
-  "Record one program's acquisition refusals once per recording target.
+(defn record-refusals-once!
+  "Record the acquisition refusals of `acquired` not yet recorded to this target.
 
-  A refusal is a fact about the program rows, so re-acquiring the same program
-  identity (another context, another commit of the same program) records nothing
-  again. Concurrent acquirers share the one delay; no monitor is held."
+  A refusal is a fact about the production that made it (`::produced-in`, the
+  content key of the derivation that installed its row), so another context,
+  another commit or a derivation carrying it records nothing again. Each is
+  keyed `[produced-in row target]`; concurrent acquirers share the one entry and
+  no monitor is held. The fresh refusals record as one transaction. A refusal
+  with no production key records every time."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map
                        [:or :nil :seon.flow/commit-fault!]] :map]}
   [ctx database acquired commit-fault!]
-  (let [program (program-revisions database (db/carried-projection database))
-        ;; The target's identity, never the Connection object: a released
+  (let [;; The target's identity, never the Connection object: a released
         ;; Connection keeps its metadata and so its whole world reachable.
         ;; `db/connection-identity` is the dependency's connection key, or the
         ;; typed unavailable result for released custody.
@@ -4116,18 +4124,26 @@
         target (if connection (db/connection-identity connection) commit-fault!)
         refusals? (or (seq (::acquisition-refusals acquired)) (seq (::agent-mistakes acquired)))]
     (cond
-      (and refusals? connection (not (:datahike/connection-id target)))
+      (not refusals?) (record-acquisition-refusals! ctx database acquired commit-fault!)
+
+      (and connection (not (:datahike/connection-id target)))
       (assoc acquired ::acquisition-refusals-recorded? false
              ::acquisition-recording-error target)
 
-      (and refusals? program target)
-      ;; Recorded once per program and target; an evicted entry records again,
-      ;; which the error owner counts as a recurrence.
-      (merge acquired
-             (seon.cache/lookup ::refusal-recording [program target] (constantly 512)
-                                #(select-keys (record-acquisition-refusals! ctx database acquired commit-fault!)
-                                              [::acquisition-refusals-recorded?
-                                               ::acquisition-recording-error])))
+      target
+      (let [fresh? (fn [refusal]
+                     (let [claimed (volatile! false)]
+                       (if-let [produced (::produced-in refusal)]
+                         (do (seon.cache/lookup ::refusal-recording [produced (acquisition-refusal-id refusal) target]
+                                                (constantly 512) #(vreset! claimed true))
+                             @claimed)
+                         true)))
+            fresh (-> acquired
+                      (update ::acquisition-refusals #(filterv fresh? %))
+                      (update ::agent-mistakes #(filterv fresh? %)))]
+        (merge (assoc acquired ::acquisition-refusals-recorded? true)
+               (select-keys (record-acquisition-refusals! ctx database fresh commit-fault!)
+                            [::acquisition-refusals-recorded? ::acquisition-recording-error])))
 
       :else (record-acquisition-refusals! ctx database acquired commit-fault!))))
 
@@ -4407,7 +4423,11 @@
       ;; The JVM's loaded program is followed through the source's connection.
       (when-let [loaded-connection (::loaded-connection held)]
         (swap! (::kernel/program-snapshot ctx) assoc ::loaded-connection loaded-connection))
-      (assoc ctx :my.program/base-ctx ctx))))
+      (let [recorded (record-refusals-once! ctx db (::acquisition ctx)
+                                            (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx)))
+            ctx (assoc ctx ::acquisition recorded)]
+        (swap! (::kernel/program-snapshot ctx) assoc ::acquisition recorded)
+        (assoc ctx :my.program/base-ctx ctx)))))
 
 (defn- failure-text
   "The declared string an evaluation names its failure with.

@@ -1475,7 +1475,7 @@
      (is
       (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
      (is
-      (contains? (set (map second (keys (seon.cache/retained :seon.sci.eval/refusal-recording))))
+      (contains? (set (map #(nth % 2) (keys (seon.cache/retained :seon.sci.eval/refusal-recording))))
                  (db/connection-identity connection))
       "the recording target is the dependency's connection identity, writer backend included")
      (is
