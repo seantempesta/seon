@@ -82,7 +82,7 @@ a data-returning split.
 **Models** (owner 2026-10-14, tailored by measured outcome). Haiku gathers and summarizes (digs, inventories, flake
 runs, red triage) so root reads conclusions, not bulk; Sonnet does well-specified work and REPL prototypes (on the
 same prototype brief Sonnet answered 3.5 of 4 questions at the REPL, Haiku 1); Opus takes the hard problems and
-planning; Astra gives the independent second opinion and the hard performance work. Gemini through `bin/agy-agent`
+planning; Astra gives the independent second opinion and the hard performance work. Gemini through `bin/agy-agent` (owner 2026-10-14; `.claude/skills/agy-lanes`): Flash-high finds root causes, audits documents against the code and judges a proposal before it is built; Argon-low runs long performance hunts and independent plans; every quote and count they report is reproduced before acting; neither implements. Gemini through `bin/agy-agent`
 (agy-lanes skill) finds root causes and judges proposals: on four blind tests with known answers Flash-high was
 right every time and fastest (F53's exact clause from its symptom in 7 min), and Argon was right but slower; Argon
 takes long performance hunts and independent plans
