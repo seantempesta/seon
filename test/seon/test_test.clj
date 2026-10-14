@@ -1,11 +1,14 @@
 (ns seon.test-test
   "Run admission uses the canonical writer and preserves selected obligations."
-  (:require [clojure.set :as set]
+  (:require [clojure.data.json]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is]]
             [seon.batch]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.mcp]
+            [seon.task]
             [seon.config :as config]
             [seon.id :as id]
             [seon.program :as program]
@@ -589,3 +592,55 @@
       (is (= [fails] (mapv :seon.test/fail-count (get-in result [:ran :seon.test/results]))))
       (is (= passed? (get-in result [:reused :seon.test/passed?])))
       (is (= 1 (get-in result [:reused :seon.test/reused-count]))))))
+
+(defn- agent-eval
+  "Evaluate `code` as `agent-id` of the running instance `running` through the MCP entrance; the parsed result."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
+  [running agent-id code]
+  (clojure.data.json/read-str
+   (seon.mcp/call (clojure.data.json/write-str
+                   {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}}))))
+
+(defn- unrun-deftest!
+  "Write deftest `sym` with `source` on `connection`'s branch through the canonical writer, outside any eval
+  request, so no test step has run it."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym :string] :nil]}
+  [connection sym source]
+  (let [declaring (symbol (namespace sym))]
+    (when-not (seq (db/datoms (db/db connection) :avet :seon.ns/name declaring))
+      (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) declaring)]))
+    (test-support/transacted! connection [(test-support/program-entity (db/db connection) [:seon.test/sym sym] source)])
+    nil))
+
+(deftest ^{:seon.test/long "Three eval requests through the MCP entrance, each followed by the step's test worlds."
+           :seon.test/long-ms 30000}
+  an-earlier-deftest-on-the-branch-is-still-selected
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.s2b1e) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+     (unrun-deftest! connection 'tq.s2b1e-test/earlier "(clojure.test/deftest earlier (clojure.test/is (= 1 1)))")
+     (agent-eval running agent-id "(+ 1 2)")
+     (agent-eval running agent-id "(in-ns 'tq.s2b1e) (defn g {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+     (let [results (runner/latest-results (db/db connection) ['tq.s2b1e-test/earlier])]
+       (is (= [1] (mapv :seon.test/pass-count results))
+           "the deftest the branch defined is selected and recorded though it reaches no changed function")))))
+
+(deftest ^{:seon.test/long "Two eval requests through the MCP entrance, each followed by the step's test worlds."
+           :seon.test/long-ms 30000}
+  a-plan-only-update-runs-the-tasks-proof
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.s2b1p) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+     (unrun-deftest! connection 'tq.s2b1p-test/proof "(clojure.test/deftest proof (clojure.test/is (= 1 (tq.s2b1p/f 1))))")
+     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                 :seon.task/ns 'tq.s2b1p :seon.task/name "f" :seon.task/plan "Identity."
+                                                 :seon.task/proofs #{'tq.s2b1p-test/proof}}))]
+       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                           :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                           :seon.task/branch (get-in (db/db connection) [:config :branch])}))
+     (let [tests (test-support/mcp-tests
+                  (agent-eval running agent-id "(my.task/update! 'tq.s2b1p/f :seon.task/plan (constantly \"Identity, unchanged.\"))"))
+           results (runner/latest-results (db/db connection) ['tq.s2b1p-test/proof])]
+       (is (not-any? #(get-in tests [% :seon.turn.loop/test-error]) [:seon.turn.loop/branch :seon.turn.loop/reaching :seon.turn.loop/proofs])
+           "the step makes no selection error")
+       (is (= [1] (mapv :seon.test/pass-count results)) "the task's proof ran and is recorded")))))

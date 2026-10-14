@@ -185,8 +185,9 @@
                   [:seon.turn.loop/pending [:vector :seon.test/sym]]
                   [:seon.render/operations :seon.render/operations]],
                  :test-summary
-                 [:map {:description "What the automatic test step executed: its proofs' and its reaching tests' summaries, and the platform proof a host-bound change waits for; the commit they ran on is the queue's and is not shown."}
+                 [:map {:description "What the automatic test step executed, in its order: the summaries of the tests the branch defined or changed since its base, of the tests reaching the request's change and of the task's proofs, and the platform proof a host-bound change waits for; the commit they ran on is the queue's and is not shown."}
                   [:seon.source/commit-id {:optional true} :seon.source/commit-id]
+                  [:seon.turn.loop/branch {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/platform {:optional true} :seon.turn.loop/platform]
