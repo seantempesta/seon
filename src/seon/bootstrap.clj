@@ -4,12 +4,12 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.ai :as ai]
-            [seon.cache :as cache]
             [seon.ref :as ref]
             [seon.schema :as schema]
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.config :as config]
+            [seon.health :as health]
             [seon.error.refusal :as error]))
 
 (defmacro help
@@ -34,13 +34,12 @@
           headings ends)))
 
 (defn- groups
-  "Help's sections with their resolved references, derived once per content digest of `resources/seon/help.md`."
+  "Help's sections with their resolved references, retained by the digest of `resources/seon/help.md` and the revisions of what the resolution read, so a changed cited function re-resolves them."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.help/groups]}
   [database]
   (let [text (slurp (io/resource "seon/help.md"))]
-    (cache/lookup ::groups (schema/sha-256 [(.getBytes text "UTF-8")])
-                  #(* 512 (+ (count %) (transduce (map (comp count :seon.help/references)) + 0 %)))
-                  #(sections database text))))
+    (health/derived database [::groups (schema/sha-256 [(.getBytes text "UTF-8")])]
+                    #(sections % text))))
 
 (defn help-value
   "The REPL instructions: `resources/seon/help.md`'s orienting guide in titled sections, teaching only installed forms; a step's own guidance is its instructions."

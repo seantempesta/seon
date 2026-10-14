@@ -1,6 +1,8 @@
 (ns seon.bootstrap-test
   "Help is a Markdown document: its sections and the references they make."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
+            [seon.cache :as cache]
             [seon.bootstrap :as bootstrap]
             [seon.test-support :as support]))
 
@@ -23,3 +25,23 @@
        (is (seq (:seon.help/references group)) "the section makes references")
        (is (= :heading (:seon.ref/section-missing (bootstrap/help-section @connection "no-such-section")))
            "an unknown anchor answers the nearest headings")))))
+
+(defn- cited-doc
+  "The source help's reference to `function` shows at `database`, and the derivations that answer missed."
+  [database function]
+  (let [misses #(get-in (cache/status) [:seon.cache/kinds :seon.health/derived :seon.cache/misses] 0)
+        before (misses)
+        groups (:seon.help/groups (bootstrap/help-value database))]
+    {:source (->> groups (mapcat :seon.help/references) (filter #(= function (:seon.ref/name %))) first :seon.fn/source)
+     :misses (- (misses) before)}))
+
+(deftest help-references-follow-the-program-they-cite
+  (support/with-database
+   (fn [connection]
+     (cited-doc @connection 'seon.db/q)
+     (is (zero? (:misses (cited-doc @connection 'seon.db/q))) "an unchanged program answers from the cache")
+     (support/transacted!
+      connection
+      (support/replacement-tx @connection [:seon.fn/sym 'seon.db/q] "(defn q \"Changed by the test.\" [] 1)" {}))
+     (is (str/includes? (str (:source (cited-doc @connection 'seon.db/q))) "Changed by the test.")
+         "a cited function's new definition shows in help's reference"))))
