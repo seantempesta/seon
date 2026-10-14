@@ -260,3 +260,15 @@
     (is (pos? (count (filter ::analyzer/var-quote usages))))
     (is (< (profile/calls-of measured 'seon.fn.analyzer/contains-position?) (* 8 (count usages)))
         "a handful of containment checks per usage, not one per quote of the file")))
+
+(deftest the-same-file-text-is-parsed-once
+  (let [file (io/file "test/seon/fn_test.clj")
+        source (str (slurp file) "\n;; " (random-uuid))
+        analyze #(profile/measure
+                  (fn [] (analyzer/analyze {::analyzer/sources {(.getCanonicalPath file) source}})))
+        first-run (analyze)
+        second-run (analyze)]
+    (is (= 1 (profile/calls-of first-run 'seon.fn.analyzer/parse-facts)))
+    (is (zero? (profile/calls-of second-run 'seon.fn.analyzer/parse-facts)))
+    (is (= (::analyzer/var-usages (:seon.profile/value first-run))
+           (::analyzer/var-usages (:seon.profile/value second-run))))))

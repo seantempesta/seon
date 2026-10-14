@@ -11,6 +11,7 @@
             [malli.core :as m]
             [clj-kondo.impl.version :as kondo.version]
             [babashka.process :as process]
+            [seon.cache :as cache]
             [seon.id :as id]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -631,17 +632,17 @@
        (and (or (vector? value) (set? value)) (every? literal-value? value))
        (and (map? value) (every? literal-value? (mapcat identity value))))))
 
-(defn- parsed-facts
+(defn- parse-facts
   "Use the existing kondo node parse for var quotes, `require` call spans and
-  literal def initializers."
-  {:malli/schema [:=> [:cat :string :string]
+  literal def initializers. The spans carry no filename: that is the caller's."
+  {:malli/schema [:=> [:cat :string]
                   [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
                    [:seon.fn.analyzer/require-forms [:vector :map]]
                    [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]
                    [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]
                    [:seon.fn.analyzer/mentioned-symbols [:set :qualified-symbol]]
                    [:seon.fn.analyzer/namespaced-attribute-maps [:map-of [:tuple :int :int] :map]]]]}
-  [filename source]
+  [source]
   (let [root (binding [kondo.reader/*reader-exceptions* (atom [])]
                (kondo.utils/parse-string-all source))
         nodes (tree-seq (comp seq :children) :children root)]
@@ -652,12 +653,12 @@
            (:children root))
      ::var-quotes
      (into [] (comp (filter #(= :var (:tag %)))
-                    (map #(assoc (meta %) :filename filename))) nodes)
+                    (map meta)) nodes)
      ::require-forms
      (into [] (comp (filter #(and (= :list (:tag %))
                                   (#{'require 'clojure.core/require}
                                    (:value (first (:children %))))))
-                    (map #(assoc (meta %) :filename filename))) nodes)
+                    (map meta)) nodes)
      ::literal-defs
      (into #{}
            (keep (fn [node]
@@ -693,6 +694,25 @@
                                 (some #(= :seon/tasks (:k %)) (:children attributes)))
                        [(:row (meta node)) (:col (meta node))]))))
            nodes)}))
+
+(defn- parsed-facts
+  "[[parse-facts]] of `source`, parsed once per content: the facts are a pure
+  function of the text, so every analysis of it shares them (a mirror's path
+  differs per analysis; only the spans' `filename` follows it)."
+  {:malli/schema [:=> [:cat :string :string]
+                  [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
+                   [:seon.fn.analyzer/require-forms [:vector :map]]
+                   [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]
+                   [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]
+                   [:seon.fn.analyzer/mentioned-symbols [:set :qualified-symbol]]
+                   [:seon.fn.analyzer/namespaced-attribute-maps [:map-of [:tuple :int :int] :map]]]]}
+  [filename source]
+  (let [facts (cache/lookup ::parsed-facts source
+                            ;; the key holds the source text; the facts are a few nodes per form
+                            #(+ 512 (* 6 (count source)) (* 160 (count (::mentioned-symbols %))))
+                            #(parse-facts source))
+        stamp (fn [spans] (mapv #(assoc % :filename filename) spans))]
+    (-> facts (update ::var-quotes stamp) (update ::require-forms stamp))))
 
 (defn- with-namespace-clauses
   "Each `ns` definition's clause facts. clj-kondo attributes every require
