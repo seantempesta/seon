@@ -565,7 +565,7 @@
              (#'db-flow-test/chain-world
               connection {"a" [#{} source]}
               (fn [handle]
-                (let [facts (cluster.agent/launch-facts (db/db connection))
+                (let [facts (cluster.agent/launch-facts (db/db connection) (registry/branches (cluster.agent/handle-store handle)))
                       actions (cluster.agent/launch-actions facts (cluster.agent/registry-facts (:seon.agent/routing handle)) 1)
                       _ (cluster.agent/apply-actions! handle (:seon.agent/routing handle)
                                                    (mapv #(cond-> % (= :start-flow (:seon.flow.actions/op %))

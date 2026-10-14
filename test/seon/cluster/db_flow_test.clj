@@ -109,6 +109,11 @@
                                                                                :seon.agent/id (str "attempt/" %))
                                                                        (take 4 handles))})
                                     (plan-registry (set (map #(str "attempt/" %) (take 4 handles))) #{}) 4))))))
+  (testing "a chain task's attempt and flow live on its chain branch and fork nothing"
+    (is (= [[:chain-a :chain-a nil] [:chain-a :chain-a nil]]
+           (mapv (juxt :seon.task/branch :seon.chain/branch :seon.flow.actions/fork-point)
+                 (agent/launch-actions (facts {:seon.flow.actions/startable #{a} :seon.flow.actions/chains {a :chain-a}})
+                                       (plan-registry) 4)))))
   (testing "an invalid running leaf is a problem, never an attempt"
     (is (= [[:problem b] [:attempt a] [:start-flow a]]
            (ops (agent/launch-actions (facts {:seon.flow.actions/startable #{a} :seon.flow.actions/invalid #{b}}) (plan-registry) 4))))))
@@ -384,6 +389,55 @@
                                                          (db/db on-branch) key)
                                        ::g-ended))
               "it ends done, a proposal root's merge decides"))))))))
+
+(deftest root-starts-a-chains-first-task-on-its-branch
+  ;; TASK-CHAIN S3a-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Run a task): after `seon.task/chain!` alone,
+  ;; root's pass writes the first task's attempt and agent on the chain branch and starts its graph there; main
+  ;; holds neither, the held second task waits, and main's unrelated :running task is never the chain's work
+  (binding [*space* "tq.chainrun"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")}}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored"}])
+                branch (:seon.chain/branch chain)
+                [first-task second-task] (:seon.task/handles chain)
+                key (id/id [first-task 1])
+                agent-id (str "attempt/" key)
+                rows (fn [database] (set (db/q '[:find ?h ?b ?id :in $ [?h ...]
+                                                 :where [?a :seon.task/assigned ?h] [?a :seon.task/branch ?b]
+                                                 [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                                               database [first-task second-task (chain-handle "u")])))
+                on-chain #(set (filter (comp #{branch} second) (rows (db/branch-database (db/db connection) branch))))]
+            (try
+              (pass! handle routing)
+              (pass! handle routing)
+              (is (= #{[first-task branch agent-id]} (on-chain))
+                  "the first task's one attempt and its agent are on the chain branch, written once over two passes")
+              (is (= branch (:seon.agent/branch (db/pull (db/branch-database (db/db connection) branch)
+                                                         [:seon.agent/branch] [:seon.agent/id agent-id])))
+                  "its agent is homed on the chain branch")
+              (is (some? (some-> (get-in @routing [:seon.agent/children branch]) deref (get-in [:seon.agent/started agent-id])))
+                  "its graph runs on the chain branch")
+              (let [main (db/db connection)]
+                (is (empty? (filter (comp #{first-task second-task} first) (rows main))) "main holds no chain attempt")
+                (is (nil? (db/pull main [:db/id] [:seon.agent/id agent-id])) "main holds no chain agent")
+                (is (every? #(not= branch (second %)) (rows main))
+                    "main's unrelated :running task is not launched on the chain branch"))
+              (finally
+                (when-let [child (get-in @routing [:seon.agent/children branch])]
+                  (doseq [started (keys (:seon.agent/started @child))]
+                    (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                  (doseq [execution (vals (:seon.agent/contexts @child))
+                          :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                    (agent/release-context! execution)))
+                (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
 (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
@@ -1127,8 +1181,8 @@
                     "q" [#{} nil :prove] "i" [#{"q"} "(clojure.test/is (= 1 2))"]
                     "r" [#{} nil :prove]
                     "s" [#{} nil] "j" [#{"s"} "(clojure.test/is (= 1 2))"]}
-        (fn [_]
-          (let [observed (agent/launch-facts (db/db connection))]
+        (fn [handle]
+          (let [observed (agent/launch-facts (db/db connection) (registry/branches (agent/handle-store handle)))]
             (is (= (set (map chain-handle ["p" "q"])) (:seon.flow.actions/startable observed))
                 "Prove starts with own proofs or a successor declaration")
             (is (= (set (map chain-handle ["r" "s"])) (:seon.flow.actions/invalid observed))
@@ -1417,7 +1471,7 @@
           (let [routing (:seon.agent/routing handle)]
             ;; root's maintenance schedules, as boot seeds them: root holds no assignment for them on HEAD
             (test-support/transacted! connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])
-            (let [planned (agent/launch-actions (agent/launch-facts (db/db connection)) (plan-registry) 4)]
+            (let [planned (agent/launch-actions (agent/launch-facts (db/db connection) (registry/branches (agent/handle-store handle))) (plan-registry) 4)]
               (is (seq (filter #(= :start-flow (:seon.flow.actions/op %)) planned)) "the plan starts the task's attempt")
               (is (every? :seon.task/assignment (filter #(= :start-flow (:seon.flow.actions/op %)) planned))
                   "every start the plan returns names an assignment"))
