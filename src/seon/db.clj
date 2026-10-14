@@ -2821,10 +2821,10 @@
         source-bindings))
 
 (def ^:private query-argument-message
-  (str "seon.db/q's :in does not match its supplied arguments (:seon.error/expected and"
-       " :seon.error/offending). Every source input must be a database value. "
-       "Use (seon.db/q query input ...) with the database elided, "
-       "or (seon.db/q database query input ...) with an explicit database first."))
+  (str "seon.db/q's supplied arguments do not match the query's :in (:seon.error/expected is the :in, default [$];"
+       " :seon.error/offending the arguments after the query). An input beyond the database is declared by the"
+       " query itself, as in [:find ?e :in $ ?x :where ...]. (seon.db/q query input ...) elides $,"
+       " (seon.db/q database query input ...) names it first."))
 
 (defn- query-input-shape-error
   {:malli/schema [:=> [:cat :map [:sequential :seon.schema/value]] :seon.error/base]}
@@ -2930,7 +2930,7 @@
   return an invalid-read error before executing the query. False and empty
   collections remain ordinary inputs."
   {:malli/schema
-   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
+   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]). An input beyond the database is declared in the query, as in [:find ?e :in $ ?x :where ...]. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
   (if-not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
                 (:find query-or-database) (:query query-or-database))

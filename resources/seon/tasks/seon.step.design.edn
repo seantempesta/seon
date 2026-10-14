@@ -4,14 +4,16 @@
 Make the plan say exactly what the problem is, in terms of the data. Read `## Problem` first and leave it as it is: it is
 the request you were given. Then search the system for what already exists: `my.program/search` with the words of the
 problem, `docs/seon/architecture/vocabulary.md` for the words we use, `my.program/source` on each owner you find. Add to
-the plan with `my.task/update!` (`(my.task/update! this-task :seon.task/plan my.edit/text old new)` for one passage):
+the plan with `my.task/update!` (`(my.task/update! (get-in (my.task/current) [:seon.context/task :seon.task/sym]) :seon.task/plan my.edit/text old new)` for one passage):
 
 - `## What exists`: the producer of the wrong or missing value, its callers, the schemas its inputs and outputs use,
   and the tests that cover it, each cited in backticks as a fully qualified symbol or keyword.
 - `## Approach`: the data first (the schema keys involved; a schema to add or change is registered on this branch,
   not described in prose), then each function to change or add with its name, arity and complete contract over named
   schemas, and what it replaces or deletes. A new function is a `defn` in its owner's namespace with its full contract
-  and the body `(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))`.
+  and the body `(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))`. For each example the Problem
+  gives, say how the change makes it true: the function that produces the example's exact result, and what it reads or
+  calls to do so. An example the Approach cannot produce is an Approach to fix before you are done.
 
 Backtick every name you cite: a backticked name that does not resolve shows up as a problem to fix.
 
