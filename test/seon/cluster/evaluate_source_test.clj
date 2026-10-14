@@ -314,6 +314,19 @@
                             (seon.problems/open-faults (db/db connection))))
            "no open fault blames the compiled caller of the agent's closure")))))
 
+(deftest a-compiled-functions-thrown-error-value-is-recorded-as-its-fault
+  ;; The constructed error value names no producer (`seon.error.refusal/diagnostic`
+  ;; attributes nothing); the kernel boundary (`seon.sci.kernel/failure-value`)
+  ;; attributes the throw's first authored frame, so `seon.batch/produced-failures`
+  ;; still blames the compiled function that threw, with no producer stubbed in.
+  (with-started-agent
+   (fn [{:keys [connection code]}]
+     (let [blamed (fn [] (filterv #(= 'seon.fn/task-refused! (get-in % [:seon.error/fact :seon.error/producer]))
+                                  (seon.problems/open-faults (db/db connection))))]
+       (is (empty? (blamed)) "no fault blames the function before the form")
+       (code "(seon.fn/task-refused! 'seon.fn/ingest :unknown-task 'probe.blame/holder 1 {})")
+       (is (= 1 (count (blamed))) "the failure is recorded as the compiled function's open fault")))))
+
 (deftest a-pass-captures-definitions-realized-after-the-form-body
   (with-started-agent
    (fn [{:keys [connection agent-id code]}]
