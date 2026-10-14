@@ -1744,18 +1744,20 @@
 
   The changed inputs are analyzed; every other derivation input whose stored
   key (`derivation-keys`) differs from its key under the code that analyzed
-  them is then added (`::rederive`) and the analysis repeated once over both."
+  them is then added (`::rederive`), retaining the first analysis artifacts."
   {:malli/schema
    [:=> [:cat :seon.boot/root :seon.store/store
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
           [:seon.source/changed-paths [:vector :string]]
           [::loaded-files {:optional true} :seon.source/relative-file-digests]
           [::rederive {:optional true} [:set :string]]
+          [:seon.fn.manifest/artifacts {:optional true} :seon.fn.manifest/artifacts]
+          [:seon.source/published {:optional true} :seon.source/published]
           [:seon.source/branch {:optional true} :seon.source/branch]
           [:seon.fn.analyzer/cache-root {:optional true} :string]]]
     :seon.source/publish-result]}
   [root store roots]
-  (let [published (current-publication store nil)
+  (let [published (or (:seon.source/published roots) (current-publication store nil))
         committed (when published
                     (d/commit-as-db (:seon.store/connection-object store)
                                     (:seon.source/commit-id published)))]
@@ -1770,7 +1772,10 @@
             partial? (and committed (seq requested-paths))
             inventory (if partial? requested
                           (source/discover-paths directory (:seon.source/roots roots)))
-            [observed captured] (source/capture-paths directory inventory)
+            held-digests (into {} (map (juxt :seon.fn.file/relative-path :seon.fn.file/digest))
+                               (:seon.fn.manifest/artifacts roots))
+            [observed captured] (source/capture-paths directory (filterv (complement held-digests) inventory))
+            observed (merge (select-keys held-digests inventory) observed)
             paths (if partial? requested
                       (vec (into (set inventory)
                                  (when committed
@@ -1798,7 +1803,7 @@
                                              inventory))
                              (into changed rederive))
             [additional additional-sources]
-            (source/capture-paths directory (vec (remove (set inventory) analysis-paths)))
+            (source/capture-paths directory (vec (remove (into (set inventory) (keys held-digests)) analysis-paths)))
             captured (merge captured additional-sources)]
     (if (and committed (empty? changed) (empty? rederive))
       published
@@ -1806,7 +1811,7 @@
                      (into {} (db/q '[:find ?path ?digest
                                       :where [?file :seon.fn.file/relative-path ?path]
                                              [?file :seon.fn.file/digest ?digest]] committed)))
-            inputs (merge (if partial? (merge (apply dissoc stored requested) observed) observed) additional)
+            inputs (merge (if partial? (merge (apply dissoc stored requested) observed) observed) additional held-digests)
             published-input-digest (when committed
                                      (db/q '[:find ?digest . :where [_ :seon.source/test-input-digest ?digest]]
                                            committed))
@@ -1826,14 +1831,15 @@
             selected analysis-paths]
         (try
           (let [paths (when database selected)
-                analyzed (seon.fn/analyze-entities
-                          (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root])
+                artifacts (seon.fn/analyzed-files
+                          (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root :seon.fn.manifest/artifacts])
                                          {:seon.fn/root directory
                                           :seon.fn/roots (:seon.fn/roots roots)
                                           :seon.fn/changed-paths selected
                                           :seon.fn.analyzer/sources captured
                                           :seon.source/relative-file-digests inputs})
                             database (assoc :seon.source/previous-database database)))
+                analyzed (into [] (mapcat :seon.fn.file/rows) artifacts)
                 projection (schema/handed-projection)
                 ;; The identity of the code that derived `analyzed`.
                 code (selected-analyzer-digest database selected analyzed inputs loaded)
@@ -1869,7 +1875,9 @@
                                analyzed)]
           (if (seq stale)
             (do (report-source-progress! (str "re-deriving " (count stale) " inputs whose derivation key changed"))
-                (full-source-refresh! root store (assoc roots ::rederive stale)))
+                (full-source-refresh! root store
+                                      (assoc roots ::rederive stale :seon.fn.manifest/artifacts artifacts
+                                                   :seon.source/published published)))
             (let [previous-findings (when database
                                       (seon.fn/file-entities database (vec paths) :seon.lint/file))
                   _ (when (:seon.error/at previous-findings)

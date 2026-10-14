@@ -181,6 +181,7 @@
           :index-request
           [:map {:description "An index request. Its connection, when omitted, is supplied from the calling evaluation's world: index! writes through the connection it holds and an absent one fails today (it is dereferenced), so absence carries no meaning."}
            [:seon.program/rows {:optional true} :seon.program/rows]
+           [:seon.fn.manifest/artifacts {:optional true} :seon.fn.manifest/artifacts]
            [:seon.fn/root {:optional true} :string]
            [:seon.fn.analyzer/sources {:optional true} [:map-of :string :string]]
            [:seon.db/connection

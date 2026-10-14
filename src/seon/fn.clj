@@ -2964,22 +2964,30 @@
                                    (declaration-forms request)
                                    (:seon.schema.projection/forms prior-projection))))))
 
-(defn- analyzed-files
-  "Analyze selected files; the database supplies invalidation and removed declarations."
-  {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :seon.fn.file/artifact]]}
+(defn analyzed-files
+  "Analyze selected files, extending artifacts from this same captured publication.
+  The database, projection and captured bytes must be the same for held artifacts."
+  {:malli/schema [:=> [:cat :seon.fn/index-request] :seon.fn.manifest/artifacts]}
   [request]
   (let [directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
         database (:seon.source/previous-database request)
         captured (::analyzer/sources request)
+        held (:seon.fn.manifest/artifacts request [])
+        held-paths (into #{} (map :seon.fn.file/relative-path) held)
+        held-names (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.ns/name)) held)
+        held-functions (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) held)
         selected (or (:seon.fn/changed-paths request)
                      (when captured (into #{} (map (partial fs/relative-path directory)) (keys captured))))
+        selected (when selected (into (set selected) held-paths))
         files (if selected
                 (into [] (comp (map #(rooted-file directory %))
                                (filter #(if captured (contains? captured (.getCanonicalPath ^java.io.File %))
                                            (source-file? %)))
-                               (filter #(containing-root directory roots %))) (sort selected))
-                (source-files directory roots))
+                               (filter #(containing-root directory roots %)))
+                      (sort (remove held-paths selected)))
+                (into [] (remove #(held-paths (fs/relative-path directory (str %))))
+                      (source-files directory roots)))
         prior-projection (when database (db/carried-projection database))
         projection (analysis-projection request prior-projection (some-> selected set))
         cache-root (analyzer/analysis-cache-root
@@ -2997,9 +3005,13 @@
         previous (mapcat :seon.fn/_file previous)
         previous-names (fn [attribute] (into #{} (keep attribute) previous))
         _ (when cache-root
-            (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name)))
-        artifacts (analyzed-artifacts projection roots directory
-                     (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
+            (analyzer/forget-namespaces! cache-root
+                                         (set/difference (previous-names :seon.ns/name) held-names)))
+        artifacts (into held
+                        (analyzed-artifacts projection roots directory
+                          (mapv #(.getCanonicalPath ^java.io.File %) files)
+                          database cache-root captured held-functions))
+        artifacts (if (seq held) (vec (sort-by :seon.fn.file/relative-path artifacts)) artifacts)
         removed (set/difference (previous-names :seon.fn/sym)
                                (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))
         ;; A removed definition's edges live on its CALLERS, and an invoker's
@@ -3010,7 +3022,7 @@
         ;; above seeds their first-party set, so a replacement it introduces
         ;; (absent from the previous database) keeps its new edge.
         dependents (if (and database selected)
-                     (dependent-paths database prior-projection projection removed (set selected))
+                     (dependent-paths database prior-projection projection removed (into (set selected) held-paths))
                      [])]
     (let [checked (assert-capability-contracts!
                    (into artifacts
