@@ -18,7 +18,7 @@ Eleven blind runs with known answers, plus four open performance hunts on the li
 | find repeated work behind a measured symptom (`17ec81f0b`'s parent) | medium: right, 4.4 min | low: right, 1.5 min; medium 2.4 min; high 4.4 min with the best cache key |
 | judge a proposal before measurement (`f18ab95e3`, later reverted) | medium: "drop", read Fressian's bytecode, 8.5 min | high: "drop", same mechanism, 6.5 min |
 | audit TASK-CHAIN against the code | medium: 8 findings, one with invented code excerpts, 7.8 min | high: 11 findings, every quote real, 10.4 min |
-| debug a live-lock blind (F53, `0c684db75`'s parent) | high and medium: unfinished after 30+ min | high: exact clause, causal chain and fix, 7 min |
+| debug a live-lock blind (F53, `0c684db75`'s parent) | right, but slow: high finished on low in about 14 min, medium 18.6 min | high: exact clause, causal chain and fix, 7 min |
 | cluster the 872-task backlog by root cause | (pending) | high: 9 clusters (unverified); its "moot" list failed: most of the 25 were tasks to build what is absent |
 | open performance hunts with live measurement | medium: 12-17 min each, solid measured findings, two lanes agreed on the top one | (not run) |
 

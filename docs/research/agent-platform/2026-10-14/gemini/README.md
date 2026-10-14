@@ -16,7 +16,7 @@ relies on was reproduced by root against the code or the live JVM, as noted.
 | A: repeated work behind a measured symptom, code at `17ec81f0b^` | `seon.schema.datahike/compiled-attribute-selection` recomputes; fix with `seon.schema/projection-cache-value` | all right: Argon-medium 4.4 min; Flash-low 1.5 min, -medium 2.4 min, -high 4.4 min (only Flash-high keyed by registry and forms, as the real fix did) |
 | B: judge the Fressian attribute cache of `f18ab95e3` before measurement | measured slower, reverted in `c2284b109`; its 1000 → 1 count a proxy | both "drop": Argon-medium 8.5 min (read Fressian's bytecode with `javap`), Flash-high 6.5 min; the premise (`clojure.data.fressian/write-named` already caches keyword strings) checked in the jar |
 | C: audit `docs/seon/schedule/cards/TASK-CHAIN.md` against the code | none; findings reproduced | Argon-medium 8 findings, one with invented code excerpts; Flash-high 11, quotes real (new: `my.root/run!` described as present, does not exist) |
-| D: F53 live-lock from its symptom, code at `0c684db75^` | `seon.turn/first-proof-run-t` joins `:seon.test.run/identities`, which reach-selected runs never write | Flash-high exact in 7 min; Argon (high, resumed on low) exact in about 14 min; Argon-medium still running at 40 min |
+| D: F53 live-lock from its symptom, code at `0c684db75^` | `seon.turn/first-proof-run-t` joins `:seon.test.run/identities`, which reach-selected runs never write | Flash-high exact in 7 min; Argon (high, resumed on low) exact in about 14 min; Argon-medium exact in 18.6 min |
 
 Intuition (in the agy-lanes skill): Flash-high is the default; it reads widely and quotes what it read. Argon is for
 long open-ended synthesis. Argon fills gaps from memory; Flash over-classifies. Both propose against design rules the
@@ -48,3 +48,14 @@ four are deletion tasks not yet done (`seon.db/deletion-error-has-no-caller`,
 `seon.db/transaction-stamp-attributes-outlive-their-producer`, `seon.turn/eval-origin-has-no-producer-or-consumer`,
 `seon.turn/row-tx-is-a-second-declaration-writer`). Only `seon.turn/receipt-attributes-are-a-hand-list` is confirmed
 moot. The nine clusters are unverified.
+
+## Worktree pitches (brief `worktree-pitch-brief.md`; Flash-high 5.2 min, Argon high resumed on low 9.3 min)
+
+Both recommend no per-agent git worktree: the Datahike branch and its SCI context are the agent's workspace, and files
+are written only when root merges (`seon.merge/publish!`). Measured: a worktree takes 0.76-0.83 s and 217 MB (467 MB
+with `reference-code/`); in it the edit hook crashes (empty submodules) or skips every check (`repository-file?`
+tests the main checkout's path), and clj-kondo starts cold (3.0 s against 0.02 s). Argon names the two gaps that
+block parallel work, both confirmed by root in the code: `seon.test/recorded-result` reads results only from the
+calling branch's database, and the `::changes` key in `seon.test` includes the branch name beside its content digest,
+so a test green on one agent's branch reruns on every sibling; and an outside agent's file edit dirties the shared
+checkout until it is committed, which is the only reason `bin/lane` claims exist.
