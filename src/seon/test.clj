@@ -1641,63 +1641,63 @@
     (if (:seon.error/at results) results
         (or (first results) (unknown test-symbol "No admitted execution is recorded for this test.")))))
 
-(defn- current-result?
-  "Whether a recorded result still describes the test's source, inputs and reachable definitions."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test/result]
-                  [:or :boolean :seon.test/host-error]]}
-  [database test-symbol result]
+(defn- current-result
+  "`test-symbol`'s result at its current identity judging `task` (nil: none, `seon.test.runner/current-results`)
+  that still describes its source and inputs; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym [:maybe :seon.task/sym]]
+                  [:or :nil :seon.test/result :seon.test/result-unknown :seon.test/host-error :seon.error/value]]}
+  [database test-symbol task]
   (let [inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
-        current (runner/reach-digests database [test-symbol])
+        current (runner/current-results database [test-symbol] task)
         present (db/pull database [:seon.test/source :seon.test/fixture-observation]
-                         [:seon.test/sym test-symbol])]
+                         [:seon.test/sym test-symbol])
+        result (when (map? current) (get current test-symbol))]
     (or (first (filter :seon.error/at [inputs current present]))
-        (boolean
-         (and (:seon.test/source present)
-              (not (:seon.test/fixture-observation present))
-              (= #{(:seon.test.run/input-digest result)} (set inputs))
-              (string? (get current test-symbol))
-              (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))
+        (when (and (:seon.test/source present)
+                   (not (:seon.test/fixture-observation present))
+                   (= #{(:seon.test.run/input-digest result)} (set inputs)))
+          result))))
 
 (defn- stale-in
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
-                  [:or [:vector :qualified-symbol] :seon.test/execution-error]]}
-  [database test-symbols]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol] [:maybe :seon.task/sym]]
+                  [:or [:vector :qualified-symbol] :seon.test/execution-error :seon.error/value]]}
+  [database test-symbols task]
   (reduce (fn [result test-symbol]
-            (let [recorded (recorded-result database test-symbol)
-                  current (cond
-                            (or (:seon.test/unknown recorded)
-                                (and (:seon.error/at recorded) (:seon.test/run recorded))) false
-                            (:seon.error/at recorded) recorded
-                            :else (current-result? database test-symbol recorded))]
+            (let [current (current-result database test-symbol task)]
               (cond
                 (:seon.error/at current)
                 (reduced (assoc current :seon.test/execution-refusal :seon.test/sym))
-                (true? current) result
+                current result
                 :else (conj result test-symbol))))
           [] test-symbols))
 
 (defn stale
-  "Source-bearing tests without a result at their current inputs and reach.
+  "Source-bearing tests without a result at their current inputs and identity.
+  The identity is `seon.test.runner/current-results` judging `task` (nil: none),
+  so a task's proofs are current under the task they ran for.
   A current red result is not stale.
-  Declared fixture observations are always stale. The named arity answers
+  Declared fixture observations are always stale. The named arities answer
   for exactly the supplied tests, so a caller holding its own set never
   digests the whole population to learn which of them must run again."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or [:vector :seon.test/sym] :seon.test/execution-error]]
+     [:or [:vector :seon.test/sym] :seon.test/execution-error :seon.error/value]]
     [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym]]
-     [:or [:vector :seon.test/sym] :seon.test/execution-error]]]}
+     [:or [:vector :seon.test/sym] :seon.test/execution-error :seon.error/value]]
+    [:=> [:cat :seon.db/database-value [:sequential :seon.test/sym] [:maybe :seon.task/sym]]
+     [:or [:vector :seon.test/sym] :seon.test/execution-error :seon.error/value]]]}
   ([database]
    (let [symbols (db/q '[:find [?s ...] :where
                          [?t :seon.test/sym ?s] [?t :seon.test/source]] database)]
      (if (:seon.db/invalid-read symbols)
        (assoc symbols :seon.test/execution-refusal :seon.test/sym)
-         (stale-in database (vec (sort symbols))))))
-  ([database test-symbols]
+       (stale-in database (vec (sort symbols)) nil))))
+  ([database test-symbols] (stale database test-symbols nil))
+  ([database test-symbols task]
    (if (empty? test-symbols)
      []
-     (stale-in database (vec (sort (distinct test-symbols)))))))
+     (stale-in database (vec (sort (distinct test-symbols))) task))))
 
 (defn- resolve-loaded
   "The host Var of `test-symbol`, loading its namespace when the JVM lacks it.
@@ -1821,7 +1821,9 @@
                    database agent-id))))
 
 (defn verified?
-  "Whether the latest admitted native result is green for the requested program.
+  "Whether the test's result is green at its current identity.
+  The identity is `current-result`'s; given a program digest, the latest
+  admitted native result's program instead.
   Missing execution is false; unavailable recorded evidence remains a refusal."
   {:malli/schema
    [:function
@@ -1830,15 +1832,14 @@
     [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
      [:or :boolean :seon.test/host-error]]]}
   ([database test-symbol]
-   (let [result (recorded-result database test-symbol)]
+   (let [result (current-result database test-symbol nil)]
      (cond
-       ;; A member's typed unknown is unverified; a failed read refuses.
-       (or (:seon.test/unknown result) (and (:seon.error/at result) (:seon.test/run result))) false
        (:seon.error/at result) result
-       (not (and (pos? (:seon.test/pass-count result))
-                 (zero? (:seon.test/fail-count result))
-                 (zero? (:seon.test/error-count result)))) false
-       :else (current-result? database test-symbol result))))
+       ;; none current, or a member's typed unknown, is unverified
+       :else (boolean (and (:seon.test/pass-count result)
+                           (pos? (:seon.test/pass-count result))
+                           (zero? (:seon.test/fail-count result))
+                           (zero? (:seon.test/error-count result)))))))
   ([database test-symbol program-digest]
    (let [result (recorded-result database test-symbol)]
      (cond

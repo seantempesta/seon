@@ -5527,8 +5527,13 @@
           changed (if run
                     (@test-request-changes (:seon.turn.loop/before run) (:seon.turn.loop/after run) (:seon.turn.loop/entities run))
                     [])
-          watched (into branch proofs)
-          stale (when (seq watched) (@test-stale database watched))
+          ;; a proof is current under the task it judges, a branch test under none (`run-proofs`, `run-branch`)
+          task (when (seq proofs) (held-task database agent-id))
+          _ (when (:seon.error/at task) (throw (ex-info (:seon.error/message task) task)))
+          stale (reduce (fn [result [tests judged]]
+                          (let [found (if (seq tests) (@test-stale database tests judged) [])]
+                            (if (:seon.error/at found) (reduced found) (into result found))))
+                        [] [[branch nil] [(vec proofs) task]])
           _ (when (:seon.error/at stale) (throw (ex-info (:seon.error/message stale) stale)))]
       (when (or (seq changed) (seq stale))
         (let [limit (step-limit-ms cluster agent-id)

@@ -1323,7 +1323,21 @@
                             digest)])))
             test-symbols))))
 
-(declare program-revisions-digest)
+(def program-content-bound
+  "The bound on the declaration datoms one program content read takes (`seon.program/digest-map`)."
+  {:seon.program/max-datoms 1000000})
+
+(defn program-content-digest
+  "The content of `database`'s program: the digest of its declarations' definition digests
+  (`seon.program/digest-map`), equal on every value holding the same declarations, whatever connection, commit or
+  as-of view; derived once per commit (`seon.cache`). The refusal when the declarations cannot be read whole."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.program/definition-digest :seon.program/digest-map-refusal]]}
+  [database]
+  (let [derive #(let [digests (program/digest-map database program-content-bound)]
+                  (if (:seon.error/at digests) digests (id/digest 64 [(into (sorted-map) digests)])))]
+    (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
+      (cache/lookup ::program-content commit (constantly 128) derive string?)
+      (derive))))
 
 (defn task-input
   "What a test body judging task `sym` reads (`seon.test/task`): the task entity on `database`, the requesting
@@ -1341,12 +1355,18 @@
 
 (defn- task-identity
   "What a result judging task input `input` is keyed by beside its closure, all content: the task's revision, the
-  next task's proofs and the requesting branch's program revisions (`program-revisions-digest`)."
-  {:malli/schema [:=> [:cat :seon.test/task-input] [:tuple [:maybe :string] [:vector :symbol] [:maybe :string]]]}
+  next task's proofs and the requesting branch's program content (`program-content-digest`); the refusal when that
+  program cannot be read whole."
+  {:malli/schema [:=> [:cat :seon.test/task-input]
+                  [:or [:tuple [:maybe :string] [:vector :symbol] :seon.program/definition-digest]
+                   :seon.program/digest-map-refusal]]}
   [{task :seon.test/task database :seon.test/branch}]
-  [((requiring-resolve 'seon.task/task-revision) database (:seon.task/id task))
-   (vec (sort (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs]) :seon.task/proofs)))
-   (program-revisions-digest database)])
+  (let [program (program-content-digest database)]
+    (if (:seon.error/at program)
+      program
+      [((requiring-resolve 'seon.task/task-revision) database (:seon.task/id task))
+       (vec (sort (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs]) :seon.task/proofs)))
+       program])))
 
 (defn task-inputs
   "Each of `test-symbols` whose body calls the test namespace's task reader, mapped to the `task-input` of `task` on
@@ -1381,7 +1401,10 @@
           (seon.error.refusal/error? inputs) inputs
           :else (reduce-kv (fn [result test-symbol input]
                              (if-let [digest (get result test-symbol)]
-                               (assoc result test-symbol (id/id [digest (task-identity input)] 64))
+                               (let [identity (task-identity input)]
+                                 (if (:seon.error/at identity)
+                                   (reduced identity)
+                                   (assoc result test-symbol (id/id [digest identity] 64))))
                                result))
                            digests inputs))))
 
@@ -2645,12 +2668,9 @@
   (boolean (and (red-result? result) (seq (:seon.test.failure/reports result)))))
 
 (defn red-at-current-reach?
-  "Whether `test-symbol`'s latest admitted result on `database` is red for its
-  current reach there: red on that branch as it stands, not only once."
+  "Whether `test-symbol`'s result at its current identity on `database`
+  (`current-results`, no task) is red: red on that branch as it stands, not only once."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
   [database test-symbol]
-  (let [results (latest-results database [test-symbol])
-        result (when (vector? results) (first results))
-        current (reach-digests database [test-symbol])]
-    (boolean (and result (red-result? result) (map? current)
-                  (= (get current test-symbol) (:seon.test.member/reach-digest result))))))
+  (let [current (current-results database [test-symbol] nil)]
+    (boolean (and (map? current) (not (:seon.error/at current)) (red-result? (get current test-symbol {}))))))

@@ -606,6 +606,37 @@
        (is (zero? (:seon.test/executed-count (task-run! connection #{dynamic} 'tq.chain/a)))
            "the same input proves once: the next request reuses it")))))
 
+(deftest a-task-reading-result-is-current-on-every-value-of-its-content
+  ;; S5 pre-mortem Findings 2 and 5 (`docs/research/agent-platform/2026-10-14/premortem-s5.md`): a task reader's
+  ;; identity hashed connection-local cache state, and `seon.test/stale` recomputed it with no task or dynamic calls
+  (test-support/with-database
+   (fn [connection]
+     (let [dynamic 'tq.chainproof/dynamic
+           store (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "identity-" (random-uuid)))
+           current #(mapv :seon.test/sym (context/current-results % #{dynamic} 'tq.chain/a))]
+       (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "a" :seon.task/plan "## Problem\n\nP."
+                                             :seon.task/proofs #{dynamic}}] 'tq.chain/a)
+       (test-support/declare-source! connection 'tq.chainproof chain-proofs)
+       (task-run! connection #{dynamic} 'tq.chain/a)
+       (let [database (db/db connection)]
+         (is (= [dynamic] (current database)) "the recording connection reads it current")
+         (is (= [] (seon.test/stale database [dynamic] 'tq.chain/a)) "the proof is not stale when nothing changed"))
+       ;; another task is no declaration of the program, nor this task's content
+       (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "other" :seon.task/plan "## Problem\n\nQ."}]
+                                'tq.chain/other)
+       (is (= [dynamic] (current (db/db connection))) "an unrelated write leaves it current")
+       (is (= [] (seon.test/stale (db/db connection) [dynamic] 'tq.chain/a)) "and not stale")
+       (is (zero? (:seon.test/executed-count (task-run! connection #{dynamic} 'tq.chain/a))) "so it is not run again")
+       (try
+         (registry/branch! {:seon.store/store store :seon.cluster.registry/from (get-in (db/db connection) [:config :branch])
+                            :seon.store/branch branch})
+         (let [opened (seon.cluster.store/open-branch! store branch)]
+           (try (is (= [dynamic] (current (db/db opened))) "another connection to the same content reads it current")
+                (finally (seon.cluster.store/release-branch! opened))))
+         (is (= [dynamic] (current (db/branch-database (db/db connection) branch))) "the branch head opened from main reads it current")
+         (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
+
 (deftest a-filed-task-becomes-a-full-chain
   ;; TASK-CHAIN S3f-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#21-create`, From a filed task)
   (test-support/with-database
