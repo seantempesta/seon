@@ -516,6 +516,13 @@ a read form for task references in `seon.ref/brief` (Sonnet); the costs measured
 Retired acceptance tests (they test the copies design): A1, A3, A4, A6's relaunch rows, A7, I3 and the rest of the
 2026-10-13 table; I0 and A5/A5b stay green as they are. I1/I2 wait for the user-conversation task.
 
+**Settled since, beside the slices (2026-10-14):** a REPL `def` is a program entity like a file's (de1f48c23), so an
+agent's values travel with its branch and reinstall in order; render invocations live in one `seon.cache` kind validated
+by read evidence and must-reads render through `seon.render/render-call` (35cafc1dc), so §3a's "assembly costs what
+changed" has its mechanism (S3d still proves it on the block); a constructed error carries no world or producer
+(5a08c13af, errors-cut E1), and the rest of the errors cut (`docs/research/agent-platform/2026-10-14/errors-cut-plan.md`)
+removes the time stamp that today makes `done-refusals`/`results-verdict` refusals differ per call.
+
 **Status (2026-10-14):** spec being fleshed out with the owner; Design's predicate proven at the REPL
 (`design-stage-table.md`); Prove's predicate proven at the REPL (`prove-stage-table.md`); the done rule proven at the REPL on all eight rows (`done-rule-table.md`). Nothing implemented.
 
