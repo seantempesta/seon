@@ -2779,7 +2779,7 @@
      (agent-eval running agent-id "(ns tq.f4) (defn area [r] (* r r))")
      (agent-eval running agent-id "(in-ns 'tq.f4) (clojure.test/deftest ^{:seon/tasks #{'tq.f4/area}} area-test (clojure.test/is (= 4 (tq.f4/area 2))))")
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/intent "Square."}))]
+                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/plan "Square."}))]
        (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
@@ -2796,7 +2796,7 @@
      (agent-eval running agent-id "(in-ns 'tq.f4-test) (clojure.test/deftest perimeter-uses-area (clojure.test/is (= 8 (* 4 (tq.f4/area 1) 2))))")
      (agent-eval running agent-id "(in-ns 'tq.f4) (clojure.test/deftest ^{:seon/tasks #{'tq.f4/area}} area-test (clojure.test/is (= 4 (tq.f4/area 2))))")
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/intent "Square."}))]
+                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/plan "Square."}))]
        (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (let [reply (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
@@ -2859,7 +2859,7 @@
   (agent-eval running agent-id "(in-ns 'tq.f4c-test) (clojure.test/deftest one (clojure.test/is (= 4 (tq.f4c/area 2)))) (clojure.test/deftest two (clojure.test/is (= 16 (tq.f4c/area 4))))")
   (agent-eval running agent-id "(in-ns 'tq.f4c) (clojure.test/deftest ^{:seon/tasks #{'tq.f4c/area}} area-test (clojure.test/is (= 25 (tq.f4c/area 5))))")
   (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                              :seon.task/ns 'tq.f4c :seon.task/name "area" :seon.task/intent "Square."}))
+                                              :seon.task/ns 'tq.f4c :seon.task/name "area" :seon.task/plan "Square."}))
         assigned (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                                        :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})]
       (is (nil? (:seon.error/message assigned)) "the fixture's task is assigned"))
@@ -2975,7 +2975,7 @@
      (agent-eval running agent-id "(ns tq.cx1) (defn area [r] r)")
      (agent-eval running agent-id "(in-ns 'tq.cx1) (clojure.test/deftest ^{:seon/tasks #{'tq.cx1/area}} area-test (clojure.test/is (= 25 (tq.cx1/area 5))))")
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.cx1 :seon.task/name "area" :seon.task/intent "Square."}))]
+                                                 :seon.task/ns 'tq.cx1 :seon.task/name "area" :seon.task/plan "Square."}))]
        (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :transcript})")))
@@ -3035,7 +3035,7 @@
      (agent-eval running agent-id "(ns tq.cx12) (defn area [r] r)")
      (agent-eval running agent-id "(in-ns 'tq.cx12) (clojure.test/deftest ^{:seon/tasks #{'tq.cx12/area}} area-test (clojure.test/is (= 25 (tq.cx12/area 5))))")
      (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.cx12 :seon.task/name "area" :seon.task/intent "Square."}))]
+                                                 :seon.task/ns 'tq.cx12 :seon.task/name "area" :seon.task/plan "Square."}))]
        (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :chat})")))

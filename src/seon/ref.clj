@@ -1,5 +1,5 @@
 (ns seon.ref
-  "References in Markdown text (a task intent, a doc, a docstring), found by one
+  "References in Markdown text (a task plan, a doc, a docstring), found by one
   parse and resolved by one rule: a code span is a candidate name or path, a
   link is a path."
   (:require [clojure.edn :as edn]
@@ -338,7 +338,7 @@
               (:seon.error/at found) found
               :else {:seon.ref/name reference :seon.render/operations [read-form]}))
       :else
-      (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/intent :seon.task/instructions]
+      (let [found (db/pull database [:seon.fn/sym :seon.fn/doc :seon.test/sym :seon.task/sym :seon.task/plan :seon.task/instructions]
                            (cond (seq (db/datoms database :avet :seon.fn/sym reference)) [:seon.fn/sym reference]
                                  (seq (db/datoms database :avet :seon.test/sym reference)) [:seon.test/sym reference]
                                  :else [:seon.task/sym reference]))]
@@ -346,7 +346,7 @@
           (:seon.error/at found) found
           ;; a step may declare only its instructions, taking its goal from its subject
           (:seon.task/sym found) {:seon.ref/name reference
-                                  :doc (first (str/split-lines (some found [:seon.task/intent :seon.task/instructions])))}
+                                  :doc (first (str/split-lines (some found [:seon.task/plan :seon.task/instructions])))}
           (or (:seon.fn/sym found) (:seon.test/sym found))
           (cond-> {:seon.ref/name reference :seon.render/operations [read-form]}
             (:seon.fn/doc found) (assoc :doc (summary (:seon.fn/doc found))))
@@ -423,13 +423,13 @@
               :else [:seon.fn/sym :seon.test/sym :seon.task/sym])))
 
 (defn- own-prose
-  "The text an entity's own content cites names in: its docstring, intent and instructions, and its schema form's
+  "The text an entity's own content cites names in: its docstring, plan and instructions, and its schema form's
   description."
   {:malli/schema [:=> [:cat :map] :string]}
   [entity]
   (let [form (some-> (:seon.schema/form entity) edn/read-string)
         description (when (and (vector? form) (map? (second form))) (:description (second form)))]
-    (str/join "\n\n" (keep identity (conj (mapv entity [:seon.fn/doc :seon.ns/doc :seon.task/intent :seon.task/instructions])
+    (str/join "\n\n" (keep identity (conj (mapv entity [:seon.fn/doc :seon.ns/doc :seon.task/plan :seon.task/instructions])
                                           description)))))
 
 (defn- resolve-name

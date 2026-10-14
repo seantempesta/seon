@@ -79,7 +79,7 @@
            assignment (:e (last (d/datoms (db/db connection) :aevt :seon.task/assignment)))
            base (db/db connection)
            source (db/with base [(support/task-row child "Child")
-                                 {:db/id parent-ref :seon.task/intent "Refined"
+                                 {:db/id parent-ref :seon.task/plan "Refined"
                                   :seon.task/children #{child-ref}}
                                 {:db/id assignment :seon.task.attempt/end :done}])
            target base
@@ -90,11 +90,11 @@
                copied (db/with target {:tx-data (:tx-data picked)})]
            (is (empty? (:conflicts picked)))
            (is (= :done (:seon.task.attempt/end (db/pull copied [:seon.task.attempt/end] assignment))))
-           (is (= "Refined" (:seon.task/intent (db/pull copied [:seon.task/intent] parent-ref))))
-           (is (= "Child" (:seon.task/intent (db/pull copied [:seon.task/intent] child-ref))))
+           (is (= "Refined" (:seon.task/plan (db/pull copied [:seon.task/plan] parent-ref))))
+           (is (= "Child" (:seon.task/plan (db/pull copied [:seon.task/plan] child-ref))))
            (is (= (:db/id (db/pull source [:db/id] child-ref))
                      (:db/id (db/pull copied [:db/id] child-ref))))
-           (is (= "Original" (:seon.task/intent (db/pull target [:seon.task/intent] parent-ref))))))))))
+           (is (= "Original" (:seon.task/plan (db/pull target [:seon.task/plan] parent-ref))))))))))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}} a-value-changed-on-both-sides-resolves-by-the-declared-rule
   (support/with-database
@@ -103,7 +103,7 @@
            entity [:seon.task/id handle]
            _ (support/transacted! connection [(assoc (support/task-row handle "Original") :seon.error.occurrence/count 1)])
            base (db/db connection)
-           source (checked-value base [{:db/id entity :seon.error.occurrence/count 3 :seon.task/intent "Refined"}])
+           source (checked-value base [{:db/id entity :seon.error.occurrence/count 3 :seon.task/plan "Refined"}])
            target (checked-value base [{:db/id entity :seon.error.occurrence/count 4}])]
        (doseq [[rule expected conflicts] [[:root 4 1] [:ours 4 0] [:theirs 3 0] [:add 6 0]]]
          (let [projection (rule-projection (schema/handed-projection) rule)
@@ -111,7 +111,7 @@
                copied (checked-value target {:tx-data (:tx-data result)})]
            (is (= expected (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
            (is (= conflicts (count (:conflicts result))))
-           (is (= "Refined" (:seon.task/intent (db/pull copied [:seon.task/intent] entity))))
+           (is (= "Refined" (:seon.task/plan (db/pull copied [:seon.task/plan] entity))))
            (when (= :root rule)
              (is (= [{:entity (:db/id (db/pull base [:db/id] entity)) :attribute :seon.error.occurrence/count :base 1 :ours 4 :theirs 3}]
                     (:conflicts result))))))))))
@@ -159,7 +159,7 @@
                          [(db/as-of base (db/basis-t base)) source]
                          [base (db/as-of source (db/basis-t source))]]]
          (is (= #{[:seon.task/references (:db/id (db/pull base [:db/id] entity))]}
-                (program/changed-identities from to {} #{:seon.task/references :seon.task/intent}))))
+                (program/changed-identities from to {} #{:seon.task/references :seon.task/plan}))))
        (is (nil? (:seon.task/references (db/pull (checked-value base {:tx-data (:tx-data unchanged)})
                                              [:seon.task/references] entity))))
        (is (empty? (:tx-data concurrent)))
@@ -201,7 +201,7 @@
                                                    (support/agent-tx (db/db connection) "squash-cost")))
            base (db/db connection)
            source (checked-value (ten-evaluation-attempt base "squash-cost")
-                                 [{:db/id entity :seon.task/intent "Refined"}])
+                                 [{:db/id entity :seon.task/plan "Refined"}])
            projection (schema/handed-projection)
            measured (profile/measure #(merge/squash-merge source base base projection))]
        (spit (str (System/getenv "SEON_CHECKOUT") "/tmp/astra-cost-handoff-squash.edn")
@@ -479,11 +479,11 @@
                                     :seon.store/store (:seon.store/store (support/execution-handle connection))}
                                    key))))
 
-(defn- intent-on
+(defn- plan-on
   "The intent of task `handle` on `connection`'s head."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle] [:maybe :seon.task/intent]]}
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle] [:maybe :seon.task/plan]]}
   [connection handle]
-  (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle])))
+  (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle])))
 
 (defn- merge-base-on
   "The merge base main holds on assignment `a`."
@@ -498,11 +498,11 @@
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (let [commit (db/commit-id (db/db fork))
                 first-merge (merged! connection a)]
             (is (uuid? (:seon.task/merge-commit first-merge)) "the merge transacted")
-            (is (= "b" (intent-on connection handle)))
+            (is (= "b" (plan-on connection handle)))
             (is (= commit (merge-base-on connection a)) "the merge base moved to the merged source commit")
             (is (= [] (merge/merge-tx (db/db connection) a commit (db/carried-projection (db/db connection))))
                 "the writer's transaction data for a repeat is empty")
@@ -519,7 +519,7 @@
        (with-assigned-fork
         connection handle
         (fn [fork _ a]
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (let [merged (merged! connection a)
                 main (db/db connection)
                 row (some #(when (= a (:db/id %)) %)
@@ -540,13 +540,13 @@
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (db/with-branch {:seon.db/connection connection}
-                          #(support/transacted! connection [{:db/id [:seon.task/id handle] :seon.task/intent "root edited"}]))
+                          #(support/transacted! connection [{:db/id [:seon.task/id handle] :seon.task/plan "root edited"}]))
           (let [merged (merged! connection a)]
-            (is (= "root edited" (intent-on connection handle)) "main keeps root's value")
+            (is (= "root edited" (plan-on connection handle)) "main keeps root's value")
             (is (= [{:entity (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/id handle]))
-                     :attribute :seon.task/intent :base "a" :ours "root edited" :theirs "b"}]
+                     :attribute :seon.task/plan :base "a" :ours "root edited" :theirs "b"}]
                    (:seon.merge/conflicts merged))
                 "the writer's conflict is answered with its three values"))))))))
 
@@ -557,12 +557,12 @@
        (with-assigned-fork
         connection handle
         (fn [fork branch a]
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (merged! connection a)
-          (is (= "b" (intent-on connection handle)))
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "a"}])
+          (is (= "b" (plan-on connection handle)))
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "a"}])
           (merged! connection a)
-          (is (= "a" (intent-on connection handle)) "the revert since the last merge reaches main")))))))
+          (is (= "a" (plan-on connection handle)) "the revert since the last merge reaches main")))))))
 
 (deftest an-occurrence-counted-on-the-branch-adds-once-on-main
   (support/with-database
@@ -593,7 +593,7 @@
        (with-assigned-fork
         connection handle
         (fn [fork _ a]
-          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "b"}])
+          (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (let [main (db/db connection)
                 measured (profile/measure #(merge/merge-tx main a (db/commit-id (db/db fork))
                                                             (db/carried-projection main)))]

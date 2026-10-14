@@ -879,7 +879,7 @@
                            {:seon.db/connection fork}
                            #(doall (for [n (range 10)]
                                      (do (test-support/transacted! fork [{:db/id [:seon.task/id handle]
-                                                                          :seon.task/intent (str "Refined " n ".")}])
+                                                                          :seon.task/plan (str "Refined " n ".")}])
                                          (db/commit-id (db/db fork))))))
                           (finally (store/release-branch! fork)))
              before-copy (clean-key-count store)
@@ -887,7 +887,7 @@
                                     #(merge/merge! {:seon.db/connection connection :seon.store/store store}
                                                    (:seon.task/assignment (db/pull (db/db connection) [:seon.task/assignment] a))))
              with-copy (clean-key-count store)]
-         (is (= "Refined 9." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
+         (is (= "Refined 9." (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle]))))
          (is (uuid? (:seon.task/merge-commit copied)))
          (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
          (let [collected (registry/collect! store registry/plain-cutoff {})]

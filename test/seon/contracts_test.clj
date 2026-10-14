@@ -7,7 +7,7 @@
 (deftest a-generated-task-is-the-declaration-its-task-file-holds
   (let [database (db/db)
         generated (contracts/task database 'seon.fs/attributes)
-        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/intent :seon.task/references]
+        stored (db/pull database [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/references]
                         [:seon.task/sym 'seon.fs/contract-attributes])]
     (is (= generated (dissoc stored :seon.task/references)))
     (is (= '#{seon.fs/attributes seon.contracts/gaps} (set (:seon.task/references stored)))
@@ -34,6 +34,6 @@
 (deftest a-generated-intent-sends-a-nil-input-to-its-caller
   ;; The call evidence is not read: the rule is in every generated intent.
   (doseq [function-symbol ['seon.fs/attributes 'seon.contracts/report]]
-    (let [intent (:seon.task/intent (contracts/task (db/db) function-symbol))]
+    (let [intent (:seon.task/plan (contracts/task (db/db) function-symbol))]
       (is (re-find #"change the caller so it does not pass nil" intent))
       (is (re-find #"absence is no key" intent)))))

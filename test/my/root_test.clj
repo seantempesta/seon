@@ -78,7 +78,7 @@
                                                          (:seon.sci.eval/projection-state (meta connection)))]
          (try
            (db/with-branch {:seon.db/connection fork}
-                           #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "Done."}
+                           #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "Done."}
                                                             [:db/add a :seon.task.attempt/end :done]]))
            (let [measured (profile/measure #(my.root/merge! {:my.program/context (root-context connection)
                                                              :seon.task/assignment assignment}))]
@@ -109,7 +109,7 @@
                                                          (:seon.sci.eval/projection-state (meta connection)))]
          (try
            (db/with-branch {:seon.db/connection fork}
-                           #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/intent "Done."}
+                           #(test-support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "Done."}
                                                             [:db/add a :seon.task.attempt/end :done]]))
            (let [commit (db/commit-id (db/db fork))
                  open (my.root/merge-requests {:seon.db/db (db/db connection)})
@@ -123,7 +123,7 @@
              (is (= commit (:seon.task/merge-base row)) "its merge base is the merged commit")
              (is (uuid? (:seon.task/merge-commit row)) "main records the merge commit")
              (is (= :done (:seon.task.attempt/end row)) "the end reached main in the merge")
-             (is (= "Done." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle]))))
+             (is (= "Done." (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle]))))
              (is (not-any? #{assignment} (map :seon.task/assignment (my.root/merge-requests {:seon.db/db (db/db connection)})))
                  "and it leaves the open list"))
            (finally (store/release-branch! fork)

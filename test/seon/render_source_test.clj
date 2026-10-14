@@ -27,7 +27,7 @@
   "A fixture preview whose result depends on one real database attribute."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_unit]
-  "(seon.db/pull [:seon.task/intent] [:seon.task/id \"previewitem0\"])")
+  "(seon.db/pull [:seon.task/plan] [:seon.task/id \"previewitem0\"])")
 
 (defn- subject-of
   "The declared subject producer whose pair names a source fixture renderer."
@@ -131,7 +131,7 @@
          (is (= (db/basis-t database) (db/basis-t @connection))
              "previewing, including the busy agent, changes no facts")
          (is (nil? (db/pull @connection [:seon.turn/id] [:seon.turn/id cached-id])))
-         (support/transacted! connection [{:seon.task/id "previewitem0" :seon.task/intent "After"}])
+         (support/transacted! connection [{:seon.task/id "previewitem0" :seon.task/plan "After"}])
          (let [next-calls (atom {})
                next-output (source-call
                             (assoc request :seon.db/db @connection
@@ -150,7 +150,7 @@
      (let [database @connection
            lookup [:seon.task/id "srcprov00000"]
            entity (db/pull database '[*] lookup)
-           cursor {:seon.render.data/path [:seon.task/intent]
+           cursor {:seon.render.data/path [:seon.task/plan]
                    :seon.render.data/offset 0}
            entity-source
            (render/render-default-ai-source
@@ -179,7 +179,7 @@
          (is (= '(seon.render.data/pull-at
                    (quote [*])
                    [:seon.task/id "srcprov00000"]
-                   {:seon.render.data/path [:seon.task/intent]
+                   {:seon.render.data/path [:seon.task/plan]
                     :seon.render.data/offset 0})
                 (read-string scalar-source))))
        (testing "query and path failures remain flat diagnostics"

@@ -778,7 +778,7 @@
         proof (symbol "tq.assigned" (str "proves-" slug))]
     (declare-proof! connection 'tq.assigned (symbol (name proof)) (symbol "tq.assigned" task-name))
     (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
-                                 :seon.task/name task-name :seon.task/intent "Work."})]
+                                 :seon.task/name task-name :seon.task/plan "Work."})]
       (running! connection (:seon.task/id created))
       (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
                                     :seon.task/agent [:seon.agent/id agent-id]
@@ -1305,11 +1305,11 @@
   "A complete task entity for fixtures that need one plain identified entity with a required
   string: the twelve-character `handle` and its `intent`. Its name is `task-` and the handle,
   one symbol's name (`seon.task/symbol-name?`) for any handle, so the printed task reads back."
-  {:malli/schema [:=> [:cat :seon.task/handle :seon.task/intent] :seon.task/task]}
+  {:malli/schema [:=> [:cat :seon.task/handle :seon.task/plan] :seon.task/task]}
   [handle intent]
   (let [task-name (str "task-" handle)]
     {:seon.task/id handle :seon.task/sym (symbol "fixture.tasks" task-name) :seon.task/ns 'fixture.tasks
-     :seon.task/name task-name :seon.task/intent intent}))
+     :seon.task/name task-name :seon.task/plan intent}))
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents.

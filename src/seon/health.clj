@@ -274,7 +274,7 @@
           findings)))
 
 (defn- with-tasks
-  "Each finding with the tasks whose intent cites its subject."
+  "Each finding with the tasks whose plan cites its subject."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.health/finding]] [:vector :seon.health/finding]]}
   [database findings]
   (let [symbol-of #(cond (qualified-symbol? %) % (qualified-keyword? %) (symbol (namespace %) (name %)))

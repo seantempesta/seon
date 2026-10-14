@@ -17,7 +17,7 @@
   "One task EDN entry of tq.tree named `task-name` with the authored `members`."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [task-name members]
-  (str "#:seon.task{:name \"" task-name "\" :intent \"Do " task-name ".\" " members "}"))
+  (str "#:seon.task{:name \"" task-name "\" :plan \"Do " task-name ".\" " members "}"))
 
 (defn- needs
   "The `:seon.task/needs` member naming the tq.tree tasks `names`."
@@ -279,14 +279,14 @@
   {:malli/schema [:=> [:cat :string :string] :seon.task/files]}
   [area side]
   {"resources/seon/tasks/tq.adopt.edn"
-   (str "[#:seon.task{:name \"area\" :intent \"" area "\"} #:seon.task{:name \"side\" :intent \"" side "\"}]")})
+   (str "[#:seon.task{:name \"area\" :plan \"" area "\"} #:seon.task{:name \"side\" :plan \"" side "\"}]")})
 
 (deftest an-adoption-keeps-a-merged-refinement-the-files-have-not-seen
   ;; Before, adoption reconciled the whole set onto main with main's own value as the basis, so the
   ;; next publication reverted a refinement merged onto main whose publication still waited.
   (let [area (task/task-handle 'tq.adopt "area")
         side (task/task-handle 'tq.adopt "side")
-        intents (fn [database] (mapv #(:seon.task/intent (db/pull database [:seon.task/intent] [:seon.task/id %])) [area side]))
+        intents (fn [database] (mapv #(:seon.task/plan (db/pull database [:seon.task/plan] [:seon.task/id %])) [area side]))
         problems (fn [database] (count (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
                                                 [(clojure.string/starts-with? ?n "adoption-conflict-")]] database)))]
     (are [published adopted conflicts]
@@ -321,24 +321,24 @@
   "The tq.tree chain: the subject's `goal`, Prove's instructions and Implement's `own` members."
   {:malli/schema [:=> [:cat :string :string] [:vector :string]]}
   [goal own]
-  [(str "#:seon.task{:name \"subject\" :intent \"" goal "\" " (children ["prove" "implement"]) "}")
+  [(str "#:seon.task{:name \"subject\" :plan \"" goal "\" " (children ["prove" "implement"]) "}")
    "#:seon.task{:name \"prove\" :step :prove :instructions \"Add rows to `tq.tree-test/rows`.\"}"
    (str "#:seon.task{:name \"implement\" " (needs "prove") " :instructions \"Fix `tq.tree/scan`.\" " own "}")])
 
 (deftest a-steps-effective-task-is-its-subjects-merged-with-its-own
   (test-support/with-database
    (fn [connection]
-     (apply ingest! connection (chain-entries "Make `tq.tree/scan` idempotent." ":intent \"Only the body.\""))
-     (let [content #(select-keys (task/effective (db/db connection) (handle %)) [:seon.task/intent :seon.task/instructions])]
+     (apply ingest! connection (chain-entries "Make `tq.tree/scan` idempotent." ":plan \"Only the body.\""))
+     (let [content #(select-keys (task/effective (db/db connection) (handle %)) [:seon.task/plan :seon.task/instructions])]
        (are [step expected] (= expected (content step))
-         "subject" {:seon.task/intent "Make `tq.tree/scan` idempotent."}
-         "prove" {:seon.task/intent "Make `tq.tree/scan` idempotent." :seon.task/instructions "Add rows to `tq.tree-test/rows`."}
-         "implement" {:seon.task/intent "Only the body." :seon.task/instructions "Fix `tq.tree/scan`."})
+         "subject" {:seon.task/plan "Make `tq.tree/scan` idempotent."}
+         "prove" {:seon.task/plan "Make `tq.tree/scan` idempotent." :seon.task/instructions "Add rows to `tq.tree-test/rows`."}
+         "implement" {:seon.task/plan "Only the body." :seon.task/instructions "Fix `tq.tree/scan`."})
        (is (= #{'tq.tree-test/rows}
               (set (:seon.task/references (db/pull (db/db connection) [:seon.task/references] [:seon.task/id (handle "prove")]))))
            "the writer derives references from the instructions too")
        (apply ingest! connection (chain-entries "Make `tq.tree/scan` total." ""))
-       (is (= "Make `tq.tree/scan` total." (:seon.task/intent (content "implement")))
+       (is (= "Make `tq.tree/scan` total." (:seon.task/plan (content "implement")))
            "a refined subject intent is the step's next view once its own intent is gone")))))
 
 (deftest a-running-subject-readies-its-first-step-only
@@ -398,7 +398,7 @@
   (test-support/with-database
    (fn [connection]
      (let [chain! (requiring-resolve 'seon.task/chain!)
-           subject {:seon.task/ns 'work :seon.task/name "fix" :seon.task/intent "Fix the observed failure."}
+           subject {:seon.task/ns 'work :seon.task/name "fix" :seon.task/plan "Fix the observed failure."}
            copy (fn [template] (task/task-handle 'work (str (name template) "-fix")))
            report (chain! connection subject step-templates {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}})
            database (db/db connection)

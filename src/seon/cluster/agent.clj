@@ -1693,7 +1693,7 @@
                        fresh)
         problems (mapv (fn [handle] {:seon.flow.actions/op :problem :seon.flow.actions/class :invalid-task
                                      :seon.task/assigned handle
-                                     :seon.task/intent "Restore the step's obligations at its fork point: an :implement step needs tagged proofs; a :prove step needs its own tagged proofs or a successor task declaring it in :seon.task/needs."})
+                                     :seon.task/plan "Restore the step's obligations at its fork point: an :implement step needs tagged proofs; a :prove step needs its own tagged proofs or a successor task declaring it in :seon.task/needs."})
                        (sort (remove attempted invalid)))]
     (into problems (concat followed launches))))
 
@@ -1944,10 +1944,10 @@
   "Write the problem task a `:problem` action names, by identity (its class and its assignment, else its task), so a
   repeat writes nothing."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
-  [handle {key :seon.task/assignment h :seon.task/assigned class :seon.flow.actions/class intent :seon.task/intent}]
+  [handle {key :seon.task/assignment h :seon.task/assigned class :seon.flow.actions/class intent :seon.task/plan}]
   (let [created (task/create! {:seon.db/connection (:seon.db/connection handle) :seon.agent/id "root"
                                :seon.task/ns 'seon.task :seon.task/name (str (name class) "-" (or key h))
-                               :seon.task/intent intent})]
+                               :seon.task/plan intent})]
     (when (:seon.error/at created) (throw (ex-info (:seon.error/message created "The problem task was refused.") created)))
     nil))
 
@@ -2110,7 +2110,7 @@
 (defn- unfinished-intent
   "Root's problem text for ended assignment `row`, closed with its work unfinished: no relaunch left, or an end
   that only root decides."
-  {:malli/schema [:=> [:cat :seon.flow.actions/held-assignment] :seon.task/intent]}
+  {:malli/schema [:=> [:cat :seon.flow.actions/held-assignment] :seon.task/plan]}
   [{key :seon.task/assignment h :seon.task/assigned branch :seon.task/branch end :seon.task.attempt/end
     reason :seon.task.attempt/reason work-left? :seon.flow.actions/work-left? refusal :seon.task/refusal}]
   (str "Attempt " key " of task " h " ended " (name end) (when reason (str ": " reason))
@@ -2153,7 +2153,7 @@
                                (dec allowance) " relaunches left.")})]
       ;; root's problem first: once main holds the end, no pass derives it again
       (or continue? (and undecided? (= :close kind)))
-      [(action :problem {:seon.flow.actions/class :unfinished-task :seon.task/intent (unfinished-intent row)})
+      [(action :problem {:seon.flow.actions/class :unfinished-task :seon.task/plan (unfinished-intent row)})
        (action :close {})]
       :else
       (cond-> []
@@ -2207,7 +2207,7 @@
                           [:db/add [:seon.task/assignment key] :seon.task.attempt/reason reason]])
       (write-problem! handle {:seon.flow.actions/op :problem :seon.task/assignment key :seon.task/assigned h
                               :seon.flow.actions/class :unfinished-task
-                              :seon.task/intent (str "Attempt " key " of task " h " failed in db<->flow's " (name op) ": "
+                              :seon.task/plan (str "Attempt " key " of task " h " failed in db<->flow's " (name op) ": "
                                                      reason " It ended :error; its branch " (name branch) " is kept: close it with"
                                                      " (my.root/close! {:seon.task/assignment \"" key "\" :seon.task/reason why}).")}))
     (fault/fault! (env/of handle) cause {:seon.error/layer :seon.flow/plan :seon.error/operation `db<->flow

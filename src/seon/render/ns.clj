@@ -98,7 +98,7 @@
   (max 0 (long (get unit :seon.render/distance 1))))
 
 (defn task-ai
-  "One task as data: its id, symbol, name and namespace; beyond distance zero its intent and
+  "One task as data: its id, symbol, name and namespace; beyond distance zero its plan and
   the references it cites. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
@@ -108,7 +108,7 @@
       named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
       ;; shape); references are declared a set, so they are shown as one.
-      (cond-> (merge named (select-keys task [:seon.task/intent]))
+      (cond-> (merge named (select-keys task [:seon.task/plan]))
         (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task)))))))
 
 (defn task-form
@@ -118,17 +118,17 @@
   (list 'seon.task/obligations '(seon.db/db) (list 'quote (:seon.task/sym (or (:seon.render/value unit) unit)))))
 
 (defn task-html
-  "Render one task as a card: intent and the references it cites. Its subjects and
+  "Render one task as a card: plan and the references it cites. Its subjects and
   proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{:seon.task/keys [id intent references] task-name :seon.task/name task-ns :seon.task/ns}
+  (let [{:seon.task/keys [id plan references] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
         entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
     [:article {:class "seon-family-entry seon-task-entry"}
      [:header [:p {:class "seon-kicker"} (str "Task · " task-ns)] [:h3 task-name " " [:code id]]]
-     [:p {:class "seon-task-intent"} intent]
+     [:p {:class "seon-task-plan"} plan]
      (when (pos? (node-distance unit))
        [:dl (entity "References" references)])]))
 
@@ -137,20 +137,20 @@
 
 (defn- held-task
   "The task `unit`'s agent holds, read on the unit's database: its name and
-  intent with the read of its proofs offered; nil when it holds none."
+  plan with the read of its proofs offered; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.task/held-view :seon.db/invalid-read-error]]}
   [{database :seon.db/db value :seon.render/value}]
   (let [handle (task/agent-task database (:seon.agent/id value))]
     (if (string? handle)
-      (let [task (db/pull database [:seon.task/name :seon.task/intent] [:seon.task/id handle])]
+      (let [task (db/pull database [:seon.task/name :seon.task/plan] [:seon.task/id handle])]
         (if (:seon.error/at task)
           task
-          (assoc (select-keys task [:seon.task/name :seon.task/intent])
+          (assoc (select-keys task [:seon.task/name :seon.task/plan])
                  :seon.task/id handle :seon.render/operations ['(my.task/current {})])))
       handle)))
 
 (defn held-task-ai
-  "The task I hold as data: name and intent, with the read of its proofs offered; nothing when I hold none.
+  "The task I hold as data: name and plan, with the read of its proofs offered; nothing when I hold none.
 
   ## Costs
 
@@ -166,14 +166,14 @@
   (list 'my.task/current {}))
 
 (defn held-task-html
-  "Render the task an agent holds: its name and intent."
+  "Render the task an agent holds: its name and plan."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [held (held-task unit)]
     (if (:seon.task/id held)
       [:section {:class "seon-held-task"}
        [:h3 (:seon.task/name held) " " [:code (:seon.task/id held)]]
-       (when (:seon.task/intent held) [:p (:seon.task/intent held)])]
+       (when (:seon.task/plan held) [:p (:seon.task/plan held)])]
       [:section {:class "seon-held-task"} [:p (or (:seon.error/message held) "No task held.")]])))
 
 (defn function-ai

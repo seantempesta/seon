@@ -197,7 +197,7 @@
               (is (not-any? :seon.cluster.eval/error receipts))
               (is (= (receipt-id-of result)
                      (db/q '[:find ?receipt-id . :in $ ?task-id
-                             :where [?task :seon.task/id ?task-id] [?task :seon.task/intent _ ?tx]
+                             :where [?task :seon.task/id ?task-id] [?task :seon.task/plan _ ?tx]
                              [?tx :seon.db/receipt ?receipt] [?receipt :seon.cluster.eval/id ?receipt-id]]
                            (:seon.db/db result) task-id))
                   "the write's transaction names the form's evaluation")))

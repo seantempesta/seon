@@ -191,7 +191,7 @@
              (let [conflict (-> prepared :seon.db/tx-data first
                                 (update 2 assoc :seon.turn/reply "different source"))
                    ;; THE ROLLBACK PROBE MUST REACH THE WRITER: a task
-                   ;; without its required `:seon.task/intent` is refused by
+                   ;; without its required `:seon.task/plan` is refused by
                    ;; write admission first, so the transaction never gets far
                    ;; enough to prove the content conflict rolls it back.
                    refused (db/transact! connection

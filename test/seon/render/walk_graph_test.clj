@@ -26,7 +26,7 @@
 
 (def ^:private task
   (str "[#:seon.task{:name \"walk-graph\""
-       " :intent \"Prove the graph walk through `tg.a/c`.\"}]"))
+       " :plan \"Prove the graph walk through `tg.a/c`.\"}]"))
 
 (defn- world!
   "Admit the fixture program and its task through their canonical writers."

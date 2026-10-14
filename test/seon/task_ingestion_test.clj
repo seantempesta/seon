@@ -35,7 +35,7 @@
 (defn- task-text
   {:malli/schema [:=> [:cat :string :string] :string]}
   [intent members]
-  (str "[#:seon.task{:name \"prove-ingestion\" :intent \"" intent "\" " members "}]"))
+  (str "[#:seon.task{:name \"prove-ingestion\" :plan \"" intent "\" " members "}]"))
 
 (defn- with-root
   "Call `body` with a fresh fixture directory holding `files` (relative path to text); delete it after."
@@ -72,7 +72,7 @@
 (deftest ingested-tasks-answer-both-ways-and-unchanged-input-writes-nothing
   (test-support/with-database
    (fn [connection]
-     (let [entities (entities-of subject-source) text (task-text "Prove ingestion; read `tq.a/g` and `:seon.task/intent`." ":needs #{}")]
+     (let [entities (entities-of subject-source) text (task-text "Prove ingestion; read `tq.a/g` and `:seon.task/plan`." ":needs #{}")]
        (admit! connection entities)
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= '#{tq.a/g} (set (:seon.task/references (db/pull @connection [:seon.task/references] [:seon.task/id handle]))))
@@ -93,15 +93,15 @@
          (is (empty? (seon.fn/reconcile-tx @connection entities []))))
        (testing "the same aspect with a new intent keeps its handle; an intent citing nothing retracts its references"
          (is (:seon.task/changed? (ingest! connection (task-text "Changed." ""))))
-         (is (= {:seon.task/intent "Changed."}
-                (db/pull @connection [:seon.task/intent :seon.task/references] [:seon.task/id handle]))))
+         (is (= {:seon.task/plan "Changed."}
+                (db/pull @connection [:seon.task/plan :seon.task/references] [:seon.task/id handle]))))
        (testing "removing one annotation drops only that edge"
          (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{'tq.a/prove-ingestion}}" "(defn g")))
          (is (= '#{tq.a tq.a/f} (:seon.task/subjects (task/task-edges @connection tag)))))
        (testing "program attributes carry the symbol edges, never task entities"
          (let [attributes (program/program-attributes (db/carried-projection @connection))]
            (is (contains? attributes :seon.task/tasks))
-           (is (not-any? attributes [:seon.task/id :seon.task/intent]))))
+           (is (not-any? attributes [:seon.task/id :seon.task/plan]))))
        (is (:seon.error/at (task/open-tasks @connection '[:seon.no-such/attribute x])) "a refused read returns whole")))))
 
 (deftest two-edits-from-one-basis-the-second-refuses-and-the-winner-stays
@@ -110,23 +110,23 @@
      (let [basis (task/task-basis @connection {task-path "[]"})]
        (is (:seon.task/changed? (ingest! connection (task-text "First." "") basis)))
        (is (= :revision-conflict (refusal #(ingest! connection (task-text "Second." "") basis))))
-       (is (= "First." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))
+       (is (= "First." (:seon.task/plan (db/pull @connection [:seon.task/plan] [:seon.task/id handle]))))))))
 
 (deftest malformed-task-files-refuse-by-name-without-writing
   (test-support/with-database
    (fn [connection]
      (let [before (db/basis-t @connection)]
-       (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :intent \"i\"}]"
+       (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :plan \"i\"}]"
                             :unreadable-file "[{"
                             :invalid-entry "[#:seon.task{:name \"x\" :intnet \"i\"}]"
-                            :invalid-name "[#:seon.task{:name \"x y\" :intent \"i\"}]"
-                            :duplicate-name "[#:seon.task{:name \"x\" :intent \"i\"} #:seon.task{:name \"x\" :intent \"j\"}]"
+                            :invalid-name "[#:seon.task{:name \"x y\" :plan \"i\"}]"
+                            :duplicate-name "[#:seon.task{:name \"x\" :plan \"i\"} #:seon.task{:name \"x\" :plan \"j\"}]"
                             ;; a child takes its goal from its subject; a task with no parent has none to take
-                            :no-intent "[#:seon.task{:name \"x\" :instructions \"i\"}]"}]
+                            :no-plan "[#:seon.task{:name \"x\" :instructions \"i\"}]"}]
          (is (= rule (refusal #(ingest! connection text)))))
        (testing "only #{} at an optional set member is absence; other values, a retired or derived member included, meet the closed entry"
          (doseq [members [":unknown []" ":must-read #{a/b}" ":references #{a/b}" ":needs {}" ":id \"000000000000\"" ":id []"]]
-           (let [text (str "[#:seon.task{:name \"x\" :intent \"i\" " members "}]")
+           (let [text (str "[#:seon.task{:name \"x\" :plan \"i\" " members "}]")
                  refused (ingest! connection text)]
              (is (= :invalid-entry (:seon.task/refused refused)))
              (is (= (edn/read-string text) (:seon.error/offending refused)) "the diagnostic keeps the authored entry"))))
@@ -142,8 +142,8 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection [{:seon.task/id (seon.id/id ['tq.a "prove-ingestion" :function]) :seon.task/sym tag
-                                            :seon.task/ns 'tq.a :seon.task/name "prove-ingestion" :seon.task/intent "i"}])
-     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :intent \"i\"}]")))
+                                            :seon.task/ns 'tq.a :seon.task/name "prove-ingestion" :seon.task/plan "i"}])
+     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :plan \"i\"}]")))
      (is (= {:seon.task/id (seon.id/id ['tq.a "prove-ingestion"])}
             (db/pull @connection [:seon.task/id] [:seon.task/sym tag]))))))
 
@@ -199,11 +199,11 @@
         (let [publish! #(is (:seon.task/changed? (db/with-branch {:seon.db/connection source} (fn [] (ingest! source %))))
                             "the source admits the edit")
               adopt! #(test-support/transacted! destination (task/adopt-tasks-call @source @destination))
-              intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))
+              intent #(:seon.task/plan (db/pull @destination [:seon.task/plan] [:seon.task/id %]))
               own (task/task-handle 'tq.b "own")]
           (is (= [] (task/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
           (task/index-tasks! {:seon.db/connection destination :seon.task/basis {}
-                               :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :intent \"Mine.\"}]"}})
+                               :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :plan \"Mine.\"}]"}})
           (publish! (task-text "Prove ingestion." ""))
           (adopt!)
           (is (= ["Prove ingestion." "Mine."] (map intent [handle own])) "published arrives; a task the source never held stays")
@@ -258,13 +258,13 @@
      (let [declaration {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
                         :seon.task/name "prove-ingestion"}
            id handle
-           intent #(:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id id]))
+           intent #(:seon.task/plan (db/pull @connection [:seon.task/plan] [:seon.task/id id]))
            assigned (fn [] (select-keys (task/assignment @connection agent-id (get-in (db/db connection) [:config :branch])) [:seon.task/assigned :seon.task/proofs :seon.error/type]))]
        (is (:seon.task/assignment (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                                                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
            "a task whose proof has not run is assigned")
        (is (= id (:seon.task/assigned (assigned))) "the assignment answers before the revision")
-       (is (:seon.task/changed? (task/create! (assoc declaration :seon.task/intent "Second."
+       (is (:seon.task/changed? (task/create! (assoc declaration :seon.task/plan "Second."
                                                      :seon.task/basis {id (task/declaration (db/carried-projection @connection)
                                                                                            (db/pull @connection '[*] [:seon.task/id id]))}))))
        (is (= "Second." (intent)) "the task shows its revised declaration")
@@ -276,7 +276,7 @@
    (fn [connection]
      (test-support/transacted! connection (test-support/agent-tx @connection "revisor"))
      (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.r
-                                            :seon.task/name "bare" :seon.task/intent "No proof."}))
+                                            :seon.task/name "bare" :seon.task/plan "No proof."}))
            refused (task/assign! {:seon.db/connection connection :seon.task/assigned id
                                   :seon.task/agent [:seon.agent/id "revisor"] :seon.task/branch (get-in (db/db connection) [:config :branch])})]
        (is (= :no-proofs (:seon.task/refused refused)))
@@ -322,7 +322,7 @@
   (let [ignored (ignored-roots)
         entries (for [file (sort-by #(.getName ^java.io.File %) (.listFiles (io/file "resources/seon/tasks")))
                       entry (edn/read-string (slurp file))
-                      text (keep entry [:seon.task/intent :seon.task/instructions])
+                      text (keep entry [:seon.task/plan :seon.task/instructions])
                       path (keep :seon.ref/span (:seon.ref/spans (ref/document text)))
                       :when (str/includes? path "/")]
                   {:file (.getPath ^java.io.File file) :task (:seon.task/name entry) :path path})

@@ -163,7 +163,7 @@
    (fn [connection]
      (let [handle (task/task-handle 'tn.a "render-node")
            entry (str "[#:seon.task{:name \"render-node\""
-                      " :intent \"Render one node with `tn.a/f`.\\nThen stop.\"}]")
+                      " :plan \"Render one node with `tn.a/f`.\\nThen stop.\"}]")
            indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
            unit (fn [lookup distance]
@@ -175,30 +175,30 @@
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
        (testing "a task at distance 1 shows its intent and the references it cites; its proofs and subjects are related data"
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
-           (is (= "Render one node with `tn.a/f`.\nThen stop." (:seon.task/intent shown)))
+           (is (= "Render one node with `tn.a/f`.\nThen stop." (:seon.task/plan shown)))
            (is (= #{'tn.a/f} (:seon.task/references shown)))
            (is (= (list 'seon.task/obligations (list 'seon.db/db) (list 'quote 'tn.a/render-node)) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the obligations read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
        (testing "a schema's AI face is data: the form it replaces and what names the key"
          (let [usage (render.schema/render-ai
-                      (assoc (unit [:seon.schema/key :seon.task/intent] 1)
-                             :seon.render/value {:seon.schema/key :seon.task/intent
+                      (assoc (unit [:seon.schema/key :seon.task/plan] 1)
+                             :seon.render/value {:seon.schema/key :seon.task/plan
                                                  :seon.schema/definition [:string {:min 400}]}))]
            (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)))
            (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)))
            (is (not (contains? usage :seon.schema.usage/check))
                "the render validates nothing: a check is only the registration's record")))
        (testing "listed among others, a schema is its key and doc line as data"
-         (is (= {:seon.schema/key :seon.task/intent}
-                (render.schema/render-ai (unit [:seon.schema/key :seon.task/intent] 0))))
+         (is (= {:seon.schema/key :seon.task/plan}
+                (render.schema/render-ai (unit [:seon.schema/key :seon.task/plan] 0))))
          (is (str/starts-with? (:seon.schema.usage/doc (render.schema/render-ai (unit [:seon.schema/key :seon.task/ns] 0)))
                                "The owning namespace")))
        (testing "the form face is the usage read, shown and never run"
-         (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/intent (list 'quote [:string {:min 1}]))
-                (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))))
+         (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/plan (list 'quote [:string {:min 1}]))
+                (render.schema/render-form (unit [:seon.schema/key :seon.task/plan] 1)))))
        (testing "a stored-data check judges each entity's reconstructed value, once, at registration"
-         (let [check (db/stored-value-check database :seon.task/intent [:string {:max 0}])]
+         (let [check (db/stored-value-check database :seon.task/plan [:string {:max 0}])]
            (is (pos? (:seon.schema.usage/checked check)))
            (is (= (:seon.schema.usage/checked check) (:seon.schema.usage/failing check))
                "every stored intent is a non-empty string, so none satisfies an empty one"))
@@ -209,7 +209,7 @@
            (is (zero? (:seon.schema.usage/failing check))
                "a cardinality-many value is judged as its set, never datom by datom (Astra's 200/200)"))
          (is (nil? (binding [db/*read-database* database]
-                     (db/registration-check :seon.task/intent [:string {:min 1}])))
+                     (db/registration-check :seon.task/plan [:string {:min 1}])))
              "an unchanged form reads nothing"))))))
 
 (deftest a-function-renders-its-source-by-name

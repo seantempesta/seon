@@ -2,7 +2,7 @@
                [:map {:description "The task an agent holds as its effective task reads on its branch (seon.task/effective): the goal its chain shares and its step's own instructions."}
                 [:seon.task/id :seon.task/id]
                 [:seon.task/sym :seon.task/sym]
-                [:seon.task/intent :seon.task/intent]
+                [:seon.task/plan :seon.task/plan]
                 [:seon.task/instructions {:optional true} :seon.task/instructions]],
                :merged [:map {:description "What main's merge of a step before the held task moved, by family, each name shown one level (seon.ref/brief): its summary and the form that reads it, never its content; families absent when empty. Producer: seon.context/merged."}
                         [:seon.context/functions {:optional true} :seon.context/functions]
@@ -110,7 +110,7 @@
                :current-state-view
                [:map {:description "The block as the AI face shows it: the task without its handle."}
                 [:seon.context/task {:optional true}
-                 [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
+                 [:map [:seon.task/sym :seon.task/sym] [:seon.task/plan :seon.task/plan]
                   [:seon.task/instructions {:optional true} :seon.task/instructions]]]
                 [:seon.context/chain {:optional true} :seon.context/chain]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]

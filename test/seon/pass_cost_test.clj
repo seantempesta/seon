@@ -67,7 +67,7 @@
      (let [id (:seon.task/id
                (task/create! {:seon.db/connection connection :seon.agent/id agent-id
                               :seon.task/ns 'pass.cost :seon.task/name "read"
-                              :seon.task/intent "Read the held task."}))
+                              :seon.task/plan "Read the held task."}))
            assigned (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                    :seon.db/connection connection :seon.task/assigned id
                                    :seon.task/agent [:seon.agent/id agent-id]

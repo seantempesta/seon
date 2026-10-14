@@ -1203,9 +1203,9 @@ handle))}}
               {:datahike.query.dependency/sources
                [{:datahike.query.source/symbol '$
                  :datahike.query.source/argument-position 0
-                 :datahike.query.source/attributes #{:seon.task/intent}}]}
+                 :datahike.query.source/attributes #{:seon.task/plan}}]}
               :datahike.read/revision
-              {:datahike.read/attributes #{:seon.task/intent}
+              {:datahike.read/attributes #{:seon.task/plan}
                :datahike.read/cache-eligible? false}}
         rendered ((web-private 'debug-read-dependencies-html)
                   database

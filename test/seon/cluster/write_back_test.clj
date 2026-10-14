@@ -24,7 +24,7 @@
   [connection]
   (task/index-tasks! {:seon.db/connection connection
                       :seon.task/files {"resources/seon/tasks/tq.write-back.edn"
-                                        "[#:seon.task{:name \"fix\" :intent \"Merge and write back the tested change.\"}]"}})
+                                        "[#:seon.task{:name \"fix\" :plan \"Merge and write back the tested change.\"}]"}})
   'tq.write-back/fix)
 
 (defn- fixture-source
@@ -594,7 +594,7 @@
           (is (= {:seon.task/changed? true}
                  (select-keys (db/with-branch {:seon.db/connection c-conn}
                                               #(task/index-tasks! {:seon.db/connection c-conn
-                                                                   :seon.task/files {path "[#:seon.task{:name \"a\" :intent \"Do it.\"}]"}}))
+                                                                   :seon.task/files {path "[#:seon.task{:name \"a\" :plan \"Do it.\"}]"}}))
                               [:seon.task/changed? :seon.error/message]))
               "the branch holds the task in the database only")
           (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root

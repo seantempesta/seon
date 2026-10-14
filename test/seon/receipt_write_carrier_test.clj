@@ -64,7 +64,7 @@
                      :in $ ?task-id
                      :where
                      [?task :seon.task/id ?task-id]
-                     [?task :seon.task/intent _ ?tx]
+                     [?task :seon.task/plan _ ?tx]
                      [?tx :seon.db/receipt ?receipt]
                      [?receipt :seon.cluster.eval/id ?receipt-id]
                      [?tx :seon.db/user ?agent]

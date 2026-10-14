@@ -24,7 +24,7 @@
 
 (def ^:private task
   (str "[#:seon.task{:name \"related\""
-       " :intent \"Prove related data; read `rd.a/c`.\"}]"))
+       " :plan \"Prove related data; read `rd.a/c`.\"}]"))
 
 (defn- world!
   "Admit the fixture program and its task through their canonical writers."

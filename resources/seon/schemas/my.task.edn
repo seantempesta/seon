@@ -16,7 +16,7 @@
                        [:my.task/counterexample {:optional true} :my.task/counterexample]]]
           :refine-request [:map {:description "A refinement of the task an agent holds: a new goal or product, written on the subject that declares the goal (seon.task/goal-owner), or new instructions, its own step's work; prose naming its references as backticked fully qualified symbols, keywords and tasks and paths with #heading anchors. Connection and agent are supplied by call preparation."}
                            [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
-                           [:seon.task/intent {:optional true} :seon.task/intent]
+                           [:seon.task/plan {:optional true} :seon.task/plan]
                            [:seon.task/instructions {:optional true} :seon.task/instructions]
                            [:seon.task/product {:optional true} :seon.task/product]]
           :refined [:map {:description "A refinement as my.task/refine! answers it: the held task's handle, whether a declaration changed on the agent's branch, and each reference of the new text that does not resolve."}

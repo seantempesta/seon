@@ -156,7 +156,7 @@
           (hosted-run! hosted (pr-str (list 'seon.db/transact!
                                             (list 'quote {:tx-data [(support/task-row task-id "written by a hosted form")]}))))
           (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
-            (is (some? (db/q '[:find ?r . :in $ ?task-id :where [?n :seon.task/id ?task-id] [?n :seon.task/intent _ ?tx]
+            (is (some? (db/q '[:find ?r . :in $ ?task-id :where [?n :seon.task/id ?task-id] [?n :seon.task/plan _ ?tx]
                                [?tx :seon.db/receipt ?r]] database task-id))
                 "a form's own elided write lands on the branch, naming its evaluation")
             (is (nil? (db/q '[:find ?n . :in $ ?task-id :where [?n :seon.task/id ?task-id]] (db/db connection) task-id))
@@ -423,17 +423,17 @@
       (support/transacted! connection (support/agent-tx @connection "root"))
       (let [hosted (host-on! handle (branch!) "mcp/creator")
             create #(str "(seon.task/create! {:seon.task/ns '" host-ns " :seon.task/name \"trim-titles\""
-                         " :seon.task/intent " (pr-str %) "})")
+                         " :seon.task/plan " (pr-str %) "})")
             task-id (task/task-handle host-ns "trim-titles")]
         (is (= ["true"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")"))))
         (is (= ["false"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")")))
             "the same declaration again finds the task and changes nothing")
         (is (= [(pr-str [:revision-conflict "Trim titles." "Trim every title."])]
-               (hosted-run! hosted (str "((juxt :seon.task/refused (comp :seon.task/intent :seon.task/current)"
-                                        " (comp :seon.task/intent :seon.task/proposed)) " (create "Trim every title.") ")")))
+               (hosted-run! hosted (str "((juxt :seon.task/refused (comp :seon.task/plan :seon.task/current)"
+                                        " (comp :seon.task/plan :seon.task/proposed)) " (create "Trim every title.") ")")))
             "a different declaration without the revision I read refuses with current and proposed")
-        (is (= {:seon.task/intent "Trim titles." :seon.task/created-by {:seon.agent/id "mcp/creator"}}
-               (db/pull (db/db connection) [:seon.task/intent {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id task-id]))
+        (is (= {:seon.task/plan "Trim titles." :seon.task/created-by {:seon.agent/id "mcp/creator"}}
+               (db/pull (db/db connection) [:seon.task/plan {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id task-id]))
             "the task is on the cluster, written by the agent")))))
 
 (deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."

@@ -136,10 +136,10 @@
    (fn [running agent-id connection]
      (let [handle (support/running-cluster running)
            base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.rc}
-           cited (:seon.task/id (task/create! (assoc base :seon.task/name "cited" :seon.task/intent "A cited task.")))
+           cited (:seon.task/id (task/create! (assoc base :seon.task/name "cited" :seon.task/plan "A cited task.")))
            _ (support/declare-proof! connection 'tq.rc-test 'reuse 'tq.rc/reuse)
            id (:seon.task/id (task/create! (assoc base :seon.task/name "reuse"
-                                                  :seon.task/intent (str "Change `seon.context/step-start` after `tq.rc/cited`; "
+                                                  :seon.task/plan (str "Change `seon.context/step-start` after `tq.rc/cited`; "
                                                                          "validate with `malli.core/validator`."))))
            _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
                             :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
@@ -160,7 +160,7 @@
            "the second pass on the same database invokes no must-read producer")
        (is (= (:seon.ai/prompt first-prompt) (:seon.ai/prompt second-prompt))
            "the same database value prints the same prompt")
-       (task/create! (assoc base :seon.task/name "cited" :seon.task/intent "A revised cited task."
+       (task/create! (assoc base :seon.task/name "cited" :seon.task/plan "A revised cited task."
                             :seon.task/basis {cited (task/declaration (db/carried-projection @connection)
                                                                      (db/pull @connection '[*] [:seon.task/id cited]))}))
        (let [revised (db/db connection)

@@ -1354,7 +1354,7 @@
             (some #(when (= :seon.task/task (:seon.schema/key %)) %)
                   (:seon.schema.projection/catalog projection)))))
     (is (= :root (:seon.task.attempt/end attributes)))
-    (is (= :root (:seon.task/intent attributes)))
+    (is (= :root (:seon.task/plan attributes)))
     (is (= :add (:seon.error.occurrence/count attributes)))
     (is (not (contains? attributes :seon.message/to)))
     (is (empty? (set/intersection (set (keys attributes))

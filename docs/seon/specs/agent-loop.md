@@ -318,8 +318,7 @@ messages and errors are unread items shown in the block; `(help)` is the prefix,
 stored facts (a database value, never a connection), rendered by its declared AI render pair into pruned data in this
 order, and printed by the value printer like any evaluation, under the ordinary per-evaluation display budget (§2
 "Context tokens"; there is no block budget). Sections, each absent when empty:
-- **Task**: the task's current declaration (its plan, instructions and the names they reference; installed until S1a:
-  `intent`), read from the agent's branch. An update (`my.task/update!`, TASK-CHAIN §3a) is one transaction, so the
+- **Task**: the task's current declaration (its plan, instructions and the names they reference), read from the agent's branch. An update (`my.task/update!`, TASK-CHAIN §3a) is one transaction, so the
   block always shows the current declaration and never an older one. Task steps are shelved
   (owner 2026-10-08): the block shows none; the simplest parts of steps may later move into tasks themselves.
 - **Proofs**: each proof test by name with its current stored source, printed as code (whole for an ordinary deftest),
@@ -331,7 +330,7 @@ order, and printed by the value printer like any evaluation, under the ordinary 
   data as a red proof, plus the count still pending. These are blockers the agent fixes. A test already red at the
   merge base is marked so; it does not block the agent's `:done` and stops `merge!` for root.
 - **Must-reads**: built automatically from what the task names: its must-reads and the fully qualified symbols and
-  keywords backticked in its plan (installed until S1a: intent), each resolved to its current definition: arglists, contract and first docstring
+  keywords backticked in its plan, each resolved to its current definition: arglists, contract and first docstring
   line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. Library names resolve the same way
   (`malli.core/validator`, `datahike.versioning/merge!`, a namespace such as `datahike.norm.norm`): read-only from the
   host's loaded Var, with the project's pinned `reference-code/` revision, and nothing copied into the store.

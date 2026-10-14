@@ -17,7 +17,7 @@
            _ (is (:db-after setup))
            ctx (support/fork-cluster-ctx connection "returned-error")
            configuration (support/effective-config)
-           source "(seon.db/transact! [[:db/add [:seon.task/id \"erroritem000\"] :seon.task/intent 42]])"
+           source "(seon.db/transact! [[:db/add [:seon.task/id \"erroritem000\"] :seon.task/plan 42]])"
            before (db/basis-t @connection)
            result (support/evaluate
                    {:seon.cluster.eval/source source
@@ -45,8 +45,8 @@
            "the reply's :value is the shown text")
        (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))
-       (is (= "Verify" (:seon.task/intent
-                        (db/pull @connection [:seon.task/intent]
+       (is (= "Verify" (:seon.task/plan
+                        (db/pull @connection [:seon.task/plan]
                                  [:seon.task/id "erroritem000"]))))
        (is (= response
               (repl/response (dissoc result :seon.sci.admit/value :seon.sci.eval/ctx))))

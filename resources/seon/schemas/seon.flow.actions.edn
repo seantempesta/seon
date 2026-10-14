@@ -43,7 +43,7 @@
           [:seon.flow.actions/class {:optional true} :seon.flow.actions/class]
           [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]
           [:seon.task.attempt/relaunch {:optional true} :seon.task.attempt/relaunch]
-          [:seon.task/intent {:optional true} :seon.task/intent]
+          [:seon.task/plan {:optional true} :seon.task/plan]
           [:db/id {:optional true} :seon.db/entity-id]]
  :actions [:vector :seon.flow.actions/action]
  :main-end [:and {:description "The end main holds on an assignment, beside the end its branch holds."} :seon.task.attempt/end]

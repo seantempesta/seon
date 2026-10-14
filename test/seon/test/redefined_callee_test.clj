@@ -135,7 +135,7 @@
      (let [agent-id (str "tag-reader-" (random-uuid))
            _ (support/own-branch-agent!
               running agent-id
-              (str "(seon.task/create! {:seon.task/ns 'rc.tags :seon.task/name \"next-step\" :seon.task/intent \"The next step.\"})\n"
+              (str "(seon.task/create! {:seon.task/ns 'rc.tags :seon.task/name \"next-step\" :seon.task/plan \"The next step.\"})\n"
                    "(ns rc.tags (:require [clojure.test :refer [deftest is]]))\n"
                    "(deftest step-proof (is (seq (:seon.task/proofs (seon.task/obligations (seon.db/db) 'rc.tags/next-step)))))"))
            check "(select-keys (my.test/check {:seon.test/identities #{'rc.tags/step-proof}}) [:seon.test/passed? :seon.test/executed-count :seon.test/reused-count])"

@@ -7,7 +7,7 @@
  :ns [:symbol {:description "The owning namespace: the task file's stem, resources/seon/tasks/<ns>.edn."}]
  :name [:string {:min 1 :description "The readable name, one symbol's name (seon.task/symbol-name?); with :ns the identifying aspect and the task's symbol."}]
  :step [:enum {:description "The step kind: Prove supplies new red product tests; Implement makes its proofs green, its subject's tagged tests and its product among them. A task declaring none is judged by its own tagged tests (seon.task/obligations)."} :prove :implement]
- :intent [:string {:min 1 :description "The goal every step of a chain shares: declared on the subject (required on a task with no parent), inherited down :seon.task/children, a child's own value overwriting (seon.task/effective)."}]
+ :plan [:string {:min 1 :description "The plan: Markdown that starts as the user's request and that every task improves, in blocks such as ## Problem, ## What exists and ## Approach, with the references it cites (seon.ref/names). Declared on the subject (required on a task with no parent), inherited down :seon.task/children, a child's own value overwriting (seon.task/effective)."}]
  :instructions [:string {:min 1 :description "A step's own work, beside the goal it shares: declared on the step, never inherited past a task that declares its own (seon.task/effective); my.task/refine! writes it on the held step."}]
  :references [:set {:min 1 :seon.db/index true :seon.program/definition-edge true
                      :description "The qualified symbols the task's intent and instructions cite as code spans (seon.ref/names), derived by the task writer whenever either is written; never authored."}
@@ -15,13 +15,13 @@
  :tasks [:set {:min 1 :seon.db/index true :seon.db/reference-to :seon.task/sym :description "The task symbols a definition's :seon/tasks names, as symbol values (never refs). On a deftest they are the tasks it proves; anywhere else the tasks it is subject to."} :qualified-symbol]
  :entry [:map {:closed true :description "Retired: the running JVM's task file schema until it reloads; seon.task/file-declarations now validates each entry as a closed :seon.task/declaration. Deleted with :seon.task/file by seon.task/retire-entry-schema."}
          [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-         [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
+         [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
          [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]]
  :file [:vector :seon.task/entry]
  :files [:map-of {:description "Task file path to its exact text; a deleted file is \"[]\", an empty declaration."} [:string {:min 1}] :string]
  :declaration [:map {:description "A task's declared content, compared as its revision (7.16), and the one list of its members (seon.task/declaration-members): a task file entry is one, closed, its :seon.task/ns the file's and empty sets absent; create! writes these members. Its handle and symbol derive from it."}
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
-               [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
+               [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
                [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
                [:seon.task/proofs {:optional true} :seon.task/proofs]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
@@ -30,7 +30,7 @@
               :seon.render/form seon.render.ns/task-form}
         [:seon.task/id :seon.task/id] [:seon.task/sym :seon.task/sym] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
         [:seon.task/step {:optional true} :seon.task/step]
-        [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/instructions {:optional true} :seon.task/instructions]
+        [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
         [:seon.task/references {:optional true} :seon.task/references]
         [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/outcome {:optional true} :seon.task/outcome] [:seon.task/reason {:optional true} :seon.task/reason]
         [:seon.task/faults {:optional true} :seon.task/faults]
@@ -58,12 +58,12 @@
                   :description "The function a firing of this task calls in the clock proc instead of creating an attempt (runtime-follows-db §6)."}
             :seon.db/ref]
  :effective [:map {:description "A step's effective task (seon.task/effective): its handle and symbol, and clojure.core/merge of the intent, instructions and product declared from its root subject down :seon.task/children to it, its own last."}
-             [:seon.task/id :seon.task/id] [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
+             [:seon.task/id :seon.task/id] [:seon.task/sym :seon.task/sym] [:seon.task/plan :seon.task/plan]
              [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/product {:optional true} :seon.task/product]]
  :attempt-of [:and {:seon.db/index true :description "The task an assignment row is an attempt of, as a ref, written beside the handle value :seon.task/assigned (runtime-follows-db §2)."} :seon.db/ref]
  :held-view [:map {:description "The task an agent holds as its opening shows it: name and intent, with the read of its proofs offered."}
              [:seon.task/id :seon.task/id] [:seon.task/name {:optional true} :seon.task/name]
-             [:seon.task/intent {:optional true} :seon.task/intent]
+             [:seon.task/plan {:optional true} :seon.task/plan]
              [:seon.render/operations :seon.render/operations]]
  :of-agent [:and {:seon.render/derived true
                   :description "The task an agent holds, derived from its latest assignment at main (seon.task/agent-task); no datom stores it. The agent's attachment, so its task stays in its opening across compaction."
@@ -163,14 +163,14 @@
  :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]
         [:seon.task/ns {:optional true} :seon.task/ns]
-        [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/references {:optional true} :seon.task/references]]
+        [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/references {:optional true} :seon.task/references]]
  :dangling [:map-of :seon.task/sym [:set :symbol]] :triage [:set :seon.task/sym]
  :findings [:map [:seon.task/dangling :seon.task/dangling] [:seon.task/triage :seon.task/triage]]
  :request [:map [:seon.db/connection :seon.db/connection] [:seon.task/files :seon.task/files] [:seon.task/basis {:optional true} :seon.task/basis]]
  :changed? :boolean
  :report [:map [:seon.task/changed? :seon.task/changed?] [:seon.db/transaction-report {:optional true} :seon.db/transaction-report]]
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
-           :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry :no-intent
+           :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry :no-plan
            :invalid-name :duplicate-name :misplaced-file :revision-conflict :dangling-id
            :unknown-task :unassigned :revised-since-assignment :needs-cycle :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]

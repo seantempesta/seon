@@ -24,10 +24,10 @@
       (nil? defined) [{:seon.fn/sym function-symbol :seon.contracts/absent true}]
       :else (fn/contract-findings database {:seon.fn.contract/selected #{function-symbol}}))))
 
-(defn- intent
-  "The task's intent: what must become true, the guide by path and the function by
+(defn- plan
+  "The task's plan: what must become true, the guide by path and the function by
   its backticked symbol, which the resolver pulls into context; nothing copied."
-  {:malli/schema [:=> [:cat :seon.fn/sym :boolean] :seon.task/intent]}
+  {:malli/schema [:=> [:cat :seon.fn/sym :boolean] :seon.task/plan]}
   [function-symbol host-bound?]
   (str "Give `" function-symbol "` a complete Malli contract that checks what its boundary is for, "
        "with the cheapest schema that checks it (`" guide "`): registered names, every input and output, "
@@ -59,7 +59,7 @@
       host-bound?
       {:seon.task/ns (symbol (namespace function-symbol))
        :seon.task/name (str "contract-" (name function-symbol))
-       :seon.task/intent (intent function-symbol (true? host-bound?))})))
+       :seon.task/plan (plan function-symbol (true? host-bound?))})))
 
 (def ^:private candidate-query
   ;; Source functions with no contract: test roots, macros and value defs
@@ -121,7 +121,7 @@
   "The bug yield of contract tasks, by function.
 
   For each of `function-symbols`, the other
-  tasks whose intent cites it (the producer tasks its contract work
+  tasks whose plan cites it (the producer tasks its contract work
   filed), or the refused read."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.fn/sym]]
                   [:or [:map-of :seon.fn/sym [:set :qualified-symbol]] :seon.db/invalid-read-error]]}

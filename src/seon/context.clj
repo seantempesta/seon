@@ -181,12 +181,12 @@
 
 (defn- task-references
   "Every reference the held task makes, resolved once on `database` by the one rule (`seon.ref/references`): the
-  names and paths its effective intent and instructions cite and its `proofs`. The tasks it needs are its chain's
+  names and paths its effective plan and instructions cite and its `proofs`. The tasks it needs are its chain's
   steps before it (`chain`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/task [:set :seon.test/sym]]
                   [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
-  [database {:seon.task/keys [intent instructions]} proofs]
-  (ref/references database {:seon.ref/text (cond-> intent instructions (str "\n\n" instructions))
+  [database {:seon.task/keys [plan instructions]} proofs]
+  (ref/references database {:seon.ref/text (cond-> plan instructions (str "\n\n" instructions))
                             :seon.ref/names proofs}))
 
 (def ^:private merged-families
@@ -581,7 +581,7 @@
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
         (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps] reads))
-            (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/instructions])}
+            (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/plan :seon.task/instructions])}
               steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
                             (update proven :seon.context/proof-list

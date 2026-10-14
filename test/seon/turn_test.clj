@@ -2008,7 +2008,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.ends.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"}]"}})
      (let [h (task/task-handle 'tq.ends "a")
            agent-id "tq-end-agent"
            _ (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
@@ -2028,7 +2028,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.backs.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"} #:seon.task{:name \"b\" :intent \"Do b.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"} #:seon.task{:name \"b\" :plan \"Do b.\"}]"}})
      (let [h (task/task-handle 'tq.backs "b")
            agent-id "tq-back-agent"
            _ (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
@@ -2045,7 +2045,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.holds.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"}]"}})
      (let [agent-id "tq-held-agent"
            handle (task/task-handle 'tq.holds "a")]
        (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
@@ -2064,7 +2064,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.noproof.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"}]"}})
      (let [agent-id "tq-noproof-agent"]
        (doseq [id ["root" agent-id]] (support/transacted! connection (support/agent-tx (db/db connection) id)))
        (support/transacted! connection [[:db/add [:seon.task/id (task/task-handle 'tq.noproof "a")] :seon.task/execution :running]])
@@ -2092,7 +2092,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.reused.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"}]"}})
      (support/declare-proof! connection 'tq.reused-test 'proves-a 'tq.reused/a)
      (let [agent-id "tq-reused-agent"
            handle (task/task-handle 'tq.reused "a")
@@ -2113,7 +2113,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.preds.edn"
-                                           "[#:seon.task{:name \"a\" :intent \"Do a.\"}]"}})
+                                           "[#:seon.task{:name \"a\" :plan \"Do a.\"}]"}})
      (support/declare-proof! connection 'tq.preds-test 'proves-a 'tq.preds/a)
      (let [agent-id "tq-pred-agent"
            handle (task/task-handle 'tq.preds "a")
@@ -2138,7 +2138,7 @@
    (fn [connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/tq.prodloop.edn"
-                                           (str "[#:seon.task{:name \"s\" :intent \"Prove then do.\""
+                                           (str "[#:seon.task{:name \"s\" :plan \"Prove then do.\""
                                                 " :children #{[:seon.task/sym tq.prodloop/prove] [:seon.task/sym tq.prodloop/body]}}"
                                                 " #:seon.task{:name \"prove\" :step :prove :instructions \"Write both.\""
                                                 " :product #{tq.prodloop-test/table tq.prodloop-test/law}}"
@@ -2176,7 +2176,7 @@
                                       "test")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.brk)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.brk :seon.task/name "area" :seon.task/intent "Square."}))
+                                            :seon.task/ns 'tq.brk :seon.task/name "area" :seon.task/plan "Square."}))
            _ (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                             :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
            before (db/commit-id (db/db connection))]
@@ -2206,7 +2206,7 @@
                                       "test")
            {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.base)")
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
-                                            :seon.task/ns 'tq.base :seon.task/name "area" :seon.task/intent "Square."}))
+                                            :seon.task/ns 'tq.base :seon.task/name "area" :seon.task/plan "Square."}))
            assignment (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
            on-main (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base]

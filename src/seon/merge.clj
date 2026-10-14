@@ -148,7 +148,7 @@
   [connection branch {:keys [entity attribute]}]
   (let [created (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'seon.task
                                :seon.task/name (str "squash-conflict-" (id/id [:squash-conflict entity attribute]))
-                               :seon.task/intent (str "Branch " (name branch) " and main both changed " attribute
+                               :seon.task/plan (str "Branch " (name branch) " and main both changed " attribute
                                                       " of entity " entity " since their merge base; main kept its value."
                                                       " Read the three values with seon.merge/squash-merge and decide.")})]
     (when (:seon.error/at created)

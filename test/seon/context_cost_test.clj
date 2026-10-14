@@ -17,7 +17,7 @@
                         'seon.task/agent-attempt 'seon.task/agent-task 'seon.db/pull 'seon.db/q}
            id (:seon.task/id
                (task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/intent (str "Read " (str/join ", " (map #(str "`" % "`") (sort references))) ".")}))]
+                              :seon.task/ns 'context.cost :seon.task/name "read" :seon.task/plan (str "Read " (str/join ", " (map #(str "`" % "`") (sort references))) ".")}))]
        (is (not (:seon.error/type
                  (task/assign! {:seon.agent/context-source (support/running-cluster running)
                                 :seon.db/connection connection :seon.task/assigned id

@@ -149,7 +149,7 @@
 (deftest a-referenced-task-shows-its-intent
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/a-reference-with-no-path-is-a-missing-file`"})]
     (is (= 'seon.ref/a-reference-with-no-path-is-a-missing-file (:seon.ref/name entry)))
-    (is (string? (:seon.task/intent entry)) "a task resolves to its own content, its intent")))
+    (is (string? (:seon.task/plan entry)) "a task resolves to its own content, its intent")))
 
 (deftest a-referenced-test-shows-its-own-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
@@ -254,7 +254,7 @@
      (let [database (db/db)]
        (testing "explicit and bare forms of one name resolve to the same identity"
          (doseq [[explicit bare] [["`seon.task/obligations`" "seon.task/obligations"]
-                                  ["`:seon.task/intent`" ":seon.task/intent"]
+                                  ["`:seon.task/plan`" ":seon.task/plan"]
                                   ["`docs/seon/schedule/cards/TASK-CHAIN.md#7-slices`" "docs/seon/schedule/cards/TASK-CHAIN.md#7-slices"]]]
            (is (seq (identities database explicit)) "the explicit form resolves")
            (is (= (identities database explicit) (identities database (str "Read " bare " first.")))
@@ -306,7 +306,7 @@
                  ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
                 [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.ns/function-ai]
                 [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.schema/render-ai]
-                [:attribute "`:seon.task/intent`" [:seon.task/intent nil nil] 'seon.render.schema/render-ai]
+                [:attribute "`:seon.task/plan`" [:seon.task/plan nil nil] 'seon.render.schema/render-ai]
                 [:error-type "`:my.fs/not-found-error`" [:my.fs/not-found-error nil nil] 'seon.render.schema/render-ai]
                 [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.schema/render-ai]
                 [:namespace "`my.agent`" ['my.agent nil nil] 'seon.render.ns/render-ai]

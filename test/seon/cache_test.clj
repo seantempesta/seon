@@ -156,7 +156,7 @@
 (deftest a-kinds-weight-counts-its-value-not-its-key
   (let [digest (apply str (repeat 64 "a"))
         declarations (into {} (map (fn [i] [(str "t" i) {:seon.task/name (symbol (str "n" i))
-                                                          :seon.task/intent (apply str (repeat 200 "x"))}])) (range 200))
+                                                          :seon.task/plan (apply str (repeat 200 "x"))}])) (range 200))
         tx (mapv (fn [i] [:db/add i :seon.task/execution :held]) (range 200))
         world {:seon.cluster/key digest :seon.cluster/absent digest
                :seon.cluster/digests (into {} (map (fn [i] [(keyword "k" (str i)) digest])) (range 3000))

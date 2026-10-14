@@ -17,7 +17,7 @@
         projection (schema/projection-from-database database)
         source "(seon.db/transact! [[:db/add [:example/order \"a1\"] :example/amount \"wrong\"]])"
         transaction (mapv (fn [n] [:db/add (str "feedback/measure-" n)
-                                  :seon.task/intent "A valid title"])
+                                  :seon.task/plan "A valid title"])
                           (range 50))]
     (schema/call-with-projection
      projection

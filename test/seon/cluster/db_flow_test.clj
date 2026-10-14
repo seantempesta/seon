@@ -297,7 +297,7 @@
   (test-support/seed-cluster! connection "tq-chain")
   (task/index-tasks! {:seon.db/connection connection
                       :seon.task/files {(str "resources/seon/tasks/" *space* ".edn") (str "[" (apply str (for [[task-name [needs _ step]] (sort tasks)]
-                                                                       (str "#:seon.task{:name \"" task-name "\" :intent \"Do " task-name ".\""
+                                                                       (str "#:seon.task{:name \"" task-name "\" :plan \"Do " task-name ".\""
                                                                             (when step (str " :step " step))
                                                                             (when (seq needs)
                                                                               (str " :needs #{" (apply str (map #(str "[:seon.task/sym " *space* "/" % "] ") needs)) "}"))
@@ -530,7 +530,7 @@
     (when work (define-on! branch-connection (symbol (namespace proof-sym)) work))
     (test-support/transacted!
      branch-connection
-     (into [{:db/id [:seon.task/id (chain-handle task-name)] :seon.task/intent "Refined on the branch."}
+     (into [{:db/id [:seon.task/id (chain-handle task-name)] :seon.task/plan "Refined on the branch."}
             [:db/add [:seon.task/assignment key] :seon.task.attempt/end end]
             [:db/add [:seon.task/assignment key] :seon.task.attempt/commit (db/commit-id (db/db branch-connection))]]
            (concat (when (not= :done end)
@@ -578,7 +578,7 @@
                                 :seon.config/manifest {:seon.config.agent/keep-ended-branches? true}}))
               (pass! handle routing)
               (let [[key branch agent-id a] (end-on-branch! handle connection "e" :done proves-e twice-work)
-                    intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
+                    intent #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id (chain-handle "e")]))]
                 (is (= #{[key branch agent-id :open]} (attempts connection "e")) "before the pass main lacks the end")
                 (pass! handle routing)
                 (let [database (db/db connection)
@@ -586,7 +586,7 @@
                   (is (= 1 (count txs)) "one end copy")
                   (is (= tx (db/q '[:find ?tx . :in $ ?a :where [?a :seon.task.attempt/end :done ?tx]] database a))
                       "carrying the end")
-                  (is (= tx (db/q '[:find ?tx . :in $ ?h :where [?t :seon.task/id ?h] [?t :seon.task/intent "Refined on the branch." ?tx]]
+                  (is (= tx (db/q '[:find ?tx . :in $ ?h :where [?t :seon.task/id ?h] [?t :seon.task/plan "Refined on the branch." ?tx]]
                                   database (chain-handle "e")))
                       "and the refinement")
                   (is (= branch (db/q '[:find ?b . :in $ ?tx :where [?tx :seon.squash/source-branch ?b]] database tx))
@@ -634,7 +634,7 @@
                 (dotimes [_ 4] (when (seq (due)) (pass! handle routing)))
                 (is (empty? (mapv :seon.flow.actions/op (due))) "the passes its writes wake leave nothing to derive"))
               (is (not (contains? (registry/branches store) branch)) "and its branch is deleted")
-              (is (= "Refined on the branch." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+              (is (= "Refined on the branch." (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
                                                                           [:seon.task/id (chain-handle "e")])))
                   "while main keeps what merged")
               (let [measured (profile/measure #(pass! handle routing))]
@@ -650,18 +650,18 @@
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
                 store (agent/handle-store handle)
-                intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id (chain-handle "e")]))]
+                intent #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id (chain-handle "e")]))]
             (pass! handle routing)
             (let [[key branch] (end-on-branch! handle connection "e" :given-back)
-                  problem #(db/pull (db/db connection) [:seon.task/intent]
+                  problem #(db/pull (db/db connection) [:seon.task/plan]
                                     [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key))])]
               (pass! handle routing)
               (is (= #{[key branch (str "attempt/" key) :given-back]} (attempts connection "e")) "main holds the end")
               (is (= "Do e." (intent)) "and no refinement")
               (is (contains? (registry/branches store) branch) "the branch stays")
-              (is (str/includes? (str (:seon.task/intent (problem))) (name branch))
+              (is (str/includes? (str (:seon.task/plan (problem))) (name branch))
                   "root's problem task names the branch")
-              (is (str/includes? (str (:seon.task/intent (problem))) "The proof asks the impossible.")
+              (is (str/includes? (str (:seon.task/plan (problem))) "The proof asks the impossible.")
                   "and the reason")
               (pass! handle routing)
               (is (= 1 (count (copies (db/db connection) branch))) "a second pass writes nothing")
@@ -686,7 +686,7 @@
           (let [routing (:seon.agent/routing handle)]
             (pass! handle routing)
             (let [[key] (end-on-branch! handle connection "e" :capped)
-                  intent #(str (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                  intent #(str (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
                                                            [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" key))])))]
               (pass! handle routing)
               (is (= 1 (count (attempts connection "e"))) "an end with no work is not relaunched")
@@ -804,7 +804,7 @@
                                   [:seon.task.attempt/end :seon.task/outcome :seon.task/refusal]))
                   "the refused merge is recorded beside the assignment's own end, not an outcome")
               (let [intents (db/q '[:find [?i ...] :in $ ?k :where [?t :seon.task/sym ?s] [(namespace ?s) ?n] [(= ?n "seon.task")]
-                                    [?t :seon.task/intent ?i] [(clojure.string/includes? ?i ?k)]]
+                                    [?t :seon.task/plan ?i] [(clojure.string/includes? ?i ?k)]]
                                   database key)]
                 (is (= 1 (count intents)) "the refusal is delivered to root as one problem task naming the assignment")
                 (is (every? #(clojure.string/includes? % ":seon.source/write-back-error") intents) "which names the refusal's type"))
@@ -827,10 +827,10 @@
                 declaration (fn [database] (task/declaration (db/carried-projection database) (db/pull database '[*] [:seon.task/id h])))
                 refine! (fn [conn agent-id intent]
                           (task/create! {:seon.db/connection conn :seon.agent/id agent-id :seon.task/ns (symbol *space*)
-                                         :seon.task/name "r" :seon.task/intent intent
+                                         :seon.task/name "r" :seon.task/plan intent
                                          :seon.task/basis {h (declaration (db/db conn))}}))
-                intent #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id h]))
-                child #(db/pull (db/db connection) [:seon.task/intent] [:seon.task/sym (symbol *space* "rc")])
+                intent #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id h]))
+                child #(db/pull (db/db connection) [:seon.task/plan] [:seon.task/sym (symbol *space* "rc")])
                 problems #(set (db/q '[:find [?s ...] :where [?t :seon.task/sym ?s] [(namespace ?s) ?n] [(= ?n "seon.task")]
                                        [(str ?s) ?text] [(clojure.string/includes? ?text "squash-conflict")]]
                                      (db/db connection)))]
@@ -847,9 +847,9 @@
               (is (true? (:seon.task/changed? (refine! on-branch agent-id "Refined by the agent."))) "the agent refines its task")
               (is (true? (:seon.task/changed? (task/create! {:seon.db/connection on-branch :seon.agent/id agent-id
                                                              :seon.task/ns (symbol *space*) :seon.task/name "rc"
-                                                             :seon.task/intent "A child of mine."}))))
+                                                             :seon.task/plan "A child of mine."}))))
               (is (= "Do r." (intent)) "main's intent is unchanged while the attempt runs")
-              (is (nil? (:seon.task/intent (child))) "and main holds no child task yet")
+              (is (nil? (:seon.task/plan (child))) "and main holds no child task yet")
               (is (true? (:seon.task/changed? (refine! connection "root" "Refined by root."))) "root edits the same intent on main")
               ;; its work, so its :done end is accepted
               (define-on! on-branch (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
@@ -859,7 +859,7 @@
               (pass! handle routing)
               (is (= "Refined by root." (intent)) "after the end copy main keeps root's concurrent edit")
               (is (= 1 (count (problems))) "and writes exactly one problem task for it")
-              (is (= "A child of mine." (:seon.task/intent (child))) "the agent's child task reached main with the end")))))))))
+              (is (= "A child of mine." (:seon.task/plan (child))) "the agent's child task reached main with the end")))))))))
 
 ;;; P7: a message travels on the recipient's inbox channel and is written once, by the recipient, on its own branch.
 
@@ -1264,7 +1264,7 @@
                 store (agent/handle-store handle)
                 rows (str *space* "-rows")
                 doubled (symbol rows "doubled")
-                problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                problem #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
                                                      [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" %))]))]
             ;; u's red proof lives in the checkout, beside the function it reaches
             (checkout! connection {(str "test/" (str/replace rows #"[.-]" {"." "/" "-" "_"}) ".clj")
@@ -1330,7 +1330,7 @@
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
                 store (agent/handle-store handle)
-                problem #(:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
+                problem #(:seon.task/plan (db/pull (db/db connection) [:seon.task/plan]
                                                      [:seon.task/sym (symbol "seon.task" (str "unfinished-task-" %))]))
                 work 'tq.relaunch-work/worked
                 holds-work? #(some? (db/q '[:find ?f . :in $ ?s :where [?f :seon.fn/sym ?s]] % work))]
@@ -1452,7 +1452,7 @@
 
 (def ^:private full-chain-input
   "The `:seon.task/chain-input` of A7: the subject, the five templates in order, no customizations."
-  [{:seon.task/ns 'tq.fullchain :seon.task/name "fix" :seon.task/intent "Make `tq.fullchain-rows/twice` double its input."
+  [{:seon.task/ns 'tq.fullchain :seon.task/name "fix" :seon.task/plan "Make `tq.fullchain-rows/twice` double its input."
     :seon.task/answer-schema :seon.task/approval}
    '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement]
    {}])
@@ -1460,15 +1460,15 @@
 (def ^:private full-chain-replies
   "Each model step's one scripted reply, in chain order: Survey asks the user and records the approval its reply
   carries; Define, Design and Prove grow the subject's document; Prove adds the red product; Implement turns it green."
-  [(str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+  [(str "(my.task/refine! {:seon.task/plan \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
         "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\"})\n"
         "(my.message/send {:my.message/to \"user\" :my.message/content \"Approve this intent?\"})\n(my.turn/wait)")
    (str "(let [[reply] (my.message/inbox)] (my.agent/answer! {:seon.task/sym 'tq.fullchain/survey-fix "
         ":my.message/id (:my.message/id reply) :seon.answer/value {:seon.task/approved? true}}))")
-   (str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+   (str "(my.task/refine! {:seon.task/plan \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
         "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\\n\\n## Examples\\n\\n2 gives 4.\\n\\n"
         "## Expected cost\\n\\nNo claim.\"})")
-   (str "(my.task/refine! {:seon.task/intent \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
+   (str "(my.task/refine! {:seon.task/plan \"Make `tq.fullchain-rows/twice` double its input.\\n\\n## Problem\\n\\n"
         "`tq.fullchain-rows/twice` is unwritten.\\n\\n## What exists\\n\\nNothing yet.\\n\\n## Examples\\n\\n2 gives 4.\\n\\n"
         "## Expected cost\\n\\nNo claim.\\n\\n## Approach\\n\\nOne contracted function.\"})")
    (str "(in-ns 'tq.fullchain-rows)\n"
@@ -1519,7 +1519,7 @@
        (is (= :done (:seon.profile/value measured)) "the subject is done")
        (is (= (repeat 5 [:merged]) (map outcome-of steps)) "each of the five steps merged once")
        (is (true? @replied) "Survey asked the user, and the user's reply was the test body's only write after running")
-       (is (str/includes? (:seon.task/intent (db/pull main [:seon.task/intent] [:seon.task/id subject])) "## Approach")
+       (is (str/includes? (:seon.task/plan (db/pull main [:seon.task/plan] [:seon.task/id subject])) "## Approach")
            "the subject's intent accumulated every stage's sections")
        (is (seq (db/datoms main :avet :seon.test/sym 'tq.fullchain-rows/twice-doubles)) "main holds the product test")
        (is (every? some? (map #(db/q '[:find ?g . :in $ ?h :where [?a :seon.task/assigned ?h] [?a :seon.task/git-commit ?g]] main %)

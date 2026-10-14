@@ -152,7 +152,7 @@
       (mapv (fn [{:seon.task/keys [name] :as entry}]
               (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
               ;; a child takes its goal from its subject; a task no entry owns has none to take
-              (when-not (or (:seon.task/intent entry) (children (task-sym ns name))) (refuse-task! :no-intent entry {}))
+              (when-not (or (:seon.task/plan entry) (children (task-sym ns name))) (refuse-task! :no-plan entry {}))
               (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
             entries))))
 
@@ -272,10 +272,10 @@
         (refused 'seon.task/refuse-needs-cycle :needs-cycle (symbol (namespace (first syms))) syms)))))
 
 (defn- with-references
-  "`task` with the references its intent and instructions cite (`seon.ref/names`), derived by the writer; none is no key."
+  "`task` with the references its plan and instructions cite (`seon.ref/names`), derived by the writer; none is no key."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:seon.task/keys [intent instructions] :as task}]
-  (let [cited (into #{} (mapcat ref/names) (keep identity [intent instructions]))]
+  [{:seon.task/keys [plan instructions] :as task}]
+  (let [cited (into #{} (mapcat ref/names) (keep identity [plan instructions]))]
     (if (seq cited) (assoc task :seon.task/references cited) (dissoc task :seon.task/references))))
 
 (defn- task-delta
@@ -289,7 +289,7 @@
   [projection stored by-id basis]
   (let [owned (conj (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))
                     :seon.task/references)
-        ;; what the writer holds for a task: its declaration and the references derived from its intent
+        ;; what the writer holds for a task: its declaration and the references derived from its plan
         held (fn [task] (when task (cond-> (declaration projection task)
                                      (seq (:seon.task/references task)) (assoc :seon.task/references (set (:seon.task/references task))))))
         owned-children (into #{} (mapcat :seon.task/children) (concat (vals stored) (vals by-id)))]
@@ -453,7 +453,7 @@
         revision #(if % (id/digest 64 [%]) :absent)]
     (task-entity {:seon.task/ns 'seon.task
                   :seon.task/name (str "adoption-conflict-" (id/id [:adoption-conflict handle (revision theirs) (revision ours)]))
-                  :seon.task/intent (str "The published task files and main both revised task `" (task-sym task-ns task-name) "`"
+                  :seon.task/plan (str "The published task files and main both revised task `" (task-sym task-ns task-name) "`"
                                          " since the adopted source commit; main kept its value."
                                          " Read the three declarations with seon.task/task-declaration and decide.")}
                  "root")))
@@ -693,13 +693,13 @@
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
   name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
   tasks as lookup refs `[:seon.task/sym ns/name]`, and needs that would leave a task
-  waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the intent and
+  waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the plan and
   instructions; a step declares its own `:seon.task/instructions` and takes the goal it omits from its subject.
 
   ## Example
 
   ```clojure
-  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/intent \"Trim reply titles.\"})
+  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\" :seon.task/plan \"Trim reply titles.\"})
   ```"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -720,7 +720,7 @@
 (defn- chain-copy
   "The copy of `template` that the chain of the subject `ns`/`subject-name` takes from `database`: named by template
   name + `-` + subject name in the subject's namespace, with the template's step, instructions and proofs (its
-  `obligations`' proofs), never its worked-example intent, then `customization` over them; it needs the copy `before`
+  `obligations`' proofs), never its worked-example plan, then `customization` over them; it needs the copy `before`
   it. nil when no task is named `template`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/ns :seon.task/name :seon.task/sym [:maybe :seon.task/sym]
                        [:maybe :seon.task/customization]]
@@ -747,7 +747,7 @@
   ## Example
 
   ```clojure
-  (seon.task/chain! connection {:seon.task/ns 'work :seon.task/name \"fix\" :seon.task/intent \"Fix the observed failure.\"}
+  (seon.task/chain! connection {:seon.task/ns 'work :seon.task/name \"fix\" :seon.task/plan \"Fix the observed failure.\"}
                     '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement] {})
   ```"
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/declaration :seon.task/templates :seon.task/customizations]
@@ -1093,13 +1093,13 @@
 
 (defn effective
   "The effective task of `handle` in `database`: its handle and symbol, and `clojure.core/merge` of the
-  `:seon.task/intent`, `:seon.task/instructions` and `:seon.task/product` each task declares from its root subject down
+  `:seon.task/plan`, `:seon.task/instructions` and `:seon.task/product` each task declares from its root subject down
   `:seon.task/children` to it, its own keys last. Content merges down children only, never along needs.
   nil when `database` holds no such task."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/effective :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database handle]
-  (let [content [:seon.task/intent :seon.task/instructions :seon.task/product]
+  (let [content [:seon.task/plan :seon.task/instructions :seon.task/product]
         set-member? (into #{} (keep (fn [[k set?]] (when set? k))) (declaration-members (db/carried-projection database)))
         declared (fn [task] (into {} (map (fn [[k v]] [k (if (set-member? k) (set v) v)])) task))
         step (db/pull database (into [:db/id :seon.task/id :seon.task/sym] content) [:seon.task/id handle])]
@@ -1116,17 +1116,17 @@
 
 (defn goal-owner
   "The handle of the task that declares the goal task `handle` reads in `database` (`effective`): itself when
-  it declares a `:seon.task/intent`, else its nearest ancestor up `:seon.task/children` that does; nil when
+  it declares a `:seon.task/plan`, else its nearest ancestor up `:seon.task/children` that does; nil when
   `database` holds no such task."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/handle :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database handle]
   (loop [lookup [:seon.task/id handle]]
-    (let [task (db/pull database [:db/id :seon.task/id :seon.task/intent] lookup)
+    (let [task (db/pull database [:db/id :seon.task/id :seon.task/plan] lookup)
           parent (when (:db/id task) (db/q '[:find ?p . :in $ ?c :where [?p :seon.task/children ?c]] database (:db/id task)))]
       (cond (read-error task) task
             (read-error parent) parent
-            (or (nil? task) (:seon.task/intent task) (not (int? parent))) (:seon.task/id task)
+            (or (nil? task) (:seon.task/plan task) (not (int? parent))) (:seon.task/id task)
             :else (recur parent)))))
 
 (defn ready

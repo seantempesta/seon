@@ -41,14 +41,14 @@
                       [?attempt :seon.ai.attempt/id ?id]] @connection))))
      (let [accepted (db/transact! connection
                                  [{:db/id [:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-                                   :seon.task/intent "attribute-only"}])]
+                                   :seon.task/plan "attribute-only"}])]
        (is (some? (:db-after accepted)))
        (is (= "attribute-only"
-              (:seon.task/intent (db/pull @connection [:seon.task/intent]
+              (:seon.task/plan (db/pull @connection [:seon.task/plan]
                                            [:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])))))
      (let [before (:t @connection)
            refused (db/transact! connection [{:seon.cluster.eval/id "incomplete"}])
-           wrong (db/transact! connection [{:seon.task/intent 42}])
+           wrong (db/transact! connection [{:seon.task/plan 42}])
            nested (db/transact! connection
                                 [{:seon.source/digest "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                                   :seon.turn/_attempts [{:seon.turn/id 42}]}])]
@@ -57,7 +57,7 @@
        (is (int? (first (:seon.db/path refused))))
        (is (str/includes? (:seon.error/message refused) ":seon.cluster.eval/run"))
        (is (string? (:seon.db.write.attempt/request-id wrong)))
-       (is (= [0 :seon.task/intent] (:seon.db/path wrong)))
+       (is (= [0 :seon.task/plan] (:seon.db/path wrong)))
        (is (= [0 :seon.turn/_attempts 0 :seon.turn/id] (:seon.db/path nested)))
        (is (= before (:t @connection)))))))
 
@@ -82,25 +82,25 @@
   (test-support/with-database
    (fn [connection]
      (doseq [[transaction path]
-             [[[(assoc (test-support/task-row "feedbacktype" "x") :seon.task/intent 42)]
-               [0 :seon.task/intent]]
-              [[[:db/add "feedback/type" :seon.task/intent 42]] [0 3]]]]
-       (let [result (refused connection transaction :seon.task/intent 42 path)]
+             [[[(assoc (test-support/task-row "feedbacktype" "x") :seon.task/plan 42)]
+               [0 :seon.task/plan]]
+              [[[:db/add "feedback/type" :seon.task/plan 42]] [0 3]]]]
+       (let [result (refused connection transaction :seon.task/plan 42 path)]
          (is (= (get (:seon.schema.projection/forms (schema/handed-projection))
-                     :seon.task/intent)
+                     :seon.task/plan)
                 (:seon.schema/form result)))
          (is (= (:seon.error/message result) (:seon.error/message (db/render-rejection-ai result))))
          (is (= [42] (mapv :seon.error/offending (:seon.error/problems (db/render-rejection-ai result)))))))
      (testing "the supplied projection owns constraints on the same attribute"
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
-                         (assoc forms :seon.task/intent [:string {:min 8}]))]
+                         (assoc forms :seon.task/plan [:string {:min 8}]))]
          (db/carry-connection-projection-state!
           connection (evaluation/projection-state @connection projection))
          (schema/call-with-projection
           projection
-          #(refused connection [[:db/add "feedback/projected" :seon.task/intent "short"]]
-                    :seon.task/intent "short" [0 3])))))))
+          #(refused connection [[:db/add "feedback/projected" :seon.task/plan "short"]]
+                    :seon.task/plan "short" [0 3])))))))
 
 (deftest unknown-attribute-with-candidates
   (test-support/with-database
@@ -109,7 +109,7 @@
              [[[{ :seon.task/typo "x"}] [0 :seon.task/typo]]
               [[[:db/add "feedback/unknown" :seon.task/typo "x"]] [0 3]]]]
        (let [result (refused connection transaction :seon.task/typo "x" path)]
-         (is (some #{:seon.task/intent} (:seon.db/registered-candidates result))))))))
+         (is (some #{:seon.task/plan} (:seon.db/registered-candidates result))))))))
 
 (deftest missing-required-identity-member
   (test-support/with-database

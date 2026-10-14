@@ -120,13 +120,13 @@
          (is (seq (:arglists library)))
          (is (= library aliased) "an alias resolves to the same Var"))
        (is (empty? (:seon.cluster.eval/output (run "(doc 'x)"))))
-       (let [schema (value "(doc :seon.task/intent)")
+       (let [schema (value "(doc :seon.task/plan)")
              namespace-doc (value "(doc seon.task)")
              empty-ns (value "(do (in-ns 'fixture.empty-doc) (doc fixture.empty-doc))")
              sci-ns (value "(doc clojure.set)")]
-         (is (= :seon.task/intent (:key schema)))
+         (is (= :seon.task/plan (:key schema)))
          (is (= (edn/read-string (:seon.schema/form (db/pull (db/db connection) [:seon.schema/form]
-                                                              [:seon.schema/key :seon.task/intent])))
+                                                              [:seon.schema/key :seon.task/plan])))
                 (:form schema))
              "the declared form is returned parsed")
          (is (unavailable? (value "(doc :no.such/schema)")))

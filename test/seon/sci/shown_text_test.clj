@@ -35,7 +35,7 @@
            result (support/evaluate request)
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)))
-       (is (= "Work." (get-in result [:seon.sci.admit/value 0 :seon.context/task :seon.task/intent])))
+       (is (= "Work." (get-in result [:seon.sci.admit/value 0 :seon.context/task :seon.task/plan])))
        (is (= [] (get-in result [:seon.sci.admit/value 1])))
        (is (not (str/includes? shown "ExceptionInfo")))
        (is (string? shown))

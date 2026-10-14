@@ -39,7 +39,7 @@
   [connection ns]
   (task/index-tasks! {:seon.db/connection connection
                       :seon.task/files {(str "resources/seon/tasks/" ns ".edn")
-                                        "[#:seon.task{:name \"fix\" :intent \"Merge the tested change.\"}]"}})
+                                        "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
   (symbol ns "fix"))
 
 (deftest ^{:seon.test/long "Three prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, measured in lane-nsa-slice4-2026-09-23.md)."
@@ -300,7 +300,7 @@
   (let [agent-id (str "land-" task-name "-" (id/id))
         {branch :seon.store/branch on-branch :seon.db/connection} (support/own-branch-agent! running agent-id (str "(ns " ns-sym ")"))
         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns ns-sym
-                                         :seon.task/name task-name :seon.task/intent "Fix."}))
+                                         :seon.task/name task-name :seon.task/plan "Fix."}))
         assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                 :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
     (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
@@ -461,8 +461,8 @@
 
 (def ^:private refine-tasks
   ;; two entries, each over two lines; a namespace no other test of this JVM creates tasks in
-  (str "[#:seon.task{:name \"area\"\n             :intent \"Fix.\"}\n"
-       " #:seon.task{:name \"side\"\n             :intent \"Other.\"}]\n"))
+  (str "[#:seon.task{:name \"area\"\n             :plan \"Fix.\"}\n"
+       " #:seon.task{:name \"side\"\n             :plan \"Other.\"}]\n"))
 
 (def ^:private refine-proof
   ;; the proof that lets root assign tq.written/area
@@ -488,17 +488,17 @@
            handle (task/task-handle 'tq.written "area")
            intent "Make `tq.land/area` square its side."
            {key :seon.task/assignment}
-           (assigned-held! running connection handle (str "(my.task/refine! {:seon.task/intent \"" intent "\"})"))
+           (assigned-held! running connection handle (str "(my.task/refine! {:seon.task/plan \"" intent "\"})"))
            execution (support/running-cluster running)
            before (git! root "rev-parse" "HEAD")
            file (io/file root path)
-           declared #(into {} (map (juxt :seon.task/name :seon.task/intent))
+           declared #(into {} (map (juxt :seon.task/name :seon.task/plan))
                            (task/file-declarations (db/carried-projection (db/db connection)) path %))]
        (try
          (is (true? (:seon.task/changed? ingested)) "main holds the file's two tasks")
          (let [merged (merge! execution key)]
            (is (nil? (:seon.error/message merged)) "the facts merge answers no refusal"))
-         (is (= intent (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent] [:seon.task/id handle])))
+         (is (= intent (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle])))
              "main holds the refined intent")
          (is (= 1 (:seon.task/merged-declarations (assignment-row connection key)))
              "the merge counts the one declaration it moved, so its publication is due")
@@ -873,7 +873,7 @@
         c (keyword (str "merge-test-c-" (id/id)))
         _ (task/index-tasks! {:seon.db/connection h-conn
                               :seon.task/files {"resources/seon/tasks/tq.accept.edn"
-                                                "[#:seon.task{:name \"fix\" :intent \"Make accept-value one.\"}]"}})
+                                                "[#:seon.task{:name \"fix\" :plan \"Make accept-value one.\"}]"}})
         _ (write! h-conn [(entity (db/db h-conn) :fn "accept-value" "(defn accept-value {:malli/schema [:=> [:cat] :int]} [] 0)")
                           (entity (db/db h-conn) :test "accept-check"
                                   "(clojure.test/deftest ^{:seon/tasks #{'tq.accept/fix}} accept-check (clojure.test/is (int? (seon.cluster.merge-test/accept-value))))")])

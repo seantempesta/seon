@@ -31,7 +31,7 @@
        (is (some #(= 'seon.agent/render-settings-ai (:seon.render/ai %)) matches))
        (is (not-any? #(= 'seon.agent/render-settings-ai (:seon.render/ai %))
                      (schema/matching-shapes-in (schema/projection-from-database database)
-                                               {:seon.task/intent "Unrelated"})))
+                                               {:seon.task/plan "Unrelated"})))
        (is (integer? component))))))
 
 (deftest settings-updates-preserve-one-component-and-agent-isolation
@@ -193,7 +193,7 @@
    (fn [running _ connection]
      (task/index-tasks! {:seon.db/connection connection
                          :seon.task/files {"resources/seon/tasks/work.edn"
-                                           (str "[#:seon.task{:name \"fix\" :intent \"Fix the observed failure.\""
+                                           (str "[#:seon.task{:name \"fix\" :plan \"Fix the observed failure.\""
                                                 " :answer-schema :seon.task/approval}]")}})
      (let [answer! (requiring-resolve 'my.agent/answer!)
            {question :seon.test/question survey :seon.db/connection}
@@ -203,7 +203,7 @@
                                          database question))
            first-reply (reply-to (db/db survey))
            stored #(db/pull (db/db survey) [{:seon.task/answer [{:seon.answer/message [:seon.message/id]}
-                                                                :seon.task/intent :seon.answer/value]}]
+                                                                :seon.task/plan :seon.answer/value]}]
                             [:seon.task/sym 'work/fix])
            request {:seon.db/connection survey :seon.task/sym 'work/fix :my.message/id first-reply}]
        (is (string? first-reply) "the user's reply is on survey's branch")
@@ -211,8 +211,8 @@
               (:seon.error/type (answer! (assoc request :seon.answer/value {:seon.task/approved? "yes"})))))
        (is (nil? (:seon.task/answer (stored))) "a wrong-schema answer stores nothing")
        (let [answer (answer! (assoc request :seon.answer/value {:seon.task/approved? true}))]
-         (is (= {:seon.task/intent "Fix the observed failure." :seon.answer/value {:seon.task/approved? true}}
-                (select-keys answer [:seon.task/intent :seon.answer/value]))
+         (is (= {:seon.task/plan "Fix the observed failure." :seon.answer/value {:seon.task/approved? true}}
+                (select-keys answer [:seon.task/plan :seon.answer/value]))
              "the answer keeps the intent its question asked about")
          (is (= first-reply (get-in (stored) [:seon.task/answer :seon.answer/message :seon.message/id]))
              "and the user's message it answers"))

@@ -379,7 +379,7 @@
         proved 'tq.merge-tasks-proof/fix
         _ (task/index-tasks! {:seon.db/connection h-conn
                               :seon.task/files {"resources/seon/tasks/tq.merge-tasks-proof.edn"
-                                                "[#:seon.task{:name \"fix\" :intent \"Merge the tested change.\"}]"}})
+                                                "[#:seon.task{:name \"fix\" :plan \"Merge the tested change.\"}]"}})
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
                           (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked {:malli/schema [:=> [:cat] :int]} [] 1)")])
@@ -391,7 +391,7 @@
         made (volatile! [])
         prepare #(let [p (source/prepare-merge! target held-store c proved)]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
-        intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
+        intent #(:seon.task/plan (db/pull (db/db h-conn) [:seon.task/plan] [:seon.task/id handle]))]
     (try
       ;; A stored identity is replaced exactly (its dropped contract retracted),
       ;; so the writer's final value carries its definition's digest.
@@ -406,7 +406,7 @@
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
-                                                                           "[#:seon.task{:name \"merge-task\" :intent \"Merge.\"}]"}})))
+                                                                           "[#:seon.task{:name \"merge-task\" :plan \"Merge.\"}]"}})))
           ;; The task write touches no merged entity, so the same prepared now merges.
           (is (:seon.source/commit-id (source/accept-merge! target held-store prepared)))
           (is (= #{tag} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))

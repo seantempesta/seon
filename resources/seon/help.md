@@ -10,17 +10,17 @@ You have one tool, eval. Its code is Clojure forms, each starting at column zero
 
 ## Your task
 
-Your current-state block is the last part of every request; (seon.context/current-state) reads it again. `:seon.context/task` holds :seon.task/intent, the goal every step of your chain shares, and :seon.task/instructions, your step's own work: do your instructions, keep the goal true. `:seon.context/step` carries the in-ns forms for the owner's namespace and the test namespaces your instructions name.
+Your current-state block is the last part of every request; (seon.context/current-state) reads it again. `:seon.context/task` holds :seon.task/plan, the goal every step of your chain shares, and :seon.task/instructions, your step's own work: do your instructions, keep the goal true. `:seon.context/step` carries the in-ns forms for the owner's namespace and the test namespaces your instructions name.
 
 `:seon.context/chain` names the steps before you and after you. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it; once main has merged a step before you, `:seon.context/merged` lists what its merge moved. A step after you starts from main once you merge.
 
 `:seon.context/proofs` are the deftests that show your step done, each red, pending or green; they run by themselves after each eval request and the next block shows them.
 
-`:seon.context/must-reads` are what the task cites in backticks, each resolved once. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:intent ...}.
+`:seon.context/must-reads` are what the task cites in backticks, each resolved once. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:plan ...}.
 
 ## How work proceeds
 
-1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/intent).
+1. Read the owner: (my.program/source 'seon.db/q), (doc seon.db/q), (my.program/search :seon.task/plan).
 
 2. Enter the namespace that owns it with the :seon.context/start form, (in-ns 'the.owner.ns). A definition changes the namespace it is evaluated in; :seon.context/namespace names the one you are in.
 
@@ -32,7 +32,7 @@ Change code at the REPL, never in files: no slurp, spit, clojure.java.io or shel
 
 ## Write what you learn
 
-(my.task/refine! {:seon.task/intent "Make `seon.db/q` answer its refusal; see docs/seon/specs/merge.md#1-the-merge-request."}) rewrites the goal for every step of your chain; (my.task/refine! {:seon.task/instructions "The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`."}) rewrites your step's own work. Both write your branch. Refine as soon as you decide something the next step would otherwise rediscover. A reference is a backticked fully qualified symbol or keyword, a task ns/task-name, or a path with a #heading anchor; your next block resolves each one.
+(my.task/refine! {:seon.task/plan "Make `seon.db/q` answer its refusal; see docs/seon/specs/merge.md#1-the-merge-request."}) rewrites the goal for every step of your chain; (my.task/refine! {:seon.task/instructions "The rows are in `seon.sci.forgive-test/a-stray-closer-keeps-tokens-apart`."}) rewrites your step's own work. Both write your branch. Refine as soon as you decide something the next step would otherwise rediscover. A reference is a backticked fully qualified symbol or keyword, a task ns/task-name, or a path with a #heading anchor; your next block resolves each one.
 
 ## When you cannot
 
@@ -48,7 +48,7 @@ An error is a map (`:seon.error/value`): read its type, message and problems, ch
 
 ## Data
 
-Every value has a named Malli schema: reuse the names on the data flow; (my.program/source :seon.task/intent) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept. Keys are fully namespaced keywords; symbols stay symbols.
+Every value has a named Malli schema: reuse the names on the data flow; (my.program/source :seon.task/plan) reads one; (seon.schema/register! :comp.order/qty [:int {:min 1}]) names a new concept. Keys are fully namespaced keywords; symbols stay symbols.
 
 Absence is no key: an optional input is [:map [:x {:optional true} :int]]; never [:maybe ...], :any or :some. For an existing function, read its actual contract and observed values before changing its inputs.
 
