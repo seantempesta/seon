@@ -314,15 +314,20 @@ docstring, shows the doc view of its kind; the full definition is the read form 
 | Document section | heading, the headings below it, its size in tokens | `(my.fs/section "path#anchor")` |
 | Task | name, the first sentence of its plan's Problem, its proofs with their status | `(my.task/current …)` |
 
-**The author picks the depth (owner 2026-10-14).** An inline code span of one fully qualified name with one backtick,
-`` `x` ``, is a light reference and shows the doc view above; the same name in triple backticks, ```` ```x``` ````,
-is a deep reference: a function's whole source, a namespace's publics each as its doc view with its requires, a
-schema with each member's description, a deftest's source and status, a document section's full text. The delimiter
-length is read from the commonmark source span (`seon.ref/document`); a line that starts with three backticks is a
-fenced code block and never a reference. Help and docstrings cite light; a plan cites deep what the agent will edit.
-This replaces the graph-distance tiers of `seon.render.ns/function-ai` (distance 0 a name and doc line, distance 1 and
-more the whole source): distance no longer decides depth; the graph only decides which neighbours appear, and those are
-the schemas a contract names. Its nested references are only the schemas the contract names, cited
+**The author picks the depth, in three levels (owner 2026-10-14).** A fully qualified name in prose shows what
+Clojure's own REPL words would: bare (no backticks), its **summary**, the docstring's first sentence; in one
+backtick, `` `x` ``, its **doc**, exactly the value of `(doc x)`: docstring, arglists, contract and the schemas the
+contract names with their descriptions, each cited once (`seon.ref/cite-once`), so the doc view above IS `doc`'s value,
+one function for the REPL and for references; in three backticks inline, ```` ```x``` ````, its **code**, everything,
+as `(source x)`. Other kinds follow the same ladder: a keyword (description / form and description / every member
+described), a namespace (docstring sentence / docstring and publics / each public's doc), a deftest (name and status /
+the functions it reaches / source), a task (name / Problem sentence and proofs / whole plan), a document section
+(heading and size / heading tree / full text). Only a fully qualified name is a reference; an alias form is code; an
+unresolved reference is a problem on whatever cites it. The delimiter length is read from the commonmark source span
+(`seon.ref/document`); a line that starts with three backticks is a fenced code block and never a reference. Size is
+the value printer's alone (one budget per evaluation, elision forms). This replaces the graph-distance tiers of
+`seon.render.ns/function-ai` (distance 0 a name and doc line, distance 1 and more the whole source): distance no
+longer decides depth; the graph only decides which neighbours appear, and those are the schemas a contract names. Its nested references are only the schemas the contract names, cited
 once (`seon.ref/cite-once`). Summaries keep the existing first-sentence rule; a producer whose first sentence is long is
 shortened at its docstring. Schemas a contract names carry a description; `seon.render.schema/description` becomes
 public; `seon.ref/render-doc-ai` keeps a section's token size and the headings below it. Measured
@@ -554,7 +559,7 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S3c-2 | Restart (§2.8) | one row per durable stopping point: attempt identity, model-call count, outcome, retained branches, pending publication | Opus | — |
 | S3f-1 | From a filed task (§2.1): `seon.task/from-filed`, and the final merge's write-back deleting the entry whose identity the chain's first task has (§2.6) | `seon.task-test/a-filed-task-becomes-a-full-chain`: a filed entry with a plan and red proofs gives three maps, the first with its identity and plan and no proofs, the last with its proofs; `seon.cluster.write-back-test/a-merged-chain-deletes-its-filed-entry`: after the merge the entry is gone from its task file and no chain task was written to any task file | Sonnet (after S3b) | — |
 | S3f-2 | Per-task model (§2.2): owned `:seon.task/model`, `:outside` starts the agent with no model turns | `seon.cluster.db-flow-test/an-outside-task-takes-no-model-turn-and-is-worked-through-the-repl`: an `:outside` task's agent makes no model call over repeated passes; eval requests as its agent id through the MCP entrance run its test step and its done rule advances the chain | Opus (after S3a) | — |
-| S3d-1 | Doc view render tier (§3a) | `seon.context-test/a-referenced-function-shows-its-doc-view`: a single-backtick reference shows docstring, contract, schema descriptions and the read form, no source; a triple-backtick reference to the same function shows its whole source; a fenced ``` block in the same plan stays code (no reference); a reference inside help renders at the compact tier (name and summary), its doc view one `doc` away | Sonnet (parallel with S1b after the restart batch: file-disjoint, prebrief-s1b-s3d1.md) | — |
+| S3d-1 | Doc view render tier (§3a) | `seon.context-test/a-referenced-function-shows-its-doc-view`: in one plan, a bare fully qualified name shows its docstring's first sentence, a single-backtick one equals `(doc x)`'s value (docstring, contract, the contract's schemas described), a triple-backtick one shows the whole source, and a fenced ``` block stays code (no reference); a reference inside help renders at the compact tier (name and summary), its doc view one `doc` away | Sonnet (parallel with S1b after the restart batch: file-disjoint, prebrief-s1b-s3d1.md) | — |
 | S3d-2 | Context section and history reuse | measured on target HEAD first; then a `seon.profile/measure` assertion that a second turn's `model-context` after one new evaluation costs in proportion to that unit, with the raw block's tokens and the elision count before/after | Opus (after the errors cut's E4a) | — |
 | S3e | Delete the task tree (`children`, `needs`, `effective`) with their last readers (§6) | no live reader; retained reds unchanged | Sonnet | — |
 | S4a | Stage preparation: `seon.step` shared helpers, the task-input fixture in `seon.test-support`, the three template files, deletion of `seon.step.edn`, `step_test.clj` and their readers, a grading form for live runs | each helper's contract; each template ingests | Sonnet (after S2a, S2b, S3a) | — |
