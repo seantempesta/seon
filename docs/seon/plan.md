@@ -65,10 +65,11 @@ runs, red triage) so root reads conclusions, not bulk; Sonnet does well-specifie
 same prototype brief Sonnet answered 3.5 of 4 questions at the REPL, Haiku 1); Opus takes the hard problems and
 planning; Astra gives the independent second opinion and the hard performance work.
 
-**Live runs** (owner 2026-10-14): the first live runs after S3a (Design, then Prove with Implement held) use a Claude
-model, not DeepSeek, until the agent experience is right and each task's generated context is of high quality.
-Prerequisite: `seon.ai` speaks OpenAI chat completions to `:seon.config.ai/endpoint`; prove Anthropic's
-OpenAI-compatible endpoint (tool calls included) by configuration before S3a ends, and file what does not fit.
+**Live runs** (owner 2026-10-14): no paid Claude API calls. Two kinds of run after S3a (Design, then Prove with
+Implement held): (1) DeepSeek product agents, the measured live run; (2) Claude Code agents acting as Seon agents
+through the MCP servers (`eval_clj` as their own agent on the chain branch, reading their current-state block and
+working by `defn`, as CLAUDE.md's outside agents do), which judge the agent experience and whether each task's
+generated context is complete and correct before the DeepSeek runs are graded on it.
 
 **Goals, in order** (owner, 2026-10-12): (1) chains run unattended, measured by hand acts after launch (target 0),
 calls, tokens and errors by signature; (2) context useful by construction; (3) tasks improve as work proceeds; (4)
