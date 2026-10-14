@@ -29,8 +29,9 @@ Nothing here is installed; the platform freeze holds, so the card names what mus
   `seon.sci.forgive-test/a-reply-reads-in-allocation-linear-in-its-length` already asserts a growth bound (4× input,
   at most 6× allocation), reading `ThreadMXBean` itself. COST-REG ([card](COST-REG.md)) turns a reaching test red when it
   costs more than main's evidence for the same test.
-- **Tasks.** `:seon.task/entry` is a closed map (name, kind, intent, must-read, evidence); proofs are deftests tagged
-  `:seon/tasks`. `seon.contracts/task` generates contract tasks whose proof is a row in `seon.contract-coverage-test`.
+- **Tasks.** A task carries `plan`, `instructions` and `proofs`, the set of deftest symbols that must be green
+  ([TASK-CHAIN](TASK-CHAIN.md) §1; installed until S1a and S2c, the task entry still reads `intent` and tagged
+  deftests). `seon.contracts/task` generates contract tasks whose proof is a row in `seon.contract-coverage-test`.
 
 ## 1. The proof is three things, in this order of cost
 
@@ -91,7 +92,7 @@ Rules that follow from the probes:
 
 **The declaration.** The designer states what the work is proportional to: the size variable (names, lines,
 declarations reached, changed declarations) and the exponent (0 constant, 1 linear, 2 quadratic). It lives in the
-growth deftest as data, not on the task: the closed task entry needs no new key, and `:seon.profile/growth` is already
+growth deftest as data, not on the task: the task needs no new member, and `:seon.profile/growth` is already
 a profile row's name. If three or more proofs repeat the same shape, promote it to a declared property of the
 function schema (`[:=> {:seon.cost/growth ...} ...]`), not before.
 
@@ -131,8 +132,8 @@ reaching tests never reach; COST-REG then holds every reaching test, the growth 
 after merge. The reference ratio is the growth proof's own baseline, so it needs no captured evidence.
 
 **Composition with contract tasks.** `seon.contracts/task` stays as it is for back-filled contracts. A designed task
-adds, beside its contract row in `seon.contract-coverage-test`, its property and growth deftests tagged with the same
-task; a generator for that triple is a later step once a few designed tasks have been run by hand.
+adds, beside its contract row in `seon.contract-coverage-test`, its property and growth deftests in the same task's
+`proofs`; a generator for that triple is a later step once a few designed tasks have been run by hand.
 
 ## 5. What an agent sees when a proof fails
 

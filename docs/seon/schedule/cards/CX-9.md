@@ -1,7 +1,7 @@
 ---
 title: "Card CX-9 Delete prompt selection, its calibration and the turns frame"
 type: reference
-status: active
+status: done (55ede54a9)
 created: 2026-10-08
 ---
 

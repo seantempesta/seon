@@ -1,7 +1,7 @@
 ---
 title: "Card RF-2 bin/lane commit --branch-evidence"
 type: reference
-status: active
+status: done (871a28901)
 created: 2026-10-08
 ---
 

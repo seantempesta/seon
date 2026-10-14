@@ -1,11 +1,14 @@
 ---
 title: "Card REF-1: One reference resolver for intents, Markdown docs and docstrings"
 type: reference
-status: active
+status: done (a807ec0b4)
 created: 2026-10-08
 ---
 
 # REF-1: One reference resolver for intents, Markdown docs and docstrings
+
+Landed (`a807ec0b4`). The task text it resolves is `:seon.task/plan` once TASK-CHAIN S1a renames `intent`; the resolver is
+unchanged ([TASK-CHAIN](TASK-CHAIN.md) §3).
 
 Depends on: CS-01c2 (the library fallback in `must-read`, which moves here whole). Group D. Model: Sonnet.
 
@@ -27,14 +30,14 @@ with a relative target is a file reference. One function answers each candidate 
 
 ## What is true at HEAD (probed on default, JVM mode, commit `6a244149d` loaded)
 
-- `seon.context/referenced-names` (CS-01c1, uncommitted in lane cs01c1, `src/seon/context.clj:366`) finds backticked
+- `seon.context/referenced-names` (CS-01c1, uncommitted in lane cs01c1) finds backticked
   spans with `(str/split intent #"`" -1)` and reads each with `edamame/parse-string`; `seon.context/must-read`
-  (`:375`) resolves a symbol (function, test, namespace) or keyword (`seon.sci.eval/schema-documentation`). This is
+  resolves a symbol (function, test, namespace) or keyword (`seon.sci.eval/schema-documentation`). This is
   the start; it moves here.
-- `io.github.nextjournal/markdown 0.7.213` (`deps.edn:16`) wraps `org.commonmark/commonmark 0.24.0`
+- `io.github.nextjournal/markdown 0.7.213` (`deps.edn`) wraps `org.commonmark/commonmark 0.24.0`
   (its POM). Read in `~/.m2/repository/io/github/nextjournal/markdown/0.7.213/markdown-0.7.213.jar`:
-  `nextjournal.markdown.impl/parser` (`impl.clj:44`) builds a commonmark `Parser` without source spans, so its data
-  carries no line positions; its heading ids (`impl/utils.cljc:42` `text->id+emoji`) keep punctuation
+  `nextjournal.markdown.impl/parser` builds a commonmark `Parser` without source spans, so its data
+  carries no line positions; its heading ids (`nextjournal.markdown.impl.utils/text->id+emoji`) keep punctuation
   (`"5.-proofs-and-references-(coordinator-items)"`), while the 216 heading links already in `docs/` and
   `.agents/` use GitHub's form (`plan/README.md#7-decisions-and-proof-gates`).
 - Probe, `docs/seon/schedule/agent-loop-ledger.md` (248 KB): commonmark with

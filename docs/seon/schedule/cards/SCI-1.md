@@ -1,7 +1,7 @@
 ---
 title: "Card SCI-1 Seon on context-owned SCI Var bindings: the gitlink bump and what must land with it"
 type: reference
-status: active
+status: done (f8f2618e8)
 created: 2026-10-08
 ---
 

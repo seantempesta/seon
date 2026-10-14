@@ -1,7 +1,7 @@
 ---
 title: "Card CX-2 A model turn only with an assignment; a reply with no form waits"
 type: reference
-status: active
+status: done (7e39aeed3)
 created: 2026-10-08
 ---
 

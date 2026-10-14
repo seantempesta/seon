@@ -1,7 +1,7 @@
 ---
 title: "Card CX-6 Delete the opening run and the demo seed"
 type: reference
-status: active
+status: done (55ede54a9)
 created: 2026-10-08
 ---
 

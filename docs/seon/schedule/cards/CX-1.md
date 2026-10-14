@@ -1,7 +1,7 @@
 ---
 title: "Card CX-1 The model sees help, its own exchanges, and its block last"
 type: reference
-status: active
+status: done (ade6e3059)
 created: 2026-10-08
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Card RF-5 Delete the hook's disabled Gemini review batch"
 type: reference
-status: active
+status: done (dbd488520)
 created: 2026-10-08
 ---
 

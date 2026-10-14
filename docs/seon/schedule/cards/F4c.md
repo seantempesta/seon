@@ -1,7 +1,7 @@
 ---
 title: "Card F4c: The step has a bound and continues"
 type: reference
-status: active
+status: done (aa0b47ab9)
 created: 2026-10-08
 ---
 

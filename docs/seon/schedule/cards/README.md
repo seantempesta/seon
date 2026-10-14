@@ -7,6 +7,9 @@ created: 2026-10-08
 
 # Implementation cards
 
+The task lifecycle is [TASK-CHAIN](TASK-CHAIN.md); where a card describes tags, `intent`, `needs`, `children`, steps
+or relaunch, TASK-CHAIN wins. A card whose status line reads `done (<commit>)` has landed.
+
 One card per ledger row: exact files, functions with contracts, seams with `file:line` (verified at HEAD `65cf8c26d`
 plus led-cs01a's uncommitted `seon.context/current-state`), the returned shape, the proof, the `--test` list, the
 expected cost, what is deleted, the commit line and the dependencies. A card marked **blocked** waits on a question
@@ -84,8 +87,8 @@ assign proofless tasks too.
 | CS-01c3 | [CS-01c3](CS-01c3.md) | ready |
 | CS-01c5 | [CS-01c5](CS-01c5.md) | landed `c9a496d6f` |
 | REF-1 | [REF-1](REF-1.md) | landed `a807ec0b4` |
-| TASK-CHECK | [TASK-CHECK](TASK-CHECK.md) | ready after REF-1, CS-01c3 |
-| REF-2 | [REF-2](REF-2.md) | ready after TASK-CHECK |
+| TASK-CHECK | [TASK-CHECK](TASK-CHECK.md) | superseded by TASK-CHAIN |
+| REF-2 | [REF-2](REF-2.md) | ready after CS-01c3 |
 | CS-01c4 | [CS-01c4](CS-01c4.md) | landed `381953f92` (today's inbox rule; S4-05a extends it) |
 | CS-01d | [CS-01d](CS-01d.md) | ready after CS-01b, F4b |
 | CS-02 | [CS-02](CS-02.md) | ready after its deps (PR-11) |

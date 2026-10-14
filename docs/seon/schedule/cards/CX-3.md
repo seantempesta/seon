@@ -1,7 +1,7 @@
 ---
 title: "Card CX-3 No system turn before a model pass"
 type: reference
-status: active
+status: done (55ede54a9)
 created: 2026-10-08
 ---
 

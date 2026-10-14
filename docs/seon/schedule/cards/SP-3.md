@@ -1,7 +1,7 @@
 ---
 title: "Card SP-3 Shell output and web bodies take the one threshold"
 type: reference
-status: active
+status: done (10bc5655a)
 created: 2026-10-08
 ---
 

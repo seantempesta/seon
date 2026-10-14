@@ -13,9 +13,9 @@ RP-15a, EN-1, EN-6, TX-3, TX-4, TX-6 and TX-8 read what it writes.
 
 ## What changes, in one paragraph
 
-`seon.db/stamp-transaction` (`src/seon/db.clj:3626`), the one owner of transaction metadata, already stamps
+`seon.db/stamp-transaction`, the one owner of transaction metadata, already stamps
 `:seon.db.transaction/operation` and `agent` from the request map or the eval request's world
-(`seon.batch/*world*`) and installs a missing stamp attribute inline (`:3634-3646`). It now also stamps
+(`seon.batch/*world*`) and installs a missing stamp attribute inline. It now also stamps
 `:seon.db.transaction/eval-request` (the eval request id: the world's `:seon.turn/id`, the id of the call row the
 recording writes) and `:seon.db.transaction/basis-t` (the t of the value the eval request read first: the world's new
 `:seon.db/basis-t` member). Both are unindexed values. Probed on default: an agent's `(seon.db/transact! [])` inside
@@ -28,9 +28,9 @@ bound at the stamp), and the JVM-mode world holds `:seon.turn/id` (`"f3ded869bed
 - `resources/seon/schemas/seon.db.transaction.edn`
 - `resources/seon/schemas/seon.batch.edn` (`:world` gains one optional member)
 - `src/seon/db.clj` (`stamp-transaction`)
-- `src/seon/turn.clj` (`evaluate-sources` world, `:4978`)
+- `src/seon/turn.clj` (`evaluate-sources` world)
 - `src/seon/turn/world.clj` (`agent-world`, `jvm-world` accept the member)
-- `src/seon/mcp.clj` (`jvm-run`, `:265`)
+- `src/seon/mcp.clj` (`jvm-run`)
 - `test/seon/db_test.clj`
 
 ## Schema
@@ -42,30 +42,30 @@ bound at the stamp), and the JVM-mode world holds `:seon.turn/id` (`"f3ded869bed
 :basis-t [:and {:description "The t of the database value the eval request read first: a model eval request's presented context basis, an MCP eval request's branch head when it started."} :seon.db/basis-t]
 ```
 
-No `:seon.db/index`. `seon.batch.edn` `:world` (`:2-25`) gains
+No `:seon.db/index`. `seon.batch.edn` `:world` gains
 `[:seon.db/basis-t {:optional true :description "The t of the value this eval request read first (seon.db.transaction/basis-t)."} :seon.db/basis-t]`.
-`:seon.db/basis-t` is NOT added to `seon.batch/world-members` (`src/seon/batch.clj:46`): it is stamped, never
+`:seon.db/basis-t` is NOT added to `seon.batch/world-members`: it is stamped, never
 supplied to a function's omitted input.
 
 ## Functions
 
-- CHANGE `seon.db/stamp-transaction` (private, `:3626`), contract unchanged
+- CHANGE `seon.db/stamp-transaction` (private), contract unchanged
   (`[:=> [:cat :seon.db/database-value :seon.store/transaction [:maybe :map]] :seon.store/transaction]`):
-  - `attributes` (`:3636`) gains `:seon.db.transaction/eval-request` and `:seon.db.transaction/basis-t`, so an old
-    store installs them inline in the first transaction that writes them (`:3637-3645`).
+  - `attributes` gains `:seon.db.transaction/eval-request` and `:seon.db.transaction/basis-t`, so an old
+    store installs them inline in the first transaction that writes them.
   - `eval-request (or (:seon.db.transaction/eval-request request) (:seon.turn/id world))`,
     `basis-t (or (:seon.db.transaction/basis-t request) (:seon.db/basis-t world))`.
   - `stamp` gains `eval-request (assoc :seon.db.transaction/eval-request eval-request)` and
     `basis-t (assoc :seon.db.transaction/basis-t basis-t)`.
   - Docstring: one sentence, "Inside an eval request the transaction also names the eval request and its basis."
-- CHANGE `seon.turn/evaluate-sources` (`:4918`): the `world` map (`:4978-4986`) gains
-  `:seon.db/basis-t (db/basis-t basis)`, the `basis` already bound at `:4940` (the value this turn read; for a model
+- CHANGE `seon.turn/evaluate-sources`: the `world` map gains
+  `:seon.db/basis-t (db/basis-t basis)`, the `basis` already bound (the value this turn read; for a model
   eval request, the snapshot its context presented).
-- CHANGE `seon.turn.world/agent-world` and `seon.turn.world/jvm-world` (`src/seon/turn/world.clj:40-95`): destructure
+- CHANGE `seon.turn.world/agent-world` and `seon.turn.world/jvm-world`: destructure
   an optional `:seon.db/basis-t` from `opts` and `(assoc :seon.db/basis-t …)` when present. Contracts unchanged (they
   answer `:seon.batch/world`, which now allows the member).
-- CHANGE `seon.mcp/jvm-run` (private, `:265`): pass `:seon.db/basis-t (db/basis-t (db/db connection))`, read once
-  before `evaluate-batch`, in the `jvm-world` opts map (`:276-281`).
+- CHANGE `seon.mcp/jvm-run` (private): pass `:seon.db/basis-t (db/basis-t (db/db connection))`, read once
+  before `evaluate-batch`, in the `jvm-world` opts map.
 
 ## Data (the stamp of an agent's write inside an SCI eval request)
 
@@ -105,19 +105,19 @@ The handle is `result/e` + the evaluation id (probed: handle `result/e0f0128e502
 
 ### The receipt tests convert here (RED-1, commit `4e307ec54`)
 Task `seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt`
-(`resources/seon/tasks/seon.cluster.host.edn:6`): a hosted form's write carries no `:seon.db/receipt` datom, and
+(`resources/seon/tasks/seon.cluster.host.edn`): a hosted form's write carries no `:seon.db/receipt` datom, and
 `seon.receipt-write-carrier-test/evaluation-receipt-is-transaction-metadata` is red at HEAD
-(`test/seon/receipt_write_carrier_test.clj:61`). `:seon.db/receipt` is deleted by RP-14; nobody repairs its stamp. This
+(`test/seon/receipt_write_carrier_test.clj`). `:seon.db/receipt` is deleted by RP-14; nobody repairs its stamp. This
 row converts every test that asserts it to assert the transaction's `:seon.db.transaction/eval-request` instead (the
 write's eval request id, the `:seon.turn/id` its world or request names):
-- `test/seon/receipt_write_carrier_test.clj:68`, `:82` (`evaluation-receipt-is-transaction-metadata`: assert
+- `seon.receipt-write-carrier-test/evaluation-receipt-is-transaction-metadata` (two assertions: assert
   `[?tx :seon.db.transaction/eval-request "receipt-write-run"]` for the evaluated write; rename the deftest
-  `an-evaluated-write-names-its-eval-request-on-the-transaction` and give it
-  `^{:seon/tasks #{'seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt}}`);
-- `test/seon/cluster/host_test.clj:146` (the hosted run's write: the same assertion with the hosted run's id);
-- `test/seon/settlement_receipt_provenance_test.clj:38`, `:73`, `test/seon/cluster/evaluate_source_test.clj:196`:
+  `an-evaluated-write-names-its-eval-request-on-the-transaction` and list it in the `proofs` of
+  `seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt`, TASK-CHAIN §1);
+- `seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged` (the hosted run's write: the same assertion with the hosted run's id);
+- `seon.settlement-receipt-provenance-test/receipt-created-by-the-write-is-resolved-before-provenance`, `seon.settlement-receipt-provenance-test/a-write-during-a-form-opens-its-run-first` and the write assertion in `seon.cluster.evaluate-source-test`:
   the same conversion;
-- `test/seon/db_test.clj:2274` reads `::db/receipt` from the stamp: convert to read
+- `seon.db-test/a-create-is-validated-complete-while-an-upsert-validates-the-merged-entity` reads `::db/receipt` from the stamp: convert to read
   `:seon.db.transaction/eval-request` with `seon.batch/*world*` bound to `{:seon.turn/id "x"}` in the test (a binding,
   not a Var redefinition).
 Add these files to the commit line and `--test seon.receipt-write-carrier-test --test seon.settlement-receipt-provenance-test --test seon.cluster.host-test --test seon.cluster.evaluate-source-test`.

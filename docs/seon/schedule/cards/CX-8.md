@@ -1,7 +1,7 @@
 ---
 title: "Card CX-8 Delete the system turn, virtual turns, compaction and the web context editor"
 type: reference
-status: active
+status: done (55ede54a9)
 created: 2026-10-08
 ---
 

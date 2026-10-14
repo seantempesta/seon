@@ -1,7 +1,7 @@
 ---
 title: "Card CS-01b: The block shows proofs and their status"
 type: reference
-status: active
+status: done (88bfd19cb)
 created: 2026-10-08
 ---
 

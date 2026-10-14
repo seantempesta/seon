@@ -7,7 +7,7 @@ created: 2026-10-08
 
 # REF-2: The edit hook checks references; one sweep lists every problem
 
-Depends on: REF-1, CS-01c3 (paths and anchors), TASK-CHECK (a task's references assembled once). Group D (owns
+Depends on: REF-1, CS-01c3 (paths and anchors), TASK-CHECK (superseded: a task's references are assembled once by the one task writer, TASK-CHAIN §1 and §3a). Group D (owns
 `bin/seon-hook`; serial with any lane holding it). Model: Sonnet.
 
 Owner: "Schedule the edit hook to check all docs and task edn files for validity of all refs too." After an edit to a
@@ -66,8 +66,7 @@ In `seon.ref`. Reads the working-tree file at `path` (the hook checks what was j
   path text)` (`seon.task` requires `seon.ref`, so the call resolves late, as `seon.cluster.source` already does).
 
 `seon.task/file-problems [database path text]`: the file's tasks through the private `file-declarations`
-(`src/seon/task.clj:119`), each through TASK-CHECK's per-task assembly (the same function `task-problems` uses, never
-a copy), as findings carrying `:seon.task/sym`. A refused file answers its refusal.
+(`src/seon/task.clj:119`), each through the one task writer's reference assembly (`seon.task/with-references`; never a copy), as findings carrying `:seon.task/sym`. A refused file answers its refusal.
 
 ```clojure
 :finding [:merge :seon.ref/problem [:map [:seon.task/sym {:optional true} :seon.task/sym]]]

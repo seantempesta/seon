@@ -1,7 +1,7 @@
 ---
 title: "Card F4b: Reaching tests run after the proofs"
 type: reference
-status: active
+status: done (34dac2655)
 created: 2026-10-08
 ---
 

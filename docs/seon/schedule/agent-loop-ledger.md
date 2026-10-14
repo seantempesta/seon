@@ -1,20 +1,21 @@
 ---
-title: Agent-loop ledger (the one ordered slice list)
+title: Agent-loop ledger (landed record and slice rows)
 type: reference
-status: active
+status: superseded
 created: 2026-10-08
 revised: 2026-10-08
 ---
 
 # Agent-loop ledger
 
-This is the only ordered list of agent-loop work. The behavior it implements is specified in
+**Superseded as the order of work** by [plan §0](../plan.md) and [TASK-CHAIN](cards/TASK-CHAIN.md) §7. What stays is
+the record: §2 lists what landed with its commits, §3 holds each slice's row (design, files, proof), §4 the retired
+ids. A row's status line is true only where §2 gives its commit. The behavior the rows implement is specified in
 [agent-loop.md](../specs/agent-loop.md) and [merge.md](../specs/merge.md); the authority above both is
-`docs/research/agent-platform/2026-10-08/review/owner-rulings.md`, then CLAUDE.md. A row here says what to change,
-where, how it is proven and in which order. It never restates a law; if a row and the spec disagree, the spec wins and
-the row is corrected.
+`docs/research/agent-platform/2026-10-08/review/owner-rulings.md`, then CLAUDE.md. If a row and the spec disagree, the
+spec wins.
 
-It absorbs, and supersedes as execution order: `split/reconciled-plan.md` (S1, S3-S7, PB, CS, AR, Q answers),
+It absorbed, as the 2026-10-08 execution order: `split/reconciled-plan.md` (S1, S3-S7, PB, CS, AR, Q answers),
 `repl-audit/repl-plan.md` §5 (P0-P14), `s5-admission/admission-design.md` §7 (S5-04a-j), merge.md's former M slices,
 `competency/competency-spec.md` §9 (C, A, D, B, X, Q, H), the printer audits (`printer-rules/`, prefix `PR-`), the
 message audits (`agent-messages/`, prefix `MS-`), the raw-output audit (`raw-output/raw-output.md`, prefix `RO-`),
@@ -27,14 +28,13 @@ the reinvention research (`reinvention/`, prefix `UL-`), the Datahike fork's ind
 dials (`dials/dials.md`, prefix `DIAL-`), the two storage audits (`storage-audit/`, SR- and DH- rows), defn-why's owners
 (`defn-why/defn-why.md`, PB-07 … PB-13) and the library questions they raise (`cards/README-audits.md`, `AU-Qn`). Those documents stay as dated evidence and
 design; their old ids appear here only as aliases. The reconciled verdicts are `review/owner-decisions.md` (questions
-cited below as `OD-Qn`); which of them the rulings answer is §1, and the questions still open are §6.
+cited below as `OD-Qn`); which of them the rulings answer is §1.
 
 ## How to read a row
 
-- **Id and title.** The id is for lanes and commits; the title says in plain English what becomes true. The critical
-  path (§5) uses titles only.
+- **Id and title.** The id is for lanes and commits; the title says in plain English what becomes true. 
 - **Status.** `landed <commit>`; `in flight (<lane>)`; `ready` (fully specified: files, contract, proof, budget);
-  `blocked-on-owner (<question>)` (an owner decision is missing, listed in §6); `waits on <lane or root>` (another
+  `blocked-on-owner (<question>)` (an owner decision was missing); `waits on <lane or root>` (another
   lane's design or a root split must land first); `ready after its deps`; `shelved` (the owner set it aside). A row
   launches only when it is `ready` **and** every dependency is landed.
 - **Group** is the file-ownership group. Rows in one group run in series; rows in different groups run in parallel
@@ -1065,183 +1065,9 @@ admission, completion), up to 5 with task proofs; the existing rows that remove 
 | W-8, W-19 | removed by CX-1 … CX-10 and PB-15 (§2) |
 | CX-3, CX-6 … CX-10 | landed in the rip (§2); CX-7's debug view landed inside `55ede54a9` |
 
-## 5. Critical path: now → live agents working tasks end to end, with merge → the competency suite on DeepSeek flash
+## 5. Order
 
-For the owner, in plain words. Each step is one or more rows above (titles as in the rows); steps on one line run in
-parallel when their files are disjoint. Landed work is in §2. Re-checked 2026-10-08 night (lane plan-check) against
-HEAD `6d3c22dbb`: the old context machinery is gone, the first live model agent finished a task green (run 3), and
-the path is re-ordered from what run 3 still blocks on.
-
-**The main goal (owner 2026-10-08): our own lanes work as Seon agents, and model agents work tasks end to end.** Root
-files each slice as a task with a red tagged proof and assigns it; the agent reads its current-state block, works by
-`defn` on its branch while its tests run by themselves, and finishes when its proofs are green; a code change reaches
-main through a merge request root holds as a task.
-
-*Works now (HEAD `6d3c22dbb`):* the model's context is `(help)`, its own exchanges and its block last (CX-1); a model
-turn opens only with an assignment and a reply with no evaluated form waits (CX-2); the block shows the task, proofs
-with status, the Seon and library names and doc sections the task references, and unread messages (CS-01a … c5,
-REF-1); after an eval request that evaluated a form, proofs then reaching tests run inside a 10 s bound and continue
-next time (F4a-c); a docstring-only `defn` reruns no test; a Var keeps its identity across forks (SCI-1); `bin/seon
-check --at REV` compares a red with its parent. Run 3: a model agent on DeepSeek flash turned its proof green.
-
-*Run 3's blockers* (tasks filed `6d3c22dbb`): an agent assigned after its branch forked never gets a model turn,
-because CX-2 reads the assignment on the branch, not the task home (lane a1-home); the system message is the help map
-printed unrendered (lane b2-help); root's `settings!` on main never reaches a branch agent (no row: RESPEC R-9); a
-failed first `deftest` leaves a stub Var and is never recorded (task in `seon.turn.batch`); an inherited test is green
-in the step but red at the agent's REPL (SCI-2, SCI-3).
-
-1. **Run 3's blockers, then run 4 (now).** The assignment is read at the task home (a1-home) and the system message is
-   the rendered help (b2-help), in flight; then the stub-Var task, then arm once in the base → delete the copy-induced
-   re-analysis (SCI-2 → SCI-3, which also retires LR-STALE3 and unblocks the acquisition reds); the settings route
-   as AE-1 → AE-2 → AE-3 (R-9). Then one live run on the same task shape, `:transcript` and `:chat` side by side once CX-12
-   lands.
-2. **Tasks finish without a merge** (after RESPEC R-2): a task whose proofs are green is done, its assignment
-   retracted in the recording transaction (Q-RT1); answers are data on the assignment (A1 as amended by RT-6) → a
-   task answered with data finishes from its proofs (F6); give back an impossible task with a reason (F7a → F7b →
-   F7c); an assignment is a wake → assignment checks inside any producer's transaction → a task names proofs in its
-   data → an agent holds several tasks.
-3. **The test step is right and cheap** (in parallel with 1-2): a schema change has reaching tests (F12, high); an
-   unchanged red is answered from its record (F11); a restarted proc and a waiting agent run what the bound left (F4d,
-   after RESPEC R-6); the block shows broken tests (CS-01d); a refused proof read is an error (LR-PROOFREAD); one rule
-   says a proof is green (LR-PROOFSTATUS). Cost by pattern (§3.29): a cost proof counts any function's calls (CO-0) →
-   an unchanged branch's change set is a lookup → a request answered from its record writes nothing → admission
-   decides by present witnesses; reach acquisition decodes nothing → reach acquires the requested closure; the P2
-   rows (CO-7 → CO-8, CO-9 → CO-10, CO-11 in a restart batch); name the queries a ping runs (CO-12).
-4. **Red triage, by commit** (alongside, now possible with `check --at`): the eight turn-test reds (RED-8), the
-   acquisition reds after SCI-3 (RED-2), RED-4 … RED-7; each classified against its parent, never wholesale.
-5. **Merge groundwork and git's words**: merge tools return their errors → a new contracted function arms on the
-   merge branch → branch schemas show in the diff; task identity without kind (**reset**) → branch functions use
-   Datahike's names → delete branch and main in the platform → merge request functions → merge request data → the
-   diff value in git's words → root diffs any merge request → delete the coverage gate. Alongside: an agent's branch
-   never refuses a valid change; the other no-kinds slices.
-6. **A code task opens a merge request root holds** (after RESPEC R-2, R-3): keep the merge branch, conflicts stay
-   unmerged → a merge lands on the request's target branch → green proofs open or update a merge request (F5's merge
-   half) → opening a merge request assigns it to root (RT-9); a question to root (RT-7) → root's common tasks as
-   templates (RT-8); give-back and the cap move the assignment to the assigner (RT-13).
-7. **Merge, whole**: check out ours or theirs per identity → resolve conflicts on the merge branch; name dangling
-   callers → check schema changes against the target's data → `merge!` commits when every test is green, carrying
-   its proofs' green evidence (MA-11 with RT-10) → close a merge request with a reason; merging deletes the source
-   branch; the automatic merge works root's held requests (MA-12 with RT-11); root is woken only by an assignment
-   (RT-14); declarations record where they came from → drop the core/agent tag (**reset**). Then norms (MA-8a →
-   MA-8b → MA-8c → MA-9) before the conflicting-refactor tasks. **First end-to-end target: a live model agent's code
-   task merged by root through `merge!`.**
-8. **The rest of the context**: the transcript shows forms, not a prompt (CX-4); wire formats (CX-12); history starts
-   at the current assignment (CX-13); a context over the window refuses (CX-5); unread by delivery and a shown
-   message counts as delivered (S4-05a → CS-04); the model's history shows each pass's test step (CX-11, after TX-0);
-   exchange text is not re-rendered per call (RESPEC R-7).
-9. **One eval request, one commit** (after RESPEC R-1 re-derives the cards from the post-rip code): TX-0 first, then
-   the recording rows in their re-derived order, crash recovery from effect stamps, each agent's own stop deadline;
-   errors recorded once per signature and a new signature asks its steward or root (TX-3 → RT-12, after RESPEC R-4).
-   **Reset point.**
-10. **Gate:** a model eval request costs no more than an ordinary one (C0).
-11. **The context bench, early and then widening** (owner 2026-10-08 night: test presentation strategies rather than
-    pick one): a run's grade (landed) → core tasks in two wordings → launch and table → the first experiments E0
-    (baseline) and E1 (task wording), under US$0.10 and runnable once those two land, beside steps 1-3; then one
-    experiment per presentation dial as each lands (wire format after CX-12, reference depth, block placement, help,
-    history, proof presentation), five repetitions per cell; paging after D1; give-back and answer tasks after F7, A1
-    and F6; conflict tasks with a model root last. The full matrix waits on C0.
-
-**File order on the path.** Three files carry most rows; a row on one of them waits for the one before it.
-- `src/seon/turn.clj` (group B): a1-home (in flight) → F4d → F11 → LR-PROOFREAD → CX-13 → CX-11 (after TX-0) →
-  RT-13's cap arm → RT-11 → step 9's rows in their re-derived order; CX-12 touches `turn.clj` at the call site only.
-- `src/seon/sci/eval.clj` (group C): SCI-2 → SCI-3 → RED-2 → PB-02's proof → PB-02b → PB-03b (after RED-5) → PB-11
-  (re-measured) → PR-04 → PR-11's leftovers → SR-H → SR-I → RO-12 → LR-OBSERVE; the lookups (S1-06 … S1-09, S7-01)
-  now live in `src/seon/sci/lookup.clj` (group H) and no longer queue here.
-- `src/seon/task.clj` (group E): CS-05b → the R-2 completion slice → RT-2 → RT-4 → RT-3 → RT-7 → NK-7 (reset) → GV-4
-  → GV-5 → F5's merge half → RT-9; LR-ASSIGNWRITER and LR-OWNTASK fold into RT-2.
-
-**The same path by row id.**
-1. a1-home, b2-help (in flight); the stub-Var task (`seon.turn.batch`); SCI-2 → SCI-3; AE-1 → AE-2 → AE-3 (R-9, §3.31).
-2. (R-2) completion slice; A1 + RT-6 → F6 → RT-5; F7a → F7b → F7c; AE-4 (reset; replaces RT-1's schema change), RT-2 → RT-4 → RT-3; then AE-6 → AE-7 (wake path).
-3. F12; F11; F4d (R-6); CS-01d; LR-PROOFREAD; LR-PROOFSTATUS; CO-0 → CO-1 → CO-2 → CO-3; CO-4 (W-24 re-measured) →
-   CO-5; CO-6; CO-7 → CO-8; CO-9 → CO-10; CO-11 (restart batch); CO-12.
-4. RED-8; RED-2 (after SCI-3); RED-4; RED-5 (high); RED-6; RED-7.
-5. MA-0 → MA-1 → MA-2; NK-7 (reset) → GV-2 (after NK-3) → GV-3 → GV-4 → GV-5 → GV-6 → MA-4 → MA-10; RP-1w; NK-2
-   (after EN-1), NK-3, NK-4, NK-5, NK-6.
-6. (R-2, R-3) MA-3 → MA-14a → F5 (merge half) → RT-9; RT-7 → RT-8; RT-13.
-7. MA-5a → MA-5b; MA-6 → MA-7 → MA-11 + RT-10 → MA-14b; MA-15; MA-12 + RT-11; RT-14; MA-16a's owner rows; NK-8a →
-   NK-8b (reset); then MA-8a → MA-8b → MA-8c → MA-9 (before X1-X4).
-8. CX-4; CX-12 → CS-03c; CX-13 → AE-5 (answers R-8; amends RT-13); CX-5; S4-05a → CS-04; CX-11 after TX-0; R-7's row.
-9. (R-1) TX-0 → the re-derived RP, EN, TX, S5, S6 order (today's cards: `cards/README-recording.md`); (R-4) TX-3 →
-   RT-12; then CN-7, CN-11, CN-20, CN-21. **Reset.**
-10. C0.
-11. BENCH-1 (landed) → BENCH-2 → BENCH-3 → BENCH-4 (E0, E1); then CX-12 → E2, BENCH-6 + C3 → E3, BENCH-7, BENCH-8,
-    BENCH-9, BENCH-10 (C8); D1 → D2 → BENCH-11; X1-X4, B1b, Q1, Q2, D3; MA-17.
-
-**The lanes-as-agents rows** (run beside the path; each removes friction our own lanes hit): CS-05b; CS-01c3 →
-TASK-CHECK → REF-2; LR-HOOK; LR-BRANCHRESTART; RF-3 (owner route); CS-02; S1-06 → S1-07a → S1-07b, S1-08 → S1-09.
-
-**Respec before launch.** These rows' designs predate today's landings; each needs a short design pass (research
-and dual review, owner approval where it changes a ruling) answering the question named, before its cards launch.
-- **R-1 Recording (RP, EN, TX, S5-05, S6 rows; `redo/pass-and-recording.md`, `redo/entrants.md`).** Written before the
-  rip deleted the system turn, generated and opening runs, the capture transaction and stored read evidence, and
-  before SCI-1 changed Var writes. Which rows are now moot or smaller (RP-10, RP-14, RP-15a-d, EN-8b, TX-8b, S6-05),
-  how many commits does a model eval request write today (re-run the census at HEAD), and does RP-3's "capture each
-  Var write" become the SCI fork's per-context binding hook rather than a second capture?
-- **R-2 Finishing (F5 against RT-1 … RT-3, RT-9, RT-13; `redo/task-finish.md`).** F5 derives status and never stores
-  it; Q-RT1 makes holding a stored assignment retracted on completion. Which transaction retracts it (the step's
-  recording when the proofs turn green?), and should F5 split into completion without a merge (answer tasks, no-change
-  code tasks: needs no merge machinery, so it can land in step 2) and the merge-request half (after GV-5, MA-14a)?
-  Do F5's `:bailed`/`:capped` statuses collapse into RT-13's move?
-- **R-3 The merge path against root's tasks (MA-11, MA-12 against RT-9 … RT-11; merge.md §4-§5; `merge-path-sol`,
-  `b226bd775`, not folded).** With an assignment as root's wake, is MA-12's listener over open requests deleted in
-  favor of RT-1's one wake? Does merge.md need the step from a merged branch to persisted running code (write-back and
-  reload) that `merge-path-sol` researched, and in which row?
-- **R-4 The errors cut against TX-3 and RT-12 (errors.md §6-§7).** RT-12 and TX-3b change `seon.fault/record!`, which
-  E-SDELETE folds into `seon.error`; E-CUT still waits on root's split. Is the cut re-split around the one recorder
-  (TX-3a → TX-3b → RT-12 first, then E-P1 … E-CUT), so no row edits a recorder the next row deletes?
-- **R-5 The codec (`390652aae`; research `c705b5ba9`, `8878ba93b`; W-24, CO-4, PR-24, PR-25).** Keep Seon's EDN-slot
-  codec, shrink it to bridged attributes only, or store Datahike-native values and delete it? One decision the four
-  rows and the task `seon.schema.datahike/a-slot-refusal-copies-the-whole-stored-value` follow.
-- **R-6 The step after CX-2 (F4d, F11, CX-11).** F4c leaves tests pending for the next eval request, but an agent that
-  then waits has no next eval request, and F4d derives pending work only at proc start. Is "tests left pending" a
-  wake (a listened fact) or run at the wait? Does F11 measure first that a red re-executes, as its row asks?
-- **R-7 History cost (agent-loop.md §3.4 against CX-1).** The spec says the proc holds the assignment's exchanges and
-  appends; CX-1 re-reads call rows and re-renders exchange text every model call (0.7 ms per evaluation, 10× over
-  copying stored text). Proc-held exchanges, or exchange text cached by content in `seon.cache` (pattern P1)? The spec
-  states the choice.
-- **R-8 The call cap after CX-2 (S6-05, RT-13, W-4).** agent-loop.md §3.5 counts model calls against the outside
-  wake; with an assignment as the only thing that opens a model turn, is the cap's anchor the assignment, and does
-  `episode-runs`/`turns-left` (W-4) become a count of call rows since it? **Answered (2026-10-08, AE-5):** the cap
-  is the count of call rows carrying the current assignment's grant; only a new assignment (RT-13's re-assignment)
-  mints a new grant and refills it; `outside-wake-t` and `spent-runs` are deleted.
-- **R-9 Where an agent's settings live (runs 2 and 3; task `my.agent` "root's settings for an agent never reach its
-  branch").** Read at the home like assignments, or written on the branch? **Answered (2026-10-08, AE-1 to AE-3):** agent
-  facts are written and read at the task home through `seon.agent/record`, and the writer refuses a fact on the
-  wrong side (`:seon.agent/written-at`).
-
-Off the path but scheduled: Clojure's words, validated state and vectors (none is needed for the smoke run; each row
-lands only after the rows that rewrite its files, so most land late): AT-1, AT-2, AT-3 (after SR-H),
-AT-8, AT-4 … AT-7 by their deps; CN rows by their deps (CN-7, CN-11, CN-20 and CN-21 close step 9); VEC-3, VEC-6,
-VEC-9; UL rows as the research lands. Also: S1-11, printer
-conversions PR-12 … PR-E4, messages MS-* (MS-11b low), raw-output RO-2 … RO-12, storage slices SR-C, SR-F, SR-G, SR-J,
-the errors cut E-P1 … E-SDELETE (after RESPEC R-4; PR-20, PR-26, MS-08 follow it; E-SREADS is on step 9's path through S5-05),
-LR-OBSERVE, LR-PROOF, LR-BOOT, LR-RETIRE, MEM-02, MEM-04, MEM-05's owner tasks, D1, B1a, M0, UL-1a → UL-1b, UL-1c → UL-1d,
-DH-1 → DH-2 → DH-3, the remaining DIAL rows from `dials/dials.md`, CN-23 (lowest). From the 2026-10-08 audits (cards in `cards/README-audits.md`): pass-cost owners PB-07a → PB-07b → PB-13, PB-08, PB-09 (after S4-01), PB-11 (after PB-03), PB-12, PB-14; storage SR-P, SR-S, SR-STATUS, SR-L → SR-G2 → SR-AUDIT, SP-1a → SP-1b → SP-1c, SP-2 → SP-4, SP-3's web half (in flight), SR-ENUMa → SR-ENUMb, SR-PERMIT, SR-EFFECT, SR-STREAM, SR-R0, SR-HITS, SR-BRANCH; library rows UL-3a → UL-3b, UL-5 → MS-08, UL-6 (before AT-4), UL-7, UL-8b, UL-9, UL-11, UL-12, UL-15, UL-16, UL-24; forks FK-SCI2 (restart batch), FK-KONDO, FK-DH, FK-ASYNC, DH-4a → DH-4b, DH-5, DH-6, DH-7, DH-8, W-23; review fixes LR-CHECKSLOTDIAL, LR-ABSENTDIAL, LR-ARMERROR, LR-OWNTASK, LR-ASSIGNWRITER, LR-JVMDOC, LR-OPDIAG, LR-SUPPLYMAP, LR-EXCEPTION (with PR-04), LR-OFFCONTEXT, LR-STDOUT, LR-P11, LR-BRANCHREACH, PR-29, MS-12, F10, W-24 … W-26; CN-24, VEC-10, DIAL-2 … DIAL-18. SR-PERMIT is a correctness defect and goes first among its group.
-
-## 6. Questions still open for the owner
-
-Everything in `review/owner-decisions.md`, the cards READMEs and the earlier "blocked-on-owner" statuses is answered by
-a ruling or by CLAUDE.md (§1), except these, in plain words. Answered on 2026-10-08 and folded into the rows: Q-R1
-(an alias retarget follows Clojure's reload rule, RP-8), the context cut's Q-CX1-3, the root tasks' Q-RT1-4, the cost
-patterns' Q1-Q2, a nested `defn` saved from its own span (RP-9), a code task with no change done without a merge
-(F5), subtree counts kept on every write (DH-1, DH-2).
-
-1. **Re-approve the recording design after the rip?** RESPEC R-1 (§5) re-derives the RP, EN and TX cards from the
-   post-rip code. Recommended: root re-derives and the owner re-approves only if a row's behavior changes, not for
-   rows that merely became smaller or moot.
-2. **Where an agent's settings live** (RESPEC R-9). Answered by the owner (2026-10-08): "an agent has their own
-   entity and the task should be ref'ed there. Everything about the agent should live there." Design and rows:
-   [README-agent-entity](cards/README-agent-entity.md), §3.31. Root took the four AE questions' recommended options
-   on the owner's behalf (assignments as components of the agent, a grant-anchored cap, messages at the home, the
-   design kept as the ref `design/agent-entity`): root default, owner to review.
-3. **Neighborhood reads for rendering** (AU-Q15, `cards/README-audits.md`), now askable because CX-10 landed: compile
-   one Datahike pull selector from the schema links (recommended), plain pull selectors as the contract, or keep ours
-   for distance and continuation only. AU-Q17 waits on UL-1d.
-4. **The codec** (RESPEC R-5): keep, shrink to bridged attributes, or delete for Datahike-native values; the research
-   is in (`c705b5ba9`, `8878ba93b`); recommended after R-5's dual review.
-5. **Commit cost** ([README-commit-cost](cards/README-commit-cost.md)): CC-Q1, may the test step's writer admission
-   ride the eval request's recording transaction (OD-Q5 keeps admission at the writer)? CC-Q2, may the proofs and the
-   reaching tests be one test request? CC-Q3, when to open the datom write-ahead log design.
-6. **Root rulings still pending** (not owner questions, listed so they are not lost): the host-bound route (RF-3) and
-   where the cluster base lives (LR-BASEWEIGHT, note `5cd143fc7`).
+The order of work is [plan §0](../plan.md#0-where-we-are-and-the-order-revised-in-place-by-root-last-2026-10-14-afternoon)
+and [TASK-CHAIN](cards/TASK-CHAIN.md) §7. The 2026-10-08 critical path and its owner questions are retired; git history
+keeps them. Rows in §3 stay as the record of each slice's design; a row's status line is true only where §2 lists its
+commit.

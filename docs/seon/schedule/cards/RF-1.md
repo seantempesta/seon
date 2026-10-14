@@ -1,7 +1,7 @@
 ---
 title: "Card RF-1 Write a branch's declarations back without a merge"
 type: reference
-status: active
+status: done (24e8cc2df)
 created: 2026-10-08
 ---
 

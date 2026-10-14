@@ -1,7 +1,7 @@
 ---
 title: "Card CX-7 One debug view: the context as sent, from the one assembler"
 type: reference
-status: active
+status: done (55ede54a9)
 created: 2026-10-08
 ---
 

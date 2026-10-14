@@ -1,7 +1,7 @@
 ---
 title: "Card F4a: Proofs run after a code-changing pass"
 type: reference
-status: active
+status: done (09f86c000)
 created: 2026-10-08
 ---
 

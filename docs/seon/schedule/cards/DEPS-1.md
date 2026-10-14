@@ -1,7 +1,7 @@
 ---
 title: "DEPS-1: hiccup 2 and Guava in deps.edn (landed by root in the restart batch)"
 type: reference
-status: landed by root in the restart batch
+status: done (6a244149d)
 created: 2026-10-08
 ---
 

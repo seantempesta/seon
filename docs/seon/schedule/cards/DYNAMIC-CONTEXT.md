@@ -1,7 +1,7 @@
 ---
 title: "DYNAMIC-CONTEXT: regenerated context, one working set, one agent per task"
 type: card
-status: proposed
+status: proposed (stages 4-7 deferred, plan §6; the task members are TASK-CHAIN §1)
 created: 2026-10-10
 ---
 
@@ -86,7 +86,7 @@ Everything the regenerated context is built from is already stored; one fact is 
 | Source | Stored (entity, attributes) | Derived at the call |
 |---|---|---|
 | The agent | `:seon.agent/id`, `:seon.agent/branch`, `:seon.agent/settings`, `:seon.agent/admission-closed-tx` | its namespace: the `:seon.sci.eval/ending-ns` of its latest evaluation, else the task namespace |
-| Its task | the task entity at the home (`seon.task/home`), the assignment (`:seon.task/assignment`), `:seon.task/must-read` | `seon.context/held-task`, `:seon.task/status` (`:working :done :capped`), `seon.context/proofs` from the test runner's latest results, `seon.ref/references` |
+| Its task | the task entity, the assignment (`:seon.task/assignment`), `:seon.task/references` (the names its `plan` and `instructions` cite) | `seon.context/held-task`, `:seon.task/status` (`:working :done :capped`), `seon.context/proofs` from the test runner's latest results, `seon.ref/references` |
 | Its evaluations | `:seon.cluster.eval/receipt` (`:seon.cluster.eval/source`, `:seon.eval/shown`, `:seon.eval/shown-tokens`, `:seon.cluster.eval/error`, `:seon.cluster.eval/executed`, `:seon.sci.eval/ending-ns`, `:seon.cluster.eval/run`) | the exchanges, in agent order (`seon.eval/of-agent`); the latest failed definition per symbol (a `defn` form with `:seon.cluster.eval/error` and no admitted digest) |
 | The definitions it touched | branch head: `:seon.fn/sym`, `:seon.fn/source`, `:seon.program/definition-digest`; `:seon.test/sym`, `:seon.test/source` | the working set |
 | **New**: the definitions an evaluation showed | `:seon.cluster.eval/shown-declarations`, a set of `[sym digest]`, written in the one recording transaction when the evaluation's value satisfies `:my.program/declaration-source` (the value of `my.program/source`) or the doc map of a program symbol | whether a history entry refers to the working set, and whether the definition changed since it was shown |
@@ -129,7 +129,7 @@ kinds of entry change:
    (below), so the exact `@balanced?` the model must correct is in front of it, not the unchanged installed body.
 
 **The working set** is a section of the block, `:seon.context/working-set`, ordered by what the task needs first
-(Astra): (1) the task's `:seon.task/must-read` references that are program declarations, current; (2) the agent's
+(Astra): (1) the task's `:seon.task/references` that are program declarations, current; (2) the agent's
 admitted edits on the branch (the symbols in any evaluation's `executed` whose digest differs from main's); (3) its
 unresolved failed definitions, each as the latest rejected source with its diagnostic; (4) then the other declarations
 it read (`shown-declarations`), first-touched order. Each entry is the declaration as `my.program/source` answers it
@@ -159,7 +159,7 @@ way; what the model attends to shrinks by about half.
 ## Two more context frictions (coordinator, 2026-10-10)
 
 **The agent re-enters its namespace on almost every call** (13 of 15 and 9 of 14 `in-ns` forms were already there).
-The block carries no namespace: `seon.context/current-state` has task, proofs, must-reads, cost, unread and turns;
+The block carries no namespace: `seon.context/current-state` has task, proofs, referenced names, cost, unread and turns;
 `seon.repl/response-entries` shows `:ns` only when a form changed it (`seon.repl-test/the-namespace-appears-only-when-the-form-changed-it`),
 so after call 1 nothing in the regenerated context states where the agent is, and the help's one example starts with
 `(in-ns 'the.task.ns)`. Fix at the producer: the block gains `:seon.context/namespace`, the agent's current namespace
@@ -239,8 +239,8 @@ The stage: when the settlement closes the agent (above), it also writes one mess
 the agent's errors grouped by signature with counts and the distinct error values' handles (the lane's grouping, reused,
 never duplicated), calls used and prompt, cached and completion tokens (the same reads `seon.competency/grade`
 makes), and the agent and branch. Its AI render ends with the prompt and the offered operations: "What was wrong or
-missing in this task: intent, must-read, proofs or context?", the record read above, the reflection send, and
-`(seon.task/create! {…the same declaration with the change… :seon.task/basis <revision>})`. Every task end sends it;
+missing in this task: plan, instructions, proofs or context?", the record read above, the reflection send, and
+`(my.task/update! task k f & args)` (TASK-CHAIN §3a). Every task end sends it;
 whether to refine is root's discretion (owner).
 
 Proof, red first: `seon.turn-continue-test/a-task-that-ends-sends-root-one-ended-message` (a fixture agent whose proof
@@ -314,12 +314,12 @@ serve the later `scan` acceptance; the loop works crudely after 1–3.
    evaluation through the one path; asserts the set holds the symbol and the branch's current digest; `(+ 1 2)` records
    none). Files: `src/seon/turn.clj` (`receipt-terminal-attributes` and the settlement),
    `resources/seon/schemas/seon.cluster.eval.edn`, `test/seon/repl_test.clj`.
-5. **The working set in the block.** `seon.context/working-set`: must-read declarations, admitted edits, latest failed
+5. **The working set in the block.** `seon.context/working-set`: referenced declarations, admitted edits, latest failed
    definitions, then other reads, each current once with `:changed-since-shown`. Proof
    `seon.context-test/the-block-shows-each-touched-definition-once-current-and-failed-attempts-as-attempts` (read
    `slug` twice, redefine it: one entry, the current source, marked changed; a `defn` with an unresolved local fails and
    its entry is the rejected source with its diagnostic while the installed body is unchanged; a deleted one shows
-   `:deleted`; the must-read entry comes first). Files: `src/seon/context.clj`,
+   `:deleted`; the referenced entry comes first). Files: `src/seon/context.clj`,
    `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj`.
 6. **History refers instead of repeating.** `seon.context/exchange-form` drops the `:value` of a declaration-showing
    reply for `:working-set [sym]` (`:changed` when the digest moved), replaces an admitted definition's form with its
