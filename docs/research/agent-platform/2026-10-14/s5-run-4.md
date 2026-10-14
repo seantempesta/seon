@@ -984,3 +984,108 @@ About 22k prompt tokens per call, only 23% cached. In run 4 the cached share was
 - A chain agent reads its branch's config, frozen at fork, not the cluster configuration on main (Broken first 2).
 - A closed working attempt keeps its graph (Broken first 3; root filed
   `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`).
+
+## Run 7: seventh Implement attempt, a prove loop with no model call
+
+Lane `s5-run-7` watched as root, 18:57-19:05 UTC. Default had restarted onto 33724e146, which carries 8103caba0
+(seen-database cached by commit ids), e287d2b52 (a result's identity follows rows main moved past) and 33724e146
+(as-of digests by index probe). Root's gates passed in JVM mode: the held Implement block on `:chain-f1f6dc8e6652`
+built cold in 4.7 s and on repeat in 149 ms / 239 MB, and its proof read `:pending`. The attempt read the chain
+branch's config, frozen at fork (40, relaunches 0, no-provider absent). Root ran
+`(my.root/run! {:seon.task/assigned "c12a57408f49"})`.
+
+**Broken first.**
+
+0. **The attempt-start prove pass re-ran the proof 127 times in 86 s and never let the agent make a model call.**
+   - Attempt `1addda8db45d` (number 7, agent `attempt/1addda8db45d`, eid 1030680, attempt eid 1030683) was written at
+     18:57:28.3 UTC. It wrote no turn.
+   - From 18:57:29.5 to 18:58:58 the branch gained 127 `:named` runs of
+     `seon.error-test/an-unresolved-alias-name-is-answered-with-its-nearest-core-name`, one new run about every 0.7 s
+     (`086ccd129723`, `283ee99f3ca8`, … `409e78873bcf`), each with one member.
+   - **The first run was green.** Run `086ccd129723` (member 1030685, run at 18:57:29.528, basis-t 536872808,
+     change-basis-t 536872685, loaded commit `6acf6f7d…`) passed 4 assertions with 0 failures and 0 errors, in 962 ms
+     and 2.2 GB. The subject may already be fixed on the branch. That is not judged, because nothing merged.
+   - All 126 later runs were red: error 1, "Uncaught exception, not in assertion.", `java.lang.NullPointerException`
+     "Cannot invoke \"clojure.lang.IObj.withMeta(clojure.lang.IPersistentMap)\" because \"x\" is null", 15-20 ms and
+     13 MB each. Top frames:
+     `seon.sci.eval$lazy_root$lazy_member eval.clj:3137` ← `seon.test.runner/run-selected-tests runner.clj:520` ←
+     `run-vars! runner.clj:439` ← `seon.db/with-branch` ← `seon.sci.eval/run-tests eval.clj:5256` ← `run-test 5268` ←
+     `seon.test/bounded-result test.clj:362`. This is run 6's class: `d/commit-as-db` answers nil in `lazy-member`.
+     It shows up on the second and later calls of the branch-interpreted test var, not the first.
+   - **Why it re-ran: no run-7 member carries a reach digest.** None of the 127 members, the green one included, has
+     `:seon.test.member/reach-digest`. Only the three old members do (`c8ec6428…`, `6d88b847…`, `6408418baa94…`).
+     - `seon.test.runner/current-results` skips a member with no digest (`:when digest`). So
+       `(seon.test.runner/current-results head [proof] nil)` answers `{}`, and every pass sees the proof as never
+       run. The green start therefore never ended the task (§2.4/§2.7), and nothing bounded the re-runs.
+     - The reader computes a string today: `(seon.test.runner/reach-digests head [proof])` answers `87aea83603ac…`
+       in 60 ms. It answers the same on `(seon.db/as-of head 536872808)`, the green run's basis.
+     - The recorder (`seon.test.runner/record-tx`) writes the digest only when `(string? (get reach sym))`. The
+       completion path drops digests with `(apply dissoc digests stale)`, using `executed-roots`' `::stale`: "a result
+       whose body ran a definition other than the tested one keys nothing: it is kept and never reused".
+     - **Probable cause (not reproduced):** the proof is classed stale on every run. On a work branch, the body runs
+       main's row for what main moved past (`seon.cluster.registry/seen-database`), while the digested closure is the
+       branch's own. A `digests` error value is the other possibility, not ruled out. Reproducing either needs the
+       run's `:seon.test.member/executed`, which is not stored.
+     - Owners: `seon.test.runner/executed-roots` (stale against moved-past rows), and the attempt-start prove pass. A
+       test result that keys nothing makes the pass re-run without end. The design has to make that impossible at the
+       owner, not by capping it.
+   - Cost: the test bodies took 2.9 s and 3.8 GB in total, but the JVM-wide allocated counter rose from 107 GB to
+     289 GB (about 2-3 GB/s). The attempt's turn thread alone allocated 64.5 GB without one model call. About 98% of
+     the cost was the pass around the test (selection, recording, digests), not the test.
+1. **Root closed the attempt, and its graph was kept.** Root wrote `:closed` at 18:58:57.530 ("S5 run 7 livelock
+   stopped by root: the start prove pass re-ran the proof ~100 times …"). One more member landed at 18:58:58 (one
+   was in flight), then none: 134 members at both 18:59:15 and 18:59:25. JVM-wide allocation over the 10 s after
+   that was 0.012 GB. The three graph threads
+   (`seon-flow/default/attempt/1addda8db45d/seon.agent/{turn,mailbox,schedule}`) were alive and `WAITING`, with
+   0 bytes allocated over 10 s. This is root's filed `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`
+   again. Root's close wrote no problem task.
+2. Root's own path: my first watch form used `:seon.agent/end-reason` and `:seon.task/handle`. The refusals were
+   good: `seon.db/q` "cannot read uninstalled attribute" listed the candidates, which let me find `:seon.task/id`
+   and `:seon.task/attempt-of`.
+
+**Run.**
+
+- 18:57:28.3: attempt 7 and its agent written. 18:57:29.5: the first prove run started (green). From 18:57:32:
+  red NPE runs every ~0.7 s.
+- 18:57:56, first watch: 0 turns, 39 threads, heap 1.6 GB, 107 GB cumulative. 18:58:11: 150 GB. 18:58:32: 213 GB and
+  41 threads. Root was messaged at the start and when the loop was found (18:58:4x).
+- 18:58:57.5: root `close!`d. 18:59:03: task `:held`, attempt 7 `:closed`, 289 GB, heap 0.95 GB. 18:59:25: no new
+  members and flat allocation (Broken first 1). Root was messaged with the stop numbers and the cause.
+
+**Grading form.** Run 4b's form with `aid "attempt/1addda8db45d"`: 0 turns, 0 calls, 0 evaluations. No first block
+was captured, because no model context was built.
+
+| Task | Model calls | Prompt tokens | Completion | Wall time | Agent forms | Proof runs | End |
+|---|---|---|---|---|---|---|---|
+| Implement, attempt 7 (`1addda8db45d`) | 0 | 0 | 0 | 89 s (18:57:28.3 to 18:58:57.5), all in the start prove pass | 0 | 127 (1 green, 126 NPE), 2.9 s / 3.8 GB in bodies, ~180 GB JVM-wide | `:closed` by root (`my.root/close!`), task `:held`; graph kept idle |
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 … 6 | **+ 7** |
+|---|---|---|---|
+| Model calls | 38 | 176 | **176** (attempt 7: 0) |
+| Prompt tokens | 570k (310k cached) | 5.41M (4.00M cached) | **5.41M (4.00M cached)** |
+| Hand acts after `chain!` | 6 | 2 | **3**. Root's `close!` of a looping attempt, the same mechanism as 4b and 6: an attempt that cannot end by itself. |
+| Furthest point | Implement (write-back conflict) | attempt 6 worked 19 calls; stale red | **attempt 7's first proof run went GREEN, but the result keyed no reach digest, so the start pass re-ran it until it was red (NPE)** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** `merge-chains!`/`finish-chains!`, the published-diff review, the bb hook load and the fresh-agent `(str/subs "abc" 1)` check were not reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:held`, and attempts 1-7 are all
+  `:closed`. 134 members of the proof are on the branch, 127 of them from this run. Attempt 7's graph threads are
+  alive and idle. `my.root/merge-requests` was not called. Main holds no `:seon.task/merge` entity.
+- JVM `user` host helpers: `s7-conn`, `s7-aid`, `s7-state`, `s7-proof`, `s7-proofs`.
+- No SCI eval as root by this lane. No config applied by this lane (the attempt read the branch's frozen config).
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** a proof result recorded with no reach digest is never current, so the attempt-start
+  prove pass re-runs it without end (127 runs in 86 s, about 2-3 GB/s, 0 model calls). The green start never ends the
+  task. Owners: `seon.test.runner/executed-roots`'s `::stale` classification on a work branch (main's moved-past rows
+  against the branch's digested closure), and the record path that keys nothing. Regression: on a work branch forked
+  before main moved a callee, a branch-defined deftest run by the start pass records a reach digest, and a second pass
+  reuses it.
+- `seon.sci.eval/lazy-root`'s `lazy-member` throws a bare NPE (`d/commit-as-db` nil) on the second and later runs of a
+  branch-interpreted test var in the same JVM. The first run passes. Reproduce: run the proof twice on the chain
+  branch head.
+- A closed working attempt keeps its graph (filed: `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`).
