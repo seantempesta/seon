@@ -1089,3 +1089,100 @@ was captured, because no model context was built.
   branch-interpreted test var in the same JVM. The first run passes. Reproduce: run the proof twice on the chain
   branch head.
 - A closed working attempt keeps its graph (filed: `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`).
+
+## Run 8: eighth Implement attempt, done with no model call, final merge refused
+
+Lane `s5-run-8` watched as root, 19:16-19:25 UTC. Default had restarted onto 5898f977e (a work branch's result
+that ran what main moved past is recorded at its identity). Root ran
+`(my.root/run! {:seon.task/assigned "c12a57408f49"})` on `:chain-f1f6dc8e6652`. The attempt read the chain branch's
+frozen config (DeepSeek, cap 40).
+
+**Broken first.**
+
+0. **The final merge refused, and nothing bails the refusal: the chain is parked with no problem task.**
+   - `merge-chains!` ran `seon.merge/merge!` for attempt `f6f49a0b3d09`. The merge refused, and only the error's
+     type was recorded on the attempt on the chain branch: `:seon.task/refusal :seon.source/write-back-error`
+     (19:16:28.96, 0.3 s after `:done`). The error map itself was not kept anywhere: no fault and no main error.
+   - **Reproduced read-only** in JVM mode with the same steps `seon.cluster.source/prepare-merge!` runs before any
+     test: `source/compare-branch` (env store, chain branch onto main), then `#'source/replacement`, `seon.db/with`,
+     and `#'source/proven-files` with root `/Users/sean/src/seon` (173 ms). The answer was
+     `{:seon.source/write-back-refused :file-absent, :seon.source/path "resources/seon/schemas/tmp.edn"}`, with
+     "The changed schemas' resource is absent under the root."
+   - **The merge delta carries junk.** It has 12 identities:
+     - the subject: `seon.error/{alias-target, alias-candidates, candidate-calling-form, core-namespace,
+       library-calling-form, library-names, nearest-calls}`, `[:seon.ns/name seon.error]` and the proof test;
+     - plus junk: `[:seon.schema/key :tmp/probe]` (on the branch since 12:15 UTC), `[:seon.ns/name user]` (06:10 UTC)
+       and `[:seon.fn/sym seon.error/config-expectation-present-generator]`.
+     - `seon.error/dbv` and `testing-dump` are not in this delta. The `:tmp/probe` schema is what refused the merge,
+       for want of a file, not because it is junk.
+     - Nothing was written to the checkout (`git status` shows no change under src, test or resources).
+   - **The refusal is never bailed.** `seon.cluster.agent/chain-bails`, called read-only, answers `[]`. Its shape is
+     `(into [] (keep ended-row) (into attempts (keep refused-row) attempts))`.
+     - The refused-merge rows that `refused-row` builds carry no `:seon.task.attempt/end`, and then they pass through
+       `ended-row`, whose `(and end …)` drops them. So "a refused final merge is recorded on its :done attempt" never
+       reaches `bail-chain!`.
+     - The task stays `:seon.task/execution :running`, with no problem task.
+     - The attempt's graph threads (`seon-flow/default/attempt/f6f49a0b3d09/seon.agent/{turn,mailbox,schedule}`) are
+       alive.
+     - `chain-finishes` excludes an attempt that holds a refusal, so nothing loops. Thread-summed allocation stayed
+       flat at about 46 GB from 19:17 to 19:20.
+1. **Fixed since run 7: the start prove pass ran the proof once.** Member 1061780 was green (4 pass, 987 ms, 2.2 GB,
+   `:interpreted`) and carries `:seon.test.member/reach-digest 20578dae963d…`. Branch members went from 134 to 135
+   and stayed there. The green start ended the task `:done` with no model call (§2.4/§2.7), so 5898f977e did what it
+   claimed.
+
+**Run.**
+
+- 19:16:19.1: task set `:running` (attempts-made 8). 19:16:21.0: attempt 8 (`f6f49a0b3d09`, eid 1061778, agent
+  `attempt/f6f49a0b3d09`, eid 1061775) written.
+- 19:16:25.6: proof run `0c9b3b2735a8` (green). 19:16:25.8: its member was recorded with a digest.
+- 19:16:28.66: `:seon.task.attempt/end :done`, end commit `6acfd50c-129c-51d2-9e77-bc41ffbd412d`. The agent's end
+  counters: calls 0, prompt 0, completion 0, green 1.
+- 19:16:28.96: merge refusal recorded. 19:17:2x: root was messaged at the first proof result, and at 19:2x with the
+  refusal and its cause.
+
+**Done-rule evidence.** `(source/done-refusals at-end (#'seon.cluster.agent/done-judged main at-end
+:chain-f1f6dc8e6652 "c12a57408f49"))` at the end commit answers `[]`. The judged map:
+
+- run `0c9b3b2735a8` on `:chain-f1f6dc8e6652`, proofs `#{seon.error-test/an-unresolved-alias-name-is-answered-with-its-nearest-core-name}`;
+- 24 identities;
+- one result: 4 pass, 0 fail, 0 error, reach digest `20578dae…`, input digest `f3a42e81…`, program digest `aba0ee51…`.
+
+**Grading form.** Run 4b's form with `aid "attempt/f6f49a0b3d09"`: 0 turns, 0 calls, 0 evaluations.
+
+| Task | Model calls | Prompt tokens | Completion | Wall time | Agent forms | Proof runs | End |
+|---|---|---|---|---|---|---|---|
+| Implement, attempt 8 (`f6f49a0b3d09`) | 0 | 0 | 0 | 7.6 s (19:16:21.0 to 19:16:28.66) | 0 | 1 (green, keyed), 987 ms / 2.2 GB | `:done`, done rule `[]`; final merge refused `:file-absent` on `resources/seon/schemas/tmp.edn`; not bailed |
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 … 7 | **+ 8** |
+|---|---|---|---|
+| Model calls | 38 | 176 | **176** (attempt 8: 0) |
+| Prompt tokens | 570k (310k cached) | 5.41M (4.00M cached) | **5.41M (4.00M cached)** |
+| Hand acts after `chain!` | 6 | 3 | **3** so far. This run needed none, but the parked chain needs one from root. |
+| Furthest point | Implement (write-back conflict) | attempt 7's green proof was unkeyed and looped | **Implement `:done` by the done rule; merge refused on carried junk (`:tmp/probe` schema)** |
+| Merge | Prove auto-merged, Implement refused | none | **refused** (`:seon.source/write-back-error` `:file-absent`). The published-diff review, the bb hook load and the fresh-agent `(str/subs "abc" 1)` check were not reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:running`. Attempt 8 is `:done`, has no
+  outcome and holds `:seon.task/refusal`. Its graph is alive.
+- JVM `user` host helpers: `s8-conn`, `s8-db`, `s8-head`, `s8-proof`, `s8-members`, `s8-state`, `s8-snap`,
+  `s8-alloc-gb`, `s8-store`, `s8-repro`, `s8-done`.
+- No SCI eval as root by this lane, no write and no config applied. The reproduction was read-only: `seon.db/with`
+  and a released compare.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** `seon.cluster.agent/chain-bails` drops refused-final-merge rows by passing them
+  through the ended-attempt filter, so a refused merge parks the chain silently. Regression: a chain whose terminal
+  `:done` attempt holds `:seon.task/refusal` is bailed (task `:held`, problem task written, graph stopped) on the next
+  pass.
+- `seon.cluster.agent/merge-chains!` records only `(:seon.error/type merged)` on the attempt, so root has to rebuild
+  the refusal by hand. Store the error value (the printed value plus ids, per "Separate storage from observation"),
+  or deliver it in the bail's reason.
+- An agent's scratch definitions ride into its chain's merge: `:tmp/probe`, the `user` namespace and
+  `seon.error/config-expectation-present-generator`. The merge refused only because the schema had no file. Owner
+  question: are the program entities of `tmp`/`user` excluded from the merge delta by the partition declared on
+  entity schemas, or must the agent unmap them before `:done`, with the done rule refusing a stray?
