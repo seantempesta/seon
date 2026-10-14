@@ -3,11 +3,14 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.cluster.agent :as agent]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.profile :as profile]
             [seon.render :as render]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
+            [seon.task :as task]
             [seon.test-support :as support]))
 
 (defn- root-render-state
@@ -113,3 +116,61 @@
         (is (map? @cache) "a cache atom holding its branch scope")
         (is (not (identical? cache (render/shared-cache base)))
             "nothing is shared through a context with no state")))))
+
+(defn- must-read-unit
+  "The current-state block of `agent-id` at `database` with the turn's render world beside it."
+  [database handle agent-id]
+  (assoc (context/current-state database agent-id)
+         :seon.db/db database
+         :seon.agent/id agent-id
+         :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+         :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)))
+
+(defn- must-read-named
+  [view ref-name]
+  (some #(when (= ref-name (:seon.ref/name %)) %) (:seon.context/must-reads view)))
+
+(deftest a-turn-re-renders-only-the-context-units-whose-reads-changed
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [handle (support/running-cluster running)
+           base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.rc}
+           cited (:seon.task/id (task/create! (assoc base :seon.task/name "cited" :seon.task/intent "A cited task.")))
+           _ (support/declare-proof! connection 'tq.rc-test 'reuse 'tq.rc/reuse)
+           id (:seon.task/id (task/create! (assoc base :seon.task/name "reuse"
+                                                  :seon.task/intent (str "Change `seon.context/step-start` after `tq.rc/cited`; "
+                                                                         "validate with `malli.core/validator`."))))
+           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
+                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           database (db/db connection)
+           request {:seon.db/connection connection
+                    :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}
+           first-pass (profile/measure #(context/current-state-ai (must-read-unit database handle agent-id)))
+           second-pass (profile/measure #(context/current-state-ai (must-read-unit database handle agent-id)))
+           first-prompt (context/model-context database request agent-id)
+           second-prompt (context/model-context database request agent-id)]
+       (is (= 3 (count (:seon.context/must-reads (:seon.profile/value first-pass)))) "one must-read per cited name")
+       (is (pos? (profile/calls-of first-pass 'seon.sci.kernel/invoke)) "the first pass renders each must-read")
+       (is (= (:seon.profile/value first-pass) (:seon.profile/value second-pass))
+           "a reused render answers the data its first render answered")
+       (is (zero? (profile/calls-of second-pass 'seon.sci.kernel/invoke))
+           "the second pass on the same database invokes no must-read producer")
+       (is (= (:seon.ai/prompt first-prompt) (:seon.ai/prompt second-prompt))
+           "the same database value prints the same prompt")
+       (task/create! (assoc base :seon.task/name "cited" :seon.task/intent "A revised cited task."
+                            :seon.task/basis {cited (task/declaration (db/carried-projection @connection)
+                                                                     (db/pull @connection '[*] [:seon.task/id cited]))}))
+       (let [revised (db/db connection)
+             third-pass (profile/measure #(context/current-state-ai (must-read-unit revised handle agent-id)))
+             before (:seon.profile/value first-pass)
+             after (:seon.profile/value third-pass)]
+         (is (pos? (profile/calls-of third-pass 'seon.sci.kernel/invoke)) "the revised unit renders again")
+         (is (< (profile/calls-of third-pass 'seon.sci.kernel/invoke) (profile/calls-of first-pass 'seon.sci.kernel/invoke))
+             "only the revised unit renders again")
+         (is (not= (must-read-named before 'tq.rc/cited) (must-read-named after 'tq.rc/cited)) "the revision shows")
+         (is (= (must-read-named before 'seon.context/step-start) (must-read-named after 'seon.context/step-start))
+             "an unchanged unit answers its reused render"))))))
+

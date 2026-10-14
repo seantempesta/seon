@@ -789,10 +789,14 @@
   (let [argument (render-invocation-argument projection request selected)
         value (when (map? argument) (:seon.render/value argument))]
     (cond-> (if (map? argument)
+              ;; Per-call identity (the turn, the result handle) names the
+              ;; call, not what the render returns.
               (dissoc argument
                       :seon.db/db
                       :seon.sci.eval/ctx
-                      :seon.db/connection)
+                      :seon.db/connection
+                      :seon.turn/id
+                      :seon.render.value/root)
               argument)
       (map? value)
       (assoc :seon.render/value (dissoc value :seon.db/db)))))
@@ -951,31 +955,54 @@
     (and (some? committed)
          (= committed (datahike.db/committed-value-identity previous)))))
 
+(declare branch-scope)
+
 (defn- invocation-cache-key
+  "The `seon.cache` key of one invocation: the branch scope it derives in, its producer, output and the
+  hashes of its code, projection and input evidence."
   [request selected evidence]
-  [selected
+  [(branch-scope (:seon.sci.eval/ctx request))
+   selected
    (:seon.render/output request)
    (hash (::program-evidence evidence))
    (hash (::projection-evidence evidence))
    (hash (::selection-input evidence))])
 
-(defn- reusable-invocation
-  [database bucket evidence]
-  (some (fn [entry]
-          (when (and (same-call-cache-evidence? entry evidence)
-                     (db/read-evidence-current?
-                      database (:seon.render.call/read-evidence entry)))
-            entry))
-        bucket))
+(def ^:private invocation-entry-bytes
+  "Estimated bytes one retained read-evidence entry and its share of the output weigh."
+  1024)
 
-(defn- retain-invocation!
-  [captured cache-key retained-bucket entry]
-  (when captured
-    (swap! captured assoc cache-key
-           (conj (into []
-                       (remove #(same-call-cache-evidence? % entry))
-                       retained-bucket)
-                 entry))))
+(defn- invocation-weight
+  "The estimated bytes of one retained invocation: its read evidence count, calibrated."
+  {:malli/schema [:=> [:cat :map] [:int {:min 0}]]}
+  [entry]
+  (* invocation-entry-bytes (inc (count (:seon.render.call/read-evidence entry)))))
+
+(declare same-invocation-evidence?)
+
+(defn invocation
+  "The retained invocation of `cache-key` that describes the same code and input as `evidence`, else nil."
+  {:malli/schema [:=> [:cat :seon.schema/value :map] [:maybe :map]]}
+  [cache-key evidence]
+  (let [entry (seon.cache/present ::invocation cache-key)]
+    (when (and entry (same-invocation-evidence? entry evidence))
+      entry)))
+
+(defn- reusable-invocation
+  "The retained invocation of `cache-key` whose code, input and reads are current at `database`."
+  [database cache-key evidence]
+  (when-let [entry (invocation cache-key evidence)]
+    (when (db/read-evidence-current? database (:seon.render.call/read-evidence entry))
+      entry)))
+
+(defn retain-invocation!
+  "Retain `entry` as the one invocation of `cache-key` in `seon.cache`, replacing any earlier one.
+  The retained entry holds evidence and output, never a database, program snapshot or projection."
+  {:malli/schema [:=> [:cat :seon.schema/value :map] :seon.schema/value]}
+  [cache-key entry]
+  (seon.cache/evict! ::invocation cache-key)
+  (seon.cache/lookup ::invocation cache-key invocation-weight
+                     (constantly (dissoc entry :seon.db/db ::program-snapshot ::projection))))
 
 (defn same-invocation-evidence?
   "True when two invocation entries describe the same code and input."
@@ -1480,8 +1507,7 @@
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
-  {:seon/tasks #{'seon.render/captured-invocations-blank-source-faces}
-   :malli/schema [:=> [:cat :seon.render/call-request]
+  {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :seon.render/rendered :seon.render/error-result]]}
   [{database :seon.db/db
     output :seon.render/output
@@ -1552,14 +1578,9 @@
                                      (call-cache-evidence request selected))
                     invocation-key (invocation-cache-key request selected
                                                          cache-evidence)
-                    retained-invocations (:seon.render/invocations request)
-                    captured-invocations
-                    (:seon.render/captured-invocations request)
                     retained-invocation
-                    (reusable-invocation database
-                                         (get retained-invocations
-                                              invocation-key)
-                                         cache-evidence)
+                    (reusable-invocation database invocation-key cache-evidence)
+                    committed (datahike.db/committed-value-identity database)
                     reusable? (and previous
                                    (same-call-cache-evidence?
                                     previous cache-evidence)
@@ -1602,12 +1623,15 @@
                     raw (if source-blocks
                           (clojure.string/join "\n\n" (map :seon.render/source source-blocks)) raw)
                     authored-source? (and source-output? (string? raw))
-                    invocation-entry
-                    (merge
-                     (if invocation-reusable?
-                       (refresh-read-evidence database retained-invocation)
+                    stored
+                    (if invocation-reusable?
+                       ;; Evidence checked at this committed value needs no refresh.
+                       (if (and (some? committed) (= committed (::committed retained-invocation)))
+                         retained-invocation
+                         (assoc (refresh-read-evidence database retained-invocation) ::committed committed))
                        (cond->
-                        {:seon.render.call/read-evidence
+                        {::committed committed
+                         :seon.render.call/read-evidence
                         (db/read-evidence @captured)
                         :seon.render.call/basis-transaction
                         (db/basis-t database)
@@ -1621,13 +1645,14 @@
                          (:seon.render.call/source-run-id request)
                          (assoc :seon.render.call/source-run-id
                                 (:seon.render.call/source-run-id request))))
-                     cache-evidence)
-                    _ (retain-invocation!
-                       captured-invocations invocation-key
-                       (get retained-invocations invocation-key)
-                       invocation-entry)
+                    invocation-entry (merge stored cache-evidence)
+                    _ (when-not (identical? stored retained-invocation)
+                        (retain-invocation! invocation-key invocation-entry))
+                    ;; A caller that evaluates authored source itself (the page's
+                    ;; source slot) asks for the evaluated output; every other
+                    ;; caller receives the source.
                     rendered (if authored-source?
-                               (if captured-invocations
+                               (if (:seon.render.call/source-output? request)
                                  (:seon.render.call/output invocation-entry)
                                  raw)
                                (if reusable?

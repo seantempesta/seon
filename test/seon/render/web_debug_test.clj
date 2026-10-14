@@ -204,8 +204,7 @@
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                         :seon.render/profile (render/agent-render-profile effective)
-                        :seon.render/captured-calls (atom {})
-                        :seon.render/captured-invocations (atom {})}
+                        :seon.render/captured-calls (atom {})}
                        :seon.error/_agent :seon.render/html [fault]
                        [:seon.error/id "reverse-render-fixture"]
                        {:seon.render.data/path [] :seon.render.data/offset 0})
@@ -243,8 +242,7 @@
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                     :seon.render/profile (render/agent-render-profile effective)
-                    :seon.render/captured-calls (atom {})
-                    :seon.render/captured-invocations (atom {})}
+                    :seon.render/captured-calls (atom {})}
            ;; The stored agent entity: `:seon.agent/agent` requires its branch.
            entity (select-keys (db/pull database '[*] [:seon.agent/id "identity-blocks"])
                                [:seon.agent/id :seon.agent/branch])
@@ -308,8 +306,7 @@
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
                     :seon.render/profile (render/agent-render-profile effective)
-                    :seon.render/captured-calls (atom {})
-                    :seon.render/captured-invocations (atom {})}
+                    :seon.render/captured-calls (atom {})}
            debug-request {:seon.render.debug/subject [:seon.agent/id "reference-agent"]
                           :seon.render.debug/viewer-namespace 'my.agents.reference-agent}]
        (is (integer? (:db/id agent-ref)))

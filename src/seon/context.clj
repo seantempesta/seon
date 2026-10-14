@@ -636,14 +636,15 @@
                                                     :seon.render/operations ['(my.message/inbox)]})))))
 
 (defn- must-read-ai
-  "One must-read as the agent reads it: its entity through the render it declares (`seon.render/render-ai`, one hop
+  "One must-read as the agent reads it: its entity through the render it declares (`seon.render/render-call`, one hop
   beyond `unit`'s distance), beside its name and the references its content makes; a problem as it is."
   {:malli/schema [:=> [:cat :seon.render/unit [:or :seon.ref/resolved :seon.ref/problem]] :seon.context/must-read-view]}
   [unit entry]
   (if-not (:seon.render/ai entry)
     entry
-    (let [shown (seon.render/render-ai (assoc unit :seon.render/value entry
-                                         :seon.render/distance (inc (get unit :seon.render/distance 0))))
+    (let [shown (seon.render/render-call (assoc unit :seon.render/value entry
+                                           :seon.render/output :seon.render/ai
+                                           :seon.render/distance (inc (get unit :seon.render/distance 0))))
           kept (select-keys entry [:seon.ref/name :seon.ref/references])]
       (if (map? shown) (merge shown kept) (assoc kept :seon.context/rendered shown)))))
 

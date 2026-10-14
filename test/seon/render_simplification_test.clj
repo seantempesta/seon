@@ -5,6 +5,7 @@
             [malli.core :as m]
             [sci.core :as sci]
             [seon.cluster.agent :as agent]
+            [seon.cache]
             [seon.config :as config]
             [seon.db :as db]
             [seon.cluster]
@@ -657,13 +658,12 @@
      (let [ctx (support/fork-cluster-ctx connection)
            invoke kernel/invoke
            invocations (atom 0)
-           request (fn [call-id retained captured]
+           request (fn [call-id calls]
                      (assoc (render-request (db/db connection) ctx fixture-a
                                             {:seon.ns/name fixture-a})
                             :seon.render/output :seon.render/ai
                             :seon.render.call/id call-id
-                            :seon.render/invocations retained
-                            :seon.render/captured-invocations captured))]
+                            :seon.render/captured-calls calls))]
        (sci/binding [sci/ns (sci/create-ns fixture-a)]
          (sci/eval-form
           ctx
@@ -679,37 +679,31 @@
        (with-redefs [kernel/invoke (fn [invocation]
                                     (swap! invocations inc)
                                     (invoke invocation))]
-         (let [first-captured (atom {})
-               first-output (target-call 'seon.render 'render-call
-                                         (request [:debug] {} first-captured))]
+         (let [first-output (target-call 'seon.render 'render-call
+                                         (request [:debug] (atom {})))]
            (let [second-captured (atom {})
                  second-output (target-call 'seon.render 'render-call
-                                            (request [:context] @first-captured
-                                                     second-captured))]
+                                            (request [:context] second-captured))]
              (is (= (str "A:" fixture-a ":one") first-output second-output))
              (is (= 1 @invocations)
                  "the second presentation reuses the raw invocation")
              (is (some (comp seq :seon.render.call/read-evidence)
-                       (mapcat identity (vals @second-captured)))
+                       (vals @second-captured))
                  "a cache hit retains read evidence from the invocation")
              (db/transact! connection
                            [{:seon.cluster/name "cache-unrelated"}])
-             (let [unrelated-captured (atom {})
-                   unrelated-output
+             (let [unrelated-output
                    (target-call 'seon.render 'render-call
-                                (request [:unrelated] @second-captured
-                                         unrelated-captured))]
+                                (request [:unrelated] (atom {})))]
                (is (= second-output unrelated-output))
                (is (= 1 @invocations)
                    "an unrelated transaction does not invoke again")
                (db/transact! connection
                              [{:seon.ns/name fixture-a
                                :seon.ns/doc "two"}])
-               (let [relevant-captured (atom {})
-                     relevant-output
+               (let [relevant-output
                      (target-call 'seon.render 'render-call
-                                  (request [:changed] @unrelated-captured
-                                           relevant-captured))]
+                                  (request [:changed] (atom {})))]
                  (is (= (str "A:" fixture-a ":two") relevant-output))
                  (is (= 2 @invocations)
                      "a changed read dependency invokes again"))))))))))
@@ -739,7 +733,7 @@
             previews (atom 0)
             preview seon.turn/preview-sources
             invoke #'seon.render.web/render-source-call
-            request (fn [id invocations captured calls]
+            request (fn [id calls]
                       (assoc
                         (render-request database ctx fixture-a {:seon.ns/name fixture-a})
                         :seon.render/output
@@ -750,10 +744,6 @@
                         {}
                         :seon.render/captured-calls
                         calls
-                        :seon.render/invocations
-                        invocations
-                        :seon.render/captured-invocations
-                        captured
                         :seon.agent/id
                         "source-cache-agent"
                         :seon.turn.loop/cluster
@@ -761,17 +751,10 @@
         (try
           (with-redefs
             [seon.turn/preview-sources (fn [request] (swap! previews inc) (preview request))]
-            (let [first-invocations (atom {})
-                  first-calls (atom {})
-                  first-output (invoke (request [:debug] {} first-invocations first-calls))
-                  second-invocations (atom {})
+            (let [first-calls (atom {})
+                  first-output (invoke (request [:debug] first-calls))
                   second-calls (atom {})
-                  second-output (invoke
-                                  (request
-                                    [:context]
-                                    @first-invocations
-                                    second-invocations
-                                    second-calls))]
+                  second-output (invoke (request [:context] second-calls))]
               (is (string? first-output))
               (is (str/includes? first-output "2"))
               (is (= first-output second-output))
@@ -783,7 +766,8 @@
                 (=
                   (get-in @first-calls [[:debug] :seon.render.call/source-run-id])
                   (get-in @second-calls [[:context] :seon.render.call/source-run-id])))
-              (is (seq @first-invocations))))
+              (is (seq (seon.cache/retained :seon.render/invocation))
+                  "the run is retained in the one cache")))
           (finally
             (doseq [key [:seon.cluster.wake/channel
                          :seon.render/context-channel

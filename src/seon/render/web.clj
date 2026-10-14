@@ -479,19 +479,13 @@
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
     retained-calls :seon.render/retained-calls
-    retained-invocations :seon.render/invocations
-    captured-invocations :seon.render/captured-invocations
     :as request}]
-  (let [retained-invocations (or retained-invocations {})
-        captured-invocations (or captured-invocations (atom {}))
-        captured-calls (atom {})
+  (let [captured-calls (atom {})
         render-request
         (-> (assoc (walk-request db caps id :seon.render/html
                                  connection request)
                    :seon.render/retained-calls retained-calls
-                   :seon.render/captured-calls captured-calls
-                   :seon.render/invocations retained-invocations
-                   :seon.render/captured-invocations captured-invocations)
+                   :seon.render/captured-calls captured-calls)
             (carry request [:seon.render/candidate-call-ids
                             :seon.render.walk/root-acquisition]))
         walked-units (render.walk/neighborhood render-request)
@@ -551,7 +545,6 @@
     {:seon.render.web/page page
      :seon.render.web/fragments fragments
      :seon.render/captured-calls @captured-calls
-     :seon.render/captured-invocations @captured-invocations
      :seon.db/tx-data
      (into [] (mapcat :seon.db/tx-data) units)}))
 
@@ -1299,15 +1292,6 @@
 
 (declare refresh-retained-read-evidence)
 
-(defn- replace-current-invocation!
-  [captured invocation-key evidence f]
-  (swap! captured update invocation-key
-         (fn [bucket]
-           (let [same? #(render/same-invocation-evidence? % evidence)
-                 previous (some #(when (same? %) %) bucket)]
-             (conj (into [] (remove same?) bucket)
-                   (f (merge previous evidence)))))))
-
 (defn- assigned-agent-namespace
   [database agent-id]
   (get-in (db/pull database
@@ -1327,12 +1311,9 @@
   {:malli/schema [:=> [:cat :map] [:or :seon.render/rendered :seon.render.web/request-error :seon.render/error-result :seon.turn/error :seon.db/error-result :seon.cluster.reply/no-forms-error]]}
 
   [request]
-  (let [captured-invocations (:seon.render/captured-invocations request)
-        request (cond-> request
+  (let [request (cond-> request
                   (= :seon.render/ai (:seon.render/output request))
-                  (assoc :seon.render.call/source-output? true)
-                  captured-invocations
-                  (update :seon.render/invocations merge @captured-invocations))
+                  (assoc :seon.render.call/source-output? true))
         rendered (render/render-call request)
         call-id (:seon.render.call/id request)
         call-entry (get @(:seon.render/captured-calls request) call-id)
@@ -1396,8 +1377,9 @@
                 (assoc :seon.render.call/source-run-id
                        (:seon.render.call/source-run-id preview))
                 (seq evidence) (update :seon.render.call/read-evidence into evidence)))]
-        (replace-current-invocation! captured-invocations invocation-key call-entry
-                                     enrich-invocation)
+        (render/retain-invocation! invocation-key
+                                   (enrich-invocation (merge (render/invocation invocation-key call-entry)
+                                                             call-entry)))
         (swap! (:seon.render/captured-calls request) update call-id enrich-call)
         output))))
 
@@ -1651,10 +1633,9 @@
   "One debug page at `db`: the selected entity's header, its units through the
   viewer's render functions and its reference graph."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :map :seon.sci.admit/caps :map :map
-                       :map :map :seon.schema/value]
+                       :map]
                   :map]}
-  [db connection debug-request caps profile handle retained-calls
-   retained-invocations captured-invocations]
+  [db connection debug-request caps profile handle retained-calls]
   (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx handle))
         {debug-data-output ::debug-data-output
          data-call-id ::debug-data-call-id
@@ -1686,9 +1667,7 @@
             :seon.agent/routing
             (:seon.agent/routing handle)
             :seon.render/retained-calls retained-calls
-            :seon.render/captured-calls captured-calls
-            :seon.render/invocations retained-invocations
-            :seon.render/captured-invocations captured-invocations}
+            :seon.render/captured-calls captured-calls}
            debug-request [:seon.agent/id]))
         units-html
         (if render-request
@@ -1722,8 +1701,7 @@
                             observation)}]
     {:seon.render.web/page page
      :seon.render.web/fragments {}
-     :seon.render/captured-calls @captured-calls
-     :seon.render/captured-invocations @captured-invocations}))
+     :seon.render/captured-calls @captured-calls}))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -1978,10 +1956,9 @@
   "seon-health")
 
 (def ^:private no-retained-calls
-  "A page result that retains no fragments, calls or invocations."
+  "A page result that retains no fragments or calls."
   {:seon.render.web/fragments {}
-   :seon.render/captured-calls {}
-   :seon.render/captured-invocations {}})
+   :seon.render/captured-calls {}})
 
 (defn- health-page-result
   "The health page at `database`: the cluster's `seon.health/report` through
@@ -2010,9 +1987,7 @@
         caps (:seon.sci.admit/caps handle)
         debug? (debug-key? registration-key)
         debug-request (when debug? (second registration-key))
-        agent-id (key-agent-id registration-key)
-        retained-invocations (::invocations retained-values {})
-        captured-invocations (atom {})]
+        agent-id (key-agent-id registration-key)]
     (cond
       (= [::health-tab {}] registration-key)
       (health-page-result handle database)
@@ -2028,14 +2003,12 @@
         (if (or invalidate-calls? (nil? (get-in retained-values [::page-results registration-key])) (seq candidates))
           (debug-page-result database connection debug-request caps profile
                              handle
-                             retained retained-invocations
-                             captured-invocations)
+                             retained)
           {::retained-only? true
            ::advance-basis? (not= (db/basis-t database)
                                   (:seon.render.package/basis-transaction
                                    package))
-           :seon.render/captured-calls retained
-           :seon.render/captured-invocations retained-invocations}))
+           :seon.render/captured-calls retained}))
       :else
       (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database confirmed?)
@@ -2054,8 +2027,6 @@
                      :seon.render.web/retained-fragments
                      (get-in retained-values [::fragments registration-key] {})
                      :seon.render/retained-calls retained
-                     :seon.render/invocations retained-invocations
-                     :seon.render/captured-invocations captured-invocations
                      :seon.render/candidate-call-ids candidates
                      :seon.render.walk/lookup
                      [:seon.agent/id agent-id]
@@ -2077,13 +2048,10 @@
                                (:acquisition root)))
                 calls (assoc (:seon.render/captured-calls result)
                              call-id (:entry root))]
-            (assoc result
-                   :seon.render/captured-calls calls
-                   :seon.render/captured-invocations @captured-invocations))
+            (assoc result :seon.render/captured-calls calls))
           (let [calls (assoc retained call-id (:entry root))]
             {::retained-only? true
-             :seon.render/captured-calls calls
-             :seon.render/captured-invocations retained-invocations}))))))
+             :seon.render/captured-calls calls}))))))
 
 (defn- newer-page?
   "True when the retained page was derived at a later value of this same
@@ -2137,8 +2105,7 @@
                    (assoc-in [::page-databases registration-key] database)
                    (assoc-in [::page-results registration-key] result)
                    (assoc-in [::calls registration-key] (:seon.render/captured-calls result))
-                   (assoc-in [::fragments registration-key] (:seon.render.web/fragments result))
-                   (update ::invocations merge (:seon.render/captured-invocations result))))))
+                   (assoc-in [::fragments registration-key] (:seon.render.web/fragments result))))))
     result))
 
 (defn- current-page
@@ -2293,7 +2260,7 @@
    (fn []
   (let [handle (:seon.turn.loop/cluster state)
         cache (render/shared-cache (:seon.sci.eval/ctx handle))
-        state (merge state (select-keys @cache [::calls ::invocations ::packages]))
+        state (merge state (select-keys @cache [::calls ::packages]))
         registration (:seon.render.web/registration state)
         watched (watched-registration-keys registration)
         profile (or (::profile state)
@@ -2370,7 +2337,7 @@
                   (assoc ::watched (count watched)
                          ::streams streams
                          ::profile profile))]
-    [(assoc (dissoc state ::packages ::fragments ::calls ::invocations
+    [(assoc (dissoc state ::packages ::fragments ::calls
                            ::ai-entries ::page-results ::page-databases
                            ::context-bases ::context-programs ::programs)
             ;; DERIVED, NOT ACCUMULATED: only the pages that failed THIS pass

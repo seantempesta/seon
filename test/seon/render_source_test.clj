@@ -81,7 +81,6 @@
            cluster (cluster-handle connection ctx channel "memory-preview")
            source-call (ns-resolve 'seon.render.web 'render-source-call)
            calls (atom {})
-           invocations (atom {})
            evaluated (atom 0)
            original-evaluate eval/evaluate
            request {:seon.db/db database :seon.sci.eval/ctx ctx
@@ -92,7 +91,6 @@
                     :seon.render/profile (render/agent-render-profile config/defaults)
                     :seon.render.call/id [:memory-preview]
                     :seon.render/captured-calls calls
-                    :seon.render/captured-invocations invocations
                     :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
                     :seon.agent/id "memory-preview-agent"
                     :seon.turn.loop/cluster cluster}
@@ -109,15 +107,12 @@
                (is (= first-output
                       (source-call (assoc request
                                           :seon.render/retained-calls @calls
-                                          :seon.render/invocations @invocations
-                                          :seon.render/captured-calls (atom {})
-                                          :seon.render/captured-invocations (atom {})))))
+                                          :seon.render/captured-calls (atom {})))))
                first-output))
            entry (get @calls [:memory-preview])
            cached-id (:seon.render.call/source-run-id entry)
            state {:seon.turn.loop/cluster cluster
                   :seon.render.web/interest (atom {})
-                  :seon.render.web/invocations @invocations
                   :seon.render.web/calls {[:memory-preview] @calls}
                   :seon.render.web/ai-calls {}}]
        (try
@@ -131,9 +126,7 @@
                      (assoc request
                             :seon.render/retained-calls
                             (get-in invalidated [:seon.render.web/calls [:memory-preview]])
-                            :seon.render/invocations (:seon.render.web/invocations invalidated)
-                            :seon.render/captured-calls (atom {})
-                            :seon.render/captured-invocations (atom {})))))))
+                            :seon.render/captured-calls (atom {})))))))
          (is (str/includes? preview "Before"))
          (is (= (db/basis-t database) (db/basis-t @connection))
              "previewing, including the busy agent, changes no facts")
@@ -143,9 +136,7 @@
                next-output (source-call
                             (assoc request :seon.db/db @connection
                                    :seon.render/retained-calls @calls
-                                   :seon.render/invocations @invocations
-                                   :seon.render/captured-calls next-calls
-                                   :seon.render/captured-invocations (atom {})))]
+                                   :seon.render/captured-calls next-calls))]
            (is (str/includes? next-output "After"))
            (is (not= cached-id (get-in @next-calls [[:memory-preview] :seon.render.call/source-run-id]))))
          (finally (async/close! channel)))))))
@@ -253,7 +244,6 @@
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)
            captured-calls (atom {})
-           captured-invocations (atom {})
            channel (async/chan 1)
            cluster (cluster-handle connection ctx channel "source-contract")
            evaluations (atom 0)
@@ -273,7 +263,6 @@
                :multiline}
               :seon.render.call/id [id]
               :seon.render/captured-calls captured-calls
-              :seon.render/captured-invocations captured-invocations
               :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
               :seon.agent/id "source-contract-agent"
               :seon.turn.loop/cluster cluster
@@ -305,8 +294,7 @@
                             {:seon.agent/id "source-contract-agent"})
                    (dissoc :seon.agent/id)
                    (assoc :seon.render/namespace 'my.agents.source-contract
-                          :seon.render/captured-calls (atom {})
-                          :seon.render/captured-invocations (atom {})))
+                          :seon.render/captured-calls (atom {})))
                refusal (source-call unowned-request)]
            (is (some? (:seon.render.web/refused-member refusal)))
            (is (= refusal (source-call unowned-request))
