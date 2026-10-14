@@ -1,12 +1,14 @@
 (ns my.task-test
   "An agent's task verbs: its task with its proofs, and giving the task back. Each test asserts one
   behavior on data."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.data.json :as json]
+            [clojure.test :refer [deftest is]]
             [my.edit]
             [my.task :as my.task]
             [seon.cluster :as cluster]
             [seon.cluster.source]
             [seon.db :as db]
+            [seon.mcp :as mcp]
             [seon.schema :as schema]
             [seon.task :as task]
             [seon.test-support :as test-support]))
@@ -56,6 +58,12 @@
 (deftest send-back-with-a-blank-reason-answers-its-error
   (is (:seon.error/at (my.task/send-back! {:my.task/reason "  "}))))
 
+(defn- updating
+  "The update request of root's `sym` member `k` on `connection`: what `my.task/update!` builds, with the world's
+  connection and agent named."
+  [connection sym k f args]
+  {:seon.db/connection connection :seon.agent/id "root" :my.task/task sym :my.task/member k :my.task/function f :my.task/arguments args})
+
 (defn- with-task
   "Run `f` with a connection holding root's task `tq.upd/work` (plan `Scan.`) and a function that updates it."
   [f]
@@ -63,7 +71,7 @@
    (fn [connection]
      (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'tq.upd :seon.task/name "work" :seon.task/plan "Scan."})
      (f connection
-        (fn [k f & args] (apply my.task/update! connection "root" 'tq.upd/work k f args))
+        (fn [k f & args] (@#'my.task/member-updated (updating connection 'tq.upd/work k f (vec args))))
         #(task/task-declaration (db/db connection) (task/task-handle 'tq.upd "work"))))))
 
 (deftest update-applies-a-function-to-a-member
@@ -73,7 +81,23 @@
          "an absent member is nil to f")
      (is (= #{'tq.upd-test/rows} (:seon.task/proofs (declared))) "the member holds f's value")
      (is (true? (:seon.task/changed? (update! :seon.task/plan my.edit/text "Scan." "Scan twice."))))
-     (is (= "Scan twice." (:seon.task/plan (declared))) "my.edit/text changes one passage of the plan"))))
+     (is (= "Scan twice." (:seon.task/plan (declared))) "my.edit/text changes one passage of the plan")))
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (test-support/declare-proof! connection 'tq.upd-test 'rows 'tq.upd/work)
+     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.upd
+                                            :seon.task/name "work" :seon.task/plan "old"}))
+           declared #(task/task-declaration (db/db connection) (task/task-handle 'tq.upd "work"))
+           shown #(:seon.repl/value (test-support/mcp-reply
+                                     (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                                               "arguments" {"code" % "agent" agent-id "cluster" running}})))))]
+       (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+       (is (true? (:seon.task/changed? (shown "(my.task/update! 'tq.upd/work :seon.task/plan my.edit/text \"old\" \"new\")")))
+           "the card's five-argument form, connection and agent filled from the evaluation")
+       (is (= "new" (:seon.task/plan (declared))) "the passage changed on the agent's branch")
+       (is (true? (:seon.task/changed? (shown "(my.task/update! 'tq.upd/work :seon.task/proofs (fnil into #{}) '[a/b])"))))
+       (is (= #{'a/b} (:seon.task/proofs (declared))) "the set grew")))))
 
 (deftest update-with-the-same-value-writes-no-transaction
   (with-task
@@ -127,7 +151,7 @@
   (with-root false
    (fn [connection]
      (is (= :my.task/unknown-task-error
-            (:seon.error/type (my.task/update! connection "root" 'tq.upd/absent :seon.task/plan (constantly "x"))))))))
+            (:seon.error/type (@#'my.task/member-updated (updating connection 'tq.upd/absent :seon.task/plan (constantly "x") []))))))))
 
 (deftest update-preserves-every-declared-member
   (with-root false
@@ -154,10 +178,10 @@
        (task/assign! {:seon.db/connection connection :seon.task/assigned (handle "prove")
                       :seon.task/agent [:seon.agent/id "root"] :seon.task/branch (get-in (db/db connection) [:config :branch])
                       :seon.agent/context-source (test-support/context-source connection)})
-       (my.task/update! connection "root" 'tq.members/prove :seon.task/instructions (constantly "Add more rows."))
+       (@#'my.task/member-updated (updating connection 'tq.members/prove :seon.task/instructions (constantly "Add more rows.") []))
        (is (= (assoc full :seon.task/instructions "Add more rows.") (declared "prove"))
            "an update keeps every member it does not change")
-       (my.task/update! connection "root" 'tq.members/prove :seon.task/proofs conj 'tq.members-test/more)
+       (@#'my.task/member-updated (updating connection 'tq.members/prove :seon.task/proofs conj ['tq.members-test/more]))
        (is (= #{'tq.members-test/rows 'tq.members-test/more} (:seon.task/proofs (declared "prove")))
            "an updated member is written on the task named")))))
 

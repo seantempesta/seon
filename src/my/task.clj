@@ -43,12 +43,15 @@
       (assoc sections :seon.agent/id agent-id))))
 
 (defn- member-updated
-  "Task `sym` with its member `k` replaced by `(apply f value args)`, written on `connection`'s branch."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
-                       [:vector :seon.schema/value]]
+  "The task `:my.task/task` with its member `:my.task/member` replaced by `(apply function value arguments)`, written
+  on the connection's branch.
+
+  `update!` names the task, member, function and arguments; call preparation supplies the connection and agent from
+  the evaluation's world by their declared schema names."
+  {:malli/schema [:=> [:cat :my.task/update-request]
                   [:or :my.task/updated :my.task/unknown-task-error :my.task/invalid-member-error :seon.task/refused-error
                    :seon.task/conflict-error :seon.error/value]]}
-  [connection agent-id sym k f args]
+  [{connection :seon.db/connection agent-id :seon.agent/id sym :my.task/task k :my.task/member f :my.task/function args :my.task/arguments}]
   (let [database (db/db connection)
         handle (task/task-handle (symbol (namespace sym)) (name sym))
         held (task/task-declaration database handle)]
@@ -78,7 +81,7 @@
 (defn update!
   "Change one member of task `sym` as `clojure.core/update` does.
 
-  `f` is applied to the member's value and up to three `args`. `k` is `:seon.task/plan`,
+  `f` is applied to the member's value and any `args`. `k` is `:seon.task/plan`,
   `:seon.task/instructions` or `:seon.task/proofs`; `f` runs here, in my context, on the declaration I read,
   and the new value is written on my branch through the task writer with that declaration as its basis. A
   basis that changed meanwhile is refused with base, current and proposed; nothing retries. An error value
@@ -92,22 +95,10 @@
   (my.task/update! 'seon.ref/fix-pathless-section :seon.task/proofs (fnil into #{}) '[seon.ref-test/a-case])
   (my.task/update! 'seon.ref/fix-pathless-section :seon.task/plan my.edit/text \"throws on\" \"answers a missing-file error for\")
   ```"
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]]
-                   :my.task/update-answer]
-                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
-                        :seon.schema/value]
-                   :my.task/update-answer]
-                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
-                        :seon.schema/value :seon.schema/value]
-                   :my.task/update-answer]
-                  [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?]
-                        :seon.schema/value :seon.schema/value :seon.schema/value]
-                   :my.task/update-answer]]}
-  ([connection agent-id sym k f] (member-updated connection agent-id sym k f []))
-  ([connection agent-id sym k f a] (member-updated connection agent-id sym k f [a]))
-  ([connection agent-id sym k f a b] (member-updated connection agent-id sym k f [a b]))
-  ([connection agent-id sym k f a b c] (member-updated connection agent-id sym k f [a b c])))
+  {:malli/schema [:=> [:cat :seon.task/sym :my.task/content-key [:fn clojure.core/ifn?] [:* :seon.schema/value]]
+                  :my.task/update-answer]}
+  [sym k f & args]
+  (member-updated {:my.task/task sym :my.task/member k :my.task/function f :my.task/arguments (vec args)}))
 
 (defn send-back!
   "Give my task back without green proofs.

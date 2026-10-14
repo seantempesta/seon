@@ -20,7 +20,13 @@
                     [:my.task/problems {:optional true} :my.task/problems]]
           :update-answer [:or :my.task/updated :my.task/unknown-task-error :my.task/invalid-member-error :seon.task/refused-error :seon.task/conflict-error :seon.error/value]
           :problems [:vector {:description "Each reference of an updated text that does not resolve on the agent's branch, as its problem."} :seon.ref/problem]
-          :task [:and {:description "The task symbol a task verb named that no task has, as an observed value."} :seon.task/sym]
-          :member [:and {:description "The content member whose new value my.task/update! refused."} :my.task/content-key]
+          :task [:and {:description "The task symbol a task verb named, as an observed value."} :seon.task/sym]
+          :member [:and {:description "The content member my.task/update! changes, and the one whose new value it refused."} :my.task/content-key]
+          :function [:fn {:description "The function my.task/update! applies to a member's value."} clojure.core/ifn?]
+          :arguments [:vector {:description "The arguments my.task/update! passes to its function after the member's value."} :seon.schema/value]
+          :update-request [:map {:description "An update's request: the task, member, function and arguments the caller named, and the connection and agent the evaluation's world supplies."}
+                           [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                           [:my.task/task :my.task/task] [:my.task/member :my.task/member]
+                           [:my.task/function :my.task/function] [:my.task/arguments :my.task/arguments]]
           :invalid-member-error [:and {:description "my.task/update! computed a value that does not satisfy the task declaration's schema."} :seon.error/base [:map [:my.task/member :my.task/member]]]
           :unknown-task-error [:and {:description "my.task/update! named a task that does not exist."} :seon.error/base [:map [:my.task/task :my.task/task]]]}
