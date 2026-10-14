@@ -832,3 +832,155 @@ because the block the model would have read is what threw (`model-context`).
   where the reply should carry the error value beside it.
 - Other readers of `:seon.sci.eval/function-source` or stored `:seon.fn/spec` on a work branch may share the class
   (Broken first 1). Count them before designing.
+
+## Run 6: sixth Implement attempt, worked 19 calls, closed by root
+
+Lane `s5-run-6` acted as root and watched, 18:27-18:40 UTC. Default had restarted onto be9b26a09, which carries
+576009291, bcce0cae1 and be9b26a09: the overlay is three-way, there is one three-way row reader with total
+documentation, and as-of views carry their branch. On the chain branch root had verified that
+`seon.context/current-state` builds (18.0 s and 39.7 GB cold, 160 ms and 291 MB on repeat), that help renders, and
+that `(doc seon.db/q)` shows main's contract. After the restart root applied the run config to main and verified it
+(`"deepseek-flash"`, no-provider absent, 30, relaunches 0). Root then ran
+`(my.root/run! {:seon.task/assigned "c12a57408f49"})`.
+
+**Broken first.**
+
+0. **Attempt 6 got past both of 5b's and 5c's stalls, but its proof was red from a platform NPE.** That NPE was a
+   result recorded six hours earlier, against an older platform. The agent spent its calls reading
+   `src/seon/sci/eval.clj`.
+   - The newest recorded execution of the proof
+     `seon.error-test/an-unresolved-alias-name-is-answered-with-its-nearest-core-name` on `:chain-f1f6dc8e6652` is
+     member 972395, completed in tx 536872687 at **12:29:44 UTC**. That is run 4b's attempt 3, two restarts and
+     three platform commits ago. The member's facts are `:evaluator :interpreted`, `error-count 1`,
+     `fail-count 0`, reach digest `6408418baa94…`, and failure 972590:
+     - `:seon.test.failure/message` "Uncaught exception, not in assertion.", throwable
+       `java.lang.NullPointerException`, "Cannot invoke \"clojure.lang.IObj.withMeta(clojure.lang.IPersistentMap)\"
+       because \"x\" is null";
+     - top frames: `seon.sci.eval$lazy_root$lazy_member doInvoke eval.clj:3124` ←
+       `seon.test.runner$run_selected_tests runner.clj:519` (that is `(test/test-vars namespace-vars)`) ←
+       `run_vars_BANG_ runner.clj:438` ← `seon.db$with_branch` ← `seon.sci.eval$run_tests eval.clj:5243` ←
+       `seon.sci.eval$run_test` ← `seon.test$bounded_result`.
+   - The member that threw is the test var itself. The runner calls the branch-interpreted deftest, which is bound
+     to its `seon.sci.eval/lazy-root`. On that first call, `lazy-member` evaluates
+     `(cond-> (d/commit-as-db (context-database executing) commit {:secondary-indices? false}) projection (vary-meta
+     assoc …))`. `d/commit-as-db` answered nil, so `vary-meta` threw. Either `context-database` found no connection
+     in the executing context, or that connection's store does not hold the branch commit.
+   - No execution of the proof is recorded at attempt 6's start or after any of its 67 evaluations. There are 3
+     members in all, at 12:07:05, 12:07:52 and 12:29:44. So the block and every test step showed the 12:29:44 red,
+     although the platform that produced it (`seon.sci.eval`) has since changed. Either the reach-digest reuse
+     treats a red from another platform as current, or the attempt-start prove pass did not run. I did not check
+     which.
+   - In SCI, the agent's own direct call no longer threw: "The call succeeds now (no NPE) but `:nearest` is empty —
+     and it's slow (1.1s, 1.6GB)." The subject was still unfixed: `:nearest []` for all three cases.
+   - Owners: the runner's call of a lazily bound test var, `seon.sci.eval/lazy-root` (commit-as-db nil, so it
+     throws a bare NPE instead of an error value), and test-result reuse across a platform change
+     (`seon.test.runner/current-results`, reach digests).
+   - **Not reproduced on the current platform.** A direct call answered without the NPE, so this may be fixed. The
+     defect then is that a stale red is shown as current.
+1. **The block costs about 14 s and about 25 GB on every turn, defn or not.** The model's own share is about 3 s
+   of each turn.
+   - The turns ran back to back about 15 s apart: `open->model` 27-39 ms after open, then 14.1-15.2 s from the
+     model attempt to close. The agent's 67 evaluations took only 1.8 s and 2.4 GB in total.
+   - The JVM-wide counter rose from 118.6 GB to 562.8 GB over 18 turns, about 25 GB per turn. Over 6 s, the turn
+     thread alone allocated 6.5 GB, about 1 GB/s.
+   - Stack samples of the turn thread (40 at 300 ms): 26 in `seon.db/vector-query-call` under `seon.db/q`, 11 in
+     `seon.ai/stream-fold` (the model). Under the query, the callers were:
+
+     ```
+     seon.cluster.registry/identity-digests ← moved-past ← seen-database
+       ← seon.sci.lookup/function-documentation ← seon.ref/at-level ← seon.ref/answer ← seon.ref/references
+         ← seon.context/task-references ← seon.context/must-reads ← task-sections ← current-state ← model-context
+         ← seon.turn/phase ← seon.turn/call-turn                                              (10 of 17)
+     seon.cluster.registry/identity-digests ← moved-past ← seen-database ← seon.ref/brief ← seon.ref/inner
+       ← seon.ref/resolve-path ← seon.ref/answer ← … must-reads                              (5 of 17)
+     seon.cluster.registry/identity-digests ← moved-past ← seen-database ← seon.ref/brief
+       ← seon.context/must-reads ← … model-context                                          (2 of 17)
+     ```
+
+   - The `seon.profile` delta over one 30 s window (2 turns, plus my own sleeping form) was 1,851
+     `seon.db/vector-query-call` calls (27.3 s self) and 393 `seon.db/commit-database` calls, with 6,824
+     `with-declarations`. That is about 925 queries and about 196 `merge-sides` per turn.
+   - Measured once, warm, in JVM mode: `merge-sides` 1.3 ms / 3.3 MB, `seen-database` 1.5 ms / 3.6-4.1 MB. So the
+     cost is the count: every reference and every declaration in the must-reads re-derives `merge-sides` (a new
+     `commit-database` of the merge base) and three digest queries, on every turn, and nothing reuses them.
+   - Root's 160 ms repeat measure of `current-state` was not this path: the turn's `model-context` re-pays it each
+     turn. A `defn` is not needed to trigger it.
+   - Owner: `seon.cluster.registry/seen-database`. Derive the sides once per database value, and the moved-past
+     set once per branch head (content-keyed in `seon.cache`), never once per declaration.
+2. **The attempt ran on the chain branch's own config, not on main's applied config.** Every
+   `:seon.ai.attempt/settings-edn` holds `:seon.config.run/max-episode-runs 40` and `:seon.config.run/relaunches 0`.
+   `(seon.config/effective head "default")` on `:chain-f1f6dc8e6652` answers exactly that, 40 and 0. This is run 4's
+   config, from when the branch forked at `chain!`. Main read 30 at the same time. So root's run-config apply on main
+   did not reach the attempt's cap, and the restore on main (no-provider `true`) does not reach this branch either.
+   Run 5b's reading that attempt 4 "launched with no-provider true" from main's overlay should be re-checked
+   against the branch. Owner: which config value a chain agent reads (`seon.config/effective` on its checked-out
+   branch, against the cluster's configuration on main). Running configuration is cluster configuration, and a
+   branch should not freeze it at fork.
+3. **A closed working attempt keeps its graph.** Root closed the attempt at about 18:32:27 with `my.root/close!`
+   ("S5 run 6 stopped by root: proof red from a platform NPE … fix first"). The attempt then read
+   `:seon.task/outcome :closed` and the task `:held`, and no model call came after the turn already in flight (19
+   calls in all, the last turn opened at 18:32:22.2). At 18:33:51 its three threads
+   (`seon-flow/default/attempt/a4de2ea6de02/seon.agent/{turn,mailbox,schedule}`) were still alive, `WAITING`, and
+   allocated 0 bytes in 5 s. The graph is idle and was not stopped. This confirms root's
+   `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`.
+
+**Run.**
+
+- 18:27:36-37.6: attempt 6 written (`a4de2ea6de02`, number 6, agent `attempt/a4de2ea6de02` eid 1025013, attempt eid
+  1025016, merge base `6acf6fed…`) with settings 1025014. 18:27:38.4: first turn, and its model call 39 ms later.
+- 18:28:25, first watch: 3 calls, 39 threads, heap 2.3 GB. Root was messaged.
+- 18:27-18:32: the agent read the helpers left on the branch (`alias-target`, `alias-candidates`, `library-names`,
+  `library-calling-form`, `candidate-calling-form`, `core-namespace`) and the proof. From about call 9 it read
+  `src/seon/sci/eval.clj` to explain the NPE.
+  - Its errors were `my.fs/read-lines` unresolved, `my.fs/read` given a string and then `:my.fs/max-bytes 0`,
+    `test-support/with-database` unresolved, the `seon.error` → `seon.test-support` cycle refusal (a `require` in
+    `seon.error`), and `d/commit-as-db` unresolved (it tried to evaluate the platform's form).
+- 18:31:20: 14 calls. Root was messaged with both findings. About 18:32:27: root `close!`d the attempt.
+- 18:32:35: `bin/seon config apply default tmp/s5-restore.edn` (`converged? false`, 3 operations). Verified at
+  18:32:39 with `seon.config/effective` on main: no-provider `true`, 100, relaunches 2, `"deepseek-flash"`. That is
+  main only; see Broken first 2.
+- No livelock: calls advanced at every watch, about one per 15 s, and threads held at 38-40.
+
+**First block.** I did not render it separately, because a render would re-pay Broken first 1. The first call's
+whole prompt was 10,841 tokens (1,920 cached). Calls grew to 19,095 tokens by call 5.
+
+**Grading form.** Run 4b's form with `aid "attempt/a4de2ea6de02"`:
+
+| Task | Model calls | Prompt tokens (cached) | Completion | Wall time | Agent forms | End |
+|---|---|---|---|---|---|---|
+| Implement, attempt 6 (`a4de2ea6de02`) | 19 | 422,092 (96,384) | 6,008 | 4 min 59 s (18:27:38.4 to about 18:32:37) | 67 evaluations, 7 errors | `:closed` by root (`my.root/close!`), task `:held`; graph left running idle |
+
+About 22k prompt tokens per call, only 23% cached. In run 4 the cached share was 79%.
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 + 4b + 5 + 5b + 5c | **+ 6** |
+|---|---|---|---|
+| Model calls | 38 | 157 | **176** |
+| Prompt tokens | 570k (310k cached) | 4.99M (3.90M cached) | **5.41M (4.00M cached)** |
+| Hand acts after `chain!` | 6 | 1 | **2**. Root's `close!` of a working attempt that could not finish, the same mechanism as 4b's hand act 1. |
+| Furthest point | Implement (write-back conflict) | attempt 5 stalled in the model-context phase | **attempt 6 worked 19 calls, past both stalls; proof red from a stale platform NPE; 14 s / 25 GB block per turn** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** `merge-chains!`/`finish-chains!`, the published-diff review, the bb hook load and the fresh-agent `(str/subs "abc" 1)` check were not reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:held`, and attempts 1-6 are all
+  `:closed`. Attempt 6's graph threads are alive and idle (Broken first 3).
+- The chain branch's config is still no-provider absent, 40, relaunches 0 (Broken first 2).
+- JVM `user` host helpers: `s6-conn`, `s6-aid`, `s6-state`, `s6-turns`, `s6-evals`, `s6-replies`, `s6-errs`,
+  `s6-prof`, `s6-p0`.
+- No SCI eval as root by this lane. Main's config was restored and verified.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 1):** `seon.cluster.registry/seen-database` re-derives `merge-sides` and three
+  `identity-digests` queries for every declaration on every turn. That is about 925 queries and 196
+  `commit-database` calls per turn, about 14 s and about 25 GB. Derive the sides once per database value and the
+  moved-past set once per head. Proof: a `seon.profile/measure` of `seon.context/model-context` on a work branch,
+  parent against change.
+- A red recorded against an older platform is shown as the current proof result after a restart (Broken first 0).
+  Separately, `seon.sci.eval/lazy-root` throws a bare NPE when `d/commit-as-db` answers nil for a test var the
+  runner calls. Reproduce on this chain: run the proof on the branch head and see whether it still throws.
+- A chain agent reads its branch's config, frozen at fork, not the cluster configuration on main (Broken first 2).
+- A closed working attempt keeps its graph (Broken first 3; root filed
+  `seon.cluster.agent/a-closed-working-attempt-keeps-its-graph`).
