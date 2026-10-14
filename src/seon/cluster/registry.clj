@@ -394,6 +394,64 @@
      (when (contains? held base)
        (get-in (head-record (:store database) base) [:meta :datahike/commit-id])))))
 
+(defn- identity-digests
+  "The definition digest `database` holds for each of `identities` it holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.program/identity]]
+                  [:map-of :seon.program/identity :seon.program/definition-digest]]}
+  [database identities]
+  (if (empty? identities)
+    {}
+    (let [rows (db/q '[:find ?a ?v ?g :in $ [[?a ?v]]
+                       :where [?e ?a ?v] [?e :seon.program/definition-digest ?g]]
+                     database (vec identities))]
+      (when (db/read-refusal? rows)
+        (throw (ex-info (:seon.error/message rows) rows)))
+      (into {} (map (fn [[a v g]] [[a v] g])) rows))))
+
+(defn merge-sides
+  "The two other sides of a work branch `database`'s three-way comparison: its
+  merge base (`base-commit-id`) and its target's head (`:seon.branch/target`
+  of its fork entity); nil on a branch with no fork entity or base ref, such
+  as a cluster's own."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe [:map [::merge-base :seon.db/database-value] [::target :seon.db/database-value]]]]}
+  [database]
+  (let [branch (get-in database [:config :branch])
+        target (:seon.branch/target (fork-of database branch))
+        commit (when target (base-commit-id database branch))]
+    (when commit
+      {::merge-base (d/commit-as-db database commit {:secondary-indices? false})
+       ::target (db/branch-database database target)})))
+
+(defn moved-past
+  "The `identities` a work branch holds as its merge base held them while its
+  target has since changed them: what main changed after the fork, which the
+  branch never changed. The branch sees main's row of each, never its stale
+  copy; whether the branch's own definitions conflict with that change is the
+  merge's three-way business. Main's change made before the fork and not yet
+  loaded is the branch's too: the target still holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map] [:sequential :seon.program/identity]]
+                  [:set :seon.program/identity]]}
+  [database {base ::merge-base target ::target} identities]
+  (if-not base
+    #{}
+    (let [own (identity-digests database identities)
+          based (identity-digests base identities)
+          current (identity-digests target identities)]
+      (into #{} (filter #(and (= (get own %) (get based %)) (not= (get own %) (get current %)))) identities))))
+
+(defn seen-database
+  "The database whose row of the program declaration `declaration` (its identity) the branch
+  `database` sees: its target's head when main moved past the branch's copy
+  (`moved-past`), else `database` itself. Every branch-side reader that
+  documents, shows or compiles one declaration's row reads it here."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity] :seon.db/database-value]}
+  [database declaration]
+  (let [sides (merge-sides database)]
+    (if (contains? (moved-past database sides [declaration]) declaration)
+      (::target sides)
+      database)))
+
 (defn advance-base!
   "Move a work branch's retained base to the immutable value just merged."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] :seon.source/commit-id]}

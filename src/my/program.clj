@@ -709,11 +709,14 @@
     (not-found database namespace-name)))
 
 (defn- declaration-source
-  "One declaration's source map, or the not-found refusal."
+  "One declaration's source map, from the row the branch sees (`seon.cluster.registry/seen-database`), or the
+  not-found refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :my.program/declaration-source :seon.program/not-found-error]]}
   [database sym]
-  (let [entity (declaration database sym)]
+  (let [family (if (seq (db/datoms database :avet :seon.test/sym sym)) :seon.test/sym :seon.fn/sym)
+        database (registry/seen-database database [family sym])
+        entity (declaration database sym)]
     (if (::kind entity)
       (let [src (::source entity)]
         ;; The source is the agent's working medium: its own budget holds the whole text, and the

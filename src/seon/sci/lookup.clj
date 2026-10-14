@@ -11,6 +11,7 @@
             [sci.lang]
             [sci.impl.namespaces :as sci.namespaces]
             [seon.call-preparation :as call-preparation]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
@@ -229,7 +230,35 @@
       (throw (ex-info "Documentation schema references unavailable." definitions)))
     (into (sorted-map) (map (fn [[key form]] [key (edn/read-string form)])) definitions)))
 
+(defn- uncompilable-contract
+  "The error a stored contract that Malli cannot compile shows in its place, naming its function and keeping the
+  cause: a contract naming a predicate no longer defined, as a branch's stale row can (S5 run 5c)."
+  {:malli/schema [:=> [:cat [:maybe :qualified-symbol] :seon.error/throwable] :seon.sci.eval/uncompilable-contract-error]}
+  [sym cause]
+  (seon.error.refusal/diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.sci.eval/program
+    :seon.error/operation 'seon.sci.lookup/documentation-contract
+    :seon.error/message "The stored contract does not compile; read the function's source and correct its :malli/schema."
+    :seon.error/throwable cause
+    :seon.sci.eval/uncompilable-contract (or sym 'unknown/function)}))
+
+(defn- compiled-contract
+  "`spec`'s `:in` and `:out` forms, compiled under `projection`'s registry."
+  {:malli/schema [:=> [:cat :string :seon.schema/projection] [:map [:in :seon.schema/value] [:out :seon.schema/value]]]}
+  [spec projection]
+  (let [compiled (m/function-schema (edn/read-string spec) {:registry (:seon.schema.projection/registry projection)})
+        arities (mapv m/-function-info (m/-function-schema-arities compiled))
+        inputs (mapv #(m/form (:input %)) arities)
+        outputs (mapv #(m/form (:output %)) arities)]
+    ;; one return shared by every arity is said once
+    {:in (if (= 1 (count inputs)) (first inputs) inputs)
+     :out (if (apply = outputs) (first outputs) outputs)}))
+
 (defn- documentation-contract
+  "The stored contract of `row` as `:in` and `:out` forms; a contract that does not compile shows its error on both
+  sides, the rest of the documentation still answers."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
   [database row]
   (if-let [spec (:seon.fn/spec row)]
     (let [projection (or (db/carried-projection database)
@@ -239,14 +268,12 @@
       (schema/projection-cache-value
        projection [:seon.sci.eval/documentation-contract spec]
        (fn []
-         (let [compiled (m/function-schema (edn/read-string spec)
-                          {:registry (:seon.schema.projection/registry projection)})
-               arities (mapv m/-function-info (m/-function-schema-arities compiled))
-               inputs (mapv #(m/form (:input %)) arities)
-               outputs (mapv #(m/form (:output %)) arities)]
-           ;; one return shared by every arity is said once
-           {:in (if (= 1 (count inputs)) (first inputs) inputs)
-            :out (if (apply = outputs) (first outputs) outputs)}))))
+         ;; the one translation: Malli throws compiling a form whose predicate does not resolve, and documentation
+         ;; shows that as the error it is beside what it can show
+         (try (compiled-contract spec projection)
+              (catch clojure.lang.ExceptionInfo cause
+                (let [error (uncompilable-contract (:seon.fn/sym row) cause)]
+                  {:in error :out error}))))))
     {:in (declaration-absent :seon.fn/spec)
      :out (declaration-absent :seon.fn/spec)}))
 
@@ -266,7 +293,8 @@
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.schema/value]]}
   [row contract]
   (let [spec (:seon.fn/spec row)]
-    (if (and spec (= :function (first (edn/read-string spec))))
+    ;; a contract that did not compile holds one error, not one input per arity
+    (if (and spec (= :function (first (edn/read-string spec))) (not (map? (:in contract))))
       (:in contract) [(:in contract)])))
 
 (defn- agent-documentation-contract
@@ -368,13 +396,14 @@
               "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
 
 (defn function-documentation
-  "The documentation of the program function `sym`, read from its program row
-  alone (no SCI context): doc parts, agent arglists, contract and the schemas
+  "The documentation of the program function `sym`, read from the program row
+  the branch sees (`seon.cluster.registry/seen-database`) alone (no SCI context): doc parts, agent arglists, contract and the schemas
   it names. `documentation-unavailable` when no row declares it."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database sym]
-  (let [row (db/pull database program-documentation-selector [:seon.fn/sym sym])
+  (let [database (registry/seen-database database [:seon.fn/sym sym])
+        row (db/pull database program-documentation-selector [:seon.fn/sym sym])
         overrides (when (= :agent (:seon.schema.admission/source row))
                     (program/overrides database))]
     (cond

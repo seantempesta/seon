@@ -348,6 +348,11 @@
  :seon.error/base
  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
 
+:uncompilable-contract [:qualified-symbol {:description "The function whose stored contract Malli could not compile."}]
+:uncompilable-contract-error [:and {:seon.db/attributes true}
+ :seon.error/base
+ [:map [:seon.sci.eval/uncompilable-contract :seon.sci.eval/uncompilable-contract]]]
+
 :installation-member [:or :symbol :qualified-keyword :string]
 
 ; The one definition authority (S1, one-repl-language-2026-09-25.md §2.2).

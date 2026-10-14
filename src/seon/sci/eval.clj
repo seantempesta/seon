@@ -2955,64 +2955,18 @@
       (throw (ex-info (:seon.error/message pairs) pairs)))
     (set pairs)))
 
-(defn- identity-digests
-  "The definition digest `database` holds for each of `identities` it holds."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.program/identity]]
-                  [:map-of :seon.program/identity :seon.program/definition-digest]]}
-  [database identities]
-  (if (empty? identities)
-    {}
-    (let [rows (db/q '[:find ?a ?v ?g :in $ [[?a ?v]]
-                       :where [?e ?a ?v] [?e :seon.program/definition-digest ?g]]
-                     database (vec identities))]
-      (when (db/read-refusal? rows)
-        (throw (ex-info (:seon.error/message rows) rows)))
-      (into {} (map (fn [[a v g]] [[a v] g])) rows))))
-
-(defn- merge-sides
-  "The two other sides of a work branch `database`'s three-way comparison: its
-  merge base (`seon.cluster.registry/base-commit-id`) and its target's head
-  (`:seon.branch/target` of its fork entity); nil on a branch with no fork
-  entity or base ref, such as a cluster's own."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:maybe [:map [::merge-base :seon.db/database-value] [::target :seon.db/database-value]]]]}
-  [database]
-  (let [branch (get-in database [:config :branch])
-        target (:seon.branch/target (registry/fork-of database branch))
-        commit (when target (registry/base-commit-id database branch))]
-    (when commit
-      {::merge-base (d/commit-as-db database commit {:secondary-indices? false})
-       ::target (db/branch-database database target)})))
-
-(defn- moved-past
-  "The `identities` a work branch holds as its merge base held them while its
-  target has since changed them: what main changed after the fork, which the
-  branch never changed. They bind the platform's compiled Vars, never the
-  branch's stale copy; whether the branch's own definitions conflict with
-  that change is the merge's three-way business. Main's change made before
-  the fork and not yet loaded is the branch's too: the target still holds it."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map] [:sequential :seon.program/identity]]
-                  [:set :seon.program/identity]]}
-  [database {base ::merge-base target ::target} identities]
-  (if-not base
-    #{}
-    (let [own (identity-digests database identities)
-          based (identity-digests base identities)
-          current (identity-digests target identities)]
-      (into #{} (filter #(and (= (get own %) (get based %)) (not= (get own %) (get current %)))) identities))))
-
 (defn- derive-overlay-plan
   "What `database` changes of the `loaded` program: the authored functions whose
   digest the loaded program lacks or holds otherwise, the other functions it
   lacks, the authored test rows it does not hold as they are, and every
   namespace row it does not hold as it is, authored or file-derived (a file's
   namespace main declared after the loaded commit is entered from its row);
-  of a work branch, only those its merge sides (`merge-sides`) leave its own
-  (`moved-past`)."
+  of a work branch, only those its merge sides (`seon.cluster.registry/merge-sides`)
+  leave its own (`seon.cluster.registry/moved-past`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]
                   [:=> [:cat :seon.db/database-value :seon.db/database-value [:maybe :map]] :map]]}
-  ([database loaded] (derive-overlay-plan database loaded (merge-sides database)))
+  ([database loaded] (derive-overlay-plan database loaded (registry/merge-sides database)))
   ([database loaded sides]
   (let [authored (authored-rows database)
         authored-names (into #{} (keep :seon.ns/name) authored)
@@ -3037,7 +2991,7 @@
                                           (not (held-namespaces (namespace-key %)))))
                          rows)
         tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)
-        moved (moved-past database sides
+        moved (registry/moved-past database sides
                           (-> []
                               (into (map #(vector :seon.fn/sym %)) (concat overridden added))
                               (into (map #(vector :seon.ns/name (:seon.ns/name %))) namespaces)
@@ -3065,11 +3019,11 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
   [database loaded]
   (if-let [basis (when (commit-id-of loaded) (program-revisions database (db/carried-projection database)))]
-    (let [sides (merge-sides database)
+    (let [sides (registry/merge-sides database)
           projection (db/carried-projection database)
           sides-key (when sides
-                      [(db/commit-id (::merge-base sides))
-                       (program-revisions (::target sides) projection)])]
+                      [(db/commit-id (::registry/merge-base sides))
+                       (program-revisions (::registry/target sides) projection)])]
     (seon.cache/lookup
      ::overlay-plan [(store-identity database) basis (db/commit-id loaded) sides-key]
      (fn [{::keys [overridden added namespaces tests]}]

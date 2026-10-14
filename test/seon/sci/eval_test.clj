@@ -27,6 +27,7 @@
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.blob :as blob]
+            [seon.bootstrap :as bootstrap]
             [seon.cache]
             [seon.db :as db]
             [seon.env :as env]
@@ -2803,6 +2804,43 @@
             (is (contains? interpreted (named "kept")) "main's unloaded change the branch inherited")
             (is (not (contains? interpreted (named "gone")))
                 "main's change after the fork binds the platform, never the branch's stale copy"))))))))
+
+(deftest a-work-branch-documents-what-main-moved-past-as-main-holds-it
+  ;; Before, documentation and help read the branch's own row: chain branch
+  ;; :chain-f1f6dc8e6652 held its merge base's `seon.db/q`, whose contract named
+  ;; `seon.db/query-call-valid?` main had deleted, so its turn's help threw
+  ;; compiling that contract (S5 run 5c).
+  (test-support/with-database
+   (fn [connection]
+     (let [cited [:seon.fn/sym 'my.edit/text]
+           replaced (fn [contract]
+                      (test-support/transacted!
+                       connection
+                       (test-support/replacement-tx
+                        (db/db connection) cited
+                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
+                        {})))]
+       ;; the merge base holds a contract main later drops a predicate from (the writer compiles a contract,
+       ;; so the predicate resolves here; on the chain branch it no longer did)
+       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
+       (with-fresh-fork
+        connection
+        (fn [fork]
+          (replaced ":string")
+          (is (= [:cat :string] (:in (lookup/function-documentation (db/db fork) 'my.edit/text)))
+              "the branch documents main's row, which main moved past its stale copy")
+          (is (vector? (:seon.help/groups (bootstrap/help-value (db/db fork))))
+              "help resolves its references on the branch")))))))
+
+(deftest a-stored-contract-that-cannot-compile-documents-its-error
+  (test-support/with-database
+   (fn [connection]
+     (let [contract (#'lookup/documentation-contract
+                     (db/db connection) {:seon.fn/sym 'fixture.nowhere/documented
+                                         :seon.fn/spec "[:=> [:cat [:fn fixture.nowhere/pred?]] :int]"})]
+       (is (= 'fixture.nowhere/documented (get-in contract [:in :seon.sci.eval/uncompilable-contract]))
+           "the contract's place holds the error naming its function")
+       (is (= (:in contract) (:out contract)) "one error for both sides")))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/branches-without-program-changes-add-no-overlay-entry}}
   branches-without-program-changes-add-no-overlay-entry
