@@ -267,7 +267,7 @@
        (is (= "Use `seon.task/agent-attempt`." (get-in state [:seon.context/task :seon.task/plan])))
        (is (some #{'seon.task/agent-attempt} (map :seon.ref/name (:seon.context/must-reads state)))
            "the next block resolves the reference the refinement added")
-       (is (= '[seon.task/agent-attempt]
+       (is (= '#{seon.task/agent-attempt}
               (shown running agent-id "(:seon.task/references (seon.db/pull (seon.db/db) [:seon.task/references] [:seon.task/sym 'tq.cs/shape]))"))
            "the writer re-derives the task's references from the refined intent")))))
 
