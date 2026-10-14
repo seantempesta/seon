@@ -1,0 +1,68 @@
+(ns seon.turn.test-step-verdict-test
+  "The automatic test step's verdict covers the open tasks' proofs reaching the change, and a test run inside the
+  eval request that changed its reach answers the new definition."
+  (:require [clojure.data.json :as json]
+            [clojure.test :refer [deftest is]]
+            [seon.mcp :as mcp]
+            [seon.test-support :as support]))
+
+(defn- eval-request
+  "The parsed MCP result of `code` evaluated as `agent-id` in the running cluster `running`."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
+  [running agent-id code]
+  (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                            "arguments" {"code" code "agent" agent-id "cluster" running}}))))
+
+(defn- last-value
+  "The value of the last form an MCP result shows."
+  {:malli/schema [:=> [:cat :map] :seon.schema/value]}
+  [result]
+  (->> (get result "content")
+       (keep #(let [item (support/reply (get % "text"))]
+                (when (and (map? item) (contains? item :seon.repl/value)) [(:seon.repl/value item)])))
+       last
+       first))
+
+(deftest ^{:seon/tasks #{'my.test/the-reaching-verdict-of-a-defn-reply-omits-a-red-task-proof}
+           :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
+           :seon.test/long-ms 15000}
+  the-step-runs-a-task-proof-that-reaches-the-change-past-the-nearest-tests
+  ;; g <- f <- f-is-int stops the nearest-test walk two levels up; f-doubles, a proof of a task of
+  ;; g's namespace, reaches g a level further through the helper doubled?.
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "step-task-proof-" (random-uuid))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(ns tv.proof (:require [clojure.test :refer [deftest is]]))\n"
+                   "(defn- g \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                   "(defn f \"Returns g of x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (g x))\n"
+                   "(deftest f-is-int (is (int? (f 1))))\n"
+                   "(defn- doubled? \"Whether f doubles x.\" {:malli/schema [:=> [:cat :int] :boolean]} [x] (= (* 2 x) (f x)))\n"
+                   "(deftest ^{:seon/tasks #{'tv.proof/f-doubles}} f-doubles (is (doubled? 1)))"))
+           step (support/mcp-tests
+                 (eval-request running agent-id
+                               "(in-ns 'tv.proof)\n(defn- g \"Returns x plus zero.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 0))"))]
+       (is (= {:seon.test/passed? false :seon.turn.loop/red ['tv.proof/f-doubles]}
+              (:seon.turn.loop/reaching step))
+           "the red proof of the changed namespace's task is in the step's verdict")))))
+
+(deftest ^{:seon/tasks #{'my.test/a-test-var-run-in-the-defining-request-answers-the-previous-red}
+           :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
+           :seon.test/long-ms 15000}
+  a-test-run-in-the-request-that-redefined-its-callee-answers-the-new-definition
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "same-request-test-" (random-uuid))
+           _ (support/own-branch-agent!
+              running agent-id
+              (str "(ns tv.same (:require [clojure.test :refer [deftest is]]))\n"
+                   "(defn f \"Returns x.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+                   "(deftest f-is-inc (is (= 2 (f 1))))"))
+           answer (last-value
+                   (eval-request running agent-id
+                                 (str "(in-ns 'tv.same)\n"
+                                      "(defn f \"Returns x plus one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
+                                      "[(f 1) (:seon.test/passed? (clojure.test/test-vars [#'tv.same/f-is-inc]))]")))]
+       (is (= [2 true] answer)
+           "the test run after the redefinition, in the same request, answers the definition the form made")))))

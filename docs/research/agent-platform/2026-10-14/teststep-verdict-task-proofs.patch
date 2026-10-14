@@ -1,0 +1,56 @@
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 3b944fb..e1c7fa4 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -79,6 +79,8 @@
+   (delay (requiring-resolve 'seon.test/request-changes)))
+ (defonce ^:private test-reaching
+   (delay (requiring-resolve 'seon.test/reaching)))
++(defonce ^:private fn-reverse-closure
++  (delay (requiring-resolve 'seon.fn/reverse-closure)))
+ (defn stage-reply!
+   "Stage exact submitted source using the run reply storage contract."
+   {:malli/schema
+@@ -5320,10 +5322,29 @@
+          :seon.turn.loop/pending (vec (sort tests))
+          :seon.render/operations ['(my.test/check-platform {})]}))))
+ 
++(defn- task-proofs-reaching
++  "The tests on `database` proving a task of a changed function's namespace (`:seon.task/tasks` naming a task in
++  it) that reach the functions among `changed` at any depth (`seon.fn/reverse-closure`): the open tasks' proofs
++  the nearest-test walk of `seon.test/reaching` stops before. Throws a read refusal."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed] [:set :seon.test/sym]]}
++  [database changed]
++  (let [functions (changed-functions changed)]
++    (if (empty? functions)
++      #{}
++      (let [closure (@fn-reverse-closure {:seon.db/db database :seon.fn/seeds (set functions)})
++            _ (when (db/read-refusal? closure) (throw (ex-info (:seon.error/message closure) closure)))
++            proofs (when (seq (:seon.fn/tests closure))
++                     (db/q '[:find [?s ...] :in $ [?s ...] [?n ...]
++                             :where [?e :seon.test/sym ?s] [?e :seon.task/tasks ?t] [(namespace ?t) ?n]]
++                           database (vec (:seon.fn/tests closure)) (vec (into #{} (map namespace) functions))))]
++        (when (db/read-refusal? proofs) (throw (ex-info (:seon.error/message proofs) proofs)))
++        (set proofs)))))
++
+ (defn- run-reaching
+   "Run the tests reaching `changed`, what this eval request changed, after the proofs, as one request bounded
+-  by `limit-ms`; nil when it changed nothing. With a `platform` proof, its host-bound functions seed nothing
+-  and its pending tests are not run here."
++  by `limit-ms`: the nearest tests and the proofs of the changed namespaces' tasks reaching it at any depth
++  (`task-proofs-reaching`); nil when it changed nothing. With a `platform` proof, its host-bound functions seed
++  nothing and its pending tests are not run here."
+   {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? :seon.test/changed [:maybe :seon.turn.loop/platform]]
+                   [:or :nil :seon.test/run-result :seon.error/value]]}
+   [execution limit-ms changed platform]
+@@ -5331,7 +5352,9 @@
+         request {:seon.test/execution execution :seon.test/recording-connection connection
+                  :seon.test/policy :named :seon.test/check-time-limit-ms limit-ms}]
+     (cond (empty? changed) nil
+-          (nil? platform) (@test-run (assoc request :seon.test/changed changed))
++          (nil? platform) (let [proofs (task-proofs-reaching (db/db connection) changed)]
++                            (@test-run (cond-> (assoc request :seon.test/changed changed)
++                                         (seq proofs) (assoc :seon.test/identities proofs))))
+           :else
+           (let [host-bound (set (:seon.turn.loop/host-bound platform))
+                 others (vec (remove #(host-bound (if (symbol? %) % (second %))) changed))
