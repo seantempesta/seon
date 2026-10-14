@@ -40,9 +40,11 @@ brief does not name, and both invent target bounds.
 ## Backlog root causes (Flash-high over 872 tasks)
 
 `rootcause-flash-high.md`: nine clusters retiring 51 tasks, eight tasks asking for fences, 25 "moot" tasks. Root
-checked the moot list: 21 are moot (their namespaces or functions are gone: `seon.census`, `seon.html-views`,
-`seon.dev.hook`, `seon.documentation`, `seon.step`, `seon.print.value`, `seon.test.selection`,
-`seon.cluster.source/land!`, `seon.context/main-database`). Four are live deletion tasks Flash misread as done:
-`seon.db/deletion-error-has-no-caller`, `seon.db/transaction-stamp-attributes-outlive-their-producer`,
-`seon.turn/eval-origin-has-no-producer-or-consumer`, `seon.turn/row-tx-is-a-second-declaration-writer`. The nine
-clusters are unverified.
+checked the moot list and it fails: tasks whose namespace is absent mostly ask for it to be built (the red proof
+`seon.census-test/a-docstring-census-reads-the-branchs-database` resolves a `seon.census/docstrings` still to write;
+likewise `seon.html-views`, `seon.dev.hook`); the five `seon.step` entries are the chain templates `seon.task` and
+`seon.task-test` read; the three `seon.test` selection tasks name `test/seon/test/selection_test.clj`, which exists;
+four are deletion tasks not yet done (`seon.db/deletion-error-has-no-caller`,
+`seon.db/transaction-stamp-attributes-outlive-their-producer`, `seon.turn/eval-origin-has-no-producer-or-consumer`,
+`seon.turn/row-tx-is-a-second-declaration-writer`). Only `seon.turn/receipt-attributes-are-a-hand-list` is confirmed
+moot. The nine clusters are unverified.

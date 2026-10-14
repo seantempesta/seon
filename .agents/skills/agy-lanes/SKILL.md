@@ -19,7 +19,7 @@ Eleven blind runs with known answers, plus four open performance hunts on the li
 | judge a proposal before measurement (`f18ab95e3`, later reverted) | medium: "drop", read Fressian's bytecode, 8.5 min | high: "drop", same mechanism, 6.5 min |
 | audit TASK-CHAIN against the code | medium: 8 findings, one with invented code excerpts, 7.8 min | high: 11 findings, every quote real, 10.4 min |
 | debug a live-lock blind (F53, `0c684db75`'s parent) | high and medium: unfinished after 30+ min | high: exact clause, causal chain and fix, 7 min |
-| cluster the 872-task backlog by root cause | (pending) | high: 9 clusters; its moot list was 21 of 25 right |
+| cluster the 872-task backlog by root cause | (pending) | high: 9 clusters (unverified); its "moot" list failed: most of the 25 were tasks to build what is absent |
 | open performance hunts with live measurement | medium: 12-17 min each, solid measured findings, two lanes agreed on the top one | (not run) |
 
 What that means:
@@ -31,7 +31,8 @@ What that means:
   Argon-low (no thinking) is reported to match it on all but the hardest tasks. Use low unless a run shows it falls
   short.
 - **Argon fills gaps from memory** when it synthesises: it once quoted code that does not exist. **Flash
-  over-classifies:** it read "this task asks to delete X" as "X is already gone". Reproduce every quote and every
+  over-classifies:** it called a task moot because its subject was absent from `src`, when the task asked for that
+  subject to be built, or to be deleted and was not yet done. Reproduce every quote and every
   retire-this list before acting.
 - **Both propose against the design unless the brief names it.** An Argon lane proposed skipping the recording
   transaction that AGENTS.md requires on every eval request; both invent target bounds ("< 0.5 ms"). Put the

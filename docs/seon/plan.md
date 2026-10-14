@@ -85,7 +85,8 @@ planning; Astra gives the independent second opinion and the hard performance wo
 right every time and fastest (F53's exact clause from its symptom in 7 min), and Argon was right but slower; Argon
 takes long performance hunts and independent plans
 ([evidence](../research/agent-platform/2026-10-14/gemini/README.md)). Every quote and retire-this list from a Gemini
-lane is reproduced before use: Argon once invented code excerpts, Flash misread four live deletion tasks as moot.
+lane is reproduced before use: Argon once invented code excerpts, and Flash called tasks moot whose subject is yet to
+be built.
 
 **Performance is on the path** (owner 2026-10-14: "huge gains can be found by identifying them and methodically
 fixing them"; everything computed from immutable inputs is shared across agents, branches and contexts, keyed by
@@ -103,11 +104,12 @@ is proven by `seon.profile/measure` on the end-to-end probe it targets; Astra or
 proposals first.
 
 **Backlog by root cause** (owner 2026-10-14: many queued tasks exist because the system does the wrong thing
-upstream). Flash-high clustered all 872 declared tasks: 21 are moot and are retired (subjects deleted:
-`seon.census`, `seon.html-views`, `seon.dev.hook`, `seon.documentation`, `seon.step`, `seon.print.value`,
-`seon.test.selection`, `seon.cluster.source/land!`, `seon.context/main-database`); nine producer clusters would retire
-51 more and are verified one by one before any retirement; eight tasks ask for fences and are re-filed on their root
-cause. Argon's independent clustering is in flight.
+upstream). Flash-high clustered all 872 declared tasks into nine producer clusters (51 tasks) and eight fence
+requests; none is acted on until verified one by one. Its list of 25 "moot" tasks failed verification: most name
+namespaces that do not exist because the task asks for them to be built (`seon.census-test` is the red proof of a
+`seon.census` still to write), the five `seon.step` entries are the live chain templates, and four are deletion tasks
+not yet done; only `seon.turn/receipt-attributes-are-a-hand-list` is confirmed moot. A Gemini "subject is absent"
+claim therefore never retires a task by itself. Argon's independent clustering is in flight.
 
 **Worktree experiment** (owner 2026-10-14). The goal is the database as the source of truth with files the vetted
 write-back, reliable two-way sync until then, lanes replaced by parallel work resolved at merge, and every immutable
