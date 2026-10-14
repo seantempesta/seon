@@ -66,7 +66,9 @@
             [datahike.api :as d]
             [datahike.db.interface :as dbi]
             [seon.cluster.branch :as cluster.branch]
+            [seon.cache]
             [seon.db :as db]
+            [seon.program :as program]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.config :as config]
@@ -320,10 +322,13 @@
   one came down from a retired branch of that name."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.branch/fork]]}
   [database branch]
-  (when-let [named (seq (db/q '[:find ?e ?tx :in $ ?branch :where [?e :seon.branch/name ?branch ?tx]]
-                              database branch))]
-    (db/pull database [:seon.branch/fork-id :seon.branch/name :seon.branch/target :seon.branch/base-t]
-             (first (apply max-key second named)))))
+  ;; Its native-typed datoms, read undecoded: a pull derives the value's declarations first, and every
+  ;; declaration a branch-side reader documents reads its fork entity.
+  (when-let [named (seq (db/datoms database :avet :seon.branch/name branch))]
+    (into {} (keep (fn [[_ attribute value]]
+                     (when (#{:seon.branch/fork-id :seon.branch/name :seon.branch/target :seon.branch/base-t} attribute)
+                       [attribute value])))
+          (db/undecoded-datoms database :eavt [(:e (apply max-key :tx named))]))))
 
 (defn advanced-base-t
   "The base-t attribute a merge recorded in `target` (a database) for the fork
@@ -408,22 +413,76 @@
         (throw (ex-info (:seon.error/message rows) rows)))
       (into {} (map (fn [[a v g]] [[a v] g])) rows))))
 
+(defn- commit-digests
+  "The definition digest of every declaration the commit `commit` of `database`'s store holds, derived once per
+  commit in `seon.cache`: a commit is immutable."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id]
+                  [:map-of :seon.program/identity :seon.program/definition-digest]]}
+  [database commit]
+  (seon.cache/lookup
+   ::commit-digests commit #(* 192 (count %))
+   #(let [value (db/commit-database database commit)
+          rows (db/q '[:find ?a ?v ?g :in $ [?a ...] :where [?e ?a ?v] [?e :seon.program/definition-digest ?g]]
+                     value (vec program/identity-attributes))]
+      (when (db/read-refusal? rows)
+        (throw (ex-info (:seon.error/message rows) rows)))
+      (into {} (map (fn [[a v g]] [[a v] g])) rows))))
+
+(defn- main-changed
+  "The declarations whose digest the target commit `target` holds otherwise than the merge base commit `base`
+  (added, changed or retracted since): derived once per commit pair in `seon.cache`, whatever the branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.source/commit-id]
+                  [:set :seon.program/identity]]}
+  [database base target]
+  (seon.cache/lookup
+   ::main-changed [base target] #(+ 256 (* 96 (count %)))
+   #(let [based (commit-digests database base)
+          current (commit-digests database target)]
+      (into #{} (remove (fn [declaration] (= (get based declaration) (get current declaration))))
+            (concat (keys based) (keys current))))))
+
+(defn- side-commits
+  "The commits of a work branch `database`'s two other sides: its merge base (`base-commit-id`) and its target's
+  head (`:seon.branch/target` of its fork entity); nil on a branch with no fork entity or base ref, such as a
+  cluster's own. The branch is the one every view of the value (as-of, since, history, `with`) carries in its
+  Datahike configuration, read through the value it views (`seon.db/schema-database`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe [:map [::base-commit :seon.source/commit-id] [::target-commit :seon.source/commit-id]
+                           [::target-branch :seon.store/branch]]]]}
+  [database]
+  (let [origin (db/schema-database database)
+        branch (get-in origin [:config :branch])
+        target (:seon.branch/target (fork-of database branch))
+        commit (when target (base-commit-id database branch))
+        head (when commit (get-in (head-record (:store origin) target) [:meta :datahike/commit-id]))]
+    (when head
+      {::base-commit commit ::target-commit head ::target-branch target})))
+
 (defn merge-sides
-  "The two other sides of a work branch `database`'s three-way comparison: its
-  merge base (`base-commit-id`) and its target's head (`:seon.branch/target`
-  of its fork entity); nil on a branch with no fork entity or base ref, such
-  as a cluster's own. The branch is the one every view of the value (as-of,
-  since, history, `with`) carries in its Datahike configuration, read through
-  the value it views (`seon.db/schema-database`)."
+  "The two other sides of a work branch `database`'s three-way comparison (`side-commits`) as values: its merge
+  base and its target's head; nil on a branch with no fork entity or base ref, such as a cluster's own."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:maybe [:map [::merge-base :seon.db/database-value] [::target :seon.db/database-value]]]]}
   [database]
-  (let [branch (get-in (db/schema-database database) [:config :branch])
-        target (:seon.branch/target (fork-of database branch))
-        commit (when target (base-commit-id database branch))]
-    (when commit
-      {::merge-base (db/commit-database database commit)
-       ::target (db/branch-database database target)})))
+  (when-let [{::keys [base-commit target-commit]} (side-commits database)]
+    {::merge-base (db/commit-database database base-commit)
+     ::target (db/commit-database database target-commit)}))
+
+(defn- moved-identities
+  "Of `identities`, those main changed since the merge base (`main-changed` of `commits`) that `database` still
+  holds as the merge base held them."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [::base-commit :seon.source/commit-id] [::target-commit :seon.source/commit-id]]
+                       [:sequential :seon.program/identity]]
+                  [:set :seon.program/identity]]}
+  [database {::keys [base-commit target-commit]} identities]
+  (let [changed (main-changed database base-commit target-commit)
+        candidates (filterv changed identities)]
+    (if (empty? candidates)
+      #{}
+      (let [own (identity-digests database candidates)
+            based (commit-digests database base-commit)]
+        (into #{} (filter #(= (get own %) (get based %))) candidates)))))
 
 (defn moved-past
   "The `identities` a work branch holds as its merge base held them while its
@@ -437,21 +496,20 @@
   [database {base ::merge-base target ::target} identities]
   (if-not base
     #{}
-    (let [own (identity-digests database identities)
-          based (identity-digests base identities)
-          current (identity-digests target identities)]
-      (into #{} (filter #(and (= (get own %) (get based %)) (not= (get own %) (get current %)))) identities))))
+    (moved-identities database {::base-commit (db/commit-id base) ::target-commit (db/commit-id target)}
+                      identities)))
 
 (defn seen-database
   "The database whose row of the program declaration `declaration` (its identity) the branch
   `database` sees: its target's head when main moved past the branch's copy
   (`moved-past`), else `database` itself. Every branch-side reader that
-  documents, shows or compiles one declaration's row reads it here."
+  documents, shows or compiles one declaration's row reads it here; only a
+  declaration main changed since the merge base reads the branch's digest."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity] :seon.db/database-value]}
   [database declaration]
-  (let [sides (merge-sides database)]
-    (if (contains? (moved-past database sides [declaration]) declaration)
-      (::target sides)
+  (let [commits (side-commits database)]
+    (if (and commits (contains? (moved-identities database commits [declaration]) declaration))
+      (db/commit-database database (::target-commit commits))
       database)))
 
 (defn advance-base!

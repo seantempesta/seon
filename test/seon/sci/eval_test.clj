@@ -2860,6 +2860,42 @@
               (is (= [:cat :string] (:in (lookup/function-documentation view 'my.edit/text)))
                   (str "the " (name kind) " view documents main's row"))))))))))
 
+(deftest a-work-branch-reads-what-main-moved-past-once-per-commit-pair
+  ;; Before, every `seon.cluster.registry/seen-database` call re-derived the merge sides (a pull of the fork entity
+  ;; and two opened commits) and three digest queries: S5 run 6's current-state block paid 14 s for it per turn.
+  (test-support/with-database
+   (fn [connection]
+     (let [cited [:seon.fn/sym 'my.edit/text]
+           replaced (fn [contract]
+                      (test-support/transacted!
+                       connection
+                       (test-support/replacement-tx
+                        (db/db connection) cited
+                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
+                        {})))
+           declarations [cited [:seon.fn/sym 'seon.db/q] [:seon.fn/sym 'my.program/source]
+                         [:seon.fn/sym 'seon.db/pull] [:seon.ns/name 'my.edit]]]
+       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
+       (with-fresh-fork
+        connection
+        (fn [fork]
+          (replaced ":string")
+          (let [branch (db/db fork)
+                main-head (db/commit-id (db/db connection))
+                seen #(mapv (fn [declaration] (db/commit-id (registry/seen-database branch declaration))) declarations)
+                _ (seen)
+                measured (profile/measure seen)
+                called (:seon.profile/called measured)]
+            (is (= main-head (first (:seon.profile/value measured)))
+                "the declaration main moved past reads main's head")
+            (is (= #{(db/commit-id branch)} (set (rest (:seon.profile/value measured))))
+                "the others read the branch")
+            (is (<= (get called 'seon.cluster.registry/identity-digests 0) 1)
+                "only the declaration main changed reads its branch digest")
+            (is (zero? (get called 'seon.db/pull 0)) "no fork entity is pulled")
+            (is (<= (get called 'seon.db/commit-database 0) 1)
+                "only the moved-past declaration opens main's head"))))))))
+
 (deftest a-stored-contract-that-cannot-compile-documents-its-error
   (test-support/with-database
    (fn [connection]
