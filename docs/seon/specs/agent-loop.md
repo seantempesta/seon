@@ -16,8 +16,9 @@ agent, one `seon.cache`.
 
 Authority: the owner rulings (`docs/research/agent-platform/2026-10-08/review/owner-rulings.md`, the current rulings
 by topic, each naming the section here that implements it), then CLAUDE.md.
-Order of work and status: [the ledger](../schedule/agent-loop-ledger.md), the only slice list. Merge mechanics:
-[merge.md](merge.md). Error shapes: [errors.md](errors.md). Competency task designs:
+Task lifecycle (attempts, done, advance, bail, merge once): [TASK-CHAIN](../schedule/cards/TASK-CHAIN.md); this spec
+owns the REPL path and the agent's context. Order of work and status: [plan](../plan.md) §0 and TASK-CHAIN §7 (the
+ledger is superseded). Merge mechanics: [merge.md](merge.md). Error shapes: [errors.md](errors.md). Competency task designs:
 `docs/research/agent-platform/2026-10-08/competency/competency-spec.md` §1-§8. Measurements live in the dated evidence
 under `docs/research/agent-platform/2026-10-07/` and `2026-10-08/` (model-pass profile, memory report, PB-01 notes);
 this spec states targets, never measurements.
@@ -28,7 +29,7 @@ proofs) is folded into §1.7 and §3.5; merging (`merge-acceptance.md`, in git's
 and its recording (`pass-and-recording.md`, approved on condition of the transaction census fold-in, done in
 `b48082ca9`) into §3.1, §3.3 and §3.4 delivery; the entrants (`entrants.md`) into §3.2.
 
-**Words.** This spec uses the approved Clojure names (ledger §3.18): one submission of forms is an **eval request**
+**Words.** This spec uses the approved Clojure names: one submission of forms is an **eval request**
 (nREPL's word; code still says `pass` and `seon.batch` until CN-20 is committed), its one transaction is the **recording
 transaction** (code: `settlement`, CN-7), what returns is the **reply** (code: `envelope`, CN-8) and the stored text is
 the **printed value** (code: `shown text`, CN-9). Code converts as each rename entry is committed.
@@ -56,23 +57,25 @@ the **printed value** (code: `shown text`, CN-9). Code converts as each rename e
    current item appears once, in its current version. Nothing in the history is re-executed or re-rendered.
 5. **Exchanges are data; wire formats are adapters** over them, selected per model (§3.4).
 6. **Standard lookups return data** on SCI's `clojure.repl`; `(help)` teaches only what its commit installs (§3.7).
-7. **Work ends by proofs; every relevant test runs by itself.** A task needs proofs (deftests naming it in
-   `:seon/tasks`) before it is assigned: assignment refuses a task with no proofs or whose proofs are all green
-   (tests give their tasks proofs in their setup). A proof is preferably an existing test: an existing failing test
-   tagged with the task, or a new case in an existing table test; a new deftest only for a behavior no test covers. A
+7. **Work ends by proofs; every relevant test runs by itself.** A task's proofs are the field `:seon.task/proofs`
+   (TASK-CHAIN §1; installed until S2c: deftests naming the task in `:seon/tasks`). A task with proofs all green at an
+   attempt's start ends with no model call (TASK-CHAIN §2.2; installed until S3a: assignment refuses it). A proof is
+   preferably an existing test: an existing failing test, or a new case in an existing table test; a new deftest only
+   for a behavior no test covers. A
    cost or refactor task, whose value does not change, is proven by measured cost: its proof asserts one test-visible
    measure (`seon.profile/measure`: reads, instrumented calls, allocated bytes, ms, as data from JVM counters, so it sees
    compiled code), red before the fix. At merge root keeps a new deftest only if it guards a behavior class no test
-   covers (merge.md §4). After every eval request that evaluated a form, the task's proofs and then every test reaching the change run automatically on the agent's branch,
-   as a serial step inside the eval request, recorded with that eval request (§3.5); the agent never has to call `my.test/check`. A
+   covers (merge.md §4). After every eval request that evaluated a form, the tests changed on the branch, the tests reaching the change and then the task's
+   proofs run automatically on the agent's branch (TASK-CHAIN §2.3), as a serial step inside the eval request, recorded with that eval request (§3.5); the agent never has to call `my.test/check`. A
    test the change broke is a blocker the agent sees and fixes, as in any intentional refactoring. The step has a time
-   bound: proofs first, reaching tests after, and what the bound leaves continues at the next eval request, shown as pending.
-   A code task requests a merge when its proofs are green and no test its change broke is red; `merge!` runs the
-   relevant tests again on the merged program and commits only when every one is green (merge.md §4). A task whose
+   bound, and what the bound leaves continues at the next eval request, shown as pending. The agent proposes `:done`
+   and root judges the done rule (`seon.cluster.source/done-refusals`, TASK-CHAIN §2.4); the chain merges once, at its
+   last task, and `merge!` runs the relevant tests again on the merged program and commits only when every one is
+   green (TASK-CHAIN §2.6, merge.md §4). A task whose
    proofs read an answer completes when they pass on the agent's answer; nothing merges. The task declares its
    answer's Malli schema, and `my.agent/answer!` validates the answer against it and stores it as ordinary Datahike
-   data; scratch values stay live in the agent's Vars. An impossible task is given
-   back early with a required reason, never claimed. Test status reaches a model agent through the current-state
+   data; scratch values stay live in the agent's Vars. An impossible task is sent
+   back early with a required reason (`my.task/send-back!`, TASK-CHAIN §2.7), never claimed. Test status reaches a model agent through the current-state
    block and an MCP agent through the reply.
 8. **Budgets** (§2). A model eval request costs no more than an ordinary eval request of the same forms, provider call excluded.
    Transient allocation is garbage-collected and never GB per operation; retained memory stays small. An ordinary
@@ -101,7 +104,7 @@ provider call and the agent's own forms are excluded.
 | Eval request kind | Expected from the work | Machinery txs |
 |---|---|---|
 | ordinary (no definitions), model eval requests included | read, evaluate and print the forms, then one recording transaction of the datoms they produced: follows the forms, not the program or the history; a model eval request within the owner's 20-40 MB, never GB | 1 |
-| definition (one-line `defn`) | as ordinary, plus one analysis of the form and a few program datoms (the expectation table of ledger RP-0) | 1 |
+| definition (one-line `defn`) | as ordinary, plus one analysis of the form and a few program datoms (measured in dated evidence) | 1 |
 | the eval request after a definition | as ordinary: nothing is rebuilt for an unchanged program | 1 |
 | current-state block, rendered at each model call | follows the task, its proofs and the unread items shown; a handful of pulls, no whole-program work | 0 (read only) |
 | the test step after an eval request that evaluated a form (Seon's work, test bodies excluded) | follows the selected tests and their reach inputs, never the program; the next eval request waits no longer than the step bound; never GB (a branch's first reaching check included) | the test requests' own, as §3.2 |
@@ -112,7 +115,7 @@ provider call and the agent's own forms are excluded.
 
 | Retained scope | Expected |
 |---|---|
-| machine | the whole process on the owner's 16 GB machine beside the user's work: every size, count, byte budget and timeout is a configuration dial with a default sized for it (approved: heap cap 4 GB, `:seon.config.operator/heap-max-bytes`; `seon.cache` 512 MB with live results inside it; Datahike's node cache byte-bounded; ledger §3.24) |
+| machine | the whole process on the owner's 16 GB machine beside the user's work: every size, count, byte budget and timeout is a configuration dial with a default sized for it (approved: heap cap 4 GB, `:seon.config.operator/heap-max-bytes`; `seon.cache` 512 MB with live results inside it; Datahike's node cache byte-bounded) |
 | cluster | one shared base SCI context per loaded program, advanced incrementally; agents fork it; no eval request constructs a base |
 | agent | live heap after a full GC per idle agent follows the values it holds, under the one cache's byte budget |
 | concurrent eval requests | N simultaneous eval requests stay inside the machine's memory; nothing allocates a GB |
@@ -191,8 +194,8 @@ caller's queued submission is dropped if it has not started; once started, it ru
 recorded.
 
 **What each entrant receives, and where its writes go** (owner 2026-10-12, `hybrid-audit-2.md` Q3 A). Every entrant
-is an agent; root and an agent differ only by the branch they hold. An entrant with a task holds an assignment
-(§3.11); an MCP or schedule entrant without a task is an agent with an **open compartment and no assignment**. No task
+is an agent; root and an agent differ only by the branch they hold. An entrant with a task holds an attempt
+(TASK-CHAIN §1; installed until S3a: an assignment, §3.11); an MCP or schedule entrant without a task is an agent with an **open compartment and no attempt**. No task
 is invented for it, and one lifecycle (`seon.cluster.agent/next-actions`) carries both.
 
 | Entrant | Agent id | Branch | SCI context | Database, connection | Writes go to |
@@ -201,10 +204,10 @@ is invented for it, and one lifecycle (`seon.cluster.agent/next-actions`) carrie
 | MCP, a new agent id | minted by the caller's name; its entity is written on main and on its branch by `seon.cluster.host/home-call` (via `seon.mcp/execution` → `seon.cluster.host/register!`, `seon.cluster.host/host!`) | its own, `agent-<id>`, forked from main's head by `my.agent/create-branch!` | a fork of the cluster's, on its branch (`seon.cluster.agent/acquire-context!`, borrowing the branch: the execution does not own it) | its branch's connection; a database value is read from it per call | its branch only |
 | MCP, a known agent id | its entity | its `:seon.agent/branch` | as above | as above | its branch only; a retired id (`:seon.agent/admission-closed-tx`) refuses by name |
 | schedule firing | the schedule's `:seon.schedule.task/owner` | that agent's branch | that agent's | as the agent | as the agent |
-| an assigned model agent | its entity | the assignment's `:seon.task/branch` | a fork on that branch | its branch's connection | its branch only |
+| a model agent on a task | its entity | the task's branch (TASK-CHAIN §2.2: the chain branch, a new agent per attempt; installed until S3a: the assignment's `:seon.task/branch`) | a fork on that branch | its branch's connection | its branch only |
 
 Capabilities are the same `my.*` functions for every non-root entrant; only root holds main. An agent's facts and
-code reach main only through root's `db<->flow`: an assignment's through its merge (merge.md §1), a taskless agent's
+code reach main only through root's `db<->flow`: a chain's through its one merge (TASK-CHAIN §2.6), a taskless agent's
 program change through a lane's write-back and commit, then reload (it never merges as facts).
 
 **A taskless agent's end** is the existing retirement fact, `:seon.agent/admission-closed-tx`, written **on its own
@@ -214,14 +217,13 @@ end writes (`seon.turn/end-task-call`). No idle timeout exists and none is added
 end keeps its branch, as today. Its branch's listen route wakes root's `db<->flow` on that write (G8's route).
 
 **Its derivation.** `seon.cluster.agent/lifecycle-facts` also reads every agent on main whose `:seon.agent/branch` the
-store holds, is not main's branch, and that no assignment names (`[?x :seon.task/agent ?g]` absent). For each it
+store holds, is not main's branch, and that no attempt names (`[?x :seon.task/agent ?g]` absent). For each it
 reads its end from main's entity, else from its branch head's entity (one branch read per such agent, as `branch-end`
 does for an assignment), and, only once ended, its unmerged program change: `seon.cluster.source/compare-branch` of
 the branch against main's head (the comparison `my.program/diff` and merge share), whose `seon.program/three-way`
 sets `:seon.program/added`, `:seon.program/changed-on-branch`, `:seon.program/retracted` and
 `:seon.program/conflict` are all empty. A declaration main already holds with the same digest (a lane's change written
-back, committed and reloaded) is `:seon.program/unchanged`, so it is not unmerged. `next-actions` then applies the
-assignment's rule with "merged" read as "nothing unmerged":
+back, committed and reloaded) is `:seon.program/unchanged`, so it is not unmerged. `next-actions` then applies a task agent's rule with "merged" read as "nothing unmerged":
 
 - ended and its graph started → `:stop` (first, as for an assignment);
 - ended, nothing unmerged → `:delete-branch` (`seon.task/delete-branch!`, root's `my.agent/retire-branch!` of
@@ -230,7 +232,7 @@ assignment's rule with "merged" read as "nothing unmerged":
   for root, as a scratch probe's definitions are kept until its end is written;
 - not ended → no action.
 
-The entity is the held entity without the assignment's keys (`:seon.task/assignment`, `:seon.task/assigned`,
+The entity is the held entity without the attempt's keys (`:seon.task/assignment`, `:seon.task/assigned`,
 `:seon.task/merge-base` absent) plus `:seon.flow.plan/unmerged` (the count of the four sets); the action carries
 `:seon.agent/id` and `:seon.task/branch` and no `:seon.task/assigned` (open schema accretion on
 `:seon.flow.plan/action`). Cost per pass: one branch read per open taskless agent; one fork-point read plus the
@@ -290,7 +292,7 @@ one balancing pass runs as in reply mode, its repairs beside the value. A line t
 - Printed output is captured whole and shown within the reply's one budget; its elision form reads the live output.
 - A form that throws does not stop the eval request; later forms run, as at a serial REPL.
 - **What a form defined is known from SCI**: the Var written and its metadata at that time, never a form's head or a
-  regex; file text is known from clj-kondo's analysis and schemas from the Malli registry (ledger UL-1). A `defn`
+  regex; file text is known from clj-kondo's analysis and schemas from the Malli registry. A `defn`
   nested in another form is saved from its own source span (SCI's write hook plus the analyzer's span) like any
   definition; one that closes over a local stays live-only with a short note to define it at top level (RP-9).
 - **An alias retarget follows Clojure's rule.** Reloading an earlier definition after its namespace retargeted an
@@ -316,9 +318,9 @@ messages and errors are unread items shown in the block; `(help)` is the prefix,
 stored facts (a database value, never a connection), rendered by its declared AI render pair into pruned data in this
 order, and printed by the value printer like any evaluation, under the ordinary per-evaluation display budget (§2
 "Context tokens"; there is no block budget). Sections, each absent when empty:
-- **Task**: the task's current declaration (intent and the names it references), read at the task home's current
-  main. A task revised by root or the user is a review: the update advances the assignment's revision in the same
-  transaction, so the block always shows the current declaration and never an older one. Task steps are shelved
+- **Task**: the task's current declaration (its plan, instructions and the names they reference; installed until S1a:
+  `intent`), read from the agent's branch. An update (`my.task/update!`, TASK-CHAIN §3a) is one transaction, so the
+  block always shows the current declaration and never an older one. Task steps are shelved
   (owner 2026-10-08): the block shows none; the simplest parts of steps may later move into tasks themselves.
 - **Proofs**: each proof test by name with its current stored source, printed as code (whole for an ordinary deftest),
   and its status: `:green`, `:red` or `:pending` (no result whose tested program holds the definitions the proof now
@@ -327,9 +329,9 @@ order, and printed by the value printer like any evaluation, under the ordinary 
   stored failure report. Counts head the section.
 - **Broken tests**: tests reaching the agent's change, not its proofs, that are red on its branch, each as the same
   data as a red proof, plus the count still pending. These are blockers the agent fixes. A test already red at the
-  merge base is marked so; it does not block the merge request and stops `merge!` for root.
+  merge base is marked so; it does not block the agent's `:done` and stops `merge!` for root.
 - **Must-reads**: built automatically from what the task names: its must-reads and the fully qualified symbols and
-  keywords backticked in its intent, each resolved to its current definition: arglists, contract and first docstring
+  keywords backticked in its plan (installed until S1a: intent), each resolved to its current definition: arglists, contract and first docstring
   line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. Library names resolve the same way
   (`malli.core/validator`, `datahike.versioning/merge!`, a namespace such as `datahike.norm.norm`): read-only from the
   host's loaded Var, with the project's pinned `reference-code/` revision, and nothing copied into the store.
@@ -339,15 +341,15 @@ order, and printed by the value printer like any evaluation, under the ordinary 
   section. **References follow one rule everywhere.** Code is a fully qualified symbol, a schema a fully qualified
   keyword, any other file a relative path whose first segment names its base, with `#heading` anchors; no custom EDN
   tag or reader; file and line are always derived (the Var's metadata, clj-kondo's analysis, the stored schema), never
-  written. Docs are Markdown, and task intents, docs (code spans and relative links) and docstrings are parsed by one
-  resolver (target `seon.ref/references`, ledger REF-1; installed today: CS-01c1's resolution of task names). A
-  reference resolving to nothing is a problem on the task at ingestion, never a refusal (TASK-CHECK), and the edit
-  hook reports one in an edited file (REF-2). An agent that runs the operations sees the result in its own history.
+  written. Docs are Markdown, and task plans, docs (code spans and relative links) and docstrings are parsed by one
+  resolver (`seon.ref/references`; TASK-CHAIN §3). A reference resolving to nothing is a problem on the task at
+  ingestion, never a refusal, and the edit hook reports one in an edited file. An agent that runs the operations sees the result in its own history.
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model eval request, each with
   its identity; `(my.message/inbox)` is the operation that shows them all (it is extended for unread items; there is
   no `my.agent/inputs`).
-- **Turns**: model calls left against the current outside wake, and the task's status (`:done` once every proof is
-  green, `:capped` with no calls left, else `:working`).
+- **Turns**: model calls left against the current outside wake, and the task's status (`:done` when the done rule
+  holds, TASK-CHAIN §2.4; `:capped` with no calls left, else `:working`; installed until S3a: `:done` once every proof is
+  green).
 
 When everything is green and quiet the status sections collapse to one line (`{:proofs {:green 3} :calls-left 7}`);
 the task and proof sources always show, because they define done.
@@ -363,11 +365,10 @@ RECORD or a failed provider call delivers nothing, so the item shows again. An i
 until it is shown. A change in what the assigner wants is a task revision, not a message.
 
 **History.** An exchange is an eval request's call entity and its evaluations with source and printed value.
-`seon.context/model-context` reads the agent's exchanges from its call entities at each model call (CX-1); the text of
+`seon.context/model-context` reads the agent's exchanges from its call entities at each model call; the text of
 an unchanged exchange is never re-derived: whether the proc holds the exchanges or their text is cached by content is
-the ledger's RESPEC R-7 (today each call re-renders every exchange, about 0.7 ms per evaluation). The history starts at
-the current assignment (ledger CX-13). Only exchanges whose call entity carries a model attempt reach the model; there is no origin tag
-(ledger §3.15). Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
+undecided (today each call re-renders every exchange, about 0.7 ms per evaluation). The history starts at
+the current attempt (installed until S3a: the current assignment). Only exchanges whose call entity carries a model attempt reach the model; there is no origin tag. Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
 Live results are held in `seon.cache` as a kind (`:seon.repl/result`, keyed by evaluation id) under its configured
 byte budget, with no count limit, evicted by Caffeine's own policy (W-TinyLFU, which approximates LRU); an evicted result's handle answers gone-value data with its saved printed
 value. Values the agent keeps in its own Vars are unaffected.
@@ -409,34 +410,32 @@ the web never reads the proc's memory.
 | a form's value is `(my.turn/wait {:my.turn/note …})` | disposition `:wait`; no model call until a new outside wake. A reply to someone is `(my.message/send …)` followed by `(my.turn/wait …)`; `my.turn/complete`, `my.agent/done` and `seon.run/complete` are deleted |
 | no form (prose only), or only read errors | one more call, whose history shows the reply with its no-form or read error; a second such reply in a row waits (disposition `:wait`); the original wake is answered |
 | provider failure or context refusal | counted call, no evaluations, answeredness unchanged, terminal reply |
-| call cap reached | disposition `:capped`; the assignment moves to the assigner in one transaction, agent and branch kept; the assigner's re-assignment to the same agent resumes it (ledger RT-13) |
-| the task's proofs all green | the task is `:done` for the agent (`seon.context/task-done?`, derived from the recorded proof results, never stored): the block shows it and no further model call opens on it; only a newer outside wake does. Its branch keeps the change for root's review. Target (F5, after RESPEC R-2), with no broken test: a code task requests a merge (merge.md §1) and the agent waits; a code task with no change against main is done after checking main still holds the tested program, with no merge request; a task whose proofs read an answer is done at the task home; nothing merges |
+| call cap reached | disposition `:capped`; the attempt closes and root writes a problem task on main (TASK-CHAIN §2.7); no relaunch. Installed until S3c: the assignment moves to the assigner and a re-assignment resumes the agent |
+| the task's proofs all green | the task is `:done` for the agent (`seon.context/task-done?`, derived from the recorded proof results, never stored): the block shows it and no further model call opens on it; only a newer outside wake does. Its branch keeps the change for root's review. Target (TASK-CHAIN §2.4): the agent proposes `:done` and root judges the done rule; the chain merges once at its last task (§2.6); a task whose proofs read an answer completes when they pass, and nothing merges |
 | a proof recorded red after the agent's answered basis | work: the agent is woken, even after `:wait`, and the block shows the red data |
-| `(my.task/complete! {:seon.task/reason …})` (the reason is required) | disposition `:bailed`; the assignment moves to the assigner with the reason (an assignment is a wake; no message, ledger RT-13); this is the only use of `my.task/complete!` |
+| `(my.task/send-back! {:my.task/reason …})` (the reason is required) | the bail: disposition `:bailed`, the attempt closes with the reason and the mess goes to root (TASK-CHAIN §2.7) |
 | a newer outside wake | answered by the next eval request, whatever the disposition |
 
 **Tests run automatically, inside the eval request.** After RECORD of any eval request that evaluated a form, the agent's proc runs, through the one test entrance
-(`seon.test/run`) on the agent's branch: first the task's proofs, as one request naming exactly them; then the tests
-reaching the eval request's change, as one reaching request. Each request carries the eval request id, so its results are recorded
+(`seon.test/run`) on the agent's branch: first the tests defined or changed on the branch and the tests
+reaching the eval request's change, then the task's own proofs last, as one request naming exactly them (TASK-CHAIN §2.3). Each request carries the eval request id, so its results are recorded
 with that eval request. The step is serial: the next submission or model call starts after it, so the next block or reply
 shows real results and nothing is ever `:running`. A test whose recorded result still holds for the program it now
 reaches is answered from that record, so an eval request that changed nothing costs lookups. A `my.test/check` naming
 definitions an earlier form of the same eval request made answers `:my.test/after-recording`: those tests run in this
 step, right after the one recording transaction, and their results are in the same reply; nothing tests uncommitted
 values and the recording stays one transaction. A change no test reaches answers `:seon.test/unreached` with no
-`:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (the cluster dial `:seon.config.test/step-time-limit-ms`, default 10 s): proofs always
-first, reaching tests after; when the bound fires, a started test var runs to its actual exit and records, and the
+`:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (the cluster dial `:seon.config.test/step-time-limit-ms`, default 10 s): the task's proofs last; when the bound fires, a started test var runs to its actual exit and records, and the
 tests not yet run continue at the next eval request's step and show as pending. A newer eval request's change supersedes the queued
 tests of the older program (the last version wins). A test var whose recorded green still holds for the program it now
 reaches is answered from the record. At proc start, tests left unfinished are
-derived from stored evidence; how a waiting agent's pending tests run (no next eval request follows a wait) is the
-ledger's RESPEC R-6. The test requests' own writes and merge-request bookkeeping never trigger the step.
+derived from stored evidence; how a waiting agent's pending tests run (no next eval request follows a wait) is undecided. The test requests' own writes and bookkeeping never trigger the step.
 There is no proof proc and no running or dirty state.
 
 - A committed model reply advances answered to the basis its context presented and records the delivery of the unread
   items its block showed. Outside and test eval requests never answer.
-- The cap counts model call entities carrying the held assignment's grant (§3.11): calls left are the agent's cap setting
-  minus that count. Only a new assignment (a new grant) refills it; a message, a task revision, a self-wake or an MCP
+- The cap counts model call entities carrying the held attempt's grant (§3.11): calls left are the agent's cap setting
+  minus that count. Only a new attempt (a new grant) refills it; a message, a task revision, a self-wake or an MCP
   retry never does.
 - With no provider configured, no model eval request is admitted. A schedule-only firing sets its wake but opens no call.
 
@@ -460,7 +459,7 @@ init; each declares the SCI context as an input filled from the evaluation's bin
 define falls back to the host's loaded Var, so library code is readable at an agent's REPL: `source` of a library Var
 is its text in the pinned `reference-code/` checkout, as at the JVM REPL. `(help)` is literal data teaching
 only the forms its commit installs, each once, and says plainly how to end a session (`my.message/send` then
-`my.turn/wait`, or `my.task/complete!` with a reason to give a task back); it is the static prefix.
+`my.turn/wait`, or `my.task/send-back!` with a reason to give a task back); it is the static prefix.
 
 ### 3.8 Bounds
 
@@ -468,7 +467,7 @@ only the forms its commit installs, each once, and says plainly how to end a ses
 |---|---|---|
 | provider timeout `:seon.config.ai/timeout-ms` | `seon.ai/complete` | a counted failed call |
 | SCI evaluation time limit per form | `seon.sci.eval` | that form's error value |
-| model calls per assignment grant (§3.11) | the writer's count | disposition `:capped` |
+| model calls per attempt grant (§3.11) | the writer's count | disposition `:capped` |
 
 The MCP await uses the caller's deadline; on timeout the caller gets a terminal "still running" reply. A host call
 that ignores interruption keeps ownership until its actual exit, and no second eval request overlaps it; the actual-exit owner
@@ -484,14 +483,12 @@ completion's cross-branch crash window with idempotent recovery. Capture-before-
 ### 3.10 Experiments, merging, scoring
 
 - **Variant.** A run's variant is its agent's settings override (model, wrapping, entrance, cap). No run entity: the run
-  is the agent, its task is its assignment.
+  is the agent, its task is its attempt.
 - **Environment.** Each run is a fresh agent on its own branch and SCI fork of the target cluster. Setup runs as an
   outside eval request before assignment; the branch is deleted after scoring.
-- **Merging.** Root is whoever holds the merge request, the orchestrator or a Seon model agent, through the ordinary
-  REPL; a Seon agent must find root's job easy. Root diffs the source branch against the target branch and enforces
-  integrity there: dangling references, contracts, schema against the target's data, and the task's proofs, the tests
-  reaching the change and root's chosen tests on the merged program. `merge!` commits when every test is green;
-  automatic merging is root's choice, configured on the target. Mechanics: merge.md.
+- **Merging.** Root merges a finished chain once (TASK-CHAIN §2.6), through the ordinary REPL; a Seon agent must find
+  root's job easy. Root diffs the source branch against the target branch and enforces integrity there: dangling references, contracts, schema against the target's data, and the task's proofs, the tests
+  reaching the change and root's chosen tests on the merged program. `merge!` commits when every test is green. Mechanics: merge.md.
 - **Scoring** reads stored facts only: proof test counts, eval requests, tokens, read-error types, imitation notes,
   latency, merge outcome, bail reason. Tests and scoring cost no provider call. The suite runs the competency spec's
   task × wrapping × entrance × model matrix, DeepSeek flash first, every run ending in the real merge flow.
@@ -500,17 +497,17 @@ completion's cross-branch crash window with idempotent recovery. Capture-before-
 
 Everything about an agent lives on its entity, `[:seon.agent/id …]` (owner 2026-10-08: "an agent has their own entity
 and the task should be ref'ed there"). One rule says where each fact is written: **addressed to the agent → the task
-home; done by the agent → its branch.** The record (identity, branch, namespace, settings, held assignments) and what
-is sent to it (assignments, messages) are written at the home, so root changes an agent without touching its branch;
+home; done by the agent → its branch.** The record (identity, branch, namespace, settings) and what
+is sent to it (messages) are written at the home, so root changes an agent without touching its branch;
 its evaluations, call entities and answered basis are written on its branch in its eval request's one transaction. Each
 agent attribute declares its side (`:seon.agent/written-at`), and the writer refuses the wrong one.
 
-- **Held tasks.** The agent's assignments are components of it (`:seon.agent/assignments`); each refs its task and
-  carries the revision it reviewed, its branch, its grant and its answer. Holding is the component's presence.
-- **One read.** `seon.agent/record [database agent-id]` answers the record from the home seen from `database`, plus the
+- **Held tasks.** [TARGET] The agent's attempts are components of it; each refs its task and carries its grant and
+  its answer (TASK-CHAIN §1; installed until S3a: assignments, `:seon.task/agent`).
+- **One read.** [TARGET] `seon.agent/record [database agent-id]` (not installed) answers the record from the home seen from `database`, plus the
   branch-side facts (answered basis, calls left on the grant). An eval request reads it once, when its evaluation context is built,
   and passes the value to the block, the proofs, the cap and the provider settings; nothing else looks up the home.
-- **Cap.** Each assignment carries a grant minted when it is written; call entities record it; calls left is the cap
+- **Cap.** Each attempt carries a grant minted when it is written; call entities record it; calls left is the cap
   setting minus the call entities on the grant (§3.5).
 - **Answered basis.** [TARGET] `:seon.agent/answered-t` (not yet declared) is the home basis the last committed model eval request presented; today the unanswered triggers are derived by `seon.turn/unanswered-triggers`.
 
@@ -518,17 +515,17 @@ Cards: [README-agent-entity](../schedule/cards/README-agent-entity.md) (AE-1 …
 
 ## 4. Order of work
 
-[The ledger](../schedule/agent-loop-ledger.md). Every slice: understanding traced, a design check, dual review of the
+[Plan](../plan.md) §0 and TASK-CHAIN §7. Every slice: understanding traced, a design check, dual review of the
 diff, its budget numbers, and root restarts or resets per §5.
 
 ## 5. Reset manifest (each reset point)
 
-Before the reset: dump runtime tasks (`:seon.task/created-by`), assignments, agent settings, schedules and open error
+Before the reset: dump runtime tasks (`:seon.task/created-by`, chain tasks included), attempts, agent settings, schedules and open error
 signatures to `docs/research/<date>/reset-<n>/`; persist the tasks into task files; verify task identities and
 references round-trip from the committed archive.
 
 Restored after the reset (checked): task files ingest with identities and references intact. Archive-only (root
-re-applies by documented forms if still needed): assignments and their revisions, agent settings, schedules, open
+re-applies by documented forms if still needed): attempts, agent settings, schedules, open
 error signatures. Discarded: runtime-only definitions, messages, live handles (gone-value markers), evaluation history,
 error occurrences. Retire only owned or unclaimed branches. Each schema retirement is transacted on a branch of the live
 store before its slice is committed.
@@ -537,5 +534,4 @@ store before its slice is committed.
 
 The owner's rulings are kept, current and by topic, in
 `docs/research/agent-platform/2026-10-08/review/owner-rulings.md`; each names the section above that implements it.
-This spec states them in those sections and keeps no log of its own. Questions still open for the owner: the ledger's
-§6.
+This spec states them in those sections and keeps no log of its own. Open questions: [plan](../plan.md) §0.

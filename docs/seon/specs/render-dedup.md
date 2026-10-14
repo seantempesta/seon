@@ -1,6 +1,6 @@
 ---
 type: spec
-status: draft
+status: draft; every file:line below is dated evidence at 587412b85, resolve the symbol with rg
 created: 2026-09-28
 tags: [spec, render, web, transcript]
 ---
@@ -146,7 +146,7 @@ One pipeline, per CLAUDE.md "Presentation": **select units, render function per 
    calls, in the same commit as the turn's.
 5. **Debug page = the same units.** The view shows the composed map the turn hands the model. Per-turn ledger
    measures are gone; `::transcript/ledger?` and `::transcript/ledger-data` are deleted from acquisition.
-6. **Faces.** Every consumer face is `render-call` (render.clj:1496) selecting by the existing three-step rule; both
+6. **Faces.** Every consumer face is `seon.render/render-call` selecting by the existing three-step rule; both
    faces of one value come from one `value/prepare` (print.cljc emit-both). Graph and experiment pages use it for
    the AI/HTML pair (D4, D5).
 7. **One graph.** The entity ref graph is the only graph page (S2a deleted the walk page).

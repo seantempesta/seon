@@ -23,14 +23,14 @@ comes from the program facts and contracts, not a surface-specific registry.
 The walk takes a requested output. Evaluation history uses `seon.repl`'s pair:
 AI renders saved printed values; HTML renders a retained live result or saved text when
 the object is unavailable. The current history walk requests AI at
-`src/seon/render/walk.clj:1005`; B2 makes that choice explicit and removes the
+`seon.render.walk`'s history section; B2 makes that choice explicit and removes the
 parallel history composition only after equivalence is proven.
 
 Render functions return data or hiccup; the one value printer applies presentation
 limits for both AI and HTML. Historical printed values are never clipped again. A
 query-work bound remains separate and yields an explicit elision/refusal naming
 that bound. The pinned Datahike fork's many-pull default is unlimited
-(`reference-code/datahike/src/datahike/pull_api.cljc:16,315-323`); an explicit
+(`datahike.pull-api/pull-attr-datoms`, `+default-limit+` in `reference-code/datahike/src/datahike/pull_api.cljc`); an explicit
 `:limit` can still truncate, and recursive pulls can return id-only maps. Neither
 a successful pull nor an unlimited default proves a complete owning value.
 
@@ -54,11 +54,11 @@ The HTTP connection's drain-or-close completion bounds pending bytes and remains
 part of the design. Compression and an SDK send queue are not backpressure. A slow
 tab delays its own delivery, and disconnect closes its tap and releases resources.
 
-The source model is `reference-code/hyperlith/src/hyperlith/impl/datastar.clj:122-181`:
+The source model is `hyperlith.impl.datastar/render-handler` (`reference-code/hyperlith/src/hyperlith/impl/datastar.clj`):
 subscribe, initial render, compute dispatch and disconnect cleanup. The SDK buffers
 sends; http-kit's maintained `write-state` seam supplies the actual drain completion
-(`reference-code/http-kit/src/org/httpkit/server.clj:321-326`). Seon's current wait
-is in `src/seon/render/web.clj:2704-2757` and must not disappear with package machinery.
+(`org.httpkit.server/write-state`). Seon's current wait
+is `seon.render.web/write-package!` and must not disappear with package machinery.
 
 Per-tab rendering costs tabs × full view, including selected history. Current shared
 derivation can be cheaper. B2 measures tabs, history size, returned/visited work,

@@ -1,6 +1,6 @@
 ---
 type: spec
-status: superseded by agent-loop.md (2026-10-08)
+status: superseded by agent-loop.md (2026-10-08); done, historical record
 created: 2026-09-28
 tags: [spec, run, one-path]
 ---

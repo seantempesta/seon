@@ -15,7 +15,7 @@ suppressed edges cycle-safely and keeps each link's data whole. Data flow after 
 map with ONE validating constructor; it returns the map when answering is its job, else throws it as `ex-info` data;
 the entrant boundary takes it back once; Seon's own errors are recorded once per signature at the task home with a
 count and one question task, assigned to the producing function's steward if one is held, else to root (the
-assignment is the one notification, §6; ledger RT-12), whose decision files the owner task; every occurrence rides the evaluation or call where it happened and
+assignment is the one notification, §6; routing is owned by the errors cut, `docs/research/agent-platform/2026-10-14/errors-cut-plan.md`), whose decision files the owner task; every occurrence rides the evaluation or call where it happened and
 reaches the agent that caused it in that reply. There is no separate concept for Seon's own failures. Principal approach: Malli's own
 shapes (`:multi` on a type key, the instrument report, cached explainers, `malli.error`) and Clojure's (`ex-info`).
 
@@ -245,7 +245,7 @@ moves into the report); about 590 lines out, 50 in. From `seon.error`: `schema-e
 
 Seon's own failures are errors like any other. An error that reaches an entrant boundary is delivered as data in the
 reply of the agent whose evaluation or call it happened in, and recorded once per signature at the task home
-(`seon.task/home`, root's home branch, where tasks and messages to root live [V]) by one `:db.fn/call` at the writer,
+(root's home branch, where tasks and messages to root live; `seon.cluster.host/home-call` writes there [V]; a bail's problem task is also on main, TASK-CHAIN §2.7) by one `:db.fn/call` at the writer,
 which receives the in-transaction database (`datahike/db/transaction.cljc:1172-1173` [V]); no counter, lock or
 occurrence queue:
 
@@ -270,7 +270,7 @@ different classes at one frame, are different entities. Member names reuse insta
 
 **Opening.** The writer function reads the entity on the in-transaction database. It OPENS when the entity is absent or
 resolved (below). An opening writes, in the same home transaction, one generated task from the triage template
-(`seon.task/generate-tx`, ledger RT-7, RT-8, RT-12) assigned to the function's steward if one is held, else to root:
+(`seon.task/generate-tx`, not installed; the errors cut owns the triage template) assigned to the function's steward if one is held, else to root:
 a question about the error entity whose answer is a decision (the owner tasks it filed, each with a red reproduction, or
 no action with a reason), its proof a generic root-decided test [TARGET: not yet written]. The entity refs it as
 `:seon.error/task` [TARGET: not yet declared]; the assignment is the one notification (an assignment is a wake), and no message is sent. The
@@ -291,15 +291,15 @@ folded repeats.
 
 - when a previously identified producer is deleted (a successful read confirms no definition carries its symbol
   on the task home's program); missing attribution or a refused read is unknown, not deletion, or
-- when its producer's current digest on the task home differs from `latest-digest` AND every success test naming its
+- when its producer's current digest on the task home differs from `latest-digest` AND every proof of its
   task has a current green run recorded on the task home after `latest-at`. Require a nonempty proof set,
   `(true? (seon.test/verified? ...))` for each proof, and the explicit time check: `verified?` returns a refusal
-  map when evidence is unavailable, which is truthy and is not proof. Use `seon.task/task-edges` for the proofs.
-  A digest change alone never resolves a surviving producer. A task with no proofs keeps its error open: adding the
+  map when evidence is unavailable, which is truthy and is not proof. Use the task's proofs (`:seon.task/proofs`, TASK-CHAIN §1; installed until S2c: `seon.task/task-edges`).
+  A digest change alone never resolves a surviving producer. A task with an empty proof set keeps its error open: adding the
   regression that names the task is part of fixing it.
 
 Both are judged on the task home's program: a fix on a branch resolves when root merges it and its tests run green
-there. `seon.task/task-resolution` reads this through `seon.error/resolution` (rewritten in place).
+there. `seon.error/resolution` reads this (rewritten in place).
 
 Cost: the home is root's branch, so a branch agent's errored form costs one home transaction before its branch
 recording transaction (N recorded errors in an eval request, N home writes). The expected
@@ -398,7 +398,7 @@ One behavior each, asserted on data:
 - **T9 chain and primary**: a two-link cause cycle terminates; distinct equal Throwables both remain; a plain exception with a suppressed typed cleanup error
   stays `:seon.error/exception` with the cleanup error in its chain.
 - **T10 resolution**: a new digest without a green run stays open; a green run after it resolves; deleting the producer
-  resolves; empty proofs (a task with no proofs after a digest change) and refused or stale evidence stay open.
+  resolves; empty proofs (a task with an empty proof set after a digest change) and refused or stale evidence stay open.
 - **T11 recurrence**: a failure after resolution opens one new message.
 - **T12 registry failure**: an error built while schema lookup throws is a literal, with no recursive explain.
 
@@ -422,7 +422,7 @@ construction-refusal cases of `refusal_test.clj`, `refusal_grammar_test.clj`, vi
 5. No separate concept: Seon's own failures are errors, recorded once per signature (64 characters) at the task home with a
    count, the first occurrence's printed value, the latest producer digest and time, and one notification; no task until an agent or root files one. Every
    occurrence is attached to the evaluation or call where it happened. A deleted producer's error resolves on deletion;
-   otherwise resolution = the producer changed AND the task's success tests have a green run since. No escalation,
+   otherwise resolution = the producer changed AND the task's proofs have a green run since. No escalation,
    stewards, folding or branch-to-cluster copy.
 6. No `:seon.error/at` on the map. Recorded errors are not migrated: default is reset after each cut that changes them.
 7. Work is cut as preparatory slices, then one dependency-complete cut proven by publish+transact on a live-store branch.
