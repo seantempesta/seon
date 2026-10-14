@@ -1890,6 +1890,25 @@
          (testing label
            (is (check (eval! "rq.a" code)))))))))
 
+(deftest a-definition-installed-later-in-the-request-keeps-the-namespaces-repl-alias
+  ;; outside-2, 2026-10-14: `(require '[seon.sci.reader :as reader])`, a defn in
+  ;; seon.edit calling `reader/read`, then a form calling `seon.edit/single-form?`
+  ;; (not yet installed in the fork): the lazy install reinstalled seon.edit's
+  ;; bindings from the request's snapshot row, the alias and require were gone,
+  ;; and the writer refused the defn's digest (the request's ns row lost them).
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [replies (support/mcp-replies
+                    (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                              "arguments" {"cluster" running "agent" agent-id
+                                                                           "mode" "sci" "namespace" "seon.edit"
+                                                                           "code" (str "(require '[clojure.string :as cs])"
+                                                                                       "(defn- utf8-bytes [text] (count (cs/upper-case text)))"
+                                                                                       "(do (single-form? \"(a)\") (contains? (ns-aliases 'seon.edit) 'cs))")}}))))
+           refused (filter :seon.db/transaction-refused (tree-seq coll? seq replies))]
+       (is (true? (:seon.repl/value (peek replies))) "the alias the request added survives installing another definition")
+       (is (empty? refused) "the defn is admitted")))))
+
 (deftest a-branch-operation-is-supplied-its-context-from-the-world
   ;; Lanes, 2026-09-28: `(my.agent/retire-branch! {...})` from MCP refused
   ;; its argument count: its context's store and routing were no world's

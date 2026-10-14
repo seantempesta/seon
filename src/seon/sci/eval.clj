@@ -1034,9 +1034,13 @@
                        (install-jvm-root! ctx function-symbol)))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
-      (sci/install-namespace-bindings!
-       ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
-      (install-namespace-bindings! ctx namespace-name (row-bindings namespace-row))
+      ;; Only a namespace the context does not hold yet takes its bindings from
+      ;; the snapshot: loading a definition never touches the aliases of a
+      ;; namespace already there, as in Clojure (a REPL require stays).
+      (when-not (contains? (:namespaces @(:env ctx)) namespace-name)
+        (sci/install-namespace-bindings!
+         ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
+        (install-namespace-bindings! ctx namespace-name (row-bindings namespace-row)))
       (let [event (one-event source namespace-name ctx (count source))]
         (sci/binding [sci/ns (context-namespace ctx namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
@@ -3090,7 +3094,9 @@
                                   (update :functions into (map (fn [row] [(first row) (function-entry row)])) rows)
                                   (update :namespaces assoc namespace-name ns-row)))
              (install-declared-classes! ctx [ns-row])
-             (sci/install-namespace-bindings! ctx namespace-name (assoc (row-bindings ns-row) :refers {}))
+             ;; A namespace the context holds keeps its bindings: promoting a member never touches its aliases.
+             (when-not (contains? (:namespaces @(:env ctx)) namespace-name)
+               (sci/install-namespace-bindings! ctx namespace-name (assoc (row-bindings ns-row) :refers {})))
              (install-required-libraries! ctx [ns-row])
              ;; A refused row binds a root refusing by name, delivered when called.
              (install-selected! ctx database {namespace-name ns-row} rows [] #{sym}
