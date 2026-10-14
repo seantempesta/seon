@@ -1,0 +1,93 @@
+diff --git a/src/seon/ref.clj b/src/seon/ref.clj
+index 89c19f297..f29033215 100644
+--- a/src/seon/ref.clj
++++ b/src/seon/ref.clj
+@@ -339,12 +339,23 @@
+ 
+ (def ^:private problem-messages
+   "What each problem kind means and what the agent does about it."
+-  {:unresolved "Nothing of this name or path exists on your branch. If the task means one to create, create it; else tell root with my.message/send that the task names it."
++  {:unresolved "This resolves to nothing on your branch; its operations read what does exist. What the task intends for it is its plan's to say."
+    :anchor-missing "The file has no heading with this anchor; (my.fs/section path) lists its headings. Tell root the task names it."
+    :no-lead "This section opens with no paragraph, so its summary is only its heading and size; its doc shows its first block whole and the headings below. Give the section a lead paragraph, or cite it at code level."
+    :no-summary "This function has no docstring, so it has no summary. Add one, or cite it at doc or code level."
+    :line-reference "A path:N citation goes stale; the task should cite code by its symbol. Tell root the task names it."})
+ 
++(defn- unresolved
++  "The problem for a name or path that resolves to nothing: the fixed message and, as data, the form that searches
++  the program for the name's last word."
++  {:malli/schema [:=> [:cat [:or :seon.ref/name :seon.ref/path]] :seon.ref/problem]}
++  [reference]
++  (let [word (if (string? reference) (first (str/split (last (str/split reference #"/")) #"\.")) (name reference))]
++    (cond-> {:seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)
++             :seon.render/operations [(list 'my.program/search word)]}
++      (string? reference) (assoc :seon.ref/path reference)
++      (not (string? reference)) (assoc :seon.ref/name reference))))
++
+ (defn- pinned-revision
+   "The reference-code project and pinned revision a loaded resource URL names, or nil when it is not under a pin."
+   {:malli/schema [:=> [:cat :string] [:or :nil :seon.ref/pin]]}
+@@ -386,7 +397,7 @@
+       arglists (assoc :arglists arglists)
+       doc (assoc :seon.fn/doc (first (str/split-lines (:summary (docstring doc)))))
+       pin (assoc :seon.ref/pin pin))
+-    {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}))
++    (unresolved reference)))
+ 
+ (defn- namespace-name
+   "A namespace named `reference`, stored or loaded on the host, as its name, doc line and the form that lists it;
+@@ -419,11 +430,11 @@
+     (cond
+       (simple-symbol? reference)
+       (or (namespace-name database reference)
+-          {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})
++          (unresolved reference))
+       (qualified-keyword? reference)
+       (let [found (schema-documentation database reference reference)]
+         (cond (:seon.sci.eval/documentation-unavailable found)
+-              {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
++              (unresolved reference)
+               (:seon.error/at found) found
+               :else {:seon.ref/name reference :seon.render/operations [read-form]}))
+       :else
+@@ -541,7 +552,7 @@
+           (with-inner (merge (select-keys found pull) {:seon.ref/name reference} (render attribute))
+             (inner database #{reference} (own-prose found)))))
+       (find-ns reference) (merge {:seon.ref/name reference :seon.ns/name reference} (render :seon.ns/name))
+-      :else {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
++      :else (unresolved reference))))
+ 
+ (defn- at-level
+   "A function or schema key at the `level` its citation asks for, each the value of one REPL function (TASK-CHAIN
+@@ -551,7 +562,7 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value [:or :qualified-symbol :qualified-keyword] :seon.ref/level]
+                   [:or :map :seon.ref/problem :seon.error/value]]}
+   [database reference level]
+-  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
++  (let [unresolved (unresolved reference)
+         source #((requiring-resolve 'my.program/source) database reference)]
+     (cond
+       (= :summary level) (brief database reference)
+@@ -821,7 +832,7 @@
+         found (section reference)
+         markdown? (str/ends-with? path ".md")]
+     (case (:seon.ref/section-missing found)
+-      :file {:seon.ref/problem-kind :unresolved :seon.ref/path path :seon.ref/message (problem-messages :unresolved)}
++      :file (unresolved path)
+       :heading {:seon.ref/problem-kind :anchor-missing :seon.ref/path path :seon.ref/anchor anchor
+                 :seon.ref/message (problem-messages :anchor-missing)}
+       (-> (section-view found level markdown?)
+diff --git a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+index 4e22e6716..8068fcff1 100644
+--- a/test/seon/ref_test.clj
++++ b/test/seon/ref_test.clj
+@@ -241,7 +241,8 @@
+ (deftest an-unresolved-reference-says-what-failed-and-what-to-do
+   (let [[problem] (ref/references (db/db) {:seon.ref/text "`:seon.nope/missing-key`"})]
+     (is (= :unresolved (:seon.ref/problem-kind problem)))
+-    (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
++    (is (not (re-find #"(?i)create" (:seon.ref/message problem))) "it never tells the agent to create the name: the plan says that")
++    (is (= '[(my.program/search "missing-key")] (:seon.render/operations problem)) "it offers the search form that finds what exists")))
+ 
+ (deftest a-reference-with-no-path-is-a-missing-file
+   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
