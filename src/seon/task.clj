@@ -892,10 +892,16 @@
              written-tasks (when-not (:seon.error/at forked)
                              (on-branch store branch
                                         ;; the first task's basis is what the branch holds under its identity: a filed
-                                        ;; task's inherited entry, which the chain's first task revises
-                                        #(let [stored (task-declaration (db/db %) first-handle)]
-                                           (refusal-data (fn [] (written % [[:db.fn/call #'adopt-tasks-tx entities handles
-                                                                             (if stored {first-handle stored} {})]]))))))
+                                        ;; task's inherited entry, which the chain's first task revises; the writer
+                                        ;; revises an entry's declaration only, so that task's chain members (running,
+                                        ;; next, created by root) are written beside it, as a new first task carries them
+                                        #(let [stored (task-declaration (db/db %) first-handle)
+                                               chained (when stored
+                                                         [(assoc (select-keys (first entities) [:seon.task/execution :seon.task/next :seon.task/created-by])
+                                                                 :db/id [:seon.task/id first-handle])])]
+                                           (refusal-data (fn [] (written % (into [[:db.fn/call #'adopt-tasks-tx entities handles
+                                                                                   (if stored {first-handle stored} {})]]
+                                                                                 chained)))))))
              fact (when (:db-after written-tasks)
                     (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
          (cond (:seon.error/at forked) forked

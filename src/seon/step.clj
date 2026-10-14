@@ -37,20 +37,16 @@
   (set (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]] database (vec (ref/names text)))))
 
 (defn results
-  "Each of `tests` with its result at its current reach on `database` (`seon.test.runner/result-at-reach`), a test
+  "Each of `tests` with its result at its current identity on `database` (`seon.test.runner/current-results`), a test
   reading its task keyed by `task`'s content as the runner records it, so another task's run of a shared test cannot
-  hide it; a test none ran at that reach is absent."
+  hide it; a test none ran at that identity is absent."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
-                   [:or [:map-of :seon.test/sym :map] :seon.test/unknown-error :seon.test/execution-error]]
+                   [:or [:map-of :seon.test/sym :map] :seon.test/unknown-error :seon.test/execution-error :seon.error/value]]
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] :seon.test/task]
                    [:or [:map-of :seon.test/sym :map] :seon.test/unknown-error :seon.test/execution-error :seon.error/value]]]}
-  ([database tests]
-   (let [reaches (runner/reach-digests database tests)]
-     (if (:seon.error/at reaches) reaches (runner/result-at-reach database reaches))))
-  ([database tests task]
-   (let [reaches (runner/reach-digests database tests {} task)]
-     (if (:seon.error/at reaches) reaches (runner/result-at-reach database reaches)))))
+  ([database tests] (runner/current-results database tests nil))
+  ([database tests task] (runner/current-results database tests task)))
 
 (defn changed
   "The values of identity `attribute` (`:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`, `:seon.schema/key`) whose

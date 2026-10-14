@@ -110,13 +110,11 @@
           (sort-by (juxt #(get % :seon.test.failure/reported-file "") #(get % :seon.test.failure/line 0) :seon.test.report/id) reports))))
 
 (defn- proof-status
-  "A proof's status from its latest result and its current reach digest."
-  {:malli/schema [:=> [:cat [:or :nil :seon.test/result :seon.test/result-unknown] [:or :nil :seon.test/reach-digest]]
-                  :seon.context/proof-status]}
-  [result current]
+  "A proof's status from its result at its current identity (`seon.test.runner/current-results`; nil: none)."
+  {:malli/schema [:=> [:cat [:or :nil :seon.test/result :seon.test/result-unknown]] :seon.context/proof-status]}
+  [result]
   (cond
-    (or (nil? result) (:seon.error/at result) (nil? current)
-        (not= current (:seon.test.member/reach-digest result))) :pending
+    (or (nil? result) (:seon.error/at result)) :pending
     (and (pos? (:seon.test/pass-count result))
          (= 0 (:seon.test/fail-count result) (:seon.test/error-count result))) :green
     :else :red))
@@ -128,16 +126,14 @@
                   [:or :seon.context/head :seon.error/value]]}
   [database names task]
   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))
-        digests (when (seq names) (runner/reach-digests database names {} task))
-        results (when (seq names) (runner/latest-results database names))]
-    (or (some #(when (:seon.error/at %) %) [digests results])
-        (let [by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)]
-          (into {} (for [s names
-                         :let [result (by-sym s)
-                               status (proof-status result (get digests s))
-                               failures (when (= :red status) (proof-failures result))]]
-                     [s (cond-> {:seon.context/proof-status status}
-                          failures (assoc :seon.context/proof-failures failures))]))))))
+        by-sym (if (seq names) (runner/current-results database names task) {})]
+    (or (when (:seon.error/at by-sym) by-sym)
+        (into {} (for [s names
+                       :let [result (get by-sym s)
+                             status (proof-status result)
+                             failures (when (= :red status) (proof-failures result))]]
+                   [s (cond-> {:seon.context/proof-status status}
+                        failures (assoc :seon.context/proof-failures failures))])))))
 
 (defn proofs
   "The proofs section for the task `sym` on `database` (the agent's branch), its assigned obligations'
@@ -287,20 +283,18 @@
 
 (defn current-results
   "The recorded result of each of `tests` that `database` holds at its current reach digest there judging `task`
-  (nil: none), the identity the runner records it under (`seon.test.runner/reach-digests`): its latest completed
-  execution, when it ran at that digest; a test absent there, unrun at that reach or with no completed outcome
+  (nil: none), the identity the runner records it under (`seon.test.runner/current-results`): its newest completed
+  execution at that identity; a test absent there, unrun at that reach or with no completed outcome
   has none, so a task-reading test's result recorded with no task, or for another task, answers for none of
   `task`'s."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
                   [:or :seon.source/results :seon.error/value]]}
   [database tests task]
   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort tests))
-        digests (when (seq names) (runner/reach-digests database names {} task))
-        latest (when (and (seq names) (not (:seon.error/at digests))) (runner/latest-results database names))]
-    (or (some #(when (:seon.error/at %) %) [digests latest])
-        (into [] (filter #(and (not (:seon.error/at %)) (:seon.test/sym %)
-                               (= (get digests (:seon.test/sym %)) (:seon.test.member/reach-digest %))))
-              latest))))
+        current (if (seq names) (runner/current-results database names task) {})]
+    (if (:seon.error/at current)
+      current
+      (into [] (comp (map current) (filter #(and % (not (:seon.error/at %)) (:seon.test/sym %)))) names))))
 
 (defn step-observation
   "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations

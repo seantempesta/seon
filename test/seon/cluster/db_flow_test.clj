@@ -564,7 +564,11 @@
                                                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
                                                 :seon.agent/id "tq-chain-author"})
                                   (symbol (str *space* "-readers"))
-                                  "(clojure.test/deftest reads-no-task (clojure.test/is (nil? (seon.test/task))))\n")
+                                  (str "(clojure.test/deftest reads-no-task (clojure.test/is (nil? (seon.test/task))))\n"
+                                       ;; S5 run 2 D4: a task reader whose body runs a definition outside its closure
+                                       "(defn helper {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                                       "(clojure.test/deftest reads-dynamically (clojure.test/is (some? (seon.test/task)))"
+                                       " (clojure.test/is (= 2 ((resolve (symbol \"tq.chaininput-readers\" \"helper\"))))))\n"))
             (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
                             :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
                                                    :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
@@ -579,7 +583,7 @@
                   store (agent/handle-store handle)
                   chain (task/chain! {:seon.db/connection connection :seon.store/store store}
                                      [{:seon.task/ns (symbol *space*) :seon.task/name "r" :seon.task/plan "Do r."
-                                       :seon.task/proofs #{reader}}])
+                                       :seon.task/proofs #{reader (symbol (str *space* "-readers") "reads-dynamically")}}])
                   branch (:seon.chain/branch chain)
                   agent-id (str "attempt/" (id/id [(first (:seon.task/handles chain)) 1]))]
               (try

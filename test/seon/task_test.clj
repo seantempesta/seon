@@ -10,6 +10,7 @@
             [seon.id :as id]
             [seon.cluster.registry :as registry]
             [seon.cluster.store]
+            [seon.context :as context]
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.step :as step]
@@ -563,7 +564,10 @@
        "(deftest successor (is (= 1 1)))\n"
        "(deftest handoff (let [{branch :seon.test/branch} (seon.test/task)]\n"
        "  (is (= 1 (:seon.test/pass-count (get (step/results branch '[tq.chainproof/successor]) 'tq.chainproof/successor))))))\n"
-       "(deftest ^{:seon/tasks #{'tq.chain/a}} unbound (is (nil? (seon.test/task))))\n"))
+       "(deftest ^{:seon/tasks #{'tq.chain/a}} unbound (is (nil? (seon.test/task))))\n"
+       ;; a task reader whose body runs a definition outside its static closure (a resolved, unquoted name)
+       "(defn helper {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+       "(deftest dynamic (is (some? (seon.test/task))) (is (= 2 ((resolve (symbol \"tq.chainproof\" \"helper\"))))))\n"))
 
 (defn- task-run!
   "Run the tests `identities` on `connection` judging `task` (nil: no task), as an agent's test step does."
@@ -583,6 +587,23 @@
   [connection test-symbol task]
   (some-> (get (if task (step/results (db/db connection) [test-symbol] task) (step/results (db/db connection) [test-symbol])) test-symbol)
           (#(if (pos? (+ (:seon.test/fail-count %) (:seon.test/error-count %))) :red :green))))
+
+(deftest a-task-reading-result-is-recorded-at-the-reach-its-readers-compute
+  ;; S5 run 2 D4 (`docs/research/agent-platform/2026-10-14/s5-run-2.md`): the recorder keyed a task reader's result with
+  ;; the definitions its body ran outside its closure, the readers without, so the proof never read as proved
+  (test-support/with-database
+   (fn [connection]
+     (let [dynamic 'tq.chainproof/dynamic]
+       (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "a" :seon.task/plan "## Problem\n\nP."
+                                             :seon.task/proofs #{dynamic}}] 'tq.chain/a)
+       (test-support/declare-source! connection 'tq.chainproof chain-proofs)
+       (is (= 1 (:seon.test/executed-count (task-run! connection #{dynamic} 'tq.chain/a))) "the proof runs once under its task")
+       (is (= :red (outcome connection dynamic 'tq.chain/a)) "its red result reads back under the task it was recorded for")
+       (is (= [dynamic] (mapv :seon.test/sym (context/current-results (db/db connection) #{dynamic} 'tq.chain/a)))
+           "the done rule's reader finds it at the identity it was recorded under")
+       (is (nil? (outcome connection dynamic nil)) "and it answers for no task-less read")
+       (is (zero? (:seon.test/executed-count (task-run! connection #{dynamic} 'tq.chain/a)))
+           "the same input proves once: the next request reuses it")))))
 
 (deftest a-filed-task-becomes-a-full-chain
   ;; TASK-CHAIN S3f-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#21-create`, From a filed task)
@@ -614,6 +635,13 @@
              on-branch (db/branch-database (db/db connection) (:seon.chain/branch answer))]
          (is (= handle (:seon.chain/first answer)) "the chain's first task is the filed task's identity")
          (is (= (:seon.task/plan (first maps)) (:seon.task/plan (pulled on-branch))) "the branch's first task carries the chain's content")
+         (is (= 3 (count (:seon.task/handles answer))) "the chain answers its three tasks, linked by next")
+         (is (= {:seon.task/execution :running
+                 :seon.task/next {:seon.task/id (second (:seon.task/handles answer))}
+                 :seon.task/created-by {:seon.agent/id "root"}}
+                (db/pull on-branch [:seon.task/execution {:seon.task/next [:seon.task/id]} {:seon.task/created-by [:seon.agent/id]}]
+                         [:seon.task/id handle]))
+             "the filed task's chain runs its first task, linked by next and created by root, as any chain's")
          (is (= before (pulled (db/db connection))) "main's entry is unchanged until the merge"))))))
 
 (deftest a-tasks-proof-is-recorded-and-read-under-its-task
