@@ -1,0 +1,118 @@
+#!/bin/sh
+# bin/agy-agent — run Antigravity (agy) lanes: Gemini 3.8 Flash (high) by default, Gemini 4 Argon on request.
+#
+#   bin/agy-agent run <name> [spec]        launch a lane; spec as one argument or on stdin
+#                                          (quoted heredoc). Streams a readable transcript to
+#                                          stdout; the final answer -> summary.
+#   bin/agy-agent resume <name> [followup] continue the lane's conversation with full prior
+#                                          context (id from the lane's retained sid file).
+#   bin/agy-agent stop <name>              stop the lane's agy process tree; the sid is kept.
+#   bin/agy-agent summary <name>           print the final answer and its usage.
+#   bin/agy-agent watch <name>             follow a live transcript.
+#   bin/agy-agent status                   running lanes, and summaries of the last hour.
+#
+# Dials (env): AGY_MODEL (gemini-3.8-flash-high; also -low, -medium, gemini-4-argon-low|medium|high),
+# AGY_TIMEOUT (0 = until the turn completes; e.g. 30m), AGY_SID (resume another conversation).
+#
+# agy loads AGENTS.md, the .agents/skills and its configured MCP servers (`agy mcp list`;
+# seon is registered) by itself. Lanes run with --dangerously-skip-permissions: headless
+# agy otherwise refuses every write. Ownership is the spec's named paths plus bin/lane.
+# State lives in tmp/orchestrator/agy/<name>/: sid, pid, prompt, stream.jsonl (raw
+# events), transcript.log, summary.txt, usage.json.
+
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+model=${AGY_MODEL:-gemini-3.8-flash-high}
+timeout=${AGY_TIMEOUT:-0}
+lane_rule="You are Seon lane NAME, run through bin/agy-agent. No edit hook runs for you: lint what you touch (clj-kondo --cache false) and commit only through bin/lane claim / bin/lane commit naming the reaching tests. Never stop or reset default, never push, never edit another lane's files. End with a short report: what changed, the commit, evidence, what is left."
+
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+
+live() { [ -f "$1/pid" ] && kill -0 "$(cat "$1/pid")" 2>/dev/null; }
+
+# One readable line per tool call, model text as it streams, usage at the end.
+render() {
+  jq --unbuffered -j '
+    if .event == "step_update" then .step_update as $s
+      | if $s.step_type == "agent_response" then ($s.text_delta // "")
+        elif $s.step_type == "tool" and $s.state == "DONE" then
+          "\n▸ \($s.tool_name) \(($s.tool_info.parameters // {}) | (.CommandLine // .AbsolutePath // .TargetFile // .Query // .ToolName // "") | tostring | .[0:160])\n"
+        else "" end
+    elif .event == "result" then
+      "\n— \(.result.status) \(.result.usage.input_tokens) in / \(.result.usage.output_tokens) out, conversation total \(.result.duration_seconds | floor)s\n"
+    else "" end'
+}
+
+launch() {  # $1 name, $2 state dir, $3 prompt, rest: extra agy args
+  name=$1 state=$2 prompt=$3
+  shift 3
+  # The pipeline ends when agy exits; agy's own status goes through the status file.
+  { agy -p "$prompt" --model "$model" --dangerously-skip-permissions \
+        --print-timeout "$timeout" --output-format stream-json "$@" \
+        2> "$state/stderr.log" &
+    echo $! > "$state/pid"
+    s=0; wait $! || s=$?; echo "$s" > "$state/status"
+  } | tee "$state/stream.jsonl" | render | tee -a "$state/transcript.log"
+  status=$(cat "$state/status")
+  rm -f "$state/pid"
+  sid=$(jq -r 'select(.event == "init") | .conversation_id' "$state/stream.jsonl" | head -1)
+  [ -n "$sid" ] && echo "$sid" > "$state/sid"
+  jq -r 'select(.event == "result") | .result.response' "$state/stream.jsonl" > "$state/summary.txt"
+  jq -c 'select(.event == "result") | .result | {status, duration_seconds, usage}' \
+     "$state/stream.jsonl" > "$state/usage.json"
+  [ -s "$state/stderr.log" ] && tail -n 5 "$state/stderr.log" >&2
+  echo "bin/agy-agent: $name exited $status (sid ${sid:-none}); summary: $state/summary.txt" >&2
+  return "$status"
+}
+
+text_arg() { if [ $# -gt 0 ]; then printf '%s' "$1"; else cat; fi; }
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case "$cmd" in
+  run|resume)
+    name=${1:?name}; shift
+    case "$name" in *[!A-Za-z0-9._-]*|.*) echo "bin/agy-agent: bad name '$name'" >&2; exit 64 ;; esac
+    state=tmp/orchestrator/agy/$name
+    mkdir -p "$state"
+    if live "$state"; then echo "bin/agy-agent: $name is running (pid $(cat "$state/pid"))" >&2; exit 1; fi
+    text=$(text_arg "$@")
+    [ -n "$text" ] || { echo "bin/agy-agent: empty spec" >&2; exit 64; }
+    rule=$(printf '%s' "$lane_rule" | sed "s/NAME/$name/")
+    if [ "$cmd" = run ]; then
+      [ -f "$state/sid" ] && { echo "bin/agy-agent: $name exists; resume it or pick a new name" >&2; exit 1; }
+      printf '%s\n' "$text" > "$state/prompt"
+      launch "$name" "$state" "$text
+
+$rule"
+    else
+      sid=${AGY_SID:-$(cat "$state/sid" 2>/dev/null || true)}
+      [ -n "$sid" ] || { echo "bin/agy-agent: no sid for $name" >&2; exit 1; }
+      printf '\n--- resume\n%s\n' "$text" >> "$state/prompt"
+      launch "$name" "$state" "$text" --conversation "$sid"
+    fi ;;
+  stop)
+    state=tmp/orchestrator/agy/${1:?name}
+    live "$state" || { echo "bin/agy-agent: $1 is not running" >&2; exit 0; }
+    pid=$(cat "$state/pid")
+    pkill -TERM -P "$pid" 2>/dev/null || true; kill -TERM "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid"; fi
+    echo "bin/agy-agent: stopped $1 (pid $pid); sid $(cat "$state/sid" 2>/dev/null ||
+      jq -r 'select(.event == "init") | .conversation_id' "$state/stream.jsonl" | head -1 | tee "$state/sid")" ;;
+  summary)
+    state=tmp/orchestrator/agy/${1:?name}
+    cat "$state/summary.txt"; cat "$state/usage.json" 2>/dev/null ;;
+  watch)
+    tail -n 40 -f "tmp/orchestrator/agy/${1:?name}/transcript.log" ;;
+  status)
+    for state in tmp/orchestrator/agy/*/; do
+      [ -d "$state" ] || continue
+      name=$(basename "$state")
+      if live "$state"; then echo "running  $name pid $(cat "$state/pid")"
+      elif [ -n "$(find "$state/summary.txt" -mmin -60 2>/dev/null)" ]; then echo "finished $name $(cat "$state/usage.json" 2>/dev/null)"
+      fi
+    done ;;
+  *) usage ;;
+esac

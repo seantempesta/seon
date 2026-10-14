@@ -53,7 +53,7 @@ lanes_dir=$dir/lanes
 sessions_dir=$dir/sessions
 model=${LANE_MODEL:-gpt-6-astra}
 effort=${LANE_EFFORT:-low}
-lane_rule="Another lane's in-flight breakage is never a reason to stop. Every lane proves its own slice: commit only through bin/lane commit LANE -m MSG --test NS-or-VAR... PATHS, which boots a throwaway JVM on HEAD plus your paths and runs the named tests; name every test reaching your change (var by var where a namespace has pre-existing reds, which you list in your landing). Root runs the broad tiers centrally. Before committing, lint src script test with clj-kondo --cache false (0 errors). Never create a git worktree (owner 2026-09-23: 'no more git worktrees'). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
+lane_rule="Another lane's in-flight breakage is never a reason to stop. Every lane proves its own slice: commit only through bin/lane commit LANE -m MSG --test NS-or-VAR... PATHS, which boots a throwaway JVM on HEAD plus your paths and runs the named tests; name every test reaching your change (var by var where a namespace has pre-existing reds, which you list in your landing). Root runs the broad tiers centrally. Before committing, lint src script test with clj-kondo --cache false (0 errors). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 

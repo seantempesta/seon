@@ -211,12 +211,11 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    - **Astra, an outside model trained on a different distribution,** takes the hard performance work and FIXES what
      it finds (super-linear transformations, repeated work, whole-program work per change, re-reading what the caller
      holds), and writes the other independent plan of a design round.
-   - **Argon (Gemini 4 Argon), a second outside model,** judges before anything is committed (measured 2026-10-14:
-     working blind, it predicted that the Fressian change later reverted as a regression would not pay off, called its
-     call count a proxy, and found the repeated work and the fix of `17ec81f0b`). It predicts whether a performance
-     proposal will pay off, from what the work is proportional to, before anyone builds or commits it. It also audits
-     a spec or card against the code in one call, and can write a third independent plan. It once quoted code that
-     does not exist, so every finding is reproduced before anyone acts on it. It runs through `bin/agy-agent`.
+   - **Gemini (Flash 3.8 and Argon 4), outside models,** find root causes and judge before anything is committed
+     (measured 2026-10-14 on blind tests with known answers: Flash-high found F53's exact clause from its symptom in
+     7 minutes, both rejected the Fressian change later reverted as a regression, both found the fix of `17ec81f0b`).
+     Flash-high is the default; Argon takes long open-ended performance hunts and independent plans. Every quoted
+     excerpt and every retire-this list is reproduced before anyone acts on it. They run through `bin/agy-agent`.
    - **Fable** writes the hybrid of a design round (the tie-break between the two plans, which it did not write) and
      the periodic audit of how planning and execution are going. Never revisions, fixes or implementation: a check's
      failures go to Opus (design) or Sonnet (mechanical).
@@ -686,9 +685,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Use Git without touching others' work.** No `git add -A`, `reset --hard`, `stash` or shared-file restore. Commit
   coherent slices only through `bin/lane commit` (it refuses unclaimed paths and anything else staged in the shared
   index, then commits exactly the named paths with `git commit --only`), and `bin/lane release` when done.
-  Never push, merge or open a pull request beyond explicit owner authorization. No git worktrees without the owner's
-  personal authorization for that specific use.
-- **Launch lanes deliberately.** Astra runs through `bin/codex-agent` and Argon through `bin/agy-agent`; read the
+  Never push, merge or open a pull request beyond explicit owner authorization.
+- **Launch lanes deliberately.** Astra runs through `bin/codex-agent` and Gemini through `bin/agy-agent`; read the
   [codex-lanes](.agents/skills/codex-lanes/SKILL.md) or [agy-lanes](.agents/skills/agy-lanes/SKILL.md) skill first.
   Assignments cite the existing issue or spec and
   raw evidence and use verify/falsify/probe language; an assignment names the tests that prove it done, and a task

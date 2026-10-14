@@ -17,7 +17,7 @@ supply the facts each operation reads.
 - **Cluster**: a named Datahike branch plus the agents working on it. Its head is the
   shared context; the cluster entity holds the pointer we advance.
 - **Branch**: a private line of commits off a cluster's head (`d/branch!`): a write
-  to the branch set, no copy, no environment. Not a git worktree; git worktrees are not used.
+  to the branch set, no copy, no environment. Not a git worktree.
 - **Context**: the SCI context acquired from a database value's program entities.
 - **Program entities**: functions, tests, schemas, namespaces, render pairs, contracts,
   their analysis facts and the test results tied to them (runs and test vars keyed by the
