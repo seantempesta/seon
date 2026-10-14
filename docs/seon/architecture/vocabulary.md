@@ -109,6 +109,7 @@ instantiate one.
 | Term | Meaning and grounding | Legacy spellings |
 |---|---|---|
 | reference | Any span of prose that names exactly one entity; explicit backticks or resolve-only bare qualified symbols/keywords and path#anchor, anywhere in prose. `seon.ref` owns parsing/resolution; the entity’s declared render owns display (TASK-CHAIN §3). | reference as a display copy |
+| light reference, deep reference | A reference's depth, chosen by its author: one backtick (`` `x` ``) is light and shows the referent's doc view; three backticks inline (```` ```x``` ````) is deep and shows the whole referent (a function's source, a section's text). A line starting with three backticks is a fenced code block, never a reference (TASK-CHAIN §3a; installed in S3d-1) | distance tier, must-read depth |
 | functions, schemas, tests | ordinary Clojure constructs | verbs |
 | database, `db` | the `seon.db` authority | store, inventory, memory |
 | boot / environment / running | boot is the 0→1 construction in dependency order (REPL first); the environment is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`), scoped per agent; running code receives it | the runtime, the platform, the tower, ambient |
