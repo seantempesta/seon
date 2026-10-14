@@ -2161,6 +2161,16 @@
     (fail! "Cluster name requires letters, digits, dot, underscore or hyphen." {:seon.boot/name value}))
   value)
 
+(defn stray-positional
+  "The first of `positionals` that is no path: it exists in neither the working
+  tree nor `repository`'s index (a deleted path is still tracked, which is how a
+  deletion is committed), so it is a test name left over by `--test A B`."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] [:maybe :string]]}
+  [repository positionals]
+  (first (remove #(or (.exists (io/file %))
+                      (not (str/blank? (command! ["git" "ls-files" "--" %] repository 30000))))
+                 positionals)))
+
 (defn parse-argv [arguments]
   (let [[root args] (if (= "--seon-root" (first arguments))
                       [(canonical-root (second arguments)) (drop 2 arguments)]
@@ -2218,11 +2228,8 @@
               ;; initialization decisions included, which no manifest admits.
               (assoc request :seon.boot/cluster-name (valid-name name)
                      :seon.config/path (.getCanonicalPath (io/file path))))
-            :check (let [stray (first (filter #(and (seq (:seon.operator/tests request))
-                                                    (not (.exists (io/file %)))
-                                                    (not-any? (fn [extension] (str/ends-with? % extension))
-                                                              [".clj" ".cljc" ".cljs" ".edn" ".md" ".json" ".sh"]))
-                                             positionals))]
+            :check (let [stray (when (seq (:seon.operator/tests request))
+                                 (stray-positional (repository-root) positionals))]
                      (when stray
                        (fail! (str "'" stray "' is not a path: each test needs its own --test (--test A --test B), not --test A B.")
                               {:seon.operator/argument stray}))

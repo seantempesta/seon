@@ -152,6 +152,25 @@
            (#'operator/test-check-arguments (:seon.operator/tests request) false)))
     (is (= :refused (:seon.operator/disposition refused)))))
 
+(deftest check-reads-a-deleted-tracked-path-as-a-path
+  ;; `bin/lane commit --test T PATH` for a deletion hands `check` a path that is
+  ;; gone from the working tree; only a name no index tracks is a stray test name.
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-stray" (make-array java.nio.file.attribute.FileAttribute 0)))
+        git (fn [& args] (#'operator/command! (into ["git" "-c" "user.name=t" "-c" "user.email=t@t"] args) repository 30000))]
+    (try
+      (git "init" "-q")
+      (spit (java.io.File. repository "gone.txt") "x")
+      (spit (java.io.File. repository "kept.txt") "x")
+      (git "add" "-A")
+      (git "commit" "-q" "-m" "c")
+      (.delete (java.io.File. repository "gone.txt"))
+      (is (= "seon.operator-test/a-test" (operator/stray-positional repository ["gone.txt" "seon.operator-test/a-test"]))
+          "a deleted tracked path is no stray; a test name is")
+      (is (nil? (operator/stray-positional repository ["gone.txt"])))
+      (finally
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
 (deftest check-at-a-revision-names-the-tests-without-paths
   (let [root (System/getProperty "java.io.tmpdir")
         request (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1"
