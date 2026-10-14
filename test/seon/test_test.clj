@@ -565,10 +565,10 @@
              (#'db-flow-test/chain-world
               connection {"a" [#{} source]}
               (fn [handle]
-                (let [facts (cluster.agent/plan-facts (db/db connection))
-                      actions (cluster.agent/plan facts (cluster.agent/registry-facts (:seon.agent/routing handle)) 1)
-                      _ (cluster.agent/apply-plan! handle (:seon.agent/routing handle)
-                                                   (mapv #(cond-> % (= :start-flow (:seon.flow.plan/op %))
+                (let [facts (cluster.agent/launch-facts (db/db connection))
+                      actions (cluster.agent/launch-actions facts (cluster.agent/registry-facts (:seon.agent/routing handle)) 1)
+                      _ (cluster.agent/apply-actions! handle (:seon.agent/routing handle)
+                                                   (mapv #(cond-> % (= :start-flow (:seon.flow.actions/op %))
                                                             (assoc :seon.task/execution :paused)) actions))
                       attempt (cluster.agent/acquire-context! handle nil {:seon.agent/branch (:seon.task/branch (first actions))})
                       conn (:seon.db/connection attempt)

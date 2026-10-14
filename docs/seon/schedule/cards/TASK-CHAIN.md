@@ -504,7 +504,7 @@ one named commit. No compatibility copy.
   then tags and their readers are deleted (S2c-2). Acceptance: before/after task→proof sets equal (union) for retained
   tests; no non-deftest proof; no live old attribute or ingestion path.
 - Lifecycle: the relaunch path (`seon.cluster.agent/assignment-actions`' relaunch rows, `allowance-left`,
-  `:seon.flow.plan/allowance-left`, `work-left?`, `:seon.flow.plan/relaunch`, the fork-point relaunch clauses in `plan`
+  `:seon.flow.actions/allowance-left`, `work-left?`, `:seon.flow.actions/relaunch`, the fork-point relaunch clauses in `plan`
   and `fork-attempt!`, `seon.task/relaunched`, the `:relaunch` kind of `seon.task/end-kinds`, the relaunch clause of
   `seon.task/ready`); `copied?` in `assignment-actions`; `seed-attempt!` and the per-attempt main merge-base write;
   per-step `:merge`, `:publish` and `:delete-branch` for tasks with a `next`; the per-assignment branch fork of today's

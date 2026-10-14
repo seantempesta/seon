@@ -1,5 +1,5 @@
 (ns seon.cluster.db-flow-test
-  "db<->flow's decision, `seon.cluster.agent/plan`, as a table: facts read on
+  "db<->flow's decision, `seon.cluster.agent/launch-actions`, as a table: facts read on
   main and the registry's live graphs in, the actions db<->flow applies out."
   (:require [clojure.core.async :as async]
             [my.root]
@@ -34,19 +34,19 @@
 
 (defn- facts
   "Plan facts over `overrides`: nothing startable, nothing open, a running cluster."
-  {:malli/schema [:=> [:cat :map] :seon.flow.plan/facts]}
+  {:malli/schema [:=> [:cat :map] :seon.flow.actions/facts]}
   [overrides]
-  (merge {:seon.flow.plan/startable #{} :seon.flow.plan/invalid #{} :seon.flow.plan/open []
-          :seon.flow.plan/attempts-made {} :seon.flow.plan/relaunch {} :seon.flow.plan/created {}
-          :seon.flow.plan/cluster :running}
+  (merge {:seon.flow.actions/startable #{} :seon.flow.actions/invalid #{} :seon.flow.actions/open []
+          :seon.flow.actions/attempts-made {} :seon.flow.actions/relaunch {} :seon.flow.actions/created {}
+          :seon.flow.actions/cluster :running}
          overrides))
 
 (defn- plan-registry
   "A registry holding `started` graphs, `paused` among them."
-  {:malli/schema [:function [:=> [:cat] :seon.flow.plan/registry]
-                  [:=> [:cat :seon.flow.plan/started :seon.flow.plan/paused] :seon.flow.plan/registry]]}
+  {:malli/schema [:function [:=> [:cat] :seon.flow.actions/registry]
+                  [:=> [:cat :seon.flow.actions/started :seon.flow.actions/paused] :seon.flow.actions/registry]]}
   ([] (plan-registry #{} #{}))
-  ([started paused] {:seon.flow.plan/started started :seon.flow.plan/paused paused}))
+  ([started paused] {:seon.flow.actions/started started :seon.flow.actions/paused paused}))
 
 (def ^:private a "aaaaaaaaaaaa")
 (def ^:private b "bbbbbbbbbbbb")
@@ -55,64 +55,64 @@
 
 (defn- open
   "The open attempt 1 of `a` under `intent`."
-  {:malli/schema [:=> [:cat :seon.task/execution] :seon.flow.plan/open-attempt]}
+  {:malli/schema [:=> [:cat :seon.task/execution] :seon.flow.actions/open-attempt]}
   [intent]
   {:seon.task/assigned a :seon.task/assignment key-a :seon.agent/id agent-a
    :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/execution intent})
 
 (defn- ops
   "The plan's actions as [op task] pairs, in order."
-  {:malli/schema [:=> [:cat :seon.flow.plan/actions] [:vector [:tuple :seon.flow.plan/op :seon.task/assigned]]]}
+  {:malli/schema [:=> [:cat :seon.flow.actions/actions] [:vector [:tuple :seon.flow.actions/op :seon.task/assigned]]]}
   [actions]
-  (mapv (juxt :seon.flow.plan/op :seon.task/assigned) actions))
+  (mapv (juxt :seon.flow.actions/op :seon.task/assigned) actions))
 
 (deftest ^{:seon/tasks #{'seon.cluster.agent/two-plan-passes-start-one-attempt}}
   plan-writes-the-attempt-first-and-makes-flow-follow
   (testing "a fresh leaf: its attempt, then its flow, in one pass"
-    (let [[attempt start :as actions] (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4)]
+    (let [[attempt start :as actions] (agent/launch-actions (facts {:seon.flow.actions/startable #{a}}) (plan-registry) 4)]
       (is (= [[:attempt a] [:start-flow a]] (ops actions)))
       (is (= {:seon.task/assignment key-a :seon.task.attempt/number 1 :seon.agent/id agent-a
-              :seon.task/branch (keyword (str "attempt-" key-a)) :seon.flow.plan/fork-point :main}
+              :seon.task/branch (keyword (str "attempt-" key-a)) :seon.flow.actions/fork-point :main}
              (select-keys attempt [:seon.task/assignment :seon.task.attempt/number :seon.agent/id
-                                   :seon.task/branch :seon.flow.plan/fork-point])))
+                                   :seon.task/branch :seon.flow.actions/fork-point])))
       (is (= :running (:seon.task/execution start)))))
   (testing "two passes over the same facts plan the same attempt, so the second write is a no-op"
-    (is (= (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4)
-           (agent/plan (facts {:seon.flow.plan/startable #{a}}) (plan-registry) 4))))
+    (is (= (agent/launch-actions (facts {:seon.flow.actions/startable #{a}}) (plan-registry) 4)
+           (agent/launch-actions (facts {:seon.flow.actions/startable #{a}}) (plan-registry) 4))))
   (testing "once written and started, nothing"
-    (is (= [] (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/open [(open :running)]})
+    (is (= [] (agent/launch-actions (facts {:seon.flow.actions/startable #{a} :seon.flow.actions/open [(open :running)]})
                           (plan-registry #{agent-a} #{}) 4))))
   (testing "a restart: the open attempt with no graph is started again, never attempted again"
     (is (= [[:start-flow a]]
-           (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/open [(open :running)]})
+           (ops (agent/launch-actions (facts {:seon.flow.actions/startable #{a} :seon.flow.actions/open [(open :running)]})
                             (plan-registry) 4)))))
   (testing "an attempt after earlier ones is numbered after the attempts made"
     (is (= (id/id [a 3])
-           (:seon.task/assignment (first (agent/plan (facts {:seon.flow.plan/startable #{a}
-                                                             :seon.flow.plan/attempts-made {a 2}})
+           (:seon.task/assignment (first (agent/launch-actions (facts {:seon.flow.actions/startable #{a}
+                                                             :seon.flow.actions/attempts-made {a 2}})
                                                      (plan-registry) 4))))))
   (testing "a relaunched leaf's attempt and flow fork its predecessor's end commit"
     (let [commit (random-uuid)]
       (is (= [commit commit]
-             (mapv :seon.flow.plan/fork-point (agent/plan (facts {:seon.flow.plan/startable #{a}
-                                                                  :seon.flow.plan/relaunch {a commit}})
+             (mapv :seon.flow.actions/fork-point (agent/launch-actions (facts {:seon.flow.actions/startable #{a}
+                                                                  :seon.flow.actions/relaunch {a commit}})
                                                           (plan-registry) 4))))))
   (testing "max-running counts open attempts: ten ready under four start the four oldest"
     (let [handles (mapv #(format "%012d" %) (range 10))
           created (zipmap handles (range 100 0 -10))
-          attempts (filter (comp #{:attempt} :seon.flow.plan/op)
-                           (agent/plan (facts {:seon.flow.plan/startable (set handles) :seon.flow.plan/created created})
+          attempts (filter (comp #{:attempt} :seon.flow.actions/op)
+                           (agent/launch-actions (facts {:seon.flow.actions/startable (set handles) :seon.flow.actions/created created})
                                        (plan-registry) 4))]
       (is (= (take 4 (reverse handles)) (map :seon.task/assigned attempts)))
-      (is (= [] (filter (comp #{:attempt} :seon.flow.plan/op)
-                        (agent/plan (facts {:seon.flow.plan/startable (set handles)
-                                            :seon.flow.plan/open (mapv #(assoc (open :running) :seon.task/assigned %
+      (is (= [] (filter (comp #{:attempt} :seon.flow.actions/op)
+                        (agent/launch-actions (facts {:seon.flow.actions/startable (set handles)
+                                            :seon.flow.actions/open (mapv #(assoc (open :running) :seon.task/assigned %
                                                                                :seon.agent/id (str "attempt/" %))
                                                                        (take 4 handles))})
                                     (plan-registry (set (map #(str "attempt/" %) (take 4 handles))) #{}) 4))))))
   (testing "an invalid running leaf is a problem, never an attempt"
     (is (= [[:problem b] [:attempt a] [:start-flow a]]
-           (ops (agent/plan (facts {:seon.flow.plan/startable #{a} :seon.flow.plan/invalid #{b}}) (plan-registry) 4))))))
+           (ops (agent/launch-actions (facts {:seon.flow.actions/startable #{a} :seon.flow.actions/invalid #{b}}) (plan-registry) 4))))))
 
 (deftest a-publication-wakes-the-pass-that-deletes-the-merged-branch
   ;; `seon.merge/publish!` writes :seon.task/git-commit and nothing else after it; the branch's
@@ -135,8 +135,8 @@
            [:stopped #{agent-a} #{} :running [[:stop nil]]]
            [:stopped #{} #{} :running []]
            [:cancelled #{agent-a} #{} :running [[:cancel nil]]]]]
-    (is (= expected (mapv (juxt :seon.flow.plan/op :seon.task/execution)
-                          (agent/plan (facts {:seon.flow.plan/open [(open intent)] :seon.flow.plan/cluster cluster})
+    (is (= expected (mapv (juxt :seon.flow.actions/op :seon.task/execution)
+                          (agent/launch-actions (facts {:seon.flow.actions/open [(open intent)] :seon.flow.actions/cluster cluster})
                                       (plan-registry started paused) 4)))
         "each intent and registry state plans exactly its Flow verb")))
 
@@ -145,38 +145,38 @@
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [facts] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
                                  :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
-                                 :seon.flow.plan/head c1 :seon.flow.plan/started? false :seon.flow.plan/kept? false
-                                 :seon.flow.plan/allowance-left 0 :seon.flow.plan/work-left? false :seon.flow.plan/refused? false}
+                                 :seon.flow.actions/head c1 :seon.flow.actions/started? false :seon.flow.actions/kept? false
+                                 :seon.flow.actions/allowance-left 0 :seon.flow.actions/work-left? false :seon.flow.actions/refused? false}
                                 facts
-                                {:seon.flow.plan/exited? (not (:seon.flow.plan/started? facts))}))]
+                                {:seon.flow.actions/exited? (not (:seon.flow.actions/started? facts))}))]
     (doseq [[facts expected why]
-            [[{:seon.flow.plan/head c2 :seon.flow.plan/started? true} [] "running: no end anywhere"]
-             [{:seon.flow.plan/head c2 :seon.flow.plan/started? true :seon.flow.plan/publish? true} [:publish]
+            [[{:seon.flow.actions/head c2 :seon.flow.actions/started? true} [] "running: no end anywhere"]
+             [{:seon.flow.actions/head c2 :seon.flow.actions/started? true :seon.flow.actions/publish? true} [:publish]
               "running, with declarations root merged: they publish"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop]
+             [{:seon.task.attempt/end :done :seon.flow.actions/head c2 :seon.flow.actions/started? true} [:stop]
               "ended on its branch: the graph stops first"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/head c2} [:merge] "then, exited, the branch merges"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1} [:delete-branch]
+             [{:seon.task.attempt/end :done :seon.flow.actions/head c2} [:merge] "then, exited, the branch merges"]
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1} [:delete-branch]
               "root merged it: deleted"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done} [:delete-branch] "merged: deleted"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/publish? true} [:publish]
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done} [:delete-branch] "merged: deleted"]
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/publish? true} [:publish]
               "merged declarations main has not published: published before the branch is deleted"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/kept? true} [] "merged and kept"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c2} [:merge]
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/kept? true} [] "merged and kept"]
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c2} [:merge]
               "written after its merge: merged again"]
-             [{:seon.task.attempt/end :sent-back :seon.task/merge-base nil :seon.flow.plan/head c2} [:merge-base :merge]
+             [{:seon.task.attempt/end :sent-back :seon.task/merge-base nil :seon.flow.actions/head c2} [:merge-base :merge]
               "no merge base yet: written first"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.task/merge-base nil :seon.flow.plan/head c2}
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.task/merge-base nil :seon.flow.actions/head c2}
               [:delete-branch] "copied to main before merge bases existed"]
-             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2 :seon.flow.plan/started? true} [:stop]
+             [{:seon.task.attempt/end :capped :seon.flow.actions/head c2 :seon.flow.actions/started? true} [:stop]
               "an end that merges nothing stops first"]
-             [{:seon.task.attempt/end :capped :seon.flow.plan/head c2} [:problem :close]
+             [{:seon.task.attempt/end :capped :seon.flow.actions/head c2} [:problem :close]
               "then, with no allowance, is written on main with root's problem"]
-             [{:seon.task.attempt/end :cancelled :seon.flow.plan/head c2} [:close] "a cancelled end closes with nothing for root"]
-             [{:seon.task.attempt/end :capped :seon.flow.plan/main-end :capped :seon.flow.plan/head c2} [] "and kept"]
-             [{:seon.task.attempt/end :error :seon.flow.plan/main-end :error :seon.flow.plan/head c2} []
+             [{:seon.task.attempt/end :cancelled :seon.flow.actions/head c2} [:close] "a cancelled end closes with nothing for root"]
+             [{:seon.task.attempt/end :capped :seon.flow.actions/main-end :capped :seon.flow.actions/head c2} [] "and kept"]
+             [{:seon.task.attempt/end :error :seon.flow.actions/main-end :error :seon.flow.actions/head c2} []
               "a failed merge's :error end stops the lifecycle"]]]
-      (is (= expected (mapv :seon.flow.plan/op (agent/next-actions [(into {} (remove (comp nil? val)) (held facts))])))
+      (is (= expected (mapv :seon.flow.actions/op (agent/next-actions [(into {} (remove (comp nil? val)) (held facts))])))
           why))))
 
 ;;; The two-step chain through the real db<->flow pass on a fixture branch.
@@ -594,7 +594,7 @@
                   (is (empty? (db/q '[:find ?m :where [?m :seon.message/content "Only on my branch."]] database))
                       "and no message")
                   (is (= "Refined on the branch." (intent)))
-                  (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
+                  (is (not (contains? (:seon.flow.actions/started (agent/registry-facts routing)) agent-id))
                       "its graph is stopped"))
                 (pass! handle routing)
                 (is (= 1 (count (copies (db/db connection) branch))) "a second pass merges nothing")
@@ -625,14 +625,14 @@
             (let [[key branch agent-id] (end-on-branch! handle connection "e" :done proves-e twice-work)]
               (db/with-branch {:seon.db/connection connection}
                               #(merge/merge! {:seon.db/connection connection :seon.store/store store} key))
-              (is (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
+              (is (contains? (:seon.flow.actions/started (agent/registry-facts routing)) agent-id) "the graph survived the merge")
               (pass! handle routing)
-              (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id))
+              (is (not (contains? (:seon.flow.actions/started (agent/registry-facts routing)) agent-id))
                   "one pass stops it")
               ;; each pass's own writes (the publication, the deletion, the sibling z's end) wake the next, as in production
               (let [due #(agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))]
                 (dotimes [_ 4] (when (seq (due)) (pass! handle routing)))
-                (is (empty? (mapv :seon.flow.plan/op (due))) "the passes its writes wake leave nothing to derive"))
+                (is (empty? (mapv :seon.flow.actions/op (due))) "the passes its writes wake leave nothing to derive"))
               (is (not (contains? (registry/branches store) branch)) "and its branch is deleted")
               (is (= "Refined on the branch." (:seon.task/intent (db/pull (db/db connection) [:seon.task/intent]
                                                                           [:seon.task/id (chain-handle "e")])))
@@ -961,7 +961,7 @@
             (pass! handle routing)
             (let [[[_ branch agent-id]] (seq (attempts connection "s"))
                   database (db/branch-database (db/db connection) branch)]
-              (is (not (contains? (:seon.flow.plan/started (agent/registry-facts routing)) agent-id)) "the graph is stopped")
+              (is (not (contains? (:seon.flow.actions/started (agent/registry-facts routing)) agent-id)) "the graph is stopped")
               (is (seq (proof-runs database (proof "s"))) "after its pass recorded its proof run")
               (is (empty? (db/q '[:find ?e :where [?e :seon.cluster.eval/interrupted-at _]] database))
                   "with nothing interrupted")))))))))
@@ -999,7 +999,7 @@
                     "y" [#{} "(clojure.test/is (= 1 2))"]}
         (fn [handle]
           (let [routing (:seon.agent/routing handle)
-                started #(:seon.flow.plan/started (agent/registry-facts routing))]
+                started #(:seon.flow.actions/started (agent/registry-facts routing))]
             (test-support/transacted! connection (agent/creation-tx {:seon.agent/id "tq-gone-agent" :seon.ns/name 'user
                                                                      :seon.cluster/name "tq-chain"
                                                                      :seon.agent/branch :tq-gone-branch}))
@@ -1065,7 +1065,7 @@
              (is (= 1 (count @ledger)) "after the one model call that wrote it"))))))))))
 
 (deftest a-prove-step-admitted-by-its-successor-opens-a-model-turn
-  ;; q is a :prove step with no proof of its own: admission starts it because i needs it (`plan-facts`), so its
+  ;; q is a :prove step with no proof of its own: admission starts it because i needs it (`launch-facts`), so its
   ;; fresh attempt is work. Its one model reply writes i's red proof, its product, and it ends :done.
   (binding [*space* "tq.chainbare"]
   (test-support/with-database
@@ -1129,10 +1129,10 @@
                     "r" [#{} nil :prove]
                     "s" [#{} nil] "j" [#{"s"} "(clojure.test/is (= 1 2))"]}
         (fn [_]
-          (let [observed (agent/plan-facts (db/db connection))]
-            (is (= (set (map chain-handle ["p" "q"])) (:seon.flow.plan/startable observed))
+          (let [observed (agent/launch-facts (db/db connection))]
+            (is (= (set (map chain-handle ["p" "q"])) (:seon.flow.actions/startable observed))
                 "Prove starts with own proofs or a successor declaration")
-            (is (= (set (map chain-handle ["r" "s"])) (:seon.flow.plan/invalid observed))
+            (is (= (set (map chain-handle ["r" "s"])) (:seon.flow.actions/invalid observed))
                 "Prove without either and Implement without proofs cannot start"))))))))
 
 (defn- rows-source
@@ -1380,35 +1380,35 @@
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [observed] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
                                  :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
-                                 :seon.flow.plan/head c2 :seon.flow.plan/started? false :seon.flow.plan/kept? false
-                                 :seon.flow.plan/allowance-left 1 :seon.flow.plan/exited? true
-                                 :seon.flow.plan/work-left? true :seon.flow.plan/refused? false}
+                                 :seon.flow.actions/head c2 :seon.flow.actions/started? false :seon.flow.actions/kept? false
+                                 :seon.flow.actions/allowance-left 1 :seon.flow.actions/exited? true
+                                 :seon.flow.actions/work-left? true :seon.flow.actions/refused? false}
                                 observed))
         actions #(agent/next-actions [(held %)])
-        op-set #(set (map :seon.flow.plan/op (actions %)))]
+        op-set #(set (map :seon.flow.actions/op (actions %)))]
     (doseq [[observed expected why]
-            [[{:seon.task.attempt/end :capped :seon.flow.plan/started? true :seon.flow.plan/exited? false} #{:stop}
+            [[{:seon.task.attempt/end :capped :seon.flow.actions/started? true :seon.flow.actions/exited? false} #{:stop}
               "an ended graph that has not exited only stops"]
              [{:seon.task.attempt/end :capped} #{:relaunch} "a capped end with work and allowance left relaunches"]
              [{:seon.task.attempt/end :stalled} #{:relaunch} "so does a stalled end"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/refused? true} #{:relaunch}
+             [{:seon.task.attempt/end :done :seon.flow.actions/refused? true} #{:relaunch}
               "so does a done end whose merge was refused"]
-             [{:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0 :seon.flow.plan/refused? true} #{:close :problem}
+             [{:seon.task.attempt/end :capped :seon.flow.actions/allowance-left 0 :seon.flow.actions/refused? true} #{:close :problem}
               "spent allowance leaves the unfinished work visible: closed with a problem, never relaunched or deleted"]
              [{:seon.task.attempt/end :sent-back :seon.task.attempt/reason "The proof is wrong."}
               #{:merge} "a send-back merges its work, whose merge reopens its target, never relaunching the sender"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/exited? false
-               :seon.flow.plan/work-left? false}
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/exited? false
+               :seon.flow.actions/work-left? false}
               #{} "an accepted end retires only after its graph exits"]
-             [{:seon.task.attempt/end :done :seon.flow.plan/main-end :done :seon.flow.plan/head c1 :seon.flow.plan/work-left? false}
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/work-left? false}
               #{:delete-branch} "and then retires"]]]
       (is (= expected (op-set observed)) why))
-    (is (= #{:unfinished-task} (set (keep :seon.flow.plan/class (actions {:seon.task.attempt/end :capped :seon.flow.plan/allowance-left 0}))))
+    (is (= #{:unfinished-task} (set (keep :seon.flow.actions/class (actions {:seon.task.attempt/end :capped :seon.flow.actions/allowance-left 0}))))
         "the problem is an unfinished task")))
 
 (deftest ^{:seon/tasks #{'seon.task/chain-actions}}
   every-agent-start-has-a-task
-  ;; root ruling: a graph starts only from an assignment, and `seon.cluster.agent/plan` is the one owner that starts it
+  ;; root ruling: a graph starts only from an assignment, and `seon.cluster.agent/launch-actions` is the one owner that starts it
   (binding [*space* "tq.taskless"]
     (test-support/with-database
      (fn [connection]
@@ -1418,9 +1418,9 @@
           (let [routing (:seon.agent/routing handle)]
             ;; root's maintenance schedules, as boot seeds them: root holds no assignment for them on HEAD
             (test-support/transacted! connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])
-            (let [planned (agent/plan (agent/plan-facts (db/db connection)) (plan-registry) 4)]
-              (is (seq (filter #(= :start-flow (:seon.flow.plan/op %)) planned)) "the plan starts the task's attempt")
-              (is (every? :seon.task/assignment (filter #(= :start-flow (:seon.flow.plan/op %)) planned))
+            (let [planned (agent/launch-actions (agent/launch-facts (db/db connection)) (plan-registry) 4)]
+              (is (seq (filter #(= :start-flow (:seon.flow.actions/op %)) planned)) "the plan starts the task's attempt")
+              (is (every? :seon.task/assignment (filter #(= :start-flow (:seon.flow.actions/op %)) planned))
                   "every start the plan returns names an assignment"))
             (is (seq (db/q '[:find [?t ...] :where [?r :seon.agent/id "root"] [?t :seon.schedule.task/owner ?r]] (db/db connection)))
                 "root owns scheduled work")

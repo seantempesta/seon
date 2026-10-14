@@ -38,8 +38,7 @@ lane-input-roots; then root commits the owner's experimental `src-clm/`). Retent
 the producers; deleted branches are still reclaimed; the window code stays). Documentation cleanup against
 TASK-CHAIN (Haiku inventories → Sonnet edits).
 
-**Next restart batch** (root opens it when the in-flight code lanes have committed): (1) S1a phase 2, with reset; the
-same commit renames db<->flow's decision `seon.cluster.agent/plan` and its `:seon.flow.plan/*` keys so "plan" names
+**Next restart batch** (root opens it when the in-flight code lanes have committed): (1) S1a phase 2, with reset; db<->flow's decision is renamed first (`seon.cluster.agent/launch-actions`, `:seon.flow.actions/*`) so "plan" names
 only the task field; (2) the GC fork bump (Konserve b4b896f, Datahike 6d49110d; `gc-one-enumeration.patch`; retire
 `seon.db/node-not-found-carries-a-store-id-not-the-store`); (3) the `io.github.nextjournal/markdown` removal
 (`drop-nextjournal-markdown.patch`); (4) the retention dial applied. After the restart: the sentinel with repeated

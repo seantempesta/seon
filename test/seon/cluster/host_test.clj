@@ -762,7 +762,7 @@
                         (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/ended"])))
                 "main's row holds its end")
             (is (contains? (registry/branches store) unmerged) "the branch holding a definition main lacks is kept")
-            (is (= [] (filterv #(and (= unmerged (:seon.task/branch %)) (= :delete-branch (:seon.flow.plan/op %)))
+            (is (= [] (filterv #(and (= unmerged (:seon.task/branch %)) (= :delete-branch (:seon.flow.actions/op %)))
                                (agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))))
                 "and no :delete-branch is derived for it"))
           (finally

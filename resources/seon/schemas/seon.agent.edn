@@ -94,7 +94,7 @@
                        :seon.flow/channel]
                       [:seon.agent/requests {:optional true} :seon.agent/requests]
                       [:seon.flow/executor {:optional true} :seon.flow/executor]
-                      [:seon.flow.plan/paused? {:optional true} :seon.flow.plan/paused?]],
+                      [:seon.flow.actions/paused? {:optional true} :seon.flow.actions/paused?]],
                      :blueprint-request
                      [:map
                       [:seon.turn.loop/cluster

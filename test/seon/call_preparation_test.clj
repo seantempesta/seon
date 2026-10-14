@@ -138,7 +138,7 @@
 (defn probe-database-then-registry
   "The `seon.cluster.agent/lifecycle-facts` shape: a leading database the
   world supplies, then a map input no binding supplies."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.flow.plan/registry] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.flow.actions/registry] :boolean]}
   [_database _registry]
   (swap! entered inc)
   true)
@@ -914,7 +914,7 @@
                                             "(seon.call-preparation-test/probe-current-database))")))]
          (is (= :input (:seon.instrument/check refusal)))
          (is (= 'seon.call-preparation-test/probe-database-then-registry (:seon.error/operation refusal)))
-         (is (= [[1 :seon.flow.plan/started] [1 :seon.flow.plan/paused]]
+         (is (= [[1 :seon.flow.actions/started] [1 :seon.flow.actions/paused]]
                 (mapv :seon.error/schema-path (:seon.error/problems refusal)))
              "only the registry, the input no binding supplies, is refused, by its declared keys")
          (is (zero? @entered) "the body never ran"))))))

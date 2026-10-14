@@ -875,7 +875,7 @@
 (defn unmerged-count
   "How many declarations `branch` changed that main `database` lacks (`compare-branch` against main's head);
   a refused comparison is thrown."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.plan/unmerged]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.actions/unmerged]}
   [database store branch]
   (let [{three :three :as compared} (compare-branch store branch database (get-in database [:config :branch]))]
     (try (if three

@@ -233,9 +233,9 @@ back, committed and reloaded) is `:seon.program/unchanged`, so it is not unmerge
 - not ended → no action.
 
 The entity is the held entity without the attempt's keys (`:seon.task/assignment`, `:seon.task/assigned`,
-`:seon.task/merge-base` absent) plus `:seon.flow.plan/unmerged` (the count of the four sets); the action carries
+`:seon.task/merge-base` absent) plus `:seon.flow.actions/unmerged` (the count of the four sets); the action carries
 `:seon.agent/id` and `:seon.task/branch` and no `:seon.task/assigned` (open schema accretion on
-`:seon.flow.plan/action`). Cost per pass: one branch read per open taskless agent; one fork-point read plus the
+`:seon.flow.actions/action`). Cost per pass: one branch read per open taskless agent; one fork-point read plus the
 changed declarations' digests per ended one.
 
 **Proof (M13).** `seon.cluster.agent/an-ended-taskless-agent-with-nothing-unmerged-has-its-branch-deleted`: an MCP

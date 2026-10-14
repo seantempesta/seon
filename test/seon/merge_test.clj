@@ -524,14 +524,14 @@
                 main (db/db connection)
                 row (some #(when (= a (:db/id %)) %)
                           (cluster.agent/lifecycle-facts main (:seon.store/store (support/execution-handle connection))
-                                                         {:seon.flow.plan/started #{} :seon.flow.plan/paused #{}}))]
+                                                         {:seon.flow.actions/started #{} :seon.flow.actions/paused #{}}))]
             (is (uuid? (:seon.task/merge-commit merged)) "the facts merged")
             (is (nil? (:seon.task/outcome (db/pull main [:seon.task/outcome] a)))
                 "a source not yet ended merges its facts and completes nothing")
             (is (nil? (:seon.task/merged-declarations (db/pull main [:seon.task/merged-declarations] a)))
                 "a merge of facts alone records no moved declarations")
             (is (map? row) "the assignment is held")
-            (is (not (:seon.flow.plan/publish? row)) "and its publication is never due"))))))))
+            (is (not (:seon.flow.actions/publish? row)) "and its publication is never due"))))))))
 
 (deftest a-root-edit-after-capture-keeps-roots-value
   (support/with-database
