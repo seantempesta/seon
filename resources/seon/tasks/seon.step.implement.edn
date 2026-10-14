@@ -3,6 +3,8 @@
 
 Read the plan and your proofs first: they start red; your block shows each failure. Change the producer the Approach
 names, and convert its callers in the same change; read each owner with `my.program/source` before changing it.
+Every def and defn you evaluate is a program definition on your branch and merges: unmap what you do not keep with
+`my.program/ns-unmap!`.
 A proof that contradicts the plan, or a row you believe is wrong, is not yours to satisfy: send it back with
 `my.task/send-back!` and the row and why. Never special-case one row to pass.
 
