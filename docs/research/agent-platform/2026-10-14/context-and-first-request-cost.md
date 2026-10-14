@@ -1,5 +1,6 @@
 ---
 title: Context assembly and first eval request cost
+type: research
 date: 2026-10-14
 status: measured research
 ---
@@ -113,7 +114,16 @@ planning/materialization caused the allocation. “Three indexed queries” in t
    `seon.fn/gate-edges` queries the program's function/test identities, all test names, declaration callers,
    unresolved file references and effect handlers, then builds maps. Five references repeat this program-scale
    acquisition five times. A doc view needs name, status and referenced/reached functions; it does not need a host report.
-   This is the largest repeatedly measured context waste.
+   This is the largest repeatedly measured context waste. The existing cache is bypassed for a reproduced reason:
+   its edge-attribute query uses `or` with `?declaration` bound in only one arm. It returns an invalid-read map
+   with “Join variable not declared inside clauses: [?declaration]” (`result/ef9f34a955168`).
+   `destructive-reach` treats that non-vector as no cache key and runs the whole walk. The error is hidden by that
+   fallback. Program revisions and the database cache context are present, so missing revision authority is not the cause.
+   The producer correction is `or-join [?attribute]`, with `?declaration` local to its arm. Read-only evaluation of
+   that query returned nine attributes in 1.73 ms / 0.75 MB and equaled the union of two independent simple queries
+   (`result/ee76362b9938f`). No function was redefined. This proves the query correction, not the whole-context speedup.
+   The existing task `seon.test/destructive-reach-keeps-a-second-cache` already owns moving this derived answer to
+   `seon.cache`; it must also repair the query and propagate its declared read failure instead of silently recomputing.
 2. **Schema usage reports:** `seon.render.schema/selection` at distance 1 calls `seon.render.schema/usage`.
    It queries previous form, reverse schema references and every matching contract, sorts the full matches,
    then selects eight displayed names. The doc view already holds the schema form and needs its description.
@@ -254,7 +264,7 @@ allocation for async work, GC and output correctness. Counts support the time pr
 |---|---|---|
 | Doc views do not derive test host reports or schema usage | **S3d absorbs** in `seon.render.test/render-ai`, `seon.render.schema/selection`, `seon.context/must-read-ai` | Extend planned `seon.context-test/a-referenced-function-shows-its-doc-view` to the three kinds; measure whole `model-context`, assert doc data/read forms and zero `seon.test/host` / `seon.render.schema/usage` calls for doc depth; retain full-detail behavior. Wall time and allocation must fall from the same parent sample. |
 | Resolve only the contract schemas needed for doc views, once | **S3d absorbs**, at `seon.ref/inner` and reference assembly | Same end-to-end probe, schemas cited once, no callee-only entries; assert fewer producer reads, no lost required references, and a measured whole-context gain. |
-| Share graph acquisition for explicit full host reports | **Survives S3d**, but lower priority after those reads leave the block | Measure `seon.test/host` for the same five names in one operation; batch shared graph derivation or reuse it by program read evidence. Prove relevant edge changes move the answer; unrelated writes do not rebuild it. |
+| Repair the host cache-key query and reuse its graph | **Survives S3d**, with existing `seon.test/destructive-reach-keeps-a-second-cache` | Fix the observed `or` binding error at `destructive-reach` using `or-join`; move its existing derived cache to `seon.cache`, not a second cache. Measure `model-context` and five explicit `seon.test/host` reads on parent/candidate. Prove one graph acquisition for unchanged program content, changed relevant edges recompute, and a read refusal reaches the caller. |
 | Carry task, selected tests and current results once | **S2a/S2b absorb** | Measure the real assigned task's first request and next `model-context`, with two tasks sharing a template proof. Preserve distinct task input identities and invalidate on plan/proof changes. Use S2a's planned `seon.task-test/a-tasks-proof-is-recorded-and-read-under-its-task`. |
 | Select before execution acquisition | **S2b absorbs**; general content-valid acquisition **survives** | Measure the fresh two-form request below and one with an actual reaching test. Empty selection performs no extra test-execution acquisition; the actual test still runs on the right branch. Whole-request wall/step allocation must fall; first/later ratio alone is insufficient. |
 | Projection work follows changed declarations | **Survives S2/S3d**; existing `seon.schema/a-function-contract-changes-the-schema-projection` is related | Measure the contracted definition request on parent/candidate, vary unrelated program population while holding changed reach fixed, preserve projection equivalence and Malli retained schema identity. No proposed encoding change without measured benefit. |
@@ -372,4 +382,9 @@ The sampled read-only repeat exposed concurrent work, so no claim of a quiet pai
 Full requested lint: `clj-kondo --lint src script test --cache false`, 8,982 ms, **0 errors**, 1,662 warnings.
 No test reaches a Markdown research document. The named candidate check is the measurement seam's existing regression
 `seon.profile-test/calls-of-counts-a-function-past-the-hot-limit`; it does not prove any proposed optimization.
-Candidate check/commit result is recorded below after execution.
+Candidate check passed: run `59ddeab5ba5a`, one test executed, three assertions passed, zero failures/errors,
+3,312 ms test result; total check 31,719 ms (throwaway boot 15,006 ms, readiness 10,298 ms).
+This is the explicitly required platform check, not an ordinary-operation cost. Publication took 3,356 ms and
+reload/adoption 1,973 ms; those exceed the ordinary-work target and are reported without calling them a performance pass.
+Initial document commit: `fad8c88aa`; the final document revision adds the reproduced hidden query failure above.
+No pre-existing red was observed in the one selected test; the broader namespace was not run.
