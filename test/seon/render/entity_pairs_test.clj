@@ -53,12 +53,12 @@
            (is (nil? (:seon.error/value unit)))
            (is (= rendered (:seon.render/output unit)))))
        (when (= :seon.fn/sym (first entity-lookup))
-         ;; The function node is its authored source (renderers read the
-         ;; supplied database value: owner ruling 2026-09-25).
+         ;; The function node is its name and the reads of its doc and source
+         ;; (renderers read the supplied database value: owner ruling 2026-09-25).
          (let [shown (render.ns/function-ai {:seon.db/db database :seon.render/value entity})]
-           (is (= '(defn function [] true) (read-string (str/join "\n" (:seon.render.ns/source-lines shown)))))
-           (is (= {:seon.fn/sym 'entity-pairs.fixture/function}
-                  (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
+           (is (= 'entity-pairs.fixture/function (:seon.fn/sym shown)))
+           (is (some #{(list 'my.program/source (list 'quote 'entity-pairs.fixture/function))} (:seon.render/operations shown)))
+           (is (= shown (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
        (when (= :seon.test/sym (first entity-lookup))
          (doseq [[facts expected] [[{} nil]
                                    [{:seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0} "pass"]

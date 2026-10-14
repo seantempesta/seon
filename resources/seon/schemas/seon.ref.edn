@@ -3,13 +3,15 @@
            :anchor [:string {:min 1 :description "A heading's anchor, as GitHub and commonmark's heading-anchor extension derive it."}]
            :line [:int {:min 1 :description "A 1-based line in the text, as an editor shows it."}]
            :line-count [:int {:min 0}]
-           :level [:int {:min 1 :max 6}]
+           :heading-level [:int {:min 1 :max 6 :description "A Markdown heading's level, 1 for `#`."}]
+           :level [:enum {:description "The reference level its author chose with the delimiter (TASK-CHAIN §3a): a bare name is its summary (`seon.ref/brief`), one backtick or a link its doc, three or more backticks its code (`my.program/source`)."} :summary :doc :code]
+           :width [:int {:min 1 :description "A code span's delimiter width: the backticks that open it, read from its source span."}]
            :heading :string
            :span :string
            :link :string
-           :heading-entry [:map [:seon.ref/level :seon.ref/level] [:seon.ref/heading :seon.ref/heading]
+           :heading-entry [:map [:seon.ref/heading-level :seon.ref/heading-level] [:seon.ref/heading :seon.ref/heading]
                            [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/line :seon.ref/line]]
-           :span-entry [:map [:seon.ref/span :seon.ref/span] [:seon.ref/line :seon.ref/line]]
+           :span-entry [:map [:seon.ref/span :seon.ref/span] [:seon.ref/width :seon.ref/width] [:seon.ref/line :seon.ref/line]]
            :link-entry [:map [:seon.ref/link :seon.ref/link] [:seon.ref/line :seon.ref/line]]
            :word [:string {:min 1 :description "A prose word with a `/`, the punctuation around it left off: a reference only when it names an entity."}]
            :word-entry [:map [:seon.ref/word :seon.ref/word] [:seon.ref/line :seon.ref/line]]
@@ -30,8 +32,10 @@
            :problem-kind [:enum :unresolved :anchor-missing :line-reference]
            :candidate [:or
                        [:map [:seon.ref/name :seon.ref/name] [:seon.ref/line {:optional true} :seon.ref/line]
+                        [:seon.ref/level {:optional true} :seon.ref/level]
                         [:seon.ref/resolve-only {:optional true} :seon.ref/resolve-only]]
                        [:map [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                        [:seon.ref/level {:optional true} :seon.ref/level]
                         [:seon.ref/problem-kind {:optional true} [:enum :line-reference]]
                         [:seon.ref/line {:optional true} :seon.ref/line]
                         [:seon.ref/resolve-only {:optional true} :seon.ref/resolve-only]]
@@ -59,9 +63,10 @@
            :brief [:map {:description "A name a referent's own content cites, shown one level: its name, a one-line summary and the form that reads it, never its content. Producer: seon.ref/brief."}
                    [:seon.ref/name :seon.ref/name] [:doc {:optional true} :string]
                    [:seon.render/operations {:optional true} [:vector :seon.render/read-form]]]
-           :references [:vector {:description "The references a referent's own content makes (a docstring's or intent's or schema description's or doc section's cited names, a function's or test's program calls), each one level."}
+           :references [:vector {:description "The names a referent's own content cites (a test's docstring, a task's intent, a namespace's docstring, a doc section's text), each one level."}
                         [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]
-           :resolved-name [:map {:description "A name identified as its entity: the attributes its identity attribute declares it is pulled as (a program family's source, else its row's own attributes; a library Var its doc line, arglists and pin), its row's render pair as its own :seon.render/ai and :seon.render/html keys, and the references its content makes, one level. Producer: seon.ref/resolve-name."}
+           :resolved-name [:map {:description "A name identified at the level its citation asks for: a function, library Var or schema key as the value of brief, doc or source (seon.ref/at-level); a deftest, task or namespace as its entity, pulled as its identity attribute declares, with its row's render pair as its own :seon.render/ai and :seon.render/html keys and the names its content cites, one level (seon.ref/resolve-name)."}
+                           [:seon.ref/level {:optional true} :seon.ref/level]
                            [:seon.ref/name :seon.ref/name]
                            [:seon.ref/references {:optional true} :seon.ref/references]
                            [:seon.ref/line {:optional true} :seon.ref/line]

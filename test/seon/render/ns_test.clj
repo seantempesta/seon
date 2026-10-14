@@ -212,23 +212,23 @@
                      (db/registration-check :seon.task/plan [:string {:min 1}])))
              "an unchanged form reads nothing"))))))
 
-(deftest a-function-renders-its-source-by-name
-  ;; Class regression: the function node is its authored form; what it calls
-  ;; and what calls it are its related data (seon.render.walk/related).
+(deftest a-function-node-is-its-name-and-the-reads-of-its-doc-and-source
+  ;; TASK-CHAIN §3a: no distance tier; its source is one my.program/source away,
+  ;; and what it calls and what calls it are its related data (seon.render.walk/related).
   (support/with-database
     (fn [connection]
       (let [db @connection
             unit (fn [sym distance]
                    (let [value (db/pull db '[*] [:seon.fn/sym sym])]
                      (assoc value :seon.db/db db :seon.render/value value :seon.render/distance distance)))
+            subject ''seon.flow/start-work-launcher!
             launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 1))]
         (is (= {:seon.fn/sym 'seon.flow/start-work-launcher!
-                :seon.fn/doc (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1))))}
-               (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))))
-        (is (= (str/split-lines (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)))
-               (:seon.render.ns/source-lines launcher))
-            "the source is its lines, so the printer shows its layout unescaped")
-        (is (not (contains? launcher :seon.fn/doc)) "a shown source carries the doc, so it is not stated twice")
+                :seon.fn/doc (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1))))
+                :seon.render/operations [(list 'doc 'seon.flow/start-work-launcher!) (list 'my.program/source subject)
+                                         (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]}
+               launcher))
+        (is (= launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))) "distance decides nothing")
         (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))
 
 (deftest an-agents-namespace-concern-is-its-name-requires-and-definition-count

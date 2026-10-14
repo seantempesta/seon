@@ -636,16 +636,17 @@
                                                     :seon.render/operations ['(my.message/inbox)]})))))
 
 (defn- must-read-ai
-  "One must-read as the agent reads it: its entity through the render it declares (`seon.render/render-call`, one hop
-  beyond `unit`'s distance), beside its name and the references its content makes; a problem as it is."
+  "One must-read as the agent reads it: a value at the level its citation chose as it is, or an entity through the
+  render it declares (`seon.render/render-call`), beside its name, level and the references its content makes; a
+  problem as it is."
   {:malli/schema [:=> [:cat :seon.render/unit [:or :seon.ref/resolved :seon.ref/problem]] :seon.context/must-read-view]}
   [unit entry]
   (if-not (:seon.render/ai entry)
     entry
-    (let [shown (seon.render/render-call (assoc unit :seon.render/value entry
-                                           :seon.render/output :seon.render/ai
-                                           :seon.render/distance (inc (get unit :seon.render/distance 0))))
-          kept (select-keys entry [:seon.ref/name :seon.ref/references])]
+    (let [shown (seon.render/render-call (-> unit
+                                             (dissoc :seon.render/distance)
+                                             (assoc :seon.render/value entry :seon.render/output :seon.render/ai)))
+          kept (select-keys entry [:seon.ref/name :seon.ref/level :seon.ref/references])]
       (if (map? shown) (merge shown kept) (assoc kept :seon.context/rendered shown)))))
 
 (defn current-state-ai

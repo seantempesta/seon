@@ -23,7 +23,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :string] :seon.help/groups]}
   [database text]
   (let [lines (vec (str/split-lines text))
-        headings (filterv #(= 2 (:seon.ref/level %)) (:seon.ref/headings (ref/document text)))
+        headings (filterv #(= 2 (:seon.ref/heading-level %)) (:seon.ref/headings (ref/document text)))
         ends (conj (mapv :seon.ref/line (rest headings)) (inc (count lines)))]
     (mapv (fn [{:seon.ref/keys [heading anchor line]} end]
             (let [body (str/join "\n" (subvec lines line (dec end)))]

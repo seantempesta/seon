@@ -38,10 +38,24 @@
      (is (= [] (shown running agent-id
                       "(seon.ref/references {:seon.ref/text \"```clojure\\n`seon.task/agent-task`\\n```\\n\\nAdd `(+ 1 2)`.\\n\"})"))))))
 
+(deftest a-code-span-carries-its-reference-level
+  ;; TASK-CHAIN §3a: the author picks the level with the delimiter, read from the code span's source span
+  (are [text expected] (= expected (mapv (juxt :seon.ref/name :seon.ref/path :seon.ref/level)
+                                         (ref/references (db/db) {:seon.ref/text text})))
+    "Read seon.ref/locate first." [['seon.ref/locate nil :summary]]
+    "Read `seon.ref/locate` first." [['seon.ref/locate nil :doc]]
+    "Read ```seon.ref/locate``` first." [['seon.ref/locate nil :code]]
+    "Read ````seon.ref/locate```` first." [['seon.ref/locate nil :code]]
+    "Read the [guide](AGENTS.md#data-and-contracts) first." [[nil "AGENTS.md" :doc]]
+    ;; two backticks wrap a literal: a code span, never a reference
+    "Read ``seon.ref/locate`` first." []
+    ;; a fenced block is code
+    "```\nseon.ref/locate\n```\n" []))
+
 (deftest front-matter-is-not-a-heading
   (test-support/with-running-agent
    (fn [running agent-id _]
-     (is (= [{:seon.ref/level 1 :seon.ref/heading "A" :seon.ref/anchor "a" :seon.ref/line 4}]
+     (is (= [{:seon.ref/heading-level 1 :seon.ref/heading "A" :seon.ref/anchor "a" :seon.ref/line 4}]
             (shown running agent-id "(:seon.ref/headings (seon.ref/document \"---\\ntitle: x\\n---\\n# A\\n\"))"))))))
 
 (deftest a-repeated-parse-is-a-cache-hit
@@ -55,11 +69,11 @@
 (deftest an-unloaded-library-name-resolves-from-the-dependency-cache
   (test-support/with-running-agent
    (fn [running agent-id _]
-     (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"`seon.operator/check!` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
-                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin :seon.fn/source]) (update :seon.ref/pin :seon.ref/project))) found))")
+     (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"```seon.operator/check!``` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
+                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin :source]) (update :seon.ref/pin :seon.ref/project))) found))")
            [operator slurp-backward absent] (shown running agent-id code)
            source (shown running agent-id "(with-out-str (clojure.repl/source rewrite-clj.paredit/slurp-backward))")]
-       (is (string? (:seon.fn/source operator)) "a program function shows its source")
+       (is (string? (:source operator)) "a program function cited at its code shows its source")
        (is (= {:arglists '([zloc]) :seon.ref/pin "rewrite-clj"} (select-keys slurp-backward [:arglists :seon.ref/pin])))
        (is (= :unresolved (:seon.ref/problem-kind absent)))
        (is (str/starts-with? source "(defn ^{:deprecated"))))))
@@ -98,10 +112,10 @@
        (is (= :file (:seon.ref/section-missing answer)))
        (is (some #{"README.md"} (:seon.ref/nearest answer)))))))
 
-(deftest a-referenced-function-shows-its-source-whole
-  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/references`"})]
-    (is (= (:seon.fn/source (db/pull (db/db) [:seon.fn/source] [:seon.fn/sym 'seon.ref/references])) (:seon.fn/source entry))
-        "a function is its source, as code")))
+(deftest a-function-cited-at-its-code-shows-its-source-whole
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "Read ```seon.ref/references``` whole."})]
+    (is (= (:seon.fn/source (db/pull (db/db) [:seon.fn/source] [:seon.fn/sym 'seon.ref/references])) (:source entry))
+        "a function at its code is its source, as code")))
 
 (deftest a-span-of-a-name-and-more-words-is-prose
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Use `seon.ref/references`, not `seon.ref/section AGENTS.md` or `foo/bar baz`."})]
@@ -133,13 +147,11 @@
     (is (= [:unresolved :anchor-missing] (mapv :seon.ref/problem-kind [missing-file missing-heading])))
     (is (= "no-such-heading" (:seon.ref/anchor missing-heading)))))
 
-(deftest a-referenced-function-is-its-entity-with-its-declared-render
+(deftest a-function-cited-at-its-doc-is-its-doc-value
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (= ['seon.ref/section 'seon.render.ns/function-ai 'seon.render.ns/function-html]
-           ((juxt :seon.fn/sym :seon.render/ai :seon.render/html) entry))
-        "its identity and the render pair its row declares")
-    (is (= #{:seon.ref/name :seon.fn/sym :seon.fn/source :seon.render/ai :seon.render/html :seon.ref/references} (set (keys entry)))
-        "its own content only: no callers or tests pulled in")))
+    (is (= ((requiring-resolve 'seon.sci.lookup/function-documentation) (db/db) 'seon.ref/section)
+           (dissoc entry :seon.ref/name :seon.ref/level))
+        "its doc value, with the schemas its contract names; no callers or tests pulled in")))
 
 (deftest a-held-path-resolves-as-a-span-does
   (let [[entry] (ref/references (db/db) {:seon.ref/text "" :seon.ref/paths #{"AGENTS.md#data-and-contracts"}})]
@@ -153,7 +165,7 @@
 
 (deftest a-referenced-test-shows-its-own-source
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`"})]
-    (is (= #{:seon.ref/name :seon.test/sym :seon.test/source :seon.render/ai :seon.render/html :seon.ref/references} (set (keys entry)))
+    (is (= #{:seon.ref/name :seon.ref/level :seon.test/sym :seon.test/source :seon.render/ai :seon.render/html} (set (keys entry)))
         "a test resolves to its own content and declared render, like any reference")
     (is (re-find #"a-span-of-a-name-and-more-words-is-prose" (:seon.test/source entry)))))
 
@@ -164,25 +176,19 @@
 
 (deftest a-referents-own-references-show-one-level-for-every-text-kind
   (are [text name] (= [(list 'my.program/source (list 'quote name))] (:seon.render/operations (get (cited text) name)))
-    ;; a function's docstring
-    "`my.task/current`" 'seon.context/task-sections
-    ;; a test body's program calls
-    "`seon.ref-test/a-span-of-a-name-and-more-words-is-prose`" 'seon.ref/references
     ;; a task's intent
     "`seon.ref/a-reference-with-no-path-is-a-missing-file`" 'seon.ref/locate
-    ;; a schema's description
-    "`:seon.batch/inserted`" 'seon.sci.forgive/forgive
     ;; a doc section's text
     "`AGENTS.md#data-and-contracts`" 'seon.blob/inline-or-stage))
 
 (deftest a-referents-own-reference-is-a-summary-and-a-read-never-its-content
-  (let [brief (get (cited "`my.task/current`") 'seon.context/task-sections)]
+  (let [brief (get (cited "`AGENTS.md#data-and-contracts`") 'seon.blob/inline-or-stage)]
     (is (= #{:seon.ref/name :doc :seon.render/operations} (set (keys brief))))
     (is (not (contains? brief :seon.ref/references)) "one level: a cited name's own references are not pulled")))
 
 (deftest a-referenced-function-shows-its-contract-as-the-agent-writes-it
-  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})]
-    (is (str/includes? (:seon.fn/source entry) "[:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]")
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "Read ```seon.ref/section``` whole."})]
+    (is (str/includes? (:source entry) "[:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]")
         "the contract is in its source, as the agent wrote it")
     (is (not (contains? entry :seon.fn/spec)))
     (is (not (contains? entry :seon.ref/line)) "a reference carries no line in its text")))
@@ -222,17 +228,17 @@
                              "{:seon.ref/text \"`tq.nested/cites` and `seon.nope/direct`\"})] "
                              "{:inner (mapv (juxt :seon.ref/name :seon.ref/problem-kind) (:seon.ref/references entry)) "
                              ":direct ((juxt :seon.ref/name :seon.ref/problem-kind) direct)})"))]
-       (is (= [['seon.task/effective nil]] (:inner kinds))
-           "a name in the referent's own docstring that resolves to nothing is not the task's problem")
+       (is (= [] (:inner kinds))
+           "a function cited at its doc carries its doc value, never the names its docstring cites")
        (is (= ['seon.nope/direct :unresolved] (:direct kinds))
            "a name the task itself cites that resolves to nothing stays its problem")))))
 
-(deftest a-name-resolved-at-top-level-is-cited-by-name-below
-  ;; my.task/current's docstring names seon.context/task-sections; the text cites both, so the second shows once
-  (let [[current task-sections] (ref/references (db/db) {:seon.ref/text "`my.task/current` and `seon.context/task-sections`"})
-        below (first (filter #(= 'seon.context/task-sections (:seon.ref/name %)) (:seon.ref/references current)))]
-    (is (some? (:seon.fn/source task-sections)) "at top level the name shows its content")
-    (is (= {:seon.ref/name 'seon.context/task-sections} below) "below it is cited by name only")))
+(deftest a-schema-is-described-once-in-one-shown-unit
+  ;; seon.ref/brief and seon.ref/answer both name :seon.db/database-value; the text also cites :seon.ref/problem itself
+  (let [[brief answer] (ref/references (db/db) {:seon.ref/text "`seon.ref/brief`, `seon.ref/answer` and `:seon.ref/problem`"})]
+    (is (contains? (:schemas brief) :seon.db/database-value) "the first doc value describes the schema")
+    (is (not (contains? (:schemas answer) :seon.db/database-value)) "a later one leaves it out: its contract still names it")
+    (is (not-any? #(contains? (:schemas %) :seon.ref/problem) [brief answer]) "a schema cited at top level is shown there")))
 
 ;;; TASK-CHAIN §5 A5 and A5b: one reference rule for all prose, one declared render per kind.
 
@@ -298,17 +304,17 @@
                         [(count answers) ((juxt :seon.ref/name :seon.ref/path :seon.ref/anchor) answer)
                          (:seon.render.selection/selected (render/selection (assoc request :seon.render/value answer)))]))]
        (doseq [[kind text expected render]
-               [[:function "Merged by `seon.task/effective` down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
-                [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.ns/function-ai]
+               [[:function "Merged by `seon.task/effective` down the children." ['seon.task/effective nil nil] 'seon.render.value/render-ai]
+                [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.value/render-ai]
                 [:deftest "`seon.ref-test/fenced-code-and-prose-spans-are-not-references`"
                  ['seon.ref-test/fenced-code-and-prose-spans-are-not-references nil nil] 'seon.render.test/render-ai]
                 [:task "`seon.ref/a-reference-with-no-path-is-a-missing-file`"
                  ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
-                [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.ns/function-ai]
-                [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.schema/render-ai]
-                [:attribute "`:seon.task/plan`" [:seon.task/plan nil nil] 'seon.render.schema/render-ai]
-                [:error-type "`:my.fs/not-found-error`" [:my.fs/not-found-error nil nil] 'seon.render.schema/render-ai]
-                [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.schema/render-ai]
+                [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.value/render-ai]
+                [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.value/render-ai]
+                [:attribute "`:seon.task/plan`" [:seon.task/plan nil nil] 'seon.render.value/render-ai]
+                [:error-type "`:my.fs/not-found-error`" [:my.fs/not-found-error nil nil] 'seon.render.value/render-ai]
+                [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.value/render-ai]
                 [:namespace "`my.agent`" ['my.agent nil nil] 'seon.render.ns/render-ai]
                 [:document "`docs/seon/schedule/cards/TASK-CHAIN.md`" [nil "docs/seon/schedule/cards/TASK-CHAIN.md" nil] 'seon.ref/render-doc-ai]
                 [:section-link "See [the phases](docs/seon/schedule/cards/TASK-CHAIN.md#7-slices)."

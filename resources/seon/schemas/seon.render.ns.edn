@@ -12,10 +12,8 @@
   [:seon.repl/columns {:optional true} [:vector :keyword]]
   [:seon.repl/rows {:optional true} [:vector [:vector :seon.schema/value]]]]
  :seon.render.ns/function-view
- [:map {:description "A function node as its AI face shows it: named, and beyond distance zero its source and contract, a library Var's arglists, and the forms that read its callers and the tests reaching it. What it calls and what calls it are its related data."}
+ [:map {:description "A function node as its AI face shows it: its name and doc line, a library Var's arglists, and the forms that read its doc, its source, its callers and the tests reaching it. What it calls and what calls it are its related data."}
   [:seon.fn/sym :seon.fn/sym]
   [:seon.fn/doc {:optional true} :seon.fn/doc]
-  [:seon.render.ns/source-lines {:optional true} [:vector :string]]
-  [:seon.fn/spec {:optional true} :seon.fn/spec]
   [:arglists {:optional true} :seon.ref/arglists]
   [:seon.render/operations {:optional true} :seon.render/operations]]}

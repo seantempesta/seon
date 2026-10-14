@@ -28,12 +28,12 @@
            "an unknown anchor answers the nearest headings")))))
 
 (defn- cited-doc
-  "The source help's reference to `function` shows at `database`, and the derivations that answer missed."
+  "The first sentence help's references to `function` show at `database` (a summary's or a doc's), and the derivations that answer missed."
   [database function]
   (let [misses #(get-in (cache/status) [:seon.cache/kinds :seon.health/derived :seon.cache/misses] 0)
         before (misses)
         groups (:seon.help/groups (bootstrap/help-value database))]
-    {:source (->> groups (mapcat :seon.help/references) (filter #(= function (:seon.ref/name %))) first :seon.fn/source)
+    {:summary (->> groups (mapcat :seon.help/references) (filter #(= function (:seon.ref/name %))) (keep #(or (:summary %) (:doc %))) first)
      :misses (- (misses) before)}))
 
 (deftest help-references-follow-the-program-they-cite
@@ -44,7 +44,7 @@
      (support/transacted!
       connection
       (support/replacement-tx @connection [:seon.fn/sym 'seon.db/q] "(defn q \"Changed by the test.\" [] 1)" {}))
-     (is (str/includes? (str (:source (cited-doc @connection 'seon.db/q))) "Changed by the test.")
+     (is (str/includes? (str (:summary (cited-doc @connection 'seon.db/q))) "Changed by the test.")
          "a cited function's new definition shows in help's reference"))))
 
 (deftest help-names-only-installed-keys

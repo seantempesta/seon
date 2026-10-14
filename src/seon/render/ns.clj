@@ -177,28 +177,20 @@
       [:section {:class "seon-held-task"} [:p (or (:seon.error/message held) "No task held.")]])))
 
 (defn function-ai
-  "A function node as data: its name and doc line; beyond distance zero its
-  authored source as its lines, which hold the doc, and its contract where the source does not carry it, else a
-  library Var's arglists, with the forms that read its callers and the tests reaching it (and a library Var's
-  source). What it calls and what calls it are its related data."
+  "A function node as data: its name and doc line, a library Var's arglists, and the forms that read its doc, its
+  source, its callers and the tests reaching it. Its source is one `my.program/source` away; what it calls and what
+  calls it are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.ns/function-view]}
   [unit]
-  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec arglists :arglists}
-        (or (:seon.render/value unit) unit)
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source arglists :arglists} (or (:seon.render/value unit) unit)
         line (first-doc-line doc)
-        near? (pos? (node-distance unit))
-        subject (list 'quote function-name)
-        ;; the authored source carries its docstring, so a shown source is the doc
-        named (cond-> {:seon.fn/sym function-name}
-                (and line (not (and source near? (str/includes? source line)))) (assoc :seon.fn/doc line))]
-    (cond-> named
-      (and source near?) (assoc :seon.render.ns/source-lines (str/split-lines source))
-      (and spec near? (not (and source (str/includes? source ":malli/schema"))))
-      (assoc :seon.fn/spec spec)
-      (and arglists near? (not source)) (assoc :arglists arglists)
-      near? (assoc :seon.render/operations
-                   (cond-> [(list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]
-                     (not source) (conj (list 'clojure.repl/source function-name)))))))
+        subject (list 'quote function-name)]
+    (cond-> {:seon.fn/sym function-name
+             :seon.render/operations [(list 'doc function-name)
+                                      (if source (list 'my.program/source subject) (list 'clojure.repl/source function-name))
+                                      (list 'my.program/callers subject) (list 'my.program/tests-reaching subject)]}
+      line (assoc :seon.fn/doc line)
+      (and arglists (not source)) (assoc :arglists arglists))))
 
 (defn function-html
   "Render a function node: its doc and authored source."

@@ -24,5 +24,5 @@
     (is (= [] (filterv #(str/blank? (get present % "")) ["problem" "what-exists" "approach"]))
         "Problem, What exists and Approach have content")
     (is (= [] (filterv :seon.ref/problem-kind references)) "every reference in the intent resolves")
-    (is (some #(and (:seon.schema/key %) (not (:seon.ref/problem-kind %))) references)
+    (is (some #(and (qualified-keyword? (:seon.ref/name %)) (not (:seon.ref/problem-kind %))) references)
         "the intent names a schema the problem involves")))

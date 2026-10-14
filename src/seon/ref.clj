@@ -1,7 +1,7 @@
 (ns seon.ref
   "References in Markdown text (a task plan, a doc, a docstring), found by one
   parse and resolved by one rule: a code span is a candidate name or path, a
-  link is a path."
+  link is a path, and the delimiter picks the level shown (TASK-CHAIN §3a)."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -56,8 +56,8 @@
           text)))
 
 (defn- parsed
-  "The headings, the code spans, links and bare prose words of `text` in document order, its first paragraph's lines
-  and its fenced code blocks."
+  "The headings, the code spans (each with its delimiter width, read from its source span), links and bare prose words
+  of `text` in document order, its first paragraph's lines and its fenced code blocks."
   {:malli/schema [:=> [:cat :string] :seon.ref/document]}
   [^String text]
   (let [ids (.build (IdGenerator/builder))
@@ -65,21 +65,26 @@
         spans (java.util.ArrayList.)
         blocks (java.util.ArrayList.)
         paragraph (volatile! nil)
+        lines (str/split-lines text)
         ;; commonmark's 0-based line index as the line an editor shows
         line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node)))))
-        last-line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (last (.getSourceSpans node)))))]
+        last-line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (last (.getSourceSpans node)))))
+        ;; a code span's source span starts at its opening backticks
+        width (fn [^Node node]
+                (let [^SourceSpan span (first (.getSourceSpans node))]
+                  (count (take-while #{\`} (subs (nth lines (.getLineIndex span)) (.getColumnIndex span))))))]
     (.accept (.parse parser text)
              (proxy [AbstractVisitor] []
                (visit [node]
                  (condp instance? node
                    Heading (let [heading (str/trim (.render text-renderer ^Node node))]
-                             (.add headings {:seon.ref/level (.getLevel ^Heading node) :seon.ref/heading heading
+                             (.add headings {:seon.ref/heading-level (.getLevel ^Heading node) :seon.ref/heading heading
                                              :seon.ref/anchor (.generateId ids heading) :seon.ref/line (line node)})
                              (proxy-super visitChildren node))
                    Paragraph (do (when-not @paragraph
                                    (vreset! paragraph {:seon.ref/line (line node) :seon.ref/end-line (last-line node)}))
                                  (proxy-super visitChildren node))
-                   Code (.add spans {:seon.ref/span (.getLiteral ^Code node) :seon.ref/line (line node)})
+                   Code (.add spans {:seon.ref/span (.getLiteral ^Code node) :seon.ref/width (width node) :seon.ref/line (line node)})
                    Link (do (.add spans {:seon.ref/link (.getDestination ^Link node) :seon.ref/line (line node)})
                             (proxy-super visitChildren node))
                    ;; a prose word is a candidate only when it names an entity (`answer`)
@@ -135,7 +140,7 @@
         example (last (filter #(#{"Example" "Examples"} (:seon.ref/heading %)) headings))
         example-end (when example
                       (or (some #(when (and (> (:seon.ref/line %) (:seon.ref/line example))
-                                            (<= (:seon.ref/level %) (:seon.ref/level example)))
+                                            (<= (:seon.ref/heading-level %) (:seon.ref/heading-level example)))
                                    (:seon.ref/line %))
                                 headings)
                           (inc line-count)))
@@ -235,35 +240,58 @@
           (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
           (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 
+(defn- delimiter-level
+  "The level a span, link or prose word asks for (TASK-CHAIN §3a): a prose word its summary, one backtick or a link
+  its doc, three or more backticks its code; nil for two backticks, which wrap a literal."
+  {:malli/schema [:=> [:cat [:or :seon.ref/span-entry :seon.ref/link-entry :seon.ref/word-entry]] [:maybe :seon.ref/level]]}
+  [{width :seon.ref/width :as entry}]
+  (cond (:seon.ref/word entry) :summary
+        (:seon.ref/link entry) :doc
+        (= 1 width) :doc
+        (<= 3 width) :code))
+
 (defn- candidate
-  "One span, link or prose word read as a reference: a qualified name, a namespace name, a based path with an
-  optional anchor, a line citation, an anchor with no document (a problem), or nil (prose). A prose word or an
-  unqualified span is only resolve-only: it is a reference when it names an entity, else prose."
+  "One span, link or prose word read as a reference at its `level`: a qualified name, a namespace name, a based path
+  with an optional anchor, a line citation, an anchor with no document (a problem), or nil (prose, or a
+  double-backtick literal). A prose word or an unqualified span is only resolve-only: it is a reference when it names
+  an entity, else prose."
   {:malli/schema [:=> [:cat [:set :string] [:maybe :seon.ref/path] [:or :seon.ref/span-entry :seon.ref/link-entry :seon.ref/word-entry]]
                   [:maybe :seon.ref/candidate]]}
   [roots document-path entry]
-  (if-let [destination (:seon.ref/link entry)]
-    (if (str/starts-with? destination "#")
-      ;; an anchor alone names the document itself; with no document it names nothing
-      (if document-path
-        (relative document-path (subs destination 1))
-        (cond-> {:seon.ref/problem-kind :anchor-missing}
-          (< 1 (count destination)) (assoc :seon.ref/anchor (subs destination 1))))
-      (link-candidate document-path destination))
-    (if-let [word (:seon.ref/word entry)]
-      (when-let [found (span-candidate roots word)]
-        (when-not (simple-symbol? (:seon.ref/name found)) (assoc found :seon.ref/resolve-only true)))
-      (span-candidate roots (:seon.ref/span entry)))))
+  (when-let [asked (delimiter-level entry)]
+    (some-> (if-let [destination (:seon.ref/link entry)]
+              (if (str/starts-with? destination "#")
+                ;; an anchor alone names the document itself; with no document it names nothing
+                (if document-path
+                  (relative document-path (subs destination 1))
+                  (cond-> {:seon.ref/problem-kind :anchor-missing}
+                    (< 1 (count destination)) (assoc :seon.ref/anchor (subs destination 1))))
+                (link-candidate document-path destination))
+              (if-let [word (:seon.ref/word entry)]
+                (when-let [found (span-candidate roots word)]
+                  (when-not (simple-symbol? (:seon.ref/name found)) (assoc found :seon.ref/resolve-only true)))
+                (span-candidate roots (:seon.ref/span entry))))
+            (assoc :seon.ref/level asked))))
+
+(def ^:private strength
+  "The order of the levels: a name asked for at two levels is shown at the stronger."
+  {:summary 0 :doc 1 :code 2})
 
 (defn- candidates
-  "The distinct candidates of `entries` in first-seen order; one is resolve-only only when every mention of it is."
+  "The distinct candidates of `entries` in first-seen order, each at the strongest level any mention asks for; one is
+  resolve-only only when every mention of it is."
   {:malli/schema [:=> [:cat [:sequential :seon.ref/candidate]] [:vector :seon.ref/candidate]]}
   [found]
   (let [identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)
         explicit (into #{} (comp (remove :seon.ref/resolve-only) (map identity-of)) found)
+        strongest (reduce (fn [kept {asked :seon.ref/level :as c}]
+                            (cond-> kept asked (update (identity-of c) #(max-key strength (or % asked) asked))))
+                          {} found)
         first-of (reduce (fn [kept c] (cond-> kept (not (contains? kept (identity-of c))) (assoc (identity-of c) c))) {} found)]
     (into [] (comp (map identity-of) (distinct)
-                   (map #(cond-> (first-of %) (explicit %) (dissoc :seon.ref/resolve-only))))
+                   (map #(cond-> (first-of %)
+                           (explicit %) (dissoc :seon.ref/resolve-only)
+                           (strongest %) (assoc :seon.ref/level (strongest %)))))
           found)))
 
 ;;; ---------------------------------------------------------------------------
@@ -286,11 +314,13 @@
       (when (and revision (str/starts-with? project "reference-code-"))
         {:seon.ref/project (subs project 15) :seon.ref/revision revision}))))
 
-(defn- library-name
-  "A qualified symbol resolved read-only from the host's loaded Vars, else, when its namespace is not loaded,
-  from the dependency cache's definition (never loading it): the function it names, with its doc line, arglists
-  and pinned revision."
-  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved-name :seon.ref/problem]]}
+(defn- library-definition
+  "A qualified symbol's library Var read-only from the host's loaded Vars, else, when its namespace is not loaded,
+  from the dependency cache's definition (never loading it): its docstring, arglists and pinned revision; nil when
+  neither holds it."
+  {:malli/schema [:=> [:cat :qualified-symbol]
+                  [:maybe [:map [:doc {:optional true} :string] [:arglists {:optional true} :seon.ref/arglists]
+                           [:seon.ref/pin {:optional true} :seon.ref/pin]]]]}
   [reference]
   (let [loaded? (find-ns (symbol (namespace reference)))
         v (when loaded? (find-var reference))
@@ -299,12 +329,23 @@
         pin (some-> (if v (some-> (:file m) io/resource str) (::analyzer/url unloaded)) pinned-revision)
         arglists (or (:arglists m) (::analyzer/arglists unloaded))
         doc (or (:doc m) (::analyzer/doc unloaded))]
-    (if (or v unloaded)
-      (cond-> {:seon.ref/name reference :seon.fn/sym reference}
+    (when (or v unloaded)
+      (cond-> {}
         arglists (assoc :arglists arglists)
-        doc (assoc :seon.fn/doc (first (str/split-lines (:summary (docstring doc)))))
-        pin (assoc :seon.ref/pin pin))
-      {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
+        doc (assoc :doc doc)
+        pin (assoc :seon.ref/pin pin)))))
+
+(defn- library-name
+  "A qualified symbol resolved read-only as a library Var (`library-definition`): the function it names, with its doc
+  line, arglists and pinned revision."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved-name :seon.ref/problem]]}
+  [reference]
+  (if-let [{:keys [doc arglists] pin :seon.ref/pin} (library-definition reference)]
+    (cond-> {:seon.ref/name reference :seon.fn/sym reference}
+      arglists (assoc :arglists arglists)
+      doc (assoc :seon.fn/doc (first (str/split-lines (:summary (docstring doc)))))
+      pin (assoc :seon.ref/pin pin))
+    {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}))
 
 (defn- namespace-name
   "A namespace named `reference`, stored or loaded on the host, as its name, doc line and the form that lists it;
@@ -357,17 +398,15 @@
                       (:seon.fn/doc library) (assoc :doc (:seon.fn/doc library))))))))))
 
 (defn- inner
-  "The references a referent's own content makes, each shown one level (`brief`): the names its `text` cites by
-  the one rule and the program functions it `calls`, in that order, the `excluded` names (itself) left out; nil
-  when none. A name that resolves to nothing is the referent's own defect and is not shown: it is no problem of
-  the text that cites the referent."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.ref/name] :string [:set :symbol]]
+  "The names a referent's own `text` cites by the one rule, each shown one level (`brief`), the `excluded` names
+  (itself) left out; nil when none. A name that resolves to nothing is the referent's own defect and is not shown:
+  it is no problem of the text that cites the referent."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.ref/name] :string]
                   [:or :nil [:vector [:or :seon.ref/brief :seon.error/value]]]]}
-  [database excluded text calls]
+  [database excluded text]
   (let [roots (set (.list (io/file (fs/source-directory))))
         cited (filter :seon.ref/name (candidates (keep #(candidate roots nil %) (:seon.ref/spans (document text)))))
-        program (filter #(seq (db/datoms database :avet :seon.fn/sym %)) (sort-by str calls))
-        names (into [] (comp (remove excluded) (distinct)) (concat (map :seon.ref/name cited) program))]
+        names (into [] (comp (map :seon.ref/name) (remove excluded) (distinct)) cited)]
     (not-empty (into [] (keep #(let [shown (brief database %)] (when-not (:seon.ref/problem-kind shown) shown))) names))))
 
 (defn- with-inner
@@ -433,31 +472,52 @@
                                           description)))))
 
 (defn- resolve-name
-  "One referenced name identified on `database`: the entity its identity attribute's index holds, pulled as that
-  identity declares (`declarations`), with its row's declared render pair as its own render keys and the references
-  its own content makes, one level (`inner`); a namespace loaded only on the host, or a library Var, as the same kind
-  of entity; or a problem."
+  "One referenced deftest, task or namespace identified on `database`: the entity its identity attribute's index
+  holds, pulled as that identity declares (`declarations`), with its row's declared render pair as its own render keys
+  and the names its own content cites, one level (`inner`); a namespace loaded only on the host as the same kind of
+  entity; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
-  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved
-                    :seon.ref/message (problem-messages :unresolved)}
-        attribute (identity-of database reference)
+  (let [attribute (identity-of database reference)
         known (declarations database)
         render #(declared-render database (:seon.ref/row (known %)))]
     (cond
       attribute
       (let [pull (:seon.ref/pull (known attribute))
-            found (db/pull database (into pull [:seon.fn/doc :seon.ns/doc :seon.fn/calls]) [attribute reference])]
+            found (db/pull database (into pull [:seon.fn/doc :seon.ns/doc]) [attribute reference])]
         (if (:seon.error/at found)
           found
           (with-inner (merge (select-keys found pull) {:seon.ref/name reference} (render attribute))
-            (inner database #{reference} (own-prose found) (set (:seon.fn/calls found))))))
-      (keyword? reference) unresolved
-      (simple-symbol? reference)
-      (if (find-ns reference) (merge {:seon.ref/name reference :seon.ns/name reference} (render :seon.ns/name)) unresolved)
-      :else (let [library (library-name reference)]
-              (cond-> library (not (:seon.ref/problem-kind library)) (merge (render :seon.fn/sym)))))))
+            (inner database #{reference} (own-prose found)))))
+      (find-ns reference) (merge {:seon.ref/name reference :seon.ns/name reference} (render :seon.ns/name))
+      :else {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)})))
+
+(defn- at-level
+  "A function or schema key at the `level` its citation asks for, each the value of one REPL function (TASK-CHAIN
+  §3a): its summary (`brief`), its doc (`seon.sci.lookup/function-documentation`, `schema-documentation`, a library
+  Var's docstring parts and arglists) or its code (`my.program/source`; a library Var's doc with the form that reads
+  its source); or a problem. The doc and code owners sit above this namespace, so they are resolved at the call."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :qualified-symbol :qualified-keyword] :seon.ref/level]
+                  [:or :map :seon.ref/problem :seon.error/value]]}
+  [database reference level]
+  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved :seon.ref/message (problem-messages :unresolved)}
+        source #((requiring-resolve 'my.program/source) database reference)]
+    (cond
+      (= :summary level) (brief database reference)
+      (keyword? reference)
+      (let [found (schema-documentation database reference reference)]
+        (cond (:seon.sci.eval/documentation-unavailable found) unresolved
+              (or (:seon.error/at found) (= :doc level)) found
+              :else (source)))
+      (seq (db/datoms database :avet :seon.fn/sym reference))
+      (if (= :doc level) ((requiring-resolve 'seon.sci.lookup/function-documentation) database reference) (source))
+      :else
+      (if-let [{:keys [doc arglists] pin :seon.ref/pin} (library-definition reference)]
+        (cond-> (merge (when doc (docstring doc)) (when arglists {:arglists arglists}))
+          pin (assoc :seon.ref/pin pin)
+          (= :code level) (assoc :seon.render/operations [(list 'clojure.repl/source reference)]))
+        unresolved))))
 
 (declare resolve-path based-file)
 
@@ -483,18 +543,27 @@
   resolve-only candidate that names nothing (it is prose)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
                   [:or :nil :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
-  [database {:seon.ref/keys [problem-kind resolve-only path] reference :seon.ref/name :as found}]
-  (let [resolved (cond
+  [database {:seon.ref/keys [problem-kind resolve-only path level] reference :seon.ref/name :as found}]
+  (let [leveled? (and level (or (qualified-keyword? reference)
+                                (and (qualified-symbol? reference)
+                                     (not (seq (db/datoms database :avet :seon.test/sym reference)))
+                                     (not (seq (db/datoms database :avet :seon.task/sym reference))))))
+        resolved (cond
                    (and resolve-only reference (not (named? database reference))) nil
+                   leveled? (at-level database reference level)
                    reference (resolve-name database reference)
                    problem-kind (assoc (dissoc found :seon.ref/resolve-only) :seon.ref/message (problem-messages problem-kind))
                    (directory? path) nil
                    :else (resolve-path database found))]
-    (when-not (and resolve-only (:seon.ref/problem-kind resolved)) resolved)))
+    (cond
+      (and resolve-only (:seon.ref/problem-kind resolved)) nil
+      (or (nil? resolved) (:seon.error/at resolved) (:seon.ref/problem-kind resolved)) resolved
+      :else (cond-> (assoc resolved :seon.ref/name reference) (nil? reference) (dissoc :seon.ref/name) level (assoc :seon.ref/level level)))))
 
 (defn- cite-once
   "`answers` with each name shown once: a name resolved at top level, or already shown below an earlier referent, is
-  cited by its `:seon.ref/name` alone in every later mention."
+  cited by its `:seon.ref/name` alone in every later mention, and a schema an earlier doc value described is left
+  out of a later one's `:schemas` (its contract still names it)."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [answers]
   (let [shown (into #{} (keep :seon.ref/name) answers)]
@@ -505,8 +574,14 @@
                                               (if (and n (seen n))
                                                 [seen (conj below {:seon.ref/name n})]
                                                 [(cond-> seen n (conj n)) (conj below brief)])))
-                                          [seen []] (:seon.ref/references answer))]
-                 [seen (conj kept (cond-> answer (seq below) (assoc :seon.ref/references below)))]))
+                                          [seen []] (:seon.ref/references answer))
+                     schemas (:schemas answer)
+                     described (when (map? schemas) (into (empty schemas) (remove (comp seen key)) schemas))]
+                 [(into seen (keys described))
+                  (conj kept (cond-> answer
+                               (seq below) (assoc :seon.ref/references below)
+                               (map? schemas) (assoc :schemas described)
+                               (and (map? schemas) (empty? described)) (dissoc :schemas)))]))
              [shown []] answers))))
 
 (defn references
@@ -597,7 +672,7 @@
   "The line after the section of the heading at `from` of `level`: the next heading at or above its level, else the end."
   {:malli/schema [:=> [:cat [:vector :seon.ref/heading-entry] :int :int :int] :int]}
   [headings from level end]
-  (or (some #(when (and (> (:seon.ref/line %) from) (<= (:seon.ref/level %) level)) (:seon.ref/line %)) headings) end))
+  (or (some #(when (and (> (:seon.ref/line %) from) (<= (:seon.ref/heading-level %) level)) (:seon.ref/line %)) headings) end))
 
 (defn- span-tokens
   "The estimated tokens of source lines `from` (1-based) up to `end`."
@@ -621,21 +696,21 @@
             end (inc line-count)
             target (if anchor
                      (first (filter #(= anchor (:seon.ref/anchor %)) headings))
-                     {:seon.ref/level 0 :seon.ref/heading (or (:seon.ref/heading (first (filter #(= 1 (:seon.ref/level %)) headings))) path)
+                     {:seon.ref/heading-level 0 :seon.ref/heading (or (:seon.ref/heading (first (filter #(= 1 (:seon.ref/heading-level %)) headings))) path)
                       ;; the line after the front matter's closing delimiter
                       :seon.ref/line (if (= "---" (first lines)) (+ 2 (count (take-while #(not= "---" %) (rest lines)))) 1)})]
         (if-not target
           (section-error :heading path anchor
                          (mapv #(select-keys % [:seon.ref/anchor :seon.ref/heading])
                                (sort-by (comp #(me/levenshtein anchor %) :seon.ref/anchor) headings)))
-          (let [{:seon.ref/keys [level line heading]} target
+          (let [{:seon.ref/keys [line heading] level :seon.ref/heading-level} target
                 stop (if anchor (section-end headings line level end) end)
                 inside (filter #(and (> (:seon.ref/line %) (if anchor line (dec line))) (< (:seon.ref/line %) stop)) headings)
-                next-level (some->> inside (map :seon.ref/level) (filter #(> % level)) seq (apply min))]
+                next-level (some->> inside (map :seon.ref/heading-level) (filter #(> % level)) seq (apply min))]
             (cond-> {:seon.ref/path path :seon.ref/heading heading
                      :seon.ref/text (str/join "\n" (subvec lines (dec line) (dec stop)))
                      :seon.ref/tokens (span-tokens lines line stop)
-                     :seon.ref/below (vec (for [child inside :when (= next-level (:seon.ref/level child))]
+                     :seon.ref/below (vec (for [child inside :when (= next-level (:seon.ref/heading-level child))]
                                             {:seon.ref/anchor (:seon.ref/anchor child) :seon.ref/heading (:seon.ref/heading child)
                                              :seon.ref/tokens (span-tokens lines (:seon.ref/line child)
                                                                            (section-end headings (:seon.ref/line child) next-level stop))}))}
@@ -657,7 +732,7 @@
           (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
           (merge (declared-render database :seon.ref/resolved-doc))
           ;; only a Markdown document's text is prose; a source or data file is code
-          (with-inner (when (str/ends-with? path ".md") (inner database #{} (:seon.ref/text found) #{})))))))
+          (with-inner (when (str/ends-with? path ".md") (inner database #{} (:seon.ref/text found))))))))
 
 (defn render-doc-ai
   "A document or section reference as data: its path, anchor, heading and pin, the one read of its text, and the
