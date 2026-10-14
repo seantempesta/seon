@@ -70,10 +70,10 @@ inputs first. A schema change never needs a reset: every branch transacts it in 
 opens (`seon.cluster/declaration-changes`), dropping the data behind a replaced or retired
 attribute rather than migrating it (README §7 "Schema change and reset").
 
-**Existing seams:** `src/seon/cluster/registry.clj:178` branch acquisition;
+**Existing seams:** `seon.cluster.registry/fork!` branch acquisition;
 `reference-code/datahike/src/datahike/writer.cljc` connection writer;
-`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-155`
-ping; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-116`
+`clojure.core.async.flow/ping`
+ping; `clojure.core.async.impl.dispatch/executor-for`
 workloads. **Target owner:** [B1](../../prds/agent-platform/plan/lane-b1-one-publication-path.md),
 with [B2](../../prds/agent-platform/plan/lane-b2-walk-flow-fork.md) lifecycle.
 B1 first repairs MCP status/evaluation access. Host/JDK/Babashka startup is observed
@@ -100,7 +100,7 @@ and its contract/dependencies. Missing identity is unknown and cannot justify
 reuse. Namespace and macro changes can alter a declaration's meaning without
 changing its body; publication and test selection retain those dependencies.
 
-**Existing seams:** `src/seon/fn/analyzer.clj:505-568` namespace context;
+**Existing seams:** `seon.fn.analyzer/namespace-context` namespace context;
 `src/seon/program.cljc` exact replacement; `src/seon/id.clj` identity derivation.
 **Target contract:** [B1 §2g](../../prds/agent-platform/plan/lane-b1-one-publication-path.md).
 
@@ -132,8 +132,8 @@ coherent connection refresh. A branch pointer does not make a concurrent whole-s
 copy consistent. Rejected/overlapping analysis and stale-head publication are
 proof gates before redundant scans or exclusion mechanisms disappear.
 
-**Existing seams:** `reference-code/datahike/src/datahike/versioning.cljc:323-367`;
-`reference-code/clj-kondo/src/clj_kondo/core.clj:242-270` cache processing.
+**Existing seams:** `datahike.versioning/delete-branch!`, `datahike.versioning/force-branch!`;
+`clj-kondo.core/run!` cache processing.
 **Target owner:** [B1](../../prds/agent-platform/plan/lane-b1-one-publication-path.md).
 
 ## 5. Registry and final write admission
@@ -161,9 +161,9 @@ ordering, retraction, history and reconnect semantics. `:db.type/any` admission
 alone is not that proof; the current codec remains until the fork supports the
 required shapes. There is no mixed-tuple fallback for arbitrary values.
 
-**Existing seams:** `src/seon/db.clj:1219` carriage, `:3586-3609` entity values,
-`:4050-4121` final report; `reference-code/datahike/src/datahike/db/transaction.cljc:1206-1226`
-validation callback; `reference-code/malli/src/malli/registry.cljc:17-30` registries.
+**Existing seams:** `seon.db/replay-read` carriage, `seon.db/entities-changed-after` entity values,
+`seon.db/write-value`, `seon.db/write-attribute-error` final report; `datahike.db.transaction/apply-db-op`, `datahike.db.transaction/validate-cross-tx-vt-windows!`
+validation callback; `malli.registry/fast-registry`, `malli.registry/simple-registry` registries.
 **Owners:** [A1](../../prds/agent-platform/plan/lane-a1-projection-carried.md),
 [A2](../../prds/agent-platform/plan/lane-a2-datahike-one-answer.md).
 The [modeling guide](data-modeling-guide.md) explains the stored guarantees.
@@ -184,9 +184,9 @@ A1/B2 prove direct and indirect calls, contracts, macros, dynamic Vars and nonca
 defs across generations before removing context-specific resolution or isolation.
 A typed fallback to loaded JVM behavior cannot certify an unexecuted proposal.
 
-**Existing seams:** `reference-code/malli/src/malli/core.cljc:2193-2218`
-instrumentation; `reference-code/sci/src/sci/impl/utils.cljc:362-379`
-copy-on-write; `src/seon/sci/eval.clj:2218` base acquisition.
+**Existing seams:** `malli.core/-instrument`
+instrumentation; `sci.impl.utils/new-var`
+copy-on-write; `seon.sci.eval/base-ctx` base acquisition.
 **Owners:** [A1](../../prds/agent-platform/plan/lane-a1-projection-carried.md)
 and [B2](../../prds/agent-platform/plan/lane-b2-walk-flow-fork.md).
 [Agent execution](agent-runtime.md) covers turns and private objects.
@@ -216,17 +216,16 @@ actionable occurrence reaches a parked agent through the existing wake/message
 owner. Namespace responsibility is many-to-many `:seon.ns/agents` ([TARGET], not yet declared), separate from
 assignment and the REPL's current namespace.
 
-Repair completion requires every declared test obligation and any subject-local
-detector obligation. Missing test, subject or detector is unknown, never done.
+A task is done by the done rule (`seon.cluster.source/done-refusals`, [TASK-CHAIN](../schedule/cards/TASK-CHAIN.md) §2.4):
+its `proofs` current and green, no stray red, no contract gap. A missing proof result is unknown, never done.
 Conversation completion is the accepted reply answering its triggering message.
-A parent requires a nonempty complete child set. The recording transaction alone writes closure
-and budget exhaustion. Parent/needs deletion cannot silently erase an obligation.
+The recording transaction alone writes closure and budget exhaustion.
 Candidate-local completion supplies evidence; explicit shared acceptance resolves
 the shared repair task.
 
-**Existing seams:** `src/seon/error.clj:200-225` signature; `:1567-1681` recording;
-`src/seon/issue.clj:554-564` trigger identity, `:1028-1064` completion;
-`reference-code/datahike/src/datahike/db/transaction.cljc:903-922` tx provenance.
+**Existing seams:** `seon.error/stored-observation` signature; `seon.error/commit-tx` recording;
+`seon.error/observation?`, `seon.error/fact-tempid` completion;
+`datahike.db.transaction/flush-tuples`, `datahike.db.transaction/flush-tx-meta` tx provenance.
 **Target owner:** [B3](../../prds/agent-platform/plan/lane-b3-errors-tasks-dials.md).
 
 ## 8. One test request, explicit evidence
@@ -256,9 +255,9 @@ A printed green tally is insufficient if deleting scratch storage deletes its on
 facts. Retain the run and tested commit at the named authority before cleanup.
 Recording refusal cannot return green.
 
-**Existing seams:** `src/seon/test.clj:143-196` current timeout implementation;
-`reference-code/clojure/src/clj/clojure/test.clj:725-737` fixtures;
-`reference-code/datahike/src/datahike/versioning.cljc:550-585` copy limitation.
+**Existing seams:** `seon.test/acquire-context!` current timeout implementation;
+`clojure.test/test-vars`, `clojure.test/test-all-vars` fixtures;
+`datahike.versioning/fork-database` copy limitation.
 **Target owner:** [B4](../../prds/agent-platform/plan/lane-b4-tests-in-process.md).
 
 ## 9. Inclusive observation at the wrapper
@@ -300,7 +299,7 @@ to one identity become a structural conflict task assigned to root. Complete ent
 normalize through the program owner; branch-local numeric ids cannot cross as if
 they were identities.
 
-Scratch starts from H and admits the merge request through Seon's final writer validator.
+Scratch starts from H and admits the chain's merge through Seon's final writer validator.
 Malformed schemas, invalid refs, unresolved surviving callers and missing coverage
 refuse. B4 runs the combined program's current reaching tests union the task's explicit
 tests. Every required member needs valid executed/reused green evidence. The final
@@ -322,7 +321,7 @@ checkout bytes refuse; no unrelated edit is restored. Automatic path-limited com
 after those proofs is D1's recommendation, with extra platform proof or human review
 remaining owner policy choices. Explicit acceptance never implies an automatic push.
 
-**Existing seams:** `reference-code/datahike/src/datahike/versioning.cljc:734-748`;
-`reference-code/datahike/src/datahike/writing.cljc:860-889`; `src/seon/edit.clj:254-316`;
-`src/seon/fs/jvm.clj:593-712`. **Target owner:**
+**Existing seams:** `datahike.versioning/fork-database`, `datahike.versioning/merge!`;
+`datahike.writing/-create-database*`; `seon.edit/lossless-candidate`, `seon.edit/matched-form-result`, `seon.edit/form`;
+`seon.fs.jvm/write-buffer!`. **Target owner:**
 [D1](../../prds/agent-platform/plan/lane-d1-isolation-merge-writeback.md).

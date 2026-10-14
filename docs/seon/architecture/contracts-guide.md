@@ -108,22 +108,22 @@ something. Decide with evidence:
   vector; `seon.contracts/partitioned` was first declared `[:sequential ...]` and its instrumented contract refused the
   set on the first probe). Fix the contract and cite the observed shape.
 - **The producer emits a bad value.** Keep the tight contract. File a task on the producer with the exact form, the
-  refused value's essence and the Malli explain, citing the contracted function in its intent
+  refused value's essence and the Malli explain, citing the contracted function in its plan
   (its `:seon.task/references` are how `seon.contracts/findings` counts the batch's bug yield), and say so in the reply.
 
 Never widen to `:any`, `[:maybe ...]` or `:map` to go green. Root reviews every loosened contract at merge.
 
 **A nil input is the caller's defect.** When a function's callers pass nil for an input, do not contract nil
 (`[:maybe X]`, `[:or X :nil]`, a nilable registered name): absence is no key. Change the caller so it does not
-pass nil, or make the function take a map whose key is optional. The generated intent says this for every input
+pass nil, or make the function take a map whose key is optional. The generated plan says this for every input
 (the call evidence is not read). If you do need a nil literal in a schema, `[:= nil]` is not valid Malli (nil is read
 as the properties slot): write `[:= {} nil]` or `:nil`.
 
 ## 5. Generating a contract task
 
 `seon.contracts/task` turns any uncontracted function into an assignable task declaration: name
-`contract-<name>` in the function's namespace, a short typed intent citing the function, this guide and
-`seon.contracts/gaps` inline. Nothing is copied into the intent: the resolver pulls the function's doc,
+`contract-<name>` in the function's namespace, a short typed `plan` citing the function, this guide and
+`seon.contracts/gaps` inline, and the case below in its `proofs`. Nothing is copied into the plan: the resolver pulls the function's doc,
 source, callers and tests into the agent's context from the backticked symbol. Create it with
 `seon.task/create!` or add it to `resources/seon/tasks/<ns>.edn`.
 
@@ -136,14 +136,14 @@ without a call edge, so an `unused` entry is a candidate to verify, not a verdic
 
 ## 6. Proof and the case lifecycle
 
-- **The proof** of a contract task is its case in `seon.contract-coverage-test`: a one-line deftest tagged with the
-  task (`^{:seon/tasks #{'ns/contract-name}}`) asserting `(contracts/gaps (db/db) 'ns/name)` is `[]` in the
+- **The proof** of a contract task is its case in `seon.contract-coverage-test`: a one-line deftest the task lists in
+  its `:seon.task/proofs` (installed until S2c-2: tagged `^{:seon/tasks #{'ns/contract-name}}`) asserting `(contracts/gaps (db/db) 'ns/name)` is `[]` in the
   executing test var's SCI context, so it turns green on the agent's branch once its `defn` carries a complete contract.
   Its reaching tests must stay green.
 - **Cost.** A contract that makes a reaching test slower is a regression. The COST-REG card
   (`docs/seon/schedule/cards/COST-REG.md`) turns a reaching test that got more expensive red; until it is committed, the
   agent measures its function's representative call before and after (§2.6) and reports the numbers.
-- **Cases are temporary.** Root deletes a case when its task merges or retires; the table and its untagged
+- **Cases are temporary.** Root deletes a case when the chain holding its task merges or the task retires; the table and its untagged
   `a-contracted-function-has-no-gaps` case stay. The lasting guard is merge acceptance:
   `seon.cluster.source/accept-merge!` refuses a merge carrying a function with no `:seon.fn/spec` (macros and
   host-bound declarations excepted). It does not yet refuse an incomplete contract (`:any`, `[:maybe ...]`, bare

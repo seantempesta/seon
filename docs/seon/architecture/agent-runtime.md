@@ -20,7 +20,7 @@ acquisition, duplicated turn paths or delivery machinery.
 
 The program-only base context derives from one database value and its carried
 registry. Today `seon.sci.eval/base-ctx` and per-turn fork reconstruction provide
-acquisition (`src/seon/sci/eval.clj:2218`). The target acquires the base once and
+acquisition (`seon.sci.eval/acquired-program`). The target acquires the base once and
 installs admitted differences into a replacement base generation. Each retained
 agent context advances at its idle execution boundary; ordinary fact writes
 advance the checked-out branch without reinstalling definitions or discovering private state.
@@ -33,8 +33,8 @@ Initializers are not replayed when accepted evaluated roots are installed.
 
 SCI `fork` creates another env atom over shared namespace data. `bind-root!` copies
 an inherited Var into a different generation before mutation, but mutates a
-same-generation Var in place (`reference-code/sci/src/sci/core.cljc:345-350`;
-`reference-code/sci/src/sci/impl/utils.cljc:362-379`). Mutating a base-owned Var can
+same-generation Var in place (`sci.core/fork`;
+`sci.impl.utils/new-var`). Mutating a base-owned Var can
 therefore affect active forks. Private closures may retain earlier Var references;
 two successive program updates must prove the intended behavior while preserving
 private atom identity.
@@ -78,9 +78,9 @@ admission until a controlled late-host-call proof shows no subsequent wake or de
 submission enters the context early. Workload tags and `futurize` do not supply a
 bounded executor queue by themselves. No new core.async timeout patch is required.
 
-**Existing seams:** `src/seon/cluster/agent.clj:118` wake channel, `:540` submission,
-`:805-845` uninstrument; `src/seon/turn.clj:2888` work, `:2980-3007` answering;
-`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:29-36,271-320`
+**Existing seams:** `seon.cluster.agent/wake-channel`, `seon.cluster.agent/submit-source!` submission;
+`seon.turn/with-submission` answering;
+`clojure.core.async.flow.impl/futurize`
 Future creation and proc loop.
 
 ## 3. One turn path and honest completion
@@ -89,7 +89,7 @@ The turn owner chooses a source: generated system forms, a provider reply, store
 unevaluated forms during the current execution, or no forms for close. These feed
 one evaluation-and-recording path. Opening, evaluation outcomes and closure are
 writer decisions against current facts; transaction count varies with forms and
-outcomes. `open-call` is the existing admission owner (`src/seon/turn.clj:395`);
+outcomes. `open-call` is the existing admission owner (`seon.turn/open-call`);
 its current already-open behavior must not be described as a new refusal.
 
 One evaluation records source, printed value, stdout, error and read evidence under
@@ -100,7 +100,7 @@ not a second durable entity or serialized recovery image.
 
 SCI's `time-limit`/`:interrupt-fn` checks interpreted function entry and loop
 execution; it does not interrupt an arbitrary host call
-(`reference-code/sci/doc/interrupt.md:52,63-87`). Provider HTTP work has its own
+(`reference-code/sci/doc/interrupt.md`). Provider HTTP work has its own
 deadline. A completion observer names the agent, turn and admitted part that failed
 to finish. Its allowance accounts for all evaluations, provider attempts and
 the recording transaction, not one evaluation plus one HTTP request. A blocked host body can remain
@@ -136,9 +136,9 @@ compaction machinery; this target is not a claim that those deletions are instal
 
 ## 5. Tasks, source branches and recovery
 
-B3 trigger creates/resolves task identity without launching an agent. Start validates
-its done condition and assignment, then composes the first work with this lifecycle.
-Repair tasks expose test/detector obligations each turn; conversations expose the
+B3 trigger creates/resolves task identity without launching an agent. Start writes an attempt
+row on the chain branch and a new agent takes the task ([TASK-CHAIN](../schedule/cards/TASK-CHAIN.md) §2.2).
+A task exposes its `proofs` and their status each turn; conversations expose the
 triggering-message/reply relation. Repeated actionable occurrences must reach parked
 or exhausted agents through the existing wake owner without duplicating tasks or
 notifications. Namespace responsibility does not route work independently of tasks.

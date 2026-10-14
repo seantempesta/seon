@@ -72,6 +72,5 @@ supply the facts each operation reads.
    Isolation between filesystem lanes remains file ownership. Seon agents doing all
    updates is the goal; the filesystem path is bootstrap.
 9. **Delete the branch, then GC.** A deleted branch leaves the branch set; its data is
-   reclaimed by the retention sweep, never by a per-branch cleanup. A finished agent's
-   branch is deleted once its task is done or given back and its merge request is
-   closed, so its history and blobs can be collected (owner 2026-10-08; merge.md §4).
+   reclaimed by the retention sweep, never by a per-branch cleanup. A chain's
+   branch is deleted once its merge is published or the chain is abandoned, so its history and blobs can be collected (owner 2026-10-08; TASK-CHAIN §2.6; installed until S3b-2: per agent branch).
