@@ -75,8 +75,20 @@ index 071faab6f..a8baf992e 100644
       :seon.cluster.registry/candidates candidates
       :seon.cluster.registry/branches @heads
       :seon.cluster.registry/mark-duration-ms (elapsed-ms started-ns)
+diff --git a/test/seon/cluster/registry_test.clj b/test/seon/cluster/registry_test.clj
+index 6dab284bf..7be26ba1a 100644
+--- a/test/seon/cluster/registry_test.clj
++++ b/test/seon/cluster/registry_test.clj
+@@ -417,6 +417,7 @@
+           (is (= #{:seon.registry.test/orphan}
+                  (:seon.cluster.registry/candidates result)))
+           (is (= (count before) (:seon.cluster.registry/key-count result)))
++          (is (= before (:seon.cluster.registry/observed-keys result)))
+           (is (zero? (:seon.cluster.registry/swept result)))
+           (is (= before (set (map :key (k/keys konserve {:sync? true})))))
+           (is (= bytes-before (store-bytes (:seon.store/dir opened))))
 diff --git a/src/seon/maintenance.clj b/src/seon/maintenance.clj
-index f27c7e4f1..802af2836 100644
+index 5968490..3fab60f 100644
 --- a/src/seon/maintenance.clj
 +++ b/src/seon/maintenance.clj
 @@ -365,12 +365,6 @@
@@ -101,7 +113,7 @@ index f27c7e4f1..802af2836 100644
    [operation-store evidence held-before]
    (let [digests (:seon.operator.collect/digests evidence)
          stored (filterv held-before digests)
-@@ -495,7 +489,7 @@
+@@ -499,7 +493,7 @@
          verification
          (root-verification
           operation-store (collection-evidence operation-store)
@@ -110,7 +122,7 @@ index f27c7e4f1..802af2836 100644
          result
          (merge
           (inventory-facts inventory)
-@@ -533,10 +527,6 @@
+@@ -537,10 +531,6 @@
          (get-in @(:seon.store/connection-object operation-store)
                  [:config :store :id])
          before (collection-observation operation-store)
@@ -121,39 +133,23 @@ index f27c7e4f1..802af2836 100644
          base-result
          {:seon.operator.collect/store-id store-id
           :seon.operator.collect/managed-root managed-root
-@@ -557,6 +547,7 @@
+@@ -561,6 +551,11 @@
      (try
        (let [inventory
-             (registry/collect! operation-store (collection-cutoff operation-store) {})
+             (registry/collect! operation-store (collection-cutoff operation-store retention?) {})
++            ;; The roots this store HELD before anything was swept: the keys
++            ;; the collection's own enumeration observed. Verification is a
++            ;; differential against this set, never a shape test over
++            ;; whatever the schema says looks like a digest.
 +            held-before (:seon.cluster.registry/observed-keys inventory)
              swept (:seon.cluster.registry/swept inventory)
              after-first (collection-observation operation-store)
              first-result
-diff --git a/test/seon/cluster/registry_test.clj b/test/seon/cluster/registry_test.clj
-index 6dab284bf..7be26ba1a 100644
---- a/test/seon/cluster/registry_test.clj
-+++ b/test/seon/cluster/registry_test.clj
-@@ -417,6 +417,7 @@
-           (is (= #{:seon.registry.test/orphan}
-                  (:seon.cluster.registry/candidates result)))
-           (is (= (count before) (:seon.cluster.registry/key-count result)))
-+          (is (= before (:seon.cluster.registry/observed-keys result)))
-           (is (zero? (:seon.cluster.registry/swept result)))
-           (is (= before (set (map :key (k/keys konserve {:sync? true})))))
-           (is (= bytes-before (store-bytes (:seon.store/dir opened))))
 diff --git a/test/seon/maintenance_test.clj b/test/seon/maintenance_test.clj
-index 5cfcb5f82..d806e95b0 100644
+index cce42f2..3ea7261 100644
 --- a/test/seon/maintenance_test.clj
 +++ b/test/seon/maintenance_test.clj
-@@ -8,6 +8,7 @@
-             [seon.db :as db]
-             [seon.cluster.store :as store]
-             [seon.maintenance :as maintenance]
-+            [seon.cluster.registry :as registry]
-             [seon.operator.runtime :as operator.runtime]
-             [seon.schema :as schema]
-             [seon.schema.datahike :as schema.datahike]
-@@ -436,11 +437,13 @@
+@@ -501,11 +501,13 @@
                        (io/file repository-root "managed"))]
      (try
        (declare-cluster-config! managed-root)
@@ -169,7 +165,7 @@ index 5cfcb5f82..d806e95b0 100644
          (is (uuid? (:seon.operator.collect/store-id result)))
          (is (= managed-root
                 (:seon.operator.collect/managed-root result)))
-@@ -456,7 +459,7 @@
+@@ -521,7 +523,7 @@
                  (:seon.operator.collect/bytes-before result)))
          (is (zero?
               (:seon.operator.collect/verification-pass-swept result)))
@@ -178,14 +174,14 @@ index 5cfcb5f82..d806e95b0 100644
        (finally
          (test-support/delete-recursively! repository-root)))))
  
-@@ -472,7 +475,10 @@
+@@ -537,7 +539,10 @@
         (fn [held]
           (let [connection (:seon.store/connection-object held)
                 evidence (#'maintenance/collection-evidence held)
 -               held-before (#'maintenance/konserve-key-set held)
 +               held-before (:seon.cluster.registry/observed-keys
 +                            (registry/collect!
-+                             held (java.util.Date. 0)
++                             held registry/plain-cutoff
 +                             {:seon.operator.collect/dry-run? true}))
                 recorded (:seon.source/commit-id
                           (first (:seon.operator.collect/branches evidence)))]
