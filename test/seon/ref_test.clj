@@ -235,8 +235,7 @@
     (is (= :unresolved (:seon.ref/problem-kind problem)))
     (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file
-                        'seon.ref/implement-a-pathless-reference-section}}
+(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
   a-reference-with-no-path-is-a-missing-file
   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
   (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))
@@ -244,8 +243,7 @@
     "#the-goal"
     "#"))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file
-                        'seon.ref/implement-a-pathless-reference-section}}
+(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
   a-reference-with-no-path-answers-an-error-that-holds-no-path
   ;; an empty path names no file: the error carries no :seon.ref/path (absence is no key) and lists the checkout root's Markdown
   (are [reference expected] (= expected
