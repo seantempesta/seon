@@ -303,37 +303,51 @@ file's content digest; its tokens measured with the block's. A deftest proves ev
 (`(my.task/update! task k f & args)`); change text (`(my.edit/text s old new)`); see what changed
 (`(editscript.core/diff before after)`).
 
-**What a reference shows: its doc view, the full form one evaluation away.** Every reference, in a plan, in help, in a
-docstring, shows the doc view of its kind; the full definition is the read form it offers.
+**What a reference shows: three levels, each the value of one REPL function (owner 2026-10-14).** A reference in
+prose (a plan, instructions, help, a docstring, a message) shows one of three levels, chosen by its author with the
+delimiter, and each level is exactly the value an agent gets by typing the same thing at the REPL. Nothing else
+decides depth: not graph distance, not the kind, not the size. The value printer is the only size limit (one budget
+per evaluation, elision forms). Levels are for references; a value the REPL returns keeps its declared render.
 
-| Kind | Doc view | Full form |
-|---|---|---|
-| Function, library Var | docstring summary, arglists, contract with its named input and output schemas, each schema's one-line description | `(my.program/source 'f)` |
-| Schema key | its form and description | `(my.program/source :k)` |
-| Deftest | its name, the functions it reaches, its latest status (deftests have no docstring attribute) | `(my.program/source 't)` |
-| Document section | heading, the headings below it, its size in tokens | `(my.fs/section "path#anchor")` |
-| Task | name, the first sentence of its plan's Problem, its proofs with their status | `(my.task/current …)` |
+| Level | Written as | The question it answers | The value |
+|---|---|---|---|
+| summary | bare `ns/name`, a prose word that resolves | what is it, do I look further? | `seon.ref/brief`: name, first sentence, status for a deftest, read form |
+| doc | `` `ns/name` ``, `` `:ns/key` ``, `` `docs/x.md#a` ``, a Markdown link | how do I call it, build it, read it? | `(doc x)`: `seon.sci.lookup/documentation-value` |
+| code | ```` ```ns/name``` ```` inline (three or more backticks) | how does it work, where does it sit? | `(source x)`: `my.program/source`; a document through `seon.ref/section` |
 
-**The author picks the depth, in three levels (owner 2026-10-14).** A fully qualified name in prose shows what
-Clojure's own REPL words would: bare (no backticks), its **summary**, the docstring's first sentence; in one
-backtick, `` `x` ``, its **doc**, exactly the value of `(doc x)`: docstring, arglists, contract and the schemas the
-contract names with their descriptions, each cited once (`seon.ref/cite-once`), so the doc view above IS `doc`'s value,
-one function for the REPL and for references; in three backticks inline, ```` ```x``` ````, its **code**, everything,
-as `(source x)`. Other kinds follow the same ladder: a keyword (description / form and description / every member
-described), a namespace (docstring sentence / docstring and publics / each public's doc), a deftest (name and status /
-the functions it reaches / source), a task (name / Problem sentence and proofs / whole plan), a document section
-(heading and size / heading tree / full text). Only a fully qualified name is a reference; an alias form is code; an
-unresolved reference is a problem on whatever cites it. The delimiter length is read from the commonmark source span
-(`seon.ref/document`); a line that starts with three backticks is a fenced code block and never a reference. Size is
-the value printer's alone (one budget per evaluation, elision forms). This replaces the graph-distance tiers of
-`seon.render.ns/function-ai` (distance 0 a name and doc line, distance 1 and more the whole source): distance no
-longer decides depth; the graph only decides which neighbours appear, and those are the schemas a contract names. Its nested references are only the schemas the contract names, cited
-once (`seon.ref/cite-once`). Summaries keep the existing first-sentence rule; a producer whose first sentence is long is
-shortened at its docstring. Schemas a contract names carry a description; `seon.render.schema/description` becomes
-public; `seon.ref/render-doc-ai` keeps a section's token size and the headings below it. Measured
-(`seon.ai.tokens/estimate`): raw block 37.4k characters, about 11.7k tokens, must-reads 9.8k; the shown prompt about
-6.0k (91 elisions). With doc views the raw block falls to about 7.1k tokens (5.0k with schema-only nesting) and
-elisions to 30.
+| Kind | summary | doc | code |
+|---|---|---|---|
+| Function, library Var | docstring's first sentence | docstring parts, agent arglists, contract, `:schemas` (each schema the contract names → its description, else its form; cited once, `seon.ref/cite-once`) | exact stored source and contract; callers and tests-reaching are operations, never inlined |
+| Schema key, attribute, error type, dial | description, else the form | form, description, `:returns` (the functions whose output names it, by use) | + `:takes`, `:guards`, `:members` described one level, `:referenced-by`, `:writes`, datom count (through `seon.db/attribute-holders`, never the arities join) |
+| Namespace | docstring sentence | docstring and its own publics | each declaration with its doc value |
+| Deftest | name and latest recorded status, or typed unknown | + the tasks it proves, its analyzed calls, when red the last failing `:expected`/`:actual` | exact source and the same |
+| Task | name and the first sentence of the plan's Problem lead | the Problem lead paragraph, the instructions, the proofs with status | whole plan, instructions, proofs with status, `next` |
+| Document section, file | heading, lead's first sentence, tokens | lead paragraph, headings below with anchors and tokens | whole section or file (`(source "path#anchor")`, also `my.fs/section`) |
+| Non-Markdown file | path, pin, tokens | the same | whole file |
+
+Rules: only a fully qualified name is a reference; an alias form is code; two backticks wrap a literal and are a code
+span, not a reference; a line starting with three backticks is a fenced block, never a reference; an unresolved
+reference is a problem on whatever cites it. The width is read from the `Code` node's source span
+(`seon.ref/document`), and `seon.ref/candidate` carries `:seon.ref/level`. The resolver chooses the level before it
+acquires anything. In one shown unit a name appears once, at the strongest level requested, where first mentioned;
+later mentions are the name; a nested citation never promotes. A referent's nested references are only the schemas
+its contract names.
+
+**The lead rule.** A section cited for its summary or doc opens with a lead: one CommonMark `Paragraph` that is the
+heading's own next block (tables parse as `TableBlock`, `commonmark-ext-gfm-tables`). With no lead, the structure is the
+fallback, never a line count (owner 2026-10-14 asked for a fallback): the summary is the heading text and the section's
+tokens, and the doc is the section's first block whole (a list, a table, a code block) with the headings below; a
+heading followed by a subheading has the heading tree as its doc. A docstring is a document with no heading: its lead is its
+first top-level paragraph. A summary- or doc-level citation of a section with no lead answers
+`:seon.ref/problem-kind :no-lead` on the document; of a var with no docstring, `:no-summary` on the var; code-level
+citations need neither. No sweep: a section is fixed when first cited. Research: `reflevels-hybrid.md`.
+
+This replaces the graph-distance tiers (`seon.render.ns/function-ai` distance 0 a name, 1 and more the whole source;
+the same in the test, schema, namespace and task renders), `seon.render.schema/names-shown`, `seon.ref/inner`'s
+callees and `seon.render.ns/source-lines`. Measured (`seon.ai.tokens/estimate`, two independent probes agreeing):
+`seon.ref/section` 70 / 214 / 905 tokens by level; `seon.edit/single-form` 35 / 72 / 373; a schema key's code value
+0.54–0.71 ms through `attribute-holders` against 20–60 ms for the join; task A's first block, authored at three
+levels, about 1k tokens with the owner and the proof whole, against 10.9k raw and 6.0k shown today.
 
 **Context assembly costs what changed.** Every unit of the context is cached in `seon.cache` by its content and by what
 it read (`seon.db/read-evidence-current?`), so a turn re-renders only the units whose inputs changed. Installed for
@@ -559,8 +573,13 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S3c-2 | Restart (§2.8) | one row per durable stopping point: attempt identity, model-call count, outcome, retained branches, pending publication | Opus | — |
 | S3f-1 | From a filed task (§2.1): `seon.task/from-filed`, and the final merge's write-back deleting the entry whose identity the chain's first task has (§2.6) | `seon.task-test/a-filed-task-becomes-a-full-chain`: a filed entry with a plan and red proofs gives three maps, the first with its identity and plan and no proofs, the last with its proofs; `seon.cluster.write-back-test/a-merged-chain-deletes-its-filed-entry`: after the merge the entry is gone from its task file and no chain task was written to any task file | Sonnet (after S3b) | — |
 | S3f-2 | Per-task model (§2.2): owned `:seon.task/model`, `:outside` starts the agent with no model turns | `seon.cluster.db-flow-test/an-outside-task-takes-no-model-turn-and-is-worked-through-the-repl`: an `:outside` task's agent makes no model call over repeated passes; eval requests as its agent id through the MCP entrance run its test step and its done rule advances the chain | Opus (after S3a) | — |
-| S3d-1 | Doc view render tier (§3a) | `seon.context-test/a-referenced-function-shows-its-doc-view`: in one plan, a bare fully qualified name shows its docstring's first sentence, a single-backtick one equals `(doc x)`'s value (docstring, contract, the contract's schemas described), a triple-backtick one shows the whole source, and a fenced ``` block stays code (no reference); a reference inside help renders at the compact tier (name and summary), its doc view one `doc` away | Sonnet (parallel with S1b after the restart batch: file-disjoint, prebrief-s1b-s3d1.md) | — |
-| S3d-2 | Context section and history reuse | measured on target HEAD first; then a `seon.profile/measure` assertion that a second turn's `model-context` after one new evaluation costs in proportion to that unit, with the raw block's tokens and the elision count before/after | Opus (after the errors cut's E4a) | — |
+| S3d-1a | `doc` describes each schema its contract names (`:schemas`) and reads the program row's doc and arglists; `seon.render.schema/description` public | `seon.sci.documentation-test/doc-describes-each-schema-its-contract-names`: `(get-in (doc seon.ref/section) [:schemas :seon.ref/section :description])` is a string, no `:source`, the same value in JVM mode with no SCI context | Sonnet (parallel with S1b after the restart batch) | — |
+| S3d-1b | The level is read and dispatched (§3a): `:seon.ref/level` from the delimiter width; `seon.ref/references` resolves through `brief` / `doc` / `source`; strongest first occurrence wins; the function tiers, `inner`'s callees, `source-lines` and `must-read-ai`'s distance deleted | `seon.ref-test/a-code-span-carries-its-reference-level` (bare → `:summary`, one backtick → `:doc`, three → `:code`, two and a fence → no candidate); `seon.context-test/a-referenced-function-shows-its-doc-view`: in one plan a bare name shows its first sentence only, a one-backtick name's entry equals `(doc x)`'s value, a three-backtick name's entry holds the whole `:source`, a fence stays code, a name at two levels appears once at the deeper | Opus (after S1a) | — |
+| S3d-2 | Documents and docstrings: per-heading lead, top-level first paragraph, one heading fold, `section` keeps `:tokens`/`:below` and starts after the front matter, `doc`/`source` on a path string, `:no-lead`/`:no-summary`; `commonmark-ext-gfm-tables` in the restart batch | `seon.ref-test/a-section-doc-is-its-lead-and-headings-below`; `seon.ref-test/a-section-opening-with-a-list-has-no-lead`; `seon.ref-test/front-matter-is-not-a-heading` extended; `seon.ref-test/a-var-with-no-docstring-cited-for-its-summary-is-a-problem-on-the-var` | Sonnet (after S3d-1b) | — |
+| S3d-3 | Schema keys through public `seon.db/attribute-holders` with read evidence: `:returns` at doc; takes, guards, members, referenced-by, writes, datoms at code; `usage`'s join, `names-shown`, `key-data`'s join deleted | `seon.db-test/attribute-holders-follow-logical-membership-with-read-evidence`; `seon.ref-test/a-schema-key-doc-names-who-returns-it`; `seon.program-test/a-schema-key-source-separates-takers-guards-and-members`; `seon.profile/measure`: `(source :seon.ref/section)` under 5 ms and 5 MB | Opus then Sonnet (file-disjoint from S3d-1) | — |
+| S3d-4 | Deftests, tasks and namespaces at three levels; `my.task/current` on a named task; the test, task and namespace render tiers deleted | `seon.ref-test/a-deftest-brief-carries-its-status`; `seon.ref-test/a-task-brief-is-one-sentence` (under 60 tokens; 398 today); `my.task-test/current-reads-a-named-task-at-its-doc-level`; `seon.ref-test/a-namespace-code-reference-lists-each-declaration-with-its-doc` | Sonnet (after S3d-1b) | — |
+| S3d-5 | Help cites instead of restating (verbs at doc level, the rest bare); the end-to-end measure on task A | `seon.bootstrap-test/every-reference-in-help-resolves` extended (no `:no-lead`/`:no-summary` in help); `seon.context-test/a-task-authored-at-three-levels-shows-its-owner-and-proof-whole`: owner and proof sources whole, no library Var operations, elisions below 91, `model-context` ms and MB not above parent | Sonnet (after S3d-2, S3d-4) | — |
+| S3d-6 | Context section and history reuse (was S3d-2), plus `seon.ref/document` taking the held parse so a hit does not re-hash | measured on target HEAD first; then a `seon.profile/measure` assertion that a second turn's `model-context` after one new evaluation costs in proportion to that unit, with the raw block's tokens and the elision count before/after; `seon.ref-test/a-reference-level-does-no-work-on-an-unrelated-definition-change` | Opus (after the errors cut's E4a) | — |
 | S3e | Delete the task tree (`children`, `needs`, `effective`) with their last readers (§6) | no live reader; retained reds unchanged | Sonnet | — |
 | S4a | Stage preparation: `seon.step` shared helpers, the task-input fixture in `seon.test-support`, the three template files, deletion of `seon.step.edn`, `step_test.clj` and their readers, a grading form for live runs | each helper's contract; each template ingests | Sonnet (after S2a, S2b, S3a) | — |
 | S4b-design / S4b-prove / S4b-implement | One lane per stage, in parallel: its predicate and deftest table (rows from the stage tables), its template's instructions, and its live runs (one-task Design chains; Prove followed by a held Implement; Implement from hand-written proofs once S3b lands) | each predicate's table: Design rows (sections, problem changed, unresolved reference, producer not cited, data not modeled, existing-schema bug fix, registered-schema new feature) and Prove rows (no successor, empty proofs, not a deftest, missing or green result, world error, unreached changed or cited function, assertion-red and body-error success); refusal sets asserted exactly | Sonnet per stage; Opus run lane for live runs | — |
