@@ -61,21 +61,21 @@
       row)))
 
 (defn- chain-requests
-  "Every chain attempt with no outcome on its chain branch (`seon.task/chain-attempts`), read through `store`, as
-  an open assignment on that branch."
+  "Every chain attempt that has ended and holds no outcome on its chain branch (`seon.task/chain-attempts`), read
+  through `store`, as an open assignment on that branch: a running attempt is not a merge request."
   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.store/store]]
                   [:or [:vector :my.root/open-assignment] :seon.db/invalid-read-error]]}
   [database store]
   (let [attempts (if store (task/chain-attempts database store) [])]
     (if (:seon.error/at attempts)
       attempts
-      (into [] (comp (remove :seon.task/outcome)
+      (into [] (comp (filter :seon.task.attempt/end) (remove :seon.task/outcome)
                      (map #(-> % (assoc :seon.task/branch (:seon.chain/branch %)) (dissoc :seon.chain/branch))))
             attempts))))
 
 (defn merge-requests
   "The open merge requests on my cluster: every assignment with no outcome yet (`seon.task/close!`,
-  `seon.merge/merge-tx`), on main and every chain attempt on its chain branch, with its task, branch, merge base
+  `seon.merge/merge-tx`), on main and every ended chain attempt on its chain branch, with its task, branch, merge base
   and its end (main's, else its branch head's), each offering its merge and its close.
 
   ## Example

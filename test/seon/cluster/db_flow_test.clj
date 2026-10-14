@@ -627,9 +627,9 @@
                 (is (some? (some-> (get-in @routing [:seon.agent/children branch]) deref
                                    (get-in [:seon.agent/started (str "attempt/" key-2)])))
                     "its agent started on the chain branch")
-                (is (some #(and (= key-2 (:seon.task/assignment %)) (= branch (:seon.task/branch %)))
-                          (my.root/merge-requests {:seon.db/db (db/db connection) :seon.store/store store}))
-                    "root lists the open chain attempt on its branch")
+                (is (not-any? #(= key-2 (:seon.task/assignment %))
+                              (my.root/merge-requests {:seon.db/db (db/db connection) :seon.store/store store}))
+                    "a running chain attempt is not a merge request")
                 (is (= :closed (:seon.task/outcome (my.root/close! {:my.program/context context :seon.task/assignment key-2
                                                                      :seon.task/reason "Root abandons this attempt."})))
                     "root closes the chain attempt with its own tool")

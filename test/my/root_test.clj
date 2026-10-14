@@ -4,9 +4,11 @@
   (:require [clojure.test :refer [deftest is]]
             [my.root :as my.root]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.id]
             [seon.profile :as profile]
             [seon.task :as task]
             [seon.test-support :as test-support]))
@@ -128,3 +130,29 @@
                  "and it leaves the open list"))
            (finally (store/release-branch! fork)
                     (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))))))))
+
+(deftest a-running-chain-attempt-is-not-a-merge-request
+  ;; TASK-CHAIN §2: root merges at the chain's end; an attempt is a merge request only once it has ended
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        connection (:seon.db/connection target)
+        _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+        chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                           [{:seon.task/ns 'tq.rootmr :seon.task/name "fix" :seon.task/plan "Fix."}])
+        branch (:seon.chain/branch chain)
+        [handle] (:seon.task/handles chain)
+        on-chain (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        chained (:seon.db/connection on-chain)
+        agent-id (str "mr-agent-" (random-uuid))
+        listed #(into #{} (map :seon.task/assignment)
+                      (my.root/merge-requests {:seon.db/db (db/db connection) :seon.store/store store}))]
+    (try
+      (test-support/transacted! chained (test-support/agent-tx (db/db chained) agent-id))
+      (test-support/transacted! chained (task/attempt-tx (db/db chained) handle agent-id branch))
+      (let [key (:seon.task/assignment (db/pull (db/db chained) [:seon.task/assignment]
+                                                [:seon.task/assignment (seon.id/id [handle 1])]))]
+        (is (not (contains? (listed) key)) "a running attempt is not listed")
+        (test-support/transacted! chained [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :done]])
+        (is (contains? (listed) key) "an attempt that ended is"))
+      (finally (cluster.agent/release-context! on-chain)
+               (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
