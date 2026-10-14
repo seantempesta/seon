@@ -74,6 +74,11 @@ macros and interpreted callers reaching them; an unchanged init runs once per co
 and macros rebuild fully until counted frequent; an init's refusal arrives in the defining reply. Phases 1-3 (lane
 overlay-impl, Opus) before S3a; phase 4 (defining reply) with S3a-2.
 
+**Dogfood the REPL path (owner 2026-10-14).** Our lanes work REPL-first by default for ordinary function changes
+(`defn` on their own branch, `my.program/write-branch!`, `bin/lane commit --branch-evidence`); when a step fails they
+apply the edit by hand and file the friction as a task, so the path Seon agents use gets smooth by being used. Trial and
+dig in flight: `../research/agent-platform/2026-10-14/repl-trial.md`, `dig-repl-commit-path.md`.
+
 **Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
 context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
 lanes, restarts and resumes them (owner 2026-10-14), so a restart never waits for every lane; a dependency or fork bump
