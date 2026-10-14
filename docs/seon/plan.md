@@ -81,186 +81,167 @@ agents mine Seon for tasks, after goal 1 holds.
 
 ## 1. The goal
 
-Software that grows by accretion: open data under named schemas, stable names, every call checked and measured, built
-by many agents each in its own branch and SCI context. Work is tasks that improve as they move through a chain of agents
-(design, prove, implement, merge after review, retrospect), each agent working from the task as the previous one left
-it and editing it for the next. Tasks are mined from the database (slow functions, guessed names, uncontracted
-functions, red proofs) and retire themselves when their proofs are green on main. A core of about 10,000 lines where
-ordinary work is sub-second.
+Software that grows by accretion: open data under named schemas, stable names, every call checked and measured, built by
+many agents each in its own branch and SCI context. Work is a chain of tasks ([TASK-CHAIN](schedule/cards/TASK-CHAIN.md)):
+Design, then Prove, then Implement, each a new agent working the task as the previous one left it, all on one branch
+that root merges to main once. Tasks are mined from the database (slow functions, guessed names, uncontracted functions,
+red proofs), and root closes a filed task whose proofs turn green on main (goal 4; not designed yet). A core of about
+10,000 lines where ordinary work is sub-second.
 
 ## 2. The essentials
 
-1. **An honest, short number in every reply.** Committed (FEEDBACK-LOOP stages 1–13, 16; like-for-like cold and warm
-   cost per [symbol scope], b37a3ff72). Being cut to one line (§0, the concise performance line): an agent learns it wrote slow software in
-   forty tokens, not five hundred.
-2. **Tasks worked end to end by Seon agents through the REPL.** A model agent turns a designed task green; root has
-   merged three; the automatic path has merged nothing yet (§0, the merge request). The chain of separate agents is the next
-   shape (§0, the runtime and the chain experiment).
-3. **Red proofs before any assignment.** `seon.task/assign!` runs the proofs on the agent's branch and refuses all-green
-   or unobserved proofs (7ce008211, c95848065). 155 of 783 tasks carry a tagged proof (§0). Proof quality is the weak point:
-   nearly every failed round traced to the proof or the task, not the implementer, so the chain gives proofs their own
-   stage and the catalogue (TASK-CHAIN §4).
-4. **Default runs HEAD.** Routine: `bin/seon start --head` per batch of commits; readiness 5.1–5.3 s on a quiet machine (`start --head` with schema transactions measured 32 s on 2026-10-11).
-   The lag workarounds are not yet deleted (§0, chores).
+1. **An honest, short number in every reply.** Committed (FEEDBACK-LOOP stages 1–13, 16; like-for-like cold and warm cost
+   per [symbol scope], b37a3ff72). Being cut to one line: an agent learns it wrote slow software in forty tokens, not five
+   hundred.
+2. **Tasks worked end to end by Seon agents through the REPL.** A model agent has turned a designed task green and root
+   has merged three by hand. The chain of separate agents on one branch is the next shape (TASK-CHAIN §2, slices §7).
+3. **Proofs before work, a done rule after.** A task's proofs are a field, `:seon.task/proofs`; Prove writes the next
+   task's, red by design, and one rule, `seon.cluster.source/done-refusals`, ends every task (TASK-CHAIN §2.4). A task
+   whose proofs are all green at its start ends at once. Installed until S2c/S3a: tagged deftests and
+   `seon.task/assign!`'s refusal. Proof quality is the weak point: nearly every failed round traced to the proof or the
+   task, not the implementer, which is why Prove is its own stage (TASK-CHAIN §4).
+4. **Default runs HEAD.** Routine: `bin/seon start --head` per batch of commits; readiness 5–6 s on a quiet machine.
 5. **Correctness and efficiency over size, for now** (owner, 2026-10-10). Temporary growth is acceptable; Seon agents
-   trim it later using the cost data; every change is judged by correctness and measured cost. Growth that is a fence
-   is not acceptable (§0 standing rules).
+   trim it later using the cost data; every change is judged by correctness and measured cost. Growth that is a fence is
+   not acceptable.
 
-## 3. The method: the chain of agents
+## 3. The method: a chain of agents
 
-The method is the TASK-CHAIN card (`schedule/cards/TASK-CHAIN.md`) on the runtime of
-[runtime-follows-db](../research/agent-platform/2026-10-11/runtime-follows-db.md): Mine (a query) → Design (survey,
-schemas, contracted stubs) → Prove → Implement (with a send-back right) → Merge (root's merge-request task) →
-Retrospective. Each stage is a step task of one subject, worked by a fresh agent the reconciler launches when the
-step's needs are done; the handoff is the subject task at main, edited by `my.task/refine!`; a step ends when its proofs
-are green, the same rule as any task; its instructions are data on the step; every stage records an explicit decision.
-Variations of the pipeline are trees and instructions, compared on the same subject family. The first experiment is two
-steps, Design+Prove → Implement (§0, the chain experiment).
+The method is TASK-CHAIN. A chain is a vector of plain task maps that `seon.task/chain!` writes in one transaction on one
+branch, linked by `:seon.task/next` and started from a template per stage (`seon.step.design/template`, `prove`,
+`implement`). Root's listener starts a new agent per task; the agent works its block at the REPL, edits the plan and the
+next task's proofs with `my.task/update!`, and ends when `done-refusals` is empty. The finished task's plan flows to the
+next. Any end that is not done bails to root, with no relaunch; a finished chain merges to main once. The MVP chain is
+Design → Prove → Implement, for bug fixes and new features alike; specialized chains are other templates on the same
+mechanism. Installed until S3a: copies, children and per-step merges.
 
-Every new mechanism is run by hand once before it is automated: the chain runs of 2026-10-10 found two to five
-frictions each at minutes of cost, the cheapest learning of the weekend.
+Every new mechanism is run by hand once before it is automated: each early chain run found two to five frictions at
+minutes of cost, the cheapest learning there is. Live runs and their order are §0.
 
 ## 4. Done
 
 The honest-measurement task (FEEDBACK-LOOP stages 1–13 and 16); the merge base by `t` (d9eb15c05, aa7ffb17f); the
-byte-bounded node cache (12473ca94); the first links of the agent lifecycle (DYNAMIC-CONTEXT stages 1–3: the block
-names the namespace, an agent closes at its end, one end message to root); non-root agents never load the shared JVM
-(e361536a9); a function and its schema merge as one unit (ff61d0b29); the collection fix (f51240f34). History is in
-git and the dated research pages.
+byte-bounded node cache (12473ca94); the first links of the agent lifecycle (DYNAMIC-CONTEXT stages 1–3: the block names
+the namespace, an agent closes at its end, one end message to root); non-root agents never load the shared JVM
+(e361536a9); a function and its schema merge as one unit (ff61d0b29); the collection fix (f51240f34). History is in git
+and the dated research pages.
 
 ## 5. Superseded
 
-The 2026-10-10 step list and the 2026-10-10 evening dependency list (38fce69e3) are replaced by §0. Of that list,
-items 1 (schema merge), 2 (target fence), 3 (exact merge), 4 (admission), 5 (idempotent end) were committed on 2026-10-10;
-items 2, 3 and 5 are fences and are reverted (§4, Q15); item 6 (one interpreted proof path) becomes §0's interpreted census with the owner's rule that every mismatch is a bug; items 7 (data-first task) and 9–11 (rounds, ROOT-AGENT stages,
-triage) wait behind the chain. Research corrections to pass 1 of the replan: `turn.clj` grew 5,622 → 5,888 overnight
-and `source.clj` 1,488 → 2,136 (not from 441 and 1,156); the compiled check gate exists (`my.test/check-platform`,
-32–45 s); the hand accept path already retires branches.
+Everything that describes copies, subjects, children, `needs`, `seon.task/effective`, obligations, `:seon/tasks` tags,
+`refine!` or relaunch is replaced by TASK-CHAIN (§6 there lists the deletions). Git history keeps it.
 
 ## 6. Deliberately deferred
 
-- ROOT-AGENT stages 4–13 (grants, root tasks, `decline-merge!`, tick, triage, spend report): `my.root` holds root's
-  tools first (§0, the vocabulary cut); the tick waits for three chain runs; triage waits for a judgment duty to occur three times.
-  The card's two refuted claims (write-back conflicts vanish with Claude lanes; "a failure leaves nothing written") are
-  corrected when it is next touched.
-- DYNAMIC-CONTEXT stages 4–7 (shown declarations, working set, history by reference, reflection on a snapshot): after
-  guessed names are answered at the failure (§0, guessed names) and only if a chain run shows prompt growth caps agents.
-- Publication (a compiled check is 32–45 s measured) and boot's whole-program derivation: platform commits pay the existing check; per-file
-  derivation inputs when the chain table shows the cost dominating.
-- Merging through git objects or a dedicated checkout (fable-replan §4.3 fix A): the revert removes the fences the
-  shared tree motivated; the root fix is committed only if a real collision is observed.
-- COST-REG slices 2–3; growth tests and guards; embeddings (after lexical search
-  is used and found wanting); the Datahike fork rebase; a stateful lifecycle test suite; a Flow-hosted writer (refused).
+- ROOT-AGENT stages 4–13 (grants, root tasks, `decline-merge!`, tick, triage, spend report): `my.root` holds root's tools
+  first; the tick waits for three chain runs; triage waits for a judgment duty to occur three times.
+- DYNAMIC-CONTEXT stages 4–7 (shown declarations, working set, history by reference, reflection on a snapshot): only if a
+  chain run shows prompt growth caps agents.
+- Publication (a compiled check is 32–45 s measured) and boot's whole-program derivation: platform commits pay the
+  existing check; per-file derivation inputs when the chain runs show the cost dominating.
+- Merging through git objects or a dedicated checkout: committed only if a real collision is observed.
+- COST-REG slices 2–3; growth tests and guards; embeddings (after lexical search is used and found wanting); the Datahike
+  fork rebase; a stateful lifecycle test suite; a Flow-hosted writer (refused).
 - The positive-wording pass over AGENTS.md's remaining negatives: root, in small commits.
 
 ## 7. Decisions, by owning topic (every owner ruling, deduped; superseded ones marked)
 
 **Laws and design**
 - 2026-10-10 Seon grows by accretion; the four properties and the design order in AGENTS.md are the laws.
-- 2026-10-11 NO GUARDS OR FENCES, no exceptions (AGENTS.md c722d8d22); supersedes "every restriction names the failure
-  it prevents". The night's sixteen fences are reverted in one batch (Q15); the three root causes they patched are
-  committing in the shared tree, two evaluators compared, and database values held across transactions.
+- 2026-10-11 NO GUARDS OR FENCES, no exceptions (AGENTS.md); supersedes "every restriction names the failure it prevents".
 - 2026-10-11 Focus: improving the tasks, not more platform machinery; embedding search later.
 - 2026-10-10 Correctness and efficiency over size for now; temporary growth acceptable; agents trim later.
-- 2026-10-10 Datahike's writer stays as it is (go-loops, group commit); Seon does not batch; Flow procs run on
-  platform threads, one per task; accounting closes at `seon.flow/var-process`; the reply is published after
-  accounting; `seon.batch` is a misleading name for the eval-request fold (rename belongs to its owner).
+- 2026-10-10 Datahike's writer stays as it is (go-loops, group commit); Seon does not batch; Flow procs run on platform
+  threads, one per task; accounting closes at `seon.flow/var-process`; the reply is published after accounting.
 - 2026-10-10 Stored data is described in Datahike's terms (entities, attributes, values, datoms).
 - 2026-10-10 Merge bases are found by the fork's `t` and `as-of`, never by walking commits (committed d9eb15c05).
-- 2026-10-10 Full history is kept with the one-hour retention window; `as-of`, `since` and `history` are unaffected.
+- 2026-10-10 Full history is kept; `as-of`, `since` and `history` are unaffected. (Retention is off by dial, §0.)
 
 **Tasks and the chain**
-- 2026-10-10 Work is a chain of separate agents; run by hand first; nail a single task before child tasks (the
-  deferral of child tasks ended 2026-10-11 with the task tree below).
-- 2026-10-11 The chain is TASK-CHAIN: build it generally, experiment with variations, keep the stages worth their
-  calls; agents may edit any subject field; every stage records an explicit decision, `:unchanged` with a reason, never
-  an absence. Superseded the same day (runtime-follows-db rounds 1–4): stages are step tasks, not stages of one task;
-  "stage proofs" are the step's own proofs; the first experiment's handoff is the reconciler's, not by hand.
-- 2026-10-10 Tasks are entities upserted as the chain refines them, with history; author little, derive the rest;
-  authored = name, intent, must-read; derived = proofs, interface, schemas, status. Task names are fully namespaced
-  symbols. The database is the source of truth; files are lossless write-back, proven by a round trip.
-- 2026-10-11 Auto-retire: a task whose proofs are green on main retires itself, derived, never written.
-- 2026-10-11 Vocabulary (Q16): agents have `my.task/current`, `refine!`, `send-back!`; success has no verb; root's
-  namespace is `my.root`; merge words are git's (`merge!`, `close!`, `:merged`/`:closed`); the queue
-  and steps are deleted; home → main, refuted → a red proof, outcome → end, proposal → merge request, renamed now.
+- 2026-10-10 Work is a chain of separate agents; run by hand first.
+- 2026-10-11 The chain is TASK-CHAIN; build it generally, experiment with variations, keep the stages worth their calls.
+  Its "every stage records an explicit decision" and the subject/step shape are superseded by the 2026-10-13/14 rulings
+  in TASK-CHAIN's header (stages are linked tasks on one branch; a stage's check is its handoff predicate, §4).
+- 2026-10-10 Tasks are entities with history; author little, derive the rest; task names are fully namespaced symbols;
+  the database is the source of truth and files are lossless write-back, proven by a round trip. Superseded as to
+  members (authored = name, intent, must-read; derived = proofs): authored = `plan`, `instructions`, `proofs`; derived =
+  `references` (TASK-CHAIN §1).
+- 2026-10-11 Auto-retire: root closes a filed task whose proofs turn green on main; not designed yet (goal 4).
+- 2026-10-11 Vocabulary (Q16): agents have `my.task/current`, `update!` (was `refine!`, TASK-CHAIN §3a) and `send-back!`
+  (stays, §2.7); success has no verb; root's namespace is `my.root`; merge words are git's (`merge!`, `close!`,
+  `:merged`/`:closed`); home → main, refuted → a red proof, outcome → end, proposal → merge request.
 - 2026-10-08 A question task declares its answer's Malli schema; the answer is ordinary Datahike data.
-- 2026-10-09 Budgets with four meters (calls, CPU, allocation, storage) estimated by the designer; completion is
-  automatic when proofs are green.
+- 2026-10-09 Cost has four meters (calls, CPU, allocation, storage); an agent's budget is its turns
+  (`seon.turn/turns-left`, TASK-CHAIN §2.7) and completion is the done rule.
 - 2026-10-11 Guessed names: answer at the failure with the nearest real symbols and calling forms; learn guessed →
   resolved from the agent's next form; link it to the task; a name guessed twice becomes a mined task.
 
-**Runtime, scheduling and the task tree** (runtime-follows-db, owner rounds 1–4, 2026-10-11)
-- One path: an agent wakes and runs a task; everything uses it (steps, merge requests, problems, recurring attempts);
-  the reconciler, the clock and the heartbeat are the procs that host it, not tasks. Agents never start agents.
-- Progress is derived from facts written once (steps, needs, attempt, end); intent is stored on the task
-  (`:held :running :paused :stopped :cancelled`, each one reconciler action in Flow's verbs) plus cluster
-  `running/paused`; nothing writes "actual" to the database except the heartbeat's audit.
-- Order is `needs` only, parallel by default, parents never run; no position; the plan is rendered from needs.
-- Instructions are data on the task (steps and problem tasks alike). A stage is a template that is itself a task entry
-  (`seon.step/survey`, `define`, `design`, `prove`, `implement` in `resources/seon/tasks/seon.step.edn`), cloned into each
-  chain's steps by `seon.task/chain!` (instructions, exit contract and `:seon.task/template` ref copied), whose intent is the
-  subject's refined goal, and whose tagged deftest is the step's handoff proof
-  (owner, 2026-10-13; [hybrid-lifecycle](../research/agent-platform/2026-10-13/hybrid-lifecycle.md) §2). No stage type
-  entity, no template language, no second merge rule.
+**Runtime and scheduling**
+- One path: an agent wakes and runs a task; everything uses it (chain tasks, problems, recurring attempts); the
+  reconciler, the clock and the heartbeat are the procs that host it, not tasks. Agents never start agents.
+- Progress is derived from facts written once (chain tasks and their `next` links, attempts, outcomes); intent is stored
+  on the task (`:held :running :paused :stopped :cancelled`) plus cluster `running/paused`; nothing writes "actual" to
+  the database except the heartbeat's audit.
+- Order on a chain is `:seon.task/next` (TASK-CHAIN §2.1). Superseded: "order is `needs` only, parents never run"; `needs`
+  and `children` are deleted (§6 there).
+- Instructions are data on the task. A stage is a template: an ordinary held task (`seon.step.design/template`, `prove`,
+  `implement`, one file each) merged into a chain's task maps by its creator, with its checks a contracted handoff
+  predicate and one deftest (TASK-CHAIN §1, §4). No stage type entity, no template language, no second merge rule.
 - Problems are tasks assigned to root by identity, created where their facts already pass; nominal ends wake nobody;
-  error signatures and cost regressions go to fresh agents. Merge requests are one problem class.
-- One scheduling system: a recurring thing is a task with a cron; one clock proc writes firings; a function firing runs
-  in the clock (maintenance, heartbeat); an attempt firing runs on the path; a firing to a live agent is a message
-  wake; refused delivery is a problem task. `seon.schedule`'s per-agent proc goes.
-- Flow owns process and computation; channels carry only ephemeral data; everything of consequence is a fact, so a
-  crash and a resume to any commit are derivations. `start` resumes; `start --paused` for debugging.
+  error signatures and cost regressions go to fresh agents. A bail is one problem class (TASK-CHAIN §2.7).
+- One scheduling system: a recurring thing is a task with a cron; one clock proc writes firings; a function firing runs in
+  the clock (maintenance, heartbeat); an attempt firing runs on the path; a firing to a live agent is a message wake;
+  refused delivery is a problem task. `seon.schedule`'s per-agent proc goes.
+- Flow owns process and computation; channels carry only ephemeral data; everything of consequence is a fact, so a crash
+  and a resume to any commit are derivations. `start` resumes; `start --paused` for debugging.
 - `max-running` is a dial, default 4; agents are to be lightweight: context MB and ms to start are measured targets.
-- The cache of a branch's interpreted definitions (`seon.sci.eval/interpret-overlay!` per branch) is the first performance lane; Astra's
-  0c3916000 already caches the plan.
+- The cache of a branch's interpreted definitions (`seon.sci.eval/interpret-overlay!` per branch) is the first
+  performance lane.
 
 **Proofs and tests**
-- 2026-10-09 Proof gates scheduling; the rest is an unproven backlog.
-- 2026-10-10 Proofs as written: an `are` table with the reported input plus one `is` on a count for a cost task; a
-  seeded property only where a one-line law exists; COST-REG slices 2–3, guards and growth tests cut.
-- 2026-10-11 How to write good proofs is not yet clear: keep a proof catalogue of good and bad examples with why
-  (TASK-CHAIN §4).
-- 2026-10-11 Interpreted must agree with compiled for every declaration that is not host-bound; every mismatch is a
-  bug, never a verdict class; the gate compares directly; platform changes use the existing compiled check. Supersedes
-  the 2026-10-10 "evidence readers accept the agent's evaluator plus compiled" and its tiers (reverted, Q15).
+- 2026-10-09 A task's proofs are its definition of done and a task without proofs never finishes (TASK-CHAIN §2.4); the
+  rest is an unproven backlog.
+- 2026-10-10 Proofs as written: an `are` table with the reported input plus one `is` on a count for a cost task; a seeded
+  property only where a one-line law exists; COST-REG slices 2–3, guards and growth tests cut.
+- 2026-10-11 How to write good proofs: the Prove template's instructions are the catalogue (TASK-CHAIN §4), revised by
+  live runs.
+- 2026-10-11 Interpreted must agree with compiled for every declaration that is not host-bound; every mismatch is a bug,
+  never a verdict class; platform changes use the existing compiled check.
 - 2026-10-10 Fixtures are data on the namespace entity (`:each`, `:once`), written by `use-fixtures` and file indexing.
 - 2026-10-10 Only reliable, like-for-like cost data is surfaced; one cost entity per [symbol, scope], cold and warm.
 
 **Merge**
-- 2026-10-10 Auto-merge on green is the target; 2026-10-11 (Q8, round 3): until criteria for non-controversial merges
-  are written, a merge request is a task assigned to root, rendered from the data attached to it; no review mechanism.
-- 2026-10-11 The first merge through the path is the round-8 task, rerun by a fresh agent after its two interpreter
-  bugs are fixed (Q11; the original merge request went with the reset). Interpreted/compiled mismatches at the gate are bugs (Q3).
-- 2026-10-11 One close owner `seon.task/close!` decides a merge request and deletes its branches; the stale merge
-  requests and ended agents' branches are cleaned by hand today (Q6).
-- 2026-10-10 Commit the Datahike fork's commit-cost change (done, 5acc29e23).
+- 2026-10-10 Auto-merge on green is the target. Until criteria for non-controversial merges are written, root reads the
+  diff before it merges (AGENTS.md). Superseded 2026-10-11 (Q8) "a merge request is a task assigned to root": root merges a
+  chain branch once (TASK-CHAIN §2.6); `my.root/merge-requests` is installed until S3b.
+- 2026-10-11 One close owner, `seon.task/close!`, decides and deletes branches; `my.root/close!` calls it.
 
 **Measurement and cost**
-- 2026-10-11 Concise performance feedback: one line of about forty tokens only when a changed definition got costlier
-  than main; request cost as `ms / MB`; the teaching goes in the instructions (Q1). Supersedes the 2026-10-10 "compact
-  cost diff always on" as to its size, not its existence.
-- 2026-10-10 Numbers are live: each reply shows the request's own values against main's stored values; cost entities
-  per function with values replaced in place, no history; schema cost measured once per digest at contract time.
+- 2026-10-11 Concise performance feedback: one line of about forty tokens only when a changed definition got costlier than
+  main; request cost as `ms / MB`; the teaching goes in the instructions (Q1).
+- 2026-10-10 Numbers are live: each reply shows the request's own values against main's stored values; cost entities per
+  function with values replaced in place, no history; schema cost measured once per digest at contract time.
 - 2026-10-09 A cost regression against the last green run on main is a red test, not a health note.
 
 **Data, documents and search**
 - 2026-10-10 Doc sections are entities identified by path and anchor, with parsed references as facts; files are the
   write-back.
-- 2026-10-10 Search: the fork's Lucene secondary index (`:scriptum`) first; vectors (`:proximum`) only after a chain
-  run shows a lexical miss.
+- 2026-10-10 Search: the fork's Lucene secondary index (`:scriptum`) first; vectors (`:proximum`) only after a chain run
+  shows a lexical miss.
 
 **Process and roles**
-- 2026-10-10 Roles: Claude designs; DeepSeek-flash implements non-platform; Opus implements platform; root reviews and
-  merges. 2026-10-11: design is interactive with the owner; lanes implement agreed designs (Q9).
+- Roles: AGENTS.md "Pick the model by the work" and §0 Models. Superseded: 2026-10-10 "DeepSeek-flash implements
+  non-platform; Opus implements platform". 2026-10-11: design is interactive with the owner; lanes implement agreed
+  designs (Q9).
 - 2026-10-10 When the owner is not replying, root decides with the recommended option, proceeds and reports; 2026-10-11
   narrows it: pre-approved are bug fixes and work agreed in §0; new design waits.
-- 2026-10-10 The whole loop is run by Seon agents eventually: a root agent through `my.root`, agents triage, no spend
-  cap with a daily report (deferred behind the chain, §6).
+- 2026-10-10 The whole loop is run by Seon agents eventually: a root agent through `my.root`, agents triage, no spend cap
+  with a daily report (deferred behind the chain, §6).
 - 2026-10-09 Auto-restart default onto HEAD per batch of commits; then delete the lag workarounds.
-- 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (host-bound half still open).
+- 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes: superseded by TASK-CHAIN being READY
+  (owner 2026-10-14).
 - 2026-10-10 Reflection: root reads the record first, then asks the snapshot; by hand.
-- 2026-10-11 Re-plan in two passes: analysis and questions, then the plan from the answers (done; this file).
 
 ## 8. Open questions
 
-None open. Q1–Q16 of the replan and the three round-3 questions are answered in
-[fable-replan](../research/agent-platform/2026-10-11/fable-replan.md) §8 and folded above.
+None open.
