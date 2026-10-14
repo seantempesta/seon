@@ -6,6 +6,7 @@
             [malli.instrument :as mi]
             [seon.config :as config]
             [my.program :as program]
+            [seon.batch :as batch]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
@@ -509,3 +510,19 @@
                          [:seon.error/data :seon.error/attempted :seon.error/message])))
       (is (= :seon.error.refusal/construction (:seon.error/layer undeclared)))
       (is (= :no.such/error (:seon.error/member undeclared))))))
+
+(deftest a-constructed-error-is-a-value-of-its-inputs-but-time
+  (let [members {:seon.error/operation 'seon.error.refusal-test/probe
+                 :seon.error/message "Not a file."
+                 :my.fs/not-regular-file "/tmp/x"}
+        build (fn [world] (binding [batch/*world* world]
+                            (error.refusal/error :my.fs/not-regular-file-error members)))
+        a (build {:seon.agent/id "agent-a" :seon.turn/id "turn-a" :seon.batch/ordinal 0})
+        b (build {:seon.agent/id "agent-b" :seon.turn/id "turn-b" :seon.batch/ordinal 3})]
+    (is (not (contains? a :seon.error/world)))
+    (is (not (contains? a :seon.error/producer)))
+    (is (= (dissoc a :seon.error/at) (dissoc b :seon.error/at)))
+    (is (= "agent-b" (get-in (binding [batch/*world* {:seon.agent/id "agent-b"}]
+                               (error.refusal/attributed a nil))
+                             [:seon.error/world :seon.agent/id]))
+        "the boundary still attributes the occurrence")))

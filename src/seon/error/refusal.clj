@@ -632,7 +632,8 @@
 (defn diagnostic
   "Preserve the supplied observation, consuming only its optional Throwable,
   with every world in it referenced (`references`, under the operation's
-  handed projection), and the common part supplied ([[attributed]]).
+  handed projection). The world and producer are not supplied here: only a
+  boundary that records an occurrence attributes ([[attributed]]).
   From the Throwable derive the outermost exception class, the whole cause
   `:seon.error/chain`, the ROOT cause's first complete stack frame, and —
   when the observation states none — the root cause's message."
@@ -649,12 +650,7 @@
      :seon.error/base]]}
   ([{:seon.error/keys [throwable message] :as observation}]
   (let [projection (operation-projection)
-        observation (attributed (references projection (dissoc observation :seon.error/throwable)) throwable)
-        ;; a producer that is only the operation says nothing more here; the
-        ;; recorder states it on the stored fault (seon.error/prepare)
-        observation (cond-> observation
-                      (= (:seon.error/producer observation) (:seon.error/operation observation))
-                      (dissoc :seon.error/producer :seon.error/producer-digest))]
+        observation (references projection (dissoc observation :seon.error/throwable))]
   (if throwable
     (let [links (chain throwable projection)
           primary (subvec links 0 (count (cause-links throwable)))
@@ -711,7 +707,8 @@
   `:seon.error/offending-projection` and its own. A `:seon.error/throwable`
   supplies the cause chain, frame and (absent a message) message
   ([[diagnostic]]). Absent, `:seon.error/at` is now and `:seon.error/layer`
-  is `alternative`; the calling world and producer are attributed.
+  is `alternative`. The value holds no world or producer: the recording
+  boundary attributes the occurrence.
 
   The built value is checked against `alternative` (`seon.schema/
   explain-candidate-value`, Malli `m/explainer`, compiled once per schema

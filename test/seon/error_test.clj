@@ -296,10 +296,9 @@
        (let [at (:seon.error/at (request observation))
              intermediate (error.refusal/diagnostic at :seon.error/normalization 'seon.error-test/check {})
              prepared (error/prepare (request observation {:seon.error/declared-schema :seon.agent/error}))]
-         ;; the calling world's reference is the common part `diagnostic`
-         ;; supplies (7781d115c); the constructed members are exactly these
+         ;; the constructed members are exactly these
          (is (= {:seon.error/at at :seon.error/layer :seon.error/normalization
-                 :seon.error/operation 'seon.error-test/check} (dissoc intermediate :seon.error/world)))
+                 :seon.error/operation 'seon.error-test/check} intermediate))
          (is (identical? at (:seon.error/at intermediate)))
          (is (= observation (select-keys (:seon.error/source prepared) (keys observation)))
              "every member the producer stated is preserved beside what the recorder supplies")
