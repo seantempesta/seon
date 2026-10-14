@@ -608,3 +608,107 @@ exist. There is no first block to paste, because no agent was started.
   chain's state.
 - `my.root/run!` should deliver the start's refusal, or answer the started attempt, rather than the intent alone.
 - `my.root/run!`'s reply runs a test step on main: 1.4-2.1 GB and 750-950 ms, now seen four times.
+
+## Run 5b: fourth Implement attempt, stalled on its first turn
+
+Lane `s5-run-5b` acted as root, 17:44-17:50 UTC. Default pid 6605 booted at 17:44:10.9 UTC from
+`data/source/fdcadc002b9f…` (HEAD `fdcadc002`, one definition of an open attempt), with `:seon.boot/missing-layers
+[]`. No lane held a claim. Root applied `tmp/s5r5-config.edn` at 17:44:03 and then restarted. Nobody called
+`my.root/run!`.
+
+**Broken first.**
+
+0. **Attempt 4 started by itself, then stalled on its first turn. There were 0 model calls.**
+   - fdcadc002 works. The boot pass wrote attempt `64b05977e3eb` (number 4) and its agent `attempt/64b05977e3eb`
+     (eid 1023629) on `:chain-f1f6dc8e6652`, and started its graph. This was the Run 5 regression, and no hand act
+     was needed.
+   - Turn `053ba9fb7c01` was opened by `seon.turn/open-call` at 17:44:35.648 and closed by
+     `seon.turn/open-run-tx-call` at 17:44:36.364. It had 0 evaluations and 0 `:seon.turn/attempts`.
+     `seon.turn/end-task-call` followed at 17:44:36.506.
+   - Occurrence `401ddb0eb6e5` is on the chain branch:
+     - type `:seon.turn.loop/phase-failed-error`, failed step `seon.turn/phase`, phase `"analysis"`, `:sci/error`;
+     - message: "Unable to resolve symbol: seon.db/query-call-valid?";
+     - a message to root, `bab65b7746fa`, carried it.
+   - The attempt ended `:stalled` with outcome `:closed` ("The attempt ended :stalled."). The task went back to
+     `:held`. The agent's end facts: 0 calls, 0 tokens, 1 red proof
+     (`seon.error-test/an-unresolved-alias-name-is-answered-with-its-nearest-core-name`). No problem task was
+     written. §2.7's bail to root held: an end was written, unlike in run 4b.
+   - **Cause: the chain branch interprets the merge base's `seon.db/q` on a platform where its callee is gone.**
+     - 712bb86e5 (13:09 UTC) deleted `seon.db/query-call-valid?` and changed `seon.db/q` on main.
+     - The chain branch forked earlier (merge base `6acf6fed…`). It still holds both entities, and its
+       `seon.db/q` source calls `seon.db/query-call-valid?`.
+     - Main holds neither the function nor any source naming it. Measured on both values: branch
+       `(seon.db/q seon.db/query-call-valid? seon.db/vector-query-call)`, main
+       `(seon.db/q seon.db/vector-query-call)`.
+     - So `seon.db/q` differs between the branch and the compiled platform. The branch interprets its own stale
+       copy in SCI, and SCI cannot resolve the deleted callee.
+     - The agent never touched `seon.db`. Main's change since the merge base is being read as a branch change.
+     - This contradicts "a branch never changes the platform … sees a change only after merge and reload; what the
+       branch evaluates from source sees its definitions". The differing set has to be the branch's own changes
+       since the merge base (three-way), not the branch compared with current main.
+     - Every long-lived chain branch will hit this whenever main deletes a function that the branch's merge-base copy
+       calls.
+     - Owner: the program-difference derivation that picks which entities a branch interprets. Reproduce with this
+       chain's state: any SCI turn by an agent on `:chain-f1f6dc8e6652`.
+1. **The run config did not survive the restart.** On main's config entity 781248, history shows root's
+   `seon.config/reconcile-call` at 17:44:03.382 (no-provider retracted, 30, relaunches 0). The new JVM's boot
+   reconcile at 17:44:21.816 then put back no-provider `true`, 100 and relaunches 2. That is the development overlay
+   the cluster boots under.
+   - Attempt 4 therefore launched with no-provider `true`. Had the turn got past analysis, it could not have made a
+     model call.
+   - Root's order has to be: restart, then `config apply`. Or the overlay must yield to applied facts.
+2. Fault `3506b09a0b84…` on this boot (17:44:30.70, 2 occurrences): `seon.db/carried-projection` refused argument 0,
+   "expected :seon.db/database-value … got a map", called from `seon.cluster.agent/acquire-context!`. Its link to
+   attempt 4 is not established. It comes 5 s before the turn.
+3. Watch-form costs, found while watching:
+   - The first JVM-mode eval of this session spent 1.19 GB at the entrance.
+   - A `[?e ?a <eid>]` reverse scan on the chain branch cost 4.36 GB and 1.3 s. That one was my form: a full scan.
+
+**Run.**
+
+- 17:44:03: root applied `tmp/s5r5-config.edn`. 17:44:10.9: default booted onto fdcadc002. 17:44:21.8: boot reconcile
+  restored the overlay (Broken first 1).
+- 17:44:30.7: fault `3506b09a` (Broken first 2). 17:44:35.6-36.5: attempt 4's one turn, its stall and its end.
+- 17:45:26: first watch. Attempt 4 had already ended. Threads 38, heap 2.5 GB, then 37 and 1.07 GB at 17:47. Idle,
+  no livelock.
+- 17:46:5x: `bin/seon config apply default tmp/s5-restore.edn` (`converged? false`, 2 operations). Verified with
+  `(seon.config/effective main "default")` at 17:47:03: no-provider `true`, 100, relaunches 2, model
+  `"deepseek-flash"`. Root was messaged.
+
+**Grading form.** This is run 4b's form with `aid "attempt/64b05977e3eb"`. The agent's own end facts answer it:
+`:seon.agent/end-calls 0`, prompt 0, completion 0. Turn `053ba9fb7c01` has no evaluations. There is no first block
+to paste, because analysis failed before any context was rendered for a call.
+
+| Task | Model calls | Prompt tokens | Completion | Wall time | Agent forms | End |
+|---|---|---|---|---|---|---|
+| Implement, attempt 4 (`64b05977e3eb`) | 0 | 0 | 0 | 0.9 s (17:44:35.6 to 17:44:36.5) | 0 | `:stalled` → `:closed`, task `:held` |
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 + 4b + 5 | **+ 5b** |
+|---|---|---|---|
+| Model calls | 38 | 157 | **157** (attempt 4: 0) |
+| Prompt tokens | 570k (310k cached) | 4.99M (3.90M cached) | **4.99M (3.90M cached)** |
+| Hand acts after `chain!` | 6 | 1 | **1**. 5b added none: the attempt started and ended by itself. |
+| Furthest point | Implement (write-back conflict) | attempt 4 refused at launch | **attempt 4 launched and ended by itself; stalled in SCI analysis on a symbol main deleted** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** `merge-chains!`/`finish-chains!`, the published-diff review, the bb hook load and the fresh-agent `(str/subs "abc" 1)` check were not reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:held`, and attempts 1-4 are all
+  `:closed`.
+- Occurrence `401ddb0eb6e5` and message `bab65b7746fa` are on the branch. Fault `3506b09a` is open on main.
+- JVM `user` host helpers: `s5r5b-conn`, `s5r5b-state`.
+- No SCI eval as root. Config was restored and verified.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** a branch interprets an entity whose only difference from the platform is main's
+  change since the merge base. Here that is the merge base's `seon.db/q`, which calls the deleted
+  `seon.db/query-call-valid?`. So every turn on an older chain branch fails analysis. The differing set must be
+  the branch's changes since its merge base. Regression: an agent on a branch forked before main deletes a callee
+  of an unchanged function still evaluates. This chain cannot run again until that is fixed, or until root abandons
+  the chain or builds a new one on current main.
+- The config applied before a restart is replaced by the boot overlay (Broken first 1). Either the operator applies
+  after boot, or the overlay yields to applied facts.
+- `seon.db/carried-projection` is given a map from `seon.cluster.agent/acquire-context!` (fault `3506b09a`).
