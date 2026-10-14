@@ -1,6 +1,6 @@
 ---
 type: research
-status: proposed
+status: investigated
 date: 2026-10-14
 ---
 
@@ -10,16 +10,108 @@ date: 2026-10-14
 The current mark already shares visited commits and index addresses. The proposed composition is one
 Konserve key inventory, passed as a value to its existing consumers, instead of three enumerations.
 
-Disposition: design and measured evidence only; no production change or fork patch. The measured
-allocation producer is Konserve's compressed metadata reader, outside the assignment's small Datahike
-fork change. Removing the duplicate scans crosses Konserve's result interface and Seon's verification
-contract. Neither change has a quiet, same-input before/after proof yet. Do not mark the task complete.
+Disposition: phase 1 was implemented in disposable candidate sources and measured on a quiet
+store copy. **Delivery stopped under the owner's regression rule:** the first paired public dry run
+regressed from 3,493.89 ms to 4,117.51 ms, despite consistently lower allocation. A reverse-order pair
+improved, so elapsed-time evidence is mixed. No fork commit, gitlink bump, or restart-batch patch is
+delivered. Phase 1 remains incomplete; phases 2 and 3 were not attempted.
 
 Task: `seon.maintenance/a-collection-dry-run-allocates-in-proportion-to-what-it-marks`.
 Related task: `seon.maintenance/collection-marks-slowly-and-records-nothing`.
 Prior observation: [chain branch mechanics](chain-on-one-branch.md#1-branch-mechanics).
 
-## Measurement and limits
+## Phase 1 candidate: quiet-store proof and stop
+
+The candidate added `:konserve.gc/report?` to `konserve.gc/sweep!`. Its default result stayed the
+candidate set; the opt-in result carried `:konserve.gc/candidates` and `:konserve.gc/observed-keys`,
+both from its existing metadata enumeration, with the observed set realized before deletion.
+`datahike.gc/gc-storage!` and its writer already pass the result through unchanged; the candidate
+updated their documentation and added a forwarding regression. Seon's registry consumed the result,
+removed its key-count atom and enumeration, and returned the declared
+`:seon.cluster.registry/observed-keys`. The dry-run verifier and real collector used that set in place
+of their separate inventory. The unused `seon.maintenance/konserve-key-set` was removed and its test
+caller converted. Cutoff, safe-point acquisition, deletion batches, root reopening and existing
+exception carriers stayed in their owners. Storage encoding was unchanged. No cache, retry, gate,
+or second collector was added.
+
+The benchmark used Seon parent `cf0a70e318173108047e704622fe1c1be606f825`, Datahike
+`c9e57c6fb65365d5ce92b59854fb02ea59054fe7`, and Konserve
+`26444d372bf97de219d55c06d5d23bd6f5cfc634`. Parent and candidate were `git archive` snapshots, not
+worktrees; the two changed dependency source trees were separately archived. Candidate code ran only
+in owned JVMs (`java`, 2 GiB heap), never loaded into default. Other dependency source paths reused the
+checkout's existing dependency locations. Default's existing faulted status was observed through
+`bin/seon status` and MCP `runtime_status`; no collection was run there.
+
+The [probe](gc-one-enumeration-probe.clj) created a file-backed Seon store through
+`seon.cluster/acquire-root-store!`, with a declared retention policy and 10,000 unreachable keys.
+The source store was closed and copied before measurement. Datahike derives this store's identity
+from its path: opening the copy at a different path refused with “Store identity mismatch”; it
+performed no collection. The copy was then placed at the original, now-unheld path, and every measured
+JVM reopened that same copy. No graphs, schedules or other writers used it. Each JVM measured store
+acquisition separately, then four complete calls to `seon.maintenance/collect!` under
+`seon.profile/measure`, with both the enable flag and dry-run flag true. A final registry dry run
+captured exact candidate-set equality outside those timing windows. No real sweep was performed on
+this fixture or on default. Preparation finished writing the fixture, then its initial JVM reported a
+reader error because the probe file was edited while that process was running. The measurement runs
+used the unchanged, corrected probe in fresh JVMs and all exited successfully.
+
+The fixture had 10,009 logical keys, 10,000 candidates, 1,039,757 physical store bytes, one branch
+`:db`, and commit `6acee46d-af8d-572e-98a7-1fb2abace86f`. Every result used cutoff
+`2026-10-13T02:09:49.032Z`, verified roots, completed, and reported zero swept objects and zero reclaimed
+bytes. EDN comparison found identical registry results and identical public results after removing
+only the two duration fields. Before/after SHA-256 over sorted relative file names and contents was
+`d8c705ac9723e3f19ef2e0e4c5484e975c93a1028d0fac7fb2b3481392d0f852` (10,010 files, including the lock file).
+
+Full metadata enumerations per public dry run: **3 before, 1 after**, established by the executed
+source paths: the registry count, Konserve sweep, and verification inventory on parent; only the
+Konserve sweep on candidate. This count is source evidence, not an instrumented call counter. The
+probe's per-function call counters are zero because this isolated measurement did not install Seon's
+function wrappers. Allocation below is the cumulative **all-thread JVM window** counter from
+`seon.profile/measure`, decimal MB, not retained heap or caller-thread allocation. It includes JVM
+compilation and any other work in that JVM; the store itself was quiet. The developer machine was not
+reserved exclusively for the benchmark.
+
+| Run, in execution order | Acquisition ms / allocation MB | Full first call ms / allocation MB | Warm call 1 ms / MB | Warm call 2 ms / MB | Warm call 3 ms / MB |
+|---|---:|---:|---:|---:|---:|
+| Parent A | 180.86 / 6.535 | 3,493.89 / 4,640.854 | 2,190.81 / 4,624.945 | 1,927.78 / 4,624.725 | 1,987.97 / 4,624.711 |
+| Candidate A | 173.67 / 6.553 | 4,117.51 / 1,629.344 | 1,707.24 / 1,613.017 | 2,358.83 / 1,615.227 | 1,865.29 / 1,615.242 |
+| Candidate B | 165.66 / 6.499 | 1,982.61 / 1,628.763 | 1,335.75 / 1,612.941 | 1,418.11 / 1,612.617 | 1,402.25 / 1,612.616 |
+| Parent B | 181.71 / 6.535 | 3,467.88 / 4,640.875 | 2,559.97 / 4,624.923 | 2,681.00 / 4,624.721 | 2,813.67 / 4,624.703 |
+
+Candidate A's first call was **17.85% slower**; its second warm call also regressed. The reverse-order
+pair was faster, and allocation consistently fell about 65%. Those later wins do not erase the
+observed regression or meet the owner's delivery condition. No performance commit is justified by
+these measurements. One enumeration still performs metadata reads proportional to all 10,009 keys;
+these results establish no sub-second guarantee. The existing allocation/slow-collection tasks above
+remain open; no new defect class was established.
+
+Verification before stopping:
+
+- `konserve.gc-callback-test/sweep-report-keeps-the-observed-inventory-before-deletion` was red on
+  parent (three failed assertions). On candidate the full `konserve.gc-callback-test` namespace passed:
+  four tests, 24 assertions, zero failures/errors. It covers dry-run and real deletion, empty stores,
+  cutoff exclusion, retained keys, pre-delete inventory, and the existing callback failure behavior.
+- The Datahike test invocation did not load: the standalone Seon test classpath lacked
+  `kaocha.stacktrace`, required by `datahike.test.core-test`. This is unavailable evidence, not a pass;
+  no Datahike tests or candidate Seon runner tests are claimed green.
+- The initial candidate lint found a missing require in the converted maintenance test. The candidate
+  source was corrected. The final archived candidate lint passed with zero errors. The shared-tree
+  lint found one foreign error at `test/seon/repl_test.clj:187` (an assertion message prints a value);
+  that file was neither changed nor included. The note-only lane check is recorded in the handoff.
+
+The candidate source snapshots, exact local diffs and measurement logs are retained under
+`tmp/gc-one-enumeration/` as unresolved evidence. Both forks' owned edits were reversed after saving
+those diffs; their working branches and commits remain at the parent pins. There is deliberately no
+`gc-one-enumeration.patch` delivery and no fork commit id to apply. No staged files, worktree, pushed
+commit, default restart, or other lane's session was created or changed.
+
+Foreign boundary: concurrent work in `seon.batch`, `seon.turn`, `seon.repl`, `seon.db`, context/tests
+and their schema/task resources was excluded by using the archived parent plus only this candidate's
+paths. The measured regression, not another lane's breakage, stopped delivery. The requested note
+commit uses `seon.maintenance-test/collection-results-project-branch-maps-to-components`; the
+committed changes are documentation/probe only and change no production declaration.
+
+## Earlier default-store measurement and limits
 
 One completed whole-store dry run, through MCP `eval_clj`, explicit `agent=root`, `cluster=default`,
 `mode=jvm`, bridge timeout 120000 ms. The connection was explicitly obtained with
@@ -197,7 +289,8 @@ decode, but the current evidence makes the buffer allocation the first owner to 
 
 ## Proposed change and required proof
 
-Phase status: investigated; implementation and red performance proof pending.
+Phase status: phase 1 candidate measured, not accepted or delivered (first-call regression below);
+phases 2 and 3 remain proposed. No implementation phase is complete.
 
 1. **First, remove redundant work without changing storage encoding.** Extend Konserve's existing
    sweep result interface so its one enumeration supplies both candidate keys and the observed key
