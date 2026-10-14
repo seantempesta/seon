@@ -360,3 +360,14 @@
        (is (= {:seon.test/passed? true :seon.turn.loop/red []}
               (:seon.turn.loop/reaching (support/mcp-tests defined)))
            "nothing of the drift is left pending by the defn's step")))))
+
+(deftest a-trivial-request-computes-its-configuration-once
+  ;; Every caller on one committed basis shares one effective configuration;
+  ;; the request's own transaction makes one new basis.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (answer running agent-id "jvm" "(+ 1 2)")
+     (let [measured (profile/measure #(answer running agent-id "jvm" "(+ 1 2)"))]
+       (is (<= (profile/calls-of measured 'seon.config/effective-in) 1)
+           "the configuration is computed at most once per new basis")))))
+

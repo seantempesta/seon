@@ -17,6 +17,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
+            [seon.cache]
             [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -936,10 +937,18 @@
     [:or :seon.config/effective :seon.config/error
      :seon.schema/validation-refusal :seon.db/invalid-read-error]]}
   [db cluster-name]
-  (if-let [projection (or (db/carried-projection db)
-                          (schema/handed-projection))]
-    (effective-in db cluster-name projection (declared-projection))
-    (db/projection-fallback 'seon.config/effective)))
+  (let [carried (db/carried-projection db)
+        commit (when carried (:datahike.value/commit-id (db/committed-value-identity db)))]
+    (cond
+      ;; A committed value fixes its config entity and carried projection; the
+      ;; JVM's declarations are named by their digest.
+      commit (seon.cache/lookup ::effective [commit cluster-name (schema.edn/declaration-digest)]
+                                #(* 128 (count %))
+                                #(effective-in db cluster-name carried (declared-projection))
+                                #(not (contains? % :seon.error/operation)))
+      :else (if-let [projection (or carried (schema/handed-projection))]
+              (effective-in db cluster-name projection (declared-projection))
+              (db/projection-fallback 'seon.config/effective)))))
 
 (defn- effective-in
   {:malli/schema
