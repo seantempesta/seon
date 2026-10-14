@@ -53,10 +53,47 @@
     "```\nseon.ref/locate\n```\n" []))
 
 (deftest front-matter-is-not-a-heading
+  (let [{:seon.ref/keys [headings body-line]} (ref/document "---\ntitle: x\n---\n# A\n")]
+    (is (= [["A" 4]] (mapv (juxt :seon.ref/heading :seon.ref/line) headings)) "the front matter's lines are no heading")
+    (is (= 4 body-line) "the document starts at the line after the closing delimiter")))
+
+(def ^:private templates "docs/seon/schedule/cards/TASK-CHAIN.md#4-templates-and-their-proofs-version-1-live-runs-revise-them")
+
+(defn- cited-section
+  "The one entry `text` makes, read from the doc `TASK-CHAIN.md`."
+  [text]
+  (first (ref/references (db/db) {:seon.ref/text text})))
+
+(deftest a-section-doc-is-its-lead-and-headings-below
+  (let [doc (cited-section (str "`" templates "`"))
+        summary (cited-section (str "Read " templates "."))]
+    (is (str/starts-with? (:seon.ref/lead doc) "Each stage's predicate is one contracted function") "the lead paragraph, whole")
+    (is (not (contains? doc :seon.ref/text)) "never the whole section")
+    (is (= "design-seonstepdesigntemplate" (:seon.ref/anchor (first (:seon.ref/below doc)))))
+    (is (pos? (:seon.ref/tokens (first (:seon.ref/below doc)))))
+    (is (not (:seon.ref/problem-kind doc)))
+    (is (str/includes? (:seon.ref/lead doc) "a member body runs in its own") "the whole paragraph, past its first sentence")
+    (is (= [nil true] [(:seon.ref/lead summary) (pos? (:seon.ref/tokens summary))]) "a summary is a sentence and a size")
+    (is (str/starts-with? (:doc summary) "Each stage's predicate"))))
+
+(deftest a-section-opening-with-a-list-has-no-lead
+  (let [path "docs/seon/schedule/cards/TASK-CHAIN.md"
+        listed (cited-section (str "`" path "#2-flow`"))
+        tree (cited-section (str "`" path "#1-data`"))]
+    (is (= [:no-lead path "2-flow"] ((juxt :seon.ref/problem-kind :seon.ref/path :seon.ref/anchor) listed)))
+    (is (str/starts-with? (:seon.ref/opening listed) "1. **Create**") "the structural fallback: the first block, whole")
+    (is (= :no-lead (:seon.ref/problem-kind tree)))
+    (is (not (contains? tree :seon.ref/opening)) "a heading followed by a heading has the heading tree as its doc")
+    (is (= "the-task" (:seon.ref/anchor (first (:seon.ref/below tree)))))
+    (is (nil? (:seon.ref/problem-kind (cited-section (str "```" path "#2-flow```")))) "a code-level citation needs no lead")))
+
+(deftest a-var-with-no-docstring-cited-for-its-summary-is-a-problem-on-the-var
   (test-support/with-running-agent
    (fn [running agent-id _]
-     (is (= [{:seon.ref/heading-level 1 :seon.ref/heading "A" :seon.ref/anchor "a" :seon.ref/line 4}]
-            (shown running agent-id "(:seon.ref/headings (seon.ref/document \"---\\ntitle: x\\n---\\n# A\\n\"))"))))))
+     (shown running agent-id "(ns tq.nodoc)\n(defn bare {:malli/schema [:=> [:cat] :int]} [] 1)")
+     (let [kinds #(shown running agent-id (str "(mapv (juxt :seon.ref/name :seon.ref/problem-kind) (seon.ref/references (seon.db/db) {:seon.ref/text \"" % "\"}))"))]
+       (is (= [['tq.nodoc/bare :no-summary]] (kinds "Then tq.nodoc/bare follows.")))
+       (is (= [['tq.nodoc/bare nil]] (kinds "`tq.nodoc/bare`")) "its doc value is not a summary")))))
 
 (deftest a-repeated-parse-is-a-cache-hit
   (test-support/with-running-agent

@@ -20,9 +20,10 @@
             [seon.schema.internal :as internal]
             [seon.test.cache :as test.cache])
   (:import [java.net URI URISyntaxException]
-           [org.commonmark.ext.front.matter YamlFrontMatterExtension]
+           [org.commonmark.ext.front.matter YamlFrontMatterBlock YamlFrontMatterExtension]
+           [org.commonmark.ext.gfm.tables TablesExtension]
            [org.commonmark.ext.heading.anchor IdGenerator]
-           [org.commonmark.node AbstractVisitor Code FencedCodeBlock Heading IndentedCodeBlock Link Node Paragraph SourceSpan Text]
+           [org.commonmark.node AbstractVisitor Code Document FencedCodeBlock Heading IndentedCodeBlock Link Node Paragraph SourceSpan Text]
            [org.commonmark.parser IncludeSourceSpans Parser]
            [org.commonmark.renderer.text TextContentRenderer]))
 
@@ -34,7 +35,7 @@
 
 (def ^:private ^Parser parser
   (-> (Parser/builder)
-      (.extensions [(YamlFrontMatterExtension/create)])
+      (.extensions [(YamlFrontMatterExtension/create) (TablesExtension/create)])
       (.includeSourceSpans IncludeSourceSpans/BLOCKS_AND_INLINES)
       .build))
 
@@ -55,9 +56,34 @@
                    (keep #(trimmed (apply str %))))
           text)))
 
+(defn- with-sections
+  "`headings` each with the line after its section (`:seon.ref/section-end`) and the lines of its child headings
+  (`:seon.ref/children`), from one fold over them; `end` is the line after the text."
+  {:malli/schema [:=> [:cat [:vector :map] :seon.ref/line] [:vector :seon.ref/heading-entry]]}
+  [headings end]
+  (let [level :seon.ref/heading-level
+        line :seon.ref/line
+        {:keys [stack ends children]}
+        (reduce (fn [{:keys [stack ends children]} heading]
+                  (let [[stack ends] (loop [stack stack ends ends]
+                                       (if-let [top (peek stack)]
+                                         (if (>= (level top) (level heading))
+                                           (recur (pop stack) (assoc ends (line top) (line heading)))
+                                           [stack ends])
+                                         [stack ends]))]
+                    {:stack (conj stack heading)
+                     :ends ends
+                     :children (cond-> children (peek stack) (update (line (peek stack)) (fnil conj []) (line heading)))}))
+                {:stack [] :ends {} :children {}} headings)
+        ends (into ends (map (juxt line (constantly end))) stack)]
+    (mapv #(cond-> (assoc % :seon.ref/section-end (ends (line %)))
+             (children (line %)) (assoc :seon.ref/children (children (line %))))
+          headings)))
+
 (defn- parsed
-  "The headings, the code spans (each with its delimiter width, read from its source span), links and bare prose words
-  of `text` in document order, its first paragraph's lines and its fenced code blocks."
+  "The headings (each with its lead or opening lines, section end and children), the code spans (each with its
+  delimiter width, read from its source span), links and bare prose words of `text` in document order, the line the
+  text starts at after its front matter, its first top-level paragraph's lines and its fenced code blocks."
   {:malli/schema [:=> [:cat :string] :seon.ref/document]}
   [^String text]
   (let [ids (.build (IdGenerator/builder))
@@ -66,6 +92,10 @@
         blocks (java.util.ArrayList.)
         paragraph (volatile! nil)
         lines (str/split-lines text)
+        tree (.parse parser text)
+        ;; the lines of a block, as an editor shows them
+        block-lines (fn [^Node node] {:seon.ref/line (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node))))
+                                      :seon.ref/end-line (inc (.getLineIndex ^SourceSpan (last (.getSourceSpans node))))})
         ;; commonmark's 0-based line index as the line an editor shows
         line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node)))))
         last-line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (last (.getSourceSpans node)))))
@@ -73,15 +103,20 @@
         width (fn [^Node node]
                 (let [^SourceSpan span (first (.getSourceSpans node))]
                   (count (take-while #{\`} (subs (nth lines (.getLineIndex span)) (.getColumnIndex span))))))]
-    (.accept (.parse parser text)
+    (.accept tree
              (proxy [AbstractVisitor] []
                (visit [node]
                  (condp instance? node
                    Heading (let [heading (str/trim (.render text-renderer ^Node node))]
-                             (.add headings {:seon.ref/heading-level (.getLevel ^Heading node) :seon.ref/heading heading
-                                             :seon.ref/anchor (.generateId ids heading) :seon.ref/line (line node)})
+                             ;; the heading's own next block is its lead when a paragraph (a table is no paragraph), else its opening
+                             (let [following (.getNext ^Node node)]
+                               (.add headings (cond-> {:seon.ref/heading-level (.getLevel ^Heading node) :seon.ref/heading heading
+                                                       :seon.ref/anchor (.generateId ids heading) :seon.ref/line (line node)}
+                                                (instance? Paragraph following) (assoc :seon.ref/lead-lines (block-lines following))
+                                                (and following (not (instance? Paragraph following)) (not (instance? Heading following)))
+                                                (assoc :seon.ref/opening-lines (block-lines following)))))
                              (proxy-super visitChildren node))
-                   Paragraph (do (when-not @paragraph
+                   Paragraph (do (when-not (or @paragraph (not (instance? Document (.getParent node))))
                                    (vreset! paragraph {:seon.ref/line (line node) :seon.ref/end-line (last-line node)}))
                                  (proxy-super visitChildren node))
                    Code (.add spans {:seon.ref/span (.getLiteral ^Code node) :seon.ref/width (width node) :seon.ref/line (line node)})
@@ -96,10 +131,13 @@
                    FencedCodeBlock (.add blocks {:seon.ref/code (.getLiteral ^FencedCodeBlock node) :seon.ref/line (line node)})
                    IndentedCodeBlock nil
                    (proxy-super visitChildren node)))))
-    (cond-> {:seon.ref/headings (vec headings)
+    (cond-> {:seon.ref/headings (with-sections (vec headings) (inc (count lines)))
              :seon.ref/spans (vec spans)
              :seon.ref/code-blocks (vec blocks)
-             :seon.ref/line-count (count (str/split-lines text))}
+             ;; the line after the front matter's closing delimiter
+             :seon.ref/body-line (let [front (.getFirstChild tree)]
+                                   (if (instance? YamlFrontMatterBlock front) (inc (:seon.ref/end-line (block-lines front))) 1))
+             :seon.ref/line-count (count lines)}
       @paragraph (assoc :seon.ref/first-paragraph @paragraph))))
 
 (defn document
@@ -302,6 +340,8 @@
   "What each problem kind means and what the agent does about it."
   {:unresolved "Nothing of this name or path exists on your branch. If the task means one to create, create it; else tell root with my.message/send that the task names it."
    :anchor-missing "The file has no heading with this anchor; (my.fs/section path) lists its headings. Tell root the task names it."
+   :no-lead "This section opens with no paragraph, so its summary is only its heading and size; its doc shows its first block whole and the headings below. Give the section a lead paragraph, or cite it at code level."
+   :no-summary "This function has no docstring, so it has no summary. Add one, or cite it at doc or code level."
    :line-reference "A path:N citation goes stale; the task should cite code by its symbol. Tell root the task names it."})
 
 (defn- pinned-revision
@@ -361,6 +401,13 @@
       (cond-> {:seon.ref/name reference :seon.render/operations [(list 'dir reference)]}
         (seq doc) (assoc :doc (first (str/split-lines (:summary (docstring doc)))))))))
 
+(defn- no-summary
+  "The problem on a var cited for its summary that has no docstring, with the form that reads it."
+  {:malli/schema [:=> [:cat :seon.ref/name :seon.render/read-form] :seon.ref/problem]}
+  [reference read-form]
+  {:seon.ref/name reference :seon.ref/problem-kind :no-summary :seon.ref/message (problem-messages :no-summary)
+   :seon.render/operations [read-form]})
+
 (defn brief
   "One name a referent's own content names, shown one level: its name, a one-line summary and the form that reads
   it; never its content."
@@ -388,14 +435,16 @@
           ;; a step may declare only its instructions, taking its goal from its subject
           (:seon.task/sym found) {:seon.ref/name reference
                                   :doc (first (str/split-lines (some found [:seon.task/plan :seon.task/instructions])))}
-          (or (:seon.fn/sym found) (:seon.test/sym found))
-          (cond-> {:seon.ref/name reference :seon.render/operations [read-form]}
-            (:seon.fn/doc found) (assoc :doc (summary (:seon.fn/doc found))))
+          (:seon.test/sym found) {:seon.ref/name reference :seon.render/operations [read-form]}
+          (:seon.fn/sym found) (if (:seon.fn/doc found)
+                                 {:seon.ref/name reference :seon.render/operations [read-form] :doc (summary (:seon.fn/doc found))}
+                                 (no-summary reference read-form))
           :else (let [library (library-name reference)]
                   (if (:seon.ref/problem-kind library)
                     library
-                    (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference)]}
-                      (:seon.fn/doc library) (assoc :doc (:seon.fn/doc library))))))))))
+                    (if (:seon.fn/doc library)
+                      {:seon.ref/name reference :seon.render/operations [(list 'doc reference)] :doc (:seon.fn/doc library)}
+                      (no-summary reference (list 'doc reference))))))))))
 
 (defn- inner
   "The names a referent's own `text` cites by the one rule, each shown one level (`brief`), the `excluded` names
@@ -407,7 +456,7 @@
   (let [roots (set (.list (io/file (fs/source-directory))))
         cited (filter :seon.ref/name (candidates (keep #(candidate roots nil %) (:seon.ref/spans (document text)))))
         names (into [] (comp (map :seon.ref/name) (remove excluded) (distinct)) cited)]
-    (not-empty (into [] (keep #(let [shown (brief database %)] (when-not (:seon.ref/problem-kind shown) shown))) names))))
+    (not-empty (into [] (keep #(let [shown (brief database %)] (when-not (= :unresolved (:seon.ref/problem-kind shown)) shown))) names))))
 
 (defn- with-inner
   "`entry` with the references its own content makes, one level, when it makes any."
@@ -556,7 +605,7 @@
                    (directory? path) nil
                    :else (resolve-path database found))]
     (cond
-      (and resolve-only (:seon.ref/problem-kind resolved)) nil
+      (and resolve-only (:seon.ref/problem-kind resolved) (not (#{:no-lead :no-summary} (:seon.ref/problem-kind resolved)))) nil
       (or (nil? resolved) (:seon.error/at resolved) (:seon.ref/problem-kind resolved)) resolved
       :else (cond-> (assoc resolved :seon.ref/name reference) (nil? reference) (dissoc :seon.ref/name) level (assoc :seon.ref/level level)))))
 
@@ -668,20 +717,22 @@
                                :seon.ref/section-missing missing :seon.ref/path path :seon.ref/nearest nearest}
                         anchor (assoc :seon.ref/anchor anchor))))
 
-(defn- section-end
-  "The line after the section of the heading at `from` of `level`: the next heading at or above its level, else the end."
-  {:malli/schema [:=> [:cat [:vector :seon.ref/heading-entry] :int :int :int] :int]}
-  [headings from level end]
-  (or (some #(when (and (> (:seon.ref/line %) from) (<= (:seon.ref/heading-level %) level)) (:seon.ref/line %)) headings) end))
-
 (defn- span-tokens
   "The estimated tokens of source lines `from` (1-based) up to `end`."
   {:malli/schema [:=> [:cat [:vector :string] :int :int] :seon.ref/tokens]}
   [lines from end]
   (tokens/estimate (str/join "\n" (subvec lines (dec from) (dec end)))))
 
+(defn- block-text
+  "The source lines of the block at `span`, whole."
+  {:malli/schema [:=> [:cat [:vector :string] :seon.ref/lines] :string]}
+  [lines {from :seon.ref/line to :seon.ref/end-line}]
+  (str/join "\n" (subvec lines (dec from) to)))
+
 (defn section
-  "The Markdown section `reference` names, with the headings below it and its size, or an error naming the nearest."
+  "The Markdown section `reference` names, with the headings below it and its size, or an error naming the nearest.
+  It carries its lead (its heading's own next paragraph) or, when the heading opens with another block, that opening
+  block whole; a whole file starts after its front matter."
   {:malli/schema [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]}
   [reference]
   (let [hash-at (str/index-of reference "#")
@@ -691,48 +742,79 @@
     (if-not located
       (section-error :file path anchor (nearest-files path))
       (let [text (slurp (:seon.ref/file located))
-            {:seon.ref/keys [headings line-count]} (document text)
+            {:seon.ref/keys [headings line-count body-line]} (document text)
             lines (vec (str/split-lines text))
-            end (inc line-count)
-            target (if anchor
-                     (first (filter #(= anchor (:seon.ref/anchor %)) headings))
-                     {:seon.ref/heading-level 0 :seon.ref/heading (or (:seon.ref/heading (first (filter #(= 1 (:seon.ref/heading-level %)) headings))) path)
-                      ;; the line after the front matter's closing delimiter
-                      :seon.ref/line (if (= "---" (first lines)) (+ 2 (count (take-while #(not= "---" %) (rest lines)))) 1)})]
+            by-line (into {} (map (juxt :seon.ref/line identity)) headings)
+            first-heading (first headings)
+            ;; a whole file is its H1 when nothing but blank lines come before it
+            title (when (and first-heading (= 1 (:seon.ref/heading-level first-heading))
+                             (every? str/blank? (subvec lines (dec body-line) (dec (:seon.ref/line first-heading)))))
+                    first-heading)
+            target (if anchor (first (filter #(= anchor (:seon.ref/anchor %)) headings)) (or title {}))]
         (if-not target
           (section-error :heading path anchor
                          (mapv #(select-keys % [:seon.ref/anchor :seon.ref/heading])
                                (sort-by (comp #(me/levenshtein anchor %) :seon.ref/anchor) headings)))
-          (let [{:seon.ref/keys [line heading] level :seon.ref/heading-level} target
-                stop (if anchor (section-end headings line level end) end)
-                inside (filter #(and (> (:seon.ref/line %) (if anchor line (dec line))) (< (:seon.ref/line %) stop)) headings)
-                next-level (some->> inside (map :seon.ref/heading-level) (filter #(> % level)) seq (apply min))]
-            (cond-> {:seon.ref/path path :seon.ref/heading heading
-                     :seon.ref/text (str/join "\n" (subvec lines (dec line) (dec stop)))
-                     :seon.ref/tokens (span-tokens lines line stop)
-                     :seon.ref/below (vec (for [child inside :when (= next-level (:seon.ref/heading-level child))]
+          (let [from (if anchor (:seon.ref/line target) body-line)
+                stop (if anchor (:seon.ref/section-end target) (inc line-count))
+                children (if (seq target)
+                           (map by-line (:seon.ref/children target))
+                           (let [nested (into #{} (mapcat :seon.ref/children) headings)]
+                             (remove #(nested (:seon.ref/line %)) headings)))
+                {:seon.ref/keys [lead-lines opening-lines]} target]
+            (cond-> {:seon.ref/path path
+                     :seon.ref/heading (or (:seon.ref/heading target) path)
+                     :seon.ref/text (str/join "\n" (subvec lines (dec from) (dec stop)))
+                     :seon.ref/tokens (span-tokens lines from stop)
+                     :seon.ref/below (vec (for [child children]
                                             {:seon.ref/anchor (:seon.ref/anchor child) :seon.ref/heading (:seon.ref/heading child)
-                                             :seon.ref/tokens (span-tokens lines (:seon.ref/line child)
-                                                                           (section-end headings (:seon.ref/line child) next-level stop))}))}
+                                             :seon.ref/tokens (span-tokens lines (:seon.ref/line child) (:seon.ref/section-end child))}))}
               anchor (assoc :seon.ref/anchor anchor)
+              lead-lines (assoc :seon.ref/lead (block-text lines lead-lines))
+              opening-lines (assoc :seon.ref/opening (block-text lines opening-lines))
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
 
+(defn- lead-sentence
+  "The first sentence of a section's `lead` paragraph, on one line."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [lead]
+  (first (first-sentence (str/join " " (map str/trim (str/split-lines lead))))))
+
+(defn- section-view
+  "The `found` section as its reference `level` shows it (TASK-CHAIN §3a): its summary (heading, lead's first
+  sentence, size), its doc (lead and the headings below with sizes) or its code (the whole section). A Markdown
+  section with no lead shows the structure instead (heading and size; the first block whole and the headings below)
+  and answers `:no-lead`."
+  {:malli/schema [:=> [:cat :seon.ref/section [:maybe :seon.ref/level] :boolean] :map]}
+  [found level markdown?]
+  (let [{:seon.ref/keys [lead]} found
+        common [:seon.ref/path :seon.ref/anchor :seon.ref/heading :seon.ref/tokens :seon.ref/pin]
+        shown (case level
+                :summary (cond-> (select-keys found common) lead (assoc :doc (lead-sentence lead)))
+                :code found
+                (select-keys found (conj common :seon.ref/lead :seon.ref/opening :seon.ref/below)))]
+    (cond-> shown
+      (and markdown? (not= :code level) (not lead))
+      (assoc :seon.ref/problem-kind :no-lead :seon.ref/message (problem-messages :no-lead) :seon.ref/level level))))
+
 (defn- resolve-path
-  "A based path with an optional anchor as its document entry: heading, pin, the render pair
-  `:seon.ref/resolved-doc` declares and the names its text cites, one level; or a problem."
+  "A based path with an optional anchor as its document entry at the level its citation asks for: heading, pin, the
+  render pair `:seon.ref/resolved-doc` declares and, below summary, the names its text cites, one level; or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem :seon.error/value]]}
-  [database {:seon.ref/keys [path anchor]}]
+  [database {:seon.ref/keys [path anchor level]}]
   (let [reference (cond-> path anchor (str "#" anchor))
-        found (section reference)]
+        found (section reference)
+        markdown? (str/ends-with? path ".md")]
     (case (:seon.ref/section-missing found)
       :file {:seon.ref/problem-kind :unresolved :seon.ref/path path :seon.ref/message (problem-messages :unresolved)}
       :heading {:seon.ref/problem-kind :anchor-missing :seon.ref/path path :seon.ref/anchor anchor
                 :seon.ref/message (problem-messages :anchor-missing)}
-      (-> found
-          (dissoc :seon.ref/text :seon.ref/below :seon.ref/tokens)
+      (-> (section-view found level markdown?)
           (merge (declared-render database :seon.ref/resolved-doc))
           ;; only a Markdown document's text is prose; a source or data file is code
-          (with-inner (when (str/ends-with? path ".md") (inner database #{} (:seon.ref/text found))))))))
+          (with-inner (when (and markdown? (not= :summary level))
+                        ;; the names of the text the level shows: the lead or opening at doc, the section at code
+                        (inner database #{} (if (= :code level) (:seon.ref/text found) (or (:seon.ref/lead found) (:seon.ref/opening found) "")))))))))
 
 (defn render-doc-ai
   "A document or section reference as data: its path, anchor, heading and pin, the one read of its text, and the
