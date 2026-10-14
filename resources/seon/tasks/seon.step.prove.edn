@@ -1,0 +1,19 @@
+[#:seon.task{:name "template"
+             :instructions "## Work
+
+Write the deftests that will show the task done, one behavior each, asserting data: every exact and boundary case the
+plan implies as a row of a table test (`are`), and a property with a bounded generator and a fixed `:seed` where a
+general law holds. Prefer a new row in an existing table test. Run them: they must fail now because the behavior is
+missing, by a failing assertion or an error the code under test raises, never because the test does not load. Then
+write their symbols into the next task's proofs:
+`(my.task/update! next-task :seon.task/proofs (fnil into #{}) '[the.ns-test/a-case …])`, the next task being the one
+your block shows after you. Unmap scratch helpers and any deftest you wrote that you do not mean as a proof (`my.program/ns-unmap!`); never unmap or
+change your own task's proofs, which judge your work: a
+red test outside the next task's proofs keeps you from done, and everything on the branch merges at the end. Define
+schemas in one request and the functions that use them in the next.
+
+## Done
+
+The next task has proofs, each ran red for the right reason, and every function the plan's Approach names or the branch
+defines is reached by at least one of them."
+             :proofs #{seon.step.prove-test/handoff}}]

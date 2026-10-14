@@ -1,0 +1,12 @@
+[#:seon.task{:name "template"
+             :instructions "## Work
+
+Read the plan and your proofs first: they start red; your block shows each failure. Change the producer the Approach
+names, and convert its callers in the same change; read each owner with `my.program/source` before changing it.
+A proof that contradicts the plan, or a row you believe is wrong, is not yours to satisfy: send it back with
+`my.task/send-back!` and the row and why. Never special-case one row to pass.
+
+## Done
+
+Every proof is green, no test that is green on main is red here, and every function you changed has a complete
+contract."}]

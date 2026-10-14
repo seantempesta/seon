@@ -327,3 +327,19 @@
     (is (some #{"tmp/"} ignored) "the census read the ignored directories")
     (is (> (count entries) 100) "the census read the paths the intents cite")
     (is (= [] (vec offending)) "each site is a task whose evidence names a gitignored path")))
+
+(deftest the-step-templates-ingest-holding-only-owned-members
+  (test-support/with-database
+   (fn [connection]
+     (let [stages ["design" "prove" "implement"]
+           path (fn [stage] (str "resources/seon/tasks/seon.step." stage ".edn"))
+           _ (task/index-tasks! {:seon.db/connection connection
+                                 :seon.task/files (into {} (map (juxt path #(slurp (path %)))) stages)})]
+       ;; A booted database may already hold the files, so admission is shown by the templates read back, not by `changed?`.
+       (doseq [stage stages
+               :let [owned (task/template (db/db connection) (symbol (str "seon.step." stage) "template"))]]
+         (is (string? (:seon.task/instructions owned)) (str stage " template holds its instructions"))
+         (is (= (if (= "implement" stage) nil #{(symbol (str "seon.step." stage "-test") "handoff")})
+                (:seon.task/proofs owned))
+             (str stage " template's proofs; Implement's are written by Prove"))
+         (is (= #{} (disj (set (keys owned)) :seon.task/instructions :seon.task/proofs)) "only owned members"))))))
