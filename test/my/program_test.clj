@@ -317,6 +317,45 @@
         (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
         (support/delete-root! root)))))
 
+(deftest an-agent-writes-back-a-file-whose-analysis-runs-a-hook
+  ;; From an agent's evaluation, the file's `clojure.test/is` runs the checkout's clj-kondo hook.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbhook" suffix ".core"))
+        path (str "src/wbhook" suffix "/core.clj")
+        root (support/temp-root (str "write-branch-hook-" suffix))
+        callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
+        replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
+        home (cluster.branch/cluster-branch (str "wbhook" suffix))
+        branch (keyword (str "write-branch-hook-" suffix))]
+    (doseq [[file text] {path (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.test]))\n\n"
+                                   "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n\n"
+                                   "(clojure.test/deftest callee-adds-one (clojure.test/is (= 2 (callee 1))))\n")
+                         ".clj-kondo/config.edn" "{:hooks {:analyze-call {clojure.test/is hooks.is-message/is}}}\n"
+                         ".clj-kondo/hooks/is_message.clj" "(ns hooks.is-message)\n\n(defn is [{:keys [node]}] {:node node})\n"}]
+      (io/make-parents (io/file root file))
+      (spit (io/file root file) text))
+    (try
+      (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+        (support/transacted! h-conn (function/reconcile-tx (db/db h-conn) entities (mapv seon-program/row-identity entities)))
+        (registry/branch! {:seon.store/store store :seon.store/branch home
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+        (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.cluster.registry/from home})
+        (let [held (agent/acquire-context! target nil {:seon.agent/branch branch})
+              connection (:seon.db/connection held)]
+          (try
+            (support/transacted! connection (support/replacement-tx (db/db connection) callee replacement {}))
+            (let [written (support/agent-value (:seon.sci.eval/ctx held)
+                                               (str "(my.program/write-branch! {:seon.fn/root \"" root "\""
+                                                    " :seon.program/identities #{'" callee "}})"))]
+              (is (= [path] (:seon.source/changed-paths written)) "the agent's write-back answers the written file"))
+            (finally (agent/release-context! held)))))
+      (finally
+        (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
+        (support/delete-root! root)))))
+
 (deftest source-shows-the-docstring-once-inside-the-source
   (let [found (program/source (db/db) 'my.program/source)]
     (is (clojure.string/includes? (:source found) "Read a declaration's source") "the source carries its docstring")
