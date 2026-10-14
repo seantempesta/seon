@@ -162,3 +162,16 @@ the inserted closers (`pending`, `dangle!`); `seon.sci.forgive/closing-quote` es
 backslashes. One new deftest `a-stray-closer-between-tokens-names-both-changes`. Branch result: all 15 tests of
 `seon.sci.forgive-test` green, the property 300 of 300 for both properties. NOT proven by `bin/seon check`; no red run id on HEAD
 beyond the REPL baseline run `223c6831f90c`. Not committed (F1).
+
+## Survival across `bin/seon start --head`: NOT TESTED
+
+Root did not restart default within 10 minutes of the READY FOR RESTART point (pid 45705 unchanged from 14:44 to 14:55 local), so
+step 3 was skipped. State to compare after any restart (agent `repl-trial`, branch `:agent-4ae8677af013`):
+
+- declaration digests: `seon.sci.forgive/scan` `ab3e99ff528d6bc8cf3cea6936a353b06437bc902f849e23d76b809e39abc1f1`,
+  `seon.sci.forgive/closing-quote` `97901271be7b9ac5afc4c2dc795a753f73aab0ad7735e3323238126967352977`,
+  test `a-stray-closer-between-tokens-names-both-changes` `4f284561cf5711ed363714d93361e4baf3cdc822dd074b6b9449c908c46c6c8f`
+  (`(my.program/diff)` as `repl-trial`; `seon.sci.forgive` namespace `bd5a13a4...`);
+- test evidence: `(my.test/run-owned {:seon.ns/name 'seon.sci.forgive-test})` should answer 15 results, none red, from runs `b33ac952a4d6` (11) and
+  `d4e008908f2a` (4), each `:seon.test/unchanged true`;
+- the three `load-string` definitions and the Var are expected to be gone (they live only in SCI), so the Var of `scan` must come from the entity.
