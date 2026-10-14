@@ -586,9 +586,10 @@
         (support/delete-root! root)))))
 
 (deftest a-merged-db-only-task-gets-a-fresh-task-file
-  ;; A task that lives only in the database (a chain `seon.task/chain!` made at
-  ;; runtime) has no task file; its merge writes one, started from an empty
-  ;; vector as a fresh namespace's file starts from empty text.
+  ;; A filed task that lives only in the database (indexed on the branch, no
+  ;; file yet) gets a task file at its merge, started from an empty vector as a
+  ;; fresh namespace's file starts from empty text. A runtime task
+  ;; (`:seon.task/created-by`, a chain's) never does (`seon.cluster.source/merge-accepted`).
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         h-conn (:seon.db/connection target)

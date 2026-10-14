@@ -970,6 +970,8 @@
         h-conn (:seon.db/connection target)
         value-entity #(entity (db/db %1) :fn "chain-value" (str "(defn chain-value {:malli/schema [:=> [:cat] :int]} [] " %2 ")"))
         _ (write! h-conn [(value-entity h-conn 1)])
+        ;; chain tasks are root's runtime tasks (`:seon.task/created-by`): a cluster's root agent
+        _ (support/transacted! h-conn (support/agent-tx (db/db h-conn) "root"))
         handle (task/task-handle 'tq.chainmerge "fix")
         chain (task/chain! {:seon.db/connection h-conn :seon.store/store store}
                            [{:seon.task/ns 'tq.chainmerge :seon.task/name "fix" :seon.task/plan "Merge the chain."}
@@ -1004,6 +1006,9 @@
                  [(:seon.fn/source (db/pull main [:seon.fn/source] [:seon.fn/sym (sym "chain-value")]))
                   (:seon.test/sym (db/pull main [:seon.test/sym] [:seon.test/sym (sym "chain-check")]))])
               "main holds the first task's code change and the last task's proof")
+          (is (= #{[:seon.fn/sym (sym "chain-value")] [:seon.test/sym (sym "chain-check")]}
+                 (:seon.program/identities (source/merge-accepted h-conn (:seon.task/merge-commit merged))))
+              "publication writes the chain's program and no chain task: chain tasks are runtime data, never in a task file")
           (is (= [:done :done :merged] (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
               "the earlier attempts keep :done and the terminal one is :merged")
           (is (= [] (filterv (set attempts) (map :seon.task/assignment ((requiring-resolve 'my.root/merge-requests) {:seon.db/db main}))))

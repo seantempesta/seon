@@ -2088,8 +2088,8 @@
 (defn merge-accepted
   "The accepted merge main's merge `commit` made, as `write-back!` takes it.
   Derived from the commits on `connection`'s store alone: the declarations whose
-  definition digest the merge changed and the tasks whose revision it changed
-  (`[:seon.task/sym ns/name]`), the main commit it was transacted onto and
+  definition digest the merge changed and the filed tasks whose revision it changed
+  (`[:seon.task/sym ns/name]`; a runtime task, `:seon.task/created-by`, is never a file's), the main commit it was transacted onto and
   the merge commit; else the `:commit-absent` refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/commit-id]
                   [:or :seon.source/accepted :seon.source/write-back-error]]}
@@ -2105,8 +2105,10 @@
         parent
         (let [datoms (vec (d/datoms (d/since (d/history after) (db/basis-t before)) :eavt))
               declared (fn/report-identities before after datoms (vec program/identity-attributes))
-              ;; a task is a declaration too: each entity whose task facts moved, by its symbol
-              sym-of (fn [e] (some #(:v (first (d/datoms % :eavt e :seon.task/sym))) [after before]))
+              ;; a task is a declaration too: each entity whose task facts moved, by its symbol, unless it is a
+              ;; runtime task (`:seon.task/created-by`, a chain's among them), which no task file declares
+              sym-of (fn [e] (when-not (seq (d/datoms after :eavt e :seon.task/created-by))
+                               (some #(:v (first (d/datoms % :eavt e :seon.task/sym))) [after before])))
               tasks (into #{} (comp (filter #(= "seon.task" (namespace (:a %)))) (map :e) (distinct) (keep sym-of)
                                     (map #(vector :seon.task/sym %)))
                           datoms)]

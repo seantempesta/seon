@@ -481,6 +481,8 @@
    (fn [connection]
      (let [store (:seon.store/store (test-support/execution-handle connection))
            context {:seon.db/connection connection :seon.store/store store}
+           ;; chain tasks are root's runtime tasks (`:seon.task/created-by`): a cluster's root agent
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
            chain! (requiring-resolve 'seon.task/chain!)
            main-branch (get-in (db/db connection) [:config :branch])
            handle #(task/task-handle 'tq.chain %)
@@ -588,6 +590,8 @@
    (fn [connection]
      (let [store (:seon.store/store (test-support/execution-handle connection))
            context {:seon.db/connection connection :seon.store/store store}
+           ;; chain tasks are root's runtime tasks (`:seon.task/created-by`): a cluster's root agent
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
            handle (task/task-handle 'tq.filed "bug")
            _ (test-support/transacted! connection
                                        (task/adopt-tasks-tx (db/db connection)

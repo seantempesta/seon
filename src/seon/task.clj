@@ -792,7 +792,8 @@
 (defn- chain-entities
   "The `tasks` of the chain whose first map names it, as the writer's maps: only the first map supplies `ns` and
   `name`, every later task is named `<first name>-<index>` (1-based) in its namespace, each takes the negative tempid
-  of its position and names the next one's as its `:seon.task/next`; the first runs and the rest are held. A map's own
+  of its position and names the next one's as its `:seon.task/next`; the first runs and the rest are held; each is
+  created by root (`:seon.task/created-by`), a runtime task no task file declares. A map's own
   `:db/id`, `:seon.task/id`, `:seon.task/sym` and `:seon.task/next` are ignored."
   {:malli/schema [:=> [:cat [:vector {:min 1} :seon.task/task-map]] [:vector :map]]}
   [tasks]
@@ -803,7 +804,9 @@
                 (cond-> (assoc (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
                                :db/id (- (inc i)) :seon.task/ns ns
                                :seon.task/name (if (zero? i) first-name (str first-name "-" (inc i)))
-                               :seon.task/execution (if (zero? i) :running :held))
+                               :seon.task/execution (if (zero? i) :running :held)
+                               ;; a chain task is runtime data, root's, never a task file's entry
+                               :seon.task/created-by [:seon.agent/id "root"])
                   (< (inc i) n) (assoc :seon.task/next (- (+ i 2))))))
           tasks)))
 
