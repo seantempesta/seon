@@ -5,7 +5,9 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
+            [rewrite-clj.zip :as z]
             [datahike.api :as d]
+            [seon.cache]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.eval]
@@ -1379,39 +1381,51 @@
          (program/shapes))
       "the shapes answered with none in hand still describe the live declarations"))
 
+(defn- with-declared-after
+  "Call `f` while the schema resources are a copy of the packaged ones whose
+  file entity schema also declares `::declared-after`: what a boot rehearsal
+  binds, a candidate archive's loader."
+  [f]
+  (let [packaged (io/file (io/resource schema.edn/default-resource))
+        root (.getAbsoluteFile (io/file "tmp" "program-test" (str (random-uuid))))
+        directory (io/file root schema.edn/default-resource)
+        edited (-> (z/of-string (slurp (io/file packaged "seon.fn.file.edn")))
+                   (z/get :seon.fn.file/file)
+                   (z/append-child [::declared-after {:optional true} :string])
+                   z/root-string)
+        loader (proxy [ClassLoader] [nil]
+                 (getResource [^String resource]
+                   (if (str/starts-with? resource schema.edn/default-resource)
+                     (let [file (io/file root resource)]
+                       (when (.exists file) (.toURL (.toURI file))))
+                     (io/resource resource))))]
+    (.mkdirs directory)
+    (doseq [^java.io.File file (.listFiles packaged)]
+      (io/copy file (io/file directory (.getName file))))
+    (spit (io/file directory "seon.fn.file.edn") edited)
+    (binding [schema.edn/*resource-loader* loader]
+      (f))))
+
 (deftest a-declaration-added-after-the-first-call-is-a-cache-miss
-  ;; THE CLASS. `shapes` cached the authored declarations in a process-level
-  ;; defonce, so an attribute declared AFTER this JVM started was stripped
-  ;; from every entity the indexer built until a restart: the runner lane
-  ;; declared :seon.test/long-ms, the analyzer lifted it, canonical-row
-  ;; dropped it, and the regression read that as "the indexer does not lift
-  ;; it" (issue
-  ;; program-shapes-cache-strips-attributes-declared-after-the-jvm-started).
-  ;; The cache key is now the resources' own stamp, so a declaration edit is
-  ;; a MISS BY CONSTRUCTION and no event has to remember to invalidate it.
+  ;; `shapes` once cached the authored declarations for the process lifetime, so an attribute
+  ;; declared later was stripped from every entity until a restart. Its key is the declarations' digest.
   (let [owned (fn [shapes]
                 (set (:seon.program/owned-attributes
                       (get shapes :seon.fn.file/relative-path))))
         before (program/shapes)
-        declared (update (schema.edn/packaged-forms) :seon.fn.file/file conj
-                         [::declared-after {:optional true} :string])
         entity {:seon.fn.file/relative-path "/probe/after-start.clj"
-             ::declared-after "carried"}]
+                ::declared-after "carried"}]
     (is (not (contains? (owned before) ::declared-after))
         "the attribute is genuinely absent from the authored declarations")
     (is (nil? (::declared-after (program/canonical-row entity)))
         "so no indexed entity carries it while it is undeclared")
-    (let [after (with-redefs [schema.edn/packaged-forms (constantly declared)
-                              schema.edn/declaration-stamp
-                              (constantly [["declared-after.edn" 1 1]])]
-                  (program/shapes))]
-      (is (contains? (owned after) ::declared-after)
-          "a changed resource stamp re-derives, without restarting the JVM")
-      (is (= entity (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) entity))
-          "and the entity built from that population carries the attribute"))
+    (with-declared-after
+      #(do (is (contains? (owned (program/shapes)) ::declared-after)
+               "changed declarations re-derive, without restarting the JVM")
+           (is (= entity (program/canonical-row entity))
+               "and the entity built from that population carries the attribute")))
     (is (= before (program/shapes))
-        "an unchanged stamp answers the same derivation, so the per-row
-         caller pays one stamp and never a resource merge")))
+        "the unchanged declarations answer the same derivation")))
 
 (deftest ^{:seon/tasks #{'seon.program/an-evaluated-namespace-keeps-its-read-source-and-call-edges}}
   indexed-and-evaluated-declarations-are-the-same-entities
@@ -1540,3 +1554,18 @@
         row (last tx)]
     (is (not (contains? row :seon.task/tasks)))
     (is (some #{[:db/retract 7 :seon.task/tasks 'my.x/t]} tx))))
+
+(deftest definition-digests-stay-cheap-after-the-packaged-population-is-reread
+  ;; A re-read of unchanged resources is a new instance of equal forms; a key naming content stays cheap.
+  (let [entity {:seon.fn/sym 'seon.cache/claim
+                :seon.fn/source "(defn claim [k w] (c/lookup k w))"
+                :seon.fn/calls #{'seon.cache/lookup}}
+        context {:requires '#{seon.cache} :aliases '{c seon.cache} :refers {} :imports {}}
+        digest #(dotimes [_ 1000] (program/definition-digest entity context))]
+    (digest)
+    (doseq [k (keys (seon.cache/retained :seon.schema.edn/packaged-population))]
+      (seon.cache/evict! :seon.schema.edn/packaged-population k))
+    (schema.edn/packaged-forms)
+    (digest)
+    (is (< (:seon.profile/ms (profile/measure digest)) 120)
+        "a thousand definition digests cost no whole-population comparison")))

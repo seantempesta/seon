@@ -363,6 +363,7 @@
     (when (directory-resource? resource)
       (validate-resource-placement! loaded))
     {::file (if (= 1 (count loaded)) (::file (first loaded)) resource)
+     ::digest (id/id declared 64)
      ::declared-forms declared
      ::forms (derive-config-forms declared)
      ::files-by-key files-by-key}))
@@ -399,23 +400,27 @@
 (def population-bytes-per-form 376)
 
 (defn- packaged-population
-  "The population the resources declare, one per resource URL in the process
-  cache. Every JVM runs a committed archive (`data/source/<sha>`), so the
-  resources on its classpath never change while it runs and the URL names
-  them. Stamping the 210 files cost 1.3 ms armed on every `packaged-forms`
-  (2026-09-26). Weighed by [[population-bytes-per-form]]."
+  "The population the resources declare, retained once per declaration digest:
+  equal resources under different URLs (archives of commits that changed no
+  schema) share one instance, so a key holding its forms compares by identity.
+  The resources at a URL never change while the JVM runs, so the URL names its
+  digest. Weighed by [[population-bytes-per-form]]."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (seon.cache/lookup ::packaged-population
-                     (str (io/resource default-resource (resource-loader)))
-                     #(* population-bytes-per-form (count (::declared-forms %)))
-                     #(resource-population default-resource)))
+  (let [weigh #(* population-bytes-per-form (count (::declared-forms %)))
+        digest (seon.cache/lookup ::packaged-digest
+                                  (str (io/resource default-resource (resource-loader)))
+                                  (constantly 64)
+                                  #(let [read (resource-population default-resource)]
+                                     (::digest (seon.cache/lookup ::packaged-population (::digest read)
+                                                                  weigh (constantly read)))))]
+    (seon.cache/lookup ::packaged-population digest weigh #(resource-population default-resource))))
 
 (defn declaration-digest
   "Stable digest of the merged schema declaration set."
   {:malli/schema [:=> [:cat] :seon.source/digest]}
   []
-  (id/id (::declared-forms (packaged-population)) 64))
+  (::digest (packaged-population)))
 
 (defn packaged-forms
   "Canonical schema forms declared by Seon's bootstrap and schema resources."

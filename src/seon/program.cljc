@@ -398,10 +398,9 @@
   {:malli/schema [:=> [:cat] :seon.program/shapes]}
   []
   #?(:clj
-     (let [forms (schema.edn/packaged-forms)]
-       (seon.cache/lookup ::authored-shapes forms
-                          #(* shape-bytes-per-family (count %))
-                          #(shapes-in (schema/declaration-projection forms))))
+     (seon.cache/lookup ::authored-shapes (schema.edn/declaration-digest)
+                        #(* shape-bytes-per-family (count %))
+                        #(shapes-in (schema/declaration-projection (schema.edn/packaged-forms))))
      :cljs (shapes-in (schema/declaration-projection (schema/registered-schemas)))))
 
 (defn shapes
@@ -509,12 +508,14 @@
                   {:qualifiers #{} :symbols #{}}
                   (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))]
     #?(:clj
-       (seon.cache/lookup
-        ::source-resolver-names (id/id [source qualifiers symbols] 64)
-        (fn [names]
-          (+ 256 (reduce (fn [bytes sym] (+ bytes 128 (* 2 (count (name sym)))))
-                         0 (concat (:qualifiers names) (:symbols names)))))
-        derive)
+       (if (and (empty? qualifiers) (empty? symbols))
+         {:qualifiers #{} :symbols #{}}
+         (seon.cache/lookup
+          ::source-resolver-names (id/id [source qualifiers symbols] 64)
+          (fn [names]
+            (+ 256 (reduce (fn [bytes sym] (+ bytes 128 (* 2 (count (name sym)))))
+                           0 (concat (:qualifiers names) (:symbols names)))))
+          derive))
        :cljs (derive))))
 
 (defn- used-resolver-context
