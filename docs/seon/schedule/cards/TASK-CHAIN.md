@@ -55,6 +55,7 @@ A task is one entity. Its members (all `:seon.task/*`):
 | `plan` (renames `intent`) | Markdown string | the plan: blocks such as `## Problem`, `## What exists`, `## Approach`, with references (§3) | content, **flowing** |
 | `instructions` | Markdown string | what this task's agent does | content, **owned** |
 | `proofs` | set of qualified deftest symbols; absent means empty, never proven | the one set that must be green for this task to be done | content, **owned** |
+| `model` (new) | a provider model name, or `:outside`; absent means the cluster's `:seon.config.ai/model` | who works this task (§2.2) | content, **owned** |
 | `next` (new) | one non-component peer task ref (cardinality one) | the task that follows; absent on the last | link |
 | `execution` | `:held :running :paused :stopped :cancelled`, Malli `:default :held` | whether it runs; root is its only writer on a chain | control |
 

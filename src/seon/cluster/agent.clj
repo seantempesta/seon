@@ -2291,6 +2291,18 @@
   (some #(when (get-in @% [:seon.agent/started agent-id]) %)
         (cons routing (vals (:seon.agent/children @routing)))))
 
+(defn started-custody
+  "The custody `evaluate-source!` takes to enter `agent-id` where its graph runs under `routing` (the cluster's
+  registry or one of its branch children, as a chain agent runs on its chain branch): the started entry's own
+  handle and registry, or nil when no graph of `agent-id` runs there."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/id]
+                  [:maybe [:map [:seon.turn.loop/cluster :map] [:seon.agent/routing :seon.agent/routing]
+                           [:seon.agent/id :seon.agent/id]]]]}
+  [routing agent-id]
+  (when-let [registry (entry-registry routing agent-id)]
+    {:seon.turn.loop/cluster (:seon.turn.loop/cluster (started registry agent-id))
+     :seon.agent/routing registry :seon.agent/id agent-id}))
+
 (defn- follow!
   "Make `agent-id`'s started graph follow the action's op.
   Pause or resume it in place (recorded on its entry), stop and join it letting

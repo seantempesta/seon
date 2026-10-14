@@ -931,8 +931,9 @@
 
 (defn from-filed
   "A filed task's chain: `filed` (a task-file entry) as the Design task, with its identity and plan, its proofs left
-  out, then the Prove template, then the Implement template carrying the entry's proofs. A plan with no `## Problem`
-  section is wrapped as one, so Design has the request to keep.
+  out, then the Prove template, then the Implement template carrying the entry's proofs; the entry's
+  `:seon.task/model`, when set, on all three. A plan with no `## Problem` section is wrapped as one, so Design has
+  the request to keep.
 
   ## Example
 
@@ -946,12 +947,15 @@
   (let [[design prove implement :as templates] (map #(template database %) ['seon.step.design/template 'seon.step.prove/template 'seon.step.implement/template])
         failure (first (filter :seon.error/at templates))
         plan (:seon.task/plan filed)
-        problem? (some #(= "problem" (:seon.ref/anchor %)) (:seon.ref/headings (ref/document (or plan ""))))]
+        problem? (some #(= "problem" (:seon.ref/anchor %)) (:seon.ref/headings (ref/document (or plan ""))))
+        ;; the entry's model is who works the whole chain: owned, it never flows, so each stage carries it
+        worked-by #(cond-> % (:seon.task/model filed) (assoc :seon.task/model (:seon.task/model filed)))]
     (or failure
-        [(cond-> (merge design (dissoc filed :seon.task/proofs))
-           (and plan (not problem?)) (assoc :seon.task/plan (str "## Problem\n\n" plan)))
-         prove
-         (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))])))
+        (mapv worked-by
+              [(cond-> (merge design (dissoc filed :seon.task/proofs))
+                 (and plan (not problem?)) (assoc :seon.task/plan (str "## Problem\n\n" plan)))
+               prove
+               (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))]))))
 
 (defn chain!
   "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch

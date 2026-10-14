@@ -2236,6 +2236,13 @@
   [database handle]
   (= :running (task/execution database handle)))
 
+(defn- outside?
+  "True when the task `handle` names on `database`, the agent's own branch, is worked from outside Seon
+  (`:seon.task/model` `:outside`, TASK-CHAIN 2.2): an agent through MCP `eval_clj` as the attempt's agent id."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
+  [database handle]
+  (= :outside (:seon.task/model (db/pull database [:seon.task/model] [:seon.task/id handle]))))
+
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose step is proved on `database`, its branch
   (`step-proved?`), no answering turn (`latest-answering-turn-t`) came after its attempt (`attempt-t`) and its step
@@ -2265,7 +2272,8 @@
   whose step is not proved on the agent's branch (`step-proved?`), or is already done there by results it found
   (`seon.context/task-done?`), is `:prove` first (`prove-turn`: proofs only, no model call; its close ends a done
   step through `end-task!`), and a red proving is its work: the next pass
-  opens the model turn that answers it (`proved-unanswered?`);
+  opens the model turn that answers it (`proved-unanswered?`), unless the task is worked from outside
+  (`:seon.task/model` `:outside`), which opens no model turn at all;
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   returned no completed/wait disposition (`continuing-reply?`), and never once the held
@@ -2324,8 +2332,9 @@
                (contains? deferred :seon.error/layer)
                (contains? deferred :seon.error/operation))
           deferred
-          ;; A :held TASK OPENS NO MODEL TURN: its wakes wait until someone sets it :running
-          (and (string? held) (attempt-running? db held))
+          ;; A :held TASK OPENS NO MODEL TURN: its wakes wait until someone sets it :running; nor does an
+          ;; :outside task, whose agent works it through the MCP entrance: its eval requests are its turns
+          (and (string? held) (attempt-running? db held) (not (outside? db held)))
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
               ;; a task whose proofs are all green continues nothing, before or after its end closes the agent

@@ -437,7 +437,8 @@
            members-of (fn [k] (into {} (m/entries (m/deref (mr/schema registry k)))))
            task (members-of :seon.task/task)
            owned (into #{} (filter #(:seon.task/owned (m/properties (mr/schema registry %)))) (keys task))]
-       (is (= #{:seon.task/instructions :seon.task/proofs} owned) "the schema property marks exactly instructions and proofs")
+       (is (= #{:seon.task/instructions :seon.task/proofs :seon.task/model} owned)
+           "the schema property marks exactly instructions, proofs and model")
        (is (contains? task :seon.task/next) "a task may link its next")
        (is (not-any? (members-of :seon.task/declaration) [:seon.task/next :seon.task/execution])
            "next and execution are never declared")))))
@@ -663,7 +664,7 @@
                                        (task/adopt-tasks-tx (db/db connection)
                                                             [{:seon.task/ns 'tq.filed :seon.task/name "bug"
                                                               :seon.task/plan "Fix the bug in `seon.task/chain!`."
-                                                              :seon.task/proofs '#{tq.filed/proof}}]
+                                                              :seon.task/proofs '#{tq.filed/proof} :seon.task/model :outside}]
                                                             #{handle} {}))
            database (db/db connection)
            filed (task/task-declaration database handle)
@@ -676,8 +677,12 @@
            "a plan with no Problem section is wrapped as one")
        (is (not (contains? (:seon.task/proofs (first maps)) 'tq.filed/proof)) "the entry's proofs are not Design's")
        (is (= '#{tq.filed/proof} (:seon.task/proofs (last maps))) "the entry's proofs are Implement's")
+       (is (= [:outside :outside :outside] (mapv :seon.task/model maps)) "the entry's model works every stage")
        (let [answer (task/chain! context maps)
              on-branch (db/branch-database (db/db connection) (:seon.chain/branch answer))]
+         (is (= [:outside :outside :outside]
+                (mapv #(:seon.task/model (db/pull on-branch [:seon.task/model] [:seon.task/id %])) (:seon.task/handles answer)))
+             "each chain task holds its model on the branch, a native keyword")
          (is (= handle (:seon.chain/first answer)) "the chain's first task is the filed task's identity")
          (is (= (:seon.task/plan (first maps)) (:seon.task/plan (pulled on-branch))) "the branch's first task carries the chain's content")
          (is (= 3 (count (:seon.task/handles answer))) "the chain answers its three tasks, linked by next")

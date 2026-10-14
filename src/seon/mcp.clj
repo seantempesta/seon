@@ -188,7 +188,9 @@
 (defn- execution
   "Where `agent-id` runs: an agent with no home branch (root) or homed on the
   cluster's own branch runs on the cluster; one homed elsewhere
-  (`:seon.agent/branch`) runs hosted on that branch; an unknown id gets a new
+  (`:seon.agent/branch`) runs hosted on that branch; one main does not know whose
+  graph runs on another branch (a chain's agent on its chain branch,
+  `seon.cluster.agent/started-custody`) is entered there; an unknown id gets a new
   branch off the cluster head (named as `acquire-context!` names an isolated
   one) and is hosted there, which records its home. A retired agent (its
   admission closed) refuses by name. Answers the custody `evaluate-source!`
@@ -200,6 +202,9 @@
         live (get-in database [:config :branch])
         entity (db/pull database [:db/id :seon.agent/branch :seon.agent/admission-closed-tx] [:seon.agent/id agent-id])
         home (:seon.agent/branch entity)
+        ;; an agent main does not know may run on another branch, as a chain's agent runs on its chain branch:
+        ;; found by id where its graph runs, entered there, never minted anew
+        running (when-not (:db/id entity) (agent/started-custody (:seon.agent/routing handle) agent-id))
         on-cluster {:seon.turn.loop/cluster handle :seon.agent/routing (:seon.agent/routing handle)
                     :seon.agent/id agent-id}]
     (cond
@@ -208,6 +213,7 @@
       (refused (str "Agent " agent-id " is retired: its admission closed. Name another agent id.")
                :seon.agent/admission-closed-tx :seon.agent/id agent-id)
       (and (:db/id entity) (or (nil? home) (= live home))) on-cluster
+      running running
       :else
       (let [branch (or home (keyword (str "agent-" (id/id))))
             registered (when-not home

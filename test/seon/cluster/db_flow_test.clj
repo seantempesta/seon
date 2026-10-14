@@ -13,6 +13,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.wake :as wake]
+            [seon.mcp :as mcp]
             [seon.merge :as merge]
             [seon.batch]
             [seon.config :as config]
@@ -28,6 +29,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
             [seon.test]
+            [seon.test.runner]
             [seon.test-support :as test-support]
             [seon.turn :as turn]
             [seon.turn.world :as world]))
@@ -796,6 +798,86 @@
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
+
+(deftest ^{:seon.test/long "One two-task chain world: task one's start test run over three db<->flow passes, one eval request through the MCP entrance, its test step and done end, then the advance."
+           :seon.test/long-ms 30000}
+  an-outside-task-takes-no-model-turn-and-is-worked-through-the-repl
+  ;; TASK-CHAIN S3f-2 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Run a task: the model is per task): an
+  ;; `:outside` task's agent is started as any task's, but its graph takes no model turn over repeated passes; the MCP
+  ;; entrance enters it by id on its chain branch (minting no agent or branch), its eval request's test step runs the
+  ;; task's proof, and its done rule ends it and advances the chain
+  (binding [*space* "tq.chainoutside"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                 :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                 :seon.config.ai/model "fixture-provider"}})
+          (let [calls (atom 0)
+                handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                (swap! calls inc)
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting for root.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")} :seon.task/model :outside}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored"
+                                     :seon.task/proofs #{(proof "u")} :seon.task/model :outside}])
+                branch (:seon.chain/branch chain)
+                [one two] (:seon.task/handles chain)
+                key-one (id/id [one 1])
+                agent-id (str "attempt/" key-one)
+                head #(db/branch-database (db/db connection) branch)
+                agent-branches (fn [] (set (filter #(str/starts-with? (name %) "agent-") (registry/branches store))))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (seq (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "c"))) ::proved))
+                    "its start's test step runs its proof on the chain branch")
+                (pass! handle routing)
+                (pass! handle routing)
+                (is (= 0 @calls) "an :outside task's agent made no model call over repeated passes")
+                (is (zero? (model-turns (db/db on-branch) agent-id)) "and took no model turn")
+                (let [before (agent-branches)
+                      custody (#'mcp/execution {:seon.turn.loop/cluster handle :seon.store/store store} agent-id nil)
+                      answer (agent/evaluate-source!
+                              (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
+                                     :seon.cluster.reply/text
+                                     (str "(in-ns '" *space* "-proofs)\n"
+                                          "(clojure.test/deftest proves-c (clojure.test/is (= 1 1)))")))]
+                  (is (identical? (get-in @routing [:seon.agent/children branch]) (:seon.agent/routing custody))
+                      "the MCP entrance enters the chain agent where its graph runs, on its chain branch")
+                  (is (some? (db/q '[:find ?r . :in $ ?run ?id :where [?r :seon.turn/id ?run] [?r :seon.turn/agent ?g]
+                                     [?g :seon.agent/id ?id]]
+                                   (db/db on-branch) (:seon.turn/id answer) agent-id))
+                      "its eval request is the chain agent's run, recorded on the chain branch")
+                  (is (nil? (db/pull (db/db connection) [:db/id] [:seon.agent/id agent-id])) "main mints no agent of its id")
+                  (is (= before (agent-branches)) "and no branch")
+                  (is (= [0] (mapv :seon.test/fail-count (seon.test.runner/latest-results (db/db on-branch) [(proof "c")])))
+                      "its test step records the task's proof green on the chain branch"))
+                (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                         [?a :seon.task.attempt/end ?e]]
+                                                       (db/db on-branch) key-one)
+                                        ::outside-ended))
+                    "its done rule ends the task done")
+                (pass! handle routing)
+                (is (= :running (:seon.task/execution (db/pull (head) [:seon.task/execution] [:seon.task/id two])))
+                    "root advances the chain to its next task")
+                (is (= 0 @calls) "still with no model call"))
+              (finally
+                (release-chain! routing store branch))))))))))
 
 (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would

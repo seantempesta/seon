@@ -25,7 +25,7 @@
                [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/step {:optional true} :seon.task/step]
                [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
                [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
-               [:seon.task/proofs {:optional true} :seon.task/proofs]]
+               [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.cluster
               :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
@@ -39,7 +39,7 @@
         [:seon.task/landed {:optional true} :seon.task/landed] [:seon.task/landed-git {:optional true} :seon.task/landed-git]
         [:seon.task/refusal {:optional true} :seon.task/refusal] [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
-        [:seon.task/proofs {:optional true} :seon.task/proofs]
+        [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]
         [:seon.task/execution {:optional true} :seon.task/execution]
         [:seon.task/next {:optional true} :seon.task/next]
         [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
@@ -51,7 +51,9 @@
  :needs [:set {:seon.db/index true :seon.wake/starts true
                :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
          :seon.db/ref]
- :owned [:boolean {:description "On a content member of a task: the chain's template sets it and an agent may change it, but it never flows to the next task (TASK-CHAIN 1). Exactly instructions and proofs carry it; every other content member flows."}]
+ :owned [:boolean {:description "On a content member of a task: the chain's template sets it and an agent may change it, but it never flows to the next task (TASK-CHAIN 1). Exactly instructions, proofs and model carry it; every other content member flows."}]
+ :model [:or {:seon.task/owned true :description "Who works this task (TASK-CHAIN 2.2): a provider model name, or :outside, an agent outside Seon (a Claude Code agent through MCP eval_clj as the attempt's agent id on the chain branch), whose graph takes no model turn (seon.turn/next-agent-work). Absent: the cluster's :seon.config.ai/model. A name is stored but not yet called (seon.task/a-task-model-name-reaches-its-agents-provider-request). Owned, never flowing."}
+         [:string {:min 1}] [:= :outside]]
  :next [:and {:seon.db/index true :description "The one task that follows this one in its chain: a peer reference, never a component, absent on the last task. Written by the chain's writer, never declared in a task file; tasks linked by next are a chain."} :seon.db/ref]
  :execution [:enum {:seon.db/index true :seon.wake/starts true :default :held
                     :description "The task's execution (runtime-follows-db §3), inherited down :seon.task/children: a task runs under its own, else its nearest ancestor's (seon.task/execution). Ingestion and create! write :held on a new task with no parent, so one :running fact on a subject launches its steps, and a step's own value keeps it apart. :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
@@ -162,7 +164,7 @@
  :task-map [:map {:description "One task of a chain as seon.task/chain! takes it: ordinary task members, a template's owned members merged with a plan. Only the first map's ns and name are read; identity, tempid and next are derived by position."}
             [:seon.task/ns {:optional true} :seon.task/ns] [:seon.task/name {:optional true} :seon.task/name]
             [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
-            [:seon.task/proofs {:optional true} :seon.task/proofs]]
+            [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]]
  :chain-context [:map {:description "What creating a chain writes through: main's connection, which holds the chain fact, and the store whose branches hold the chain's branch."}
                  [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]
  :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's."}
