@@ -1,20 +1,16 @@
 (ns seon.transaction-result-test
   (:require [clojure.test :refer [deftest is]]
-            [seon.config :as config]
             [seon.db :as db]
             [seon.test-support :as support]))
 
 (deftest agent-transactions-return-resolved-changes-and-preserve-refusals
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection
-                    :seon.boot/cluster-name "transaction-result"})
-     (is (:db-after (db/transact! connection
-                                 [[:db/add "cluster" :seon.cluster/name "transaction-result"]])))
+     (support/seed-cluster! connection "transaction-result")
      (let [ctx (support/fork-cluster-ctx connection "transaction-result")
            created (support/agent-value
                     ctx
-                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/plan \"Verify\"} {:seon.agent/id \"reporter\" :seon.agent/branch :db :seon.agent/admission-closed-tx \"datomic.tx\"}])")
+                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/sym (quote fixture.tasks/report) :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/plan \"Verify\"} {:seon.agent/id \"reporter\" :seon.agent/branch :db :seon.agent/admission-closed-tx \"datomic.tx\"}])")
            changes (:seon.db/datoms created)
            transaction (:seon.db/tx created)]
        (is (= #{:seon.db/tx :seon.db/datoms} (set (keys created))))
