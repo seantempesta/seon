@@ -12,8 +12,8 @@
             [seon.test-support :as support]))
 
 (def ^:private finished 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol)
-(def ^:private interrupted 'seon.id-test/data-shape-and-explicit-length-determine-identity)
-(def ^:private red 'seon.id-test/printed-identity-ignores-the-callers-print-bindings)
+(def ^:private interrupted 'seon.id-test/a-host-object-has-no-identity)
+(def ^:private red 'seon.id-test/map-and-set-order-never-changes-an-identity)
 
 (defn- outcome [test-symbol fails]
   {:seon.test/sym test-symbol :seon.test.member/began? true :seon.test.member/ended? true
@@ -87,7 +87,7 @@
            unknown (first (by-symbol interrupted))
            found (problems/problems database {})]
        (is (m/validate :seon.test/latest-results latest registry))
-       (is (= [finished interrupted red] (sort (keys by-symbol))) "never-run is absent")
+       (is (= #{finished interrupted red} (set (keys by-symbol))) "never-run is absent")
        (is (= [1 0 0] (map (first (by-symbol finished)) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))
        (is (= 1 (:seon.test/fail-count (first (by-symbol red)))))
        (is (m/validate :seon.test/result-unknown unknown registry))
