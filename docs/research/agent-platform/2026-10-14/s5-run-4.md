@@ -321,3 +321,205 @@ at its producer (`seon.schema/call-with-projection-state`).
   with Prove's form, `(seon.sci.eval/context-namespace ctx 'user)` inside `test-support/with-database`.
 - The bin/seon-hook PostToolUse check blames `eval_clj` for another lane's unbalanced working file.
 - Thread count after a chain stage's `:done` (premortem Finding 4, part 2): verify per graph.
+
+## Run 4b: third Implement attempt
+
+Lane `s5-run-4b` acted as root, 12:27-12:36 UTC. Default pid 77190 booted at 12:26:13 from `data/source/14e881c6ba3c…`
+(HEAD `14e881c6b`), with `:seon.boot/missing-layers []`. Fixes live since run 4: 11f8c3263 (a cycle-closing require
+answers its refusal), 14e881c6b (a rerun's block shows the earlier attempts and the branch's changed declarations),
+3b900522d, 65f4c292e and 064809752.
+
+**Broken first.**
+
+0. **Attempt 3 stalled on Seon's own error and never ended.** The run stopped there; nothing merged.
+   - At turn 31 the agent evaluated these forms in `user`, as the new cycle refusal advises ("Require it from a
+     namespace it does not reach, such as user or a test namespace"):
+
+     ```clojure
+     (in-ns 'user)
+     (require '[seon.test-support :as test-support] '[seon.config :as config] '[seon.error :as error] '[seon.db :as db])
+     (test-support/with-database
+       (fn [connection]
+         (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "npe-probe"})
+         (let [database (db/db connection)]
+           (try (count (error/nearest-calls database 'str/subs nil))
+                (catch Throwable t {:message (.getMessage t) :stack …})))))
+     ```
+
+   - The third form evaluated, and its value class was `java.lang.Integer`. Its stored `:seon.eval/private` holds 18
+     platform dynamic Vars: `clojure.test/*test-out*`, `sci.ctx-store/*ctx*`, `seon.db/*conn*`, `seon.db/*open*`,
+     `seon.schema/*projection*`, `seon.sci.eval/*expected-identities*` and others. None of them is the agent's.
+   - Turn 32 (`137720212e95`) opened at 12:30:00.002 and closed at 12:30:00.193 with no model call.
+   - Fault `ec89d9a4fbaf…` (signature `ec89d9a4fbaf7c32bbbc593a07680696907c5c0dc7ea7311a434c6ac569d3af7`) is on the
+     chain branch:
+     - type `:seon.turn.loop/phase-failed-error`, failed step `seon.repl/def-note`, caller
+       `seon.repl/response-entries (repl.clj:209)`;
+     - message: "seon.repl/def-note refused argument 0 `private`: expected a set, got a vector. Fix: Supply a set.";
+     - `:seon.error/expected` `[:maybe [:set :qualified-symbol]]`. The `:seon.error/offending` value is a vector
+       wrapping the vector shown next.
+   - The stored value, as the reply's pull returns it: `:seon.eval/private` `[clojure.test/*test-out*
+     sci.ctx-store/*ctx* sci.lang/*expansion-observer* sci.lang/*write-observer* seon.batch/*world* seon.db/*conn*
+     seon.db/*open* seon.db/*read-database* seon.db/*read-evidence-sink* seon.db/*receipt*
+     seon.effect/*request-context* seon.print/*budget* seon.schema/*candidate-forms-overlay* seon.schema/*packaged-forms*
+     seon.schema/*projection* seon.schema/*projection-state* seon.schema/*registration-admission-source*
+     seon.sci.eval/*expected-identities*]`.
+     - `seon.turn.batch` produces a set (`(into #{} …)`, schema `[:set :qualified-symbol]`).
+     - The reply reader pulls the attribute back (`seon.repl/cost-attributes` names it), and a cardinality-many pull
+       answers a vector.
+   - After the fault the attempt's turn proc sat idle in the thread dump. The attempt had no
+     `:seon.task.attempt/end`, so root's pass saw nothing to bail, and 8 turns were left. Watched until 12:33:26.
+   - This breaks three rules:
+     - the REPL path is total: a later stage's failure is attached beside the value, and here it ended the agent's
+       loop instead;
+     - every end that is not done bails to root (§2.7): this one wrote no end, so the attempt stays open
+       indefinitely;
+     - the eval's private set is classified wrong: it holds the platform's dynamic Vars.
+   - Owners: `seon.repl/response-entries` and its pull (to fix the vector), the turn loop's phase failure (to give the
+     attempt an end), and the private classification in `seon.turn.batch`.
+   - On root's instruction, at 12:35:24 I closed it with `(my.root/close! {:seon.task/assignment "68d331fe623f"
+     :seon.task/reason "stalled: reply-stage :seon.turn.loop/phase-failed-error, fault ec89d9a4fbaf, no end
+     written"})`. It answered `:outcome :closed` in 49 ms; its reply's test step on main cost 2.11 GB and 943 ms. At
+     12:35:34 the attempt read `:closed`, the task `:held`, `my.root/merge-requests` `[]`, and the chain fact was
+     kept. `close!` wrote no problem task. The chain was not run a fourth time.
+   - **Hand act 1** (mechanism: a failed reply stage ends the attempt). Today it needs root's `close!`.
+1. **`my.root/merge-requests` lists the running attempt as a merge request.** It offers `(my.root/merge! …)` and
+   `(my.root/close! …)` for `68d331fe623f` while that attempt is still working. With the task `:held`, the list
+   was `[]`.
+2. **Root's own path, again:**
+   - `my.root/run!`'s reply ran a test step on main: 1.61 GB, 759 ms, with the stale
+     `:seon.test/identity-unresolved` refusal on `seon.cluster.merge-test/a-refined-task-is-written-to-its-task-file-and-survives-re-ingestion`.
+   - A JVM-mode ClassCastException still gives no form position. Twice in my own watch forms: a Keyword joined as an
+     entity id, and a ref map sorted.
+   - The Design and Prove tasks still read `:seon.task/execution :running` after their attempts ended `:done`.
+
+**Run.**
+
+- 12:27:4x: chain `:chain-f1f6dc8e6652` and its chain fact were present. Task `c12a57408f49` was `:held`, with
+  attempts `5ef1a6f0140d` and `e4eeaddcbaf3` both `:capped`/`:closed`.
+- 12:27:51: `bin/seon config apply default tmp/s5-config.edn`. Verified with `seon.config/effective`: model
+  `"deepseek-flash"`, no-provider absent, 40, relaunches 0, max-running 4. The apply reported
+  `converged? false` (C3).
+- 12:28:02.8: `(my.root/run! {:seon.task/assigned "c12a57408f49"})` in SCI as root. It answered `:running` in 86 ms.
+- 12:28:04.1: attempt 3 `68d331fe623f` (agent `attempt/68d331fe623f`) made its first model call.
+- Turns 1-14, to about 12:29:15: re-read the plan, the proof and the helpers it found under `:seon.context/changes`.
+  Turn 1 already read `alias-target` and `core-namespace` by name.
+- Turns 15-30: fixed `alias-target`'s wrong `:qualified-symbol` result contract and wired the widened candidates into
+  `seon.error/nearest-calls`. New branch declarations: `seon.error/alias-candidates` and
+  `seon.error/candidate-calling-form`. The proof then went from an empty `nearest` to a NullPointerException
+  ("Cannot invoke clojure.lang.IObj.withMeta") in `library-calling-form`.
+- Turn 31: the probe above. Turn 32 hit the stall.
+- 12:33:21: `bin/seon config apply default tmp/s5-restore.edn`. Verified at 12:33:26: no-provider `true`, 100,
+  relaunches 2. Root was messaged.
+
+**Watch, JVM-wide** (cumulative allocated bytes of live threads; the count falls when threads end):
+
+| At (UTC) | Implement turns | Threads | Allocated | Heap |
+|---|---|---|---|---|
+| 12:27:5x (before) | – | 47 | 42.4 GB | 1.97 GB |
+| 12:28:1x | 1 | 52 | 47.5 GB | 1.32 GB |
+| ~12:29:2x | 14 | 55 | 58.8 GB | 2.30 GB |
+| ~12:29:5x | 23 | 54 | 77.1 GB | 2.46 GB |
+| ~12:30:1x | 32 (stalled) | 52 | 112.6 GB | 2.38 GB |
+| 12:31:23 | 32 | 50 | 107.9 GB | 1.16 GB |
+
+About 65 GB went over 31 calls, roughly 2.1 GB per call. After the stall the JVM was idle: 133 MB and 380 ms of CPU
+over 35 s. There was no livelock.
+
+**Grading form** (JVM mode; the agent's id is read from the attempt):
+
+```clojure
+(let [main (seon.db/db (seon.cluster.boot/connection "default"))
+      head (seon.db/branch-database main :chain-f1f6dc8e6652)
+      aid  "attempt/68d331fe623f"]
+  (try
+    (let [turns (seon.db/q '[:find ?turn (pull ?att [:seon.ai.usage/prompt-tokens :seon.ai.usage/cached-tokens
+                                                     :seon.ai.usage/completion-tokens])
+                             :in $ ?aid :where [?ag :seon.agent/id ?aid] [?turn :seon.turn/agent ?ag]
+                             [?turn :seon.turn/attempts ?att]] head aid)
+          sum #(transduce (keep (comp % second)) + 0 turns)
+          evals (seon.db/q '[:find ?e ?err :in $ ?aid :where [?ag :seon.agent/id ?aid] [?turn :seon.turn/agent ?ag]
+                             [?e :seon.cluster.eval/run ?turn] [(get-else $ ?e :seon.cluster.eval/error :none) ?err]]
+                           head aid)]
+      {:calls (count (into #{} (map first) turns))
+       :prompt (sum :seon.ai.usage/prompt-tokens) :cached (sum :seon.ai.usage/cached-tokens)
+       :completion (sum :seon.ai.usage/completion-tokens)
+       :evals (count evals) :errors (count (remove #(= :none (second %)) evals))})
+    (finally (seon.cluster.source/release! [head]))))
+;; => {:calls 31, :prompt 727316, :cached 521600, :completion 7488, :evals 95, :errors 6}
+```
+
+| Task | Model calls | Prompt tokens (cached) | Completion | Wall time | Agent forms | End |
+|---|---|---|---|---|---|---|
+| Implement, attempt 3 (`68d331fe623f`) | 31 | 727,316 (521,600) | 7,488 | 1 min 56 s of work (12:28:04.1 to 12:30:00.2), then stalled | 95 evaluations, 6 errors | no end: stalled on `seon.repl/def-note` (Broken first 0); `:closed` by root at 12:35:24 |
+
+Errors in attempt 3:
+
+| Count | Error |
+|---|---|
+| 3 | Not admitted. One is a cycle `seon.error` → `my.task`, one a cycle `seon.error` → `seon.test-support`, both now answered with their way out. The third is "`seon.error/candidate-calling-form` has a bare nilable return". |
+| 1 | `seon.error/alias-target` refused its result, `clojure.string` (not namespaced) |
+| 1 | `seon.error/alias-target` given a non-database first argument |
+| 1 | `my.program/search` given a non-database first argument |
+
+Calls averaged about 23k prompt tokens, 72% cached.
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | S5 run 4 (D, P, I1, I2) | **Run 4 + 4b (adds I3)** |
+|---|---|---|---|
+| Model calls | 38 | 126 | **157** (18 + 28 + 40 + 40 + 31) |
+| Prompt tokens | 570k (310k cached) | 4.26M (3.38M cached) | **4.99M (3.90M cached)** |
+| Completion tokens | – | 38.1k | **45.6k** |
+| Hand acts after `chain!` | 6 | 0 | **1**: `my.root/close!` of the stalled attempt (mechanism: a failed reply stage ends the attempt). Root's two `my.root/run!` are the designed resume (§2.7), not hand acts. |
+| Furthest point | Implement (write-back conflict) | Implement capped twice | **Implement wired the producer; proof still red (NPE); stalled on a reply-stage contract error** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** `merge-chains!`/`finish-chains!` are still untested live. |
+
+The S5 pass criteria are unchanged from run 4: no merge, no `clojure.core/subs` in the reply, the table not green.
+The post-merge check, `(str/subs "abc" 1)` in a fresh agent, was not reachable.
+
+**Context, judged.** The block was read by JVM mode at about turn 19, not captured before the first call. It is the
+raw `seon.context/current-state` on the branch, in estimated tokens (pr-str characters / 4), so it is not the AI view
+run 4 measured.
+
+| task | chain | proofs | step | attempts | changes | must-reads | cost | turns | total |
+|---|---|---|---|---|---|---|---|---|---|
+| 1,011 | 48 | 596 | 169 | 79 | 560 | 5,108 | 162 | 22 | ~7,750 |
+
+- **Changes helped.** It lists `alias-target`, `core-namespace`, `library-names` and `library-calling-form` with their
+  docs, and `dbv`, `config-expectation-present-generator`, `testing-dump` and `:tmp/probe` as junk.
+  - Turn 1 read the helpers by name. By turn 10 the agent stated "the before-steps built `alias-target`,
+    `core-namespace`, `library-names`, `library-calling-form`, but `nearest-calls` was never widened".
+  - Attempts 1 and 2 never reached that change. This attempt changed `nearest-calls` within about 20 calls.
+  - The section shows `seon.error/testing-dump` as `:unresolved` ("Nothing of this name … exists on your branch"),
+    though it is listed as changed. The unmapped name should read as a deletion.
+- **Attempts helped only a little** (79 tokens). It says two attempts ended `:capped` at 40 calls, and the agent
+  budgeted around that ("I have 28 turns left and 2 capped attempts already. Let me be efficient").
+  - It carries no attempt id and nothing of what the earlier attempts learned (their last comment or next step).
+  - Their last comments would have saved about 10 calls of re-reading: the agent said "I have the full picture now"
+    in about 8 consecutive turns.
+- **The junk was not removed.** The agent never unmapped `dbv`, `config-expectation-present-generator` or
+  `:tmp/probe`. Nothing in the block says junk would merge or be refused, so a merge would have carried or refused it.
+  Not judged, because nothing merged.
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact. Task `c12a57408f49` is `:held`, and attempt `68d331fe623f` is
+  `:closed` with root's reason (it has no `:seon.task.attempt/end`).
+- Branch declarations: earlier ones plus `seon.error/alias-candidates`, `seon.error/candidate-calling-form` and a
+  changed `seon.error/nearest-calls`.
+- Fault `ec89d9a4fbaf…` is on the branch.
+- JVM `user` host helpers: `s5r4b-conn`, `s5r4b-watch`, `s5r4b-jvm`, `s5r4b-agent`, `s5r4b-a3`, `s5r4b-turns`.
+- Two SCI evals as root, both `my.root/*` tools: `run!` and `close!`.
+- Config was restored and verified.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** a reply-stage contract error ends an agent's loop with no attempt end. The fix
+  belongs at the producer: `seon.repl/response-entries` reads a cardinality-many pull as a vector, and the turn
+  loop's phase failure must give the attempt an end (§2.7). Reproduce with the turn 31 forms above in `user` on a
+  disposable agent.
+- `:seon.eval/private` classifies the platform's dynamic Vars, which a fixture binds, as the agent's private Vars.
+  Owner: `seon.turn.batch`.
+- `my.root/merge-requests` lists a running attempt (Broken first 1).
+- `seon.context/attempts` should carry each earlier attempt's last comment or next step.
+- `seon.context/changes` should show an unmapped name as a deletion, not `:unresolved`.
