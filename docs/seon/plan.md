@@ -78,6 +78,19 @@ macros and interpreted callers reaching them; an unchanged init runs once per co
 and macros rebuild fully until counted frequent; an init's refusal arrives in the defining reply. Phases 1-3 (lane
 overlay-impl, Opus) before S3a; phase 4 (defining reply) with S3a-2.
 
+**Working order (root, 2026-10-14 15:05Z; owner: "methodically work through the problems in the optimal order").**
+(1) The REPL path works end to end, because our lanes depend on it: write-back (lane writeback-fix: the
+`write-branch!` NPE, refusals, dropped comments, partial install), test-step verdicts (lane teststep-verdict: a proof
+red while the reply said green; a stale pre-edit result), the reader's `\u2026` literal (lane reader-charlit); trial
+`../research/agent-platform/2026-10-14/repl-trial.md` (a283068f1). (2) Cache sharing, phases of
+`truths-hybrid.md` (579d9a774; root took its three recommendations, owner may veto: derivations see no evaluation
+binding, at `seon.cache/lookup`; speculative projections live only for their operation; when one identity records two
+outcomes the newest terminated outcome answers and a problem task is filed): phase 1 projections one per content
+(proj-content-key), phase 3 reds retained (with b1-test-reuse), then phase 2 speculative projections and phase 4
+bindings at lookup, then 8, 5, 6, 7. (3) TASK-CHAIN S1c-2, S1d-2, then S2 and S3a; overlay phase 3 (overlay-p3).
+(4) Performance: boot double analysis (boot-dup-analysis), reconciliation (reconcile-writer), the test step's
+2.6-7.3 GB per `defn` (Astra, after teststep-verdict names it).
+
 **Dogfood the REPL path (owner 2026-10-14).** Our lanes work REPL-first by default for ordinary function changes
 (`defn` on their own branch, `my.program/write-branch!`, `bin/lane commit --branch-evidence`); when a step fails they
 apply the edit by hand and file the friction as a task, so the path Seon agents use gets smooth by being used. Trial and
