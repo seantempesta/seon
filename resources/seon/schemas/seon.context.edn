@@ -23,7 +23,7 @@
                :subject [:and {:description "The task whose :seon.task/children holds the held task: the owner of the goal its chain shares."} :seon.task/sym]
                :before [:vector {:description "The steps the held task needs, merged onto main before its branch forked when each shows :merged."} :seon.context/step-before]
                :after [:vector {:description "The steps that need the held task, each with its instructions."} :seon.context/step-after]
-               :chain [:map {:description "The chain the held task is a step of: its subject, the steps before it and the steps after it; absent when it has none. Producer: seon.context/chain."}
+               :chain [:map {:description "The chain the held task is a task of: the tasks before it and after it along :seon.task/next, in chain order; absent when nothing links to or from it. Producer: seon.context/chain."}
                        [:seon.context/subject {:optional true} :seon.context/subject]
                        [:seon.context/before {:optional true} :seon.context/before]
                        [:seon.context/after {:optional true} :seon.context/after]]
@@ -55,13 +55,14 @@
                           [:seon.context/proof-status :seon.context/proof-status]
                           [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
                :head [:map-of {:description "The tests a step is judged by, as its branch's head holds them."} :seon.test/sym :seon.context/observed]
-               :step-observation [:map {:description "What one step is judged by: its obligations, its head (for display), the agent's branch as the candidate, main's head and the results judgment's input over the branch's own recorded results. Producer: seon.context/step-observation; consumer: seon.context/step-status."}
+               :step-observation [:map {:description "What one step is judged by: its obligations, its product (the next task's proofs), its head (for display), the agent's branch as the candidate, main's head and the done rule's input over the branch's own recorded results. Producer: seon.context/step-observation; consumer: seon.context/step-status."}
                                   [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                                   [:seon.task/product :seon.task/product]
                                   [:seon.context/head :seon.context/head]
+                                  [:seon.context/chained {:optional true :description "True when :seon.task/next links the task into a chain: seon.context/step-status judges it by seon.cluster.source/done-refusals, any other by seon.cluster.source/results-verdict."} :boolean]
                                   [:seon.context/candidate :seon.db/database-value] [:seon.context/main :seon.db/database-value]
                                   [:seon.source/judged {:optional true :description "Absent while the branch has recorded no run to judge."} :seon.source/judged]]
-               :step-status [:map {:description "A step judged by the one results judgment (seon.cluster.source/results-verdict): done exactly when it refuses nothing. Producer: seon.context/step-status."}
+               :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals) for a chain's task, else by its merge's preview (seon.cluster.source/results-verdict): done exactly when it refuses nothing. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :working]]
                              [:seon.source/refusals :seon.source/refusals]]
                :step-verdict [:and {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
@@ -71,12 +72,12 @@
                             [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
                :start [:map {:description "Where a step begins: the form that enters the held task's namespace and the namespace of each test its instructions cite. Producer: seon.context/step-start."}
                        [:seon.render/operations [:vector :seon.render/read-form]]]
-               :step [:map {:description "The held task's step as the one results judgment previews it (seon.context/step-status): its kind and status, a working step's refusals, then the tests that keep it from done. Producer: seon.context/step-section."}
+               :step [:map {:description "The held task's step as the done rule judges it (seon.context/step-status): its kind and status, a working step's done refusals, then the tests other than its proofs that keep it from done. Producer: seon.context/step-section."}
                       [:seon.task/step {:optional true} :seon.task/step] [:seon.task/status [:enum :done :working]]
-                      [:seon.source/refusals {:optional true :description "A working step's refusals: what its merge would refuse, as data."} :seon.source/refusals]
+                      [:seon.source/refusals {:optional true :description "A working step's refusals (seon.context/step-status), as data."} :seon.source/refusals]
                       [:seon.context/start {:optional true :description "A step's first forms to run: the (in-ns) of the held task's namespace and of the tests its instructions cite. Producer: seon.context/step-start."} :seon.context/start]
-                      [:seon.context/red-tests {:optional true :description "The judged tests not green, each with its status and, when red, its failing assertions."} [:vector :seon.context/test-entry]]
-                      [:seon.context/product-tests {:optional true :description "A Prove step's product: its successors' proofs it owes, each red by a failing assertion or an error its body raised when done."} [:vector :seon.context/test-entry]]]
+                      [:seon.context/red-tests {:optional true :description "The judged tests not green other than its proofs (shown under proofs), each with its status and, when red, its failing assertions."} [:vector :seon.context/test-entry]]
+                      [:seon.context/product-tests {:optional true :description "The proofs of the task after it (its :seon.task/next) that are not its own, each with its status: a Prove task writes them red."} [:vector :seon.context/test-entry]]]
                :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
                         [:seon.context/items :my.message/inbox]
                         [:seon.render/operations [:vector :seon.render/read-form]]]

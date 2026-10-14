@@ -158,14 +158,15 @@
                :seon.context/proof-list entries}))))))
 
 (defn step-status
-  "The status of a step from its `observation` (`step-observation`): the one results judgment
-  (`seon.cluster.source/results-verdict`) over the agent's branch as the candidate, main's head and the branch's
-  own recorded results, `:done` exactly when it refuses nothing, else `:working`, with its refusals; `:working`
-  with none while the branch has recorded no run to judge. A preview of what the merge judges over its run
-  (`seon.cluster.source/merge-verdict`); reads only."
+  "The status of a step from its `observation` (`step-observation`): for a chain's task the done rule
+  (`seon.cluster.source/done-refusals`) over the agent's branch and the judged input, for any other task the
+  preview of its merge (`seon.cluster.source/results-verdict`, until TASK-CHAIN S3e deletes that model); `:done`
+  exactly when it refuses nothing, else `:working`, with its refusals; `:working` with none while the branch has
+  recorded no run to judge. Reads only."
   {:malli/schema [:=> [:cat :seon.context/step-observation] :seon.context/step-status]}
-  [{candidate :seon.context/candidate main :seon.context/main judged :seon.source/judged}]
-  (let [refusals (when judged (source/results-verdict candidate main judged))]
+  [{candidate :seon.context/candidate main :seon.context/main chained? :seon.context/chained judged :seon.source/judged}]
+  (let [refusals (when judged
+                   (if chained? (source/done-refusals candidate judged) (source/results-verdict candidate main judged)))]
     {:seon.task/status (if (and judged (empty? refusals)) :done :working) :seon.source/refusals (vec refusals)}))
 
 (defn held-task
@@ -229,27 +230,28 @@
           (seq moved) (assoc :seon.context/merged moved)))))
 
 (defn- chain
-  "The chain the held task `id` is a step of, on `database`: its subject (the task whose `:seon.task/children`
-  holds it), the steps before it (its `:seon.task/needs`, `step-before`) and the steps after it (the tasks that
-  need it, each with its kind and instructions); nil when it has none of the three."
+  "The chain the held task `id` is a task of, on `database`: the tasks before it and after it along
+  `:seon.task/next`, in chain order, those before as `step-before` shows them, those after each with its kind and
+  instructions; nil when nothing links to it or from it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :nil :seon.context/chain :seon.error/value]]}
   [database id]
-  (let [subject (db/q '[:find ?s . :in $ ?id :where [?t :seon.task/id ?id] [?p :seon.task/children ?t] [?p :seon.task/sym ?s]]
-                      database id)
-        needs (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/needs ?n] [?n :seon.task/sym ?s]]
-                    database id)
-        successors (db/q '[:find [?s ...] :in $ ?id :where [?t :seon.task/id ?id] [?n :seon.task/needs ?t] [?n :seon.task/sym ?s]]
-                         database id)
-        read-error (some #(when (:seon.error/at %) %) [subject needs successors])
-        before (when-not read-error (mapv #(step-before database %) (sort needs)))
-        after (when-not read-error
-                (mapv #(db/pull database [:seon.task/sym :seon.task/step :seon.task/instructions] [:seon.task/sym %])
-                      (sort successors)))]
-    (or read-error
+  (let [previous (fn [handle] (db/q '[:find ?p . :in $ ?id :where [?t :seon.task/id ?id] [?e :seon.task/next ?t] [?e :seon.task/id ?p]]
+                                    database handle))
+        ;; walk back to the first task, then forward along next (`seon.task/chain-handles`)
+        first-handle (loop [handle id]
+                       (let [p (previous handle)]
+                         (cond (map? p) p
+                               (string? p) (recur p)
+                               :else handle)))
+        handles (when (string? first-handle) (task/chain-handles database first-handle))
+        [before [_ & after]] (split-with #(not= id %) handles)
+        sym-of #(:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id %]))
+        before (mapv #(step-before database (sym-of %)) before)
+        after (mapv #(db/pull database [:seon.task/sym :seon.task/step :seon.task/instructions] [:seon.task/id %]) after)]
+    (or (when (map? first-handle) first-handle)
         (some #(when (:seon.error/at %) %) (concat before after))
-        (when (or subject (seq before) (seq after))
+        (when (or (seq before) (seq after))
           (cond-> {}
-            subject (assoc :seon.context/subject subject)
             (seq before) (assoc :seon.context/before before)
             (seq after) (assoc :seon.context/after after))))))
 
@@ -297,49 +299,64 @@
                                (= (get digests (:seon.test/sym %)) (:seon.test.member/reach-digest %))))
               latest))))
 
-(defn- held-red
-  "Of `tests`, those `main` holds red at its own current reach there (`current-results`): a test main never ran
-  at that reach is unknown, never red."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]] [:or [:set :seon.test/sym] :seon.error/value]]}
-  [main tests]
-  (let [held (if (seq tests) (current-results main tests) [])]
-    (if (:seon.error/at held) held (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) held))))
-
 (defn step-observation
   "The observation the held task `sym`'s step is judged by on `database`, the agent's branch: its obligations
-  over its assigned basis (`seon.task/assigned-obligations`), the branch as the candidate, main's head
-  (`seon.task/main-head`; the branch itself on main) and the results judgment's input: its proofs (a Prove step's
-  product among them), the tests reaching the functions it changed since its merge base (`change`,
-  `seon.fn/gate-sets`), their results at their current reach on the branch (`current-results`) and the reds main
-  holds at its own reach (`held-red`), naming the newest run they came from. A branch that recorded no run has
-  nothing to judge, so it carries no judgment input. The head shows each judged test's status."
+  over its assigned basis (`seon.task/assigned-obligations`), whether a chain links it (`:seon.task/next`), its
+  product (the proofs of the task after it and, for a Prove step, the tests its successors are tagged with), the
+  branch as the candidate, main's head (`seon.task/main-head`; the branch itself on main) and the judgment's input:
+  its proofs, the tests reaching the functions it changed since its merge base (`change`, `seon.fn/gate-sets`),
+  their results at their current reach on the branch (`current-results`) and the newest run they came from. A
+  chain's task adds the tests the branch defines or changes, passes its product as `:seon.source/next-proofs` and
+  the tests main holds green as `:seon.source/green-on-target` (`seon.cluster.source/done-refusals`); any other
+  joins its product to its proofs and passes the reds main holds as `:seon.source/red-on-target`
+  (`seon.cluster.source/results-verdict`). A branch that recorded no run has nothing to judge, so it carries no
+  judgment input. The head shows each judged test's status."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym]
                   [:or :seon.context/step-observation :seon.error/value]]}
   [database agent-id sym]
   (let [owed (task/assigned-obligations database sym)
         main (or (task/main-head database) database)
+        following (when-not (:seon.error/at owed)
+                    (db/pull database [{:seon.task/next [:seon.task/proofs]}] [:seon.task/sym sym]))
+        ;; a task linked by next is a chain's, judged by the done rule; any other by its merge's preview until
+        ;; TASK-CHAIN S3e deletes the subject/needs model
+        previous (db/q '[:find ?p . :in $ ?s :where [?t :seon.task/sym ?s] [?p :seon.task/next ?t]] database sym)
+        chained? (or (some? (:seon.task/next following)) (some? previous))
+        product (cond-> (set (get-in following [:seon.task/next :seon.task/proofs]))
+                  (= :prove (:seon.task/step owed)) (into (:seon.task/product owed)))
         delta (when-not (:seon.error/at owed) (change database agent-id))
-        fns (when (set? delta) (into #{} (keep (fn [[a f]] (when (= :seon.fn/sym a) f))) delta))
+        of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
+        fns (of :seon.fn/sym)
         reached (if (seq fns) (fn/gate-sets {:seon.db/db database :seon.fn/seeds fns}) [])
-        product (when (= :prove (:seon.task/step owed)) (:seon.task/product owed))
-        proofs (into (set (:seon.task/proofs owed)) product)
-        members (when (sequential? reached) (into proofs reached))
+        proofs (set (:seon.task/proofs owed))
+        members (when (sequential? reached)
+                  (cond-> (-> proofs (into product) (into reached)) chained? (into (of :seon.test/sym))))
         results (when members (current-results database members))
-        reds (when (vector? results) (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results))
-        on-target (when reds (held-red main reds))
+        held (when (vector? results) (if (identical? main database) results (current-results main members)))
+        on-target (when (vector? held)
+                    (if chained?
+                      (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0))) (map :seon.test/sym)) held)
+                      (let [reds (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results)]
+                        (into #{} (comp (filter runner/red-result?) (map :seon.test/sym) (filter reds)) held))))
         head (when members (head-entries database members))
         ;; the run the refusals name: the newest its results came from, else the newest the branch holds
         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
         run-id (when (vector? results)
                  (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
-                     (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] database))))]
-    (or (some #(when (:seon.error/at %) %) [owed delta reached results on-target head])
-        (cond-> (assoc owed :seon.context/head head :seon.context/candidate database :seon.context/main main)
-          run-id (assoc :seon.source/judged (cond-> {:seon.source/members members :seon.source/results results
-                                                     :seon.task/proofs proofs :seon.program/identities delta
-                                                     :seon.test.run/id run-id :seon.test.run/branch (get-in database [:config :branch])}
-                                              (seq product) (assoc :seon.task/product product)
-                                              (seq on-target) (assoc :seon.source/red-on-target on-target)))))))
+                     (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] database))))
+        judged (when run-id
+                 (if chained?
+                   (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
+                     (seq product) (assoc :seon.source/next-proofs product)
+                     (seq on-target) (assoc :seon.source/green-on-target on-target))
+                   (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs (into proofs product)}
+                     (seq product) (assoc :seon.task/product product)
+                     (seq on-target) (assoc :seon.source/red-on-target on-target))))]
+    (or (some #(when (:seon.error/at %) %) [owed following previous delta reached results held head])
+        (cond-> (assoc owed :seon.task/product product :seon.context/chained chained?
+                       :seon.context/head head :seon.context/candidate database :seon.context/main main)
+          judged (assoc :seon.source/judged (assoc judged :seon.program/identities delta :seon.test.run/id run-id
+                                                   :seon.test.run/branch (get-in database [:config :branch])))))))
 
 (defn step-verdict
   "The held task's step on `database`, the agent's branch, judged by `step-status` over `step-observation`: the
@@ -355,24 +372,26 @@
 
 (defn step-section
   "The step section of `verdict` (`step-verdict`), as the agent reads it: the step's kind and status, a working
-  step's refusals (what its merge would refuse, as data), then each judged test the refusals name red or unknown,
-  and for a Prove step the product it owes its successors, each with its status and, when red, its failing
-  assertions. Lists are absent when empty."
+  step's done refusals (`seon.cluster.source/done-refusals`, as data), then each other test they name red or
+  unknown, and the product it owes the task after it (that task's proofs), each with its status and, when red,
+  its failing assertions. A proof is listed under the proofs section only, so each test shows once. Lists are
+  absent when empty."
   {:malli/schema [:=> [:cat :seon.context/step-verdict] :seon.context/step]}
-  [{step :seon.task/step product :seon.task/product head :seon.context/head status :seon.task/status
+  [{step :seon.task/step own :seon.task/proofs product :seon.task/product head :seon.context/head status :seon.task/status
     refusals :seon.source/refusals}]
   (let [entries (fn [tests] (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) (sort tests)))
-        product (when (= :prove step) product)
-        red (into #{} (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (remove (set product))) refusals)]
+        shown-proofs (set own)
+        owed (remove shown-proofs product)
+        red (into #{} (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (remove (into shown-proofs product))) refusals)]
     (cond-> {:seon.task/status status}
       step (assoc :seon.task/step step)
       (seq refusals) (assoc :seon.source/refusals refusals)
       (seq red) (assoc :seon.context/red-tests (entries red))
-      (seq product) (assoc :seon.context/product-tests (entries product)))))
+      (seq owed) (assoc :seon.context/product-tests (entries owed)))))
 
 (defn task-done?
   "True when the step of the task `agent-id` holds is done on `database`, the agent's branch (`step-verdict`): its
-  merge would accept, so the turn loop opens no model turn for it."
+  done rule refuses nothing (`seon.cluster.source/done-refusals`), so the turn loop opens no model turn for it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (= :done (:seon.task/status (step-verdict database agent-id))))

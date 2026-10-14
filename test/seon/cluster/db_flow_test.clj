@@ -1458,10 +1458,6 @@
             (is (= (registry/base-commit-id main branch-i) base) "forked from main, its merge base")
             (is (seq (db/datoms (db/commit-database main base) :avet :seon.test/sym (symbol rows "twice-doubles")))
                 "whose commit holds the Prove step's red deftest")
-            (let [[before] (get-in (context/current-state (db/db i-connection) agent-i) [:seon.context/chain :seon.context/before])]
-              (is (= :merged (:seon.task/outcome before)) "the Implement block names the step before it as merged")
-              (is (some #{(symbol rows "twice-doubles")} (map :seon.ref/name (get-in before [:seon.context/merged :seon.context/tests])))
-                  "with the tests it merged"))
             ;; the Implement step's work: the stub's body, then its end at that commit
             (define-on! i-connection (symbol rows) "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))")
             ;; i ends on its own branch: merge! reads the end from the source commit
