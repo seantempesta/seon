@@ -176,3 +176,36 @@ error in run 39aa091d2489 (66.215 s; operator-check-20261014T163419.614.edn). Th
 14 passing integration assertions plus 24 passing assertions in the seven CLI/parser tests. This
 pre-existing integration red is excluded by var from the final commit check; no test was deleted or
 relaxed. The foreign root/branch boundary is outside this lane's files.
+
+## Final proposal and acceptance boundary
+
+CLI fix committed as 3b48555eb. Run 19adf9604939: seven tests, 24 assertions, zero failures/errors,
+5.127 s test request; whole check 70.289 s, queue 0.004 s, seed 3.114 s, prepare 4.475 s,
+boot 48.671 s (readiness 39.520 s), adoption 1.709 s, test client 5.227 s. Candidate lint:
+8.848 s, zero errors, 1,689 warnings. A concurrent committed clj-kondo pin change made the operator
+use its existing dependency-change path: the candidate booted/tested its own archive, without
+attempting to reload a different dependency into default. This is not a parent/change performance
+comparison. Operator source grew by 32 lines, regressions by 30; neither bin/lane nor bin/seon changed.
+The installed bin/seon selects the running JVM's operator archive: RESTART NEEDED to expose the fix
+there. The changed Babashka entry point and exact candidate were tested; this lane never restarted default.
+
+Recommend a bounded profile/prototype at `seon.cluster/full-source-refresh!` during the boot
+source/current interval, using the same pinned dependencies, template basis, changed files and tests
+for parent and candidate. Preserve the publisher's existing digest comparison; remove measured
+repeated preparation at its producer. The measured 20.354 s interval is the **maximum opportunity**
+on the drifted fresh check, not a promised gain. The same-base check's readiness was only 6.191 s,
+so this cannot be quoted as a universal per-check saving. The expected gain is the portion of that
+interval the profile proves independent of changed inputs; it remains unmeasured.
+
+Do not start by deleting the parallel default rehearsal for a claimed wall-time win: in the fresh
+74.820 s check it completed after 32.939 s, before the queued throwaway path. Its 23.365 s publication
+cost is real CPU work, but removing it alone has no demonstrated critical-path saving. Exact-archive
+JVM reuse has a larger conditional ceiling (about 35 s for seed, prepare and boot in the isolated
+45.734 s check), but only on repeat hits; measure hit frequency and retain the existing test-isolation
+semantics before choosing it. A changed dependency needs its own JVM regardless.
+
+No performance implementation was built or committed. Parent/change end-to-end measurement,
+including allocation and positive test evidence on the identical probe, remains the acceptance
+condition. The silent 30 s check failure also remains open: its original exact argv/form is missing,
+and neither the warm budget probe nor the cold 100-identity request reproduced it. No retry,
+timeout bump, extra slot, or speculative parsing/transport check was added by this lane.
