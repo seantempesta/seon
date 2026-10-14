@@ -1124,7 +1124,8 @@
                                       (or (not= :named policy) (named? entry)
                                           (requested-reached (first entry)))))) tests)
             _ (doseq [symbol identities :when (not (get eligible symbol))]
-                (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
+                (refuse! :seon.test/identity-unresolved (str "The requested test has no definition on the branch this run reads (the basis and branch are in the data): "
+                                                                "define it there, or name one the branch defines.") symbol))
             ;; A named change's reaching test the eligibility rule drops is
             ;; missing coverage: it refuses by name, never an empty verdict.
             ;; Only the caller's own named changes judge it: a change observed since
@@ -2162,10 +2163,12 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
                   [:or [:vector :seon.test/sym] :seon.test/selection-error :seon.error/value]]}
   [execution recording]
-  (let [changed (branch-changes execution recording)]
+  (let [changed (branch-changes execution recording)
+        database (db/db (:seon.db/connection execution))]
     (if (:seon.error/at changed)
       changed
-      (into [] (keep (fn [[a v]] (when (= :seon.test/sym a) v))) changed))))
+      ;; a removed test is in the delta as a change; it is no test to run
+      (into [] (keep (fn [[a v]] (when (and (= :seon.test/sym a) (seq (db/datoms database :avet :seon.test/sym v))) v))) changed))))
 
 (defn request-changes
   "What one eval request changed, in print order; empty when it defined nothing.

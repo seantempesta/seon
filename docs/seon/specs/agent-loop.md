@@ -421,7 +421,7 @@ reaching the eval request's change, then the task's own proofs last, as one requ
 with that eval request. The step is serial: the next submission or model call starts after it, so the next block or reply
 shows real results and nothing is ever `:running`. A test whose recorded result still holds for the program it now
 reaches is answered from that record, so an eval request that changed nothing costs lookups. A `my.test/check` naming
-definitions an earlier form of the same eval request made answers `:my.test/after-recording`: those tests run in this
+definitions an earlier form of the same eval request made answers an error naming them (not recorded yet): the tests reaching them run in this
 step, right after the one recording transaction, and their results are in the same reply; nothing tests uncommitted
 values and the recording stays one transaction. A change no test reaches answers `:seon.test/unreached` with no
 `:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (the cluster dial `:seon.config.test/step-time-limit-ms`, default 10 s): the task's proofs last; when the bound fires, a started test var runs to its actual exit and records, and the

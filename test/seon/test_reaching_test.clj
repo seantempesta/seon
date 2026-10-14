@@ -481,6 +481,8 @@
             (is (.contains (sut/host-text database test-symbol) "unknown")))
           (let [result (run-in-fixture test-var connection)]
             (is (= :seon.test/identity-unresolved (:seon.test/selection-refusal result)))
+            (is (clojure.string/includes? (:seon.error/message result) "no definition on the branch")
+                "the refusal says why the test is not eligible")
             (is (not (.exists marker)) "an unknown test executed nothing"))
           (finally
             (support/delete-recursively! marker)
@@ -694,6 +696,22 @@
            "unchanged program revisions require no declaration pulls"))
      (define! branch '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
      (is (= [[:seon.fn/sym 'reach.fixture/b]] (sut/changes child branch)) "only its own definition")
+     (finally (agent/release-context! child)))))))
+
+(deftest a-test-the-branch-removed-is-not-one-of-its-tests
+ ;; A removed test is a change of the branch's program, not a test to run:
+ ;; naming it as one makes the run refuse it unresolved.
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (define! connection '[:seon.test/sym reach.fixture/red-test] "(deftest red-test (is (= 2 (b 1))))")
+   (let [child (agent/acquire-context! (support/execution-handle connection) nil {:seon.agent/isolate? true})
+         branch (:seon.db/connection child)]
+    (try
+     (define! branch '[:seon.test/sym reach.fixture/other-test] "(deftest other-test (is (= 2 (b 1))))")
+     (support/transacted! branch [[:db/retractEntity [:seon.test/sym 'reach.fixture/red-test]]])
+     (is (= ['reach.fixture/other-test] (sut/branch-tests child branch))
+         "the test it defined, not the one it removed")
      (finally (agent/release-context! child)))))))
 
 (defn- namespace-with-aliases

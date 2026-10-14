@@ -51,9 +51,9 @@
   runs them again instead of answering recorded results. `:seon.test/passed?`
   is true only when every reaching test has green evidence. Failure data
   names the test and its claim. A name an earlier form of this same request
-  defined has no facts until the request records: the answer lists it under
-  `:my.test/after-recording`, and the pass's test step runs its tests right
-  after recording, in the same reply.
+  defined has no facts until the request records: the answer is an error
+  naming it, never an empty result, and the pass's test step runs its tests
+  right after recording, in the same reply.
 
   ## Example
 
@@ -61,18 +61,21 @@
   (my.test/check {:seon.test/changed ['my.turn/wait]})
   ```"
   {:malli/schema [:=> [:cat :my.test/check-request]
-                  [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
-                   :seon.error/value]]}
+                  [:or :seon.test/run-result :my.test/unreached-result :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection defined :seon.batch/defined :as request}]
   (let [tests (some-> (:seon.test/identities request) sort vec)
         named (or tests (:seon.test/changed request))
         after (filterv (or defined #{}) named)
-        now (vec (remove (set after) named))
-        [changed tests] (if tests [nil now] [now nil])
+        [changed tests] (if tests [nil named] [named nil])
         rerun? (true? (:seon.test/rerun? request))]
-    (cond (empty? after) (check-now context connection changed tests rerun?)
-          (empty? now) {:my.test/after-recording after}
-          :else (assoc (check-now context connection changed tests rerun?) :my.test/after-recording after))))
+    (if (empty? after)
+      (check-now context connection changed tests rerun?)
+      (seon.error.refusal/diagnostic
+       (java.util.Date.) :my.test/check 'my.test/check
+       {:seon.error/message (str "The named definitions were made earlier in this request and are not recorded yet, "
+                                 "so nothing ran for them: the test step runs the tests reaching them right after "
+                                 "this request records, and their results are in this reply's tests.")
+        :seon.error/offending after}))))
 
 (defn check-platform
   "Prove my branch's host-bound change in a JVM loaded from it and record the

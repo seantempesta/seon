@@ -51,7 +51,7 @@
        (is (seq (:seon.test/results named)) "the reused red is listed, not only counted")
        (is (seq (:seon.test.failure/reports (first (:seon.test/results named)))) "with its failure reports")))))
 
-(deftest a-check-naming-a-definition-of-its-own-request-runs-it-after-recording
+(deftest a-check-naming-a-definition-of-its-own-request-answers-not-recorded-yet-and-runs-it-after-recording
   (support/with-running-agent
    (fn [running agent-id _]
      (let [namespace-name (str "my.after" (id/id))
@@ -62,7 +62,8 @@
                                " (my.test/check {:seon.test/changed '[" f "]})")
                           agent-id running)
            tests (some :seon.turn.loop/tests replies)]
-       (is (= {:my.test/after-recording [f]} (:seon.repl/value (nth replies 3))))
+       (is (= [f] (:seon.error/offending (:seon.repl/value (nth replies 3))))
+           "a check naming a definition not recorded yet answers an error naming it, never an empty success")
        (is (= [(symbol namespace-name "f-test")] (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/red]))
            "the test step ran the reaching test after recording, in the same reply")))))
 
