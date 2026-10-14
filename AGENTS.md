@@ -190,20 +190,20 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    ledger: a change need not delete what it adds, feature for feature. Write the simplest correct form of what is
    needed; when the code grows, name what it lets go elsewhere and plan that deletion. Large additions still start
    with the smaller alternative considered, and net deletion never excuses needless machinery.
-4. **Pick the model by the work; every lane proves its slice** (owner, 2026-10-12, from a day of measured outcomes).
-   - **Haiku gathers and verifies; it never judges alone.** Digs before a design round (prior attempts, the code
-     path, rulings, edge cases, library seams); a **pre-brief before every Opus or Sonnet phase** (every caller, test,
-     quoted symbol and schema reference of what the phase changes or deletes, the reds on HEAD, the prior notes and the
-     file collisions — it caught a deletion that would have stopped every chain); inventories; red triage from stored
-     runs by the commit that changed the behavior; **flake hunting** (run a suspect test alone several times at the
-     suspect commits before anyone designs a fix — a "Datahike bug" was a flaky fixture); the **performance sentinel**
-     after each restart (`script/seon/sentinel.clj` against its last baseline). Haiku never makes SCI requests as root
-     on default (they write test runs to main): JVM mode or throwaway checks only. Its output is evidence a stronger
-     model or a test confirms; it does not pick tasks or decide on judgement.
-   - **Sonnet** does clearly specified work: implements a phase whose design and red proof are written, mechanical
-     fixes and sweeps, renames, filing and retiring tasks, applying patches, narrow checks, and running the central
-     round. When it cannot find the cause or a clearly correct fix in about fifteen minutes, it stops with what it
-     measured.
+4. **Pick the model by the work; every lane proves its slice** (owner, 2026-10-12 and 10-14, by measured outcomes).
+   - **Haiku gathers and verifies; it never judges alone.** Digs before a design round (prior attempts, the code path,
+     rulings, edge cases, library seams); a **pre-brief before every Opus or Sonnet phase** (every caller, test,
+     quoted symbol and schema reference of what the phase changes or deletes, the reds on HEAD, the prior notes and
+     the file collisions); inventories; red triage from stored runs by the commit that changed the behavior; **flake
+     hunting** (run a suspect test alone several times at the suspect commits before anyone designs a fix); the
+     **performance sentinel** after each restart (`script/seon/sentinel.clj` against its last baseline). Haiku never
+     makes SCI requests as root on default (they write test runs to main): JVM mode or throwaway checks only. Its
+     output is evidence, verified against the code or a test before use; it does not pick tasks or decide on
+     judgement.
+   - **Sonnet** does clearly specified work and REPL prototypes (measured 2026-10-14: 3.5 of 4 REPL prototype questions,
+     Haiku 1): implements a phase whose design and red proof are written, mechanical fixes and sweeps, renames,
+     filing and retiring tasks, applying patches, narrow checks, and running the central round. When it cannot find
+     the cause or a clearly correct fix in about fifteen minutes, it stops with what it measured.
    - **Opus** takes the hard problems: the semantics of the one REPL path (eval request, evaluation, render,
      evidence), the writer, the test runner, boot-critical code, design gaps a check found, root causes nobody has
      isolated, and one of the two independent plans of a design round; it designs by dogfooding (alternatives tried at
@@ -214,6 +214,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
    - **Fable** writes the hybrid of a design round (the tie-break between the two plans, which it did not write) and
      the periodic audit of how planning and execution are going. Never revisions, fixes or implementation: a check's
      failures go to Opus (design) or Sonnet (mechanical).
+   - **Live runs: no paid Claude API.** DeepSeek product agents are the measured run; Claude Code agents act as Seon
+     agents through MCP to judge whether each task's generated context is complete.
    - **Count before designing.** Before choosing between design options, measure how often the case occurs in the
      code (a design for multimethods was stopped when `src` turned out to hold none): the owner prefers the simple
      general rule over modeling a rare construct.
@@ -263,8 +265,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
   JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
   boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from `d/branches`; retention
-  GC reclaims its commits without per-branch cleanup. A finished agent's branch is deleted once its task is done or
-  given back and its merge request is closed, so its history and blobs can be collected.
+  GC reclaims its commits without per-branch cleanup. A chain's branch is retired once its one merge publishes or root
+  abandons it, so its history and blobs can be collected; a bailed chain keeps its branch for root.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
@@ -285,31 +287,29 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   the platform: compiled (host-bound) code, the evaluator, printer and test runner included, keeps running as
   compiled and working on every branch, and sees a change only after merge and reload; what the branch evaluates
   from source sees its definitions. Compute host-bound status per declaration, never from a hand list of namespaces.
-- **An agent's context** is its SCI context; its task selects the branch it checks out: the live cluster head or its
-  own branch.
-  Every agent, filesystem agents on their own named branches included, uses the one REPL entrance. Private defs,
-  atoms and objects survive program changes advanced in place at idle boundaries; each eval request reacquires from
-  the branch head, reusing content-valid derivations.
+- **An agent's context** is its SCI context; its task selects the branch it checks out: its chain's branch (a new agent
+  per task, in turn), or for root the live cluster head. Every agent, filesystem agents on their own named branches
+  included, uses the one REPL entrance. Private defs, atoms and objects survive program changes advanced in place at
+  idle boundaries; each eval request reacquires from the branch head, reusing content-valid derivations.
 - **Reload.** A reload is `require :reload` for changed namespaces and their dependents. It goes entities → load →
   instrument → record and waits for no one. Stability comes from the checked-out branch: work that overlaps a reload
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and instrumentation converge; never call an unchanged entity healthy.
   Ordinary clusters keep their program; selected development clusters reload explicitly.
-- **Merge is a root task.** An agent writes no merge request: a done branch is merged by root's `db<->flow`, whose gate takes the
-  proofs from the assignment's task (`seon.task/obligations`) and requires no test its change broke red on its source
-  branch; the merge request is the assignment. Root's tools live in `my.root`
-  (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use git's words: a merge request is
-  reviewed, then merged (`:merged`) or closed with a reason (`:closed`); root reads the diff before it merges until
-  criteria for automatic merges are written. Root works it through the ordinary REPL holding both sides — a
-  merge branch forked from the target branch (main) and a fork of the agent's SCI context on its source branch — with
-  easy tools to move data between them, and chooses exactly what to take by identity from the diff value (since the merge base; ours is the
-  target, theirs the source); the task never lists what to merge. `merge!` commits only when every test on the merge
-  branch is green (the proofs, the tests reaching the change and whatever root chose to run, recorded as evidence); a
-  test already red on main stops it for root. Conflicts stay unmerged on the merge branch for repair. Norms run in
-  their listed order. The writer checks the touched entities' digests; only root's merge advances main, and the
-  agent's branch is deleted when its merge request closes. Local green never implies shared acceptance.
+- **Merge is a root task.** An agent writes no merge request. When a chain's last task is done
+  (`seon.cluster.source/done-refusals`, the one done rule), root's `db<->flow` merges the chain branch to main once, the
+  terminal attempt as its source (installed until S3b-1: one merge request per assignment). Root's tools live in
+  `my.root` (`instructions`, `merge-requests`, `merge!`, `close!`, `ended`; the reconciler launches agents) and use
+  git's words: a merge request is merged (`:merged`) or closed with a reason (`:closed`). `merge!` takes the whole delta
+  since the merge base and commits only when it is green: the last task's proofs, every test the branch defines or
+  changes, every reaching test and whatever root chose to run, contracts complete, recorded as evidence; a test already
+  red on main stops it for root. Conflicts stay unmerged on the merge branch, which root repairs at the ordinary REPL
+  holding both sides (the merge branch forked from main and a fork of the agent's SCI context on the source branch; ours
+  is the target, theirs the source), moving data between them by identity from the diff value. Norms run in their listed
+  order. The writer checks the touched entities' digests; only root's merge advances main. Local green never implies
+  shared acceptance.
 - **Write-back** uses the same checks, checks file bases, stages exact-span changes and reindexes to prove equivalent
-  declarations before installation, task entries included: a merged task is written into its task file.
+  declarations before installation. The merge never writes chain tasks into task files.
 
 ## Data and contracts
 
@@ -321,22 +321,20 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   missing render is not a fix. Choose each relationship deliberately: component, optional or required peer ref, identity
   value, or an edge the recording transaction moves; a statement about a living entity is a ref, an observed name is a value; a component
   is validated as its whole owning value on each write, so size trees by what each write owns.
-- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent holds its own
-  branch and its own SCI fork, and nothing else: it writes only its branch, never main or another branch, and never
-  loads code into the platform JVM. That is what lets many agents run at once safely. Its tracked facts (task
-  refinements, children, its end, sent messages) and its code reach main only through its one merge request, whose
-  contents are the derived diff since its merge base: root's `db<->flow`, woken by the branch's listen route,
-  auto-merges the rule-trusted parts it owns as they change, and everything else waits in that merge request for
-  root's review (git's untrusted-contributor model: an agent never pushes). Only root acts cluster-wide: it holds
-  main, and it auto-merges, merges, starts and stops agents and loads code. Root and an agent differ only by
-  the branch they hold. **Agents transact facts; root reacts.** An agent never performs an effect that reaches main
-  or another agent: it writes its end, refinements, outgoing messages and merge request as facts on its own branch,
-  and root's `db<->flow`, woken by that branch's listen route, executes everything that affects main or other agents
-  (auto-merge, message delivery, stopping it, starting its successors, problem tasks). Effects local to its compartment
-  (model calls, its own evaluation, its own tests in a fork of its SCI context) stay its own. Within its compartment an agent may make serious changes, first-party code included: the
-  immutable database and rollback are the safety net. What each kind of entrant receives (database value, connection,
-  branch, SCI fork, agent id, task, capabilities) and where its writes go is declared once in the owning spec,
-  never implied.
+- **Agents are compartments; root acts cluster-wide** (owner, 2026-10-12). A non-root agent holds its chain's branch and
+  its own SCI context, and nothing else: it writes only that branch, never main or another branch, and never loads code
+  into the platform JVM. That is what lets many agents run at once safely. Its tracked facts (task updates, its end,
+  sent messages) and its code reach main only through its chain's one merge, whose contents are the derived diff since
+  the merge base (git's untrusted-contributor model: an agent never pushes). Only root acts cluster-wide: it holds main,
+  and it merges, starts and stops agents and loads code. Root and an agent differ only by the branch they hold. **Agents
+  transact facts; root reacts.** An agent never performs an effect that reaches main or another agent: it writes its
+  end, task updates and outgoing messages as facts on its branch, and root's `db<->flow`, woken by that branch's listen
+  route, executes everything that affects main or other agents (advancing the chain, the final merge, message delivery,
+  stopping it, starting the next agent, problem tasks). Effects local to its compartment (model calls, its own
+  evaluation, its own tests in a fork of its SCI context) stay its own. Within its compartment an agent may make serious
+  changes, first-party code included: the immutable database and rollback are the safety net. What each kind of entrant
+  receives (database value, connection, branch, SCI fork, agent id, task, capabilities) and where its writes go is
+  declared once in the owning spec, never implied.
 - **Pass the evaluation's bindings explicitly.** Carry the database or connection, the registry, render profile, proc
   and recording inputs, including profiling and test ownership. The checked-out branch elides only the agent's
   db/conn; it authorizes no other ambient service.
@@ -354,10 +352,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   See the [data guide](docs/seon/architecture/data-modeling-guide.md).
 - **Decide at the authority.** Derive at the writer or pass its decision; validate a pre-read's basis there if it
   could change. Mirrors are derived, drift-checked or explicitly historical, never silently current state.
-- **Declare facts at their producer.** Search the registry before adding a key. Use fully namespaced keys, one
-  schema per identity and `seon.id`; identities are minted by their owner (a task's handle by ingestion), never
-  hand-typed; no name guessing, text parsing or invented entity kinds. Production regex needs
-  owner permission (ordinary `rg` searches do not). Enums describe real bounded states or dependency grammar.
+- **Declare facts at their producer.** Search the registry before adding a key. Use fully namespaced keys, one schema
+  per identity and `seon.id`; identities are minted by their owner (a task's handle by the one task writer), never
+  hand-typed; no name guessing, text parsing or invented entity kinds. Production regex needs owner permission (ordinary
+  `rg` searches do not). Enums describe real bounded states or dependency grammar.
 - **Preserve native values.** Absence is no key, never stored nil; symbols stay Datahike symbols, not strings
   converted at each reader. Prefer `find` or `get` with a sentinel; `contains?` tests vector indices and also finds
   nil-valued map keys.
@@ -391,48 +389,47 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   functions are back-filled as generated tasks (`seon.contracts/task`, the [contracts guide](docs/seon/architecture/contracts-guide.md)),
   skipping those with a pending deletion task or no live use.
   A new or changed function without a complete contract: the edit hook refuses it; the REPL admits it with a
-  warning beside its value that grows as the agent's uncontracted definitions accumulate; the merge check refuses
-  a merge request that carries one.
+  warning beside its value that grows as the agent's uncontracted definitions accumulate; the done rule refuses a
+  task that leaves one, and the merge refuses a chain that carries one.
 - **Keep entry policy separate from merge.** Schema and test entry default to `:gate`, refusing before evaluation;
   explicit `:warn` admits experiments with declared findings. A missing function contract is never refused at
   the REPL: the value returns with the growing warning above. Preserve malformed authored contracts as data; never
   instrument them or substitute stale wrappers. Instrument every valid contract: invalid inputs prevent entry, invalid outputs
   refuse. Entry policy never relaxes merge acceptance.
 - **Documentation is data.** A docstring says briefly what the function returns; Markdown headings (Examples, Edge
-  cases, Errors, Known issues) only on public `my.*` docstrings; cross-cutting knowledge in Markdown pages. A
-  backticked span reading as one fully qualified symbol or keyword is a reference; a task's is `ns/task-name`, its
-  identity derived from namespace and name. A definition or test names its tasks with `:seon/tasks` metadata (on a
-  deftest, `^{…}` before the name); the deftests naming a task are its success tests; `:seon/tasks` holds
-  `ns/task-name` symbols. Target: the index resolves backticked references into the subject's context and reports one
-  resolving to nothing as a problem on that var. No dates,
-  measurements, history or `file:line` in source: costs are profile evidence. Known issues reference their task.
-  Never author what the call graph already derives.
+  cases, Errors, Known issues) only on public `my.*` docstrings; cross-cutting knowledge in Markdown pages. A backticked
+  span reading as one fully qualified symbol or keyword is a reference; a task's is `ns/task-name`, its identity derived
+  from namespace and name. A definition cites its tasks by reference in its docstring; a task's proofs are its
+  `:seon.task/proofs` field, never metadata on a test (`:seon/tasks` tags are installed until S2c-2). Target: the index
+  resolves backticked references into the subject's context and reports one resolving to nothing as a problem on that
+  var. No dates, measurements, history or `file:line` in source: costs are profile evidence. Known issues reference
+  their task. Never author what the call graph already derives.
 - **The right context is the product.** The goal: every agent, ours included, works a task from the context Seon
   generates at the REPL (its current-state block, then `doc`, `source` and its references, one evaluation each), and
-  that context is complete and correct. References everywhere (task intents, Markdown docs, docstrings) follow one
+  that context is complete and correct. References everywhere (task plans, help, Markdown docs, docstrings) follow one
   rule and go through one resolver; every tool that pulls them in must do it well. When context is missing, wrong,
   noisy, slow or misleading (an unresolved reference, a stale line, `passed? false` with nothing run, a reply full of
   noise), fix it at its producer if it takes about fifteen minutes, otherwise file a task on that producer with the
   exact form and reply. Never work around bad context silently.
-- **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
-  the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
-  name; the task is `ns/name`), `:seon.task/intent` (what must become true, short, with its references inline) and
-  optional `:seon.task/needs`; its identity is `seon.id/id` over `[ns name]`. A chain is a subject with step
-  `:seon.task/children` in one file: the subject declares the intent (the goal), each step its `:seon.task/step` and
-  `:seon.task/instructions` (its own work), and a step's task is `clojure.core/merge` of both down the children, its
-  own keys last (`seon.task/effective`); one `:running` on the subject launches it. The writer derives
-  `:seon.task/references` (the qualified symbols intent and instructions cite) for queries; it is never authored. Its proofs are the deftests carrying `ns/name` in
-  `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a case to an existing table test; write
-  a new deftest only for a behavior no test covers; a task already green proves nothing; at merge root keeps a new
-  test only if it guards a new behavior class.
-  References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
-  e.g. `` `malli.core/validator` ``), a schema a backticked fully qualified keyword, any other file a relative path
-  whose first segment names its base (the checkout, or `reference-code/<project>` at its pinned revision) with
-  `#heading` anchors. Never write a file or line for code: they are derived from the Var or the analysis. A reference
-  never points into gitignored `tmp/`. Ingestion reports an unresolved reference as a problem on the task. Retire a
-  task in the commit that deletes its subject or makes it moot. Write the intent typed: the fully qualified symbols
-  and keywords the work creates, changes and calls, each backticked inline; prose naming only the
-  behavior costs the agent its calls searching for the owner (bench E1, `cards/README-bench.md` Results).
+- **Write tasks as data an agent can be handed.** A task is one entity
+  ([TASK-CHAIN](docs/seon/schedule/cards/TASK-CHAIN.md) §1): `:seon.task/ns` and `:seon.task/name` (the task is
+  `ns/name`), `:seon.task/plan` (Markdown: what must become true, with its references inline; `:seon.task/intent` until
+  S1a), `:seon.task/instructions` (its own work), `:seon.task/proofs` (the deftests that must be green for it to be
+  done) and `:seon.task/next`. A declared task lives in `resources/seon/tasks/<ns>.edn`; chain tasks are runtime data. A
+  chain is a vector of plain task maps (a template merged with a plan, `seon.task/template`) that `seon.task/chain!`
+  writes in one transaction on its own branch, linked by `next`; a single task is a chain of one. The plan flows to the
+  next task at each advance; `instructions` and `proofs` never flow. The one task writer derives
+  `:seon.task/references`; it is never authored. Proofs are deftests, never prose: prefer an existing failing test or a
+  new row in an existing table test; write a new deftest only for a behavior no test covers; a task already green proves
+  nothing; at merge root keeps a new test only if it guards a new behavior class. References are typed by plain EDN and
+  must resolve: code is a backticked fully qualified symbol (Seon or library, e.g. `` `malli.core/validator` ``), a
+  schema a backticked fully qualified keyword, any other file a relative path whose first segment names its base (the
+  checkout, or `reference-code/<project>` at its pinned revision) with `#heading` anchors. Never write a file or line
+  for code: they are derived from the Var or the analysis. A reference never points into gitignored `tmp/`. Ingestion
+  and `my.task/update!` report an unresolved reference as a problem on the task. Retire a task in the commit that
+  deletes its subject or makes it moot. Write the plan typed: the fully qualified symbols and keywords the work creates,
+  changes and calls, each backticked inline; prose naming only the behavior costs the agent its calls searching for the
+  owner (bench E1, `cards/README-bench.md` Results).
 - **Use the agreed words** ("Words and where they come from" above). Keep JVM REPL and SCI evaluation, live result
   and printed value distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or
   file its issue. Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure.
@@ -484,19 +481,20 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   deliveries) is likewise durable before its caller is answered.
 - **Derive work and completion.** Work is a listened wake the agent has not answered; a message subject is literal,
   `:seon.message/from` marks inside wakes; never replay writes or effects. Context is rendered live from the agent's
-  task and its references, never stored. A task names its success tests (deftests carrying it in `:seon/tasks`)
-  before it is assigned or launched; a test already green before the work does not prove it. Target (agent-loop P5
-  and cut): `seon.task/assign!` refuses a task with no proofs or whose proofs are all green; after any eval request
-  that evaluated a form, the task's proofs and then the tests reaching the change run on the agent's branch inside
-  that eval request (unchanged results answered from their record, the step's time limit a dial defaulting to 10 s),
-  and all green completes the task, the only success; a question task declares its answer's Malli schema and
-  `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read;
-  `my.task/send-back!`, with a required reason, an optional target stage and a counterexample, gives a broken or
-  impossible task back to the stage that owns the mistake (its assigner is notified); an agent's other task verbs are
-  `my.task/current` and `my.task/refine!`, and success has no verb; a reply is `my.message/send` then `my.turn/wait`; a model agent launches only on an assigned task with
-  proofs, and its own `:work` task ends by `my.turn/wait` or the call cap; the
-  answered basis is `:seon.agent/answered-t`, and system turns and context capture are gone. Archive agents; preserve
-  task and agent identity on loud, resumable budget exhaustion.
+  task and its references, never stored. A chain agent's first turn comes from its task's red proofs. At the attempt's
+  start and after any eval request that evaluated a form, the branch's changed tests, the tests reaching the change and
+  then the task's proofs run on the chain branch (reused by reach digest); all green at the start ends the task with no
+  model call. One rule judges every task done, `seon.cluster.source/done-refusals` (TASK-CHAIN §2.4: proofs green, no
+  regression of main, no stray red, no contract gap), and root advances the chain. Every other end bails to root with a
+  problem task, the task held and the branch kept; nothing relaunches by itself: root changes the held task and runs it
+  again (`my.root/run!`), abandons the chain or builds a new one. A question task declares its answer's Malli schema and
+  `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read; `my.task/send-back!`,
+  with a required reason and a counterexample, bails a broken or impossible task to root; an agent's other task verbs
+  are `my.task/current` and `my.task/update!` (`clojure.core/update` on a member; `my.task/refine!` until S1d-2), and
+  success has no verb; a reply is `my.message/send` then `my.turn/wait`; a model agent's own `:work` task ends by
+  `my.turn/wait` or the call cap; the answered basis is `:seon.agent/answered-t`, and system turns and context capture
+  are gone. Archive agents; budget exhaustion is loud, and a resumed task's next attempt has a new attempt and agent
+  identity.
 
 ## Presentation
 
@@ -622,20 +620,21 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 ## Operating and collaborating
 
-- **Work as a Seon agent.** Our own lanes are the first Seon agents. Root files each slice as a task with a red tagged
-  proof (an existing failing test, a table-test case, or a measured-cost assertion through `seon.profile/measure`) and assigns
-  it; the lane's first form reads its block, `(seon.context/current-state)`, then works by `defn` on its branch: the
-  edit hook evaluates changed forms there and the proofs and reaching tests run by themselves after each eval request.
-  It writes back with `my.program/write-branch!`, commits with `--branch-evidence`, and files every gap in its context
-  as a task. Every reply carries `:seon.repl/ms` and `:seon.repl/alloc-mb`: read them, and treat 10× over what the form
-  should cost as wrong work. Tests read reply items by content (the shared test-support reader), never by position.
+- **Work as a Seon agent.** Our own lanes are the first Seon agents. Root files each slice as a task
+  (`seon.task/chain!`) whose proofs are red (an existing failing test, a table-test case, or a measured-cost assertion
+  through `seon.profile/measure`); the lane's first form reads its block, `(seon.context/current-state)`, then works by
+  `defn` on its branch: the edit hook evaluates changed forms there and the proofs and reaching tests run by themselves
+  after each eval request. It changes its task with `my.task/update!` (text by `my.edit/text`), writes back with
+  `my.program/write-branch!`, commits with `--branch-evidence`, and files every gap in its context as a task. Every
+  reply carries `:seon.repl/ms` and `:seon.repl/alloc-mb`: read them, and treat 10× over what the form should cost as
+  wrong work. Tests read reply items by content (the shared test-support reader), never by position.
 - **Plan before implementing; keep lanes short.** Design decisions are made up front in implementation cards
   (`docs/seon/schedule/cards/`) by an agent with full context; implementers follow one card in about fifteen minutes and
   stop and report when the code contradicts it. Work past about fifteen minutes is split. A fix that fights the design
   goes to the owner with options. `bin/lane commit` takes one `--test` per test and runs a declared-long test only when
   named by var.
 - **Design by independent plans and a hybrid** (owner, 2026-10-11; revised 2026-10-12). Any design whose spec we are
-  not sure of is a task tree: a subject task (what we know, what to look into, the questions) → a thorough **dig**
+  not sure of is a chain whose plan holds what we know, what to look into and the questions → a thorough **dig**
   (Haiku: buried data in `reference-code/`, our code, docs, notes and git history, including earlier attempts and why
   they failed, and the existing references and docs to build on, so no plan starts from zero or redoes done work) →
   **two independent plans** written in parallel by Opus and Astra (`gpt-6-astra`), neither seeing the other, each
@@ -649,7 +648,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   reproduced before it is fixed, at its root cause, never by a fence. The models were trained on different
   distributions; use them to design, not only to review: open-ended review of a design anchors on its author and
   turns hypothetical failures into fences. A clear slice needs one plan and the narrow check. Root runs this shape
-  by hand until the scheduler runs it as a task tree.
+  by hand until it runs as a chain.
 - **Restart in batches.** A restart or reset is a batch: root commits every ready dependency or fork bump and pending fix
   just before it. A dependency or fork bump, or a rename touching most files, is committed only inside a scheduled
   restart batch that root opens, never mid-day by a lane: each one refuses every lane's commit until default restarts
