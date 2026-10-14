@@ -2173,26 +2173,58 @@
   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
   branch): the agent's admission closed and, on its open attempt (`seon.task/agent-attempt`),
   `:seon.task.attempt/end` with the branch `commit` it ended at and, sent back, `:seon.task.attempt/target`
-  the task `target` names and `:seon.task.attempt/reason` the sending turn's reply, as one transaction; nothing when the admission is already closed, so a task's
-  end is recorded once. No message: root learns of the end when db<->flow squash-merges it to main
-  (`seon.cluster.agent/next-actions`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
-                       :seon.task.attempt/commit [:maybe :seon.task/sym]]
-                  :seon.store/transaction-data]}
-  [database agent-id end commit target]
-  (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))
-        reason (when (and (= :sent-back end) target) (sent-back-reason database agent-id))]
-    (cond (closed-on? database agent-id) []
-          ;; a transaction function's throw is its writer's refusal
-          (:seon.error/at attempt) (throw (ex-info (:seon.error/message attempt) attempt))
-          :else (cond-> [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]
-                  attempt (into [[:db/add attempt :seon.task.attempt/end end]
-                                 [:db/add attempt :seon.task.attempt/commit commit]])
-                  (and attempt (= :sent-back end) target)
-                  (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])
-                  ;; the reason is the completed turn's reply, a fact the target's next attempt reads
-                  (and attempt (= :sent-back end) target reason)
-                  (conj [:db/add attempt :seon.task.attempt/reason reason])))))
+  the task `target` names and `:seon.task.attempt/reason` its `reason` (by default the sending turn's committed
+  reply; `my.task/send-back!` passes its own, its turn not yet committed), as one transaction; nothing when the
+  admission is already closed, so a task's end is recorded once. No message: root learns of the end when
+  db<->flow squash-merges it to main (`seon.cluster.agent/next-actions`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
+                        :seon.task.attempt/commit [:maybe :seon.task/sym]]
+                   :seon.store/transaction-data]
+                  [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/end
+                        :seon.task.attempt/commit [:maybe :seon.task/sym] [:maybe :seon.task.attempt/reason]]
+                   :seon.store/transaction-data]]}
+  ([database agent-id end commit target]
+   (end-task-call database agent-id end commit target
+                  (when (and (= :sent-back end) target) (sent-back-reason database agent-id))))
+  ([database agent-id end commit target reason]
+   (let [attempt (when-not (closed-on? database agent-id) (task/agent-attempt database agent-id))]
+     (cond (closed-on? database agent-id) []
+           ;; a transaction function's throw is its writer's refusal
+           (:seon.error/at attempt) (throw (ex-info (:seon.error/message attempt) attempt))
+           :else (cond-> [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]]
+                   attempt (into [[:db/add attempt :seon.task.attempt/end end]
+                                  [:db/add attempt :seon.task.attempt/commit commit]])
+                   (and attempt (= :sent-back end) target)
+                   (conj [:db/add attempt :seon.task.attempt/target [:seon.task/sym target]])
+                   ;; the reason is a fact the target's next attempt and root's bail read
+                   (and attempt (= :sent-back end) reason)
+                   (conj [:db/add attempt :seon.task.attempt/reason reason]))))))
+
+(defn record-end!
+  "Record the end `end` of the task `agent-id` holds on `connection`, the agent's own branch: the agent's outcome
+  (`seon.context/end-summary-tx`), then its admission closed and the end on its attempt in one transaction
+  (`end-task-call`, with `target` and `reason` when sent back). Answers the attempt and its recorded end
+  (`:seon.turn.loop/end`), or the refused write's error value with the operation that was refused."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/end [:maybe :seon.task/sym]
+                       [:maybe :seon.task.attempt/reason]]
+                  [:or :seon.turn.loop/end :seon.error/value]]}
+  [connection agent-id end target reason]
+  (let [write! (fn [tx] (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))
+        attempt (task/agent-attempt (db/db connection) agent-id)
+        end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
+        kept (when (seq end-summary-tx) (write! end-summary-tx))
+        ;; the branch commit the attempt ended at: its successor's fork basis
+        commit (db/commit-id (db/db connection))
+        outcome (cond (and kept (not (:db-after kept))) (assoc kept :seon.error/operation `seon.context/end-summary-tx)
+                      (uuid? commit) (write! {:tx-data [[:db.fn/call #'end-task-call agent-id end commit target reason]]
+                                              :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
+                      :else commit)]
+    (if-not (:db-after outcome)
+      (cond-> outcome (map? outcome) (update :seon.error/operation #(or % `end-task-call)))
+      (cond-> {:seon.task.attempt/end end :seon.turn.loop/processed-by :root}
+        (int? attempt) (assoc :seon.task/assignment
+                              (:seon.task/assignment (db/pull (:db-after outcome) [:seon.task/assignment] attempt)))))))
 
 (defn- end-task!
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`), all in the agent's
@@ -2204,26 +2236,17 @@
   nil. A refused step is a fault recorded beside the pass."
   {:malli/schema [:=> [:cat :map :seon.agent/id] :nil]}
   [cluster agent-id]
-  (let [connection (:seon.db/connection cluster)
-        fault! (fn [operation outcome]
-                 (fault/fault! (env/of cluster) (ex-info (:seon.error/message outcome "The task's end was refused.") outcome)
-                               {:seon.error/layer :seon.turn/task-end
-                                :seon.error/operation operation
-                                :seon.db.process/id (:seon.db.process/id cluster)
-                                :seon.agent/id agent-id}))
-        write! (fn [tx] (db/with-branch {:seon.db/connection connection} #(db/transact! connection tx)))]
+  (let [connection (:seon.db/connection cluster)]
     (when-let [end (task-end (db/db connection) agent-id)]
-      (let [end-summary-tx (@context-end-summary-tx (db/db connection) agent-id)
-            kept (when (seq end-summary-tx) (write! end-summary-tx))
-            _ (when (and kept (not (:db-after kept))) (fault! `seon.context/end-summary-tx kept))
-            ;; the branch commit the attempt ended at: its successor's fork basis
-            commit (db/commit-id (db/db connection))
-            target (when (= :sent-back end) (sent-back-to (db/db connection) agent-id))
-            outcome (if (uuid? commit)
-                      (write! {:tx-data [[:db.fn/call #'end-task-call agent-id end commit target]]
-                               :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
-                      commit)]
-        (when-not (:db-after outcome) (fault! `end-task-call outcome))))
+      (let [target (when (= :sent-back end) (sent-back-to (db/db connection) agent-id))
+            recorded (record-end! connection agent-id end target
+                                  (when target (sent-back-reason (db/db connection) agent-id)))]
+        (when-not (:seon.task.attempt/end recorded)
+          (fault/fault! (env/of cluster) (ex-info (:seon.error/message recorded "The task's end was refused.") recorded)
+                        {:seon.error/layer :seon.turn/task-end
+                         :seon.error/operation (:seon.error/operation recorded `end-task-call)
+                         :seon.db.process/id (:seon.db.process/id cluster)
+                         :seon.agent/id agent-id}))))
     nil))
 
 (declare attempt-t latest-answering-turn-t step-proved? prove-turn step-limit-ms)

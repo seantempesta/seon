@@ -879,6 +879,69 @@
               (finally
                 (release-chain! routing store branch))))))))))
 
+(deftest ^{:seon.test/long "One chain world: task one's start test run, one eval request through the MCP entrance whose last form sends the task back, and two db<->flow passes that bail it."
+           :seon.test/long-ms 30000}
+  an-outside-agents-send-back-ends-its-attempt-and-root-bails-it-once
+  ;; TASK-CHAIN 2.2 and 2.7: an :outside agent's end is the same fact a model agent's is. Its eval request whose last
+  ;; form is `my.task/send-back!` records the end on its attempt, the reply carries that recorded end, and root's
+  ;; pass bails it once: one problem task on main, the attempt :closed and the task :held on the chain branch
+  (binding [*space* "tq.chainoutsideback"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")} :seon.task/model :outside}])
+                branch (:seon.chain/branch chain)
+                [one] (:seon.task/handles chain)
+                key-one (id/id [one 1])
+                agent-id (str "attempt/" key-one)
+                problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
+                                       [(clojure.string/starts-with? ?n "unfinished-task-")]]
+                                     (db/db connection)))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})
+                    _ (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "c"))) ::proved)
+                    custody (#'mcp/execution {:seon.turn.loop/cluster handle :seon.store/store store} agent-id nil)
+                    answer (agent/evaluate-source!
+                            (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
+                                   :seon.cluster.reply/text
+                                   "(my.task/send-back! {:my.task/reason \"The proof contradicts the plan.\"})"))
+                    end-of #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
+                                  (db/db on-branch) key-one)]
+                (is (= :sent-back (end-of)) "the eval request records the end on the attempt")
+                (is (= "The proof contradicts the plan."
+                       (db/q '[:find ?r . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/reason ?r]]
+                             (db/db on-branch) key-one))
+                    "with its reason")
+                (is (= {:seon.task/assignment key-one :seon.task.attempt/end :sent-back :seon.turn.loop/processed-by :root}
+                       (some #(get-in % [:seon.sci.eval/evaluation :my.turn/value :seon.turn.loop/end])
+                             (:seon.turn.loop/evaluated-sources answer)))
+                    "its reply carries the recorded end, for root to process")
+                (pass! handle routing)
+                (pass! handle routing)
+                (is (= #{(str "unfinished-task-" key-one)} (problems)) "root bails it once: one problem task on main")
+                (let [database (db/db on-branch)]
+                  (is (= :closed (:seon.task/outcome (db/pull database [:seon.task/outcome] [:seon.task/assignment key-one])))
+                      "the attempt is :closed on the chain branch")
+                  (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id one])))
+                      "and its task :held")))
+              (finally
+                (release-chain! routing store branch))))))))))
+
 (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
   ;; accept as it stands, so it ends done with no model call and root's merge completes it

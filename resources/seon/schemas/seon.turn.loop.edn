@@ -201,6 +201,12 @@
                  [:map {:description "The tests a bounded test step left for the next pass; the Flow proc's state, dropped when a pass runs its own step."}
                   [:seon.turn.loop/queued [:vector :seon.test/sym]]
                   [:seon.source/commit-id :seon.source/commit-id]],
+:end
+                 [:map {:description "An end as recorded on the agent's attempt on its own branch (seon.turn/record-end!), by a model pass or by the agent's own my.task/send-back!: the attempt and how it ended. Root's next db<->flow pass processes it (TASK-CHAIN 2.5-2.7): a done advances or merges, any other end bails to root."}
+                  [:seon.task/assignment {:optional true} :seon.task/assignment]
+                  [:seon.task.attempt/end :seon.task.attempt/end]
+                  [:seon.turn.loop/processed-by :seon.turn.loop/processed-by]],
+                 :processed-by [:= {:description "Who acts on a recorded end: root, never the agent."} :root],
                  :turn-report
                  [:map
                   [:seon.turn/id {:optional true} :seon.turn/id]

@@ -39,9 +39,9 @@
      (is (= {:seon.agent/id "root"} (my.task/current {:seon.db/db (db/db connection) :seon.agent/id "root"}))))))
 
 (defn- send-back-request
-  "A send-back request as the world completes it: root's database on `connection` beside what the caller named."
+  "A send-back request as the world completes it: root's connection beside what the caller named."
   [connection named]
-  (merge {:seon.db/db (db/db connection) :seon.agent/id "root"} named))
+  (merge {:seon.db/connection connection :seon.agent/id "root"} named))
 
 (deftest send-back-is-a-completed-disposition-carrying-its-reason-and-data
   (with-root true

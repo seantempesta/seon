@@ -8,13 +8,14 @@
           :reason [:string {:min 1 :description "Why an agent gives its task back without green proofs: the reply root reads."}]
           :target [:and {:description "The task that owns the mistake a send-back names, by symbol."} :seon.task/sym]
           :counterexample [:and {:description "The data showing why the task cannot be made green as written."} :seon.schema/value]
-          :send-back-request [:map {:description "A send-back's request: the reason, target and counterexample the caller named, and the database and agent the evaluation's world supplies."}
-                              [:seon.db/db :seon.db/database-value] [:seon.agent/id :seon.agent/id] [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
+          :send-back-request [:map {:description "A send-back's request: the reason, target and counterexample the caller named, and the connection and agent the evaluation's world supplies."}
+                              [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id] [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
                               [:my.task/counterexample {:optional true} :my.task/counterexample]]
-          :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it."}
+          :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it, and the end it recorded on the attempt for root to process."}
                       :my.turn/completed
                       [:map [:my.task/target {:optional true} :my.task/target]
-                       [:my.task/counterexample {:optional true} :my.task/counterexample]]]
+                       [:my.task/counterexample {:optional true} :my.task/counterexample]
+                       [:seon.turn.loop/end :seon.turn.loop/end]]]
           :content-key [:enum {:description "The task members my.task/update! changes: its plan, its instructions and its proofs. Identity, link and control members are not content."} :seon.task/plan :seon.task/instructions :seon.task/proofs]
           :updated [:map {:description "An update as my.task/update! answers it: the task's handle, whether a declaration changed on the agent's branch, and each reference of the new text that does not resolve."}
                     [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]

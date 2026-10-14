@@ -16,7 +16,8 @@
             [seon.ref :as ref]
             [seon.schema :as schema]
             [seon.run :as run]
-            [seon.task :as task]))
+            [seon.task :as task]
+            [seon.turn :as turn]))
 
 (defn current
   "My task, its proofs with their status on my branch, my step as judged and every reference it makes, resolved.
@@ -104,13 +105,12 @@
   "Give my task back without green proofs.
 
   `:my.task/reason` says why, `:my.task/target` optionally names the task that owns the mistake and
-  `:my.task/counterexample` optionally carries the data showing it; call preparation supplies my database and
-  identity, and holding no task answers `:my.task/no-task-error`. Answers
-  the completed disposition whose reply is the reason, with the target and
-  counterexample beside it; as my reply's last form it ends my turn, my
-  task's end is derived `:sent-back` to the target, recorded on my attempt as
-  `:seon.task.attempt/target`, or `:given-back` without one
-  (`seon.turn/task-end`), and root hears it in my end message.
+  `:my.task/counterexample` optionally carries the data showing it; call preparation supplies my connection and
+  identity, and holding no task answers `:my.task/no-task-error`. Writes my task's end `:sent-back` on my
+  attempt on my branch, with the reason and the target (`seon.turn/record-end!`), whether a model reply or an
+  eval request called it, and closes me. Answers the completed disposition whose reply is the reason, with the
+  target and counterexample beside it and the end as recorded (`:seon.turn.loop/end`); root's next pass bails
+  the task to root, which decides what runs next.
 
   ## Example
 
@@ -120,12 +120,16 @@
                        :my.task/counterexample {:expected 1 :actual 2}})
   ```"
   {:malli/schema [:=> [:cat :my.task/send-back-request] [:or :my.task/sent-back :my.task/no-task-error :seon.error/value]]}
-  [{database :seon.db/db agent-id :seon.agent/id reason :my.task/reason :as request}]
-  (let [held (task/agent-task database agent-id)
-        completed (run/complete reason)]
+  [{connection :seon.db/connection agent-id :seon.agent/id reason :my.task/reason target :my.task/target :as request}]
+  (let [held (task/agent-task (db/db connection) agent-id)
+        completed (run/complete reason)
+        recorded (when (and (string? held) (not (:seon.error/at completed)))
+                   (turn/record-end! connection agent-id :sent-back target reason))]
     (cond
       (:seon.error/at held) held
       (nil? held) (refusal/error :my.task/no-task-error {:seon.error/operation 'my.task/send-back! :my.task/reason reason
                                                          :seon.error/message "I hold no task, so there is nothing to give back."})
       (:seon.error/at completed) completed
-      :else (merge completed (select-keys request [:my.task/target :my.task/counterexample])))))
+      (:seon.error/at recorded) recorded
+      :else (merge completed (select-keys request [:my.task/target :my.task/counterexample])
+                   {:seon.turn.loop/end recorded}))))
