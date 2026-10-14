@@ -643,7 +643,9 @@
   "Apply one agent function contract, `contract` its form.
 
   It uses the host boundary's per-arity enforcement: every refusal throws,
-  and the evaluation boundary decides what it records."
+  and the evaluation boundary decides what it records. Its metadata holds
+  the predicate bindings `projection` compiled it with
+  (`:seon.instrument/predicate-functions`)."
   {:malli/schema
    [:function
     [:=> [:cat :qualified-symbol :seon.schema/value :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
@@ -700,9 +702,12 @@
                                                     config/defaults)))))]
         ;; The compiled wrapper and its timing cell belong to this
         ;; installation alone; the projection never retains the callable.
+        ;; The predicate bindings it compiled with are kept as data, so a
+        ;; context that later holds one apart re-arms it (`seon.sci.arm/arm!`).
         (profile/with-cell cell
           (with-meta (fn [& arguments] (profile/timed (apply wrapped arguments)))
-            (assoc (meta wrapped) interpreted-original original ::cell cell)))))))
+            (assoc (meta wrapped) interpreted-original original ::cell cell
+                   ::predicate-functions (schema/predicate-functions-in projection))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation

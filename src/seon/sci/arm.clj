@@ -2,8 +2,10 @@
   "Arming at the write: each observed definition's contract is armed on the
   exact Var written, under the batch's arming projection, before the next
   expression runs. The write observer stages (`seon.sci.observe`) call it."
-  (:require [sci.ctx-store]
+  (:require [sci.core :as sci]
+            [sci.ctx-store]
             [seon.db :as db]
+            [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]))
@@ -35,6 +37,54 @@
                                         [k {:seon.schema.admission/source :agent}])))
                     forms))))))
 
+(defn- reaches?
+  "Whether `function-symbol`'s contract in `projection` names `predicate`:
+  inline, or in the form of a schema key it depends on, transitively."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :qualified-symbol] :boolean]}
+  [projection function-symbol predicate]
+  (let [forms (:seon.schema.projection/forms projection)
+        dependencies (:seon.schema.projection/schema-dependencies projection {})
+        names? (fn [form] (contains? (#'schema/predicate-symbols-in form) predicate))]
+    (or (names? (get-in projection [:seon.schema.projection/function-contracts function-symbol]))
+        (loop [frontier (get-in projection [:seon.schema.projection/function-dependencies function-symbol] #{})
+               seen #{}]
+          (cond
+            (empty? frontier) false
+            (some #(names? (get forms %)) frontier) true
+            :else (let [seen (into seen frontier)]
+                    (recur (into #{} (comp (mapcat #(get dependencies % #{})) (remove seen)) frontier)
+                           seen)))))))
+
+(defn- rearm-dependents!
+  "Re-arm each function `ctx` installed whose contract reaches `predicate` and
+  whose wrapper compiled with another binding of it than `ctx` now calls:
+  the context's own Var when it holds `predicate` apart, else `projection`'s.
+  Only the transition re-arms: a later redefinition of a held-apart Var is the
+  same binding. Answers the re-armed symbols."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :seon.schema/projection :seon.db/database-value]
+                  [:vector :qualified-symbol]]}
+  [ctx predicate projection working]
+  ;; the installed functions are few; only one compiled with another binding
+  ;; of `predicate` asks whether its contract reaches it
+  (if-not (contains? (#'schema/population-predicate-symbols
+                      (:seon.schema.projection/forms projection)
+                      (get projection :seon.schema.projection/function-contracts {}))
+                     predicate)
+    []
+    (let [current (or (kernel/held-apart-var ctx predicate)
+                      (get (schema/predicate-functions-in projection) predicate))
+          contracts (:seon.schema.projection/function-contracts projection)]
+      (into []
+            (keep (fn [dependent]
+                    (let [compiled-with (some-> (sci/resolve ctx dependent) deref meta
+                                                ::instrument/predicate-functions)]
+                      (when (and compiled-with
+                                 (not (identical? current (get compiled-with predicate)))
+                                 (reaches? projection dependent predicate))
+                        (#'eval/arm-contract! ctx dependent (get contracts dependent) nil projection working)
+                        dependent))))
+            (disj @(::kernel/installed-functions ctx) predicate)))))
+
 (defn arm!
   "Arm the observed Var's contract at its write, under the batch's arming
   projection, and mark it the installed definition of its name in this
@@ -46,14 +96,17 @@
   write defines apart from the base's Var are re-interpreted onto it
   (`seon.sci.eval/reinterpret-inherited-callers!`), and the callers and tests
   `ctx` still runs compiled are bound to run interpreted (`seon.sci.eval/interpret-affected!`),
-  so the forms after the write call the definition through them; a failure
-  there is the write's `:seon.batch/arm-error` too."
+  so the forms after the write call the definition through them. When the
+  write is a predicate `ctx` now holds apart, the installed functions whose
+  contract reaches it re-arm on it (`rearm-dependents!`); a failure there is
+  the write's `:seon.batch/arm-error` too."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
   (sci.ctx-store/with-ctx ctx
     (let [sym (var-symbol v)
           contract (:malli/schema (meta v))
-          function? (fn? @v)]
+          function? (fn? @v)
+          projection (delay (arming-projection request working))]
       (when (and sym function?)
         (kernel/mark-installed! ctx sym))
       (cond-> (if-not (and sym contract function?)
@@ -61,8 +114,7 @@
                 (try
                   ;; the evaluated contract as the Var holds it, its
                   ;; predicates the callables its symbols named
-                  (#'eval/arm-contract! ctx sym contract nil
-                                        (arming-projection request working) working)
+                  (#'eval/arm-contract! ctx sym contract nil @projection working)
                   (assoc write :seon.batch/armed true)
                   (catch Throwable t
                     (assoc write :seon.batch/arm-error (ex-message t)))))
@@ -71,6 +123,7 @@
               (try
                 (eval/reinterpret-inherited-callers! ctx working sym v)
                 (eval/interpret-affected! ctx working [sym])
+                (rearm-dependents! ctx sym @projection working)
                 armed
                 (catch Throwable t
                   (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))

@@ -294,14 +294,26 @@
                  :seon.fn/sym function-symbol})))))
   function-symbol)
 
+(defn held-apart-var
+  "The SCI Var `ctx` holds `predicate` apart in, or nil when `ctx` calls the
+  shared definition: `ctx` has its own binding of the Var (a branch `defn` of
+  a copied function, an affected caller interpreted onto it) or the Var was
+  born in an agent's context."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol]
+                  [:or :nil [:fn clojure.core/ifn?]]]}
+  [ctx predicate]
+  (when-let [sci-var (sci/resolve ctx predicate)]
+    (when (or (sci.vars/context-binding ctx sci-var)
+              (:sci/generation (meta sci-var)))
+      sci-var)))
+
 (defn context-bound-projection
   "`base` with each predicate `ctx` holds apart from it bound to `ctx`'s SCI Var.
 
-  A predicate is held apart when `ctx` has its own binding of the Var (a
-  branch `defn` of a copied function, an affected caller interpreted onto
-  it) or the Var was born in an agent's context, among the predicates `base`'s
-  population and `form` name. A call of the bound Var reads the executing
-  context's binding, so a later redefinition recompiles nothing. Holding
+  A predicate is held apart as [[held-apart-var]] decides, among the
+  predicates `base`'s population and `form` name. A call of the bound Var
+  reads the executing context's binding, so a later redefinition recompiles
+  nothing. Holding
   nothing apart answers `base` itself. Compiled callers and the checked
   writer keep the database's projection: they see a branch's predicate only
   after merge (`seon.schema/with-bound-predicates`)."
@@ -317,10 +329,7 @@
                           (#'schema/predicate-symbols-in form))
          bindings (into {}
                         (keep (fn [predicate]
-                                (when-let [sci-var (sci/resolve ctx predicate)]
-                                  (when (or (sci.vars/context-binding ctx sci-var)
-                                            (:sci/generation (meta sci-var)))
-                                    [predicate sci-var]))))
+                                (some->> (held-apart-var ctx predicate) (vector predicate))))
                         predicates)]
      (if (empty? bindings)
        base

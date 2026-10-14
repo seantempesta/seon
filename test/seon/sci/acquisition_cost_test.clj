@@ -228,3 +228,36 @@
          (mcp/call (request "(+ 1 3)"))
          (is (= before (counted))
              "an unrelated definition records no refusal of a row it does not change"))))))
+
+(deftest ^{:seon.test/long "Eight MCP eval requests on main and one agent branch, its first acquiring the branch's context."
+           :seon.test/long-ms 10000}
+  a-predicate-transition-re-arms-once
+  ;; main and a branch holding no predicate apart; then `takes` armed, its
+  ;; registered predicate redefined on the branch (the transition), redefined
+  ;; again, and a request after
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [call (fn [agent-name code]
+                  (support/mcp-reply (json/read-str (mcp/call (json/write-str
+                                                               {"name" "eval_clj"
+                                                                "arguments" {"cluster" running "agent" agent-name "code" code}})))))
+           predicate (fn [value]
+                       (str "(in-ns 'seon.edit)
+                             (defn valid-form-operation? {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate accepts arbitrary objects.\", :gen/elements [nil {}]}]] :boolean]} [request] " value ")"))
+           arms #(profile/calls-of % 'seon.sci.eval/arm-contract!)
+           recompiles #(profile/calls-of % 'seon.schema/projection-with-declarations)]
+       (call "root" "(+ 1 1)")
+       (call agent-id "(+ 1 1)")
+       (let [main (measured ::main-request #(call "root" "(+ 1 1)"))
+             branch (measured ::branch-request #(call agent-id "(+ 1 1)"))
+             _ (call agent-id "(ns bp.transition)
+                               (defn takes {:malli/schema [:=> [:cat :my.edit/form-request] :boolean]} [request] true)")
+             transition (measured ::predicate-transition #(call agent-id (predicate "false")))
+             later (measured ::predicate-redefinition #(call agent-id (predicate "(nil? request)")))
+             after (measured ::after-predicate-change #(call agent-id "(+ 1 1)"))]
+         (is (= 2 (:seon.repl/value (:seon.profile/value main))))
+         (is (zero? (recompiles main)) "main binds every predicate as compiled")
+         (is (zero? (recompiles branch)) "a branch holding no predicate apart recompiles nothing")
+         (is (pos? (recompiles transition)) "the transition binds the branch's predicate")
+         (is (< (arms later) (arms transition)) "a later redefinition re-arms no dependent")
+         (is (zero? (recompiles after)) "a held-apart binding needs no recompile"))))))
