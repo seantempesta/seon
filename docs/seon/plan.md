@@ -45,6 +45,12 @@ only the task field; (2) the GC fork bump (Konserve b4b896f, Datahike 6d49110d; 
 (`drop-nextjournal-markdown.patch`); (4) the retention dial applied. After the restart: the sentinel with repeated
 samples; a stale-template check.
 
+**Restart batch after that:** retire namespace agents (owner 2026-10-14: a task supersedes them; a namespace agent
+is a task about a namespace): delete `steward-call`, `:seon.ns/steward`, `:seon.error/of-steward`, `:my.agent/steward`,
+their readers and the unowned-namespace problem family in one slice with every caller converted
+(`../research/agent-platform/2026-10-14/namespace-agents-inventory.md`, b80a0fc67); `:seon.agent/namespace` (the
+REPL's current namespace) stays. S3d-1 (doc views) runs beside S1b after the first batch (e962f5a11).
+
 **Then, before S1b: the red sweep.** The bulk tier once on the restarted default; classify every red by the commit
 that turned it red (stored runs, `bin/seon check --at`); fix broken and surviving reds, skip what TASK-CHAIN §6
 deletes, file the rest. Known untracked reds: ten `seon.effect-test` vars, the `seon.edit-test` odd-map pair,
@@ -52,7 +58,7 @@ deletes, file the rest. Known untracked reds: ten `seon.effect-test` vars, the `
 `seon.cluster.turn-test/a-model-request-is-help-own-exchanges-and-the-block-last`,
 `seon.sci.supplied-database-test/own-record-reads-supply-the-same-database-and-agent-as-explicit-calls`,
 `seon.help-test/source-finds-a-schema-registered-in-the-same-eval-request`,
-`seon.test.accretion-test/source-harvest-keeps-refusal-render-contracts-coherent` (19 s over its bound).
+`seon.test.accretion-test/source-harvest-keeps-refusal-render-contracts-coherent` (19 s over its bound); eight reds identical at HEAD from 86942d3d0 (three `seon.cluster.publication-inputs-test` errors on 64-character gitlink pins, three `seon.cluster.source-test` fails, `seon.test-cache-test/a-documentation-edit-never-widens-a-gate`, `seon.test.selection-test/a-proof-request-runs-only-its-proofs`); the collection test body at ~70 s (flake-collection-test.md); 157 real dead-code lint warnings (lint-warnings.md) as a Sonnet sweep.
 
 **Beside the chain** (file-disjoint, never ahead of it): the errors cut E2 → E3 (restart batch) → E4a → E4b → E6
 (`../research/agent-platform/2026-10-14/errors-cut-plan.md`); the reply fence (`seon.test-support/reply`'s catch,
