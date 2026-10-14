@@ -113,3 +113,36 @@ lane's patch), S3d-2 fc7d5994b, the tag fix e1db21f25, S3d-3 d8b6e1fce, clj-kond
     a green neighbour.
 33. Lane rule added: no lane writes, restores or checks out a file another lane holds (kondo-bump reverted
     ref_test.clj with `git checkout`; s3d-3 re-applied its hunk from a saved diff).
+
+## Night of 10-14 → 15 (root; owner asleep from ~20:45; orders: refine functions, renders, printer, instructions, context; sanity-check; no live runs while known things are broken)
+
+Landed overnight (all live on default by 05:05 unless noted): S2a dc47cae3f, S2b-1 e3716cd30, S3a-2 674a8de72, S3a-2b
+2dba90a5b, S3a-3 76c4bed09, S3b-1 e958b1700, S3b-2 0331e584a + 2b5829f40 (chain tasks never in task files) + 70fdd8ffb
+(write-back reads git HEAD), S3c-1 bdc09786a, S3f-1a d024947fe, S3f-2 c2eab5ab5, S4a 840d175a8, S4b 38cca803d
+14cc74ab4 65f4c292e; S5 defects D1-D8 (4dd6fab76 e1b547528 24d0d382e 1d8bbec16 4463dda3f 1c42de87c 108c2e077);
+context: red values 373391e48, rerun block 14e881c6b + 9d57ee3b8, stable block in cached prefix ba2e0f299, old reply
+meta 3ce843a85, history by reference a1c4970e6, stable must-reads da91498ce, changes render c94977458, taught forms
+3b900522d, unresolved names offer search 5c78940d9, alias forms are code d17b7f67e; REPL: require refusals delivered
+11f8c3263, request view 0f7db6347 + a239a2a73, host-copy private Vars 4121ddf4a, alias survives lazy install 10171f0cd,
+send-back writes its end e54a9b587, nested time limits 8c0744b53; errors hold references e52ae96c5 221cb228f, db/q guard
+deleted 712bb86e5; cost: test-step harness closure 160fbf821, Datahike as-of index-page (fork 62f94893, bump edd63b16e:
+as-of digest 26 s → 1.9 s), publication analysis f9a315309; branch predicates phases 1-3 00c8b3d4d e79736317 50037b679;
+per-action branch connection race 8b9ca750d; agy archive mode 86794e83a (an Argon lane's `git checkout` had wiped two
+claimed files).
+
+Morning questions for the owner:
+1. `my.program/ns-unmap!` in clojure.core's `[ns sym]` shape: A drop the explicit-context arities → `[context ns sym]`
+   only and convert 1-arg `'ns/sym` callers (root lean); B change "an exact declared arity is never prefixed"; C a new name.
+2. Lifecycle of MCP lane agents' branches (~100 + base copies accumulate; `my.agent/branches` is noise): retire like an
+   abandoned chain once the agent has no running graph and no unmerged change?
+3. "This namespace loads in babashka for the edit hook" was prose only and an automatic merge broke it: a declared
+   namespace property checked where requires are recorded and shown in the block, plus a bb-load test?
+4. A contract naming a branch-born predicate is refused at the writer (`seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer`).
+5. The predicates hybrid's larger option (a branch defn rebinding main's Var) — recommended against for now (8926d8d61).
+
+Open, in order: block build 6.0 s / 11.7 GB per model call (lane block-cost running); then DeepSeek S5 run 5 on the held
+Implement task c12a57408f49 (chain :chain-f1f6dc8e6652) with a low cap; errors cut (block refusals still carry
+`:seon.error/at`/`:layer`); order-independent declaration content key (ed2ffc32e); Argon request-fixed-cost-2 note
+(quota-blocked, resume once); predicate held apart through interpret-affected! does not re-arm (red row);
+`:seon.test/reach` empty on branch eval-request runs; outside-1's chain e439 to abandon; root scratch notes in the
+session scratchpad root-pending.md.

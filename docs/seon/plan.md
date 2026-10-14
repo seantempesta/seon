@@ -16,14 +16,15 @@ f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; t
 
 ## 0. Where we are, and the order (revised in place by root; last 2026-10-14 16:45 local)
 
-**State.** Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), §7 status column. Done: S1 (all), S2b-2
-(`done-refusals`, e67cb2ba0), S3a-1, S3d-1a/1b, S4a (helpers 619c73d14; the three template files commit after the
-restart: default still refuses a plan-less task until 99997d214 is live); the overlay rebuild (phases 1-3); write-back's
-all-or-nothing install; the honest reaching verdict (7064853fc); cross-branch test reuse, red included (923eff09d); one
-schema projection per content (c1dd12e6e). Default runs 5fddc2bfd; the restart batch (clj-kondo eb245d82 plus every
-commit since) is being committed now. Lanes and root's queue: `../research/agent-platform/2026-10-14/root-working-state.md`.
-Rough live chain 1 (`live-chain-rough-1.md`): Implement green in 14 calls with no hand act; 6 hand acts in all, each
-mapped to the TASK-CHAIN mechanism that removes it; its merge request waits on lane s3d-2's `ref.clj`.
+**State (2026-10-15 05:15 local).** Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), §7 status column.
+Every chain mechanism is installed and has worked live: `chain!` (and `seon.task/from-filed`), Design → Prove →
+Implement advance, the done rule, bail to root and `my.root/run!`, per-task `:outside` agents worked through MCP, and the
+final merge: on 2026-10-14 outside-2's `:outside` Seon agent fixed a filed defect from generated context in 12 calls and
+root's pass merged, published and retired its chain with 0 hand acts (becee4d99). That first automatic merge also
+merged the first automatic regression (it broke the edit hook's babashka load, a constraint stated only in prose;
+reverted e5dd2abd5). Live DeepSeek S5 run 4: Design and Prove done with 0 hand acts, Implement bailed and reran three
+times on context waste and REPL defects, since fixed. Default runs HEAD; lanes, findings and the morning questions:
+`../research/agent-platform/2026-10-14/root-working-state.md` ("Night of 10-14").
 
 **The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge). The critical path is
 run in parallel, not in series (owner 2026-10-14 evening: "the time is now"): every remaining slice
