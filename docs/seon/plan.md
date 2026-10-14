@@ -14,31 +14,35 @@ One plan, revised in place. First written by lane fable-docs on 2026-10-10; rewr
 two reviews (`schedule/cards/TASK-CHAIN.md` §8). Live facts were checked on default (archive c1230efc3, then
 f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; this file holds direction and decisions.
 
-## 0. Where we are, and the order (revised in place by root; last 2026-10-14 16:00 local, from the afternoon audit `../research/agent-platform/2026-10-14/audit-afternoon.md`)
+## 0. Where we are, and the order (revised in place by root; last 2026-10-14 16:45 local)
 
-**State.** Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), §7 status column. Done: S1 (S1a, S1b-1/2,
-S1c-1/2, S1d-1/2/3) and S3d-1a/1b; the overlay rebuild (phases 1-3); write-back's all-or-nothing install and new-namespace
-write. Default runs 5fddc2bfd; later commits go live at the next restart. Lanes in flight, their files and root's queue:
-`../research/agent-platform/2026-10-14/root-working-state.md`. A rough live chain (Prove → Implement on the subject Design
-run 1 designed, root carrying plan and proofs as counted hand acts; a deliberate paid DeepSeek run) is running.
+**State.** Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), §7 status column. Done: S1 (all), S2b-2
+(`done-refusals`, e67cb2ba0), S3a-1, S3d-1a/1b, S4a (helpers 619c73d14; the three template files commit after the
+restart: default still refuses a plan-less task until 99997d214 is live); the overlay rebuild (phases 1-3); write-back's
+all-or-nothing install; the honest reaching verdict (7064853fc); cross-branch test reuse, red included (923eff09d); one
+schema projection per content (c1dd12e6e). Default runs 5fddc2bfd; the restart batch (clj-kondo eb245d82 plus every
+commit since) is being committed now. Lanes and root's queue: `../research/agent-platform/2026-10-14/root-working-state.md`.
+Rough live chain 1 (`live-chain-rough-1.md`): Implement green in 14 calls with no hand act; 6 hand acts in all, each
+mapped to the TASK-CHAIN mechanism that removes it; its merge request waits on lane s3d-2's `ref.clj`.
 
-**The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge; about 6 h if no slice
-waits on a held file):
+**The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge). The critical path is
+two serial Opus lines, S2a → S3a-2 → S3a-3 and S3b-1 → S3b-2, at about 45 min a slice: S5 is tomorrow; today's live
+signal comes from rough runs on each newly landed slice.
 
 | Step | Slice | Files | Model | Waits for |
 |---|---|---|---|---|
-| 1 | writeback-fix (done), verdict-honest, b1-durable: commit or leave a patch and release | `cluster/source.clj`, `my/program.clj`; `turn.clj`; `test.clj`, `test/runner.clj` | in flight | a 30-minute box |
-| 2a | S2b-2 `done-refusals` | `cluster/source.clj`, `source_test.clj` | Opus | 1 |
-| 2b | S2a one task input | `turn.clj`, `test/runner.clj`, `context.clj`, `task.clj`, `task_test.clj` | Opus | 1 |
-| 2c | S2b-1 whole-branch selection | `test.clj`, `test_test.clj` | Sonnet | 1 |
-| 2d | S3a-1 root reads chains | `cluster/agent.clj` | Opus, in flight | — |
-| 2e | S4a templates | `seon.step.*.edn`, `step.clj`, `test_support.clj` | Sonnet, in flight | — |
-| 3a | S3a-2 turn authority and context | `turn.clj`, `context.clj` | Opus | 2b |
-| 3b | S3b-1 + S3b-2 acceptance, publication, retirement | `merge.clj`, `cluster/source.clj` | Opus | 2a |
-| 3c | S2c-1 tag sweep (one commit window) | task files | Sonnet | 2e |
-| 4 | S3a-3 advance | `task.clj`, `cluster/agent.clj`, `db_flow_test.clj` | Opus | 2b, 2d, 3a |
-| 5 | S4b-design, S4b-prove predicates | `step/<stage>.clj` | Sonnet ×2 | 2e |
-| 6 | S5 live DeepSeek chain | none (root REPL) | Opus | 3b, 4, 5 |
+| 1 | S2a one task input | `turn.clj`, `test/runner.clj`, `context.clj`, `task.clj`, `task_test.clj`, `step.clj`, `test_support.clj` | Opus, in flight | — |
+| 1 | S2b-1 whole-branch selection, and `seon.step/changed` | `test.clj`, `test_test.clj` (+ a `turn.clj` window) | Opus, in flight (the runner is Opus's) | — |
+| 1 | S3b-1 + S3b-2 acceptance, publication, retirement; the write-back basis question (below) | `merge.clj`, `cluster/source.clj`, `merge_test.clj` | Opus, in flight | — |
+| 2 | S3a-2 turn authority and context | `turn.clj`, `context.clj` | Opus | S2a |
+| 2 | S2c-1 tag sweep (one commit window) | task files | Sonnet | the restart |
+| 2 | S4b-design, S4b-prove predicates | `step/<stage>.clj` | Sonnet ×2 | S2a (S4a's `results` and task input are interim until it) |
+| 3 | S3a-3 advance | `task.clj`, `cluster/agent.clj`, `db_flow_test.clj` | Opus | S2a, S3a-2 |
+| 4 | S5 live DeepSeek chain | none (root REPL) | Opus | S3b, S3a-3, S4b |
+
+**Open on S3b (from rough run 1):** the merge's write-back compared against the shared working tree, so another lane's
+uncommitted edit refused a correct merge. Under "files are written at merge" the basis should be the committed file
+the merge base corresponds to; lane s3b answers with evidence before S3b-2.
 
 Deferred until S5, each for a reason: S2c-2, S3c, S3e, S3f (the first run is watched; Claude-Code-as-Seon-agent runs
 follow S5); S3d-2..6 and the S3d-3 patch (context is usable, 58f130e03); the cache phases 2 and 4-8 and the Argon third
@@ -56,7 +60,11 @@ the test step's 2.6-7.3 GB per `defn` (Astra).
 **Rules** (AGENTS.md is the authority; these are the ones today's audit sharpened): claims are commit windows and a
 stopped lane releases; at most one host-bound lane per check slot (4); REPL-first for ordinary function changes, every
 friction filed; a Haiku or Gemini claim is reproduced before it is a task; restarts pause and resume lanes; one design
-round in flight; a dependency or fork bump only just before its restart.
+round in flight; a dependency or fork bump only just before its restart. Rhythm (owner 2026-10-14 evening): proven
+work lands the hour it is proven (root applies a stopped lane's proven patch itself rather than queueing it); restarts
+come often, since agents keep their branches and reacquire, and a nuke is acceptable when it unblocks; every lane,
+host-bound ones included, starts as a Seon agent at the REPL and reports its context frictions, because bad context is
+the defect that costs every agent.
 
 **Restart batches.** Next restart: the clj-kondo fork bump `eb245d82` (`../research/agent-platform/2026-10-14/kondo-fork-bump.md`;
 fixes `my.program/write-branch!`'s NullPointerException; proven by `an-agent-writes-back-a-file-whose-analysis-runs-a-hook`),
