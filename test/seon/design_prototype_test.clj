@@ -17,7 +17,7 @@
     (into {} (map (fn [{:seon.ref/keys [anchor line]} end] [anchor (str/join "\n" (subvec lines line (dec end)))]) headings ends))))
 
 (deftest ^{:seon/tasks #{'seon.ref/design-a-pathless-reference-section}} a-pathless-reference-section-is-designed
-  (let [{{intent :seon.task/plan} :seon.task/effective} (seon.test/task)
+  (let [{{intent :seon.task/plan} :seon.test/task} (seon.test/task)
         intent (or intent "")
         present (sections intent)
         references (ref/references (db/db) {:seon.ref/text intent})]

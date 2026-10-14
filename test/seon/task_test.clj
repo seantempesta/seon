@@ -12,7 +12,9 @@
             [seon.cluster.store]
             [seon.profile :as profile]
             [seon.schema :as schema]
+            [seon.step :as step]
             [seon.task :as task]
+            [seon.test]
             [seon.test-support :as test-support]))
 
 (def ^:private task-path "resources/seon/tasks/tq.tree.edn")
@@ -550,3 +552,67 @@
          (finally
            (doseq [b [branch from-branch] :when (contains? (registry/branches store) b)]
              (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))))
+
+(def ^:private chain-proofs
+  ;; A template proof reading its task's plan, a successor proof, a handoff reading the successor's result on the
+  ;; supplied branch, and a tagged reader run with no task.
+  (str "(ns tq.chainproof (:require [clojure.string :as str] [clojure.test :refer [deftest is]] [seon.step :as step] [seon.test]))\n"
+       "(deftest planned (is (str/includes? (get-in (seon.test/task) [:seon.test/task :seon.task/plan] \"\") \"## Approach\")))\n"
+       "(deftest successor (is (= 1 1)))\n"
+       "(deftest handoff (let [{branch :seon.test/branch} (seon.test/task)]\n"
+       "  (is (= 1 (:seon.test/pass-count (get (step/results branch '[tq.chainproof/successor]) 'tq.chainproof/successor))))))\n"
+       "(deftest ^{:seon/tasks #{'tq.chain/a}} unbound (is (nil? (seon.test/task))))\n"))
+
+(defn- task-run!
+  "Run the tests `identities` on `connection` judging `task` (nil: no task), as an agent's test step does."
+  {:malli/schema [:=> [:cat :seon.db/connection [:set :symbol] [:maybe :seon.task/sym]] :map]}
+  [connection identities task]
+  (let [ran (seon.test/run (cond-> {:seon.test/execution (test-support/context-source connection)
+                                    :seon.test/recording-connection connection :seon.test/policy :named
+                                    :seon.test/identities identities}
+                             task (assoc :seon.test/task task)))]
+    (when (:seon.error/at ran) (throw (ex-info (:seon.error/message ran) ran)))
+    ran))
+
+(defn- outcome
+  "`test-symbol`'s recorded outcome on `connection`'s head under `task`'s content (`seon.step/results`; nil: no task):
+  :green, :red or absent."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol [:maybe :seon.task/sym]] [:maybe [:enum :green :red]]]}
+  [connection test-symbol task]
+  (some-> (get (if task (step/results (db/db connection) [test-symbol] task) (step/results (db/db connection) [test-symbol])) test-symbol)
+          (#(if (pos? (+ (:seon.test/fail-count %) (:seon.test/error-count %))) :red :green))))
+
+(deftest a-tasks-proof-is-recorded-and-read-under-its-task
+  (test-support/with-database
+   (fn [connection]
+     (let [planned 'tq.chainproof/planned
+           plan-b "## Problem\n\nP.\n\n## Approach\n\nA."
+           tasks [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "a" :seon.task/plan "## Problem\n\nP."
+                   :seon.task/proofs #{planned 'tq.chainproof/handoff} :seon.task/next -2}
+                  {:db/id -2 :seon.task/ns 'tq.chain :seon.task/name "a-2" :seon.task/proofs #{'tq.chainproof/successor}}
+                  {:db/id -3 :seon.task/ns 'tq.chain :seon.task/name "b" :seon.task/plan plan-b :seon.task/proofs #{planned}}]]
+       (test-support/task-input connection tasks 'tq.chain/a)
+       (test-support/declare-source! connection 'tq.chainproof chain-proofs)
+       (task-run! connection #{planned} 'tq.chain/a)
+       (task-run! connection #{planned} 'tq.chain/b)
+       (is (= [:red :green] [(outcome connection planned 'tq.chain/a) (outcome connection planned 'tq.chain/b)])
+           "one template proof holds a result under each task, neither hiding the other")
+       (test-support/task-input connection [{:seon.task/ns 'tq.other :seon.task/name "unrelated" :seon.task/plan "U."}]
+                                'tq.other/unrelated)
+       (is (= [:red :green] [(outcome connection planned 'tq.chain/a) (outcome connection planned 'tq.chain/b)])
+           "an unrelated write keeps both results current")
+       (is (zero? (:seon.test/executed-count (task-run! connection #{planned} 'tq.chain/b)))
+           "an unchanged task's proof is reused, not rerun")
+       (let [a-handle (task/task-handle 'tq.chain "a")
+             database (db/db connection)
+             declared (task/task-declaration database a-handle)]
+         (test-support/transacted! connection (task/adopt-tasks-tx database [(assoc declared :seon.task/plan plan-b)]
+                                                                   #{a-handle} {a-handle declared})))
+       (is (= [nil :green] [(outcome connection planned 'tq.chain/a) (outcome connection planned 'tq.chain/b)])
+           "changing a task's plan invalidates its own result only")
+       (task-run! connection #{'tq.chainproof/successor 'tq.chainproof/handoff} 'tq.chain/a)
+       (is (= :green (outcome connection 'tq.chainproof/handoff 'tq.chain/a))
+           "the handoff sees the successor proof's result recorded earlier in the same request")
+       (task-run! connection #{'tq.chainproof/unbound} nil)
+       (is (= :green (outcome connection 'tq.chainproof/unbound nil))
+           "a task-reading test run with no task reads nil, never its tag")))))

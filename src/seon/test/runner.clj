@@ -1318,57 +1318,54 @@
                             digest)])))
             test-symbols))))
 
-(declare tests-reaching)
-
-(defn- single-tags
-  "Each of `test-symbols` tagged with exactly one task on `database` (`:seon.task/tasks`), mapped to it."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] [:map-of :seon.test/sym :seon.task/sym]]}
-  [database test-symbols]
-  (into {} (keep (fn [[test-symbol tags]] (when (= 1 (count tags)) [test-symbol (second (first tags))])))
-        (group-by first (db/q '[:find ?s ?t :in $ [?s ...] :where [?e :seon.test/sym ?s] [?e :seon.task/tasks ?t]]
-                              database test-symbols))))
+(declare program-revisions-digest)
 
 (defn task-input
-  "What a test reads of task `sym` on `database`, the request's own: its effective declaration
-  (`seon.task/effective`), absent when `database` holds no such task, and its obligations (`seon.task/obligations`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.test/task-input :seon.error/value]]}
+  "What a test body judging task `sym` reads (`seon.test/task`): the task entity on `database`, the requesting
+  branch's value, and that value; the unknown-error when `database` holds no such task."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.test/task-input :seon.test/unknown-error]]}
   [database sym]
-  (let [handle (:seon.task/id (db/pull database [:seon.task/id] [:seon.task/sym sym]))
-        effective (when handle ((requiring-resolve 'seon.task/effective) database handle))
-        obligations ((requiring-resolve 'seon.task/obligations) database sym)]
-    (or (first (filter seon.error.refusal/error? [effective obligations]))
-        (cond-> {:seon.task/sym sym :seon.task/obligations obligations}
-          effective (assoc :seon.task/effective effective)))))
+  (if-let [entity (first (db/datoms database :avet :seon.task/sym sym))]
+    {:seon.test/task (db/stored-entity database (:e entity)) :seon.test/branch database}
+    (seon.error.refusal/error :seon.test/unknown-error
+     {:seon.error/layer :seon.test/selection
+      :seon.error/operation 'seon.test.runner/task-input
+      :seon.error/message (str "The request names task " sym ", which the requesting branch does not hold.")
+      :seon.test/unknown "task input"
+      :seon.error/offending sym})))
 
-(defn- inputs-of
-  "Each of `test-symbols` whose closure calls the test namespace's task reader, mapped to the `task-input` of its task: `task`, else
-  its one tag (`single-tags`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] [:or :nil :seon.test/task]]
-                  [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]}
-  [database test-symbols task]
-  ;; The reader's name is built, not quoted: a quoted symbol is an analysed reference, so this harness function would
-  ;; reach it and every test running a nested request would read as a reader.
-  (let [readers (tests-reaching database (vec test-symbols) (symbol "seon.test" "task"))
-        reading (when (set? readers)
-                  (if task (zipmap readers (repeat task)) (single-tags database (vec readers))))
-        inputs (into {} (map (fn [sym] [sym (task-input database sym)])) (set (vals reading)))]
-    (or (when-not (set? readers) readers)
-        (first (filter seon.error.refusal/error? (vals inputs)))
-        (update-vals reading inputs))))
+(defn- task-identity
+  "What a result judging task input `input` is keyed by beside its closure, all content: the task's revision, the
+  next task's proofs and the requesting branch's program revisions (`program-revisions-digest`)."
+  {:malli/schema [:=> [:cat :seon.test/task-input] [:tuple [:maybe :string] [:vector :symbol] [:maybe :string]]]}
+  [{task :seon.test/task database :seon.test/branch}]
+  [((requiring-resolve 'seon.task/task-revision) database (:seon.task/id task))
+   (vec (sort (some->> (:seon.task/next task) (db/pull database [:seon.task/proofs]) :seon.task/proofs)))
+   (program-revisions-digest database)])
 
 (defn task-inputs
-  "Each of `test-symbols` whose closure calls the test namespace's task reader, mapped to the `task-input` it judges on `database`:
-  of `task`, a request's `:seon.test/task`, else of its one `:seon/tasks` tag."
+  "Each of `test-symbols` whose body calls the test namespace's task reader, mapped to the `task-input` of `task` on
+  `database`; empty with no task: an unbound reader reads nil, never a tag. A reader is a direct caller (its
+  `:seon.fn/calls`): every deftest's closure reaches the reader through `clojure.test`, so reach cannot tell one."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                    [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]
-                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] :seon.test/task]
+                  [:=> [:cat :seon.db/database-value [:vector :seon.test/sym] [:maybe :seon.test/task]]
                    [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]]}
-  ([database test-symbols] (inputs-of database test-symbols nil))
-  ([database test-symbols task] (inputs-of database test-symbols task)))
+  ([database test-symbols] (task-inputs database test-symbols nil))
+  ([database test-symbols task]
+   (let [;; The reader's name is built, not quoted: a quoted symbol is an analysed reference, so this harness
+         ;; function would call it.
+         readers (when task
+                   (db/q '[:find [?s ...] :in $ [?s ...] ?reader :where [?t :seon.test/sym ?s] [?t :seon.fn/calls ?reader]]
+                         database (vec test-symbols) (symbol "seon.test" "task")))
+         input (when (seq readers) (task-input database task))]
+     (cond (empty? readers) {}
+           (seon.error.refusal/error? input) input
+           :else (zipmap readers (repeat input))))))
 
 (defn- task-reach-digests
-  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its task input."
+  "`closure-digests`, each test of `inputs` (`task-inputs`) keyed too by its input's `task-identity`."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls]
                        [:or :seon.test/task-inputs :seon.test/unknown-error :seon.error/value]]
@@ -1379,7 +1376,7 @@
           (seon.error.refusal/error? inputs) inputs
           :else (reduce-kv (fn [result test-symbol input]
                              (if-let [digest (get result test-symbol)]
-                               (assoc result test-symbol (id/id [digest input] 64))
+                               (assoc result test-symbol (id/id [digest (task-identity input)] 64))
                                result))
                            digests inputs))))
 
@@ -1387,9 +1384,8 @@
   "Each test's reach digest: the content of its static closure on `database`,
   and, given `extra-roots` (test -> the definitions its body executed outside
   that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test whose
-  closure calls the test namespace's task reader also keys the task input it judges
-  (`task-inputs`): of `task`, the request's `:seon.test/task`, else of its one
-  `:seon/tasks` tag."
+  closure calls the test namespace's task reader also keys, given `task` (the
+  request's `:seon.test/task`), the content of the input it judges (`task-identity`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]

@@ -313,13 +313,12 @@
   :seon.db/connection]
  :seon.test/policy :seon.test.run/policy
  :seon.test/task
- [:and {:description "The task a test request's members judge (`seon.test/task`): a clone's own step, read on the request's database. Absent: each member judges its one `:seon/tasks` tag."}
+ [:and {:description "The task a test request's members judge (`seon.test/task`), read on the requesting branch. Absent: a member reading it reads nil."}
   :seon.task/sym]
  :seon.test/task-input
- [:map {:description "What a member's body reads of the task it judges (`seon.test/task`), read on the request's own database: a clone's effective declaration and obligations live on its branch, never in the member's world."}
-  [:seon.task/sym :seon.task/sym]
-  [:seon.task/effective {:optional true} :seon.task/effective]
-  [:seon.task/obligations :seon.task/obligations]]
+ [:map {:description "What a member's body reads of the task it judges (`seon.test/task`): the task entity and the requesting branch's database value, captured after the request's earlier tests recorded; a member's own world holds neither its task nor the branch's results."}
+  [:seon.test/task :seon.task/task]
+  [:seon.test/branch :seon.db/database-value]]
  :seon.test/task-inputs [:map-of :seon.test/sym :seon.test/task-input]
  :seon.test/request
  [:map
