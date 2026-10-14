@@ -9,7 +9,8 @@ The laws are in [CLAUDE.md](../../../CLAUDE.md); this skill shows what code that
 building, open the matching entry of
 [Read before you build](../../../docs/seon/architecture/reference-code.md#read-before-you-build) and read the library
 code it names. Errors follow the reviewed [errors spec](../../../docs/seon/specs/errors.md); agent data follows the
-[agent-loop spec](../../../docs/seon/specs/agent-loop.md). Where an owner ruling postdates a spec, the ruling wins: flag
+[agent-loop spec](../../../docs/seon/specs/agent-loop.md) and the task lifecycle follows
+[TASK-CHAIN](../../../docs/seon/schedule/cards/TASK-CHAIN.md). Where an owner ruling postdates a spec, the ruling wins: flag
 the spec section to its owner. Tests follow the
 [clojure-testing skill](../clojure-testing/SKILL.md).
 
@@ -358,7 +359,7 @@ A contract refusal or core error is not in the tool's union, so step 3 lets it p
 ## 4. Contracts
 
 Every function you add or change is contracted, private ones included, and instrumentation covers all of them; existing
-uncontracted functions are back-filled as generated tasks (`seon.contracts/task`, the
+uncontracted functions are back-filled as generated tasks (`seon.contracts/task`, which writes the proofs field from S2c-2, the
 [contracts guide](../../../docs/seon/architecture/contracts-guide.md)). Keep each contract short, never weaker.
 
 **4.1 Write the contract on one line when it fits. Use registry names and naked keys; never restate a registered
@@ -539,11 +540,12 @@ from its namespace and name, never a hand-typed id. This replaces `[[sym]]` link
 reference into the subject's context and reports one that resolves to nothing as a problem on that var; until it
 exists, a backticked span is prose that a reader can follow.
 
-**9.4 Link a task with `:seon/tasks` metadata.** A definition or test names its tasks with `:seon/tasks` (on a deftest,
-`^{:seon/tasks #{…}}` before the name; metadata after the name is refused). The index links it today
-(`seon.fn/task-links`), and the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`). Today
-the set holds task handles derived by `seon.task/task-handle`; TARGET (lane task-tags): it holds `ns/task-name`
-symbols. A known issue under `Known issues` on a `my.*` docstring names the same task.
+**9.4 A task's proofs are a field.** A task's success tests are its `:seon.task/proofs`, the set of qualified deftest
+symbols that must be green (TASK-CHAIN §1); a definition cites its task as a backticked `ns/task-name` in its docstring
+(§9.3), and a known issue under `Known issues` on a `my.*` docstring names the same task. Installed until S2c-2: a
+definition or test names its tasks with `:seon/tasks` metadata (on a deftest, `^{:seon/tasks #{…}}` before the name;
+metadata after the name is refused), indexed by `seon.fn/task-links`, and the deftests naming a task are its proofs
+(`seon.task/task-edges`).
 
 **9.5 Review prompt: comment why, in one line above the form, only where the code cannot say it.** No banner rules
 (`;;; ----`), narration or restated docstrings; a `;;;` section title is fine.

@@ -183,7 +183,7 @@ Information design for a UI that is scanned, not read:
   on first paint; "Loading…" placeholders that depend on the feed are a
   defect on the initial GET, and the initial GET stays under one second.
 - **Words are design material.** Labels name what a person recognises
-  (agent, namespace, turn, plan step), never the mechanism (`subject`,
+  (agent, namespace, turn, task), never the mechanism (`subject`,
   `viewer`, `output :seon.render/html`, lookup refs, db ids, `#inst`).
 - **Structure encodes truth.** Turn ordinals, plan positions, and step
   states are shown because the order and the state are facts; decorative

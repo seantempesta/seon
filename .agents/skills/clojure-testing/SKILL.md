@@ -30,12 +30,12 @@ Add none when one of these holds:
    or lint already performs. Name the installed check before relying on it.
 7. **The claim is a wall-clock time.** Profile it and record the number as evidence; the runner holds the bound.
    Deterministic work counts (cache misses, recomputations, query counts) are different: when the spec states them,
-   test them. Context costs follow the approved three-part context (agent-loop.md §2, §3.4): what a
+   test them. Context costs follow the approved three-part context ([agent-loop.md](../../../docs/seon/specs/agent-loop.md) §2, §3.4): what a
    test asserts there is the count its spec states.
 
 Otherwise, if an agent or a user would notice the break, write one test through the entrance, asserting data.
 
-A task names its success tests before it is assigned (§2.12): new behavior gets the test that fails until the task is
+A task names its success tests in its proofs before it runs (§2.12): new behavior gets the test that fails until the task is
 done; a refactor names the existing tests that reach it.
 
 ## 2. How to write one
@@ -139,16 +139,18 @@ merging them.
 public `my.*` examples, deleted (removed in `819a8ed4b`). A public `my.*` behavior at risk gets one focused test
 through its entrance; an example that no longer runs is a docstring defect fixed where it is touched.
 
-**2.12 A test that proves a task names it.** `(deftest ^{:seon/tasks #{'ns/task-name}} a-refused-write-is-the-forms-refusal
-…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:seon.task/proofs`). Installed:
-`seon.task/assign!` refuses a task with no proofs (`:no-proofs`); proofs already green end the attempt in the agent's
-first pass with no model call (`seon.turn/prove-turn`). TARGET (agent-loop.md §1.7, §3.5): after any eval request that evaluated
-a form, the proofs and the tests reaching the change run on the agent's branch, and all green completes the task. Metadata
-placed after the test name is refused (`:metadata-after-test-name`). The set holds `ns/task-name` symbols; the task's
-`:seon.task/id` handle is derived (`seon.task/task-handle`), never hand-typed. A new behavior or bug regression fails before the work and passes after it. A behavior-preserving refactor names
-existing green tests (§1); green alone cannot establish that the refactor has been done, so under the target
-admission rule a refactor task needs one proof that fails before it (how such tasks name that proof is an open owner
-question).
+**2.12 A test that proves a task is in its proofs.** A task's proofs are its `:seon.task/proofs` field, a set of
+qualified deftest symbols; the deftests in it are its success tests (TASK-CHAIN §1, §6). After any eval request that
+evaluated a form, the tests the branch changed, the tests reaching the change and then the task's proofs run on the
+agent's branch, and all green completes the task; proofs already green at the start end it with no model call (§2.3).
+The next task's proofs are red by design: Prove writes them and `:not-designed-red` refuses a green one (§4), and
+`:stray-red` refuses any other red the branch added (§2.4). A new behavior or bug regression fails before the work and
+passes after it. A behavior-preserving refactor names existing green tests (§1); green alone cannot establish that the
+refactor has been done, so its Prove task writes one proof that fails before it (TASK-CHAIN §4).
+Installed until S2c-2: the field is derived from `^{:seon/tasks #{'ns/task-name}}` metadata on the deftest (metadata
+after the test name is refused, `:metadata-after-test-name`; `seon.task/task-edges` reads it), `seon.task/assign!`
+refuses a task with no proofs (`:no-proofs`), and proofs already green end the attempt in the agent's first pass
+(`seon.turn/prove-turn`). The task's `:seon.task/id` handle is derived (`seon.task/task-handle`), never hand-typed.
 
 ## 3. Delete or convert
 
