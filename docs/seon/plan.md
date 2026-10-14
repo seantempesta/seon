@@ -37,6 +37,7 @@ signal comes from rough runs on each newly landed slice.
 | 2 | S3a-2 turn authority and context | `turn.clj`, `context.clj` | Opus | S2a |
 | 2 | S2c-1 tag sweep (one commit window) | task files | Sonnet | the restart |
 | 2 | S4b-design, S4b-prove predicates | `step/<stage>.clj` | Sonnet ×2 | S2a (S4a's `results` and task input are interim until it) |
+| 2 | S3f-2 per-task model, `:outside` (our Claude Code lanes become Seon agents with a block, proofs and the done rule: the dogfood gap, working state item 31) | `cluster/agent.clj`, `turn.clj` | Opus | S3a-2 |
 | 3 | S3a-3 advance | `task.clj`, `cluster/agent.clj`, `db_flow_test.clj` | Opus | S2a, S3a-2 |
 | 4 | S5 live DeepSeek chain | none (root REPL) | Opus | S3b, S3a-3, S4b |
 

@@ -85,3 +85,31 @@ Lanes at ~16:20 local and the order: plan section 0 (175906558) and the resume m
 27. request-view (986b6d79a; patches request-view.patch + a seon.test patch 2 to write): land after S3a-2, patch 1 and 2 together (patch 1 alone turns a false green into a loud provenance error). Root decisions: results computed on the in-request view are NOT recorded (the request's test step records the true ones after its one transaction); `ns-unmap!` option (a): judge on the view, unmap natively, the request records the removal, its own transaction deleted (convert test/my/program_mutation_test.clj's direct JVM callers to requests). Correction to patch 1: do not bind a database value (`seon.db/*working*` breaks AGENTS.md "a database value is never bound"): bind the request's applied facts (data) and compute the view from the connection's head plus those facts at the read, the working value only a cache keyed by head commit and facts digest; record the word in vocabulary.md.
 
 28. Rough live chain 1 (live-chain-rough-1.md 4e2731bcb; tasks 810496199): Prove (0d0e604c3fd9) merged itself (installed auto-merge); Implement (90a6132f928c) green on its branch, merge request 51efd81cbc42 OPEN, refused because lane s3d-2's uncommitted seon.ref/section edits conflict: after s3d-2 commits, root repairs the merge on a merge branch and reviews (Implement's flaws: inline `[:string {:min 0}]` instead of `[:maybe :seon.ref/path]`; a redundant check; `:seon.error/offending` nil for "#" instead of absent: ask for those fixes before merging). Provider config restored by the run lane. The Prove unmap sentence fixed in TASK-CHAIN §4 (a8d44126f) and sent to lane s4a for seon.step.prove.edn. Four defects listed in the note (held task files): file them (my.program/search misuse with no result; my.program/source refuses task symbols; no `clojure.core/subs` suggestion for `str/subs`; redefining `locate` refused on output when only input changed). Hand acts map to TASK-CHAIN mechanisms (note §"what TASK-CHAIN must replace"); `my.root/close!` writes no attempt end (filed seon.task/a-closed-attempt-without-an-end-blocks-its-task).
+
+## Evening, 16:00-16:50 (root)
+
+Landed: S2b-2 e67cb2ba0, projections phase 1 c1dd12e6e, b1 cross-branch reuse 923eff09d (root applied the stopped
+lane's patch), S3d-2 fc7d5994b, the tag fix e1db21f25, S3d-3 d8b6e1fce, clj-kondo bump 7882e7c4f, S4a templates
+840d175a8, check-wait's measurements 19a8e2c1b, sentinel note bea2c4cae. Default restarted onto e1db21f25 at 16:26.
+
+29. HEAD stopped booting at ad653ff14: rough run 1's Prove merge was published by the installed path once s3d-2 freed
+    test/seon/ref_test.clj, and its write-back added the runtime-only task `seon.ref/implement-a-pathless-reference-section`
+    to two deftest tags; boot ingests tasks from files, so it refused (dangling-id) and every lane's check failed at
+    publication. `start --head` rolled back cleanly. Fixed by tags (e1db21f25); the producer fix (a merge never writes a
+    runtime task identity into a file) is a row of S3b's red proof.
+30. Sentinel on e1db21f25 (root ran `seon.sentinel/run`: its probes are SCI as root, so Haiku cannot): warm `(+ 1 2)`
+    66.6 ms vs 38.6 baseline (1.7x; settle 54 ms), fresh 223-261 vs 214 ms, `defn` 670 ms (test-step 162, settle 204,
+    custody 132). Boot ready 47,820 ms, 4.7x the 10-13 median, `seon.source/current` 88% of it; check-wait measured the
+    same publication (about 20 s) inside every check's throwaway boot, plus a 23 s + 9 s rehearsal per check while
+    default lags HEAD. Next perf lane: publication cost (after check-wait's proposal).
+31. Dogfood gap (s3d-3, s2b-1): an outside lane's `(seon.context/current-state)` shows only `:my.agent/turns-left` and
+    no task, because our lanes hold no task. S3f-2 (`:outside` per-task model) is what makes Claude Code lanes real
+    Seon agents with a block, proofs and a done rule: pulled forward to right after S3a-2.
+32. To file (held files at the time): a check's failure report drops the `actual:` line for a non-trivial value
+    (kondo-bump had to write the value to a file to see a contract error); `:seon.config.test/step?` is read in
+    `seon.turn` but declared in no schema; the test step costs 1,415 ms / 1,787 MB for one `defn` plus one 33 ms test
+    (s2b-1) and 98 ms / 425 MB for a scratch `def`; `bin/lane claim` and `bin/seon check` refuse a quoted multi-path
+    variable and blame `--test`; `bin/lane commit` cannot name a task's intended red proofs, so a tags-only fix names
+    a green neighbour.
+33. Lane rule added: no lane writes, restores or checks out a file another lane holds (kondo-bump reverted
+    ref_test.clj with `git checkout`; s3d-3 re-applied its hunk from a saved diff).
