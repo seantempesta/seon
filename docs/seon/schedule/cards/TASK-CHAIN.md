@@ -138,7 +138,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    cost about 100 ms (fork 53–56 ms, two small committed transactions ~22 ms each); measure the durable create in S1c.
 2. **Run a task** — root's listener `seon.cluster.agent/db<->flow`, each pass, reads every chain fact on main and each
    chain's branch head with `seon.db/branch-database` (a store read needing no open connection, as
-   `seon.cluster.agent/branch-end` does today), released after use (`seon.cluster.source/release!`). Measured
+   `seon.cluster.agent/branch-end` does today), released after use (`seon.cluster.source/release!`); a chain value is never read after the same pass deletes its
+   branch (retention reclaims it; the window is `:seon.config.db/snapshot-window-ms`). Measured
    0.45–0.7 ms and 1.4–1.8 MB per chain read and walked (20 chains 9–14 ms with a warm store); no cache until load
    justifies one. A chain's work is only its first task's `next` path and those tasks' attempts: the branch also inherits
    main's unrelated tasks, which are not its work. **A task starts** when its execution is `:running`, its latest
