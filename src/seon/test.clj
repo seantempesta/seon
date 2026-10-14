@@ -1640,21 +1640,44 @@
     (if (:seon.error/at results) results
         (or (first results) (unknown test-symbol "No admitted execution is recorded for this test.")))))
 
+(defn- current-result?
+  "Whether a recorded result still describes the test's source, inputs and reachable definitions."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test/result]
+                  [:or :boolean :seon.test/host-error]]}
+  [database test-symbol result]
+  (let [inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
+        current (runner/reach-digests database [test-symbol])
+        present (db/pull database [:seon.test/source :seon.test/fixture-observation]
+                         [:seon.test/sym test-symbol])]
+    (or (first (filter :seon.error/at [inputs current present]))
+        (boolean
+         (and (:seon.test/source present)
+              (not (:seon.test/fixture-observation present))
+              (= #{(:seon.test.run/input-digest result)} (set inputs))
+              (string? (get current test-symbol))
+              (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))
+
 (defn- stale-in
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   [:or [:vector :qualified-symbol] :seon.test/execution-error]]}
   [database test-symbols]
   (reduce (fn [result test-symbol]
-            (let [verified (verified? database test-symbol)]
+            (let [recorded (recorded-result database test-symbol)
+                  current (cond
+                            (or (:seon.test/unknown recorded)
+                                (and (:seon.error/at recorded) (:seon.test/run recorded))) false
+                            (:seon.error/at recorded) recorded
+                            :else (current-result? database test-symbol recorded))]
               (cond
-                (:seon.error/at verified)
-                (reduced (assoc verified :seon.test/execution-refusal :seon.test/sym))
-                (true? verified) result
+                (:seon.error/at current)
+                (reduced (assoc current :seon.test/execution-refusal :seon.test/sym))
+                (true? current) result
                 :else (conj result test-symbol))))
           [] test-symbols))
 
 (defn stale
-  "Source-bearing tests with no result or a changed reach digest.
+  "Source-bearing tests without a result at their current inputs and reach.
+  A current red result is not stale.
   Declared fixture observations are always stale. The named arity answers
   for exactly the supplied tests, so a caller holding its own set never
   digests the whole population to learn which of them must run again."
@@ -1814,19 +1837,7 @@
        (not (and (pos? (:seon.test/pass-count result))
                  (zero? (:seon.test/fail-count result))
                  (zero? (:seon.test/error-count result)))) false
-       :else
-       (let [inputs (db/q '[:find [?digest ...]
-                            :where [_ :seon.source/test-input-digest ?digest]] database)
-             current (runner/reach-digests database [test-symbol])
-             present (db/pull database [:seon.test/source :seon.test/fixture-observation]
-                              [:seon.test/sym test-symbol])]
-         (or (first (filter :seon.error/at [inputs current present]))
-             (boolean
-              (and (:seon.test/source present)
-                   (not (:seon.test/fixture-observation present))
-                   (= #{(:seon.test.run/input-digest result)} (set inputs))
-                   (string? (get current test-symbol))
-                   (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))))
+       :else (current-result? database test-symbol result))))
   ([database test-symbol program-digest]
    (let [result (recorded-result database test-symbol)]
      (cond

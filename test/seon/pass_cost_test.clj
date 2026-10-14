@@ -2,8 +2,11 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.profile :as profile]
+            [seon.task :as task]
+            [seon.test :as test]
             [seon.test-support :as support]))
 
 (deftest a-pass-reads-its-terminal-ordinal-once
@@ -56,3 +59,30 @@
        (is (= [3] (mapv :seon.repl/value (support/mcp-replies reply))))
        (is (zero? (profile/calls-of measured 'seon.test/request-changes)))
        (is (< (get stages :test-step 0.0) 5.0))))))
+
+(deftest a-current-red-proof-does-not-repeat-the-test-step
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (support/declare-proof! connection 'pass.cost-proof 'pending 'pass.cost/read)
+     (let [id (:seon.task/id
+               (task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                              :seon.task/ns 'pass.cost :seon.task/name "read"
+                              :seon.task/intent "Read the held task."}))
+           assigned (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                   :seon.db/connection connection :seon.task/assigned id
+                                   :seon.task/agent [:seon.agent/id agent-id]
+                                   :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           request (fn [code] (json/write-str {"name" "eval_clj"
+                                                "arguments" {"code" code "agent" agent-id "cluster" running}}))]
+       (is (not (:seon.error/type assigned)))
+       (mcp/call (request "(seon.context/current-state)"))
+       (is (false? (test/verified? (db/db connection) 'pass.cost-proof/pending)))
+       (is (= [] (test/stale (db/db connection) ['pass.cost-proof/pending])))
+       (doseq [code ["(seon.context/current-state)" "(+ 1 2)"]]
+         (let [measured (profile/measure #(json/read-str (mcp/call (request code))))
+               reply (:seon.profile/value measured)
+               stages (:seon.cost/stages (support/mcp-request reply))]
+           (is (false? (get reply "isError")))
+           (is (zero? (profile/calls-of measured 'seon.test/select)))
+           (is (< (get stages :test-step 0.0) 5.0))
+           (is (< (:seon.profile/ms measured) 1000.0))))))))

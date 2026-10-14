@@ -1,0 +1,22 @@
+--- a/test/seon/pass_cost_test.clj
++++ b/test/seon/pass_cost_test.clj
+@@ -78,11 +78,18 @@
+        (mcp/call (request "(seon.context/current-state)"))
+        (is (false? (test/verified? (db/db connection) 'pass.cost-proof/pending)))
+        (is (= [] (test/stale (db/db connection) ['pass.cost-proof/pending])))
+-       (doseq [code ["(seon.context/current-state)" "(+ 1 2)"]]
++       (doseq [sample (range 3)
++               code ["(seon.context/current-state)" "(+ 1 2)"]]
+          (let [measured (profile/measure #(json/read-str (mcp/call (request code))))
+                reply (:seon.profile/value measured)
+                stages (:seon.cost/stages (support/mcp-request reply))]
+            (is (false? (get reply "isError")))
++           (is (= :cost-probe
++                  {:sample sample :code code
++                   :profile (select-keys measured [:seon.profile/ms :seon.profile/calls])
++                   :request (support/mcp-request reply)
++                   :form (mapv #(select-keys % [:seon.repl/ms :seon.repl/alloc-mb])
++                               (support/mcp-replies reply))}))
+            (is (zero? (profile/calls-of measured 'seon.test/select)))
+            (is (< (get stages :test-step 0.0) 5.0))
+            (is (< (:seon.profile/ms measured) 1000.0))))))))
