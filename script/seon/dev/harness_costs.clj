@@ -12,7 +12,6 @@
   A warm validator acquisition near one microsecond is the populated Malli
   cache; a regression to recompiling shows as hundreds of microseconds."
   (:require [malli.core :as m]
-            [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
             [seon.instrument :as instrument]
@@ -58,7 +57,7 @@
   [projection]
   (let [caps (config/result-caps config/defaults)
         ctx (sci.eval/build-base-ctx projection)
-        interpreted (sci/eval-string* ctx "(fn [value] value)")]
+        interpreted (sci.eval/evaluate-native! ctx (quote (fn [value] value)))]
     (kernel/with-arm
      ctx 60000
      (fn [_]

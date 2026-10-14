@@ -474,7 +474,7 @@
       (is (= #{'first.party} (into #{} (keep :seon.ns/name) entities)))
       (is (= #{(quote first.party/trim)} (into #{} (keep :seon.fn/sym) entities)))
       (is (not-any? #(= (quote clojure.string/trim) (:seon.fn/sym %)) entities))))
-  (is (= ["src" "test"] seon.fn/source-roots)))
+  (is (= ["src" "test" "script"] seon.fn/source-roots)))
 
 (deftest a-fold-derived-definition-has-static-index-edge-parity
   (let [root (fixture-root)

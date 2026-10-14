@@ -300,7 +300,7 @@
   a-declaration-naming-an-unrequired-namespace-merges-with-its-ns-form-requiring-it
   ;; The dogfood class: the agent's SCI world resolves `clojure.set/union`
   ;; unrequired. Its evaluation requires it in the agent's namespace
-  ;; (`seon.turn.batch/auto-require!`), so the merge carries the namespace and
+  ;; (`seon.sci.eval/auto-require!`), so the merge carries the namespace and
   ;; the written file's `ns` form requires it.
   (merge-world! "wbreq" "set-check"
                 [(fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]

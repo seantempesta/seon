@@ -4180,7 +4180,7 @@
         value (:seon.sci.admit/value evaluation)
         ;; a definition's namespace requires what the definition names, as its file will
         required (when (and (instance? sci.lang.Var value) (not (:seon.cluster.eval/error evaluation)))
-                   (turn.batch/auto-require! (get-in world [:seon.sci.eval/ctx]) namespace-name form))
+                   (sci.eval/auto-require! (get-in world [:seon.sci.eval/ctx]) namespace-name form))
         evaluation (cond-> evaluation (seq required) (assoc :seon.eval/auto-required required))]
     (vreset! current (:seon.sci.eval/ending-ns evaluation))
     (cond

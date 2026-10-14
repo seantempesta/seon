@@ -1649,8 +1649,9 @@
         (advance-context-projection! ctx db installed-projection))
       installed)))
 
-(defn- evaluate-native!
-  "Execute an already-admitted program operation in its supplied SCI context."
+(defn evaluate-native!
+  "Execute an already-admitted `form` in its supplied SCI context `ctx`; answers its value."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value] :seon.schema/value]}
   [ctx form]
   (kernel/with-world-ctx ctx
     #(sci/eval-form ctx form)))
@@ -2254,6 +2255,28 @@
                   [:=> [:cat :seon.sci.eval/ctx :symbol :seon.db/database-value] :seon.sci.eval/ctx]]}
   ([ctx namespace-name] (enter-namespace* ctx namespace-name #(context-database ctx)))
   ([ctx namespace-name database] (enter-namespace* ctx namespace-name (constantly database))))
+
+(defn auto-require!
+  "Require in `namespace-name` of `ctx` each namespace a definition names fully
+  qualified that the namespace neither is, aliases nor requires, and that
+  resolves (`ctx` holds it or the platform loaded it): SCI resolves any such
+  namespace, the file's `ns` form only what it requires, so the namespace's
+  resolver state, and with it the merged `ns` form, holds what its definitions
+  use. Answers the namespaces required."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :seon.batch/form] [:set :symbol]]}
+  [ctx namespace-name form]
+  (let [{:keys [aliases requires]} (sci/namespace-bindings ctx namespace-name)
+        named (into (sorted-set)
+                    (comp (filter qualified-symbol?)
+                          (map (comp symbol namespace))
+                          (remove (into #{namespace-name 'clojure.core} requires))
+                          (remove #(contains? aliases %))
+                          (filter #(or (sci/find-ns ctx %) (find-ns %))))
+                    (tree-seq coll? seq form))]
+    (when (seq named)
+      (sci/binding [sci/ns (sci/find-ns ctx namespace-name)]
+        (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))
+    named))
 
 (defn- required-libs
   "The namespace names `require`'s arguments name: a lib symbol, a libspec

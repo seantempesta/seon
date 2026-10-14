@@ -706,28 +706,6 @@
       (throw (ex-info (:seon.error/message facts) facts))
       facts)))
 
-(defn auto-require!
-  "Require in `namespace-name` of `ctx` each namespace a definition names fully
-  qualified that the namespace neither is, aliases nor requires, and that
-  resolves (`ctx` holds it or the platform loaded it): SCI resolves any such
-  namespace, the file's `ns` form only what it requires, so the namespace's
-  resolver state, and with it the merged `ns` form, holds what its definitions
-  use. Answers the namespaces required."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :seon.batch/form] [:set :symbol]]}
-  [ctx namespace-name form]
-  (let [{:keys [aliases requires]} (sci/namespace-bindings ctx namespace-name)
-        named (into (sorted-set)
-                    (comp (filter qualified-symbol?)
-                          (map (comp symbol namespace))
-                          (remove (into #{namespace-name 'clojure.core} requires))
-                          (remove #(contains? aliases %))
-                          (filter #(or (sci/find-ns ctx %) (find-ns %))))
-                    (tree-seq coll? seq form))]
-    (when (seq named)
-      (sci/binding [sci/ns (sci/find-ns ctx namespace-name)]
-        (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))
-    named))
-
 (defn private-fact
   "`:seon.eval/private`: the Vars this entry's change classed as the agent's private
   state (`write-entity`), the one decision the reply's note reads; nil when none."
