@@ -154,6 +154,13 @@ the slice is proven by publish and reload on a branch of the live store, then jo
 
 ### E2. One predicate: every identity reader calls `seon.error.refusal/error?`
 
+- **Known identity reader on the blame path (found 2026-10-14, 80e9cc030).** `seon.sci.kernel/failure-value` recognizes an
+  existing refusal by the presence of `:at`, `:layer` and `:operation` and only then attributes it with its throwable;
+  that attribution is how `seon.batch/produced-failures` blames a compiled thrower and records its fault. E2 converts
+  this check to `seon.error.refusal/error?` like every other identity reader, before E3/E6 remove the stamps;
+  `seon.cluster.evaluate-source-test/a-compiled-functions-thrown-error-value-is-recorded-as-its-fault` is the proof that
+  must stay green.
+
 - **Change.** One rewrite-clj script over `src script test` rewrites the shapes of §1 into
   `(seon.error.refusal/error? x)`, adds the require where it is missing, then lints. The definition of `error?` does
   not change.
