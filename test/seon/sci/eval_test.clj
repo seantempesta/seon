@@ -2883,6 +2883,36 @@
          (is (< (* 3 (#'eval/overlay-weight overlay)) (* 3 1024 1024))
              "three one-function branches charge under 3 MB"))))))
 
+(defn- acquisition-refusals
+  "The row refusals a program context's acquisition holds, by row and message."
+  {:malli/schema [:=> [:cat :seon.sci.eval/program-context]
+                  [:set [:tuple [:maybe :qualified-symbol] [:maybe :string]]]]}
+  [value]
+  (let [{::eval/keys [acquisition-refusals agent-mistakes]} (::eval/acquisition value)]
+    (into #{} (map (juxt #(or (::eval/refused-function %) (::eval/row-symbol %)) :seon.error/message))
+          (concat acquisition-refusals agent-mistakes))))
+
+(deftest a-program-context-does-not-depend-on-who-derives-it
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'probe.who)])
+     (doseq [[local source] [["d" "(def d (seon.db/db))"]
+                             ["L2" "(def L2 (seon.ref/brief d 'seon.edit/single-form))"]]]
+       (test-support/transacted!
+        connection [(test-support/program-fn-entity (db/db connection) (symbol "probe.who" local) source
+                                                    {:seon.schema.admission/source :agent})]))
+     (let [database (db/db connection)
+           loaded (#'eval/loaded-program database)
+           projection (db/carried-projection database)
+           plan (#'eval/program-changes database loaded projection)
+           derive #(#'eval/derive-program-context database loaded projection plan)
+           unbound (binding [db/*conn* nil db/*read-database* nil] (derive))
+           bound (binding [db/*conn* connection] (derive))]
+       (is (contains? (into #{} (map first) (acquisition-refusals unbound)) 'probe.who/L2)
+           "with no connection bound, L2's init refuses its database argument")
+       (is (= (acquisition-refusals unbound) (acquisition-refusals bound))
+           "the deriving thread's connection never reaches an init")))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-an-agent-requires-is-interpreted-not-host-loaded}}
   an-interpreted-test-namespace-resolves-the-core-names-sci-lacks
   ;; seon.test.runner-test calls `ref`; SCI's clojure.core carries no STM

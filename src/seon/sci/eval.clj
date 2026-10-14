@@ -3673,35 +3673,38 @@
   and freeze it."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/program-context]}
   [loaded]
-  ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
-  ;; its loaded program's namespaces loaded.
-  (load-core-namespaces! loaded)
-  (let [projection (if-let [carried (db/carried-projection loaded)]
-                     (schema/projection-from-database loaded carried)
-                     (schema/projection-from-database loaded))]
-    (schema/call-with-projection
-     projection
-     (fn []
-       (let [ctx (assoc (build-base-ctx projection)
-                        ::bind-result! #'bind-result!
-                        :seon.schema/projection projection
-                        ::kernel/install-function! install-function-from-database!)
-             _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-commit-id (db/commit-id loaded))
-             acquired (acquire-program! {:seon.sci.eval/ctx ctx
-                                         :seon.db/db loaded
-                                         :seon.schema/projection projection})
-             ;; read before the freeze renews the builder's generation
-             program-namespaces {::generation (:sci/generation @(:env ctx))
-                                 ::namespaces (sci/namespace-state ctx)}]
-         ;; The program context holds program data only. Each fork carries its
-         ;; own acquired basis and loaded commit.
-         (-> (freeze-program ctx)
-             (update ::kernel/program-snapshot
-                     #(-> (dissoc % ::loaded-commit-id)
-                          (assoc ::acquisition acquired
-                                 ::program-namespaces program-namespaces
-                                 :seon.test/class-loader (clojure.lang.RT/baseLoader))))
-             (assoc ::acquisition acquired)))))))
+  ;; A program context is a function of its content: no init reads the
+  ;; deriving thread's connection or read basis.
+  (binding [db/*conn* nil db/*read-database* nil]
+    ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
+    ;; its loaded program's namespaces loaded.
+    (load-core-namespaces! loaded)
+    (let [projection (if-let [carried (db/carried-projection loaded)]
+                       (schema/projection-from-database loaded carried)
+                       (schema/projection-from-database loaded))]
+      (schema/call-with-projection
+       projection
+       (fn []
+         (let [ctx (assoc (build-base-ctx projection)
+                          ::bind-result! #'bind-result!
+                          :seon.schema/projection projection
+                          ::kernel/install-function! install-function-from-database!)
+               _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-commit-id (db/commit-id loaded))
+               acquired (acquire-program! {:seon.sci.eval/ctx ctx
+                                           :seon.db/db loaded
+                                           :seon.schema/projection projection})
+               ;; read before the freeze renews the builder's generation
+               program-namespaces {::generation (:sci/generation @(:env ctx))
+                                   ::namespaces (sci/namespace-state ctx)}]
+           ;; The program context holds program data only. Each fork carries its
+           ;; own acquired basis and loaded commit.
+           (-> (freeze-program ctx)
+               (update ::kernel/program-snapshot
+                       #(-> (dissoc % ::loaded-commit-id)
+                            (assoc ::acquisition acquired
+                                   ::program-namespaces program-namespaces
+                                   :seon.test/class-loader (clojure.lang.RT/baseLoader))))
+               (assoc ::acquisition acquired))))))))
 
 (defn- cluster-base-key
   "The inputs the cluster base is a function of: the loaded program's store and
@@ -3788,11 +3791,14 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/program-context :seon.db/database-value :seon.db/database-value
                        :seon.schema/projection :map] :seon.sci.eval/program-context]}
   [cluster database loaded projection plan]
-  (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
-                   ::custody {} :seon.schema/projection projection)
-        acquired (overlay! ctx database plan)
-        value (freeze-program ctx)]
-    (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster)))))
+  ;; A program context is a function of its content: no init reads the
+  ;; deriving thread's connection or read basis.
+  (binding [db/*conn* nil db/*read-database* nil]
+    (let [ctx (assoc (copy-base-ctx cluster database loaded nil)
+                     ::custody {} :seon.schema/projection projection)
+          acquired (overlay! ctx database plan)
+          value (freeze-program ctx)]
+      (assoc value ::acquisition (assoc acquired ::own-namespace-entries (own-namespace-entries value cluster))))))
 
 (defn- projection-delta
   "The digest of the schema forms and function contracts `database`'s
