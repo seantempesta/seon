@@ -29,12 +29,14 @@
                        [:seon.context/after {:optional true} :seon.context/after]]
                :send-backs [:vector {:description "The latest send-back to the held task: the step that sent it back and the reason its attempt recorded (seon.context/send-backs); absent when none was sent."}
                             [:map [:seon.task/sym :seon.task/sym] [:seon.task.attempt/reason :seon.task.attempt/reason]]]
-               :attempt [:map {:description "One earlier attempt of the held task, as a rerun reads it: its number, how it ended, root's outcome and reason, and the model calls its agent made. Producer: seon.context/earlier-attempts."}
+               :attempt [:map {:description "One earlier attempt of the held task, as a rerun reads it: its number, how it ended, root's outcome and reason, the model calls its agent made and its last step. Producer: seon.context/earlier-attempts."}
                          [:seon.task.attempt/number :seon.task.attempt/number]
                          [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
                          [:seon.task/outcome {:optional true} :seon.task/outcome]
                          [:seon.task/reason {:optional true} :seon.task/reason]
-                         [:seon.task/calls :seon.task/calls]]
+                         [:seon.task/calls :seon.task/calls]
+                         [:seon.context/last-step {:optional true} :seon.context/last-step]]
+               :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
                :changes [:and {:description "Every declaration the agent's branch changed since its task's merge base, by family, each name one level with the form that reads it (seon.context/by-family): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!). Absent when nothing changed."} :seon.context/merged]
                :turns

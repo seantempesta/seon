@@ -470,9 +470,24 @@
        :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
        :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)})))
 
+(defn- last-step
+  "The last step agent `agent-id` took on `database`: the note of the `my.turn/wait` its last form returned, else
+  the prose it wrote with that form, else that form's source; nil when it evaluated nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:maybe :seon.context/last-step] :seon.error/value]]}
+  [database agent-id]
+  (let [evaluations (seon.eval/of-agent database agent-id [:seon.cluster.eval/comment :seon.cluster.eval/source :seon.eval/shown])]
+    (if (:seon.error/at evaluations)
+      evaluations
+      (when-let [{shown :seon.eval/shown prose :seon.cluster.eval/comment source :seon.cluster.eval/source} (peek evaluations)]
+        (let [value (some-> shown repl/shown-value)]
+          (or (when (and (map? value) (= :wait (:my.turn/disposition value))) (:my.turn/note value))
+              (not-empty prose)
+              source))))))
+
 (defn- earlier-attempts
   "The attempts of task `handle` on `database` other than agent `agent-id`'s, by number, one entry each: its
-  number, end, outcome and reason when it holds them, and the model calls its agent made (`model-usage`)."
+  number, end, outcome and reason when it holds them, the model calls its agent made (`model-usage`) and its last
+  step (`last-step`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id] [:or :seon.context/attempts :seon.error/value]]}
   [database handle agent-id]
   (let [rows (db/q '[:find [(pull ?a [:seon.task.attempt/number :seon.task.attempt/end :seon.task/outcome :seon.task/reason
@@ -483,10 +498,12 @@
       rows
       (let [shown (into [] (comp (remove #(= agent-id (get-in % [:seon.task/agent :seon.agent/id])))
                                  (map (fn [row]
-                                        (let [usage (model-usage database (get-in row [:seon.task/agent :seon.agent/id]))]
-                                          (if (:seon.error/at usage)
-                                            usage
-                                            (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage)))))))
+                                        (let [earlier (get-in row [:seon.task/agent :seon.agent/id])
+                                              usage (model-usage database earlier)
+                                              step (last-step database earlier)]
+                                          (or (some #(when (:seon.error/at %) %) [usage step])
+                                              (cond-> (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage))
+                                                step (assoc :seon.context/last-step step)))))))
                         (sort-by :seon.task.attempt/number rows))]
         (or (some #(when (:seon.error/at %) %) shown) shown)))))
 

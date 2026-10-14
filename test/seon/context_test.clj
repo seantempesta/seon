@@ -781,4 +781,8 @@
              "the earlier attempt, one entry: its number, end, outcome, reason and model calls")
          (is (every? changed ['tq.ra/squared 'tq.ra/scratch]) "the branch's new definitions, scratch included")
          (is (every? #(seq (:seon.render/operations %)) (mapcat val (:seon.context/changes state)))
-             "each with the form that reads it"))))))
+             "each with the form that reads it"))
+       ;; a later attempt's block shows this one's last step: the note of the wait it ended its turn with
+       (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
+       (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))
+           "an attempt's last step is the note of its last wait")))))
