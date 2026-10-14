@@ -147,8 +147,7 @@
         absent (edit/exact source (assoc base :my.edit/old-string "missing")
                            8192)]
     (is (string? (:my.edit/ambiguous-match ambiguous)))
-    (is (= 2 (get-in ambiguous
-                     [:seon.error/data :my.edit/replacements])))
+    (is (= 2 (:my.edit/replacements ambiguous)))
     (is (= "NEW\nkeep\nNEW\n" (:seon.edit/source all)))
     (is (= 2 (:my.edit/replacements all)))
     (is (string? (:my.edit/no-match absent)))))

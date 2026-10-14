@@ -329,6 +329,7 @@
                  {:seon.error/message "No top-level form matches the exact selector."
         :seon.error/offending request
         :seon.error/data {:seon.edit/candidates candidates}
+        :my.edit/replacements 0
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
@@ -339,6 +340,7 @@
                  {:seon.error/message "More than one top-level form matches the selector."
         :seon.error/offending request
         :seon.error/data {:seon.edit/candidates candidates}
+        :my.edit/replacements (count matches)
         :my.edit/ambiguous-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
@@ -368,6 +370,50 @@
                (conj parts (subs source previous-end position) new-string))
         (apply str (conj parts (subs source previous-end)))))))
 
+(defn- occurrence-error
+  [source old-string positions]
+  (let [many? (seq (rest positions))]
+    (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/text
+     {:seon.error/type (if many? :my.edit/ambiguous-match-error :my.edit/no-match-error)
+      :seon.error/message (if many?
+                            "The exact prior string occurs more than once."
+                            "The exact prior string does not occur in the source.")
+      :seon.error/offending old-string
+      :my.edit/replacements (count positions)
+      :seon.error/data {:seon.edit/lines (mapv #(:my.edit/from-line
+                                                 (line-range source % (+ % (count old-string))))
+                                               positions)}
+      :seon.error/expected "one matching source region"})))
+
+(defn text
+  "Answers `source` with its one exact occurrence of `old-string` replaced by
+  `new-string`, or the no-match or ambiguous-match error with the matching lines."
+  {:malli/schema
+   [:=> [:cat :string :string :string]
+    [:or :string :my.edit/no-match-error :my.edit/ambiguous-match-error]]}
+  [source old-string new-string]
+  (let [positions (occurrences source old-string)]
+    (if (= 1 (count positions))
+      (replace-occurrences source positions old-string new-string)
+      (occurrence-error source old-string positions))))
+
+(defn- exact-candidate
+  [source applied old-string new-string context-byte-limit]
+  (let [candidate-source (replace-occurrences source applied old-string new-string)
+        first-start (first applied)
+        last-start (+ (last applied)
+                      (* (dec (count applied))
+                         (- (count new-string) (count old-string))))
+        changed-end (+ last-start (count new-string))]
+    (merge {:seon.edit/source candidate-source
+            :seon.edit/start first-start
+            :seon.edit/end changed-end
+            :my.edit/replacements (count applied)}
+           (byte-span candidate-source first-start changed-end)
+           (line-range candidate-source first-start changed-end)
+           (context-window candidate-source first-start changed-end
+                           context-byte-limit))))
+
 (defn exact
   "Replace one exact string occurrence, or every occurrence when explicit."
   {:malli/schema
@@ -377,48 +423,18 @@
   (let [old-string (:my.edit/old-string request)
         new-string (:my.edit/new-string request)
         positions (occurrences source old-string)
-        replace-all? (true? (:my.edit/replace-all? request))
-        lines-of #(mapv (fn [position]
-                          (:my.edit/from-line
-                           (line-range source position (+ position (count old-string)))))
-                        %)]
-    (cond
-      (empty? positions)
-      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/exact
-       {:seon.error/message "The exact prior string does not occur in the source."
-        :seon.error/offending request
-        :seon.error/data {:my.edit/replacements 0 :seon.edit/lines []}
-        :my.edit/no-match (:my.edit/path request)
-        :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
-
-      (and (not replace-all?) (< 1 (count positions)))
-      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/exact
-       {:seon.error/message "The exact prior string occurs more than once."
-        :seon.error/offending request
-        :seon.error/data {:my.edit/replacements (count positions)
-                          :seon.edit/lines (lines-of positions)}
-        :my.edit/ambiguous-match (:my.edit/path request)
-        :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
-
-      :else
-      (let [applied (if replace-all? positions [(first positions)])
-            candidate-source
-            (replace-occurrences source applied old-string new-string)
-            first-start (first applied)
-            last-start (+ (last applied)
-                          (* (dec (count applied))
-                             (- (count new-string) (count old-string))))
-            changed-end (+ last-start (count new-string))]
-        (merge {:seon.edit/source candidate-source
-                :seon.edit/start first-start
-                :seon.edit/end changed-end
-                :my.edit/replacements (count applied)}
-               (byte-span candidate-source first-start changed-end)
-               (line-range candidate-source first-start changed-end)
-               (context-window candidate-source first-start changed-end
-                               context-byte-limit))))))
+        all? (and (true? (:my.edit/replace-all? request)) (seq positions))
+        answer (if all? positions (text source old-string new-string))]
+    (if (or all? (string? answer))
+      (exact-candidate source (if all? positions [(first positions)])
+                       old-string new-string context-byte-limit)
+      (assoc answer
+             (if (= :my.edit/no-match-error (:seon.error/type answer))
+               :my.edit/no-match
+               :my.edit/ambiguous-match) (:my.edit/path request)
+             :seon.error/offending request
+             :seon.error/member :my.edit/path
+             :seon.error/operation 'seon.edit/exact))))
 
 (defn lines
   "Replace a one-based inclusive line window guarded by its exact bytes."
@@ -436,6 +452,7 @@
         :seon.error/data {:my.edit/from-line from-line
                    :my.edit/to-line to-line
                    :seon.edit/line-count (count starts)}
+        :my.edit/replacements 0
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"})
@@ -451,6 +468,7 @@
                        :my.edit/to-line to-line
                        :my.edit/actual-window actual
                        :my.edit/source-window-complete? true}
+        :my.edit/replacements 0
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"})

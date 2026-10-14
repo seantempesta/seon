@@ -86,6 +86,25 @@
   [request]
   (effect/request! #'exact! request))
 
+(defn text
+  "Answers `source` with the one exact occurrence of `old-string` replaced by `new-string`.
+
+  Zero occurrences answer `:my.edit/no-match-error`, several
+  `:my.edit/ambiguous-match-error`, each with the matching lines in
+  `:seon.error/data`.
+
+  ## Example
+
+  ```clojure
+  (my.edit/text \"(def example 1)\" \"1\" \"2\")
+  ```"
+  {:malli/schema
+   [:=> [:cat :string :string :string]
+    [:or :string :my.edit/no-match-error :my.edit/ambiguous-match-error]]
+   :seon.workload :compute}
+  [source old-string new-string]
+  (edit/text source old-string new-string))
+
 (defn lines!
   "Replace an inclusive line window after checking its text and digest.
 

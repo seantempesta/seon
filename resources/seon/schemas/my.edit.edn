@@ -61,9 +61,9 @@
   [:my.edit/source-window-complete? :my.edit/source-window-complete?]
   [:my.edit/replacements {:optional true} :my.edit/replacements]],
  :my.edit/no-match :my.edit/path
- :my.edit/no-match-error [:and :seon.error/base [:map [:my.edit/no-match :my.edit/no-match]]]
+ :my.edit/no-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/no-match {:optional true} :my.edit/no-match]]]
  :my.edit/ambiguous-match :my.edit/path
- :my.edit/ambiguous-match-error [:and :seon.error/base [:map [:my.edit/ambiguous-match :my.edit/ambiguous-match]]]
+ :my.edit/ambiguous-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/ambiguous-match {:optional true} :my.edit/ambiguous-match]]]
  :my.edit/parse-byte-count [:int {:min 0}]
  :my.edit/parse-refused-error [:and :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
  :my.edit/unverified-char-span [:tuple [:int {:min 0}] [:int {:min 0}]]

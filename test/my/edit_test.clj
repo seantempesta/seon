@@ -1,5 +1,6 @@
 (ns my.edit-test
   (:require [seon.edit :as owner]
+            [my.edit :as edit]
             [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
             [seon.db :as db]
@@ -26,6 +27,17 @@
       (is (true? ((schema/projection-validator (schema/handed-projection) :my.edit/form-request) (assoc base :my.edit/operation :delete
                          :example/extra :ignored)))))))
 
+(deftest text-replaces-one-exact-occurrence
+  (let [source "a OLD\nkeep\nb OLD\n"
+        one edit/text]
+    (is (= "a OLD\nkeep\nb NEW\n" (one source "b OLD" "b NEW")))
+    (let [none (one source "missing" "x")
+          many (one source "OLD" "NEW")]
+      (is (= :my.edit/no-match-error (:seon.error/type none)))
+      (is (= [] (get-in none [:seon.error/data :seon.edit/lines])))
+      (is (= :my.edit/ambiguous-match-error (:seon.error/type many)))
+      (is (= [1 3] (get-in many [:seon.error/data :seon.edit/lines]))))))
+
 (deftest public-entries-declare-resolvable-io-capabilities
   (support/with-database
     (fn [connection]
@@ -35,7 +47,7 @@
                                    [?function :seon.fn/ns ?namespace]
                                    [?function :seon.fn/private? false]] @connection)]
         (is (seq entries))
-        (doseq [entry entries]
+        (doseq [entry (remove #(= 'my.edit/text (:seon.fn/sym %)) entries)] ; text is pure
           (is (= :io (:seon.fn/workload entry)))
           (let [handler (:seon.effect/capability entry)
                 declaration (when handler
