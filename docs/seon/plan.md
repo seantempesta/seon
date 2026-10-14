@@ -80,7 +80,40 @@ a data-returning split.
 **Models** (owner 2026-10-14, tailored by measured outcome). Haiku gathers and summarizes (digs, inventories, flake
 runs, red triage) so root reads conclusions, not bulk; Sonnet does well-specified work and REPL prototypes (on the
 same prototype brief Sonnet answered 3.5 of 4 questions at the REPL, Haiku 1); Opus takes the hard problems and
-planning; Astra gives the independent second opinion and the hard performance work.
+planning; Astra gives the independent second opinion and the hard performance work. Gemini through `bin/agy-agent`
+(agy-lanes skill) finds root causes and judges proposals: on four blind tests with known answers Flash-high was
+right every time and fastest (F53's exact clause from its symptom in 7 min), and Argon was right but slower; Argon
+takes long performance hunts and independent plans
+([evidence](../research/agent-platform/2026-10-14/gemini/README.md)). Every quote and retire-this list from a Gemini
+lane is reproduced before use: Argon once invented code excerpts, Flash misread four live deletion tasks as moot.
+
+**Performance is on the path** (owner 2026-10-14: "huge gains can be found by identifying them and methodically
+fixing them"; everything computed from immutable inputs is shared across agents, branches and contexts, keyed by
+content; tests already green for an unchanged reach never rerun). Leads from the Gemini hunt, each confirmed in the
+code or on default, in order of measured weight
+([evidence](../research/agent-platform/2026-10-14/gemini/README.md)): (1) `seon.program/authored-shapes` keys
+`seon.cache/lookup` by the whole packaged forms map (two lanes independently), and `seon.cache` sits at its 512 MB
+budget evicting the schema projection while it holds ten 105 MB declaration projections; (2) the recording
+transaction is about 41 ms of a 40-48 ms trivial eval request (`seon.db/transact-call` 285 ms mean since boot), with
+`seon.config/effective` read 7 times and `seon.print/emit-both` building HTML for AI replies; (3)
+`seon.fn.analyzer/attributed-usages` scans every var-quote per usage (80.6M checks since boot); (4)
+`seon.cluster/rehearse-source!` and `seon.fn/analyzed-artifacts` re-derive the whole program per change (to measure);
+(5) the profiler's own predicates carry contracts, so `seon.profile/summary` costs about 88k checked calls. Each fix
+is proven by `seon.profile/measure` on the end-to-end probe it targets; Astra or Opus implements, Flash-high judges
+proposals first.
+
+**Backlog by root cause** (owner 2026-10-14: many queued tasks exist because the system does the wrong thing
+upstream). Flash-high clustered all 872 declared tasks: 21 are moot and are retired (subjects deleted:
+`seon.census`, `seon.html-views`, `seon.dev.hook`, `seon.documentation`, `seon.step`, `seon.print.value`,
+`seon.test.selection`, `seon.cluster.source/land!`, `seon.context/main-database`); nine producer clusters would retire
+51 more and are verified one by one before any retirement; eight tasks ask for fences and are re-filed on their root
+cause. Argon's independent clustering is in flight.
+
+**Worktree experiment** (owner 2026-10-14). The goal is the database as the source of truth with files the vetted
+write-back, reliable two-way sync until then, lanes replaced by parallel work resolved at merge, and every immutable
+computation shared across places. Two independent pitches (Flash-high, Argon) decide whether each agent's place is a
+Datahike branch, an SCI context and a git worktree cut from one commit; the owner decides from the pitches before
+anything is built. The worktree prohibition is lifted for the experiment (a54610348).
 
 **Live runs** (owner 2026-10-14): no paid Claude API calls. Two kinds of run after S3a (Design, then Prove with
 Implement held): (1) DeepSeek product agents, the measured live run; (2) Claude Code agents acting as Seon agents
@@ -92,9 +125,9 @@ generated context is complete and correct before the DeepSeek runs are graded on
 calls, tokens and errors by signature; (2) context useful by construction; (3) tasks improve as work proceeds; (4)
 agents mine Seon for tasks, after goal 1 holds.
 
-**Deferred, not on the path:** user surfaces; concurrency (two chains at once); performance follow-ups
-(`my.program/search` allocation, publication ~1.3 s per namespace, the 2.3 s cold one-test check, check JVM runs of
-160–190 s for one test).
+**Deferred, not on the path:** user surfaces; concurrency (two chains at once). Older performance follow-ups join the
+performance leads above when measured: `my.program/search` allocation, publication ~1.3 s per namespace, the 2.3 s cold
+one-test check, check JVM runs of 160–190 s for one test.
 
 ## 1. The goal
 
