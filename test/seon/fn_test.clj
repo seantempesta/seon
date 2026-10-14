@@ -3273,3 +3273,33 @@
                            (:seon.problems/files-without-namespace
                             (seon.problems/problems database {})))))))))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest analyzed-artifacts-asserts-a-clean-analysis-once
+  (let [root (fixture-root)
+        file (write-source! root "src/once/sample.clj" "(ns once.sample)\n(defn g [] 1)\n(defn f [] (g))\n")
+        path (.getCanonicalPath file)
+        projection (seon.schema/handed-projection)
+        [artifacts calls] (test-support/armed-calls
+                           '#{seon.fn/assert-clean-analysis!}
+                           #(#'seon.fn/analyzed-artifacts projection ["src"] (.getPath root) [path] nil nil))]
+    (try
+      (is (= 1 (count artifacts)))
+      (is (= 1 (get calls 'seon.fn/assert-clean-analysis!)))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest a-larger-first-party-set-blocks-every-finding-a-smaller-one-blocks
+  (let [finding (fn [row type]
+                  {::analyzer/filename "a.clj" ::analyzer/row row ::analyzer/col 1
+                   ::analyzer/end-row row ::analyzer/end-col 5
+                   ::analyzer/level :error ::analyzer/type type})
+        usage (fn [row] {::analyzer/filename "a.clj" ::analyzer/row row ::analyzer/col 1
+                         ::analyzer/end-row row ::analyzer/end-col 5
+                         ::analyzer/to 'ext ::analyzer/name 'f})
+        analysis {::analyzer/findings (mapv #(finding % :unresolved-var) (range 1 4))
+                  ::analyzer/var-usages (mapv usage (range 1 3))}
+        small #{}
+        large #{'ext/f}
+        rows #(set (map ::analyzer/row (#'seon.fn/blocking-findings analysis %)))]
+    (is (= #{3} (rows small)))
+    (is (= #{1 2 3} (rows large)))
+    (is (every? (rows large) (rows small)))))

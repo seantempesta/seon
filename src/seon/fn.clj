@@ -2793,7 +2793,6 @@
                      (nil? cache-root)
                      (with-dependency-analysis
                       (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis))))
-          _ (assert-clean-analysis! analysis (first-party-function-symbols analysis))
           schema-values (keep forms (into #{} (mapcat val) (keywords-by-holder analysis)))
           ;; The sources' own symbols come from the analyzer's one parse.
           mentioned (into (::analyzer/mentioned-symbols analysis)
