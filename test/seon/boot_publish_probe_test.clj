@@ -12,7 +12,7 @@
             [seon.render.value :as value]
             [seon.test-support :as support]))
 
-(deftest ^{:seon.test/long "Measures three publications of eight large source files including whole-program derivation widening; the installed replay measured 34 seconds per publication."
+(deftest ^{:seon.test/long "Measures six publications of eight large source files including whole-program derivation widening; the installed replay measured 34 seconds per publication."
            :seon.test/long-ms 180000}
   publication-widening-measurement
   (let [root (str "tmp/boot-publish-" (random-uuid))
@@ -20,6 +20,21 @@
         source (or (System/getenv "SEON_BOOT_PUBLISH_INPUT") (fs/source-directory))
         output (System/getenv "SEON_BOOT_PUBLISH_OUTPUT")
         parent (support/execution-handle db/*conn*)
+        targets '#{seon.schema/call-with-projection-state seon.db/with-declarations
+                   seon.db/read-declarations seon.db/carried-projection
+                   seon.schema/build-projection seon.cluster/derivation-keys}
+        counters (fn []
+                   (reduce (fn [out cell]
+                             (if (targets (:seon.profile/sym cell))
+                               (let [observed (profile/observation cell)]
+                                 (update out (:seon.profile/sym cell)
+                                         #(merge-with + % (select-keys observed [:seon.profile/calls
+                                                                               :seon.profile/self-ms
+                                                                               :seon.profile/total-ms]))))
+                               out)) {} (profile/cells)))
+        recording (when (System/getenv "SEON_BOOT_PUBLISH_JFR")
+                    (doto (jdk.jfr.Recording. (jdk.jfr.Configuration/getConfiguration "profile"))
+                      (.start)))
         paths ["src/seon/cluster.clj" "src/seon/fn.clj" "src/seon/db.clj"
                "src/seon/turn.clj" "src/seon/instrument.clj" "src/seon/context.clj"
                "src/seon/ref.clj" "src/seon/schema.clj"]]
@@ -39,9 +54,12 @@
         (let [file (io/file directory path)]
           (.setWritable file true)
           (spit file (str "; Publication measurement.\n" (slurp file)))))
-      (doseq [sample (range 3)]
+      (doseq [sample (range 6)]
        (let [held (store/open-overlay! (:seon.store/store parent))
-            began (System/nanoTime)]
+            began (System/nanoTime)
+            before (counters)
+            cpu-bean (java.lang.management.ManagementFactory/getThreadMXBean)
+            cpu-before (.getCurrentThreadCpuTime cpu-bean)]
         (try
           (let [measured
                 (with-bindings {#'cluster/*source-progress!*
@@ -60,12 +78,23 @@
                              :seon.fn.analyzer/cache-root (str root "/resolver")))))]
             (when output
               (spit output (str (value/core-text
+                                {:sample sample
+                                 :target-cells (into {} (map (fn [[sym after]]
+                                                              [sym (merge-with - after (get before sym))]))
+                                                     (counters))}) "\n") :append true)
+              (spit output (str (value/core-text
                                 (assoc (dissoc measured :seon.profile/value :seon.profile/called :seon.profile/ranked-by-calls)
                                        :sample sample
+                                       :thread-cpu-ms (/ (- (.getCurrentThreadCpuTime cpu-bean) cpu-before) 1e6)
                                        :analysis-calls (select-keys (:seon.profile/called measured)
                                                                    '[seon.fn.analyzer/parsed-facts seon.fn.analyzer/parse-facts
                                                                      seon.fn.analyzer/invoke-kondo]))) "\n")
                     :append true))
             (is (true? (:seon.source/built? (:seon.profile/value measured)))))
           (finally (store/release-store! held)))))
-      (finally (support/delete-recursively! root)))))
+      (finally
+        (when recording
+          (.stop recording)
+          (.dump recording (.toPath (io/file (System/getenv "SEON_BOOT_PUBLISH_JFR"))))
+          (.close recording))
+        (support/delete-recursively! root)))))

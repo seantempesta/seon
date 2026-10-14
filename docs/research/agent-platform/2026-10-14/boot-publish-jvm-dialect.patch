@@ -1,0 +1,49 @@
+diff --git a/src/seon/fn/analyzer.clj b/src/seon/fn/analyzer.clj
+index 33ab11967..64bc76644 100644
+--- a/src/seon/fn/analyzer.clj
++++ b/src/seon/fn/analyzer.clj
+@@ -62,7 +62,7 @@
+   ;; lint-deferred-conditions!). Disable at admission,
+   ;; never by dropping findings from a completed analysis.
+   (reduce #(assoc-in %1 [:linters %2 :level] :off)
+-          analysis-config
++          (assoc analysis-config :cljc {:features ^:replace [:clj]})
+           [:type-mismatch :redundant-str-call :is-message-not-string
+            :redundant-primitive-coercion :equals-float :not-empty?
+            :constant-condition]))
+@@ -299,8 +299,10 @@
+       directory)))
+ 
+ (defn- invoke-kondo
+-  "Lint the supplied files once using the dependency-set cache."
+-  {:malli/schema [:=> [:cat [:map [:lint [:vector :string]]]] :map]}
++  "Lint the supplied JVM sources once using the dependency-set cache."
++  {:malli/schema [:=> [:cat [:map [:lint [:vector :string]]
++                            [:config [:map [:cljc [:map [:features [:= [:clj]]]]]]]]]
++                  :map]}
+   [options]
+   (let [options (merge {:lang :clj :config-dir config-directory
+                        :cache-dir cache-directory :cache true :repro true
+diff --git a/test/seon/fn/analyzer_test.clj b/test/seon/fn/analyzer_test.clj
+index 70cf82277..6bcee5fb1 100644
+--- a/test/seon/fn/analyzer_test.clj
++++ b/test/seon/fn/analyzer_test.clj
+@@ -192,10 +192,15 @@
+                    "#?(:clj (defn jvm-only [] :clj)\n"
+                    "   :cljs (defn browser-only [] :cljs))\n"
+                    "(defrecord Pair [left right])\n"
+-                   "(deftype Cell [value])\n"))
+-        definitions (::analyzer/var-definitions
+-                     (analyzer/analyze {::analyzer/paths [cljc]}))
++                   "(deftype Cell [value])\n"
++                   "(defprotocol P (p [x]))\n"
++                   "#?(:clj (extend-type String P (p [x] x))\n"
++                   "   :cljs (extend-type string P (p [x] x)))\n"))
++        analysis (analyzer/analyze {::analyzer/paths [cljc]})
++        definitions (::analyzer/var-definitions analysis)
+         names (into #{} (map ::analyzer/name) definitions)]
++    (is (= ['clojure.core/extend-type]
++           (mapv ::analyzer/defined-by->lint-as (::analyzer/protocol-impls analysis))))
+     (is (contains? names 'jvm-only))
+     (is (not (contains? names 'browser-only)))
+     (is (every? #(not= :cljs (::analyzer/lang %)) definitions))

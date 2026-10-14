@@ -1,0 +1,23 @@
+diff --git a/src/seon/fn.clj b/src/seon/fn.clj
+index 9c79983d4..53b247740 100644
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -1552,14 +1552,14 @@
+   (let [used-keywords (keywords-by-holder analysis)
+         host-bound (host-bound-callers analysis first-party-functions projection)
+         invocations (invocations-by-definition analysis)
++        definitions-by-file (group-by ::analyzer/filename (::analyzer/var-definitions analysis))
+         declared-calls
+         (reduce-kv
+          (fn [calls filename context]
+            (let [holders (select-keys invocations
+-                                      (keep (fn [entry]
+-                                              (when (= filename (::analyzer/filename entry))
+-                                                (symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))))
+-                                            (::analyzer/var-definitions analysis)))]
++                                      (map (fn [entry]
++                                             (symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry))))
++                                           (get definitions-by-file filename)))]
+              (if (empty? holders)
+                calls
+                (let [attributes (into #{} (mapcat val) holders)
