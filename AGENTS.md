@@ -309,7 +309,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   order. The writer checks the touched entities' digests; only root's merge advances main. Local green never implies
   shared acceptance.
 - **Write-back** uses the same checks, checks file bases, stages exact-span changes and reindexes to prove equivalent
-  declarations before installation. The merge never writes chain tasks into task files.
+  declarations before installation, task entries included: a merged task is written into its task file.
 
 ## Data and contracts
 
