@@ -38,6 +38,13 @@ lane-input-roots; then root commits the owner's experimental `src-clm/`). Retent
 the producers; deleted branches are still reclaimed; the window code stays). Documentation cleanup against
 TASK-CHAIN (Haiku inventories → Sonnet edits).
 
+**Files at merge; `bin/lane` retires (owner 2026-10-14).** Agents, ours included, work through the REPL as much as
+possible: `defn` on their own branch, source read through `my.program/source`; root's merge writes the accepted
+entities to files, and once it does (with what `bin/lane commit` checks today carried by the merge), `bin/lane` claims
+and commits retire. No per-agent git worktree (both Gemini pitches, `../research/agent-platform/2026-10-14/gemini/`).
+Gaps to close, from `dig-merge-writes-files.md` (in flight): the merge's write and commit of files, the non-program
+files (docs, scripts, deps, bin), and our lanes working as `:outside` Seon agents (S3f-2).
+
 **Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
 context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
 lanes, restarts and resumes them (owner 2026-10-14), so a restart never waits for every lane; a dependency or fork bump
