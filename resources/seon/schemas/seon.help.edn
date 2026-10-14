@@ -1,8 +1,13 @@
 {:seon.help/lines [:vector :string]
  :seon.help/title [:string {:min 1 :description "A help group's heading, a few words."}]
- :seon.help/group [:map {:description "One titled group of help lines."}
+ :seon.help/anchor :seon.ref/anchor
+ :seon.help/references [:vector {:description "The references a help section's text makes, each resolved once per content digest of help.md."}
+                        [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]
+ :seon.help/group [:map {:description "One titled help section: its heading, the anchor that names it, its lines (one per paragraph of resources/seon/help.md) and the references they make."}
                    [:seon.help/title :seon.help/title]
-                   [:seon.help/lines :seon.help/lines]]
+                   [:seon.help/anchor {:optional true} :seon.help/anchor]
+                   [:seon.help/lines :seon.help/lines]
+                   [:seon.help/references {:optional true} :seon.help/references]]
  :seon.help/groups [:vector :seon.help/group]
  :seon.help/help
  [:map {:description "The REPL instructions returned as data by help: an orienting guide in titled groups."

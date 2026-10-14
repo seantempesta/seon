@@ -141,9 +141,9 @@
 (deftest the-help-reply-reads-as-data-its-value-the-help-lines
   (support/with-running-agent
    (fn [running agent-id connection]
-     (is (= (:seon.help/groups (bootstrap/help-value @connection))
+     (is (= (bootstrap/render-help-ai (bootstrap/help-value @connection))
             (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
-         "the reply is one EDN form whose value is the help groups, whole"))))
+         "the reply is one EDN form whose value is the help groups' titles and lines, whole; references stay in the value"))))
 
 (deftest help-teaches-the-schema-registration-form
   (support/with-running-agent
