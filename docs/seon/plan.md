@@ -26,8 +26,11 @@ Rough live chain 1 (`live-chain-rough-1.md`): Implement green in 14 calls with n
 mapped to the TASK-CHAIN mechanism that removes it; its merge request waits on lane s3d-2's `ref.clj`.
 
 **The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge). The critical path is
-two serial Opus lines, S2a → S3a-2 → S3a-3 and S3b-1 → S3b-2, at about 45 min a slice: S5 is tomorrow; today's live
-signal comes from rough runs on each newly landed slice.
+run in parallel, not in series (owner 2026-10-14 evening: "the time is now"): every remaining slice
+prototypes at the REPL on its own branch while its files are held and claims only for its commit window, and the S5
+run plan (`../research/agent-platform/2026-10-14/s5-run-plan.md`) is prepared beside them, so S5 runs tonight as soon
+as the slices land. Landed since 16:45: S3b-1 (e958b1700), the stage templates (840d175a8), S3d-2, S3d-3, the
+pathless-section fix from rough run 1 (6133c9670).
 
 | Step | Slice | Files | Model | Waits for |
 |---|---|---|---|---|
