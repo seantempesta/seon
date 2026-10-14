@@ -91,6 +91,12 @@ bindings at lookup, then 8, 5, 6, 7. (3) TASK-CHAIN S1c-2, S1d-2, then S2 and S3
 (4) Performance: boot double analysis (boot-dup-analysis), reconciliation (reconcile-writer), the test step's
 2.6-7.3 GB per `defn` (Astra, after teststep-verdict names it).
 
+**Live chain today (owner 2026-10-14: "run the live chain today, maybe in a rougher version").** TASK-CHAIN S1 is
+complete (S1d-2 6b6a825f9). Rough run now on the installed single-task path (lane live-chain-rough: Prove → Implement on
+the subject Design run 1 designed, root carrying plan and proofs between them as counted hand acts; a deliberate paid
+DeepSeek run with the development cluster's `no-provider` lifted for it only); the automatic chain follows S3a-1 (in
+flight), S4a templates (in flight), S2b-2, S2a/S2b-1, S3a-2, S3a-3 and S3b.
+
 **Dogfood the REPL path (owner 2026-10-14).** Our lanes work REPL-first by default for ordinary function changes
 (`defn` on their own branch, `my.program/write-branch!`, `bin/lane commit --branch-evidence`); when a step fails they
 apply the edit by hand and file the friction as a task, so the path Seon agents use gets smooth by being used. Trial and
