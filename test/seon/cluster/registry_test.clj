@@ -722,6 +722,36 @@
             (d/release held)
             (d/release connection)))))))
 
+(deftest a-chain-fact-keeps-its-branch-and-base-through-retirement
+  ;; A chain's work branch is claimed by the chain fact on main (TASK-CHAIN 2.1):
+  ;; it and its retained base survive boot's retirement, held or not; a branch no
+  ;; fact names is retired.
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "alice"))
+      (let [cluster (registry/cluster-branch "alice")
+            fork! #(registry/fork! {:seon.store/store opened
+                                    :seon.cluster.registry/from cluster
+                                    :seon.store/branch %})
+            _ (run! fork! [:chain-named :chain-held :chain-unnamed])
+            connection (store/open-branch! opened cluster)
+            held (store/open-branch! opened :chain-held)]
+        (try
+          (test-support/transacted!
+           connection
+           {:tx-data [{:seon.chain/first "aaaaaaaaaaaa" :seon.chain/branch :chain-named}
+                      {:seon.chain/first "bbbbbbbbbbbb" :seon.chain/branch :chain-held}]})
+          (is (= #{:chain-unnamed (registry/base-branch :chain-unnamed)}
+                 (registry/retire-unclaimed! opened #{source-branch}))
+              "only the branch no chain fact names, with its base, is retired")
+          (is (every? (registry/branches opened)
+                      [:chain-named (registry/base-branch :chain-named)
+                       :chain-held (registry/base-branch :chain-held)])
+              "a named chain, held or not, keeps its branch and base")
+          (finally
+            (d/release held)
+            (d/release connection)))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
   an-idle-branch-keeps-the-commit-it-forked-from-through-collection
   ;; The lane forks from `src`'s head F and commits once; `src` then moves on.

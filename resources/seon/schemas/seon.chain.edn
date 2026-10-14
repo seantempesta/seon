@@ -1,0 +1,9 @@
+#:seon.chain
+{:branch [:and {:seon.wake/starts true :description "The branch holding a chain's tasks and attempts: forked from main by seon.task/chain!, merged into main once at the chain's end. Counted by seon.cluster.registry/cluster-claims, so boot's retirement keeps it and its base."} :seon.store/branch]
+ :first [:and {:seon.db/identity true :seon.program/row-schema :seon.chain/chain
+               :description "The chain's first task, by its :seon.task/id: the chain's identity, since only the first task supplies a chain's name."}
+         :seon.task/handle]
+ :chain [:map {:seon.db/attributes true :seon.program/partition :seon.data
+               :description "The chain fact on main, one per chain: discovery, not status. Root finds every chain through it and reads the chain's state on its branch."}
+         [:seon.chain/first :seon.chain/first]
+         [:seon.chain/branch :seon.chain/branch]]}

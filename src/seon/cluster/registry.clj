@@ -534,8 +534,9 @@
   nil)
 
 (defn- cluster-claims
-  "The branches `branch` claims when it is a cluster branch, else nil: itself
-  and the branch of every agent row on it whose admission is open.
+  "The branches `branch` claims when it is a cluster branch, else nil: itself,
+  the branch of every agent row on it whose admission is open and the branch of
+  every chain fact on it (`:seon.chain/branch`), held chains included.
   A cluster branch is one whose own `:seon.cluster/name` row names it through
   `cluster.branch/cluster-branch`. A fork inherits its cluster's name row, so
   the comparison, never the branch's spelling, tells a cluster from its forks."
@@ -550,8 +551,10 @@
                   (d/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db))
         (into #{branch}
               (d/q '[:find [?branch ...]
-                     :where [?agent :seon.agent/branch ?branch]
-                     (not [?agent :seon.agent/admission-closed-tx])]
+                     :where (or-join [?branch]
+                                 (and [?agent :seon.agent/branch ?branch]
+                                      (not [?agent :seon.agent/admission-closed-tx]))
+                                 [_ :seon.chain/branch ?branch])]
                    db)))
       (finally (d/release-materialized-db db)))))
 

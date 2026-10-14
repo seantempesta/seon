@@ -10,7 +10,7 @@
          [:string {:min 1}] [:fn {:error/message "must be one symbol's name"} seon.task/symbol-name?]]
  :step [:enum {:description "The step kind: Prove supplies new red product tests; Implement makes its proofs green, its subject's tagged tests and its product among them. A task declaring none is judged by its own tagged tests (seon.task/obligations)."} :prove :implement]
  :plan [:string {:min 1 :description "The plan: Markdown that starts as the user's request and that every task improves, in blocks such as ## Problem, ## What exists and ## Approach, with the references it cites (seon.ref/names). Declared on the subject (required on a task with no parent), inherited down :seon.task/children, a child's own value overwriting (seon.task/effective)."}]
- :instructions [:string {:min 1 :description "A step's own work, beside the goal it shares: declared on the step, never inherited past a task that declares its own (seon.task/effective); my.task/refine! writes it on the held step."}]
+ :instructions [:string {:min 1 :seon.task/owned true :description "A step's own work, beside the goal it shares: declared on the step, never inherited past a task that declares its own (seon.task/effective); my.task/refine! writes it on the held step."}]
  :references [:set {:min 1 :seon.db/index true :seon.program/definition-edge true
                      :description "The qualified symbols the task's intent and instructions cite as code spans (seon.ref/names), derived by the task writer whenever either is written; never authored."}
               :seon.program/edge-symbol]
@@ -41,6 +41,7 @@
         [:seon.task/children {:optional true} :seon.task/children] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/product {:optional true} :seon.task/product]
         [:seon.task/proofs {:optional true} :seon.task/proofs]
         [:seon.task/execution {:optional true} :seon.task/execution]
+        [:seon.task/next {:optional true} :seon.task/next]
         [:seon.task/attempts-made {:optional true} :seon.task/attempts-made]
         [:seon.task/cron {:optional true} :seon.task/cron] [:seon.task/zone {:optional true} :seon.task/zone]
         [:seon.task/function {:optional true} :seon.task/function]]
@@ -50,6 +51,8 @@
  :needs [:set {:seon.db/index true :seon.wake/starts true
                :description "The tasks this one is ready only after (runtime-follows-db §2): each must be done; inherited by every descendant. Siblings without needs between them run in parallel. Authored in task EDN as lookup refs [:seon.task/sym ns/name]; a cycle is refused at the writer (seon.task/refuse-needs-cycle)."}
          :seon.db/ref]
+ :owned [:boolean {:description "On a content member of a task: the chain's template sets it and an agent may change it, but it never flows to the next task (TASK-CHAIN 1). Exactly instructions and proofs carry it; every other content member flows."}]
+ :next [:and {:seon.db/index true :description "The one task that follows this one in its chain: a peer reference, never a component, absent on the last task. Written by the chain's writer, never declared in a task file; tasks linked by next are a chain."} :seon.db/ref]
  :execution [:enum {:seon.db/index true :seon.wake/starts true :default :held
                     :description "The task's execution (runtime-follows-db §3), inherited down :seon.task/children: a task runs under its own, else its nearest ancestor's (seon.task/execution). Ingestion and create! write :held on a new task with no parent, so one :running fact on a subject launches its steps, and a step's own value keeps it apart. :held is never launched, :paused is hosted without running, :stopped releases its graph keeping agent, branch and attempt, :cancelled ends it."}
              :held :running :paused :stopped :cancelled]
@@ -74,7 +77,7 @@
             :seon.db/ref]
  :faults [:set {:seon.db/index true :description "The fault signatures a task answers (seon.error/commit-call writes a producer's own task with each of its faults). The task is closed when every one is resolved (seon.task/resolution)."} :seon.db/ref]
  :created-by [:and {:description "The agent that wrote a runtime task (7.8); file reconciliation never retracts a task carrying it."} :seon.db/ref]
- :outcome [:enum {:description "How root closed an assignment, the merge request: merged (seon.merge/merge-tx, in the merge's transaction, for a :done end), or closed (another end merged, or root's decline with a reason, seon.task/close!); absence means open. A merge task generated before assignments carried it records it too."} :merged :closed]
+ :outcome [:enum {:description "How an attempt ended its task's part of a chain: done (its proofs passed and the chain moved on), merged (seon.merge/merge-tx, in the merge's transaction, for a :done end), or closed (another end merged, or root's decline with a reason, seon.task/close!); absence means open. A merge task generated before assignments carried it records it too."} :done :merged :closed]
  :landed [:uuid {:description "The main commit a merge task's landing made (seon.cluster.source/land! on a green end, seon.turn/end-task!)."}]
  :landed-git [:and {:description "The git commit a merge task's landing made in the checkout."} :seon.git/commit]
  :refusal [:qualified-keyword {:description "The error type of the refusal a merge task's landing, or an assignment's merge (seon.merge/merge! through db<->flow's :merge), returned (a red gate, a contract, lint or write-back refusal): the candidate's own, so the same db<->flow pass relaunches the assignment from its end commit while its allowance lasts and otherwise closes it for root (seon.cluster.agent/assignment-actions)."}]
@@ -155,7 +158,7 @@
  :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :referrers [:set :symbol]
- :proofs [:set {:description "The copied part of seon.task/obligations: the default deftests a chain copy took from its template (seon.task/chain!) or root chose for it, by symbol, joined with the task's own tagged tests; local to the task, never inherited."} :symbol]
+ :proofs [:set {:seon.task/owned true :description "The copied part of seon.task/obligations: the default deftests a chain copy took from its template (seon.task/chain!) or root chose for it, by symbol, joined with the task's own tagged tests; local to the task, never inherited."} :symbol]
  :templates [:vector {:min 1 :description "The templates a chain copies, in chain order, distinct: ordinary tasks, the off-the-shelf ones in resources/seon/tasks/seon.step.edn."} :seon.task/sym]
  :customization [:map {:description "Root's choices for one template's copy, applied over what the copy takes from its template before assignment."}
                  [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/proofs {:optional true} :seon.task/proofs]

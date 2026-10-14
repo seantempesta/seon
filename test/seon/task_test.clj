@@ -3,6 +3,8 @@
   needs-cycle refusal, the attempt and firing facts adopted on a branch of the live store."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is are testing]]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.id :as id]
@@ -467,3 +469,15 @@
          (is (= :running (:seon.task/execution (db/pull (db/with started edited) [:seon.task/execution] [:seon.task/sym 'tq.kinds/a])))
              "editing a running task never resets it held"))
        (is (:seon.error/at (db/transact! connection [(entity "x y" {})])) "a name that is no symbol name is refused by the writer")))))
+
+(deftest owned-members-are-instructions-and-proofs
+  (test-support/with-database
+   (fn [connection]
+     (let [registry (:seon.schema.projection/registry (db/carried-projection (db/db connection)))
+           members-of (fn [k] (into {} (m/entries (m/deref (mr/schema registry k)))))
+           task (members-of :seon.task/task)
+           owned (into #{} (filter #(:seon.task/owned (m/properties (mr/schema registry %)))) (keys task))]
+       (is (= #{:seon.task/instructions :seon.task/proofs} owned) "the schema property marks exactly instructions and proofs")
+       (is (contains? task :seon.task/next) "a task may link its next")
+       (is (not-any? (members-of :seon.task/declaration) [:seon.task/next :seon.task/execution])
+           "next and execution are never declared")))))
