@@ -12,7 +12,9 @@
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.operator.runtime :refer [running-instances]]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [sci.core :as sci]
+            [seon.sci.eval :as sci.eval]))
 
 (defn- eval!
   "`code` through the MCP entrance as `agent-id`."
@@ -339,3 +341,36 @@
        (is (nil? (get-in ((requiring-resolve 'seon.test-support/mcp-tests) later)
                          [:seon.turn.loop/reaching :seon.turn.loop/test-error]))
            "the test step builds its world")))))
+
+(defn- install-errors
+  "The errors raised by `seon.sci.eval/install-row!` among the replies of a parsed MCP `eval_clj` result."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [result]
+  (into [] (comp (mapcat :seon.repl/errors)
+                 (filter #(= 'seon.sci.eval/install-row! (:seon.error/operation %))))
+        ((requiring-resolve 'seon.test-support/mcp-replies) result)))
+
+(deftest a-repl-value-def-is-a-program-row-a-fresh-context-installs-in-order
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(ns batch-test.value-def) (def k1 42) (defn uses-k1 [] k1) (def z 1) (def a (inc z))" agent-id running)
+     (let [later (eval! "(in-ns 'batch-test.value-def) (defn other [] 1)" agent-id running)
+           database (db/db connection)
+           ctx (sci.eval/base-ctx database)]
+       (is (= [] (install-errors later)) "a later request installs the function reading the def")
+       (is (= #:seon.fn{:arglists "()" :constant? true}
+              (db/pull database [:seon.fn/arglists :seon.fn/constant?] [:seon.fn/sym 'batch-test.value-def/k1]))
+           "the value def is a program row, as a file's is")
+       (is (= [] (source/contract-gaps database #{[:seon.fn/sym 'batch-test.value-def/k1]
+                                                  [:seon.fn/sym 'batch-test.value-def/a]}))
+           "a value def is no uncontracted function")
+       (is (= 42 (sci/eval-string* ctx "(batch-test.value-def/uses-k1)")) "a fresh context resolves the def")
+       (is (= 2 (sci/eval-string* ctx "batch-test.value-def/a")) "a def reading a def installs after it")))))
+
+(deftest a-value-def-over-a-function-replaces-its-row
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(ns batch-test.rebound) (defn fl2 [] 1)" agent-id running)
+     (eval! "(in-ns 'batch-test.rebound) (def fl2 5)" agent-id running)
+     (is (= #:seon.fn{:arglists "()" :source "(def fl2 5)"}
+            (db/pull (db/db connection) [:seon.fn/arglists :seon.fn/source] [:seon.fn/sym 'batch-test.rebound/fl2]))))))

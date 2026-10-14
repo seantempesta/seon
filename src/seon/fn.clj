@@ -303,6 +303,14 @@
        (#{'clojure.core/defmulti 'clojure.core/def 'clojure.core/defonce}
         (::analyzer/defined-by->lint-as entry)))))
 
+(defn value-definition?
+  "Whether `arglists`, a program row's `:seon.fn/arglists`, names a value
+  definition: a `def` or `defonce` with no arglist, read rather than called, so
+  it is no function to contract and nothing to bind lazily."
+  {:malli/schema [:=> [:cat :seon.fn/arglists] :boolean]}
+  [arglists]
+  (= "()" arglists))
+
 (defn stored-namespace-context
   [{:seon.ns/keys [requires aliases refers imports]}]
   {:requires (set requires)

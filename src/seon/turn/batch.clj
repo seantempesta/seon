@@ -263,7 +263,7 @@
   Its contract facts read `projection`, the one the write was armed under,
   with the predicates its contract names as `ctx` resolves them."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
-  [ctx namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
+  [ctx namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym :as write} declared]
   (let [coords (entry-coords analysis entry)
         first-row (:first-row coords)
         source (:seon.batch/source entry)
@@ -277,12 +277,9 @@
               (if (:seon.batch/other-namespace j)
                 (first (vals (:entities (analyze-form namespace-row db (symbol (namespace sym)) (definition-source analysis d) declared []))))
                 (get entities [0 (local-offset source first-row [r c]) (name sym)])))]
+    ;; every top-level def is a program row, as a file's is (`seon.fn/function-definition?`):
+    ;; a value def's row is its source, never its value
     (cond
-      ;; A program declaration is a function or a test; a def of any other
-      ;; value (an atom, a map, a result) is the agent's private state, kept
-      ;; in its context and never shared as program.
-      (not (or (fn? @v) (:test (meta v))))
-      {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :value :seon.batch/reason :not-a-function}}
       (seq captured) {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :unanalyzed
                                            :seon.batch/reason :captures-locals
                                            :seon.batch/captured captured}}

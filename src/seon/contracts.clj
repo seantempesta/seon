@@ -62,15 +62,14 @@
        :seon.task/intent (intent function-symbol (true? host-bound?))})))
 
 (def ^:private candidate-query
-  ;; Source functions with no contract: test roots, macros, constants and value
-  ;; defs (no arglist) are not functions to contract.
+  ;; Source functions with no contract: test roots, macros and value defs
+  ;; (`seon.fn/value-definition?`, constants included) are not functions to contract.
   '[:find ?s ?host
     :where [?e :seon.fn/sym ?s]
     [(missing? $ ?e :seon.fn/spec)]
     [?e :seon.fn/file ?f] [?f :seon.fn.file/relative-root ?root] [(not= ?root "test")]
     [(get-else $ ?e :seon.fn/macro? false) ?macro] [(false? ?macro)]
-    [(get-else $ ?e :seon.fn/constant? false) ?constant] [(false? ?constant)]
-    [?e :seon.fn/arglists ?arglists] [(not= ?arglists "()")]
+    [?e :seon.fn/arglists ?arglists] [(seon.fn/value-definition? ?arglists) ?value] [(false? ?value)]
     [(get-else $ ?e :seon.fn/host-bound? false) ?host]])
 
 (defn- partitioned

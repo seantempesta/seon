@@ -2533,6 +2533,26 @@
                                   (map :seon.ns.fixture/function (sort-by :seon.ns.fixture/position held)))))))
   nil)
 
+(defn- definition-order
+  "The rows of one namespace's `entries` in the order loading it evaluates them,
+  so a def reading another def finds it bound: those with a file position in
+  file order, then those defined at a REPL, which carry none, each after the
+  REPL rows its `:seon.fn/calls` name, ties by name."
+  {:malli/schema [:=> [:cat [:sequential [:map [:seon.program/row :map]]]] [:vector :map]]}
+  [entries]
+  (let [{placed true repl false} (group-by (comp some? ::position) entries)
+        name-of (comp :seon.fn/sym :seon.program/row)
+        by-sym (into {} (map (juxt name-of identity)) repl)
+        visit (fn visit [[out seen] sym]
+                (if (seen sym)
+                  [out seen]
+                  (let [[out seen] (reduce visit [out (conj seen sym)]
+                                           (sort-by str (filter by-sym (::calls (by-sym sym)))))]
+                    [(conj out (by-sym sym)) seen])))]
+    (mapv :seon.program/row
+          (concat (sort-by (juxt ::position (comp str name-of)) placed)
+                  (first (reduce visit [[] #{}] (sort-by str (keys by-sym))))))))
+
 (defn- install-selected!
   "Interpret `function-rows` and `test-rows` on `ctx`, each namespace after the
   ones it binds, advancing the acquisition `state`; the acquisition, its
@@ -2620,23 +2640,20 @@
                   (::agent-authored?
                    (get namespace-row-by-name namespace-name))
                   (update :seon.sci.eval/installed inc))
-                ;; In file order, as loading the file evaluates them: a def
-                ;; reading another def finds it bound. Rows with no span
-                ;; (defined at a REPL) follow, by name.
-                (->> (get function-rows-by-ns namespace-name)
-                     (map (fn [[sym source _ admission private?]]
-                            (let [{:seon.fn/keys [arglists form-span]}
-                                  (db/pull db [:seon.fn/arglists :seon.fn/form-span] [:seon.fn/sym sym])]
-                              [[(or (first form-span) Long/MAX_VALUE) (str sym)]
-                               {:seon.fn/sym sym
-                                :seon.schema.admission/source admission
-                                :seon.fn/source source
-                                :seon.fn/ns [:seon.ns/name namespace-name]
-                                :seon.fn/private? private?
-                                :seon.fn/arglists arglists
-                                ::skip-contract-install? (not= :agent admission)}])))
-                     (sort-by first)
-                     (map second))))
+                (definition-order
+                 (map (fn [[sym source _ admission private?]]
+                        (let [{:seon.fn/keys [arglists form-span calls]}
+                              (db/pull db [:seon.fn/arglists :seon.fn/form-span :seon.fn/calls] [:seon.fn/sym sym])]
+                          {::position (first form-span)
+                           ::calls calls
+                           :seon.program/row {:seon.fn/sym sym
+                                              :seon.schema.admission/source admission
+                                              :seon.fn/source source
+                                              :seon.fn/ns [:seon.ns/name namespace-name]
+                                              :seon.fn/private? private?
+                                              :seon.fn/arglists arglists
+                                              ::skip-contract-install? (not= :agent admission)}}))
+                      (get function-rows-by-ns namespace-name)))))
              state
              order)]
         ;; Tests resolve only after every namespace's functions and exact

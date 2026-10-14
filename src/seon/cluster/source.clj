@@ -1102,15 +1102,16 @@
 (defn contract-gaps
   "What keeps the functions among `identities` that `database` holds from a complete `:malli/schema`, private ones
   included, judged by the one function-contract rule (`seon.fn/contract-findings`): each missing contract and each
-  unjustified `:any` or `:some` slot, with its position. Macros and host-bound declarations carry no arity
-  contract. Throws a refused read."
+  unjustified `:any` or `:some` slot, with its position. Macros, host-bound declarations and value definitions
+  (`seon.fn/value-definition?`) carry no arity contract. Throws a refused read."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:vector :seon.fn.contract/finding-row]]}
   [database identities]
   (let [judged (into #{} (keep (fn [[a f]]
                                  (when (= :seon.fn/sym a)
-                                   (let [entity (db/pull database [:db/id :seon.fn/macro? :seon.fn/host-bound?] [a f])]
+                                   (let [entity (db/pull database [:db/id :seon.fn/macro? :seon.fn/host-bound? :seon.fn/arglists] [a f])]
                                      (when (and (:db/id entity) (not (:seon.fn/macro? entity))
-                                                (not (:seon.fn/host-bound? entity)))
+                                                (not (:seon.fn/host-bound? entity))
+                                                (not (fn/value-definition? (:seon.fn/arglists entity))))
                                        f)))))
                      identities)
         findings (if (seq judged) (fn/contract-findings database {:seon.fn.contract/selected judged}) [])]

@@ -168,8 +168,9 @@
              (filter #{:seon.repl/value :seon.repl/note :seon.repl/out :seon.repl/ns :seon.repl/ms}
                      (keys (reply "(def secret 99)" {:seon.eval/private #{'my.agents.juniper/secret}}))))))))
 
-;; the batch classes a def of a function as program and any other value as the
-;; agent's private state; the note follows that decision, not the form's text
+;; the batch stores every top-level def as program, as a file's, and keeps a def
+;; capturing locals as the agent's private state; the note follows that decision,
+;; not the form's text
 (deftest the-def-note-follows-what-the-batch-classed-private
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id _]
@@ -179,7 +180,8 @@
                                                               "arguments" {"code" code "agent" agent-id
                                                                            "cluster" running}})))))]
        (eval! "(ns def-note.probe)")
-       (doseq [[form noted?] [["(def k 42)" true]
+       (doseq [[form noted?] [["(let [x 42] (def k x))" true]
+                              ["(def v 42)" false]
                               ["(def f (fn [] 1))" false]
                               ["(def g #(inc %))" false]]]
          (let [note (:seon.repl/note (first (eval! form)))]
