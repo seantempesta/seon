@@ -1379,20 +1379,29 @@
            :in $ ?path :where [?file :seon.fn.file/relative-path ?path] [?e :seon.fn/file ?file]]
          database path)))
 
-(defn- install!
-  "Install proven `candidate` bytes at `file`: a sibling write, then an atomic rename."
-  {:malli/schema [:=> [:cat :string :seon.source/file-bytes] :nil]}
+(defn stage!
+  "Write proven `candidate` bytes beside the file at `path`: the staged file's path, which a rename installs."
+  {:malli/schema [:=> [:cat :string :seon.source/file-bytes] :string]}
   [path candidate]
   (let [file (io/file path)
         _ (io/make-parents file)
         staged (java.io.File/createTempFile ".write-back-" ".clj" (.getParentFile file))]
     (try
       (Files/write (.toPath staged) ^bytes candidate (make-array java.nio.file.OpenOption 0))
-      (Files/move (.toPath staged) (.toPath file)
-                  (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE
-                                                        java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
-      nil
-      (finally (Files/deleteIfExists (.toPath staged))))))
+      (.getPath staged)
+      (catch Exception failure
+        ;; a partial write is no stage: its file goes, the failure stays the caller's
+        (Files/deleteIfExists (.toPath staged))
+        (throw failure)))))
+
+(defn- install-staged!
+  "Rename each staged file onto its path, atomically per file."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :string]]] :nil]}
+  [staged-paths]
+  (doseq [[staged path] staged-paths]
+    (Files/move (.toPath (io/file staged)) (.toPath (io/file path))
+                (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE
+                                                      java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))
 
 (defn- namespace-path
   "The one file `database` records declaring namespace `namespace-name`, or nil."
@@ -1897,9 +1906,9 @@
 (defn- write-back-commits
   "`write-back!` between the accepted merge's `before` and `after` commits."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
-                       :seon.db/database-value :seon.fn/root]
+                       :seon.db/database-value :seon.fn/root :seon.source/stage]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [connection accepted before after root]
+  [connection accepted before after root stage]
   (let [identities (:seon.program/identities accepted)
         merged (held-digests after identities)
         moved (moved-digests merged (held-digests (db/db connection) identities))
@@ -1919,28 +1928,30 @@
       (write-back-refusal :file-changed "The file changed while the candidate was proven."
                           {:seon.source/path (:seon.source/path changed) :seon.error/offending (:seon.source/base-digest changed)})
       :else
-      (reduce
-       (fn [written {path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
-                     entities :seon.source/proof-rows}]
-         (try
-           (install! (.getPath (io/file root (str path))) candidate)
-           (let [added (kind entities #(and (not %1) %2))
-                 retracted (kind entities #(and %1 (not %2)))]
-             (-> written
-                 (update :seon.source/changed-paths conj path)
-                 (update :seon.source/files conj
+      ;; All or nothing: every candidate is staged beside its file before any is renamed onto it.
+      (let [staging (reduce (fn [staging {path :seon.source/path candidate :seon.source/candidate-bytes}]
+                              (let [file (.getPath (io/file root (str path)))]
+                                (try (update staging :staged conj [(stage file candidate) file])
+                                     (catch Exception failure (reduced (assoc staging :failed path :failure failure))))))
+                            {:staged []} proven)]
+        (if-let [failed (:failed staging)]
+          (do (run! (fn [[staged]] (Files/deleteIfExists (.toPath (io/file staged)))) (:staged staging))
+              (write-back-refusal :install-failed "A proven candidate could not be staged; no file was installed."
+                                  {:seon.source/path failed :seon.source/changed-paths []
+                                   :seon.error/throwable (:failure staging)}))
+          (do (install-staged! (:staged staging))
+              {:seon.source/changed-paths (mapv :seon.source/path proven)
+               :seon.source/files
+               (mapv (fn [{path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
+                           entities :seon.source/proof-rows}]
+                       (let [added (kind entities #(and (not %1) %2))
+                             retracted (kind entities #(and %1 (not %2)))]
                          (cond-> {:seon.source/path path :seon.source/base-digest base-digest
                                   :seon.source/candidate-digest (sha-256 candidate)
                                   :seon.source/replaced (kind entities #(and %1 %2))}
                            (seq added) (assoc :seon.source/added added)
-                           (seq retracted) (assoc :seon.source/retracted retracted)))))
-           (catch Exception failure
-             ;; Files installed before this one stay installed and are named.
-             (reduced (write-back-refusal :install-failed "The proven candidate could not be installed."
-                                          {:seon.source/path path :seon.source/changed-paths (:seon.source/changed-paths written)
-                                           :seon.error/throwable failure})))))
-       {:seon.source/changed-paths [] :seon.source/files []}
-       proven))))
+                           (seq retracted) (assoc :seon.source/retracted retracted))))
+                     proven)}))))))
 
 (defn- main-parent
   "The parent of commit `after` on its own branch, or the `:commit-absent` refusal.
@@ -2018,9 +2029,10 @@
   declaration must still hold its base digest there (else `:conflict`, with
   `:seon.program/conflict-digests`); and the ordinary analyzer reindexes the
   candidate to the file's other declarations unchanged and the merge commit's
-  digests for the written ones. Every file's disk bytes are checked again, then each
-  candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
-  publication owner.
+  digests for the written ones. Every file's disk bytes are checked again, then every
+  candidate is staged beside its file (`:seon.source/stage`, default `seon.cluster.source/stage!`) and only then
+  renamed onto it, answering one entry per file; a failed stage removes the staged files and installs none
+  (`:install-failed`). Publishing the changed path stays with the publication owner.
 
   `:seon.fn/root` is the checkout's absolute path (`seon.fs/checkout-root?`);
   a relative path or one inside a `data/source` archive is refused as
@@ -2033,7 +2045,8 @@
   ```"
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root}]
+  [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root
+    stage :seon.source/stage :or {stage stage!}}]
   (let [[before after] (map #(d/commit-as-db connection (% accepted))
                             [:seon.source/base-commit-id :seon.source/commit-id])]
     (try
@@ -2042,7 +2055,7 @@
       (if (some nil? [before after])
         (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
                             {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
-        (write-back-commits connection accepted before after root)))
+        (write-back-commits connection accepted before after root stage)))
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 ;;; ---------------------------------------------------------------------------

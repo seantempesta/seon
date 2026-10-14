@@ -167,7 +167,10 @@
               [:map
                [:seon.db/connection :seon.db/connection]
                [:seon.source/accepted :seon.source/accepted]
-               [:seon.fn/root :seon.fn/root]],
+               [:seon.fn/root :seon.fn/root]
+               [:seon.source/stage {:optional true} :seon.source/stage]],
+              :stage [:=> {:description "Writes one proven candidate beside the file at a path and answers the staged file's path, which write-back renames onto it once every candidate is staged. seon.cluster.source/stage! when absent."}
+                      [:cat :string :seon.source/file-bytes] :string],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
                :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],

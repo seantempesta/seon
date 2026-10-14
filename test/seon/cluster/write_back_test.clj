@@ -651,3 +651,50 @@
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (run! support/delete-root! [defined root])))))
 
+(deftest ^{:seon.test/long "Two analyses of a two-file fixture onto H, two replacements on a branch C, and one write-back (one analysis per candidate)."
+           :seon.test/long-ms 20000}
+  a-write-back-whose-second-file-cannot-be-staged-installs-no-file
+  ;; Every candidate is staged before any is installed: the second file's
+  ;; failed stage removes the first one's staged bytes, and both files keep theirs.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        root (support/temp-root (str "write-back-staged-test-" suffix))
+        paths (mapv #(str "src/wbstage" suffix "/" % ".clj") ["one" "two"])
+        callees (mapv #(vector :seon.fn/sym (symbol (str "wbstage" suffix "." %) "callee")) ["one" "two"])
+        replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
+        staged (atom [])
+        stage (fn [path candidate]
+                (if (empty? @staged)
+                  (let [file (str path ".staged")] (io/copy candidate (io/file file)) (swap! staged conj file) file)
+                  (throw (ex-info "The disk is full." {:seon.source/path path}))))
+        c (keyword (str "write-back-staged-c-" suffix))]
+    (doseq [[path callee] (map vector paths callees)]
+      (io/make-parents (io/file root path))
+      (spit (io/file root path) (str "(ns " (namespace (second callee)) ")\n\n"
+                                     "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n")))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            base (db/commit-id (db/db h-conn))
+            before (mapv #(slurp (io/file root %)) paths)
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (doseq [callee callees]
+            (support/transacted! c-conn (support/replacement-tx (db/db c-conn) callee replacement {})))
+          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root :seon.source/stage stage
+                                             :seon.source/accepted {:seon.program/identities (set callees)
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+            (is (= {:seon.source/write-back-refused :install-failed :seon.source/changed-paths []}
+                   (select-keys written [:seon.source/write-back-refused :seon.source/changed-paths]))
+                "the failed stage refuses and names no installed file")
+            (is (= before (mapv #(slurp (io/file root %)) paths)) "both files keep their bytes")
+            (is (= [false] (mapv #(.exists (io/file %)) @staged)) "the staged candidate is removed"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-root! root)))))
