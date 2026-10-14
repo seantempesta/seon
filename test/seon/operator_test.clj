@@ -135,6 +135,49 @@
         (.destroy holder)
         (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
 
+(deftest a-class-directory-held-while-a-prune-runs-keeps-its-classes
+  ;; A launch holds its directory, then reads it as a JVM would. A prune that
+  ;; decided the directory was unheld before the hold must not delete it after:
+  ;; every class the launch saw when it held stays readable.
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-prune-race" (make-array java.nio.file.attribute.FileAttribute 0)))
+        classes (java.io.File. repository "target/dev-program-classes")
+        write-classes! (fn [^java.io.File directory n]
+                         (.mkdirs directory)
+                         (dotimes [i n] (spit (java.io.File. directory (str "c" i ".class")) "x")))
+        wanted (java.io.File. classes "wanted")
+        hold-file (java.io.File. repository
+                                 (str "target/operator-holds/"
+                                      (#'operator/hold-name (.getCanonicalPath wanted)) "."
+                                      (.pid (java.lang.ProcessHandle/current))))
+        violations (atom 0)]
+    (try
+      (dotimes [_ 6]
+        (doseq [i (range 8)]
+          (doto (java.io.File. classes (str "junk-" i))
+            (write-classes! 400)
+            (.setLastModified (- (System/currentTimeMillis) (* 1000 (+ 100 i))))))
+        (doto wanted
+          (write-classes! 5)
+          (.setLastModified (- (System/currentTimeMillis) 900000)))
+        (let [program (doto (java.io.File. classes "program") .mkdirs)
+              done (promise)
+              reader (future
+                       (while (not (realized? done))
+                         (.delete hold-file)
+                         (Thread/sleep 4)
+                         (#'operator/hold! repository (.getCanonicalPath wanted))
+                         (when (.isDirectory wanted)
+                           (Thread/sleep 5)
+                           (when-not (.isFile (java.io.File. wanted "c0.class"))
+                             (swap! violations inc)))))]
+          (try (#'operator/prune-program-classes! repository (.getCanonicalPath program))
+               (finally (deliver done true) @reader))
+          (.delete hold-file)))
+      (is (zero? @violations) "no class a holding launch could see is deleted under it")
+      (finally
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
 (deftest check-names-the-tests-its-throwaway-jvm-runs
   ;; `check PATH --test NS --test NS/NAME` carries both test names in order;
   ;; the runner receives a namespace as --ns and a test as --test.

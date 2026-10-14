@@ -687,12 +687,28 @@
            (filter #(str/starts-with? (.getName ^java.io.File %) prefix)
                    (or (.listFiles (holds-directory repository)) []))))))
 
+(defn- prune-directory!
+  "Delete the class directory `directory` unless a launch holds it by the time
+  it is out of the way: renamed aside first (atomic, so a reader sees the whole
+  directory or none), then `held?` is read again. A launch that held it after
+  the caller decided it was free gets the directory back; one that holds it
+  from here on finds none and compiles its own."
+  {:malli/schema [:=> [:cat :string [:fn seon.fs/file?]] :nil]}
+  [repository ^java.io.File directory]
+  (let [path (.getCanonicalPath directory)
+        aside (io/file (.getParentFile directory)
+                       (str (.getName directory) ".pruning-" (random-uuid)))]
+    (fs/move directory aside {:atomic-move true})
+    (if (held? repository path)
+      (fs/move aside directory {:atomic-move true})
+      (fs/delete-tree aside))))
+
 (defn- prune-program-classes!
   "Keep `program` and the most recently used class directories; delete the
-  rest and any staging a day old (a launch that died filling it). A directory
-  a live process names on its classpath, or holds (`hold!`) before it has
-  launched, is never deleted: a concurrent start or check still loads classes
-  from it (NoSuchFileException on a class the other JVM needed)."
+  rest and any staging or aside directory a day old (a launch or prune that
+  died). A directory a live process names on its classpath, or holds (`hold!`)
+  before it has launched, is never deleted: a concurrent start or check still
+  loads classes from it (NoSuchFileException on a class the other JVM needed)."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [repository program]
   (let [in-use? (let [arguments (live-arguments)]
@@ -701,14 +717,16 @@
                     (or (held? repository path)
                         (some #(str/includes? % path) arguments)))))
         directories (remove in-use? (or (.listFiles (io/file repository program-classes-root)) []))
-        {staging true complete false} (group-by #(str/includes? (.getName ^java.io.File %) ".staging-")
+        {partial true complete false} (group-by #(let [name (.getName ^java.io.File %)]
+                                                   (or (str/includes? name ".staging-")
+                                                       (str/includes? name ".pruning-")))
                                                 directories)
         stale (concat (drop program-classes-kept
                             (sort-by #(- (.lastModified ^java.io.File %))
                                      (remove #(= program (.getCanonicalPath ^java.io.File %)) complete)))
                       (filter #(< (.lastModified ^java.io.File %) (- (System/currentTimeMillis) 86400000))
-                              staging))]
-    (doseq [directory stale] (fs/delete-tree directory))
+                              partial))]
+    (doseq [directory stale] (prune-directory! repository directory))
     (.setLastModified (io/file program) (System/currentTimeMillis))
     nil))
 
