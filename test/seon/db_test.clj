@@ -1,6 +1,5 @@
 (ns seon.db-test
   (:require [seon.cache]
-            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -80,29 +79,6 @@
                "the fork's own write names the fork head")
            (is (= first-opening (opened)) "a second opening reads the same revisions"))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
-
-(deftest ^{:seon/tasks #{'seon.db/a-failed-projection-derivation-stays-cached-under-its-commit}}
-  a-failed-projection-cell-does-not-poison-its-next-read
-  (test-support/with-database
-   (fn [connection]
-     (test-support/transacted! connection [(test-support/task-row "projfailcell" "Exercise a failed derivation.")])
-     (let [database (db/db connection)
-           builder (#'db/projection-builder database)
-           commit-key [:seon.db/commit (db/commit-id database) builder]
-           revision-key (assoc (#'db/projection-cache-key database) :seon.db/builder builder)
-           held @#'db/projection-cache
-           failure (ex-info "Projection derivation failed." {::failed true})
-           cell (delay (throw failure))]
-       (doseq [k [commit-key revision-key]]
-         (cache/evict held k)
-         (cache/lookup-or-miss held k (constantly cell)))
-       (try
-         (is (= {::failed true}
-                (try (db/carried-projection database) (catch Exception e (ex-data e)))))
-         (is (not-any? #(identical? cell %) (vals @held)))
-         (is (map? (try (db/carried-projection database) (catch Exception _ nil))))
-         (finally
-           (doseq [k [commit-key revision-key]] (cache/evict held k))))))))
 
 (schema/call-with-registration-delta
  schema-delta
@@ -920,9 +896,8 @@
            "each speculative value reads its own declarations")
        ;; Other members share the cache, so the check names this test's own
        ;; declarations: no committed entry derived them.
-       (is (not-any? (fn [cell] (and (realized? cell)
-                                     (contains? (:seon.schema.projection/forms @cell) :probe.speculative/k0)))
-                     (vals @@#'db/projection-cache))
+       (is (not-any? #(contains? (:seon.schema.projection/forms %) :probe.speculative/k0)
+                     (vals (seon.cache/retained :seon.db/projection)))
            "no speculative projection entered the committed cache")))))
 
 ;; CLASS: a definition write's projection read every declaration datom of

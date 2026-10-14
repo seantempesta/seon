@@ -1,12 +1,13 @@
 (ns seon.schema.projection-writer-test
-  (:require [clojure.core.cache.wrapped :as cache]
-            [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [datahike.db]
             [malli.core :as m]
+            [seon.cache :as cache]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.profile]
             [seon.schema :as schema]
             [seon.test-support :as support]
             [seon.turn :as turn]))
@@ -59,7 +60,6 @@
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
-            cache @(ns-resolve 'seon.db 'projection-cache)
             first-read (db/carried-projection database)]
         (is (identical? first-read (db/carried-projection database)) "one cache hit")
         (is (identical? first-read (db/carried-projection (d/history database)))
@@ -75,9 +75,7 @@
           (is (not (identical? first-read next-read)) "a declaration derives once")
           (is (identical? next-read (db/carried-projection declared)))
           (is (contains? (:seon.schema.projection/forms next-read) ::cached))
-          (is (identical? first-read (db/carried-projection database))))
-        (is (<= (count @cache) (:seon.db/projection-cache-size db/projection-cache-policy)))
-        (is (string? (:seon.db/projection-cache-reason db/projection-cache-policy)))))))
+          (is (identical? first-read (db/carried-projection database))))))))
 
 (deftest speculative-values-derive-without-committed-identity
   (support/with-database
@@ -134,42 +132,35 @@
             (is (identical? committed (first @derivation-bases))
                 "and derives by replacement from its basis's projection")))))))
 
-;; Cache-invalidation audit item 7 (2026-09-23): the value tier keyed a weak
-;; `ValueKey` whose equality died with its referent; core.cache's LRU kept the
-;; key a hit re-inserted, never the one it stored, so eviction never matched
-;; and the tier held 121-338 entries against its bound of 4, each retaining a
-;; whole projection.
-(deftest the-value-tier-honours-its-bound-and-releases-evicted-projections
+;; A projection is held once in the process cache under its canonical key and
+;; named by aliases. However many speculative values came between, a value's
+;; second read derives nothing (the kind's recordStats count no new miss) and
+;; answers the same projection; after the canonical entry is evicted the read
+;; derives once and names it again.
+(deftest speculative-projections-are-process-cache-hits
   (support/with-database
     (fn [connection]
       (let [head (db/db connection)
             _ (db/carried-projection head)
-            value-cache @(ns-resolve 'seon.db 'value-projection-cache)
-            durable-cache @(ns-resolve 'seon.db 'projection-cache)
-            bound (:seon.db/value-cache-size db/projection-cache-policy)
-            _ (cache/seed value-cache {})
-            ;; Declaration datoms written directly: the tier's subject is the
-            ;; value, not the entity writer (`turn/row-tx` costs ~400 ms each).
-            references
-            (vec (for [index (range (inc bound))]
-                   (let [staged (:db-after (d/with head [{:seon.schema/key
-                                                          (keyword "seon.schema.projection-writer-test"
-                                                                   (str "bounded-" index))
-                                                          :seon.schema/form (pr-str :int)}]))
-                         projection (db/carried-projection staged)]
-                     (is (identical? projection (db/carried-projection staged))
-                         "repeated reads of one speculative value hit the value tier")
-                     (java.lang.ref.WeakReference. projection))))]
-        (is (<= (count @value-cache) bound))
-        ;; Only the tiers retain these projections; release the durable one's
-        ;; content entries and collect.
-        (cache/seed durable-cache {})
-        (loop [attempt 0]
-          (System/gc)
-          (when (and (< attempt 3) (some? (.get ^java.lang.ref.WeakReference (first references))))
-            (recur (inc attempt))))
-        (is (nil? (.get ^java.lang.ref.WeakReference (first references)))
-            "an evicted value's projection is collectable")))))
+            stage (fn [index]
+                    (:db-after (d/with head [{:seon.schema/key
+                                              (keyword "seon.schema.projection-writer-test"
+                                                       (str "bounded-" index))
+                                              :seon.schema/form (pr-str :int)}])))
+            values (mapv stage (range 8))
+            firsts (mapv db/carried-projection values)
+            misses #(get-in (cache/status) [:seon.cache/kinds :seon.db/value-projection :seon.cache/misses])
+            before (misses)
+            timing (seon.profile/measure #(mapv db/carried-projection values))
+            seconds (:seon.profile/value timing)
+            _ (is (< (:seon.profile/ms timing) 50) "eight re-reads derive nothing (151 ms when each re-derived)")]
+        (is (every? true? (map identical? firsts seconds)))
+        (is (= before (misses)))
+        (cache/evict-kinds! #{:seon.db/value-projection})
+        (let [rederived (db/carried-projection (first values))]
+          (is (= (inc before) (misses)))
+          (is (= (:seon.schema.projection/forms (first firsts)) (:seon.schema.projection/forms rederived)))
+          (is (identical? rederived (db/carried-projection (first values)))))))))
 
 ;; 24ad (2026-09-23): a committed read that hit its revision key never stored
 ;; the commit key, so a new branch at that commit (a new connection, so a new
