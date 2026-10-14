@@ -50,26 +50,29 @@
     {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])})))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
-  a-thrown-request-records-its-unfinished-members-as-failed-obligations
+  a-thrown-request-stops-its-run-and-records-no-result-for-its-unfinished-members
   (support/with-database
    (fn [connection]
      (let [{run-id :seon.test.run/id completion ::completion} (admitted-run! connection)
-           failure (ex-info "resolution exploded" {::probe true}
+           failure (ex-info "The test world's program overlay was refused" {::probe true}
                             (IllegalStateException. "the underlying cause"))
            recorded (runner/record-interrupted! connection completion failure)
-           results (runner/run-results (db/db connection) run-id)
-           by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
-           latest (runner/latest-results (db/db connection) [interrupted])]
-       (is (= [interrupted] (mapv :seon.test/sym recorded)))
-       (is (not (:seon.error/at results)) "the run's evidence is complete")
-       (is (= 0 (:seon.test/error-count (by-symbol finished))) "a recorded member is untouched")
-       (is (= 1 (:seon.test/error-count (by-symbol interrupted))) "interrupted is red, never green")
-       (is (= 1 (:seon.test/error-count (first latest))) "it stays an obligation")
-       (is (every? #(str/includes? (sut/failure-message (first latest)) %)
-                   ["resolution exploded" "the underlying cause" "probe true"])
-           "the record names the whole cause chain")
+           database (db/db connection)
+           results (runner/run-results database run-id)
+           latest (first (runner/latest-results database [interrupted]))]
+       (is (= [] recorded) "the open member gains no recorded result")
+       (is (= :request-threw
+              (:seon.test.run/stopped (db/pull database [:seon.test.run/stopped] [:seon.test.run/id run-id])))
+           "the throw is the run's, as its stop cause")
+       (is (:seon.error/at results) "the run's evidence is incomplete, never a red member")
+       (is (:seon.error/at latest) "the open member reads as an unknown")
+       (is (not-any? #(contains? latest %) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])
+           "an unknown carries no counts")
+       (is (false? (runner/designed-red? latest)) "a member that never ran is no designed red")
+       (is (= 0 (:seon.test/error-count (first (runner/latest-results database [finished]))))
+           "a recorded member is untouched")
        (is (= [] (runner/record-interrupted! connection completion failure))
-           "a second observation writes nothing")))))
+           "a second observation records no result")))))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   one-incomplete-member-is-its-own-unknown-and-its-run-mates-stay-readable

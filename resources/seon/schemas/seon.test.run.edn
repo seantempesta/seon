@@ -70,7 +70,7 @@
                  [:seon.test.member/host :seon.test.member/host]
                  [:seon.test.run/deadline :seon.test.run/deadline]
                  [:seon.test.run/dead-workers {:optional true} :seon.test.run/dead-workers]],
-                :stopped [:enum {:description "Why this request stopped before running every reserved member. Its members with no completed outcome were never started (:program-unknown: a failed adoption left the loaded program unknown): each reads as an unknown, never green, and no longer covers a later request."} :deadline :member-unfinished :recording-refused :platform-red :program-unknown],
+                :stopped [:enum {:description "Why this request stopped before running every reserved member. Its members with no completed outcome were never started (:program-unknown: a failed adoption left the loaded program unknown; :request-threw: the request itself threw, for example its test world could not be built): each reads as an unknown, never green, and no longer covers a later request."} :deadline :member-unfinished :recording-refused :platform-red :program-unknown :request-threw],
                 :terminated? [:boolean {:description "Caller observed execution return or exact process exit; a bound firing alone is false."}],
                 :claim-completion
                 [:and :seon.test.run/completion

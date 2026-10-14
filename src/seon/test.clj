@@ -2871,8 +2871,9 @@
                                      ;; Exits racing capture are separate; later exits belong to the callback.
                                      (doseq [sym (remove folded (::exited before))]
                                        (own-write! `runner/record-exit! (runner/record-exit! recording run-id sym)))))]
-                    ;; A throw leaves no admitted member open: each unrecorded
-                    ;; member is recorded red with the throwable, which is rethrown.
+                    ;; A throw is the request's: its run stops with :request-threw,
+                    ;; unfinished members keep no result (each reads unknown) and
+                    ;; the throwable is rethrown to the entrant.
                     (try
                     (let [outcome
                     (loop [remaining members outcome outcome]

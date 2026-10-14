@@ -2386,38 +2386,27 @@
   (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]]))
 
 (defn record-interrupted!
-  "Give every admitted member of `completion`'s run that has no outcome a
-  terminal error naming `failure`, the throwable that ended its request.
+  "Stop `completion`'s run with `:request-threw` and commit the results its
+  members captured before `failure`, the throwable that ended the request.
 
-  An interrupted member is an obligation, never green: it is recorded red with
-  its cause chain as `report-value` shows it, so the member is
-  selected again. Members already recorded are left as they are."
+  The throw is the request's, never a member's: a member with no outcome
+  gains no result, so it reads as an unknown (never green, never a designed
+  red), keeps no reach digest and is selected again. Members already recorded
+  are left as they are."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/completion :seon.error/throwable]
                   [:or :seon.test/results :seon.db/error-result]]}
-  [connection completion ^Throwable failure]
+  [connection completion ^Throwable _failure]
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
-        members (execution-members (db/db connection) run-id)
-        completed (into #{} (keep #(when (:seon.test.member/completed-tx %) (:seon.test.member/symbol %))) members)
-        captured (remove #(completed (:seon.test/sym %)) (:seon.test.runner/results completion))
-        captured-symbols (set (map :seon.test/sym captured))
-        open (remove #(or (:seon.test.member/completed-tx %)
-                          (captured-symbols (:seon.test.member/symbol %)))
-                     members)
-        message (str "Interrupted: request " run-id " threw before this member finished.\n"
-                     (report-value {:seon.db/db (db/db connection)} failure))]
-    (if (and (empty? open) (empty? captured))
-      []
-      (commit-results!
-       connection
-       (assoc completion
-              :seon.test.run/terminated? true
-              :seon.test.runner/results
-              (into (vec captured) (map (fn [member]
-                      {:seon.test/sym (:seon.test.member/symbol member)
-                       :seon.test.member/began? false :seon.test.member/ended? false
-                       :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
-                       :seon.test/failure-message message})
-                    open)))))))
+        completed (into #{} (keep #(when (:seon.test.member/completed-tx %) (:seon.test.member/symbol %)))
+                        (execution-members (db/db connection) run-id))
+        captured (vec (remove #(completed (:seon.test/sym %)) (:seon.test.runner/results completion)))
+        recorded (if (seq captured)
+                   (commit-results! connection (assoc completion :seon.test.run/terminated? true
+                                                      :seon.test.runner/results captured))
+                   [])
+        stopped (when-not (seon.error.refusal/error? recorded)
+                  (db/transact! connection [[:db/add [:seon.test.run/id run-id] :seon.test.run/stopped :request-threw]]))]
+    (if (seon.error.refusal/error? stopped) stopped recorded)))
 
 (def ^:private run-result-query
   '[:find ?symbol ?pass ?fail ?error ?id ?at ?basis ?program ?inputs

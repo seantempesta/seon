@@ -65,7 +65,8 @@
                          (db/db connection) run-id)]
            (is (= n (count recorded)))
            (is (= (set selected) (set (map :seon.test/sym recorded))))
-           (is (= 1 (get calls 'seon.db/transact!)))
+           (is (= (if exited? 1 2) (get calls 'seon.db/transact!))
+               "the outcomes are one commit; a thrown request adds only its run's stop")
            (is (= (if exited? 1 0) (count txs))
                "a member's explicit exit observation wins over the completion default")
            (when exited?
