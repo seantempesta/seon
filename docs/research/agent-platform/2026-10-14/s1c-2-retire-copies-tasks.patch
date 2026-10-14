@@ -1,0 +1,14 @@
+--- a/resources/seon/tasks/seon.task.edn	2026-10-14 14:51:36.326454710 +0700
++++ b/resources/seon/tasks/seon.task.edn	2026-10-14 14:51:36.347034192 +0700
+@@ -43,11 +43,5 @@
+  #:seon.task{:name "chain-intake-answer"
+              :plan "TASK-CHAIN slice I2 (`docs/seon/schedule/cards/TASK-CHAIN.md#1-need--fields`): the new my.agent/answer! validates a reply's answer against the task-declared answer schema and stores it as ordinary data keeping the user message's identity and the subject intent it approves; a later reply supersedes it. Names and admits the answer schema/value task members at their producer. Done when my.agent-test/an-answer-is-validated-and-keeps-its-message is green."
+              :needs #{[:seon.task/sym seon.task/chain-intake-replies]}}
+- #:seon.task{:name "chain-intake-approval"
+-             :plan "TASK-CHAIN slice I3 (`docs/seon/schedule/cards/TASK-CHAIN.md#4-off-the-shelf-templates`): Survey's default deftest reads the latest answer from the user for the current subject intent; missing, negative, superseded or earlier-intent answers stay red, and only an ordinary accepted merge advances the chain. Done when seon.step-test/survey-waits-for-the-latest-user-approval is green."
+-             :needs #{[:seon.task/sym seon.task/chain-intake-answer]}}
+- #:seon.task{:name "chain-loop"
+-             :plan "TASK-CHAIN phase 7 (`docs/seon/schedule/cards/TASK-CHAIN.md#5-acceptance-deftests--red-first`): one launch runs the full chain with scripted replies through `:seon.turn.loop/complete`, real SCI, listens, tests, five merges and disposable publication, with zero paid calls and no hand act after the subject's running fact; its long bound is measured and owner-authorized before it gates. Done when seon.cluster.db-flow-test/a-scripted-full-chain-completes-without-hand-acts is green."
+-             :needs #{[:seon.task/sym seon.task/chain-actions] [:seon.task/sym seon.task/chain-intake-approval]}}
+  #:seon.task{:name "relaunched-is-read-only-for-leaves-with-an-ended-attempt"
+              :plan "`seon.task/relaunched` is called by `seon.cluster.agent/launch-facts` for every ready leaf and costs 0.36 ms and 0.35 MB per leaf: 301 ms and 291 MB over 834 leaves (`docs/research/agent-platform/2026-10-14/reactive-scheduling.md#2-measurements-default-warm-read-only`), though only a leaf with an ended attempt can be relaunched. What the work must be proportional to: the leaves with an ended attempt, found from one attempts-made query already read by `launch-facts`. Narrow the input of `seon.task/relaunched` (or derive it from the ended-attempt facts `launch-facts` holds) so a leaf with no ended attempt costs no call. Proof: to write before assignment (`seon.profile/measure` on `launch-facts` with 834 ready leaves and no ended attempt, `relaunched` zero calls)."}]

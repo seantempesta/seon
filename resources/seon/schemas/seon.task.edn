@@ -158,12 +158,18 @@
  :obligations [:map [:seon.task/step {:optional true} :seon.task/step] [:seon.task/proofs :seon.task/proofs]
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :referrers [:set :symbol]
- :proofs [:set {:seon.task/owned true :description "The copied part of seon.task/obligations: the default deftests a chain copy took from its template (seon.task/chain!) or root chose for it, by symbol, joined with the task's own tagged tests; local to the task, never inherited."} :symbol]
- :templates [:vector {:min 1 :description "The templates a chain copies, in chain order, distinct: ordinary tasks, the off-the-shelf ones in resources/seon/tasks/seon.step.edn."} :seon.task/sym]
- :customization [:map {:description "Root's choices for one template's copy, applied over what the copy takes from its template before assignment."}
-                 [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/proofs {:optional true} :seon.task/proofs]
-                 [:seon.task/product {:optional true} :seon.task/product]]
- :customizations [:map-of {:description "Each template's customization, by template symbol."} :seon.task/sym :seon.task/customization]
+ :proofs [:set {:seon.task/owned true :description "The deftests that must be green for this task to be done, by symbol: set from its template when its chain is created (seon.task/chain!), changed by an agent (Prove writes the next task's), joined with the task's own tagged tests until tags go; owned, never flowing."} :symbol]
+ :task-map [:map {:description "One task of a chain as seon.task/chain! takes it: ordinary task members, a template's owned members merged with a plan. Only the first map's ns and name are read; identity, tempid and next are derived by position."}
+            [:seon.task/ns {:optional true} :seon.task/ns] [:seon.task/name {:optional true} :seon.task/name]
+            [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
+            [:seon.task/proofs {:optional true} :seon.task/proofs]]
+ :chain-context [:map {:description "What creating a chain writes through: main's connection, which holds the chain fact, and the store whose branches hold the chain's branch."}
+                 [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]
+ :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's."}
+                 [:seon.chain/from {:optional true} :seon.chain/from]]
+ :handles [:vector {:min 1 :description "Task handles in chain order, along :seon.task/next."} :seon.task/handle]
+ :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
+         [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/referrers :seon.task/referrers]]
  :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent and references. Its subjects and proofs are its related data."}
         [:seon.task/id :seon.task/id] [:seon.task/sym {:optional true} :seon.task/sym] [:seon.task/name {:optional true} :seon.task/name]

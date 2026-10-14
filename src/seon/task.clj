@@ -12,6 +12,7 @@
             [malli.transform :as mt]
             [malli.util :as mu]
             [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
@@ -569,7 +570,7 @@
   candidate's, absent when it declares none. On one database value (an unassigned task) it is that value's own: its
   proofs are the tests tagged with the task, and an explicit `:implement` step adds the tests tagged with its subject
   (`goal-owner`) and its product; its product is its effective `:seon.task/product` (`effective`) and the tests tagged
-  with a task that needs it. Its proofs include the ones it copied (`:seon.task/proofs`, `chain!`)."
+  with a task that needs it. Its proofs include its own `:seon.task/proofs` field."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.task/sym]
                    [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]
@@ -759,53 +760,88 @@
       report
       {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))})))
 
-(defn- chain-copy
-  "The copy of `template` that the chain of the subject `ns`/`subject-name` takes from `database`: named by template
-  name + `-` + subject name in the subject's namespace, with the template's step, instructions and proofs (its
-  `obligations`' proofs), never its worked-example plan, then `customization` over them; it needs the copy `before`
-  it. nil when no task is named `template`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/ns :seon.task/name :seon.task/sym [:maybe :seon.task/sym]
-                       [:maybe :seon.task/customization]]
-                  [:or :nil :seon.task/declaration :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
-  [database ns subject-name template before customization]
-  (let [held (db/pull database [:seon.task/id :seon.task/step :seon.task/instructions] [:seon.task/sym template])
-        selected (when (:seon.task/id held) (obligations database template))]
-    (or (some read-error [held selected])
-        (when (:seon.task/id held)
-          (merge (cond-> (assoc (select-keys held [:seon.task/step :seon.task/instructions])
-                                :seon.task/ns ns :seon.task/name (str (name template) "-" subject-name))
-                   (seq (:seon.task/proofs selected)) (assoc :seon.task/proofs (:seon.task/proofs selected))
-                   before (assoc :seon.task/needs #{[:seon.task/sym (task-sym ns (str (name before) "-" subject-name))]}))
-                 customization)))))
+(defn- chain-entities
+  "The `tasks` of the chain whose first map names it, as the writer's maps: only the first map supplies `ns` and
+  `name`, every later task is named `<first name>-<index>` (1-based) in its namespace, each takes the negative tempid
+  of its position and names the next one's as its `:seon.task/next`; the first runs and the rest are held. A map's own
+  `:db/id`, `:seon.task/id`, `:seon.task/sym` and `:seon.task/next` are ignored."
+  {:malli/schema [:=> [:cat [:vector {:min 1} :seon.task/task-map]] [:vector :map]]}
+  [tasks]
+  (let [{ns :seon.task/ns first-name :seon.task/name} (first tasks)
+        n (count tasks)]
+    (into [] (map-indexed
+              (fn [i task]
+                (cond-> (assoc (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
+                               :db/id (- (inc i)) :seon.task/ns ns
+                               :seon.task/name (if (zero? i) first-name (str first-name "-" (inc i)))
+                               :seon.task/execution (if (zero? i) :running :held))
+                  (< (inc i) n) (assoc :seon.task/next (- (+ i 2))))))
+          tasks)))
+
+(defn- chain-handles
+  "The handles of the chain whose first task is `handle` at `database`, in order along `:seon.task/next`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.task/handles]}
+  [database handle]
+  (loop [handle handle handles []]
+    (let [after (get-in (db/pull database [{:seon.task/next [:seon.task/id]}] [:seon.task/id handle]) [:seon.task/next :seon.task/id])]
+      (if after (recur after (conj handles handle)) (conj handles handle)))))
+
+(defn- on-branch
+  "Call `f` with a connection to `branch` of `store` for this one action: the one this process holds, else one
+  opened here and released when `f` returns."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:=> [:cat :seon.db/connection] :seon.schema/value]]
+                  :seon.schema/value]}
+  [store branch f]
+  (if-let [held (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+    (f held)
+    (let [opened (store/open-branch! store branch)]
+      (try (f opened) (finally (store/release-branch! opened))))))
 
 (defn chain!
-  "Build the chain of the `subject` declaration from `templates` in one write: the subject, one copy per template
-  (`chain-copy`: its step, instructions and proofs, with `customizations` by template applied over them) as its
-  children, each copy needing the one before it, submitted as one population through `adopt-tasks-tx` in one
-  transaction. Only the subject is written `:held`, so one `:running` fact on it readies the first copy alone; an
-  identical construction changes nothing, and a stored task that differs refuses with base, current and proposed.
-  A template no task names refuses `:unknown-task`.
+  "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch
+  whose head it starts from; it still merges toward main): the first map names the chain and the branch
+  `chain-<handle>`, later tasks are named by position (`chain-entities`), all written in one transaction through
+  the task writer, then the chain fact on main. A chain whose fact main holds is answered as it stands and nothing
+  is written. Answers the branch, the first task and every handle in order.
 
   ## Example
 
   ```clojure
-  (seon.task/chain! connection {:seon.task/ns 'work :seon.task/name \"fix\" :seon.task/plan \"Fix the observed failure.\"}
-                    '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement] {})
+  (seon.task/chain! {:seon.db/connection connection :seon.store/store store}
+                    [(merge (seon.task/template database 'seon.step.design/template)
+                            {:seon.task/ns 'seon.ref :seon.task/name \"fix-pathless-section\" :seon.task/plan plan})])
   ```"
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/declaration :seon.task/templates :seon.task/customizations]
-                  [:or :seon.db/transaction-report :seon.error/value]]}
-  [connection {ns :seon.task/ns subject-name :seon.task/name :as subject} templates customizations]
-  (let [database (db/db connection)
-        copies (mapv (fn [template before] (chain-copy database ns subject-name template before (get customizations template)))
-                     templates (cons nil templates))
-        missing (some (fn [[template copy]] (when (nil? copy) template)) (map vector templates copies))]
-    (cond (some read-error copies) (some read-error copies)
-          missing (refused 'seon.task/chain! :unknown-task ns missing)
-          :else
-          (let [root (assoc subject :seon.task/children (into #{} (map #(vector :seon.task/sym (task-sym ns (:seon.task/name %)))) copies))
-                entities (mapv identified (cons root copies))
-                handles (into #{} (map :seon.task/id) entities)]
-            (refusal-data #(written connection [[:db.fn/call #'adopt-tasks-tx entities handles {}]]))))))
+  {:malli/schema [:function
+                  [:=> [:cat :seon.task/chain-context [:vector {:min 1} :seon.task/task-map]]
+                   [:or :seon.task/chain :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]
+                  [:=> [:cat :seon.task/chain-context [:vector {:min 1} :seon.task/task-map] :seon.task/chain-options]
+                   [:or :seon.task/chain :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]]}
+  ([context tasks] (chain! context tasks {}))
+  ([{connection :seon.db/connection store :seon.store/store} tasks {from :seon.chain/from}]
+   (let [main (db/db connection)
+         main-branch (get-in main [:config :branch])
+         {ns :seon.task/ns first-name :seon.task/name} (first tasks)
+         first-handle (task-handle ns first-name)
+         held (:seon.chain/branch (db/pull main [:seon.chain/branch] [:seon.chain/first first-handle]))
+         branch (or held (keyword (str "chain-" first-handle)))
+         answer (fn [connection] {:seon.chain/branch branch :seon.chain/first first-handle
+                                  :seon.task/handles (chain-handles (db/db connection) first-handle)})]
+     (if held
+       (on-branch store branch answer)
+       (let [forked (when-not (contains? (registry/branches store) branch)
+                      (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db main
+                                       :seon.branch/target main-branch :seon.cluster.registry/from (or from main-branch)}))
+             entities (chain-entities tasks)
+             handles (into #{} (map #(task-handle ns (:seon.task/name %))) entities)
+             written-tasks (when-not (:seon.error/at forked)
+                             (on-branch store branch
+                                        #(refusal-data (fn [] (written % [[:db.fn/call #'adopt-tasks-tx entities handles {}]])))))
+             fact (when (:db-after written-tasks)
+                    (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
+         (cond (:seon.error/at forked) forked
+               (not (:db-after written-tasks)) written-tasks
+               (not (:db-after fact)) fact
+               :else (on-branch store branch answer)))))))
 
 (defn assignment-read
   "What assigning task `handle` to `agent` reads at `database`: the task's revision, the agent's

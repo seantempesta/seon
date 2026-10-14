@@ -3,6 +3,7 @@
  :first [:and {:seon.db/identity true :seon.program/row-schema :seon.chain/chain
                :description "The chain's first task, by its :seon.task/id: the chain's identity, since only the first task supplies a chain's name."}
          :seon.task/handle]
+ :from [:and {:description "The branch whose head a new chain forks from instead of main's (seon.task/chain!): it selects only the starting head; the chain's base and merge target stay main."} :seon.store/branch]
  :chain [:map {:seon.db/attributes true :seon.program/partition :seon.data
                :description "The chain fact on main, one per chain: discovery, not status. Root finds every chain through it and reads the chain's state on its branch."}
          [:seon.chain/first :seon.chain/first]

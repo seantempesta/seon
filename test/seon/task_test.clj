@@ -8,6 +8,8 @@
             [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.id :as id]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store]
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.task :as task]
@@ -391,52 +393,6 @@
       (is (= #{} (into #{} (remove #(or (allowed %) (str/ends-with? (namespace %) "-test"))) readers))
           "writers, links, dangling, triage, task-edges' subjects and namespace tag display read tags for their own purpose"))))
 
-(def ^:private step-templates
-  "The five off-the-shelf templates, in chain order."
-  '[seon.step/survey seon.step/define seon.step/design seon.step/prove seon.step/implement])
-
-(deftest one-write-clones-a-chain-and-one-running-readies-survey
-  ;; TASK-CHAIN A3 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`)
-  (test-support/with-database
-   (fn [connection]
-     (let [chain! (requiring-resolve 'seon.task/chain!)
-           subject {:seon.task/ns 'work :seon.task/name "fix" :seon.task/plan "Fix the observed failure."}
-           copy (fn [template] (task/task-handle 'work (str (name template) "-fix")))
-           report (chain! connection subject step-templates {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}})
-           database (db/db connection)
-           pulled (fn [template] (db/pull database [:seon.task/instructions :seon.task/execution :seon.task/proofs
-                                                   {:seon.task/needs [:seon.task/id]}]
-                                          [:seon.task/id (copy template)]))]
-       (is (= 1 (count (into #{} (map :tx) (:tx-data report)))) "the subject, five copies and needs are one transaction")
-       (is (= (set (map copy step-templates))
-              (set (map :seon.task/id (:seon.task/children (db/pull database [{:seon.task/children [:seon.task/id]}]
-                                                                     [:seon.task/id (task/task-handle 'work "fix")])))))
-           "the subject's children are the five copies")
-       (is (= [[] [(copy 'seon.step/survey)] [(copy 'seon.step/define)] [(copy 'seon.step/design)] [(copy 'seon.step/prove)]]
-              (mapv #(mapv :seon.task/id (:seon.task/needs (pulled %))) step-templates))
-           "each copy needs the one before it")
-       (is (= (:seon.task/instructions (db/pull database [:seon.task/instructions] [:seon.task/sym 'seon.step/survey]))
-              (:seon.task/instructions (pulled 'seon.step/survey)))
-           "a copy carries its template's instructions")
-       (is (= '#{tq.gates/root-gate} (set (:seon.task/proofs (pulled 'seon.step/prove)))) "root's customization is on its copy")
-       (is (= [:held nil nil nil nil nil]
-              (mapv #(:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id %]))
-                    (cons (task/task-handle 'work "fix") (map copy step-templates))))
-           "only the subject starts held")
-       (is (= #{(copy 'seon.step/survey)}
-              (task/ready (db/with database [[:db/add [:seon.task/id (task/task-handle 'work "fix")] :seon.task/execution :running]])))
-           "running the subject readies Survey only")
-       (is (empty? (filter #(= "seon.task" (namespace (:a %))) (:tx-data (chain! connection subject step-templates
-                                                               {'seon.step/prove {:seon.task/proofs '#{tq.gates/root-gate}}}))))
-           "an identical construction changes no task fact")
-       (is (= '#{seon.step-test/survey-handoff} (set (:seon.task/proofs (pulled 'seon.step/survey))))
-           "a copy takes its template's default deftests as its proofs")
-       (test-support/transacted! connection [[:db/add [:seon.task/sym 'seon.step/survey] :seon.task/instructions "## Work\n\nRevised."]])
-       (chain! connection (assoc subject :seon.task/name "other") step-templates {})
-       (let [instructions #(:seon.task/instructions (db/pull (db/db connection) [:seon.task/instructions] [:seon.task/id (task/task-handle 'work %)]))]
-         (is (= "## Work\n\nRevised." (instructions "survey-other")) "a template edit reaches the next copy")
-         (is (= (:seon.task/instructions (pulled 'seon.step/survey)) (instructions "survey-fix")) "an earlier copy keeps what it took"))))))
-
 (deftest only-a-merge-completes-a-leaf
   ;; TASK-CHAIN phase 4: :satisfied is deleted; an empty delta merges as an accepted no-op
   (let [projection (schema/handed-projection)]
@@ -516,3 +472,81 @@
            "the writer derives each task's references from its plan and instructions")
        (is (nil? (:seon.task/plan (pulled "fix-2"))) "a template carries no plan")
        (is (= :unknown-task (:seon.task/refused (task/template database 'tq.link/absent))) "an absent template is refused by name")))))
+
+(deftest a-chain-is-linked-tasks-written-in-one-transaction-on-its-branch
+  ;; TASK-CHAIN S1c-2 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Create)
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           context {:seon.db/connection connection :seon.store/store store}
+           chain! (requiring-resolve 'seon.task/chain!)
+           main-branch (get-in (db/db connection) [:config :branch])
+           handle #(task/task-handle 'tq.chain %)
+           _ (test-support/transacted! connection
+                                       (task/adopt-tasks-tx (db/db connection)
+                                                            [{:seon.task/ns 'tq.chain :seon.task/name "template"
+                                                              :seon.task/instructions "Check with `seon.task/chain!`."
+                                                              :seon.task/proofs '#{tq.chain/proof}}]
+                                                            #{(handle "template")} {}))
+           owned (task/template (db/db connection) 'tq.chain/template)
+           plan "Link the tasks of `seon.task/chain!`."
+           maps [(merge owned {:seon.task/ns 'tq.chain :seon.task/name "fix" :seon.task/plan plan})
+                 ;; identity, symbol, tempid and next in a later map are ignored
+                 (merge owned {:db/id -7 :seon.task/ns 'tq.other :seon.task/name "ignored" :seon.task/id (handle "fix")
+                               :seon.task/sym 'tq.chain/fix :seon.task/next -1})
+                 owned]
+           measured (profile/measure #(chain! context maps))
+           answer (:seon.profile/value measured)
+           branch (:seon.chain/branch answer)
+           chain-db #(db/branch-database (db/db connection) branch)
+           names ["fix" "fix-2" "fix-3"]
+           pulled (fn [database task-name]
+                    (db/pull database [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/execution
+                                       {:seon.task/next [:seon.task/name]}]
+                             [:seon.task/id (handle task-name)]))
+           commits (fn [] [(db/commit-id (db/db connection)) (db/commit-id (chain-db))])
+           from-branch (keyword (str "chain-" (handle "again")))]
+       (try
+         (is (= {:seon.chain/branch (keyword (str "chain-" (handle "fix"))) :seon.chain/first (handle "fix")
+                 :seon.task/handles (mapv handle names)}
+                answer)
+             "the answer names the branch, the first task and every task in chain order")
+         (is (contains? (registry/branches store) branch) "the chain's branch exists")
+         (let [on-branch (chain-db)
+               tasks (mapv #(pulled on-branch %) names)]
+           (is (= ["fix-2" "fix-3" nil] (mapv #(get-in % [:seon.task/next :seon.task/name]) tasks))
+               "each task's next is the one after it, by position")
+           (is (= 1 (count (db/q '[:find [?tx ...] :in $ [?h ...] :where [?e :seon.task/id ?h ?tx]] on-branch (mapv handle names))))
+               "every task identity is asserted in one transaction")
+           (is (every? #(= owned (-> % (select-keys [:seon.task/instructions :seon.task/proofs]) (update :seon.task/proofs set))) tasks)
+               "each task carries its template's owned members")
+           (is (= [plan nil nil] (mapv :seon.task/plan tasks)) "only the first map supplied a plan")
+           (is (= [:running :held :held] (mapv :seon.task/execution tasks)) "the first runs, the rest are held"))
+         (let [main (db/db connection)]
+           (is (not-any? #(:seon.task/execution (pulled main %)) names) "main holds no chain task")
+           (is (empty? (db/q '[:find [?a ...] :in $ [?h ...] :where [?a :seon.task/assigned ?h]] main (mapv handle names)))
+               "main holds no attempt of a chain task")
+           (is (= {:seon.chain/branch branch} (db/pull main [:seon.chain/branch] [:seon.chain/first (handle "fix")]))
+               "main holds the chain fact"))
+         (let [edited "An edited plan."
+               opened (seon.cluster.store/open-branch! store branch)
+               _ (try (test-support/transacted! opened [[:db/add [:seon.task/id (handle "fix")] :seon.task/plan edited]])
+                      (finally (seon.cluster.store/release-branch! opened)))
+               before (commits)]
+           (is (= answer (chain! context maps)) "a repeat answers the existing chain")
+           (is (= before (commits)) "a repeat commits nothing on main or the branch")
+           (is (= edited (:seon.task/plan (pulled (chain-db) "fix"))) "a repeat keeps the edited plan"))
+         (let [from (chain! context [(assoc owned :seon.task/ns 'tq.chain :seon.task/name "again")] {:seon.chain/from branch})
+               _ (is (= from-branch (:seon.chain/branch from)) "a chain's branch is named by its first task")
+               database (db/db connection)]
+           (is (= main-branch (:seon.branch/target (registry/fork-of (db/branch-database database from-branch)
+                                                                      from-branch)))
+               "a chain started from another branch merges toward main")
+           (is (= (registry/base-commit-id database branch) (registry/base-commit-id database from-branch))
+               "its base is the main commit the first chain forked at")
+           (is (= :running (:seon.task/execution (pulled (db/branch-database database from-branch) "fix")))
+               "it starts from that branch's head, holding its tasks"))
+         (is (< (:seon.profile/ms measured) 1000) "the durable create is measured, expected about 100 ms")
+         (finally
+           (doseq [b [branch from-branch] :when (contains? (registry/branches store) b)]
+             (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))))
