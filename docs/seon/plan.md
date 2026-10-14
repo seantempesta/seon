@@ -51,6 +51,23 @@ dependencies; the merge commit's hard-coded co-author; our lanes working as `:ou
 two functions named `publish!` with different meanings (`seon.merge/publish!` writes files, `seon.cluster.source/publish!`
 reads the checkout into a cluster).
 
+**Everything immutable is shared (owner 2026-10-14).** "A list of things we know to be true, cachable across all the
+permutations of branches and SCI": every derivation is keyed by the content of exactly what it reads (definition,
+reach and input digests, `seon.schema/declaration-digest`, read evidence), never by branch name, commit id where content
+would do, instance identity, URL or the deriving thread, so a result is valid on every branch and in every SCI context
+and nothing is invalidated. Each truth states its inputs and is proven by a test that changing anything outside them
+leaves the result unchanged (the hidden-input proof). Order: B1 test results across branches (lane b1-test-reuse) and
+the overlay rebuild (overlay-impl) first; then the catalogue: inventory `../research/agent-platform/2026-10-14/dig-content-keys.md`
+(Haiku, in flight) → independent catalogues and keyings (Opus, Astra, Argon) → hybrid → one lane per derivation. Known
+violations: 62 schema populations keyed per archive URL holding 5 contents (fixed in f8a2773be, live since the
+2026-10-14 14:16Z restart); the cache at 472 of 512 MB right after boot (in the inventory).
+
+**Landed since the morning (2026-10-14).** TASK-CHAIN S1 complete except S1d-2: S1a (e6df7e213, 243683f1d), S1b-1
+(d4566ddd2), S1b-2 (f6a770bec); S3d-1a `doc` describes its contract's schemas (f8f582caa); restart batch 1b (06bbba850:
+GC one enumeration, gfm tables); the lifecycle branch race (8b6473ed8); perf B4 schema derivations by digest (f8a2773be),
+B2 config once per state (92a99f39a), `seon.db` projections in `seon.cache` (fbf611da5); markdown dependency removed
+(c2d555626). Default runs 86beed937.
+
 **Overlay rebuild (owner answers 2026-10-14, hybrid `../research/agent-platform/2026-10-14/overlay-hybrid.md`, 723bce2e1).**
 A branch's program context derives from its previous frozen context by the changed definitions plus the value rows,
 macros and interpreted callers reaching them; an unchanged init runs once per content of itself and its callees; removals
