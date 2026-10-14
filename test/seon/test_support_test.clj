@@ -509,3 +509,10 @@
         (is (string? root) "the fixture cluster names a working root")
         (is (not= live root) "a fixture cluster never publishes into the live checkout")
         (is (.isDirectory (io/file root)))))))
+
+(deftest a-cut-reply-is-answered-as-data
+  (let [text "{:message \"abc\"…+3808}"
+        answer (test-support/reply text)]
+    (is (map? answer) "a cut map value answers a map, not a reader error")
+    (is (= text (::test-support/cut answer)) "the cut text stays visible as text")
+    (is (string? (::test-support/cause answer)) "the reader's complaint names the cut")))

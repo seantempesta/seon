@@ -903,12 +903,16 @@
 (defn reply
   "One `#:seon.repl{…}` response read back as the data it is. A tagged literal
   the reader cannot construct (an `#object`) stays data too, as its tag and
-  form, so a test asserts on the reply's keys rather than on its bytes."
+  form, so a test asserts on the reply's keys rather than on its bytes. A text
+  the printer cut inside a map is not EDN: it answers `::cut` (the text) and
+  `::cause` (the reader's message), so the real failure stays visible."
   {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [text]
   (binding [*read-eval* false
             *default-data-reader-fn* (fn [tag form] {::tag tag ::form form})]
-    (read-string text)))
+    (try (read-string text)
+         (catch RuntimeException cause
+           {::cut text ::cause (ex-message cause)}))))
 
 (defn- mcp-parsed
   "Each content item of a parsed MCP tool result as [text reply]."
