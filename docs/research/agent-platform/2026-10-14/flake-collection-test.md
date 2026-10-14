@@ -1,6 +1,7 @@
 ---
 title: Flake hunt — an-eval-request-after-a-collection-reads-no-collected-value
 type: research
+status: complete
 ---
 
 # Flake hunt: `seon.cluster.armed-test/an-eval-request-after-a-collection-reads-no-collected-value`
