@@ -116,9 +116,18 @@ From [perf-analysis.md](perf-analysis.md), [perf-schema.md](perf-schema.md), [pe
 - Path classification: `seon.test.cache/input-path?` 3.57M calls over all 6,907 `git ls-files` paths against 45
   roots (83% under `docs/`, `evals/`, `v1/`, `tmp/`); callers in `seon.cluster` and `seon.cluster.source` (held by
   lane-lifecycle-branch at handoff).
-- The recording transaction: about 41 ms of a 40-48 ms trivial request; `seon.db/transact-call` 285 ms mean since
-  boot. The Argon lane on the write path (`perf-transact`) was still running at handoff; its report lands at
-  `tmp/argon-perf/transact.md` (copy it here when it finishes).
+- The write path ([perf-transact.md](perf-transact.md), Argon-medium, 32 min, finished after handoff). Ordinary
+  recording transactions are fine (p50 33.5 ms of 1,181); **190 reconciliation and adoption transactions take
+  1.07-4.24 s each, 89% of all write time**. Inside the writer, `seon.fn/reconcile-tx-in` pulls `[*]` and normalizes
+  the whole desired entity population (`seon.fn/normalized-index-entity`) even when `:seon.program/definition-digest`
+  is unchanged, calling `seon.db/carried-projection` 2.54M times; target proportional to changed digests. Per
+  transaction, `seon.db/write-owned-values-error` and `seon.db/write-report-error` rescan the 2,404-attribute schema
+  map and validate transaction-report datoms 15+ times (29.9M `transaction-report-datom?` calls). Confirmed by root:
+  `seon.db` holds two core.cache LRU atoms of its own (`projection-cache` 24, `value-projection-cache` 4, sizes in
+  `seon.db/projection-cache-policy`) outside `seon.cache`, against AGENTS.md (one central cache, no hardcoded policy
+  numbers, no further atoms); they thrash (`seon.db/declaration-content-key` scans 34,841 datoms on 2,639 misses).
+  Fold them into `seon.cache` kinds keyed by content. Note: `transact-call`'s profiled "self" time is the whole writer
+  wait (the profiler does not subtract writer-thread callees), so read its rows with that in mind.
 - The profiler's own predicates carry instrumented contracts (`seon.profile/summary` costs about 88k checked calls;
   hot leaves like `contains-position?` pay checks on every call). Owner rule: every function keeps its contract; the
   question for Opus is the instrumentation cost of hot private leaves, not removing contracts.
