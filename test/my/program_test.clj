@@ -411,6 +411,28 @@
 ;;; TASK-CHAIN I0 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`), over the link-statement experiment's requests
 ;;; (`docs/research/agent-platform/2026-10-13/link-statement-experiment.md`).
 
+(deftest search-allocation-follows-the-returned-page
+  (support/with-running-agent
+   (fn [running _agent-id _connection]
+     (let [request (json/write-str
+                    {"name" "eval_clj"
+                     "arguments"
+                     {"agent" "root" "cluster" running "mode" "jvm"
+                      "code" (str "(let [database (seon.db/db (:seon.db/connection (seon.test-support/running-cluster \"" running "\")))] "
+                                  "(mapv (fn [query] "
+                                  "(let [measured (seon.profile/measure #(my.program/search database query))] "
+                                  "(select-keys measured [:seon.profile/ms :seon.profile/alloc-bytes]))) "
+                                  "[:seon.message/id \"program context\" \"current-state block\" \"merge\" :seon.render/form]))")}})
+           _ (mcp/call request)
+           measured (profile/measure #(json/read-str (mcp/call request)))
+           reply (:seon.profile/value measured)
+           costs (mapcat :seon.repl/value (support/mcp-replies reply))]
+       (is (empty? (when (get reply "isError") (get reply "content"))))
+       (is (= 5 (count costs)))
+       (doseq [cost costs]
+         (is (< (:seon.profile/alloc-bytes cost) 20000000)
+             "a warm search allocates under twenty megabytes"))))))
+
 (deftest intake-search-finds-owners-with-candidate-costs
   (support/with-database
    (fn [connection]

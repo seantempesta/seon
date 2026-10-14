@@ -649,14 +649,17 @@
 
 (defn- file-line
   "The 1-based start line of a declaration on disk, as {:line n}; empty when the file no longer holds its indexed source."
-  {:malli/schema [:=> [:cat :map] :map]}
+  {:malli/schema [:=> [:cat :map] [:map [:line {:optional true} [:int {:min 1}]]]]}
   [{{path :seon.fn.file/relative-path} :seon.fn/file [start end] :seon.fn/form-span source ::source}]
   (let [file (when (and path start) (java.io.File. ^String (System/getProperty "user.dir") ^String path))]
     (if (and file (.isFile file))
       (let [content (java.nio.file.Files/readAllBytes (.toPath file))]
         (if (and (<= end (alength content))
                  (= source (String. content (int start) (int (- end start)) java.nio.charset.StandardCharsets/UTF_8)))
-          {:line (inc (count (filter #(= 10 %) (take start content))))}
+          (loop [i 0 line 1]
+            (if (< i start)
+              (recur (inc i) (if (= 10 (aget content i)) (inc line) line))
+              {:line line}))
           {}))
       {})))
 
@@ -760,20 +763,22 @@
   (into #{} (map (comp namespace :v)) (db/datoms database :aevt :seon.test/sym)))
 
 (defn- source-matches
-  "Each declaration whose indexed source holds needle, with its first matching line; only matching sources are split."
-  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:vector :map]]}
+  "The symbols and kinds whose source holds needle, through Datahike's content-valid query cache."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:or [:vector :map] :seon.db/invalid-read-error]]}
   [database needle]
-  (into []
-        (comp (mapcat (fn [[source-key sym-key kind]]
-                        (eduction (filter #(str/includes? (:v %) needle))
-                                  (map #(vector (:v (first (db/datoms database :eavt (:e %) sym-key))) (:v %) kind))
-                                  (db/datoms database :aevt source-key))))
-              (map (fn [[sym text kind]]
-                     (let [[i line] (first (keep-indexed (fn [i line] (when (str/includes? line needle) [i line]))
-                                                         (str/split-lines text)))]
-                       {:sym sym :line (inc i) :snippet (str/trim line) :kind kind
-                        :named? (str/includes? (str sym) needle)}))))
-        [[:seon.fn/source :seon.fn/sym :function] [:seon.test/source :seon.test/sym :test]]))
+  (let [matches (db/q database
+                      '[:find ?sym ?kind :in $ ?needle
+                        :where (or-join [?sym ?text ?kind]
+                                 (and [?e :seon.fn/source ?text] [?e :seon.fn/sym ?sym]
+                                      [(ground :function) ?kind])
+                                 (and [?e :seon.test/source ?text] [?e :seon.test/sym ?sym]
+                                      [(ground :test) ?kind]))
+                        [(clojure.string/includes? ?text ?needle)]] needle)]
+    (if (:seon.db/invalid-read matches)
+      matches
+      (mapv (fn [[sym kind]]
+              {:sym sym :kind kind :named? (str/includes? (str sym) needle)})
+            matches))))
 
 (defn- declared?
   "Whether a function or test declaration names sym."
@@ -832,11 +837,30 @@
   [database k form]
   {:seon.schema/key k :my.program/producer (producer database k) :my.program/candidate-tokens (tokens/estimate form)})
 
-(defn- candidate-tokens
-  "The tokens a declaration's AI face costs when expanded, as `my.program/source` shows it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :my.program/candidate-tokens]}
-  [database sym]
-  (tokens/estimate (render-source-ai {:seon.render/value (declaration-source database sym)})))
+(defn- search-match
+  "A returned declaration's first matching line and the token cost of its AI source."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map [:sym :qualified-symbol]] :string] :my.program/search-match]}
+  [database {:keys [sym vocabulary?] :as row} needle]
+  (let [source (declaration-source database sym)
+        match (if vocabulary?
+                (select-keys row [:sym :snippet])
+                (let [[i line] (first (keep-indexed (fn [i line] (when (str/includes? line needle) [i line]))
+                                                    (str/split-lines (:source source))))]
+                  {:sym sym :line (inc i) :snippet (str/trim line)}))]
+    (assoc match :my.program/candidate-tokens
+           (tokens/estimate (render-source-ai {:seon.render/value source})))))
+
+(defn- ranked-matches
+  "The requested prefix, counting recorded uses only in rank groups that can enter the page."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :string] [:int {:min 0}]] [:vector :map]]}
+  [database rows tests limit]
+  (let [groups (group-by (juxt #(or (= :test (:kind %)) (contains? tests (namespace (:sym %))))
+                               (complement :vocabulary?) (complement :named?)) rows)]
+    (into [] (comp (mapcat (fn [[_ matches]]
+                            (sort-by (juxt #(- (::use %)) #(str (:sym %)))
+                                     (map #(assoc % ::use (use-count database (:sym %))) matches))))
+                   (take limit))
+          (take limit (sort-by key groups)))))
 
 (defn search
   "Search the program for a string or keyword: the schema key itself, the owners the vocabulary's entries cite and
@@ -854,26 +878,27 @@
   (my.program/search \"program context\")
   (my.program/search {:text \"java.util.Date.\" :limit 25})
   ```"
-  {:malli/schema [:=> [:cat :seon.db/database-value :my.program/search-query] :my.program/search-result]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :my.program/search-query]
+                  [:or :my.program/search-result :seon.db/invalid-read-error]]}
   [database query]
   (let [{:keys [text limit] :or {limit 8}} (if (map? query) query {:text query})
         needle (if (keyword? text) (str text) text)
-        tests (test-namespaces database)
-        owned (vocabulary-matches database needle)
-        owned-syms (set (map :sym owned))
-        test? #(or (= :test (:kind %)) (contains? tests (namespace (:sym %))))
-        rows (->> (concat owned (remove #(owned-syms (:sym %)) (source-matches database needle)))
-                  (map #(assoc % ::use (use-count database (:sym %))))
-                  (sort-by (juxt test? (complement :vocabulary?) (complement :named?) #(- (::use %)) #(str (:sym %)))))
-        form (when (keyword? text) (db/q database '[:find ?form . :in $ ?k :where [?e :seon.schema/key ?k] [?e :seon.schema/form ?form]] text))
-        key-hit (when form (key-match database text form))
-        matches (into (if key-hit [key-hit] [])
-                      (map #(assoc (select-keys % [:sym :line :snippet])
-                                   :my.program/candidate-tokens (candidate-tokens database (:sym %))))
-                      (take (cond-> limit key-hit dec) rows))]
-    (cond-> {:count (count matches) :matches matches}
-      (< (count matches) (+ (count rows) (if key-hit 1 0)))
-      (assoc :more (list 'my.program/search {:text text :limit (* 3 limit)})))))
+        sources (source-matches database needle)]
+    (if (:seon.db/invalid-read sources)
+      sources
+      (let [tests (test-namespaces database)
+            owned (vocabulary-matches database needle)
+            owned-syms (set (map :sym owned))
+            rows (into owned (remove #(owned-syms (:sym %))) sources)
+            form (when (keyword? text)
+                   (db/q database '[:find ?form . :in $ ?k :where [?e :seon.schema/key ?k] [?e :seon.schema/form ?form]] text))
+            key-hit (when form (key-match database text form))
+            matches (into (if key-hit [key-hit] [])
+                          (map #(search-match database % needle))
+                          (ranked-matches database rows tests (cond-> limit key-hit dec)))]
+        (cond-> {:count (count matches) :matches matches}
+          (< (count matches) (+ (count rows) (if key-hit 1 0)))
+          (assoc :more (list 'my.program/search {:text text :limit (* 3 limit)})))))))
 
 (defn sizes
   "The functions and tests of a namespace with their line counts, largest first (top 20).
