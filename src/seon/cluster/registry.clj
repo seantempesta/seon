@@ -138,7 +138,10 @@
 (defn branch-commit-id
   "The commit ID currently named by a branch. A branch the store does not
   hold answers `:seon.cluster.registry/branch-missing-error`, naming the store
-  and the branch, so no caller mistakes absence for a commit.
+  and the branch, so no caller mistakes absence for a commit. A caller holding
+  the store's branches as its basis passes them (`:seon.cluster.registry/branches`),
+  so a branch deleted since still answers the head it read: the head record
+  stays until collection.
 
   ## Example
 
@@ -147,8 +150,8 @@
   ```"
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
                   [:or :seon.source/commit-id :seon.cluster.registry/branch-missing-error]]}
-  [{:keys [:seon.store/store :seon.store/branch]}]
-  (or (when (contains? (branches store) branch)
+  [{:keys [:seon.store/store :seon.store/branch] held :seon.cluster.registry/branches}]
+  (or (when (contains? (or held (branches store)) branch)
         (get-in (head-record (konserve-store store) branch)
                 [:meta :datahike/commit-id]))
       (error.refusal/diagnostic
@@ -362,15 +365,18 @@
 
 (defn base-commit-id
   "The commit retained by a work branch's base ref, or nil when the store's
-  branches hold no such ref: `delete-branch!` leaves a deleted ref's head
-  record until collection, and that record is no merge base."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
-                  [:maybe :seon.source/commit-id]]}
-  [database branch]
-  (let [konserve (:store database)
-        base (base-branch branch)]
-    (when (contains? (head-record konserve :branches) base)
-      (get-in (head-record konserve base) [:meta :datahike/commit-id]))))
+  branches (`held`, the caller's basis, else read now) hold no such ref:
+  `delete-branch!` leaves a deleted ref's head record until collection, and
+  that record is no merge base."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.source/commit-id]]
+                  [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches :seon.store/branch]
+                   [:maybe :seon.source/commit-id]]]}
+  ([database branch] (base-commit-id database (set (head-record (:store database) :branches)) branch))
+  ([database held branch]
+   (let [base (base-branch branch)]
+     (when (contains? held base)
+       (get-in (head-record (:store database) base) [:meta :datahike/commit-id])))))
 
 (defn advance-base!
   "Move a work branch's retained base to the immutable value just merged."

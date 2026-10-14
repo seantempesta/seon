@@ -748,7 +748,7 @@
             (registry/collect! opened (java.util.Date. (+ (System/currentTimeMillis) 60000)) {})
             (let [head (source/commit-database opened (head-of source-branch))
                   branch (source/commit-database opened (head-of lane))
-                  base (#'source/merge-base branch head source-branch lane)
+                  base (#'source/merge-base (registry/branches opened) branch head source-branch lane)
                   compared (source/compare-branch opened lane head source-branch)]
               (try
                 (is (= fork (when-not (:seon.error/at base) (marker-set base)))
@@ -767,7 +767,7 @@
       (let [branch (source/commit-database opened (registry/branch-commit-id {:seon.store/store opened :seon.store/branch :bare}))]
         (try
           (is (= {:seon.program/missing-evidence :seon.program/history :seon.store/branch :bare}
-                 (select-keys (#'source/merge-base branch branch source-branch :bare)
+                 (select-keys (#'source/merge-base (registry/branches opened) branch branch source-branch :bare)
                               [:seon.program/missing-evidence :seon.store/branch])))
           (finally (source/release! [branch])))))))
 
@@ -790,7 +790,7 @@
             base-markers (fn []
                            (let [head (source/commit-database opened (head-of source-branch))
                                  branch (source/commit-database opened (head-of :lane))
-                                 base (#'source/merge-base branch head source-branch :lane)]
+                                 base (#'source/merge-base (registry/branches opened) branch head source-branch :lane)]
                              (try [(registry/fork-of branch :lane) (when-not (:seon.error/at base) (marker-set base))]
                                   (finally (source/release! [head branch])))))
             retire! #(registry/retire-branch! {:seon.store/store opened :seon.store/branch :lane})]

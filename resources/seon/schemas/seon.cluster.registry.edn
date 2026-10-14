@@ -1,7 +1,9 @@
 #:seon.cluster.registry{:branch-commit-request
                         [:map
                          [:seon.store/store :seon.store/store]
-                         [:seon.store/branch :seon.store/branch]],
+                         [:seon.store/branch :seon.store/branch]
+                         [:seon.cluster.registry/branches {:optional true}
+                          :seon.cluster.registry/branches]],
                         :branch-request
                         [:map
                          [:seon.store/store :seon.store/store]

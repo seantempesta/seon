@@ -300,7 +300,7 @@
         (fn [fork branch]
           (let [head (db/db connection)
                 candidate (db/db fork)
-                merge-base (source/merge-base candidate head target branch)
+                merge-base (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)
                 basis (source/branch-base-t candidate head target branch)]
             (is (= (db/basis-t base) basis))
             (try
@@ -397,7 +397,7 @@
           (support/transacted! fork (occurrence-tx (db/db fork)))
           (let [candidate (db/db fork)
                 head (db/db connection)
-                base (source/merge-base candidate head target branch)
+                base (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)
                 entity (:e (first (d/datoms candidate :aevt :seon.error.occurrence/id)))
                 result (merge/squash-merge candidate base head (schema/handed-projection))
                 copied (checked-value head (:tx-data result))]
@@ -405,7 +405,7 @@
             (try
               (is (= 2 (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
               (registry/advance-base! candidate branch)
-              (let [advanced (source/merge-base candidate head target branch)]
+              (let [advanced (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)]
                 (try
                   (is (= 2 (:seon.error.occurrence/count (db/pull advanced [:seon.error.occurrence/count] entity))))
                   (finally (source/release! [advanced]))))
@@ -524,6 +524,7 @@
                 main (db/db connection)
                 row (some #(when (= a (:db/id %)) %)
                           (cluster.agent/lifecycle-facts main (:seon.store/store (support/execution-handle connection))
+                                                         (registry/branches (:seon.store/store (support/execution-handle connection)))
                                                          {:seon.flow.actions/started #{} :seon.flow.actions/paused #{}}))]
             (is (uuid? (:seon.task/merge-commit merged)) "the facts merged")
             (is (nil? (:seon.task/outcome (db/pull main [:seon.task/outcome] a)))

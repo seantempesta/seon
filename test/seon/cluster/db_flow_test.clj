@@ -630,7 +630,7 @@
               (is (not (contains? (:seon.flow.actions/started (agent/registry-facts routing)) agent-id))
                   "one pass stops it")
               ;; each pass's own writes (the publication, the deletion, the sibling z's end) wake the next, as in production
-              (let [due #(agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))]
+              (let [due #(agent/next-actions (agent/lifecycle-facts (db/db connection) store (registry/branches store) (agent/registry-facts routing)))]
                 (dotimes [_ 4] (when (seq (due)) (pass! handle routing)))
                 (is (empty? (mapv :seon.flow.actions/op (due))) "the passes its writes wake leave nothing to derive"))
               (is (not (contains? (registry/branches store) branch)) "and its branch is deleted")

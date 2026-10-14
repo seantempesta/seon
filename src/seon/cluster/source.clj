@@ -751,15 +751,17 @@
       :else (or (registry/advanced-base-t head (:seon.branch/fork-id fork)) (:seon.branch/base-t fork)))))
 
 (defn merge-base
-  "The immutable commit held by candidate's retained base ref, preserving
-  values whose attributes omit history. The caller releases the database."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch :seon.store/branch]
+  "The immutable commit held by candidate's retained base ref among the store's
+  `branches` (the caller's basis), preserving values whose attributes omit
+  history. The caller releases the database."
+  {:malli/schema [:=> [:cat :seon.cluster.registry/branches :seon.db/database-value :seon.db/database-value
+                       :seon.store/branch :seon.store/branch]
                   [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
-  [branch head target candidate]
+  [branches branch head target candidate]
   (let [t (branch-base-t branch head target candidate)]
     (if (:seon.error/at t)
       t
-      (if-let [commit (registry/base-commit-id branch candidate)]
+      (if-let [commit (registry/base-commit-id branch branches candidate)]
         (d/commit-as-db branch commit)
         (refused :seon.program/history "The branch has no retained base ref."
                  {:seon.store/branch candidate})))))
@@ -848,17 +850,25 @@
   "Compare `candidate`'s committed program with `head` (a database value of the
   branch `target`) on their merge base: the candidate's changed identities, the base, candidate and
   head digest maps and their `seon.program/three-way` classification. The one
-  comparison merge and `my.program/diff` share. The base and branch values are
+  comparison merge and `my.program/diff` share. The candidate's head and base
+  ref come from one read of the store's branches, the caller's `branches` when
+  it holds them. The base and branch values are
   materialized: the caller releases them. Refusals sit in `:c-id`, `:changed`
   or `:maps`."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value :seon.store/branch] :map]}
-  [held-store candidate head target]
-  (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value :seon.store/branch] :map]
+                  [:=> [:cat :seon.store/store :seon.cluster.registry/branches :seon.store/branch :seon.db/database-value
+                        :seon.store/branch] :map]]}
+  ([held-store candidate head target]
+   (compare-branch held-store (registry/branches held-store) candidate head target))
+  ([held-store branches candidate head target]
+  (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate
+                                         :seon.cluster.registry/branches branches})]
     (if (:seon.error/at c-id)
       {:c-id c-id}
       (let [bound merge-bound
             branch (commit-database held-store c-id)
-            base (merge-base branch head target candidate)
+            base (merge-base branches branch head target candidate)
             ;; Only what the candidate changed since its base can merge or
             ;; conflict, read on the candidate's own lineage.
             changed (if (:seon.error/at base) base
@@ -866,18 +876,19 @@
             maps (when (set? changed)
                    (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
-         :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))))
+         :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))})))))
 
 (def ^:private unmerged-sets
   "The `seon.program/three-way` sets a branch holds that main lacks."
   [:seon.program/added :seon.program/changed-on-branch :seon.program/retracted :seon.program/conflict])
 
 (defn unmerged-count
-  "How many declarations `branch` changed that main `database` lacks (`compare-branch` against main's head);
-  a refused comparison is thrown."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.store/branch] :seon.flow.actions/unmerged]}
-  [database store branch]
-  (let [{three :three :as compared} (compare-branch store branch database (get-in database [:config :branch]))]
+  "How many declarations `branch` changed that main `database` lacks (`compare-branch` against main's head), read
+  from the store's `branches` the caller holds; a refused comparison is thrown."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.cluster.registry/branches :seon.store/branch]
+                  :seon.flow.actions/unmerged]}
+  [database store branches branch]
+  (let [{three :three :as compared} (compare-branch store branches branch database (get-in database [:config :branch]))]
     (try (if three
            (reduce + (map #(count (get three %)) unmerged-sets))
            (let [refusal (some #(when (:seon.error/at %) %)
@@ -1275,7 +1286,7 @@
       e-id
       (let [head (db/db (:seon.db/connection source))
             candidate (commit-database held-store (first merged))
-            base (merge-base candidate head (get-in head [:config :branch]) (:seon.branch/name advanced))
+            base (merge-base (registry/branches held-store) candidate head (get-in head [:config :branch]) (:seon.branch/name advanced))
             base-commit (registry/base-commit-id candidate (:seon.branch/name advanced))
             tested (commit-database held-store e-id)
             delta (set (keys expected))]

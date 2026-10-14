@@ -2033,7 +2033,7 @@
                          (cond-> {:db/id g :seon.agent/id id :seon.task/branch b
                                   :seon.flow.actions/started? (contains? started id)}
                            end (assoc :seon.agent/admission-closed-tx end
-                                      :seon.flow.actions/unmerged (source/unmerged-count database store b)))))))
+                                      :seon.flow.actions/unmerged (source/unmerged-count database store branches b)))))))
           (sort-by second rows))))
 
 (defn- allowance-left
@@ -2053,21 +2053,22 @@
 
 (defn lifecycle-facts
   "What db<->flow reads before it derives the ended assignments' and taskless agents' actions (`next-actions`).
-  Every assignment on main `database` whose branch the `store` holds: its end on main, else on its branch head
+  Every assignment on main `database` whose branch the store's `branches` holds (db<->flow's one read of them,
+  the basis every head and comparison below reads, so a branch deleted since still answers what it held): its end on main, else on its branch head
   (one branch read per assignment main holds no end for or whose head is not merged), its merge base and branch head commit, whether
   `registry` runs its graph (its exit is its absence), whether its publication is due, whether main records a
   refusal its merge returned, ended to merge, whether its branch stays once merged (`kept?`), and, exited with an
   end main has not decided that does not simply merge, whether its branch holds work main lacks and how many
   relaunches its task has left (`allowance-left`); then every taskless agent's end and unmerged change
   (`taskless-agents`), so an ended one holding an unmerged change is listed here for root."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.flow.actions/registry] :seon.flow.actions/held]}
-  [database store {started :seon.flow.actions/started}]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.cluster.registry/branches :seon.flow.actions/registry]
+                  :seon.flow.actions/held]}
+  [database store branches {started :seon.flow.actions/started}]
   (let [rows (db/q '[:find ?a ?k ?h ?b ?id
                      :where [?a :seon.task/assignment ?k] [?a :seon.task/assigned ?h] [?a :seon.task/branch ?b]
                      [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
                    database)
-        _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the assignments.") rows)))
-        branches (registry/branches store)]
+        _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the assignments.") rows)))]
     (into (into [] (keep (fn [[a k h b id]]
                      (when (contains? branches b)
                        (let [{main-end :seon.task.attempt/end base :seon.task/merge-base :as row}
@@ -2076,7 +2077,8 @@
                                                     :seon.task/merge-commit :seon.task/merged-declarations
                                                     :seon.task/git-commit :seon.task/refusal :seon.task/publication-refusal] a)
                                  {})
-                             head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b})
+                             head (registry/branch-commit-id {:seon.store/store store :seon.store/branch b
+                                                              :seon.cluster.registry/branches branches})
                              ;; the branch is read while it holds something unmerged
                              {on-branch :seon.task.attempt/end reason :seon.task.attempt/reason}
                              (when (or (nil? main-end) (not= head base)) (branch-end database b k))
@@ -2095,7 +2097,7 @@
                                     :seon.agent/id id :seon.flow.actions/head head
                                     :seon.flow.actions/started? started? :seon.flow.actions/exited? (not started?)
                                     :seon.flow.actions/refused? refused?
-                                    :seon.flow.actions/work-left? (boolean (and judged? (pos-int? (source/unmerged-count database store b))))
+                                    :seon.flow.actions/work-left? (boolean (and judged? (pos-int? (source/unmerged-count database store branches b))))
                                     :seon.flow.actions/allowance-left (if judged? (allowance-left database h id) 0)
                                     :seon.flow.actions/kept? (boolean (and (= :merge kind) (kept? database id)))}
                              end (assoc :seon.task.attempt/end end)
@@ -2309,7 +2311,8 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/routing] :nil]}
   [handle routing]
   (let [connection (:seon.db/connection handle)]
-    (let [lifecycle! #(let [actions (next-actions (lifecycle-facts @connection (handle-store handle) (registry-facts routing)))]
+    (let [lifecycle! #(let [actions (next-actions (lifecycle-facts @connection (handle-store handle) (registry/branches (handle-store handle))
+                                                                    (registry-facts routing)))]
                         (apply-actions! handle routing actions)
                         actions)]
       ;; a stop and a merge each change what the derivation reads (the graph's exit; the merge's outcome or its

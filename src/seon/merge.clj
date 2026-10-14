@@ -252,7 +252,10 @@
     (if (:seon.error/at row)
       row
       (let [{a :db/id branch :seon.task/branch base :seon.task/merge-base} row
-            commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
+            ;; one read of the store's branches: the head and the comparison below read the same basis
+            branches (registry/branches store)
+            commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch
+                                               :seon.cluster.registry/branches branches})
             target (db/db connection)
             ;; prepare-merge! selects the proofs of the assignment's task over its assigned basis (main, the
             ;; branch head, the merge base), a Prove step's product beside them
@@ -267,7 +270,7 @@
             accepted? (case end
                         :done true
                         :sent-back false
-                        (and (uuid? commit) (not= base commit) (pos? (source/unmerged-count target store branch))))
+                        (and (uuid? commit) (not= base commit) (pos? (source/unmerged-count target store branches branch))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]

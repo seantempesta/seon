@@ -763,12 +763,34 @@
                 "main's row holds its end")
             (is (contains? (registry/branches store) unmerged) "the branch holding a definition main lacks is kept")
             (is (= [] (filterv #(and (= unmerged (:seon.task/branch %)) (= :delete-branch (:seon.flow.actions/op %)))
-                               (agent/next-actions (agent/lifecycle-facts (db/db connection) store (agent/registry-facts routing)))))
+                               (agent/next-actions (agent/lifecycle-facts (db/db connection) store (registry/branches store) (agent/registry-facts routing)))))
                 "and no :delete-branch is derived for it"))
           (finally
             (doseq [branch [ended unmerged]]
               (some-> (host/hosted handle branch) host/retire!)
               (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
+
+(deftest a-lifecycle-pass-answers-an-ended-agent-whose-branch-is-deleted-after-its-roster-was-read
+  ;; the deletion lands between db<->flow's roster read and its comparison, as another lane's
+  ;; `my.agent/retire-branch!` or root's detached :delete-branch lands
+  (with-host-world {}
+    (fn [{:keys [handle connection]}]
+      (let [store (:seon.store/store handle)
+            routing (:seon.agent/routing handle)
+            branch (:seon.store/branch (registry/fork! {:seon.store/store store :seon.store/branch (keyword (str "host-test-" (id/id)))
+                                                        :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                                        :seon.db/db (db/db connection)}))
+            hosted (host-on! handle branch "mcp/deleted")]
+        (is (= ["true"] (hosted-run! hosted (str "(:my.agent/retiring? (my.agent/retire-branch! {:seon.store/branch " branch "}))")))
+            "the agent writes its end on its own branch")
+        (let [held (registry/branches store)]
+          (some-> (host/hosted handle branch) host/retire!)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+          (is (not (contains? (registry/branches store) branch)) "the branch is deleted after the roster was read")
+          (is (= {:seon.agent/id "mcp/deleted" :seon.flow.actions/unmerged 0}
+                 (some #(when (= "mcp/deleted" (:seon.agent/id %)) (select-keys % [:seon.agent/id :seon.flow.actions/unmerged]))
+                       (agent/lifecycle-facts (db/db connection) store held (agent/registry-facts routing))))
+              "the pass answers the ended agent's facts from the roster it held"))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.host/a-message-to-an-agent-whose-branch-is-gone-refuses-by-name}}
   a-message-to-an-admitted-agent-whose-branch-was-deleted-refuses-branch-absent
