@@ -4,7 +4,8 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.operator :as operator]))
+            [seon.operator :as operator]
+            [seon.test.cache :as cache]))
 
 (defn- sh [dir & args]
   (apply shell/sh (concat args [:dir (str dir)])))
@@ -23,6 +24,15 @@
     (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "init")
     (spit (io/file dir "b.txt") "b")
     dir))
+
+(defn- with-sources
+  "DIR's bin/lane classifies paths with this checkout's seon.test.cache: link each entry of its src and script into real directories of DIR."
+  [dir]
+  (doseq [d ["src" "script"]
+          ^java.io.File entry (.listFiles (io/file d))]
+    (let [target (io/file dir d (.getName entry))]
+      (io/make-parents target)
+      (java.nio.file.Files/createSymbolicLink (.toPath target) (.toPath (.getAbsoluteFile entry)) (make-array java.nio.file.attribute.FileAttribute 0)))))
 
 (defn- lane [dir & args] (apply sh dir "bin/lane" args))
 
@@ -111,7 +121,7 @@
     (is (= 1 (eligible "resources/seon/x.edn")) "a non-program path still takes the throwaway check")))
 
 (deftest a-fallback-check-names-its-tests
-  (let [dir (scratch)
+  (let [dir (doto (scratch) with-sources)
         put (fn [path text] (io/make-parents (io/file dir path)) (spit (io/file dir path) text))]
     (put ".clj-kondo/config.edn" "{}")
     (put "src/x/core.cljc" "(ns x.core)\n")
@@ -123,7 +133,7 @@
       (is (str/includes? (:err refused) "names no test: pass each reaching test as --test NS/VAR")))))
 
 (deftest a-reference-code-gitlink-commits-only-inside-a-restart-batch
-  (let [dir (scratch)
+  (let [dir (doto (scratch) with-sources)
         sha "1111111111111111111111111111111111111111"]
     (sh dir "git" "update-index" "--add" "--cacheinfo" (str "160000," sha ",reference-code/dep"))
     (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "gitlink")
@@ -134,3 +144,13 @@
       (is (= 2 (:exit refused)))
       (is (str/includes? (:err refused) "restart batch"))
       (is (str/includes? (:err batch) "names no test") "with the flag it reaches the normal check"))))
+
+(deftest a-commit-needs-a-check-only-for-gate-inputs
+  (let [roots (cache/input-roots ".")]
+    (is (= {"src-clm/clm/core.py" false "docs/seon/x.md" false "AGENTS.md" false
+            "src/seon/lane.clj" true "test/seon/lane_test.clj" true "deps.edn" true
+            "bin/test" true "config/x.edn" true "reference-code/malli" true}
+           (into {} (map (juxt identity #(cache/gate-input? roots %)))
+                 ["src-clm/clm/core.py" "docs/seon/x.md" "AGENTS.md" "src/seon/lane.clj"
+                  "test/seon/lane_test.clj" "deps.edn" "bin/test" "config/x.edn"
+                  "reference-code/malli"])))))

@@ -32,8 +32,8 @@
 # (vars, arities, privacy, inferred returns; no positions) changed, found by naming
 # the namespace. Any other path, or more than 150 files, lints all of src script
 # test with --cache false. The gate prints which it ran. `bin/seon check` (publication,
-# adoption, --test) runs alongside it, except for a documentation-only commit
-# (docs/, AGENTS.md, CLAUDE.md or skill Markdown, no --test): documentation is no program input.
+# adoption, --test) runs alongside it, except for a commit with no --test whose paths
+# are all outside `seon.test.cache/gate-input?` (documentation, experiments off every deps.edn path).
 # The commit itself (staged-index check, new-file add, git commit, verification)
 # holds .git/lane-commit.lock: git commit shares .git/COMMIT_EDITMSG, the index and
 # HEAD between processes, and two concurrent commits once crossed (649829332
@@ -324,16 +324,22 @@ lints_unchanged() {
   done
 }
 
-# Documentation outside the program input roots has nothing to publish.
-# Skill scripts and fixtures are deliberately not covered by the Markdown rule.
-documentation_only() {
-  local path
-  for path in "$@"; do
-    case "$path" in
-      docs/*|AGENTS.md|CLAUDE.md|.agents/skills/*.md) ;;
-      *) return 1 ;;
-    esac
-  done
+# True when no path is a gate input (`seon.test.cache/gate-input?`): nothing
+# outside the program input roots (docs, skill Markdown, experiments on no
+# deps.edn path) can change what a check runs, so it has nothing to publish.
+# Exit 1 from bb is "some path is an input"; any other failure refuses.
+gate_inputs_absent() {
+  local status=0
+  bb -cp "$root/script:$root/src" -e '
+(require (quote [seon.test.cache :as cache]))
+(let [[root & paths] *command-line-args*
+      roots (cache/input-roots root)]
+  (System/exit (if (some #(cache/gate-input? roots %) paths) 1 0)))' "$root" "$@" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) refuse "seon.test.cache/gate-input? could not classify ${*} (bb exit $status, above); nothing committed" ;;
+  esac
 }
 
 # The message belongs to this commit: lanes have built -m from one shared
@@ -536,8 +542,8 @@ commit() {
   fi
   if [[ -n "$proven_by_branch" ]]; then
     echo "== proven by agent $evidence_agent's branch evidence; bin/seon check not run"
-  elif documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
-    echo "== documentation only: no program input; bin/seon check not run"
+  elif [[ ${#tests[@]} -eq 0 ]] && gate_inputs_absent "${paths[@]}"; then
+    echo "== no gate input among the paths (seon.test.cache/gate-input?); bin/seon check not run"
   else
     [[ ${#tests[@]} -gt 0 ]] || refuse "the throwaway check names no test: pass each reaching test as --test NS/VAR (a check that runs no test proves nothing); nothing committed"
     local check_args=("${paths[@]}")

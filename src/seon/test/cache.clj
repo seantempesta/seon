@@ -2,7 +2,6 @@
   "Declared test and publication input readers: the inventory of files a
   program's evidence depends on and their content digests."
   (:require [clojure.edn :as edn]
-            [hasch.core :as hasch]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.cluster.process :as process]
@@ -64,7 +63,7 @@
       (filter #(.isFile ^File %))
       (map (fn [^File file]
              [(str/replace (str (.relativize (.toPath root-file) (.toPath file))) File/separator "/")
-              (hasch/hash->str (hasch/sha256 (Files/readAllBytes (.toPath file))))])))
+              (id/sha-256 [(Files/readAllBytes (.toPath file))])])))
      (input-paths (.getPath root-file)))))
 
 (defn changed-inputs
@@ -150,6 +149,14 @@
                (str/starts-with? path (str root "/"))))
          roots)))
 
+(defn gate-input?
+  "True when a change to `path` is a gate input: under one of `roots`
+  (`input-roots`) or under a program-graph root."
+  {:malli/schema [:=> [:cat [:set [:string {:min 1}]] [:string {:min 1}]] :boolean]}
+  [roots path]
+  (or (input-path? roots path)
+      (input-path? (set graph-roots) path)))
+
 (defn source-file?
   "True for file extensions indexed under a declared source directory.
   Shared by the publication snapshot and its exported-inventory check."
@@ -202,7 +209,7 @@
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
   (update-vals (gitlink-pins root)
-               #(hasch/hash->str (hasch/sha256 (.getBytes ^String % "UTF-8")))))
+               #(id/sha-256 [(.getBytes ^String % "UTF-8")])))
 
 (defn toolchain-dependencies
   "The gate's pinned dependencies plus the analyzer's declared configuration.
@@ -216,7 +223,7 @@
                 (keep (fn [path]
                         (let [file (io/file root path)]
                           (when (.isFile file)
-                            [path (hasch/hash->str (hasch/sha256 (Files/readAllBytes (.toPath file))))])))))
+                            [path (id/sha-256 [(Files/readAllBytes (.toPath file))])])))))
           (input-paths root))))
 
 (defn input-digests
