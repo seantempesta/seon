@@ -146,3 +146,24 @@ Implement task c12a57408f49 (chain :chain-f1f6dc8e6652) with a low cap; errors c
 (quota-blocked, resume once); predicate held apart through interpret-affected! does not re-arm (red row);
 `:seon.test/reach` empty on branch eval-request runs; outside-1's chain e439 to abandon; root scratch notes in the
 session scratchpad root-pending.md.
+
+### Morning, 10-15 ~09:50 (root): where the S5 chain stands
+
+After the night's fixes (overlay three-way 576009291, one row reader bcce0cae1, as-of views be9b26a09, cached three-way
+sides 8103caba0, as-of digest by index probe 33724e146, result identity follows moved rows e287d2b52, recorder = reader
+on work branches 5898f977e, open attempt defined once fdcadc002, refused merge bails 3ef018918, cache weighing 7e2546112),
+S5 run 8's Implement attempt ran its proof ONCE, green and keyed, and ended :done at its start in 7.6 s with 0 model
+calls (done-refusals []). The final merge then REFUSED, correctly: the branch carries junk from earlier attempts —
+schema `:tmp/probe` (resource tmp.edn absent), namespace `user`, `seon.error/config-expectation-present-generator`.
+Since 3ef018918 the refusal bailed by itself (attempt 8 :closed with the refusal as reason, task c12a57408f49 :held).
+The block of block shows it and flags the junk, and the block costs ~0.15 s per turn (cold 4.7 s).
+
+Morning question 7 (blocks the chain): a task green at its start ends :done before any agent takes a turn, so nobody
+sees the changes section's junk flags; the merge refuses the junk; another `my.root/run!` would end done at start again.
+Options: (a) root repairs the branch by hand (needs a schema-key removal tool, filed
+`my.program/a-schema-key-added-on-a-branch-can-be-removed-at-the-repl`); (b) the merge delta leaves out declarations the
+branch added that no test or function reaches (a partition by data, owner's "better data" rule — the changes section's
+same evidence); (c) green-at-start does not end a task whose branch carries unreached additions (a refusal: rejected
+tonight by the owner's rule). Root lean: (b) for schema keys and functions no test reaches, or (a) as a one-off.
+Also morning question 6: the chain branch's config is frozen at fork (run 8 read run 4's cap 40, provider on).
+Chain totals: 176 model calls, 5.41M prompt tokens, 3 hand acts (all root close!), 0 merges of this chain.
