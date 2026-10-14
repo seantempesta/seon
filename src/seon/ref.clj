@@ -356,22 +356,19 @@
                     (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference)]}
                       (:seon.fn/doc library) (assoc :doc (:seon.fn/doc library))))))))))
 
-(declare named?)
-
 (defn- inner
   "The references a referent's own content makes, each shown one level (`brief`): the names its `text` cites by
   the one rule and the program functions it `calls`, in that order, the `excluded` names (itself) left out; nil
-  when none."
+  when none. A name that resolves to nothing is the referent's own defect and is not shown: it is no problem of
+  the text that cites the referent."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.ref/name] :string [:set :symbol]]
-                  [:or :nil [:vector [:or :seon.ref/brief :seon.ref/problem :seon.error/value]]]]}
+                  [:or :nil [:vector [:or :seon.ref/brief :seon.error/value]]]]}
   [database excluded text calls]
   (let [roots (set (.list (io/file (fs/source-directory))))
         cited (filter :seon.ref/name (candidates (keep #(candidate roots nil %) (:seon.ref/spans (document text)))))
-        only (into #{} (comp (filter :seon.ref/resolve-only) (map :seon.ref/name)) cited)
         program (filter #(seq (db/datoms database :avet :seon.fn/sym %)) (sort-by str calls))
         names (into [] (comp (remove excluded) (distinct)) (concat (map :seon.ref/name cited) program))]
-    ;; a resolve-only name that names nothing is prose
-    (not-empty (into [] (keep #(when-not (and (only %) (not (named? database %))) (brief database %))) names))))
+    (not-empty (into [] (keep #(let [shown (brief database %)] (when-not (:seon.ref/problem-kind shown) shown))) names))))
 
 (defn- with-inner
   "`entry` with the references its own content makes, one level, when it makes any."

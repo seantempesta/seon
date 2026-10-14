@@ -104,7 +104,7 @@
 
 (defn- parse-options
   "Reader policy for one parse. With the evaluating SCI `ctx`, SCI resolves
-  `::alias/k` and syntax-quote from the namespace table bound as `sci/ns`
+  `::alias/k` and syntax-quote from the namespace table bound as `sci.core/ns`
   (sci/impl/parser.cljc:60-167); without one, the caller's supplied aliases
   and refers are the whole resolution world."
   [{::keys [ns aliases refers features tags defer-auto-resolve? ctx]}]
@@ -819,7 +819,7 @@
   "Read accepted Clojure source into ordered read events or a flat error.
 
   `::ctx` is the evaluating SCI context, with the target namespace bound as
-  `sci/ns` by the caller: SCI then resolves auto-resolved keywords and
+  `sci.core/ns` by the caller: SCI then resolves auto-resolved keywords and
   syntax-quote from that context. Without it, resolution uses only the
   supplied `::ns`, `::aliases` and `::refers`."
   {:malli/schema

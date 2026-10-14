@@ -168,7 +168,7 @@
 
   This total predicate is the storage boundary for program-graph edge names.
   It rejects symbols whose namespace begins with `:`, including symbols made
-  from clj-kondo's `:clj-kondo/unknown-namespace` sentinel: they print as
+  from clj-kondo's unknown-namespace sentinel: they print as
   keywords, so an EDN boundary changes their type. It checks the symbol's
   text against the EDN reader's symbol grammar without printing or reading."
   {:malli/schema

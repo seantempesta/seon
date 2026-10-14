@@ -210,6 +210,23 @@
     "#the-goal" [:file "the-goal" false true]
     "#" [:file nil false true]))
 
+(deftest a-nested-docstring-problem-belongs-to-its-var
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (shown running agent-id
+            (str "(ns tq.nested)\n"
+                 "(defn cites\n  \"Return 1, after reading `seon.task/effective` and `seon.nope/inside`.\"\n"
+                 "  {:malli/schema [:=> [:cat] :int]}\n  [] 1)"))
+     (let [kinds (shown running agent-id
+                        (str "(let [[entry direct] (seon.ref/references (seon.db/db) "
+                             "{:seon.ref/text \"`tq.nested/cites` and `seon.nope/direct`\"})] "
+                             "{:inner (mapv (juxt :seon.ref/name :seon.ref/problem-kind) (:seon.ref/references entry)) "
+                             ":direct ((juxt :seon.ref/name :seon.ref/problem-kind) direct)})"))]
+       (is (= [['seon.task/effective nil]] (:inner kinds))
+           "a name in the referent's own docstring that resolves to nothing is not the task's problem")
+       (is (= ['seon.nope/direct :unresolved] (:direct kinds))
+           "a name the task itself cites that resolves to nothing stays its problem")))))
+
 (deftest a-name-resolved-at-top-level-is-cited-by-name-below
   ;; my.task/current's docstring names seon.context/task-sections; the text cites both, so the second shows once
   (let [[current task-sections] (ref/references (db/db) {:seon.ref/text "`my.task/current` and `seon.context/task-sections`"})
