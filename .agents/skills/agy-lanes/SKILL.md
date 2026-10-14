@@ -65,6 +65,13 @@ DeepSeek).
 | `gemini-4-argon-low` | long open-ended investigation, independent plans, second opinions |
 | `gemini-4-argon-medium` / `-high` | only when low measurably falls short; high is too slow for interactive use |
 
+**Quota.** `agy -p "/usage"` prints the remaining share and reset time of each bucket and costs no quota; check it
+before launching. Gemini models (Flash and Argon) share one bucket with a five-hour and a weekly limit; Claude and GPT
+models in agy have their own. Measured 2026-10-14: about twenty long Gemini runs in one session used the whole
+five-hour window and a quarter of the weekly one; a lane past the limit ends `RESOURCE_EXHAUSTED (code 429):
+Individual quota reached ... Resets in <time>`. When Gemini is out, `claude-sonnet-5-5-*` and `claude-opus-5-5-*`
+run through the same `bin/agy-agent` on the separate bucket.
+
 The Argon models need the Google AI Ultra plan on the signed-in account (`agy models` lists what the account can
 use; if Argon is missing, sign out and back in interactively in `agy`). Google rate-limits many small calls, so send
 one call with the full context. Each resumed turn re-sends the whole conversation (a short second turn read about
