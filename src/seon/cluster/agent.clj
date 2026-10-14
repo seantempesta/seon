@@ -1833,7 +1833,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle]
                   :seon.source/judged]}
   [database at-end branch handle]
-  (let [task (db/pull at-end [:seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
+  (let [task (db/pull at-end [:seon.task/sym :seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
         proofs (set (:seon.task/proofs task))
         next-proofs (set (get-in task [:seon.task/next :seon.task/proofs]))
         base-commit (registry/base-commit-id at-end branch)
@@ -1844,8 +1844,8 @@
         of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
         reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
         members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))
-        results (when members (context/current-results at-end members))
-        held (when (vector? results) (context/current-results database members))
+        results (when members (context/current-results at-end members (:seon.task/sym task)))
+        held (when (vector? results) (context/current-results database members nil))
         failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held])
         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
         run-id (when (vector? results)

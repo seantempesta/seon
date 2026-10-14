@@ -122,13 +122,13 @@
     :else :red))
 
 (defn- head-entries
-  "Each of `names` `database` holds, by symbol, with its status at its current reach and, when red, its
-  failing assertions; the reads' refusal when one refuses."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]]
+  "Each of `names` `database` holds, by symbol, with its status at its current reach judging `task` (nil: none)
+  and, when red, its failing assertions; the reads' refusal when one refuses."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
                   [:or :seon.context/head :seon.error/value]]}
-  [database names]
+  [database names task]
   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))
-        digests (when (seq names) (runner/reach-digests database names))
+        digests (when (seq names) (runner/reach-digests database names {} task))
         results (when (seq names) (runner/latest-results database names))]
     (or (some #(when (:seon.error/at %) %) [digests results])
         (let [by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)]
@@ -151,7 +151,7 @@
         names (when-not (:seon.error/at owed) (vec (sort (:seon.task/proofs owed))))]
     (if (empty? names)
       (when (:seon.error/at owed) owed)
-      (let [head (head-entries database (set names))]
+      (let [head (head-entries database (set names) sym)]
         (or (when (:seon.error/at head) head)
             (let [entries (mapv #(merge {:seon.test/sym % :seon.context/proof-status :pending} (head %)) names)]
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
@@ -286,13 +286,16 @@
                      (finally (source/release! [base]))))))
 
 (defn current-results
-  "The recorded result of each of `tests` that `database` holds at its current reach digest there: its latest
-  completed execution, when it ran at that digest; a test absent there, unrun at that reach or with no completed
-  outcome has none."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]] [:or :seon.source/results :seon.error/value]]}
-  [database tests]
+  "The recorded result of each of `tests` that `database` holds at its current reach digest there judging `task`
+  (nil: none), the identity the runner records it under (`seon.test.runner/reach-digests`): its latest completed
+  execution, when it ran at that digest; a test absent there, unrun at that reach or with no completed outcome
+  has none, so a task-reading test's result recorded with no task, or for another task, answers for none of
+  `task`'s."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
+                  [:or :seon.source/results :seon.error/value]]}
+  [database tests task]
   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort tests))
-        digests (when (seq names) (runner/reach-digests database names))
+        digests (when (seq names) (runner/reach-digests database names {} task))
         latest (when (and (seq names) (not (:seon.error/at digests))) (runner/latest-results database names))]
     (or (some #(when (:seon.error/at %) %) [digests latest])
         (into [] (filter #(and (not (:seon.error/at %)) (:seon.test/sym %)
@@ -331,14 +334,14 @@
         proofs (set (:seon.task/proofs owed))
         members (when (sequential? reached)
                   (cond-> (-> proofs (into product) (into reached)) chained? (into (of :seon.test/sym))))
-        results (when members (current-results database members))
-        held (when (vector? results) (if (identical? main database) results (current-results main members)))
+        results (when members (current-results database members sym))
+        held (when (vector? results) (if (identical? main database) results (current-results main members nil)))
         on-target (when (vector? held)
                     (if chained?
                       (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0))) (map :seon.test/sym)) held)
                       (let [reds (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results)]
                         (into #{} (comp (filter runner/red-result?) (map :seon.test/sym) (filter reds)) held))))
-        head (when members (head-entries database members))
+        head (when members (head-entries database members sym))
         ;; the run the refusals name: the newest its results came from, else the newest the branch holds
         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
         run-id (when (vector? results)

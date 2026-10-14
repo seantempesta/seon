@@ -1390,7 +1390,8 @@
   and, given `extra-roots` (test -> the definitions its body executed outside
   that closure, `:seon.test.member/dynamic-calls`), of theirs too. A test whose
   closure calls the test namespace's task reader also keys, given `task` (the
-  request's `:seon.test/task`), the content of the input it judges (`task-identity`)."
+  request's `:seon.test/task`; nil: none), the content of the input it judges (`task-identity`): the one result
+  identity every recorder and reader of a task-reading test shares."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]
@@ -1398,7 +1399,7 @@
                         [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error]]
                   [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]
-                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls] :seon.test/task]
+                        [:map-of :seon.test/sym :seon.test.member/dynamic-calls] [:maybe :seon.test/task]]
                    [:or :seon.test/reach-digests :seon.test/unknown-error :seon.error/value]]]}
   ([database test-symbols]
    (reach-digests database test-symbols {}))

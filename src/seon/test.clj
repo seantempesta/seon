@@ -2848,7 +2848,8 @@
             ;; The loaded program every member must run in: an adoption from
             ;; here on, before or during a member, makes that member unknown.
             since @sci.eval/loaded-identity
-            reach (when (seq runnable) (runner/reach-digests database runnable))
+            ;; Keyed as each member's result is recorded: a task reader's by the request's task too.
+            reach (when (seq runnable) (runner/reach-digests database runnable {} (:seon.test/task request)))
             ;; A result another branch recorded for the same identity, red included, answers here
             ;; and is recorded as this branch's own; an explicit rerun executes.
             carried (when (and (seq runnable) (not (:seon.error/at reach)) (not (:seon.test/rerun? request))

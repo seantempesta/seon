@@ -27,6 +27,7 @@
             [seon.profile :as profile]
             [seon.sci.eval :as sci.eval]
             [seon.task :as task]
+            [seon.test]
             [seon.test-support :as test-support]
             [seon.turn :as turn]
             [seon.turn.world :as world]))
@@ -383,7 +384,8 @@
               branch-db (db/db on-branch)
               verdict (context/step-verdict branch-db agent-id)]
           (is (= :done (:seon.task/status verdict)) "its proof green at the base: its merge would accept as it stands")
-          (is (nil? (turn/next-agent-work branch-db {:seon.agent/id agent-id})) "no model turn opens")
+          (is (not= :open (:seon.turn.work/situation (turn/next-agent-work branch-db {:seon.agent/id agent-id})))
+              "no model turn opens: a done step's only work is the prove pass whose close ends it")
           (is (zero? (model-turns branch-db agent-id)) "none was taken")
           (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end ?e]]
                                                          (db/db on-branch) key)
@@ -517,6 +519,91 @@
                           :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
                     (agent/release-context! execution)))
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
+
+(defn- record-on-main!
+  "Run `tests` on `connection`'s head through the chain world's `handle` with no task, as root's central round
+  does; the run."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection [:set :symbol]] :map]}
+  [handle connection tests]
+  (let [ran (seon.test/run {:seon.test/execution handle
+                            :seon.test/recording-connection connection :seon.test/policy :named
+                            :seon.test/identities tests})]
+    (when (:seon.error/at ran) (throw (ex-info (:seon.error/message ran) ran)))
+    ran))
+
+(defn- release-chain!
+  "Stop the graphs db<->flow started on chain `branch` under `routing`, release their executions, retire the branch."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.store/store :seon.chain/branch] :nil]}
+  [routing store branch]
+  (when-let [child (get-in @routing [:seon.agent/children branch])]
+    (doseq [started (keys (:seon.agent/started @child))]
+      (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+    (doseq [execution (vals (:seon.agent/contexts @child))
+            :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+      (agent/release-context! execution)))
+  (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+  nil)
+
+(deftest ^{:seon.test/long "One chain world: a task-reading proof recorded green on main with no task, a chain whose first attempt proves it red and makes one scripted model call; then a chain whose proof main already holds green, ended done by its prove pass; measured with the S3a-2 row's world." :seon.test/long-ms 30000}
+  a-green-recorded-without-the-task-never-proves-a-chain-task
+  ;; S5 run 1 D1 (`docs/research/agent-platform/2026-10-14/s5-run-1.md`): a test reading its task (`seon.test/task`)
+  ;; has a result identity that includes its task input (`seon.test.runner/reach-digests`), so root's input-less green
+  ;; on main never answers for a chain task holding that proof; D2: a task green at its start by results it found
+  ;; still ends :done (TASK-CHAIN §2.3)
+  (binding [*space* "tq.chaininput"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [reader (symbol (str *space* "-readers") "reads-no-task")]
+            (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                              (db/db connection) connection)
+                                                :seon.batch/sink (seon.batch/sink)
+                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                :seon.agent/id "tq-chain-author"})
+                                  (symbol (str *space* "-readers"))
+                                  "(clojure.test/deftest reads-no-task (clojure.test/is (nil? (seon.test/task))))\n")
+            (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                            :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                   :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                   :seon.config.ai/model "fixture-provider"}})
+            (is (true? (:seon.test/passed? (record-on-main! handle connection #{reader (proof "u")})))
+                "main holds the reader green with no task, and u green")
+            (let [calls (atom 0)
+                  handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                  (swap! calls inc)
+                                                                  {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting for root.\"})"}))
+                  routing (:seon.agent/routing handle)
+                  store (agent/handle-store handle)
+                  chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                     [{:seon.task/ns (symbol *space*) :seon.task/name "r" :seon.task/plan "Do r."
+                                       :seon.task/proofs #{reader}}])
+                  branch (:seon.chain/branch chain)
+                  agent-id (str "attempt/" (id/id [(first (:seon.task/handles chain)) 1]))]
+              (try
+                (pass! handle routing)
+                (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                  (await-on! on-branch #(when (pos? (model-turns (db/db on-branch) agent-id)) true) ::first-model-turn)
+                  (is (= 1 @calls) "main's input-less green proves nothing for the task: its red proving opens a model call"))
+                (finally (release-chain! routing store branch)))
+              (let [green (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                       [{:seon.task/ns (symbol *space*) :seon.task/name "g" :seon.task/plan "Do g."
+                                         :seon.task/proofs #{(proof "u")}}])
+                    green-branch (:seon.chain/branch green)
+                    key (id/id [(first (:seon.task/handles green)) 1])]
+                (try
+                  (pass! handle routing)
+                  (let [on-green (registry/active-branch-connection {:seon.store/store store :seon.store/branch green-branch})]
+                    (is (= :done (await-on! on-green #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                                 [?a :seon.task.attempt/end ?e]]
+                                                               (db/db on-green) key)
+                                            ::green-ended))
+                        "a chain task green at its start by the result main holds ends done")
+                    (is (= 1 @calls) "with no model call"))
+                  (finally (release-chain! routing store green-branch))))))))))))
+
 
 (defn- chain-attempts
   "Every attempt row on `database` of the chain tasks `handles`: task, attempt number, agent, end, outcome."

@@ -2259,8 +2259,9 @@
   turn, the `:open` arm needs a held assignment (`seon.task/agent-task`) of a task under execution :running,
   read in its own world (its branch holds its attempt row): a :held task opens no model turn;
   a held task whose intent is :running (db<->flow started the attempt) and
-  whose step is not proved on the agent's branch (`step-proved?`) is `:prove` first
-  (`prove-turn`: proofs only, no model call), and a red proving is its work: the next pass
+  whose step is not proved on the agent's branch (`step-proved?`), or is already done there by results it found
+  (`seon.context/task-done?`), is `:prove` first (`prove-turn`: proofs only, no model call; its close ends a done
+  step through `end-task!`), and a red proving is its work: the next pass
   opens the model turn that answers it (`proved-unanswered?`);
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
@@ -2309,8 +2310,11 @@
           (admission-closed? db agent-id) nil
           (map? held) held
           ;; A FRESH ATTEMPT OF A :running TASK PROVES FIRST: its proofs run on its branch
-          ;; before any model call, and proofs already green end it with none (`prove-turn`)
-          (and (string? held) (attempt-running? db held) (not (step-proved? db agent-id)))
+          ;; before any model call, and proofs already green end it with none (`prove-turn`):
+          ;; a step done by results it found at its start (reused) still passes through the
+          ;; prove pass, whose close records its end
+          (and (string? held) (attempt-running? db held)
+               (or (not (step-proved? db agent-id)) (@context-task-done? db agent-id)))
           {:seon.turn.work/situation :prove :seon.agent/id agent-id}
           (and (map? deferred)
                (contains? deferred :seon.error/at)
@@ -5270,7 +5274,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [tests (step-tests database agent-id)
-        results (when (and (set? tests) (seq tests)) (@context-current-results database tests))]
+        results (when (and (set? tests) (seq tests)) (@context-current-results database tests (held-task database agent-id)))]
     (cond (:seon.error/at tests) false
           (empty? tests) true
           (:seon.error/at results) false
