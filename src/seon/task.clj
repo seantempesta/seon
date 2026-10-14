@@ -150,12 +150,9 @@
         entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (set-member? k) (= #{} v)))) %) %) (first forms))]
     (when-let [explanation (m/explain (entry-file-schema projection) (mapv #(if (map? %) (assoc % :seon.task/ns ns) %) entries))]
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
-    (let [children (into #{} (comp (mapcat :seon.task/children) (map second)) entries)]
-      (mapv (fn [{:seon.task/keys [name] :as entry}]
-              ;; a child takes its goal from its subject; a task no entry owns has none to take
-              (when-not (or (:seon.task/plan entry) (children (task-sym ns name))) (refuse-task! :no-plan entry {}))
-              (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
-            entries))))
+    (mapv (fn [{:seon.task/keys [name] :as entry}]
+            (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
+          entries)))
 
 (def ^:private tree-attributes
   "The task attributes whose values are other tasks: authored and compared as lookup refs `[:seon.task/sym ns/name]`."
