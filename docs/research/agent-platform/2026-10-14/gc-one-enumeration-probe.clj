@@ -1,4 +1,4 @@
-;; Run with clojure.main in an isolated archive JVM; arguments: prepare|measure ROOT [KEYS].
+;; Run with clojure.main in an isolated archive JVM; arguments: prepare|measure|measure-once ROOT [KEYS].
 ;; ROOT is an owned disposable directory, never the development root.
 (require '[clojure.java.io :as io]
          '[datahike.api :as d]
@@ -36,7 +36,7 @@
                      :seon.config.maintenance/collect? true
                      :seon.operator.collect/dry-run? true}
             cutoff (registry/retained-before held (registry/retention-cutoff held))]
-        (doseq [iteration (range 4)]
+        (doseq [iteration (range (if (= mode "measure-once") 1 4))]
           (let [measured (profile/measure #(maintenance/collect! request))]
             (prn {:iteration iteration :cutoff cutoff
                   :measurement (dissoc measured :seon.profile/called
