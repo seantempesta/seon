@@ -846,6 +846,26 @@
   "The bound on the changed entities one merge comparison reads (`seon.program/changed-identities`)."
   {:seon.program/max-datoms 10000})
 
+(defn- agent-owned
+  "The identities of `changed` that belong to an agent the destination `head` lacks: a namespace `branch`
+  holds stewarded by such an agent (`:seon.ns/steward`), and each declaration in it. An agent's own namespace
+  is its compartment, not the branch's program: a chain's agents live only on its branch (TASK-CHAIN §2.2),
+  so their namespaces never merge. Interim until `seon.cluster.agent/agent-creation-writes-no-program-namespace`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
+                  :seon.program/identity-set]}
+  [branch head changed]
+  (let [stewarded (db/q '[:find ?n ?id :where [?ns :seon.ns/steward ?g] [?ns :seon.ns/name ?n] [?g :seon.agent/id ?id]]
+                        branch)
+        _ (when (map? stewarded) (throw (ex-info (:seon.error/message stewarded "The branch's namespace stewards could not be read.") stewarded)))
+        owned (into #{} (keep (fn [[n agent-id]]
+                                (when-not (:db/id (db/pull head [:db/id] [:seon.agent/id agent-id])) n)))
+                    stewarded)]
+    (into #{} (filter (fn [[attribute value]]
+                        (owned (if (= :seon.ns/name attribute)
+                                 value
+                                 (when (qualified-symbol? value) (symbol (namespace value)))))))
+          changed)))
+
 (defn compare-branch
   "Compare `candidate`'s committed program with `head` (a database value of the
   branch `target`) on their merge base: the candidate's changed identities, the base, candidate and
@@ -873,6 +893,8 @@
             ;; conflict, read on the candidate's own lineage.
             changed (if (:seon.error/at base) base
                         (program/changed-identities (branch-base-t branch head target candidate) branch bound))
+            ;; an agent's own namespace is its compartment, never the branch's program (`agent-owned`)
+            changed (if (set? changed) (into #{} (remove (agent-owned branch head changed)) changed) changed)
             maps (when (set? changed)
                    (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
         {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
@@ -965,6 +987,10 @@
   the candidate changed it. Without one the whole delta merges, namespace rows
   included.
 
+  The `:merging` option's transaction data (root's merge of the source's facts, `seon.merge/merge-tx`) rides in
+  the candidate's one write, so the tested world holds the source's tasks beside its program: a proof that reads
+  its task reads it there.
+
   With the `:root` option, the checkout, the files write-back would produce are proven first
   (`proven-files` over the merged value, `seon.db/with`): a declaration naming
   a namespace its file does not require refuses before any test runs."
@@ -973,10 +999,11 @@
                    [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/sym
                         [:map [:selection {:optional true} :seon.program/identity-set]
-                         [:root {:optional true} :seon.fn/root]]]
+                         [:root {:optional true} :seon.fn/root]
+                         [:merging {:optional true} :seon.store/transaction-data]]]
                    [:or :seon.source/prepared :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
   ([source held-store candidate task-sym] (prepare-merge! source held-store candidate task-sym {}))
-  ([source held-store candidate task-sym {:keys [selection root]}]
+  ([source held-store candidate task-sym {:keys [selection root merging]}]
   (let [{:keys [c-id base branch head changed maps three]}
         (let [head (db/db (:seon.db/connection source))]
           (compare-branch held-store candidate head (get-in head [:config :branch])))]
@@ -1033,7 +1060,7 @@
             :else
             (let [s (keyword (str "merge-" (id/id)))
                   write! (fn [execution]
-                           (let [written (db/transact! (:seon.db/connection execution) {:tx-data tx})
+                           (let [written (db/transact! (:seon.db/connection execution) {:tx-data (into (vec merging) tx)})
                                  ;; The writer re-derives a merged namespace's declarations: their tests run too.
                                  touched (when-not (:seon.error/at written) (fn/report-identities written))]
                              (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
@@ -1361,11 +1388,13 @@
               (:seon.error/at tx) tx
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         ;; the writer's comparisons read the head before this merge's own writes
+                                         ;; the writer's comparisons read the head before this merge's own writes;
+                                         ;; the facts precede the program, whose refs (a namespace's steward agent)
+                                         ;; name entities the facts admit
                                          (cond-> {:tx-data (-> [[:db.fn/call declarations-held-tx expected]
                                                                 [:db.fn/call task-basis-held-tx basis (first merged) base-commit]
                                                                 advanced]
-                                                                  (into tx) (into merging))
+                                                                  (into merging) (into tx))
                                                   :parents (conj merged e-id)}
                                            meta (assoc :tx-meta meta)))]
                 (if (:db-after report)

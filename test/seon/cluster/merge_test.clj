@@ -17,6 +17,7 @@
             [seon.fn :as fn]
             [seon.id :as id]
             [seon.mcp :as mcp]
+            [seon.merge]
             [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -906,3 +907,75 @@
       (finally
         (cluster.agent/release-context! candidate)
         (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+;;; TASK-CHAIN S3b-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Finish): the chain branch and its terminal
+;;; attempt are the merge's source; main is only the destination.
+
+(defn- chain-attempts!
+  "Write, on chain branch `branch` through `connection`, one attempt per task of `handles` by a fixture agent, each
+  ended `:done`, the earlier ones with the `:done` outcome advance writes: the attempt keys in order."
+  [connection branch handles]
+  (let [agent-id (str "chain-agent-" (id/id))]
+    (support/transacted! connection (support/agent-tx (db/db connection) agent-id))
+    (mapv (fn [h last?]
+            (support/transacted! connection (task/attempt-tx (db/db connection) h agent-id branch))
+            (let [k (id/id [h 1])]
+              (support/transacted! connection (cond-> [[:db/add [:seon.task/assignment k] :seon.task.attempt/end :done]]
+                                                (not last?) (conj [:db/add [:seon.task/assignment k] :seon.task/outcome :done])))
+              k))
+          handles (concat (repeat (dec (count handles)) false) [true]))))
+
+(deftest ^{:seon.test/long "Two chains, one prepare-merge! (a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and one merge that stops at the three-way."
+           :seon.test/long-ms 120000}
+  a-chain-merges-once-and-closes-every-attempt
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        value-entity #(entity (db/db %1) :fn "chain-value" (str "(defn chain-value {:malli/schema [:=> [:cat] :int]} [] " %2 ")"))
+        _ (write! h-conn [(value-entity h-conn 1)])
+        handle (task/task-handle 'tq.chainmerge "fix")
+        chain (task/chain! {:seon.db/connection h-conn :seon.store/store store}
+                           [{:seon.task/ns 'tq.chainmerge :seon.task/name "fix" :seon.task/plan "Merge the chain."}
+                            {:seon.task/ns 'tq.chainmerge :seon.task/name "ignored"}
+                            ;; the terminal task holds the plan advance flowed to it (S3a-3)
+                            {:seon.task/ns 'tq.chainmerge :seon.task/name "ignored" :seon.task/plan "Merge the chain."
+                             :seon.task/proofs #{(sym "chain-check")}}])
+        clash (task/chain! {:seon.db/connection h-conn :seon.store/store store}
+                           [{:seon.task/ns 'tq.chainclash :seon.task/name "fix" :seon.task/plan "Clash."
+                             :seon.task/proofs #{(sym "chain-check")}}])
+        branch (:seon.chain/branch chain)
+        handles (:seon.task/handles chain)
+        on-chain (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        on-clash (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.chain/branch clash)})
+        c-conn (:seon.db/connection on-chain)
+        x-conn (:seon.db/connection on-clash)
+        main-tasks #(set (db/q '[:find [?h ...] :in $ [?h ...] :where [_ :seon.task/id ?h]] (db/db h-conn) handles))]
+    (try
+      ;; task one changes the code; task three writes the tests; each attempt ends done
+      (write! c-conn [(value-entity c-conn 2)])
+      (write! c-conn [(entity (db/db c-conn) :test "chain-check" "(clojure.test/deftest chain-check (clojure.test/is (= 2 (seon.cluster.merge-test/chain-value))))")])
+      (write! x-conn [(value-entity x-conn 3)])
+      (let [attempts (chain-attempts! c-conn branch handles)
+            [clash-key] (chain-attempts! x-conn (:seon.chain/branch clash) (:seon.task/handles clash))]
+        (is (= #{} (main-tasks)) "before acceptance main holds no chain task")
+        (let [merged (seon.merge/merge! target (last attempts))
+              main (db/db h-conn)]
+          (is (= {} (select-keys merged [:seon.error/type :seon.source/red-tests :seon.error/offending]))
+              "the chain's one merge answers no refusal")
+          (is (= (set handles) (main-tasks)) "one acceptance admits all three tasks")
+          (is (= ["(defn chain-value {:malli/schema [:=> [:cat] :int]} [] 2)" (sym "chain-check")]
+                 [(:seon.fn/source (db/pull main [:seon.fn/source] [:seon.fn/sym (sym "chain-value")]))
+                  (:seon.test/sym (db/pull main [:seon.test/sym] [:seon.test/sym (sym "chain-check")]))])
+              "main holds the first task's code change and the last task's proof")
+          (is (= [:done :done :merged] (mapv #(:seon.task/outcome (db/pull main [:seon.task/outcome] [:seon.task/assignment %])) attempts))
+              "the earlier attempts keep :done and the terminal one is :merged")
+          (is (= [] (filterv (set attempts) (map :seon.task/assignment ((requiring-resolve 'my.root/merge-requests) {:seon.db/db main}))))
+              "no chain attempt is an open merge request after"))
+        (let [refused (seon.merge/merge! target clash-key)]
+          (is (= :seon.source/conflict-error (:seon.error/type refused)) "a conflicting second chain reports its conflict")
+          (is (contains? (registry/branches store) (:seon.chain/branch clash)) "and keeps its branch")))
+      (finally
+        (cluster.agent/release-context! on-chain)
+        (cluster.agent/release-context! on-clash)
+        (doseq [b [branch (:seon.chain/branch clash)]]
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))

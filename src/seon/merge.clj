@@ -202,25 +202,42 @@
            outcome (conj [:db/add a :seon.task/outcome outcome])))))))
 
 (defn- assigned-task
-  "The symbol of the task assignment `a` on main `database` assigns."
+  "The symbol of the task assignment `a` assigns, read on the source head `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] :seon.task/sym]}
   [database a]
   (db/q '[:find ?sym . :in $ ?a :where [?a :seon.task/assigned ?h] [?t :seon.task/id ?h] [?t :seon.task/sym ?sym]]
         database a))
 
+(defn- chain-row
+  "Assignment `key`'s row on the head of the chain branch that holds it, among the chain facts main `database`
+  holds (`:seon.chain/branch`), else {}: a chain's attempts live on its branch, never on main, until its one merge."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
+                  [:map [:db/id {:optional true} :seon.db/entity-id] [:seon.task/branch {:optional true} :seon.task/branch]
+                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]]]}
+  [database key]
+  (or (some (fn [branch]
+          (when-let [head (db/branch-database database branch)]
+            (try (let [row (db/pull head [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])]
+                   (when (:seon.task/branch row) row))
+                 (finally (source/release! [head])))))
+        (sort (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] database)))
+      {}))
+
 (defn- assignment-row
-  "Assignment `key`'s row on main `database`, with its merge base: the stored one, else the commit its branch
-  forked at (`seon.cluster.registry/base-commit-id`), which the merge stores."
+  "Assignment `key`'s row, with its merge base: main's, else, for a chain's attempt, its chain branch head's
+  (`chain-row`); the stored base, else the commit its branch forked at (`seon.cluster.registry/base-commit-id`),
+  which the merge stores."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
                   [:or [:map [:db/id :seon.db/entity-id] [:seon.task/branch :seon.task/branch]
                         [:seon.task/merge-base :seon.task/merge-base]] :seon.error/value]]}
   [database key]
-  (let [row (db/pull database [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])
+  (let [on-main (db/pull database [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])
+        row (if (:seon.task/branch on-main) on-main (chain-row database key))
         base (or (:seon.task/merge-base row) (some->> (:seon.task/branch row) (registry/base-commit-id database)))
         refuse #(refusal/diagnostic (java.util.Date.) :seon.program/write 'seon.merge/merge!
                                     {:seon.error/message % :seon.error/member :seon.task/assignment :seon.error/offending key})]
     (cond
-      (not (:seon.task/branch row)) (refuse (str "Assignment " key " is not on main."))
+      (not (:seon.task/branch row)) (refuse (str "Assignment " key " is neither on main nor on a chain's branch."))
       (not base) (refuse (str "Assignment " key "'s branch retains no fork commit to merge from."))
       :else (assoc row :seon.task/merge-base base))))
 
@@ -257,16 +274,16 @@
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch
                                                :seon.cluster.registry/branches branches})
             target (db/db connection)
-            ;; prepare-merge! selects the proofs of the assignment's task over its assigned basis (main, the
-            ;; branch head, the merge base), a Prove step's product beside them
-            task-sym (assigned-task target a)
+            ;; the source head holds the attempt's end and its task (a chain's live only there):
+            ;; prepare-merge! selects the proofs of that task over its assigned basis (main, the
+            ;; branch head, the merge base), a Prove step's product beside them;
             ;; a source that ended :done is accepted through a candidate, a task-only or empty change included,
             ;; and only so completes its task; a sent-back one merges its facts only; any other source merges
             ;; its facts alone, or its declarations through an accepted candidate when it changed any
+            on-head (fn [f] (let [head (db/commit-database target commit)]
+                              (try (f head) (finally (source/release! [head])))))
             end (when (and (uuid? commit) (not= base commit))
-                  (let [head (db/commit-database target commit)]
-                    (try (:v (first (d/datoms head :eavt a :seon.task.attempt/end)))
-                         (finally (source/release! [head])))))
+                  (on-head #(:v (first (d/datoms % :eavt a :seon.task.attempt/end)))))
             accepted? (case end
                         :done true
                         :sent-back false
@@ -301,7 +318,8 @@
                 result)
               report))
           :else
-          (let [prepared (source/prepare-merge! context store branch task-sym (cond-> {} root (assoc :root root)))
+          (let [prepared (source/prepare-merge! context store branch (on-head #(assigned-task % a))
+                                                 (cond-> {:merging merge-call} root (assoc :root root)))
                 accepted (when (:seon.source/candidate prepared)
                            (source/accept-merge! context store prepared
                                                  {:tx-data merge-call :tx-meta meta}))
