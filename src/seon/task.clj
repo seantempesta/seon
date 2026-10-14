@@ -9,6 +9,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.registry :as mr]
+            [malli.transform :as mt]
             [malli.util :as mu]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
@@ -150,7 +151,6 @@
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
     (let [children (into #{} (comp (mapcat :seon.task/children) (map second)) entries)]
       (mapv (fn [{:seon.task/keys [name] :as entry}]
-              (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
               ;; a child takes its goal from its subject; a task no entry owns has none to take
               (when-not (or (:seon.task/plan entry) (children (task-sym ns name))) (refuse-task! :no-plan entry {}))
               (assoc entry :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
@@ -278,6 +278,16 @@
   (let [cited (into #{} (mapcat ref/names) (keep identity [plan instructions]))]
     (if (seq cited) (assoc task :seon.task/references cited) (dissoc task :seon.task/references))))
 
+;; A new task takes the schema's defaults for the members it supplies none of: a supplied execution stays.
+(defn task-defaults
+  "The members a new task takes when it supplies none: `{}` decoded with the default value transformer under `:seon.task/task`."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :map]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::task-defaults
+   #(m/decode (mr/schema (:seon.schema.projection/registry projection) :seon.task/task) {}
+              (mt/default-value-transformer {:malli.transform/add-optional-keys true}))))
+
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
   whose handle changed frees its unique symbol before its new entity claims it; a handle whose
@@ -309,7 +319,7 @@
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
                         current (replacement-tx (stored id) proposed owned)
                         (owned-children [:seon.task/sym (:seon.task/sym proposed)]) [(dissoc proposed :seon.task/execution)]
-                        :else [(assoc proposed :seon.task/execution :held)]))))
+                        :else [(merge (task-defaults projection) proposed)]))))
           (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id)))))))
 
 (defn- symbol-tx
@@ -331,9 +341,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
   [database]
   (if (contains? (:schema database) :seon.task/execution)
-    (let [unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _]) (not [_ :seon.task/children ?e])] database)]
+    (let [default (:seon.task/execution (task-defaults (db/carried-projection database)))
+          unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _]) (not [_ :seon.task/children ?e])] database)]
       (when (read-error unset) (throw (ex-info (:seon.error/message unset) unset)))
-      (mapv (fn [e] [:db/add e :seon.task/execution :held]) (sort unset)))
+      (mapv (fn [e] [:db/add e :seon.task/execution default]) (sort unset)))
     []))
 
 (defn- admitted
@@ -650,7 +661,7 @@
   "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
   [{:seon.task/keys [ns name] :as declaration} agent-id]
-  (assoc declaration :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name) :seon.task/execution :held
+  (assoc declaration :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name)
          :seon.task/created-by [:seon.agent/id agent-id]))
 
 (defn advance-assignments-tx
@@ -691,7 +702,7 @@
   the aspect `[ns name]` and its symbol `ns/name`: the same declaration again
   changes nothing; a different one refuses with base, current and proposed unless
   `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
-  name refuses `:invalid-name`; `:seon.task/children` and `:seon.task/needs` name
+  name is refused by `:seon.task/name`; `:seon.task/children` and `:seon.task/needs` name
   tasks as lookup refs `[:seon.task/sym ns/name]`, and needs that would leave a task
   waiting on itself refuse `:needs-cycle`. The writer derives `:seon.task/references` from the plan and
   instructions; a step declares its own `:seon.task/instructions` and takes the goal it omits from its subject.
@@ -706,16 +717,14 @@
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
                    :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id task-name :seon.task/name :as request}]
-  (if-not (symbol-name? task-name)
-    (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
-    (let [entity (task-entity (select-keys request (map first (declaration-members (db/carried-projection (db/db connection)))))
-                              agent-id)
-          tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
-          report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
-      (if (:seon.error/at report)
-        report
-        {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))}))))
+  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (let [entity (task-entity (select-keys request (map first (declaration-members (db/carried-projection (db/db connection)))))
+                            agent-id)
+        tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
+        report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
+    (if (:seon.error/at report)
+      report
+      {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))})))
 
 (defn- chain-copy
   "The copy of `template` that the chain of the subject `ns`/`subject-name` takes from `database`: named by template

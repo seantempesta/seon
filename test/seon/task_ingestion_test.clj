@@ -119,7 +119,6 @@
        (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :plan \"i\"}]"
                             :unreadable-file "[{"
                             :invalid-entry "[#:seon.task{:name \"x\" :intnet \"i\"}]"
-                            :invalid-name "[#:seon.task{:name \"x y\" :plan \"i\"}]"
                             :duplicate-name "[#:seon.task{:name \"x\" :plan \"i\"} #:seon.task{:name \"x\" :plan \"j\"}]"
                             ;; a child takes its goal from its subject; a task with no parent has none to take
                             :no-plan "[#:seon.task{:name \"x\" :instructions \"i\"}]"}]

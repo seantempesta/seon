@@ -441,3 +441,29 @@
     (doseq [attribute [:seon.task.attempt/end :seon.task/end :seon.task/status]]
       (is (not ((schema/projection-validator projection attribute) :satisfied)) "no end or status admits :satisfied")))
   (is (not-any? #{:satisfied} (flatten task/ready-rules)) "a leaf is done only by its merged outcome"))
+
+(deftest task-members-have-defaults-and-kinds
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           entity (fn [task-name members]
+                    (merge {:seon.task/id (id/id ['tq.kinds task-name]) :seon.task/sym (symbol "tq.kinds" task-name)
+                            :seon.task/ns 'tq.kinds :seon.task/name task-name :seon.task/plan "Do it."}
+                           members))
+           executions (fn [tx] (set (keep :seon.task/execution (filter map? tx))))
+           running (task/adopt-tasks-tx database [(entity "a" {:seon.task/execution :running})]
+                                        #{(task/task-handle 'tq.kinds "a")} {})]
+       (is (= {:seon.task/execution :held} (task/task-defaults (db/carried-projection database)))
+           "decoding {} fills the execution default")
+       (is (= #{:held} (executions (task/adopt-tasks-tx database [(entity "b" {})] #{(task/task-handle 'tq.kinds "b")} {})))
+           "a new task takes the default")
+       (is (= #{:running} (-> (db/with database running) (db/pull [:seon.task/execution] [:seon.task/sym 'tq.kinds/a])
+                              :seon.task/execution hash-set))
+           "a supplied execution survives the writer")
+       (let [started (db/with database running)
+             edited (task/adopt-tasks-tx started [(entity "a" {:seon.task/execution :running :seon.task/plan "Do it better."})]
+                                         #{(task/task-handle 'tq.kinds "a")}
+                                         {(task/task-handle 'tq.kinds "a") (task/task-declaration started (task/task-handle 'tq.kinds "a"))})]
+         (is (= :running (:seon.task/execution (db/pull (db/with started edited) [:seon.task/execution] [:seon.task/sym 'tq.kinds/a])))
+             "editing a running task never resets it held"))
+       (is (:seon.error/at (db/transact! connection [(entity "x y" {})])) "a name that is no symbol name is refused by the writer")))))
