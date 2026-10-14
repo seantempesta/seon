@@ -670,7 +670,9 @@
   "Return, per fixed arity of `sym`'s contract, `{:argument-count n :positions
   #{index} :keys #{key}}`: the positional arguments call preparation supplies
   by schema name and the map entries it fills. An arglist minus these is the
-  call as an agent writes it."
+  call as an agent writes it. A schema name declared by several positions is
+  not listed: the caller tells them apart (a function over a main, a candidate
+  and a base database), so each stays in the arglist."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.fn/sym]
     [:or [:vector [:map [:argument-count :int] [:positions [:set :int]] [:keys [:set :qualified-keyword]]]]
@@ -682,8 +684,10 @@
         (vec (for [arity (planned-arities (db/carried-projection database) current sym)
                    :when (not (:seon.call-preparation/variadic? arity))]
                {:argument-count (:seon.fn.arity/argument-count arity)
-                :positions (set (keep #(when (:seon.call-preparation/key %) (:seon.fn.argument/index %))
-                                      (:seon.call-preparation/slots arity)))
+                :positions (let [keyed (filter :seon.call-preparation/key (:seon.call-preparation/slots arity))
+                                 declared (frequencies (map :seon.call-preparation/key keyed))]
+                             (set (keep #(when (= 1 (declared (:seon.call-preparation/key %))) (:seon.fn.argument/index %))
+                                        keyed)))
                 :keys (set (map :seon.call-preparation/entry-key (:seon.call-preparation/entries arity)))})))))
 
 (defn- compiled-plan

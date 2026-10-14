@@ -20,7 +20,8 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.ref]
-            [seon.test]))
+            [seon.test]
+            [seon.test.runner :as runner]))
 
 (defn- read-result
   {:malli/schema
@@ -710,6 +711,34 @@
           (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
       (not-found database sym))))
 
+(defn- proof-status
+  "Each of `proofs`' latest recorded outcome, `:pass`, `:fail` or `:unknown` when none completed."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :unknown]]]}
+  [database proofs]
+  (let [results (runner/latest-results database (vec proofs))
+        latest (if (vector? results) (into {} (keep #(when-let [sym (:seon.test/sym %)] [sym %])) results) {})]
+    (into (sorted-map)
+          (map (fn [proof]
+                 (let [result (latest proof)]
+                   [proof (cond (nil? result) :unknown
+                                (pos? (+ (:seon.test/fail-count result 0) (:seon.test/error-count result 0))) :fail
+                                :else :pass)])))
+          proofs)))
+
+(defn- task-source
+  "A task's code level (TASK-CHAIN §3a): its plan, instructions, proofs with their latest status and next task, or nil
+  when no task has that symbol."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:maybe :my.program/task-source]]}
+  [database sym]
+  (let [task (db/pull database [:seon.task/plan :seon.task/instructions :seon.task/proofs {:seon.task/next [:seon.task/sym]}]
+                      [:seon.task/sym sym])]
+    (when (and (map? task) (not (db/read-refusal? task)))
+      (cond-> {:sym sym :kind :task}
+        (:seon.task/plan task) (assoc :plan (:seon.task/plan task))
+        (:seon.task/instructions task) (assoc :instructions (:seon.task/instructions task))
+        (seq (:seon.task/proofs task)) (assoc :proofs (proof-status database (set (:seon.task/proofs task))))
+        (get-in task [:seon.task/next :seon.task/sym]) (assoc :next (get-in task [:seon.task/next :seon.task/sym]))))))
+
 (defn- member-description
   "A member schema described one level: its description, else its form; nothing for a key with no stored form."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
@@ -757,13 +786,16 @@
   (my.program/source 'seon.task/create!)
   (my.program/source :seon.task/id)
   (my.program/source 'seon.task)
+  (my.program/source 'seon.ref/fix-pathless-section)
   ```
+
+  A task's symbol answers its plan, instructions, proofs with their latest status and next task.
 
   ## Errors
 
   an unknown subject returns a not-found error with the nearest symbols under :seon.error/expected and the forms that work under :seon.error/fix."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject]
-                  [:or :my.program/declaration-source :my.program/schema-source
+                  [:or :my.program/declaration-source :my.program/schema-source :my.program/task-source
                    [:map [:seon.ns/name :symbol] [:seon.program/functions [:vector :qualified-symbol]]
                     [:seon.program/tests [:vector :qualified-symbol]]]
                    :seon.program/not-found-error]]}
@@ -771,7 +803,7 @@
   (cond
     (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
-    :else (declaration-source database subject)))
+    :else (or (task-source database subject) (declaration-source database subject))))
 
 (defn render-source-ai
   "A declaration's source as its own text: the code an agent can copy into a `defn`

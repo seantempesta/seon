@@ -11,6 +11,12 @@
   [:sym :qualified-symbol] [:kind :keyword] [:source :string]
   [:line {:optional true} :int] [:file {:optional true} :string] [:doc {:optional true} :string]
   [:contract {:optional true} :seon.schema/value]]
+ :my.program/task-source
+ [:map {:description "A task's code level: its plan, instructions, proofs with their latest recorded status and next task."}
+  [:sym :qualified-symbol] [:kind [:= :task]]
+  [:plan {:optional true} :string] [:instructions {:optional true} :string]
+  [:proofs {:optional true} [:map-of :qualified-symbol [:enum :pass :fail :unknown]]]
+  [:next {:optional true} :qualified-symbol]]
  :my.program/schema-source
  [:map {:description "A schema key's code level: its doc value, the functions whose contract takes or guards it, its members described one level, the schemas whose form names it, the functions declaring its writes and, for an installed attribute, its datom count."}
   [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]

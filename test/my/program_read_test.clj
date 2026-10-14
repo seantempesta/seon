@@ -2,6 +2,8 @@
   (:require [clojure.string]
             [clojure.test :refer [are deftest is]]
             [my.program :as program]
+            [seon.cluster :as cluster]
+            [seon.task :as task]
             [seon.db :as db]
             [seon.test-support :as support]))
 
@@ -89,3 +91,14 @@
        (are [limit] (= :seon.instrument/contract-error (refusal-type limit))
          0
          -1)))))
+
+(deftest source-answers-a-task-symbol
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "my-task" {})
+     (cluster/seed-root-agent! connection "my-task" cluster/boot-process-identity)
+     (task/create! {:seon.task/ns 'pr.read :seon.task/name "answer" :seon.task/plan "Answer the symbol."
+                    :seon.task/instructions "Read it." :seon.db/connection connection :seon.agent/id "root"})
+     (let [read (program/source (db/db connection) 'pr.read/answer)]
+       (is (= {:sym 'pr.read/answer :kind :task :plan "Answer the symbol." :instructions "Read it."} read)
+           "a task symbol answers its plan and instructions, not a not-found refusal")))))

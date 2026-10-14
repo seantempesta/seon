@@ -250,27 +250,41 @@
     {:in (declaration-absent :seon.fn/spec)
      :out (declaration-absent :seon.fn/spec)}))
 
+(defn- opened-argument
+  "The argument of input `form` at supplied-entry `position`, as `schemas` names it: its index in `form`, its schema
+  key when a request map is named by its registered key, and the argument's form."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/definition] :seon.schema/value :int]
+                  [:map [:index :int] [:key {:optional true} :qualified-keyword] [:argument :seon.schema/value]]]}
+  [schemas form position]
+  (let [index (+ (if (map? (second form)) 2 1) position)
+        named (get form index)]
+    (cond-> {:index index :argument (if (keyword? named) (get schemas named named) named)}
+      (keyword? named) (assoc :key named))))
+
+(defn- contract-arities
+  "`contract`'s input forms, one per arity."
+  {:malli/schema [:=> [:cat :map :map] [:vector :seon.schema/value]]}
+  [row contract]
+  (let [spec (:seon.fn/spec row)]
+    (if (and spec (= :function (first (edn/read-string spec))))
+      (:in contract) [(:in contract)])))
+
 (defn- agent-documentation-contract
+  "The stored contract as an agent calls it: a request map's runtime-supplied entries left out and `:supplied`
+  naming them."
   {:malli/schema [:=> [:cat :seon.db/database-value :map]
                   [:or :map :seon.db/error-result]]}
   [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
         contract (documentation-contract database row)
         schemas (documentation-schemas database row)
-        spec (:seon.fn/spec row)
-        arities (if (and spec (= :function (first (edn/read-string spec))))
-                  (:in contract) [(:in contract)])]
+        arities (contract-arities row contract)]
     (if (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries))
       entries
       (let [inputs
             (mapv (fn [order input]
                     (reduce (fn [form [position supplied]]
-                              (let [offset (if (map? (second form)) 2 1)
-                                    index (+ offset position)
-                                    named (get form index)
-                                    ;; A request map named by its registered key opens one level so
-                                    ;; the runtime-supplied entries can be left out of it.
-                                    argument (if (keyword? named) (get schemas named named) named)
+                              (let [{:keys [index argument]} (opened-argument schemas form position)
                                     keys (set (map #(nth % 2) supplied))]
                                 (if (and (vector? argument) (= :map (first argument)))
                                   (assoc form index
@@ -283,6 +297,22 @@
           (seq entries)
           (assoc :in (if (= 1 (count inputs)) (first inputs) inputs)
                  :supplied (vec (distinct (map #(nth % 2) entries)))))))))
+
+(defn- opened-schema-keys
+  "The schema keys `agent-documentation-contract` shows in `:in` with their runtime-supplied entries left out: a
+  schema is cited once, so `:schemas` does not repeat them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:set :qualified-keyword]]}
+  [database row]
+  (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
+        schemas (documentation-schemas database row)
+        arities (contract-arities row (documentation-contract database row))]
+    (if (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries))
+      #{}
+      (into #{}
+            (keep (fn [[order position]]
+                    (let [{named :key argument :argument} (opened-argument schemas (nth arities order) position)]
+                      (when (and named (vector? argument) (= :map (first argument))) named))))
+            entries))))
 
 (defn- agent-arglists
   "`arglists` as an agent calls `sym`: each arglist without the positional
@@ -307,13 +337,15 @@
              arglists)))))
 
 (defn- schema-descriptions
-  "Each schema `row`'s contract names, as its description, else its form."
+  "Each schema `row`'s contract names, as its description, else its form; one `:in` already shows is left out."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] [:map-of :qualified-keyword :map]]}
   [database row]
-  (into (sorted-map)
-        (map (fn [[key form]]
-               [key (if-let [text (render.schema/description form)] {:description text} {:form form})]))
-        (documentation-schemas database row)))
+  (let [opened (opened-schema-keys database row)]
+    (into (sorted-map)
+          (comp (remove (comp opened key))
+                (map (fn [[key form]]
+                       [key (if-let [text (render.schema/description form)] {:description text} {:form form})])))
+          (documentation-schemas database row))))
 
 (defn- function-doc-map
   "The documentation of one program row: its doc and arglists, the stored

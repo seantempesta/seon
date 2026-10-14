@@ -429,3 +429,19 @@
        (is (string? (:description schema)) "a schema with a description shows that description")
        (is (not (contains? schema :source)) "a schema shows no source")
        (is (= in-sci in-jvm) "the same value in JVM mode with no SCI context")))))
+
+(deftest doc-shows-the-arglists-the-defn-declares
+  (support/with-database
+   (fn [connection]
+     (let [arglists #(:arglists (lookup/function-documentation (db/db connection) %))]
+       (is (= '([main candidate base sym]) (arglists 'seon.cluster.source/tested-task-basis))
+           "three databases the caller tells apart all stay in the arglist")
+       (is (= '([tested candidate-commit base-commit]) (arglists 'seon.cluster.source/task-basis-held-tx))
+           "a lone database argument is still filled by schema name and left out")))))
+
+(deftest doc-cites-a-request-schema-once
+  (support/with-database
+   (fn [connection]
+     (let [doc (lookup/function-documentation (db/db connection) 'my.message/send)]
+       (is (some vector? (rest (second (:in doc)))) "the request map's entries are shown in :in")
+       (is (not (contains? (:schemas doc) :my.message/send-request)) "its schema is not repeated under :schemas")))))
