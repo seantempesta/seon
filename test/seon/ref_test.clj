@@ -196,8 +196,8 @@
            [(:seon.ref/path entry) (:seon.ref/anchor entry) (:seon.ref/heading entry)]))))
 
 (deftest a-referenced-task-shows-its-intent
-  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/a-reference-with-no-path-is-a-missing-file`"})]
-    (is (= 'seon.ref/a-reference-with-no-path-is-a-missing-file (:seon.ref/name entry)))
+  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/documentation-and-source-take-a-path-string`"})]
+    (is (= 'seon.ref/documentation-and-source-take-a-path-string (:seon.ref/name entry)))
     (is (string? (:seon.task/plan entry)) "a task resolves to its own content, its intent")))
 
 (deftest a-referenced-test-shows-its-own-source
@@ -214,7 +214,7 @@
 (deftest a-referents-own-references-show-one-level-for-every-text-kind
   (are [text name] (= [(list 'my.program/source (list 'quote name))] (:seon.render/operations (get (cited text) name)))
     ;; a task's intent
-    "`seon.ref/a-reference-with-no-path-is-a-missing-file`" 'seon.ref/locate
+    "`seon.ref/documentation-and-source-take-a-path-string`" 'seon.ref/section
     ;; a doc section's text
     "`AGENTS.md#data-and-contracts`" 'seon.blob/inline-or-stage))
 
@@ -235,16 +235,14 @@
     (is (= :unresolved (:seon.ref/problem-kind problem)))
     (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
-  a-reference-with-no-path-is-a-missing-file
+(deftest a-reference-with-no-path-is-a-missing-file
   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
   (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))
     "no-such-file.md#the-goal"
     "#the-goal"
     "#"))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
-  a-reference-with-no-path-answers-an-error-that-holds-no-path
+(deftest a-reference-with-no-path-answers-an-error-that-holds-no-path
   ;; an empty path names no file: the error carries no :seon.ref/path (absence is no key) and lists the checkout root's Markdown
   (are [reference expected] (= expected
                                (let [error (ref/section reference)]
@@ -345,8 +343,8 @@
                 [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.value/render-ai]
                 [:deftest "`seon.ref-test/fenced-code-and-prose-spans-are-not-references`"
                  ['seon.ref-test/fenced-code-and-prose-spans-are-not-references nil nil] 'seon.render.test/render-ai]
-                [:task "`seon.ref/a-reference-with-no-path-is-a-missing-file`"
-                 ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
+                [:task "`seon.ref/documentation-and-source-take-a-path-string`"
+                 ['seon.ref/documentation-and-source-take-a-path-string nil nil] 'seon.render.ns/task-ai]
                 [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.value/render-ai]
                 [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.value/render-ai]
                 [:attribute "`:seon.task/plan`" [:seon.task/plan nil nil] 'seon.render.value/render-ai]

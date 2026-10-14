@@ -133,5 +133,5 @@
            :section-missing [:enum :file :heading]
            :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
            :section-error [:and :seon.error/base
-                           [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path :seon.ref/path]
+                           [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path]
                             [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}

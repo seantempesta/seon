@@ -708,15 +708,15 @@
     (vec (sort (filter #(str/ends-with? % ".md") (.list directory))))))
 
 (defn- section-error
-  "The error for a reference with no file or no such heading, naming the nearest."
-  {:malli/schema [:=> [:cat :keyword :seon.ref/path [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
+  "The error for a reference with no file or no such heading, naming the nearest; a reference with no path names none."
+  {:malli/schema [:=> [:cat :keyword [:maybe :seon.ref/path] [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
   [missing path anchor nearest]
-  (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
-                      (cond-> {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
-                               :seon.error/offending (cond-> {:seon.ref/path path} anchor (assoc :seon.ref/anchor anchor))
-                               :seon.error/expected nearest
-                               :seon.ref/section-missing missing :seon.ref/path path :seon.ref/nearest nearest}
-                        anchor (assoc :seon.ref/anchor anchor))))
+  (let [named (cond-> {} path (assoc :seon.ref/path path) anchor (assoc :seon.ref/anchor anchor))]
+    (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
+                        (cond-> (merge named {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
+                                              :seon.error/expected nearest
+                                              :seon.ref/section-missing missing :seon.ref/nearest nearest})
+                          (seq named) (assoc :seon.error/offending named)))))
 
 (defn- span-tokens
   "The estimated tokens of source lines `from` (1-based) up to `end`."
@@ -739,9 +739,9 @@
   (let [hash-at (str/index-of reference "#")
         path (cond-> reference hash-at (subs 0 hash-at))
         anchor (when hash-at (not-empty (subs reference (inc hash-at))))
-        located (locate path)]
+        located (when (seq path) (locate path))]
     (if-not located
-      (section-error :file path anchor (nearest-files path))
+      (section-error :file (not-empty path) anchor (nearest-files path))
       (let [text (slurp (:seon.ref/file located))
             {:seon.ref/keys [headings line-count body-line]} (document text)
             lines (vec (str/split-lines text))
