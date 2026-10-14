@@ -2068,3 +2068,74 @@
                     (agent/release-context! execution)))
                 (when (contains? (registry/branches store) branch)
                   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a one-task chain whose attempt's hand-written work and done end, one refused final merge (prepare-merge!'s write-back refuses) and its bail over three db<->flow passes, then root's run and the second attempt's start."
+           :seon.test/long-ms 60000}
+  a-refused-final-merge-bails-to-root-once-with-its-refusal
+  ;; TASK-CHAIN §2.7 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Bail or fail), S5 run 8: a done terminal
+  ;; attempt whose final merge refuses bails once like every other end that is not done: one problem task on main
+  ;; naming the refusal, the attempt :closed with the refusal's message as its reason and its type kept, the task
+  ;; :held, branch and chain fact kept; `my.root/run!` then starts the next attempt
+  (binding [*space* "tq.mergebail"]
+    (test-support/with-database
+     (fn [connection]
+       ;; the attempt's work redefines its red proof green on the branch, a file no checkout of this world holds,
+       ;; so the final merge's write-back refuses
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 2))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")}}])
+                branch (:seon.chain/branch chain)
+                [first-task] (:seon.task/handles chain)
+                key-1 (id/id [first-task 1])
+                key-2 (id/id [first-task 2])
+                context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                         :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                ;; the problem tasks naming this chain's task: main holds other worlds' too
+                problems #(into {} (db/q '[:find ?n ?p :in $ ?h :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
+                                           [(clojure.string/starts-with? ?n "unfinished-task-")] [?t :seon.task/plan ?p]
+                                           [(clojure.string/includes? ?p ?h)]]
+                                         (db/db connection) first-task))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                ;; the agent's work, by hand: its proof redefined green on the branch, then its end at that commit
+                (await-on! on-branch #(not-empty (proof-runs (db/db on-branch) (proof "u"))) ::merge-bail-proved)
+                (define-on! on-branch (symbol (str *space* "-proofs")) "(clojure.test/deftest proves-u (clojure.test/is (= 1 1)))")
+                (is (= 1 (await-on! on-branch #(:green (:seon.context/counts (context/proofs (db/db on-branch) (symbol *space* "c"))))
+                                 ::merge-bail-green))
+                    "its proof is green on the branch")
+                (test-support/transacted! on-branch [[:db/add [:seon.task/assignment key-1] :seon.task.attempt/end :done]
+                                                     [:db/add [:seon.task/assignment key-1] :seon.task.attempt/commit
+                                                      (db/commit-id (db/db on-branch))]])
+                (pass! handle routing)
+                (pass! handle routing)
+                (pass! handle routing)
+                (let [database (db/db on-branch)
+                      row (db/pull database [:seon.task/outcome :seon.task/reason :seon.task/refusal] [:seon.task/assignment key-1])
+                      found (problems)]
+                  (is (= [(str "unfinished-task-" key-1)] (keys found)) "exactly one problem task on main, named by the attempt")
+                  (is (keyword? (:seon.task/refusal row)) "the attempt keeps the refusal's type")
+                  (is (some-> (vals found) first (str/includes? (str (:seon.task/refusal row)))) "which the problem task names")
+                  (is (= :closed (:seon.task/outcome row)) "the attempt is :closed on the chain branch")
+                  (is (str/includes? (str (:seon.task/reason row)) (str (:seon.task/refusal row) ": "))
+                      "with the refusal's type and its own message as its reason")
+                  (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id first-task])))
+                      "its task is :held"))
+                (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.task/assignment key-1]))) "nothing merged to main")
+                (is (contains? (registry/branches store) branch) "the branch is kept")
+                (is (some? (db/q '[:find ?c . :in $ ?b :where [?c :seon.chain/branch ?b]] (db/db connection) branch))
+                    "the chain fact is kept")
+                (is (= {:seon.task.attempt/number 2 :seon.task/assignment key-2}
+                       (select-keys ((requiring-resolve (quote my.root/run!)) {:my.program/context context :seon.task/assigned first-task})
+                                    [:seon.task.attempt/number :seon.task/assignment]))
+                    "root runs the held task again")
+                (pass! handle routing)
+                (is (some? (some-> (get-in @routing [:seon.agent/children branch]) deref
+                                   (get-in [:seon.agent/started (str "attempt/" key-2)])))
+                    "and the next attempt's agent starts on the chain branch"))
+              (finally (release-chain! routing store branch))))))))))

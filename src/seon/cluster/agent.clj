@@ -2094,11 +2094,12 @@
   "Bail chain attempt `key` of task `h` on chain `branch` to root with `reason` (TASK-CHAIN §2.7), through cluster
   `handle`: first its problem task on main, named by the attempt (`write-problem!`), so a repeat writes none; then
   ONE transaction on the chain branch, decided at the writer (`seon.task/hold-tx`): the attempt `:closed` with its
-  reason and the task `:held`. The branch and the chain fact stay; nothing else runs."
+  reason and the task `:held`, with `tx-data` (a refused merge's type). The branch and the chain fact stay; nothing
+  else runs."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.chain/branch :seon.task/assignment :seon.task/handle
-                       :seon.task/reason]
+                       :seon.task/reason :seon.db/tx-data]
                   :nil]}
-  [handle branch key h reason]
+  [handle branch key h reason tx-data]
   (write-problem! handle {:seon.flow.actions/op :problem :seon.task/assignment key :seon.task/assigned h
                           :seon.flow.actions/class :unfinished-task
                           :seon.task/plan (str "Chain attempt " key " of task " h " on branch " (name branch) " bailed: " reason
@@ -2106,13 +2107,13 @@
                                                " Change the task on its branch and run it again with (my.root/run! {:seon.task/assigned \""
                                                h "\"}), abandon the chain, or build a new one from the branch"
                                                " (seon.task/chain! with :seon.chain/from " branch ").")})
-  (registry/on-branch (handle-store handle) branch #(write! % [[:db.fn/call #'task/hold-tx key reason]]))
+  (registry/on-branch (handle-store handle) branch #(write! % (into [[:db.fn/call #'task/hold-tx key reason]] tx-data)))
   nil)
 
 (defn- chain-bails
   "The ended chain attempts root bails, read through `store` on main `database` (`seon.task/chain-attempts`):
-  every attempt holding no outcome whose end is neither :done (judged by the done rule) nor :cancelled, or that
-  ended :done and holds a refused final merge (`:seon.task/refusal`), with its reason."
+  every attempt holding no outcome whose end is neither :done (judged by the done rule and the final merge, which
+  bail their own refusals) nor :cancelled, with its reason."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
                             [:seon.task/assigned :seon.task/handle] [:seon.task/reason :seon.task/reason]]]]}
@@ -2127,16 +2128,7 @@
                                           (db/pull (db/db connection) [:seon.task.attempt/reason] [:seon.task/assignment key])]
                                       (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
                                              :seon.task/reason (str "The attempt ended " end (if why (str ": " why) ".")))))))))
-          (into attempts
-                ;; a refused final merge is recorded on its :done attempt
-                (keep (fn [{branch :seon.chain/branch key :seon.task/assignment end :seon.task.attempt/end :as row}]
-                        (when (and (= :done end) (not (:seon.task/outcome row)))
-                          (when-let [refusal (registry/on-branch store branch
-                                                        #(:seon.task/refusal (db/pull (db/db %) [:seon.task/refusal]
-                                                                                      [:seon.task/assignment key])))]
-                            (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
-                                   :seon.task/reason (str "The final merge refused it: " refusal "."))))))
-                attempts))))
+          attempts)))
 
 (defn- bail-chains!
   "Bail every ended chain attempt root does not advance or merge (`chain-bails`) through cluster `handle`."
@@ -2144,7 +2136,7 @@
   [handle]
   (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned reason :seon.task/reason}
           (chain-bails @(:seon.db/connection handle) (handle-store handle))]
-    (bail-chain! handle branch key h reason))
+    (bail-chain! handle branch key h reason []))
   nil)
 
 (defn- refused-reason
@@ -2152,6 +2144,12 @@
   {:malli/schema [:=> [:cat :seon.source/refusals] :seon.task/reason]}
   [refusals]
   (str "The done rule refused its done: " (str/join ", " (sort (into #{} (map #(str (:seon.error/type %))) refusals))) "."))
+
+(defn- merge-refused-reason
+  "The reason a chain's final merge was refused by `refusal`: its type and its producer's message."
+  {:malli/schema [:=> [:cat :seon.error/value] :seon.task/reason]}
+  [{refused :seon.error/type message :seon.error/message}]
+  (str "The final merge refused it, " refused (if message (str ": " message) ".")))
 
 (defn- advance-chains!
   "Advance every chain past its finished attempts (`chain-ends`) through cluster `handle`: when the done rule
@@ -2175,13 +2173,13 @@
                                                         (finally (source/release! [at-end])))]
                                       (when (empty? refusals) (write! on-chain [[:db.fn/call #'task/advance-tx key]]))
                                       refusals))))]
-        (when (seq refusals) (bail-chain! handle branch key h (refused-reason refusals))))))
+        (when (seq refusals) (bail-chain! handle branch key h (refused-reason refusals) [])))))
   nil)
 
 (defn- chain-finishes
   "The terminal attempts root merges, read on main `database` among the store's `branches`: on each chain's
-  `:seon.task/next` path, every attempt of a task with no next that ended :done holding no outcome and no recorded
-  merge refusal, which main does not hold yet (its one merge copies it there), with its chain branch, task and end
+  `:seon.task/next` path, every attempt of a task with no next that ended :done holding no outcome (a refused merge
+  closes it), which main does not hold yet (its one merge copies it there), with its chain branch, task and end
   commit."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
@@ -2195,8 +2193,7 @@
                            (let [rows (db/q '[:find ?k ?h ?c :in $ [?h ...]
                                               :where [?t :seon.task/id ?h] (not [?t :seon.task/next _]) [?a :seon.task/attempt-of ?t]
                                               [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end :done]
-                                              [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])
-                                              (not [?a :seon.task/refusal _])]
+                                              [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])]
                                             head (task/chain-handles head first-handle))]
                              (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)))
                              (for [[k h c] (sort rows)
@@ -2208,8 +2205,9 @@
 (defn- merge-chains!
   "Merge every finished chain (`chain-finishes`) to main once through cluster `handle`: when the done rule
   (`seon.cluster.source/done-refusals`) refuses nothing over the chain branch at the terminal attempt's end commit,
-  `seon.merge/merge!` with that attempt as its source, the files proven against the cluster's checkout; a refused
-  merge is recorded on the attempt on its chain branch (`:seon.task/refusal`), for root. Answers whether any merged."
+  `seon.merge/merge!` with that attempt as its source, the files proven against the cluster's checkout. A refused
+  done or a refused merge bails to root (`bail-chain!`), the merge's refusal its reason (`merge-refused-reason`) and
+  its type kept on the attempt (`:seon.task/refusal`). Answers whether any merged."
   {:malli/schema [:=> [:cat :seon.agent/context-source] :boolean]}
   [handle]
   (let [store (handle-store handle)
@@ -2226,15 +2224,14 @@
                                             (try (source/done-refusals at-end (done-judged database at-end branch h))
                                                  (finally (source/release! [at-end]))))))]
                 (if (seq refusals)
-                  (do (bail-chain! handle branch key h (refused-reason refusals)) false)
+                  (do (bail-chain! handle branch key h (refused-reason refusals) []) false)
                   (let [root (merge/checkout database (:seon.cluster/name handle))
                         merged (db/with-branch {:seon.db/connection connection}
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
                                                        (when (string? root) [root])))]
                     (if (:seon.error/at merged)
-                      ;; the refusal is recorded on its attempt; this pass's bail closes it (`chain-bails`)
-                      (do (registry/on-branch store branch
-                                     #(write! % [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]]))
+                      (do (bail-chain! handle branch key h (merge-refused-reason merged)
+                                       [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]])
                           false)
                       true))))))))))
 
