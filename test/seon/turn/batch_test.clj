@@ -305,3 +305,37 @@
       (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be an even integer\" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]} [x] (quot x 2))"
      'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
      "(halve 4)" 2 "(halve 3)"]]))
+
+(defn- stale-declarations
+  "The functions and tests of `namespace-name` on `database` whose stored
+  definition digest is not the one `seon.db/definition-digest-of` produces
+  under the namespace row stored beside them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :qualified-symbol]]}
+  [database namespace-name]
+  (let [projection (db/carried-projection database)
+        identity-attrs (#'db/identity-attributes database)
+        value (fn [entity] (#'db/declaration-value projection database identity-attrs entity))
+        namespace-entity (:db/id (db/pull database [:db/id] [:seon.ns/name namespace-name]))
+        namespace-map (value namespace-entity)]
+    (into #{}
+          (keep (fn [entity]
+                  (let [entity-map (value entity)]
+                    (when (not= (:seon.program/definition-digest entity-map)
+                                (db/definition-digest-of projection entity-map namespace-map))
+                      (or (:seon.fn/sym entity-map) (:seon.test/sym entity-map))))))
+          (db/q '[:find [?e ...] :in $ ?n :where (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
+                database namespace-entity))))
+
+(deftest a-retargeted-alias-leaves-no-stale-digest-for-the-test-world
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(ns batch-test.alias (:require [clojure.string :as x] [clojure.test :refer [deftest is]]))
+             (defn f1 [s] (x/upper-case s))
+             (deftest f1-test (is (= \"A\" (f1 \"a\"))))" agent-id running)
+     (let [later (eval! "(in-ns 'batch-test.alias) (ns-unalias 'batch-test.alias 'x) (alias 'x 'clojure.set) (defn g1 [] 2)"
+                        agent-id running)]
+       (is (= #{} (stale-declarations (db/db connection) 'batch-test.alias))
+           "every stored digest is the one the stored namespace row produces")
+       (is (nil? (get-in ((requiring-resolve 'seon.test-support/mcp-tests) later)
+                         [:seon.turn.loop/reaching :seon.turn.loop/test-error]))
+           "the test step builds its world")))))

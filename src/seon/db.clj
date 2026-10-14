@@ -5973,6 +5973,46 @@
                 name-datom (d/datoms database :eavt (:v datom) :seon.ns/name)]
             (:v name-datom)))))
 
+(defn- namespace-derivation
+  "The re-derivation `tx-data` needs on `database`: a namespace entity it
+  writes re-derives its declarations' digests in the same transaction, as does
+  the namespace of a declaration losing data its family owns (an attribute's
+  replacement). Empty when it writes neither."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.store/transaction-data]
+                  [:vector :seon.schema/value]]}
+  [projection database tx-data]
+  (let [entity-maps (filter map? tx-data)
+        namespaces (into (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
+                         (dropped-definition-namespaces projection database tx-data))
+        written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
+    (if (seq namespaces)
+      [[:db.fn/call namespace-digests-tx projection namespaces written]]
+      [])))
+
+(declare digested-call)
+
+(defn- digested-calls
+  "`tx-data` with each transaction function call answering its output followed
+  by that output's re-derivation (`namespace-derivation`): a namespace a
+  transaction function writes re-derives its declarations as a submitted one does."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.store/transaction-data] :seon.store/transaction-data]}
+  [projection tx-data]
+  (mapv (fn [op]
+          (if (and (vector? op) (= :db.fn/call (first op)))
+            (with-meta (into [:db.fn/call digested-call projection] (rest op)) (meta op))
+            op))
+        tx-data))
+
+(defn- digested-call
+  "The output of transaction function `f` on `database`, its own calls
+  digested in turn, followed by its re-derivation (`namespace-derivation`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.instrument/callable
+                       [:* :seon.schema/value]]
+                  :seon.store/transaction-data]}
+  [database projection f & args]
+  (let [output (digested-calls projection (vec (apply f database args)))]
+    (into output (namespace-derivation projection database output))))
+
 (defn- prepared-write
   "The request the writer applies for `transaction` on `database`: JDK
   integers as longs, the final-report validator in its metadata, values
@@ -5992,19 +6032,14 @@
                  (jdk-integers->long
                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
                             [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
-        entity-maps (filter map? (:tx-data request))
-        ;; A namespace entity written here re-derives its declarations' digests in this transaction,
-        ;; as does the namespace of a declaration losing data its family owns (an attribute's replacement).
-        namespaces (into (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
-                         (dropped-definition-namespaces projection database (:tx-data request)))
-        written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
-    (cond-> request
+        derivation (namespace-derivation projection database (:tx-data request))]
+    (cond-> (update request :tx-data #(digested-calls projection %))
       ;; A transaction on a store without the bridge attributes may install
       ;; them (a publication's declarations): the members it and earlier
       ;; transactions wrote move into cells at its end, once installed.
       (not (or installed? declared?))
       (update :tx-data #(conj (vec %) [:db.fn/call vector-migration-tx projection]))
-      (seq namespaces) (update :tx-data #(conj (vec %) [:db.fn/call namespace-digests-tx projection namespaces written])))))
+      (seq derivation) (update :tx-data into derivation))))
 
 (defn- write-refusal
   "The declared value of a write that threw: the validator's refusal, a Seon
