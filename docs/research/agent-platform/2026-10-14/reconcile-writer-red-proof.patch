@@ -1,0 +1,57 @@
+diff --git a/resources/seon/tasks/seon.fn.edn b/resources/seon/tasks/seon.fn.edn
+index 719bd0e73..65c0382bf 100644
+--- a/resources/seon/tasks/seon.fn.edn
++++ b/resources/seon/tasks/seon.fn.edn
+@@ -67,4 +67,6 @@
+              :plan "`seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection` is real cost, not a flake: run alone it takes 3,938 to 4,756 ms (mean 4.34 s, 5 of 5 runs) against its 5 s bound, and 3.4 to 3.9 s inside `seon.fn-test`; the one 5,168 ms observation in a 202-test batch is the same cost plus load (see `docs/research/agent-platform/2026-10-14/flake-hunt.md` #Suspect 1: render projection test, per run). Find what the work is proportional to: the test crosses every indexed outward path of the program through the total render projection, so the cost should follow the number of distinct indexed outward paths and their rendered nodes, once each. Profile the test alone with `seon.profile/measure`, name the responsible instrumented functions (the owners are `seon.fn` for the index and `seon.render.value/prepare` for the projection), and remove repeated or whole-program work per path at the owner. Never raise the bound without a measured reason. Done when the test runs alone in under half its bound on a quiet JVM, measured on parent and change. Read `seon.fn-test/every-indexed-outward-path-crosses-its-total-render-projection`. Proof: the test itself with a measured-cost assertion through `seon.profile/measure`, to write before assignment."}
+  #:seon.task{:name "a-test-calling-a-missing-var-names-its-test"
+              :plan "A candidate that adds a test file calling a var that does not exist makes the check's throwaway JVM refuse to boot, so the red names no test: `seon.fn/assert-clean-analysis!` throws \"Static program analysis found blocking errors.\" for the `:unresolved-var` finding (`seon.fn/blocking-findings`, `seon.fn/load-refusal-finding-types`) and the boot stops before any test is selected. Observed at f87629f9b: `seon.bootstrap-test/every-reference-in-help-resolves` and `seon.bootstrap-test/help-answers-one-section-by-its-anchor` read `red-load: the throwaway JVM refused boot`, with `bootstrap_test.clj:19:40 :unresolved-var Unresolved var: bootstrap/help-section` buried in the log and no test ran (also 776a04249; `docs/research/agent-platform/2026-10-14/proof-audit.md`). A test file's unresolved var belongs to that test, not to the platform's boot: report the finding against the test (a red whose failing assertion names the var and the test) and boot with the program that loads. Done when a candidate whose only defect is a test calling a missing var boots, runs the rest, and reports that test red with the finding. Read `seon.fn/publication-findings` and `script/seon/operator.clj` `candidate-tests!`. Proof: to write before assignment."}
++ #:seon.task{:name "reconciliation-normalizes-against-one-projection"
++             :plan "`seon.fn/reconcile-tx-in` normalizes every desired entity through `seon.fn/normalized-index-entity`, which asks `seon.db/stored-collection` for each cardinality-many attribute, and each of those calls `seon.db/carried-projection` again on the same database value: 1,768 projection reads for one unchanged 169-entity file (src/seon/fn.clj on default, 2026-10-14), 2.5 s of a 2.6 s reconciliation, nearly all in `seon.db/alias!`. Normalize against the projection `reconcile-tx-in` already holds, so an unchanged population reconciles to no transaction data at a projection cost independent of its size. Read `seon.fn/reconcile-tx-in`, `seon.db/stored-collection` and `docs/research/agent-platform/2026-10-14/gemini/perf-transact.md`."}
+ ]
+diff --git a/test/seon/fn/reconcile_cost_test.clj b/test/seon/fn/reconcile_cost_test.clj
+new file mode 100644
+index 000000000..dc38edaff
+--- /dev/null
++++ b/test/seon/fn/reconcile_cost_test.clj
+@@ -0,0 +1,40 @@
++(ns seon.fn.reconcile-cost-test
++  (:require [clojure.java.io :as io]
++            [clojure.string :as str]
++            [clojure.test :refer [deftest is]]
++            [seon.db :as db]
++            [seon.fn :as functions]
++            [seon.profile :as profile]
++            [seon.test-support :as support]))
++
++(defn- unchanged-reconciliation
++  "The transaction and measured cost of reconciling `n` indexed functions
++  against the database that already holds them."
++  {:malli/schema [:=> [:cat [:int {:min 1}]] [:map [:tx :seon.schema/value] [:projections [:int {:min 0}]]]]}
++  [n]
++  (let [root (io/file "tmp" "reconcile-cost-test" (str (random-uuid)))
++        file (io/file root "sample/reconcile_cost.clj")]
++    (try
++      (.mkdirs (.getParentFile file))
++      (spit file (str "(ns sample.reconcile-cost)\n"
++                      (str/join "\n" (for [i (range n)]
++                                       (str "(defn f" i " [x] (inc x))")))
++                      "\n"))
++      (support/with-database
++       (fn [connection]
++         (let [entities (functions/program-entities {:seon.fn/roots [(.getPath root)]})]
++           (support/transacted! connection (functions/reconcile-tx (db/db connection) entities []))
++           (let [database (db/db connection)
++                 measured (profile/measure #(functions/reconcile-tx database entities []))]
++             {:tx (:seon.profile/value measured)
++              :projections (profile/calls-of measured 'seon.db/carried-projection)}))))
++      (finally (support/delete-recursively! root)))))
++
++(deftest ^{:seon/tasks #{'seon.fn/reconciliation-normalizes-against-one-projection}}
++  an-unchanged-population-reconciles-to-nothing-at-a-cost-independent-of-its-size
++  (let [small (unchanged-reconciliation 2)
++        large (unchanged-reconciliation 12)]
++    (is (= [] (:tx small)) "an unchanged population writes nothing")
++    (is (= [] (:tx large)) "an unchanged population writes nothing")
++    (is (= (:projections small) (:projections large))
++        "the projection is read once per reconciliation, never once per entity attribute")))

@@ -1,0 +1,21 @@
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -1922,10 +1922,14 @@
+        ;; speculative values the branch derives (`with`, a transaction
+        ;; function's argument) find their basis without reading the
+        ;; declaration datoms.
+-       (when-let [[canonical held] (resolved [::commit (:datahike.value/commit-id committed) @builder])]
+-         (when (:datahike.cache/connection-id (:cache-context source))
+-           (alias! (assoc (projection-cache-key source) ::builder @builder) canonical))
+-         held))
++       ;; The revision key answers first, so a hit names nothing again:
++       ;; `alias!` compares canonical keys that hold the whole declaration content.
++       (let [revision-key (when (:datahike.cache/connection-id (:cache-context source))
++                            (assoc (projection-cache-key source) ::builder @builder))]
++         (or (some-> revision-key resolved second)
++             (when-let [[canonical held] (resolved [::commit (:datahike.value/commit-id committed) @builder])]
++               (when revision-key (alias! revision-key canonical))
++               held))))
+      (cond
+       (not (declares-program? source))
+       (construction-projection database)

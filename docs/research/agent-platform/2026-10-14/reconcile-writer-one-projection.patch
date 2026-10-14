@@ -1,0 +1,80 @@
+--- a/src/seon/fn.clj
++++ b/src/seon/fn.clj
+@@ -3637,13 +3637,26 @@
+                (sort-by key print/compare-values tempids))
+          :seon.fn/index-keyword-operations keyword-operations}))))
+ 
++(defn- stored-collection-in
++  "`values` of cardinality-many `attribute` as a database whose projection is
++  `projection` stores them: `seon.db/stored-collection` over the projection the
++  caller already holds, so a whole population compares against one projection
++  read instead of one per attribute. Known issue: `seon.db/stored-collection-takes-the-projection`."
++  {:malli/schema [:=> [:cat :seon.schema/projection :keyword [:or [:sequential :seon.schema/value] [:set :seon.schema/value]]]
++                  [:or [:vector :seon.schema/value] [:set :seon.schema/value]]]}
++  [projection attribute values]
++  (if (schema.datahike/vector-attribute-in? projection attribute)
++    (vec values)
++    (set values)))
++
+ (defn- normalized-index-entity
+   "Compare stored refs by identity and anonymous components by their values;
+-  a many value as its database stores it (`seon.db/stored-collection`)."
+-  {:malli/schema [:=> [:cat :map :seon.db/database-value [:or :nil :map] [:or [:sequential :keyword] [:set :keyword]]
+-                       :seon.instrument/callable]
++  a many value as `database`, whose projection is `projection`, stores it
++  (`stored-collection-in`)."
++  {:malli/schema [:=> [:cat :map :seon.schema/projection :seon.db/database-value [:or :nil :map]
++                       [:or [:sequential :keyword] [:set :keyword]] :seon.instrument/callable]
+                   [:or :nil :map]]}
+-  [entity-shapes database entity-map identity-attributes entity]
++  [entity-shapes projection database entity-map identity-attributes entity]
+   (let [entity-identity
+         (fn [entity-map]
+           (some (fn [attribute]
+@@ -3661,7 +3674,7 @@
+                                   (reduced normalized)
+                                   (conj result normalized))))
+                             [] values)]
+-                (if (map? normalized) normalized (db/stored-collection database attribute normalized))))
++                (if (map? normalized) normalized (stored-collection-in projection attribute normalized))))
+             (normalize-map [entity-map]
+               (if (and (map? entity-map)
+                        (contains? entity-map :seon.error/at)
+@@ -3742,10 +3755,10 @@
+                    (contains? current :seon.error/operation))
+             current
+             (let [normalized-current
+-                  (normalized-index-entity entity-shapes database current
++                  (normalized-index-entity entity-shapes projection database current
+                                         identity-attributes entity)
+                   normalized-desired
+-                  (normalized-index-entity entity-shapes database entity-map
++                  (normalized-index-entity entity-shapes projection database entity-map
+                                         identity-attributes entity)
+                   refusal (some #(when (and (map? %)
+                                             (contains? % :seon.error/at)
+@@ -3905,7 +3918,8 @@
+   ;; The entity schemas' `:seon.program/partition` decides what an entity may inline:
+   ;; a ref into a data entity (a steward agent, whose runtime and turns point back)
+   ;; is written as that entity's declared identity.
+-  (let [program (program/program-attributes (db/carried-projection database))
++  (let [projection (db/carried-projection database)
++        program (program/program-attributes projection)
+         declared (db/identity-attributes database)
+         entities (reached-entities database identities omitted program)
+         entity (fn [identity] (if (:seon.error/at entities) entities (get entities identity)))]
+@@ -3947,12 +3961,12 @@
+                                      portable-member
+                                      (recur (next pending)
+                                             (conj values portable-member))))
+-                                 (db/stored-collection database attribute values)))
++                                 (stored-collection-in projection attribute values)))
+                              (reference value))
+                            (if (= :db.cardinality/many
+                                   (get-in (:schema database)
+                                           [attribute :db/cardinality]))
+-                             (db/stored-collection database attribute value)
++                             (stored-collection-in projection attribute value)
+                              value))]
+                      (if (and (map? portable)
+                               (contains? portable :seon.error/at)
