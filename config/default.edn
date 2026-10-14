@@ -419,9 +419,11 @@
  :seon.config.operator/heap-max-bytes 4294967296
 
  ; Unit: throwaway check JVMs one root runs at once; further checks queue
- ; first come, first served. Each holds a 4 GiB heap (above), so two fit a
- ; 16 GB machine beside the running default.
- :seon.config.operator/check-slots 2
+ ; first come, first served. Each holds a 4 GiB heap (above). Development
+ ; tooling, so it may exceed the 16 GB runtime budget (owner 2026-10-14);
+ ; the queue wait itself is a defect to fix, not to hide with more slots
+ ; (seon.operator/a-check-waits-for-a-slot-longer-than-it-runs).
+ :seon.config.operator/check-slots 4
 
  ; Unit: template stores one root keeps for check JVMs (one per published
  ; commit and slot, data/check/template/<sha>_slot<n>, each one fresh-boot

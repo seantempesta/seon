@@ -278,7 +278,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration. Boot
   reads each dial from the configuration it applied, never the store's value from before the reload, so a new dial exists at
   its first read. Every size, count, byte budget, heap cap, timeout and threshold is a dial whose shipped default fits
-  a 16 GB machine running many agents beside the user's work, never derived from the host's RAM: a 4 GB heap cap,
+  a 16 GB machine running many agents beside the user's work, never derived from the host's RAM (development
+  tooling that only speeds our own work, such as check JVM slots, may exceed it; runtime never does): a 4 GB heap cap,
   `seon.cache` 512 MB with live results inside it, Datahike's node cache byte-bounded (replacing its soft-referenced
   retention), 4,096 bytes inline before a blob, a 1 KB blob compression floor, storage I/O on virtual threads. A
   hardcoded policy number in code is a defect. Target (ledger DIAL-1): configuration files are read by Aero
