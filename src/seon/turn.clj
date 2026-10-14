@@ -2226,12 +2226,12 @@
 (declare attempt-t latest-answering-turn-t step-proved? prove-turn step-limit-ms)
 
 (defn- attempt-running?
-  "True when the task `handle` an agent holds runs under execution :running at its authority, main's head seen
-  from `database`, the agent's branch (`seon.task/main-head`; `database` itself on main): its own, else its
-  subject's (`seon.task/execution`). Root decides execution on main; the branch's copy is never read."
+  "True when the task `handle` an agent holds runs under execution :running on `database`, the agent's own branch:
+  its own, else its subject's (`seon.task/execution`). Root is the only writer of a chain task's execution, on the
+  chain branch, so the branch holds it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
-  (= :running (task/execution (or (task/main-head database) database) handle)))
+  (= :running (task/execution database handle)))
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose step is proved on `database`, its branch

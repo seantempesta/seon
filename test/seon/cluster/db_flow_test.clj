@@ -439,6 +439,85 @@
                     (agent/release-context! execution)))
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
+(deftest ^{:seon.test/long "One chain world: a chain fork, its first attempt's prove pass and one scripted model turn over three db<->flow passes, then a green chain's prove pass ending it done; measured 10.5 s for the first part." :seon.test/long-ms 30000}
+  a-chain-agent-makes-its-first-model-call-with-no-wake
+  ;; TASK-CHAIN S3a-2 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Work): a chain agent starts with no wake; it
+  ;; reads its task's execution on its own branch and its proofs from the task's field, so its red proof opens its
+  ;; first model turn: the scripted model is called exactly once over repeated passes
+  (binding [*space* "tq.chainfirst"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                 :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                 :seon.config.ai/model "fixture-provider"}})
+          (let [calls (atom 0)
+                handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                (swap! calls inc)
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting for root.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")}}])
+                branch (:seon.chain/branch chain)
+                agent-id (str "attempt/" (id/id [(first (:seon.task/handles chain)) 1]))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (await-on! on-branch #(when (pos? (model-turns (db/db on-branch) agent-id)) true) ::first-model-turn)
+                (pass! handle routing)
+                (pass! handle routing)
+                (is (= 1 @calls) "the scripted model is called once")
+                (is (= 1 (model-turns (db/db on-branch) agent-id)) "the agent took one model turn on the chain branch")
+                (is (empty? (db/q '[:find [?m ...] :in $ ?id :where [?g :seon.agent/id ?id] [?m :seon.message/to ?g]]
+                                  (db/db on-branch) agent-id))
+                    "with no wake addressed to it"))
+              ;; TASK-CHAIN §2.3: a chain task whose proofs are all green at its start ends :done with no model call
+              (let [green (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                       [{:seon.task/ns (symbol *space*) :seon.task/name "g" :seon.task/plan "Do g."
+                                         :seon.task/proofs #{(proof "u")}}])
+                    green-branch (:seon.chain/branch green)
+                    key (id/id [(first (:seon.task/handles green)) 1])
+                    green-agent (str "attempt/" key)]
+                (try
+                  (pass! handle routing)
+                  (let [on-green (registry/active-branch-connection {:seon.store/store store :seon.store/branch green-branch})]
+                    (is (= :done (await-on! on-green #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                                 [?a :seon.task.attempt/end ?e]]
+                                                               (db/db on-green) key)
+                                            ::green-ended))
+                        "a chain task green at its start ends done")
+                    (is (zero? (model-turns (db/db on-green) green-agent)) "with no model turn")
+                    (is (= 1 @calls) "and no model call"))
+                  (finally
+                    (when-let [child (get-in @routing [:seon.agent/children green-branch])]
+                      (doseq [started (keys (:seon.agent/started @child))]
+                        (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                      (doseq [execution (vals (:seon.agent/contexts @child))
+                              :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                        (agent/release-context! execution)))
+                    (registry/retire-branch! {:seon.store/store store :seon.store/branch green-branch}))))
+              (finally
+                (when-let [child (get-in @routing [:seon.agent/children branch])]
+                  (doseq [started (keys (:seon.agent/started @child))]
+                    (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                  (doseq [execution (vals (:seon.agent/contexts @child))
+                          :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                    (agent/release-context! execution)))
+                (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
+
 (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
   ;; accept as it stands, so it ends done with no model call and root's merge completes it
