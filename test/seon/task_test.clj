@@ -582,6 +582,36 @@
   (some-> (get (if task (step/results (db/db connection) [test-symbol] task) (step/results (db/db connection) [test-symbol])) test-symbol)
           (#(if (pos? (+ (:seon.test/fail-count %) (:seon.test/error-count %))) :red :green))))
 
+(deftest a-filed-task-becomes-a-full-chain
+  ;; TASK-CHAIN S3f-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#21-create`, From a filed task)
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           context {:seon.db/connection connection :seon.store/store store}
+           handle (task/task-handle 'tq.filed "bug")
+           _ (test-support/transacted! connection
+                                       (task/adopt-tasks-tx (db/db connection)
+                                                            [{:seon.task/ns 'tq.filed :seon.task/name "bug"
+                                                              :seon.task/plan "Fix the bug in `seon.task/chain!`."
+                                                              :seon.task/proofs '#{tq.filed/proof}}]
+                                                            #{handle} {}))
+           database (db/db connection)
+           filed (task/task-declaration database handle)
+           maps (task/from-filed database filed)
+           pulled #(db/pull % [:seon.task/plan :seon.task/proofs :seon.task/execution] [:seon.task/id handle])
+           before (pulled database)]
+       (is (= 3 (count maps)) "a filed task is a Design, a Prove and an Implement")
+       (is (= ['tq.filed "bug"] ((juxt :seon.task/ns :seon.task/name) (first maps))) "the first map has the entry's identity")
+       (is (= "## Problem\n\nFix the bug in `seon.task/chain!`." (:seon.task/plan (first maps)))
+           "a plan with no Problem section is wrapped as one")
+       (is (not (contains? (:seon.task/proofs (first maps)) 'tq.filed/proof)) "the entry's proofs are not Design's")
+       (is (= '#{tq.filed/proof} (:seon.task/proofs (last maps))) "the entry's proofs are Implement's")
+       (let [answer (task/chain! context maps)
+             on-branch (db/branch-database (db/db connection) (:seon.chain/branch answer))]
+         (is (= handle (:seon.chain/first answer)) "the chain's first task is the filed task's identity")
+         (is (= (:seon.task/plan (first maps)) (:seon.task/plan (pulled on-branch))) "the branch's first task carries the chain's content")
+         (is (= before (pulled (db/db connection))) "main's entry is unchanged until the merge"))))))
+
 (deftest a-tasks-proof-is-recorded-and-read-under-its-task
   (test-support/with-database
    (fn [connection]

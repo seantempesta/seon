@@ -826,6 +826,30 @@
     (let [opened (store/open-branch! store branch)]
       (try (f opened) (finally (store/release-branch! opened))))))
 
+(defn from-filed
+  "A filed task's chain: `filed` (a task-file entry) as the Design task, with its identity and plan, its proofs left
+  out, then the Prove template, then the Implement template carrying the entry's proofs. A plan with no `## Problem`
+  section is wrapped as one, so Design has the request to keep.
+
+  ## Example
+
+  ```clojure
+  (seon.task/chain! context (seon.task/from-filed database (seon.task/task-declaration database handle)))
+  ```"
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task-map]
+                  [:or [:vector {:min 3 :max 3} :seon.task/task-map] :seon.task/refused-error :seon.db/invalid-read-error
+                   :seon.db/pull-budget-error]]}
+  [database filed]
+  (let [[design prove implement :as templates] (map #(template database %) ['seon.step.design/template 'seon.step.prove/template 'seon.step.implement/template])
+        failure (first (filter :seon.error/at templates))
+        plan (:seon.task/plan filed)
+        problem? (some #(= "problem" (:seon.ref/anchor %)) (:seon.ref/headings (ref/document (or plan ""))))]
+    (or failure
+        [(cond-> (merge design (dissoc filed :seon.task/proofs))
+           (and plan (not problem?)) (assoc :seon.task/plan (str "## Problem\n\n" plan)))
+         prove
+         (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))])))
+
 (defn chain!
   "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch
   whose head it starts from; it still merges toward main): the first map names the chain and the branch
@@ -864,7 +888,11 @@
              handles (into #{} (map #(task-handle ns (:seon.task/name %))) entities)
              written-tasks (when-not (:seon.error/at forked)
                              (on-branch store branch
-                                        #(refusal-data (fn [] (written % [[:db.fn/call #'adopt-tasks-tx entities handles {}]])))))
+                                        ;; the first task's basis is what the branch holds under its identity: a filed
+                                        ;; task's inherited entry, which the chain's first task revises
+                                        #(let [stored (task-declaration (db/db %) first-handle)]
+                                           (refusal-data (fn [] (written % [[:db.fn/call #'adopt-tasks-tx entities handles
+                                                                             (if stored {first-handle stored} {})]]))))))
              fact (when (:db-after written-tasks)
                     (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
          (cond (:seon.error/at forked) forked
