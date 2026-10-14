@@ -1090,8 +1090,9 @@
 
 (defn- red-test-refusal
   "The refusal of a candidate whose judged results left `red-tests` not green, with the run and branch
-  `evidence` names: `:seon.source/red-on-target-error` when each is already red on the target, for root to
-  decide, else `:seon.source/red-test-error`."
+  `evidence` names (its layer, operation and message, when it names them, over the merge's):
+  `:seon.source/red-on-target-error` when each is already red on the target, for root to decide, else
+  `:seon.source/red-test-error`."
   {:malli/schema [:=> [:cat [:map [:seon.test.run/branch :seon.store/branch] [:seon.source/refused-test-run :seon.test.run/id]]
                        :seon.source/red-tests]
                   [:or :seon.source/red-test-error :seon.source/red-on-target-error]]}
@@ -1099,11 +1100,19 @@
   (let [on-target? (every? #(= :red-on-target (:seon.source/verdict %)) red-tests)]
     (seon.error.refusal/error
      (if on-target? :seon.source/red-on-target-error :seon.source/red-test-error)
-     (assoc evidence :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
-            :seon.error/message (if on-target?
-                                  "Every test the merge leaves red is already red on the target; root decides."
-                                  "A test of the named run is not green; a merge commits only when every test is.")
-            :seon.source/red-tests red-tests))))
+     (merge {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/accept-merge!
+             :seon.error/message (if on-target?
+                                   "Every test the merge leaves red is already red on the target; root decides."
+                                   "A test of the named run is not green; a merge commits only when every test is.")}
+            evidence
+            {:seon.source/red-tests red-tests}))))
+
+(defn- green-result?
+  "Whether `result` is an executed recorded result with a passing assertion and no failure or error."
+  {:malli/schema [:=> [:cat [:or :seon.test/result :seon.test/result-unknown]] :boolean]}
+  [result]
+  (boolean (and (not (:seon.error/at result)) (pos? (:seon.test/pass-count result 0))
+                (zero? (:seon.test/fail-count result 0)) (zero? (:seon.test/error-count result 0)))))
 
 (def ^:private incomplete-findings
   "The `seon.fn/contract-findings` a merge refuses: no contract, or a slot accepting anything that records no
@@ -1143,6 +1152,24 @@
   [database identities]
   (gap-symbols (contract-gaps database identities)))
 
+(defn- uncontracted-refusal
+  "The refusal of the functions `gaps` (`contract-gaps`) names, with the run, branch, layer and operation
+  `evidence` names."
+  {:malli/schema [:=> [:cat [:map [:seon.test.run/branch :seon.store/branch] [:seon.source/refused-test-run :seon.test.run/id]
+                             [:seon.error/layer :qualified-keyword] [:seon.error/operation :qualified-symbol]]
+                       :seon.source/contract-gaps]
+                  :seon.source/uncontracted-error]}
+  [evidence gaps]
+  (let [uncontracted (gap-symbols gaps)]
+    (seon.error.refusal/error :seon.source/uncontracted-error
+     (assoc evidence
+            :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
+                                     "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
+                                     ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
+                                     "schemas or named predicates, contract them on the candidate branch, run their tests and "
+                                     "request the merge again.")
+            :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps))))
+
 (defn results-verdict
   "Every refusal the recorded results in `judged` give the candidate: each of its `:seon.task/proofs` among its
   `:seon.source/members`, every member green except the `:seon.task/product` red by design
@@ -1167,10 +1194,8 @@
                  (seon.error.refusal/error :seon.source/test-evidence-error
                   (assoc evidence :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/results-verdict
                          :seon.error/message message :seon.error/offending offending)))
-        green? (fn [r] (and (not (:seon.error/at r)) (pos? (:seon.test/pass-count r 0))
-                            (zero? (:seon.test/fail-count r 0)) (zero? (:seon.test/error-count r 0))))
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
-        green (into #{} (filter #(some-> (by-sym %) green?)) members)
+        green (into #{} (filter #(some-> (by-sym %) green-result?)) members)
         designed (into #{} (filter #(some-> (by-sym %) ((requiring-resolve 'seon.test.runner/designed-red?)))) (filter (set product) members))
         unproven (vec (sort (remove members proofs)))
         not-green (vec (remove (into green designed) members))
@@ -1179,7 +1204,6 @@
         ;; run's reaching tests. The REPL admits an uncontracted sketch with a warning; merge is where the
         ;; contract becomes required. Macros and host-bound declarations carry no arity contract.
         gaps (contract-gaps candidate delta)
-        uncontracted (gap-symbols gaps)
         uncovered (vec (for [[a f] delta :when (= :seon.fn/sym a)
                              :when (:db/id (db/pull candidate [:db/id] [a f]))
                              :when (not-any? (into green designed) (fn/gate-sets {:seon.db/db candidate :seon.fn/seeds #{f}}))] f))
@@ -1187,19 +1211,58 @@
     (cond-> []
       (or (empty? proofs) (seq unproven)) (conj (refuse "Every proof must be a member of the named run." unproven))
       (seq red-tests) (conj (red-test-refusal evidence red-tests))
-      (seq uncontracted)
-      (conj (seon.error.refusal/error :seon.source/uncontracted-error
-             (assoc evidence :seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/results-verdict
-                    :seon.error/message (str "Every function a merge carries declares a complete :malli/schema, private ones included, "
-                                             "with no unjustified :any or :some slot: :seon.source/uncontracted names those that do not and "
-                                             ":seon.source/contract-gaps each gap's position. Declare their data shapes as registered "
-                                             "schemas or named predicates, contract them on the candidate branch, run their tests and "
-                                             "request the merge again.")
-                    :seon.error/offending uncontracted :seon.source/uncontracted uncontracted :seon.source/contract-gaps gaps)))
+      (seq gaps)
+      (conj (uncontracted-refusal (assoc evidence :seon.error/layer :seon.source/merge
+                                         :seon.error/operation 'seon.cluster.source/results-verdict)
+                                  gaps))
       (seq uncovered) (conj (refuse "A replaced function reaches no green test of the named run." uncovered))
       (:seon.error/at dangling) (conj dangling)
       (and (not (:seon.error/at dangling)) (seq dangling))
       (conj (refuse "The merged program names tasks the destination has not admitted." dangling)))))
+
+(defn done-refusals
+  "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
+  of its `:seon.task/proofs` without a current result (an empty set never finishes) or not green; each other
+  member red here that `:seon.source/green-on-target` holds green on main, and each red test defined or changed
+  on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
+  `:seon.source/next-proofs` (none on the last task); and every function of the identities `branch` holds with a
+  contract gap (`contract-gaps`). A function no test reaches is not refused. Empty only for done. Runs no test;
+  reads `branch` for contracts only.
+
+  ## Example
+
+  ```clojure
+  (seon.cluster.source/done-refusals branch judged)
+  ```"
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/judged] :seon.source/refusals]}
+  [branch {members :seon.source/members results :seon.source/results proofs :seon.task/proofs
+           next-proofs :seon.source/next-proofs on-main :seon.source/green-on-target delta :seon.program/identities
+           run-id :seon.test.run/id s :seon.test.run/branch}]
+  (let [evidence {:seon.test.run/branch s :seon.source/refused-test-run run-id
+                  :seon.error/layer :seon.source/done :seon.error/operation 'seon.cluster.source/done-refusals}
+        red? (requiring-resolve 'seon.test.runner/red-result?)
+        by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
+        on-main (set on-main)
+        unknown (vec (sort (remove by-sym proofs)))
+        red-proofs (filterv #(some-> (by-sym %) green-result? not) proofs)
+        others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
+        regressed (filterv on-main others)
+        stray (filterv #(and (delta [:seon.test/sym %]) (not (on-main %))) others)
+        verdicts (fn [tests] (red-test-verdicts run-id results tests (set tests)))
+        gaps (contract-gaps branch delta)]
+    (cond-> []
+      (or (empty? proofs) (seq unknown))
+      (conj (seon.error.refusal/error :seon.source/test-evidence-error
+             (assoc evidence :seon.error/message "Every proof needs a current recorded result; an empty proof set never finishes."
+                    :seon.error/offending unknown)))
+      (seq (into red-proofs regressed))
+      (conj (red-test-refusal (assoc evidence :seon.error/message "A proof, or a test main holds green, is not green here.")
+                              (verdicts (into red-proofs regressed))))
+      (seq stray)
+      (conj (seon.error.refusal/error :seon.source/stray-red-error
+             (assoc evidence :seon.error/message "A test defined or changed on the branch is red and is not one of the next task's proofs."
+                    :seon.source/red-tests (verdicts stray))))
+      (seq gaps) (conj (uncontracted-refusal evidence gaps)))))
 
 (defn merge-verdict
   "Every refusal of the candidate `prepared` (`prepare-merge!`'s value) names, judged from what `main`, the

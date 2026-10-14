@@ -438,3 +438,57 @@
               (into #{} (map (juxt :seon.fn/sym :seon.fn.contract/position :seon.fn.contract/finding))
                     (source/contract-gaps database identities)))
            "each gap names its function, position and finding")))))
+
+(defn- recorded
+  "A recorded result of `test-symbol`, green or red."
+  [test-symbol green?]
+  {:seon.test/sym test-symbol :seon.test/pass-count (if green? 1 0) :seon.test/fail-count (if green? 0 1)
+   :seon.test/error-count 0 :seon.test/run-basis-t 1 :seon.test/run-at #inst "2026-10-14"})
+
+(deftest done-refusals-judges-every-task-alike
+  ;; the done rule, for every task: a function of the judged results, the next task's proofs and what main holds
+  ;; green; it runs no test, and the branch is read only for the changed functions' contracts
+  (test-support/with-database
+   (fn [connection]
+     (test-support/declare-source!
+      connection 'tq.done
+      (str "(ns tq.done)\n"
+           "(defn stub {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+           "(defn loose {:malli/schema [:=> [:cat :any] :int]} [x] 1)\n"))
+     (let [branch (db/db connection)
+           base {:seon.source/members #{'tq.done-test/proof} :seon.task/proofs #{'tq.done-test/proof}
+                 :seon.source/results [(recorded 'tq.done-test/proof true)]
+                 :seon.program/identities #{} :seon.test.run/id "run-1" :seon.test.run/branch :tq-done}
+           red (fn [judged test-symbol & more]
+                 (-> judged (update :seon.source/members conj test-symbol)
+                     (update :seon.source/results conj (recorded test-symbol false))
+                     (as-> j (reduce (fn [j [k v]] (assoc j k v)) j (partition 2 more)))))
+           new-red (fn [judged] (-> (red judged 'tq.done-test/new)
+                                    (update :seon.program/identities conj [:seon.test/sym 'tq.done-test/new])))]
+       (doseq [[row judged expected]
+               [["own proof green: done" base []]
+                ["own proof red: refused"
+                 (assoc base :seon.source/results [(recorded 'tq.done-test/proof false)]) [:seon.source/red-test-error]]
+                ["own proof with no result: refused" (assoc base :seon.source/results []) [:seon.source/test-evidence-error]]
+                ["an empty proof set never finishes" (assoc base :seon.task/proofs #{}) [:seon.source/test-evidence-error]]
+                ["a branch-new red outside the next proofs: stray"
+                 (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/stray-red-error]]
+                ["the same red among the next proofs: done"
+                 (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/new}) []]
+                ["the terminal task with a branch-new red: refused" (new-red base) [:seon.source/stray-red-error]]
+                ["a test main holds green, red here: refused"
+                 (red base 'tq.done-test/existing :seon.source/green-on-target #{'tq.done-test/existing})
+                 [:seon.source/red-test-error]]
+                ["the same red as a next proof, a row added to an existing table: done"
+                 (red base 'tq.done-test/existing :seon.source/green-on-target #{'tq.done-test/existing}
+                      :seon.source/next-proofs #{'tq.done-test/existing})
+                 []]
+                ["main holding no result is not a regression" (red base 'tq.done-test/existing) []]
+                ["a new function with an :any slot: refused"
+                 (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/loose]) [:seon.source/uncontracted-error]]
+                ["a contracted stub no test reaches: done"
+                 (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/stub]) []]]]
+         (is (= expected (mapv :seon.error/type (source/done-refusals branch judged))) row))
+       (is (= [['tq.done-test/new]]
+              (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))
+           "the stray refusal names the red test")))))
