@@ -1028,6 +1028,31 @@
          (is (= before-misses (misses)) "reading it again derives nothing")
          (is (= before-entries (held-entries)) "and holds no second entry"))))))
 
+;; CLASS: a projection derived from a held one shares every member it did not
+;; rebuild, by identity, yet was charged its whole population: on default
+;; 2026-10-14, 45 projections sharing 98-100% of each member were charged
+;; 10.9 MB each, 95% of the 512 MB budget, while evicting 20 of them freed
+;; 1 MB each. The small kinds beside them (behavior digests, reach nodes) were
+;; evicted between eval requests, so a chain agent's block derived 3,005
+;; behavior digests again on every call (2.5 s, 6.7 GB).
+(deftest a-derived-projection-is-charged-the-forms-it-does-not-share
+  (test-support/with-database
+   (fn [connection]
+     (let [kinds [:seon.db/projection :seon.db/value-projection]
+           held-bytes #(reduce + (map (fn [kind] (get-in (seon.cache/status) [:seon.cache/kinds kind :seon.cache/bytes] 0))
+                                      kinds))
+           base (db/carried-projection (db/db connection))
+           before (held-bytes)
+           _ (test-support/transacted! connection [[:db.fn/call #'turn/row-tx {}
+                                                    {:seon.schema/key ::charged-unshared :seon.schema/form ":int"}]])
+           derived (db/carried-projection (db/db connection))
+           charged (- (held-bytes) before)]
+       (is (contains? (:seon.schema.projection/forms derived) ::charged-unshared) "the write derived its own projection")
+       (is (< 100 (count (:seon.schema.projection/forms base)))
+           "the base is large enough that a whole charge differs from a derived one")
+       (is (< 0 charged (quot (* schema/projection-bytes-per-form (count (:seon.schema.projection/forms base))) 4))
+           "it is charged its own spines and the forms it rebuilt, not the population it shares with its base")))))
+
 ;; CLASS: a per-read whole-program derivation during boot. Before a boot
 ;; instance names its commit, an uncommitted value's builder identity was
 ;; derived on every projection read: a transaction function comparing stored

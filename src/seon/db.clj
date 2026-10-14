@@ -1494,11 +1494,22 @@
     :seon.schema/expected-value :seon.schema/projection
     :seon.schema/refused-value {:seon.db/operation operation}}) :seon.error/type :seon.db/invalid-read-error))
 
+(def ^:private derived-projection-bytes
+  "The bytes a projection derived from a held base keeps alive beyond the forms it rebuilt: the members' own map
+  spines, which a replacement path-copies (fitted by evicting held derived projections and reading the live heap
+  after collection)."
+  1000000)
+
 (defn- projection-bytes
-  "The estimated bytes a retained projection keeps alive, by its forms."
-  {:malli/schema [:=> [:cat :seon.schema/projection] :int]}
-  [projection]
-  (* schema/projection-bytes-per-form (count (:seon.schema.projection/forms projection))))
+  "The estimated bytes `projection` keeps alive beyond `base`, the projection it was derived from: a derivation
+  from a base rebuilds only what differs and shares the rest, so its own spines (`derived-projection-bytes`) and
+  its forms not identical to `base`'s; every form for an empty base."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/projection] :int]}
+  [base projection]
+  (let [shared (:seon.schema.projection/forms base {})
+        unshared (count (remove (fn [[k form]] (identical? form (get shared k))) (:seon.schema.projection/forms projection)))]
+    (cond-> (* schema/projection-bytes-per-form unshared)
+      (seq shared) (+ derived-projection-bytes))))
 
 (defn- digest-bytes
   "Nothing beyond the entry itself: a digest string, which `seon.cache` weighs by its entry."
@@ -1646,20 +1657,23 @@
   content and the loaded `builder` and named by each of `aliases`. A miss
   takes the projection a speculative value of the same content derived
   (`speculative-projection`), else derives under `kind` by `derivation`, by
-  default from its `nearest-base`."
+  default from its `nearest-base`, and is charged the forms it does not share
+  with the projection the delay `base` holds, the one it derives from
+  (`projection-bytes`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]
                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
                         [:sequential :seon.schema/value]]
                    :seon.schema/projection]
                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
-                        [:sequential :seon.schema/value] :seon.instrument/callable]
+                        [:sequential :seon.schema/value] :seon.instrument/callable
+                        [:fn clojure.core/delay?]]
                    :seon.schema/projection]]}
   ([builder database] (content-projection builder database ::projection []))
   ([builder database kind aliases]
-   (content-projection builder database kind aliases
-                       #(schema/load-projection database (nearest-base builder database))))
-  ([builder database kind aliases derivation]
+   (let [base (delay (nearest-base builder database))]
+     (content-projection builder database kind aliases #(schema/load-projection database @base) base)))
+  ([builder database kind aliases derivation base]
    (let [content-key [::declaration-content builder (declaration-content-key database)]
          held (some #(when (seon.cache/present % content-key) %) [::projection ::value-projection])
          ;; The content names itself in the alias kind, which answers the
@@ -1667,7 +1681,7 @@
          ;; then holds that one key object, compared by identity.
          [canonical-kind canonical-key :as canonical]
          (alias! content-key [(or held kind) content-key])
-         projection (seon.cache/lookup canonical-kind canonical-key projection-bytes derivation)]
+         projection (seon.cache/lookup canonical-kind canonical-key #(projection-bytes @base %) derivation)]
      (run! #(alias! % canonical) aliases)
      projection)))
 
@@ -1904,7 +1918,8 @@
             (content-projection builder after ::value-projection
                                 [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]
                                 #(or (schema/advance-projection before after base written)
-                                     (schema/load-projection after base))))))))
+                                     (schema/load-projection after base))
+                                (delay base)))))))
 
 (defn- hold-committed-projection!
   "Hold the committed value's already derived projection under its commit.
