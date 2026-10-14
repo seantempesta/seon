@@ -51,6 +51,12 @@ dependencies; the merge commit's hard-coded co-author; our lanes working as `:ou
 two functions named `publish!` with different meanings (`seon.merge/publish!` writes files, `seon.cluster.source/publish!`
 reads the checkout into a cluster).
 
+**Overlay rebuild (owner answers 2026-10-14, hybrid `../research/agent-platform/2026-10-14/overlay-hybrid.md`, 723bce2e1).**
+A branch's program context derives from its previous frozen context by the changed definitions plus the value rows,
+macros and interpreted callers reaching them; an unchanged init runs once per content of itself and its callees; removals
+and macros rebuild fully until counted frequent; an init's refusal arrives in the defining reply. Phases 1-3 (lane
+overlay-impl, Opus) before S3a; phase 4 (defining reply) with S3a-2.
+
 **Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
 context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
 lanes, restarts and resumes them (owner 2026-10-14), so a restart never waits for every lane; a dependency or fork bump
