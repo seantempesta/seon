@@ -105,27 +105,18 @@
   #{:seon.repl/errors :seon.repl/diagnostics :seon.repl/value :seon.repl/error})
 
 (defn- def-note
-  "Explain a temporary def from the evaluation's own record: its source is a
-  `def` form and its outcome a Var, whose recorded class names the surface
-  that evaluated it (`sci.lang.Var`: the agent's SCI context; `clojure.lang.Var`:
-  a host Var in `ns-name`, MCP JVM mode). A failed evaluation, an unreadable
-  source or any other value earns no note."
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] [:maybe :symbol]] [:maybe :string]]}
-  [source value-class ns-name]
-  (when (and (string? source) (#{"sci.lang.Var" "clojure.lang.Var"} value-class))
-    (let [form (try (edn/read-string source) (catch Throwable _ nil))]
-      (when (and (seq? form) (= 'def (first form)) (symbol? (second form)))
-        (if (= "sci.lang.Var" value-class)
-          (str (second form)
-               " lives only in your SCI context and is lost when the JVM"
-               " restarts. Nothing defined with def is persisted, atoms"
-               " included; they are for temporary data-modeling experiments."
-               " To keep something, write a function, schema, or test, or"
-               " transact the data into the database.")
-          (str (second form) " is the host Var " (or ns-name 'user) "/" (second form)
-               " and lasts until the JVM restarts. Nothing defined with def is"
-               " persisted, atoms included. To keep something, write a function,"
-               " schema, or test, or transact the data into the database."))))))
+  "Explain private state from the batch's own decision: the Vars the evaluation's
+  batch classed as the agent's private state live only in its SCI context."
+  {:malli/schema [:=> [:cat [:maybe [:set :qualified-symbol]]] [:maybe :string]]}
+  [private]
+  (when (seq private)
+    (str (str/join ", " (sort (map name private)))
+         (if (next private) " live" " lives")
+         " only in your SCI context and is lost when the JVM"
+         " restarts. Nothing defined with def is persisted, atoms"
+         " included; they are for temporary data-modeling experiments."
+         " To keep something, write a function, schema, or test, or"
+         " transact the data into the database.")))
 
 (defn value-text
   "Return the saved shown text unchanged."
@@ -178,7 +169,6 @@
   are `:findings`; nothing is printed above or around the map."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:vector [:tuple :qualified-keyword :string]]]}
   [{output :seon.cluster.eval/output
-    source :seon.cluster.eval/source
     handle :seon.repl/handle
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
@@ -216,7 +206,7 @@
                 ;; ALREADY TEXT: the value renderer bounded it once.
                 :seon.repl/errors (:seon.repl/errors emission)
                 :seon.repl/note (when-not failed?
-                                  (some-> (def-note source (:seon.eval/value-class emission) prompt-ns) print/string-literal))
+                                  (some-> (def-note (:seon.eval/private emission)) print/string-literal))
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
                 :seon.repl/ms (when (and (int? duration)
@@ -298,7 +288,7 @@
   []
   (let [{measures ::measures named ::named} @bounds]
     (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct))
-          (concat measures named [:seon.eval/value-class]))))
+          (concat measures named [:seon.eval/private]))))
 
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its

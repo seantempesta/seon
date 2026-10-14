@@ -1,11 +1,13 @@
 (ns seon.repl-test
   "The REPL response grammar: what an agent reads back for one form."
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as check]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
+            [seon.mcp :as mcp]
             [seon.repl :as repl]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
@@ -135,11 +137,10 @@
            (select-keys (support/reply response) [:seon.repl/out :seon.repl/value]))
         "output is its own key, never folded into the value")))
 
-(deftest a-def-note-follows-the-evaluations-surface-and-outcome
-  ;; THE CLASS: the note is decided from the evaluation's recorded outcome
-  ;; (the class of the Var it returned), never from the source text alone:
-  ;; an SCI def is told it lives in SCI, a host def names its Var, a failed
-  ;; def and a definer that becomes a program entity carry none.
+(deftest a-def-note-follows-the-batchs-decision-and-the-outcome
+  ;; THE CLASS: the note is decided from the Vars the evaluation's batch classed
+  ;; private (`:seon.eval/private`), never from the source text: a failed
+  ;; evaluation and an evaluation with nothing private carry none.
   (let [reply (fn [source extra]
                 (support/reply
                  (repl/response (merge {:seon.cluster.eval/source source
@@ -148,26 +149,43 @@
                                         :seon.eval/shown "nil"}
                                        extra))))
         note (fn [source extra] (:seon.repl/note (reply source extra)))]
-    (testing "an SCI def keeps the SCI note"
-      (let [text (note "(def secret 99)" {:seon.eval/value-class "sci.lang.Var"})]
+    (testing "a private Var keeps the SCI note"
+      (let [text (note "(def secret 99)" {:seon.eval/private #{'my.agents.juniper/secret}})]
         (is (str/starts-with? text "secret lives only in your SCI context"))
         (is (str/ends-with? text "transact the data into the database."))))
-    (testing "a JVM def names its host Var and its lifetime"
-      (let [text (note "(def secret 99)" {:seon.eval/value-class "clojure.lang.Var"})]
-        (is (str/starts-with? text "secret is the host Var my.agents.juniper/secret"))
-        (is (str/includes? text "lasts until the JVM restarts"))
-        (is (not (str/includes? text "SCI")))))
-    (testing "a failed def carries no note"
-      (is (not (contains? (reply "(def secret (nope))" {:seon.cluster.eval/error "Unable to resolve symbol"})
+    (testing "several private Vars are named in one note"
+      (is (str/starts-with? (note "(do (def a 1) (def b 2))" {:seon.eval/private #{'my.agents.juniper/a 'my.agents.juniper/b}})
+                            "a, b live only in your SCI context")))
+    (testing "a failed evaluation carries no note"
+      (is (not (contains? (reply "(def secret (nope))" {:seon.cluster.eval/error "Unable to resolve symbol"
+                                                         :seon.eval/private #{'my.agents.juniper/secret}})
                           :seon.repl/note))))
-    (testing "a def with no recorded Var outcome, and a defn's value, carry none"
+    (testing "nothing classed private, whatever the text, carries none"
       (is (not (contains? (reply "(def secret 99)" {}) :seon.repl/note)))
-      (is (not (contains? (reply "(defn hello [] 42)" {:seon.eval/value-class "sci.lang.Var"})
-                          :seon.repl/note))))
+      (is (not (contains? (reply "(defn hello [] 42)" {}) :seon.repl/note))))
     (testing "the note sits after :out and before :ns, and before the shown value, in the one order"
       (is (= [:seon.repl/note :seon.repl/value]
              (filter #{:seon.repl/value :seon.repl/note :seon.repl/out :seon.repl/ns :seon.repl/ms}
-                     (keys (reply "(def secret 99)" {:seon.eval/value-class "sci.lang.Var"}))))))))
+                     (keys (reply "(def secret 99)" {:seon.eval/private #{'my.agents.juniper/secret}}))))))))
+
+;; the batch classes a def of a function as program and any other value as the
+;; agent's private state; the note follows that decision, not the form's text
+(deftest the-def-note-follows-what-the-batch-classed-private
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id _]
+     (let [eval! (fn [code]
+                   (support/mcp-replies
+                    (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                              "arguments" {"code" code "agent" agent-id
+                                                                           "cluster" running}})))))]
+       (eval! "(ns def-note.probe)")
+       (doseq [[form noted?] [["(def k 42)" true]
+                              ["(def f (fn [] 1))" false]
+                              ["(def g #(inc %))" false]]]
+         (let [note (:seon.repl/note (first (eval! form)))]
+           (is (= noted? (some? note)) form)
+           (when noted?
+             (is (str/starts-with? note "k lives only in your SCI context") form))))))))
 
 (deftest an-error-response-carries-no-value
   (let [response (repl/response {:seon.cluster.eval/source "(/ 1 0)"

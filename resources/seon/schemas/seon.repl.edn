@@ -66,6 +66,7 @@
              [:seon.repl/key :seon.repl/key]
              [:seon.eval/renderer {:optional true} :seon.eval/renderer]
              [:seon.eval/shown {:optional true} :seon.eval/shown]
+             [:seon.eval/private {:optional true} :seon.eval/private]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]
              [:seon.sci.admit/print-node

@@ -159,7 +159,7 @@
       ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
                                               :seon.eval/elisions :seon.eval/full :seon.eval/budget-override
-                                              :seon.eval/value-class
+                                              :seon.eval/value-class :seon.eval/private
                                               :seon.eval/uncontracted :seon.eval/uncontracted-count
                                               :seon.eval/contract-gaps :seon.eval/auto-required]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
@@ -1119,6 +1119,7 @@
    :seon.eval/full
    :seon.eval/budget-override
    :seon.eval/value-class
+   :seon.eval/private
    :seon.eval/uncontracted
    :seon.eval/uncontracted-count
    :seon.eval/contract-gaps
@@ -4433,6 +4434,7 @@
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
                                              (get uncontracted ordinal)
+                                             (turn.batch/private-fact entry)
                                              (code-evidence entry)
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)

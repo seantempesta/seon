@@ -731,12 +731,20 @@
         (sci/eval-form ctx (apply list 'clojure.core/require (map #(list 'quote %) named)))))
     named))
 
+(defn private-fact
+  "`:seon.eval/private`: the Vars this entry's change classed as the agent's private
+  state (`write-entity`), the one decision the reply's note reads; nil when none."
+  {:malli/schema [:=> [:cat :seon.batch/entry] [:maybe [:map [:seon.eval/private [:set :qualified-symbol]]]]]}
+  [{private :seon.batch/private}]
+  (when (seq private)
+    {:seon.eval/private (into #{} (map :seon.batch/sym) private)}))
+
 (defn- entry-evaluation
   "One settled entry's terminal facts, as its run records them and its reply
   prints them."
   {:malli/schema [:=> [:cat :seon.batch/entry] :seon.turn.loop/evaluation]}
   [{:seon.batch/keys [shown shown-map error facts-error duration-ms] :as entry}]
-  (cond-> {}
+  (cond-> (or (private-fact entry) {})
     ;; the reply's :ms, as an SCI evaluation records it
     duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
     shown (assoc :seon.eval/shown shown)
