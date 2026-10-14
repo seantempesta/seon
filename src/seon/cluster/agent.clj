@@ -78,6 +78,9 @@
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
             [seon.turn :as turn]
+            [seon.context :as context]
+            [seon.fn]
+            [seon.test.runner :as runner]
             [seon.config :as config]
             [seon.db :as db]
             ;; loaded for agents: the root opening names (seon.cluster.status/agents {})
@@ -1797,6 +1800,70 @@
                     (if (:seon.error/at read) (reduced read) (merge-with into facts read))))
                 empty-read (sort chains)))))
 
+(defn- chain-ends
+  "The finished attempts root advances past, read on main `database` among the store's `branches`: on each chain's
+  `:seon.task/next` path, every attempt that ended :done holding no outcome, whose task has a next (a last task's
+  done goes to the merge), with its chain branch, task and end commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
+                  [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
+                            [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]]]]}
+  [database branches]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
+    (when (map? chains) (throw (ex-info (:seon.error/message chains "db<->flow could not read the chains.") chains)))
+    (into [] (mapcat (fn [[branch first-handle]]
+                       (when-let [head (when (contains? branches branch) (db/branch-database database branch))]
+                         (try
+                           (let [rows (db/q '[:find ?k ?h ?c :in $ [?h ...]
+                                              :where [?t :seon.task/id ?h] [?t :seon.task/next _] [?a :seon.task/attempt-of ?t]
+                                              [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end :done]
+                                              [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])]
+                                            head (task/chain-handles head first-handle))]
+                             (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)))
+                             (for [[k h c] (sort rows)]
+                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned h :seon.task.attempt/commit c}))
+                           (finally (source/release! [head]))))))
+          (sort chains))))
+
+(defn- done-judged
+  "What the done rule (`seon.cluster.source/done-refusals`) judges for chain task `handle` at `at-end`, its chain
+  `branch` at the attempt's end commit: its proofs field, the next task's, the tests the branch defines or changes
+  and those reaching the functions it changed since its fork (`seon.fn/gate-sets`), their current results there
+  (`seon.context/current-results`), those main `database` holds green at its own reach, and the newest run they
+  came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle]
+                  :seon.source/judged]}
+  [database at-end branch handle]
+  (let [task (db/pull at-end [:seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
+        proofs (set (:seon.task/proofs task))
+        next-proofs (set (get-in task [:seon.task/next :seon.task/proofs]))
+        base-commit (registry/base-commit-id at-end branch)
+        base (when base-commit (db/commit-database at-end base-commit))
+        delta (if base
+                (try (program/changed-identities (db/basis-t base) at-end source/merge-bound) (finally (source/release! [base])))
+                #{})
+        of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
+        reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
+        members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))
+        results (when members (context/current-results at-end members))
+        held (when (vector? results) (context/current-results database members))
+        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held])
+        newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
+        run-id (when (vector? results)
+                 (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
+                     (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] at-end))))]
+    (when failure (throw (ex-info (:seon.error/message failure "db<->flow could not build a chain task's judgment.") failure)))
+    (when-not (string? run-id)
+      (throw (ex-info "A chain task ended done on a branch that recorded no test run."
+                      {:seon.error/message "A chain task ended done on a branch that recorded no test run."
+                       :seon.task/assigned handle :seon.chain/branch branch})))
+    (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs proofs
+               :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
+        (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
+        (seq held) (assoc :seon.source/green-on-target
+                          (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0)))
+                                          (map :seon.test/sym))
+                                held)))))
+
 (defn launch-facts
   "What db<->flow reads on main `database` before it plans.
   The ready leaves (every need merged) split by obligations on main, which
@@ -2031,6 +2098,30 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
   [handle {agent-id :seon.agent/id branch :seon.chain/branch intent :seon.task/execution}]
   (start-branch-flow! handle (acquire-context! handle nil {:seon.agent/branch branch}) agent-id (or intent :running))
+  nil)
+
+(defn- advance-chains!
+  "Advance every chain past its finished attempts (`chain-ends`) through cluster `handle`: when the done rule
+  (`seon.cluster.source/done-refusals`) refuses nothing over the chain branch at the attempt's end commit, ONE
+  transaction on the chain branch through a connection held for this action, decided at the writer
+  (`seon.task/advance-tx`), so a repeat writes nothing. A refused done stays for root."
+  {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
+  [handle]
+  (let [store (handle-store handle)
+        database @(:seon.db/connection handle)]
+    (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
+            (chain-ends database (registry/branches store))]
+      (on-branch store branch
+                 (fn [on-chain]
+                   (let [at-end (db/commit-database (db/db on-chain) commit)]
+                     (when-not at-end
+                       (throw (ex-info "The chain branch retains no end commit of its finished attempt."
+                                       {:seon.error/message "The chain branch retains no end commit of its finished attempt."
+                                        :seon.task/assignment key :seon.chain/branch branch})))
+                     (try
+                       (when (empty? (source/done-refusals at-end (done-judged database at-end branch h)))
+                         (write! on-chain [[:db.fn/call #'task/advance-tx key]]))
+                       (finally (source/release! [at-end]))))))))
   nil)
 
 (defn- entry-registry
@@ -2438,6 +2529,8 @@
             derived (lifecycle!)
             derived (if (applied? :stop derived) (lifecycle!) derived)]
         (when (applied? :merge derived) (lifecycle!))))
+    ;; a chain advances on its branch before the plan reads it, so the plan starts its next task in this pass
+    (advance-chains! handle)
     (let [db @connection
           ;; the branches read after the lifecycle: a chain branch this pass deleted is never read
           facts (launch-facts db (registry/branches (handle-store handle)))

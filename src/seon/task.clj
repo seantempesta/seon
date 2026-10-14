@@ -707,6 +707,38 @@
     (when (read-error assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
     (into [] (keep (fn [[a current]] (when (not= current revision) [:db/add a :seon.task/revision revision]))) assigned)))
 
+(defn- flowing-members
+  "The content members a chain's next task takes from the finished one at each advance under `projection`: the
+  declaration's members less identity, the owned ones (`:seon.task/owned`) and the tree's task refs."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
+  [projection]
+  (let [kept (into #{:seon.task/ns :seon.task/name} (concat (owned-members projection) tree-attributes))]
+    (into [] (comp (map first) (remove kept)) (declaration-members projection))))
+
+(defn advance-tx
+  "The transaction data advancing a chain past its finished attempt `key` at `database`, the chain branch: the
+  attempt's outcome `:done`, and the task its task's `:seon.task/next` names, through the task writer, taking the
+  finished task's flowing members (the finished value wins; references derived again) and `:execution :running`.
+  An attempt already holding an outcome, or none at all, answers none, so a repeated advance writes nothing.
+  Invoke as `[:db.fn/call seon.task/advance-tx key]`, decided over the value the writer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] :seon.db/tx-data]}
+  [database key]
+  (let [row (db/pull database [:db/id :seon.task/outcome
+                               {:seon.task/attempt-of [:seon.task/id {:seon.task/next [:seon.task/id]}]}]
+                     [:seon.task/assignment key])
+        finished (get-in row [:seon.task/attempt-of :seon.task/id])
+        after (get-in row [:seon.task/attempt-of :seon.task/next :seon.task/id])
+        stored (when after (stored-tasks database :seon.task/id #{finished after}))]
+    (when-let [failure (some read-error [row stored])] (throw (ex-info (:seon.error/message failure) failure)))
+    (if (or (nil? (:db/id row)) (:seon.task/outcome row))
+      []
+      (let [projection (db/carried-projection database)
+            current (when after (declaration projection (stored after)))
+            flowed (merge current (select-keys (declaration projection (stored finished)) (flowing-members projection)))]
+        (cond-> [[:db/add (:db/id row) :seon.task/outcome :done]]
+          after (into (adopt-tasks-tx database [flowed] #{after} {after current}))
+          after (conj [:db/add [:seon.task/id after] :seon.task/execution :running]))))))
+
 (defn- task-call
   "The task writer's call for `row` against `basis` on `connection`'s branch,
   or [] when that branch already holds its declaration; a revision
@@ -775,7 +807,7 @@
                   (< (inc i) n) (assoc :seon.task/next (- (+ i 2))))))
           tasks)))
 
-(defn- chain-handles
+(defn chain-handles
   "The handles of the chain whose first task is `handle` at `database`, in order along `:seon.task/next`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.task/handles]}
   [database handle]

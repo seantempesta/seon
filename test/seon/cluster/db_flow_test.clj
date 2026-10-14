@@ -518,6 +518,100 @@
                     (agent/release-context! execution)))
                 (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
 
+(defn- chain-attempts
+  "Every attempt row on `database` of the chain tasks `handles`: task, attempt number, agent, end, outcome."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.task/handle]]
+                  [:set [:tuple :seon.task/handle :int :seon.agent/id :keyword :keyword]]]}
+  [database handles]
+  (set (db/q '[:find ?h ?n ?id ?e ?o :in $ [?h ...]
+               :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]
+               [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]
+               [(get-else $ ?a :seon.task.attempt/end :open) ?e] [(get-else $ ?a :seon.task/outcome :none) ?o]]
+             database handles)))
+
+(deftest ^{:seon.test/long "One two-task chain world: task one's start test run and done end, the advance, task two's start test run and one scripted model turn over five db<->flow passes." :seon.test/long-ms 30000}
+  a-two-task-chain-reaches-its-second-model-call
+  ;; TASK-CHAIN S3a-3 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Advance): task one ends done, root advances
+  ;; the chain on its branch (`seon.task/advance-tx`) and the same pass starts task two's NEW agent there, whose red
+  ;; proof opens its first model call with no hand act; a repeated pass starts nothing again and writes no task datom
+  (binding [*space* "tq.chainadvance"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c-2 (clojure.test/is (= 1 2)))\n")
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                 :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                 :seon.config.ai/model "fixture-provider"}})
+          (let [calls (atom 0)
+                plan "Do c with `seon.task/advance-tx`."
+                handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                (swap! calls inc)
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting for root.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan plan
+                                     :seon.task/proofs #{(proof "u")}}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored"
+                                     :seon.task/proofs #{(proof "c-2")}}])
+                branch (:seon.chain/branch chain)
+                [one two] (:seon.task/handles chain)
+                key-one (id/id [one 1])
+                agent-one (str "attempt/" key-one)
+                agent-two (str "attempt/" (id/id [two 1]))
+                head #(db/branch-database (db/db connection) branch)
+                pulled #(db/pull (head) [:seon.task/plan :seon.task/references :seon.task/proofs :seon.task/execution]
+                                 [:seon.task/id two])]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                         [?a :seon.task.attempt/end ?e]]
+                                                       (db/db on-branch) key-one)
+                                        ::one-ended))
+                    "task one ends done")
+                (pass! handle routing)
+                (is (= :done (db/q '[:find ?o . :in $ ?k :where [?a :seon.task/assignment ?k] [?a :seon.task/outcome ?o]]
+                                   (head) key-one))
+                    "root records its attempt's outcome :done on the chain branch")
+                (let [{p :seon.task/plan r :seon.task/references proofs :seon.task/proofs e :seon.task/execution} (pulled)]
+                  (is (= :running e) "the next task runs")
+                  (is (= plan p) "the plan flows to the next task")
+                  (is (= #{'seon.task/advance-tx} (set r)) "with its references derived again")
+                  (is (= #{(proof "c-2")} (set proofs)) "the next task keeps its own proofs: owned, they never flow"))
+                (is (= 1 (await-on! on-branch #(when (pos? (model-turns (db/db on-branch) agent-two)) @calls) ::two-called))
+                    "task two's agent makes its first model call with no hand act")
+                (let [datoms (count (db/datoms (head) :eavt [:seon.task/id two]))]
+                  (pass! handle routing)
+                  (pass! handle routing)
+                  (is (= datoms (count (db/datoms (head) :eavt [:seon.task/id two]))) "a repeated pass writes no task datom")
+                  (is (= [] (task/advance-tx (head) key-one)) "a repeated advance answers no transaction data"))
+                (let [rows (chain-attempts (head) [one two])]
+                  (is (= #{[one 1 agent-one :done :done]} (into #{} (filter (comp #{one} first)) rows))
+                      "task one never starts again")
+                  (is (= #{agent-one agent-two} (into #{} (map #(nth % 2)) rows))
+                      "exactly two distinct agents share the one branch"))
+                (is (zero? (model-turns (head) agent-one)) "task one took no model turn")
+                (is (= 1 @calls) "the scripted model was called once, by task two"))
+              (finally
+                (when-let [child (get-in @routing [:seon.agent/children branch])]
+                  (doseq [started (keys (:seon.agent/started @child))]
+                    (agent/stop-flow! {:seon.agent/id started :seon.agent/routing child}))
+                  (doseq [execution (vals (:seon.agent/contexts @child))
+                          :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+                    (agent/release-context! execution)))
+                (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))))
+
 (deftest a-prove-step-whose-product-main-holds-merges-and-its-successor-forks-main
   ;; the product, the successor's proof red by design, is on main before the Prove step forks: its merge would
   ;; accept as it stands, so it ends done with no model call and root's merge completes it
