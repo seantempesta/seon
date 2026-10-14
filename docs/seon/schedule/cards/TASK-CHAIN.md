@@ -298,8 +298,15 @@ sentence, never a long first line (`seon.ref/brief` emitted a 150-token one for 
 prompt the model sees is about 6.0k tokens because the value printer's budget cuts it (91 elisions, function and
 deftest sources cut mid-form). With every must-read as a doc view the raw block falls to about 7.1k tokens (-41%),
 about 5.0k (-58%) when nested references are only the contract's schemas; the shown prompt stays about 6k, but
-elisions fall from 91 to 30, so the agent sees whole values instead of cut ones. Help today is about 2.1k tokens;
-doc views of its references add an estimated 0.6–2.5k per request, measured in S1d.
+elisions fall from 91 to 30, so the agent sees whole values instead of cut ones. Help today is about 2.1k tokens; doc views of its references add an estimated 0.6–2.5k per request, measured in S1d.
+
+**Context assembly costs what changed.** Every unit of the context (the block's sections, each reference's doc view,
+each history unit, help) is cached in `seon.cache` by its content digest and by what it read
+(`seon.db/read-evidence-current?`), so a turn re-renders only the units whose inputs changed, usually the evaluation
+just made and the block sections it touched. Assembling a turn's context therefore costs in proportion to those
+changes, not to the history or the references. Measured today: `seon.context/model-context` 382 ms and 898 MB for
+one agent (`doc-view-measure.md`), the block alone 43 ms: far above that, cause under measurement
+(`context-and-first-request-cost.md`).
 
 ## 4. Templates and their proofs (version 1; S5's one-task live runs revise them)
 
@@ -496,7 +503,9 @@ for real test execution.
 | S3a | Root reads chains: chain facts, `branch-database` reads cached by head, a chain's own `next` path only, attempts on the chain branch, a new agent per task, `attempt-running?` on the branch, the advance (§2.5) | `seon.cluster.db-flow-test/a-two-task-chain-reaches-its-second-model-call`: after `chain!` alone, task one ends done by the scripted model, task two's first model call happens with zero hand acts, three distinct agent ids would appear across three tasks, no chain task or attempt on main, an unrelated `:running` task on main is not launched on the chain | Opus | — |
 | S3b | The final merge of a multi-attempt branch (§2.6) | `seon.cluster.merge-test/a-chain-merges-once-and-closes-every-attempt`: before acceptance main holds no chain task; one acceptance admits all three tasks and every earlier code change; `my.root/merge-requests` is empty after; publication commits once; branch, base and chain fact are gone; a second pass is a no-op; a conflicting second chain reports its conflict and keeps its branch | Opus | — |
 | S3c | Bail, abandon and restart (§2.7, §2.8) | `seon.cluster.db-flow-test/a-bail-goes-to-root-once`: a `:capped` end leaves the branch and chain fact, the task `:held`, exactly one problem task after repeated wakes, no successor started, nothing merged; plus a restart table over the durable stopping points of §2.8 | Sonnet (after S3a) | — |
-| S3d | Doc views (§3a): references render at brief depth; must-reads stop rendering whole | `seon.context-test/a-referenced-function-shows-its-doc-view`: the block shows docstring, contract and schema descriptions, no source, and the read form; the raw block's tokens and the shown prompt's elision count measured before and after on one task (not the shown tokens, which the printer's budget holds near 6k either way) | Sonnet (after S3a) | — |
+| S3d | Doc views (§3a): references render at brief depth; must-reads stop rendering whole | `seon.context-test/a-referenced-function-shows-its-doc-view`: the block shows docstring, contract and schema descriptions, no source, and the read form; the raw block's tokens and the shown prompt's elision count measured before and after on one task (not the shown tokens, which the printer's budget holds near 6k either way); and a `seon.profile/measure`
+assertion that a second turn's `seon.context/model-context`, after one new evaluation, costs in proportion to that
+one unit (cache hits for every other unit), not to the history | Sonnet (after S3a) | — |
 | S4 | Template predicates and deftests (§4), after S2a fixes the task input | `seon.step-test/design-handoff` and `prove-handoff`, each its table (rows from `design-stage-table.md` and `prove-stage-table.md`) plus the bound-task assertion | Sonnet | — |
 | S5 | Live, one task at a time: a one-task chain of Design on a real defect, graded against its predicate; then Prove from a hand-written plan; then Implement from hand-written proofs. A one-task chain of Design or Prove is not mergeable on purpose (stubs, red tests): it is graded and retained, never merged. Revise instructions and predicates from what each run shows | each run's record: hand acts, calls, tokens, and whether the predicate judged the work right | Opus run lane | — |
 | S6 | Run 26: the full Design → Prove → Implement chain, live DeepSeek | 0 hand acts after `chain!`, one merge, the defect fixed | Opus run lane | — |
