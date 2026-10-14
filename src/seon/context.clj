@@ -191,21 +191,28 @@
   {:seon.fn/sym :seon.context/functions :seon.schema/key :seon.context/schemas
    :seon.test/sym :seon.context/tests :seon.task/sym :seon.context/tasks})
 
+(defn- by-family
+  "The declaration `identities` shown on `database` by family, in name order, each name one level
+  (`seon.ref/brief`): its summary and the form that reads it, never its content; a name `database` no longer
+  declares shows as its problem. Families are absent when empty."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] [:or :seon.context/merged :seon.error/value]]}
+  [database identities]
+  (let [shown (reduce (fn [shown [attribute value]]
+                        (if-let [family (merged-families attribute)]
+                          (update shown family (fnil conj []) (ref/brief database value))
+                          shown))
+                      {} (sort-by (comp str second) identities))]
+    (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))
+
 (defn- merged
-  "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family, each
-  name one level (`seon.ref/brief`): its summary and the form that reads it, never its content. Families are
-  absent when empty."
+  "What main's merge `commit` moved (`seon.cluster.source/merge-accepted`), shown on `database` by family
+  (`by-family`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id] [:or :seon.context/merged :seon.error/value]]}
   [database commit]
   (let [accepted (source/merge-accepted (db/branch-connection database (get-in database [:config :branch])) commit)]
     (if (:seon.error/at accepted)
       accepted
-      (let [shown (reduce (fn [shown [attribute value]]
-                            (if-let [family (merged-families attribute)]
-                              (update shown family (fnil conj []) (ref/brief database value))
-                              shown))
-                          {} (sort-by (comp str second) (:seon.program/identities accepted)))]
-        (or (some #(when (:seon.error/at %) %) (mapcat val shown)) shown)))))
+      (by-family database (:seon.program/identities accepted)))))
 
 (defn- step-before
   "The step `sym` the held task needs, as its chain shows it on `database`: its kind and, once main merged an
@@ -352,6 +359,7 @@
     (or (some #(when (:seon.error/at %) %) [owed following previous delta reached results held head])
         (cond-> (assoc owed :seon.task/product product :seon.context/chained chained?
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
+          (set? delta) (assoc :seon.program/identities delta)
           judged (assoc :seon.source/judged (assoc judged :seon.program/identities delta :seon.test.run/id run-id
                                                    :seon.test.run/branch (get-in database [:config :branch])))))))
 
@@ -444,6 +452,44 @@
         (turn/previous-ending-namespace database eid))
       (some-> (:seon.task/sym held) namespace symbol)))
 
+(defn- model-usage
+  "The model calls agent `agent-id` made on `database` (its turns that called a model) and their tokens."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or [:map [:seon.task/calls :seon.task/calls] [:seon.task/prompt-tokens :seon.task/prompt-tokens]
+                        [:seon.task/completion-tokens :seon.task/completion-tokens]]
+                   :seon.error/value]]}
+  [database agent-id]
+  (let [attempts (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
+                         :in $ ?agent-id
+                         :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
+                       database agent-id)
+        total #(transduce (keep (comp % second)) + 0 attempts)]
+    (if (:seon.error/at attempts)
+      attempts
+      {:seon.task/calls (count (into #{} (map first) attempts))
+       :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
+       :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)})))
+
+(defn- earlier-attempts
+  "The attempts of task `handle` on `database` other than agent `agent-id`'s, by number, one entry each: its
+  number, end, outcome and reason when it holds them, and the model calls its agent made (`model-usage`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id] [:or :seon.context/attempts :seon.error/value]]}
+  [database handle agent-id]
+  (let [rows (db/q '[:find [(pull ?a [:seon.task.attempt/number :seon.task.attempt/end :seon.task/outcome :seon.task/reason
+                                      {:seon.task/agent [:seon.agent/id]}]) ...]
+                     :in $ ?h :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]]
+                   database handle)]
+    (if (:seon.error/at rows)
+      rows
+      (let [shown (into [] (comp (remove #(= agent-id (get-in % [:seon.task/agent :seon.agent/id])))
+                                 (map (fn [row]
+                                        (let [usage (model-usage database (get-in row [:seon.task/agent :seon.agent/id]))]
+                                          (if (:seon.error/at usage)
+                                            usage
+                                            (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage)))))))
+                        (sort-by :seon.task.attempt/number rows))]
+        (or (some #(when (:seon.error/at %) %) shown) shown)))))
+
 (defn- branch-end-summary
   "What the agent `agent-id` did on `branch-db` toward task `sym`: its model calls and tokens and its proofs'
   counts and red proofs; an error when a read refuses."
@@ -455,15 +501,9 @@
                    :seon.error/value]]}
   [branch-db agent-id sym]
   (let [proven (when sym (proofs branch-db sym))
-        attempts (db/q '[:find ?turn (pull ?attempt [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens])
-                         :in $ ?agent-id
-                         :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts ?attempt]]
-                       branch-db agent-id)
-        total #(transduce (keep (comp % second)) + 0 attempts)]
-    (or (some #(when (:seon.error/at %) %) [proven attempts])
-        (cond-> {:seon.task/calls (count (into #{} (map first) attempts))
-                 :seon.task/prompt-tokens (total :seon.ai.usage/prompt-tokens)
-                 :seon.task/completion-tokens (total :seon.ai.usage/completion-tokens)}
+        usage (model-usage branch-db agent-id)]
+    (or (some #(when (:seon.error/at %) %) [proven usage])
+        (cond-> usage
           proven (assoc :seon.task/proof-counts (:seon.context/counts proven)
                         :seon.task/red-proofs (into [] (comp (filter #(= :red (:seon.context/proof-status %))) (map :seon.test/sym))
                                                     (:seon.context/proof-list proven)))))))
@@ -576,7 +616,9 @@
   "The held task's sections for `agent-id` on `database`, its branch: the effective task (`seon.task/effective`) by
   handle, symbol, goal and its step's instructions; the chain it is a step of (`chain`); its
   proofs, each placed once with its resolution (its source) beside its status; its step; the latest send-back;
-  and every other reference it makes, resolved. Empty when it holds none.
+  the task's earlier attempts, one entry each (`earlier-attempts`); every declaration the branch changed since its
+  merge base, by family, each name with the form that reads it (`by-family`), so a rerun sees its earlier work and
+  its scratch; and every other reference it makes, resolved. Empty when it holds none.
 
   ## Costs
 
@@ -592,11 +634,14 @@
             verdict (step-verdict database agent-id)
             sent-back (send-backs database (:seon.task/id held))
             steps (chain database (:seon.task/id held))
+            earlier (earlier-attempts database (:seon.task/id held) agent-id)
+            changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
+                      (by-family database (:seon.program/identities verdict)))
             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
             reads (when-not (:seon.error/at proven) (task-references database held proof-names))
             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
             others (into [] (remove #(contains? resolution (:seon.ref/name %))) reads)]
-        (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps] reads))
+        (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps earlier changes] reads))
             (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/plan :seon.task/instructions])}
               steps (assoc :seon.context/chain steps)
               proven (assoc :seon.context/proofs
@@ -606,6 +651,8 @@
                              (assoc (step-section verdict)
                                     :seon.context/start (step-start database held)))
               (seq sent-back) (assoc :seon.context/send-backs sent-back)
+              (seq earlier) (assoc :seon.context/attempts earlier)
+              (seq changes) (assoc :seon.context/changes changes)
               (seq others) (assoc :seon.context/must-reads others)))))))
 
 (defn current-state
@@ -671,7 +718,7 @@
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/chain :seon.context/proofs :seon.context/step :seon.context/send-backs :seon.context/attempts :seon.context/changes :seon.context/must-reads :seon.context/cost :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)
     (:seon.context/must-reads block) (update :seon.context/must-reads (partial mapv #(must-read-ai block %)))))
 

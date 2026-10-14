@@ -29,6 +29,14 @@
                        [:seon.context/after {:optional true} :seon.context/after]]
                :send-backs [:vector {:description "The latest send-back to the held task: the step that sent it back and the reason its attempt recorded (seon.context/send-backs); absent when none was sent."}
                             [:map [:seon.task/sym :seon.task/sym] [:seon.task.attempt/reason :seon.task.attempt/reason]]]
+               :attempt [:map {:description "One earlier attempt of the held task, as a rerun reads it: its number, how it ended, root's outcome and reason, and the model calls its agent made. Producer: seon.context/earlier-attempts."}
+                         [:seon.task.attempt/number :seon.task.attempt/number]
+                         [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                         [:seon.task/outcome {:optional true} :seon.task/outcome]
+                         [:seon.task/reason {:optional true} :seon.task/reason]
+                         [:seon.task/calls :seon.task/calls]]
+               :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
+               :changes [:and {:description "Every declaration the agent's branch changed since its task's merge base, by family, each name one level with the form that reads it (seon.context/by-family): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!). Absent when nothing changed."} :seon.context/merged]
                :turns
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
@@ -61,7 +69,8 @@
                                   [:seon.context/head :seon.context/head]
                                   [:seon.context/chained {:optional true :description "True when :seon.task/next links the task into a chain: seon.context/step-status judges it by seon.cluster.source/done-refusals, any other by seon.cluster.source/results-verdict."} :boolean]
                                   [:seon.context/candidate :seon.db/database-value] [:seon.context/main :seon.db/database-value]
-                                  [:seon.source/judged {:optional true :description "Absent while the branch has recorded no run to judge."} :seon.source/judged]]
+                                  [:seon.source/judged {:optional true :description "Absent while the branch has recorded no run to judge."} :seon.source/judged]
+                                  [:seon.program/identities {:optional true :description "The declarations the branch changed since the task's merge base (seon.context/change)."} :seon.program/identity-set]]
                :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals) for a chain's task, else by its merge's preview (seon.cluster.source/results-verdict): done exactly when it refuses nothing. Producer: seon.context/step-status."}
                              [:seon.task/status [:enum :done :working]]
                              [:seon.source/refusals :seon.source/refusals]]
@@ -88,6 +97,8 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
+                [:seon.context/attempts {:optional true} :seon.context/attempts]
+                [:seon.context/changes {:optional true} :seon.context/changes]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]]
                :current-state
                [:map {:description "The current-state block's data, derived at each model call from stored facts and never stored; sections are absent when empty."
@@ -97,6 +108,8 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
+                [:seon.context/attempts {:optional true} :seon.context/attempts]
+                [:seon.context/changes {:optional true} :seon.context/changes]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]
@@ -117,6 +130,8 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/step {:optional true} :seon.context/step]
                 [:seon.context/send-backs {:optional true} :seon.context/send-backs]
+                [:seon.context/attempts {:optional true} :seon.context/attempts]
+                [:seon.context/changes {:optional true} :seon.context/changes]
                 [:seon.context/must-reads {:optional true} [:vector :seon.context/must-read-view]]
                 [:seon.context/cost {:optional true} :seon.context/cost]
                 [:seon.context/unread {:optional true} :seon.context/unread]

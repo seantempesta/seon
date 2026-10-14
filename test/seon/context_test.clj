@@ -733,3 +733,52 @@
            "the block's Prove step offers the owner's namespace, then the test namespace its instructions name")
        (is (= {:seon.render/operations ['(in-ns 'tq.cs)]} (start "Add a row for the empty input."))
            "instructions naming no test offer only the owner's namespace")))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup, an earlier attempt's assignment and end, one eval request with its test step, and one read of its block."
+           :seon.test/long-ms 30000}
+  a-rerun-attempts-block-shows-the-earlier-attempt-and-the-branchs-changes
+  ;; TASK-CHAIN §2.7: root runs a held task again (`my.root/run!`) on the branch its capped attempt left; the new
+  ;; attempt's block shows that attempt (its number, end, outcome, reason and model calls) and every declaration the
+  ;; branch changed since its fork, by name with the form that reads it, so the agent sees its earlier work and its
+  ;; scratch without reading again
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "rerun-" (seon.id/id))
+           earlier (str "rerun-earlier-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" (get-in (db/db connection) [:config :branch]) 'user
+                                        (:seon.cluster/name (test-support/execution-handle nil))]])
+           _ (test-support/declare-source! connection 'tq.ra
+                                           (str "(ns tq.ra (:require [clojure.test :refer [deftest is]]))\n"
+                                                "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                                "(deftest area-test (is (= 25 (area 5))))\n")
+                                           "test")
+           [first-task] (linked-chain! connection [{:seon.task/ns 'tq.ra :seon.task/name "implement" :seon.task/plan "Square."
+                                                    :seon.task/instructions "Make area square." :seon.task/proofs #{'tq.ra/area-test}}])
+           {branch :seon.store/branch target :seon.db/connection} (test-support/own-branch-agent! running agent-id "(ns tq.ra)")
+           context-source (test-support/running-cluster running)
+           assign! #(task/assign! {:seon.agent/context-source context-source :seon.db/connection connection
+                                   :seon.task/assigned first-task :seon.task/agent [:seon.agent/id %] :seon.task/branch branch})
+           ;; the earlier attempt's agent, on main and on the branch it worked
+           earlier-tx (agent/creation-tx {:seon.agent/id earlier :seon.ns/name 'user :seon.agent/branch branch
+                                          :seon.cluster/name (:seon.cluster/name (test-support/execution-handle nil))})
+           _ (test-support/transacted! connection earlier-tx)
+           _ (test-support/transacted! target earlier-tx)
+           first-attempt (assign! earlier)
+           capped (seon.id/id [first-task 1])
+           ;; the earlier attempt capped and root bailed it (`seon.cluster.agent/bail-chain!`), then ran the task again
+           _ (test-support/transacted! connection [[:db/add [:seon.task/assignment capped] :seon.task.attempt/end :capped]])
+           _ (test-support/transacted! target [[:db/add [:seon.task/assignment capped] :seon.task.attempt/end :capped]
+                                               [:db.fn/call #'task/hold-tx capped "The attempt ended :capped."]])
+           second-attempt (assign! agent-id)]
+       (is (= [nil nil] (mapv :seon.error/type [first-attempt second-attempt])) "both attempts are assigned")
+       (evaluate running agent-id (str "(in-ns 'tq.ra)\n(defn squared {:malli/schema [:=> [:cat :int] :int]} [r] (* r r))\n"
+                                       "(def scratch 1)"))
+       (let [state (block running agent-id)
+             changed (into #{} (comp (mapcat val) (map :seon.ref/name)) (:seon.context/changes state))]
+         (is (= [{:seon.task.attempt/number 1 :seon.task.attempt/end :capped :seon.task/outcome :closed
+                  :seon.task/reason "The attempt ended :capped." :seon.task/calls 0}]
+                (:seon.context/attempts state))
+             "the earlier attempt, one entry: its number, end, outcome, reason and model calls")
+         (is (every? changed ['tq.ra/squared 'tq.ra/scratch]) "the branch's new definitions, scratch included")
+         (is (every? #(seq (:seon.render/operations %)) (mapcat val (:seon.context/changes state)))
+             "each with the form that reads it"))))))
