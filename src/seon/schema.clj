@@ -2667,8 +2667,13 @@
    Predicate bindings are those of the population, as a build binds them: a
    binding whose symbol only a replaced or removed definition named is dropped
    after one scan of the population, which runs only when such a symbol
-   exists. A changed unqualified key is a bootstrap definition every compile
-   sees, so it derives the whole build instead."
+   exists. A supplied binding that replaces a held one, or that no held
+   binding has (a branch context's SCI Var for a predicate it holds apart,
+   [[with-bound-predicates]]), changes every declaration and contract whose
+   form names it: they seed the same reverse closure, found by one scan of
+   the population that runs only when a supplied binding changed. A changed
+   unqualified key is a bootstrap definition every compile sees, so it
+   derives the whole build instead."
   {:malli/schema
    [:=> [:cat :seon.error/operation :map :map :map :map] :map]}
   [operation projection forms function-contracts
@@ -2695,6 +2700,11 @@
         (apply set/union (declaration-changes old-function-admissions function-admissions))
         export-changes (set-changes old-exports artifact-exports)
         old-predicates (predicate-functions-in projection)
+        rebound (into #{}
+                      (keep (fn [[predicate bound]]
+                              (when-not (identical? bound (get old-predicates predicate))
+                                predicate)))
+                      predicate-functions)
         replaced-definitions
         (concat (keep #(get old-forms %) (into changed-keys removed-keys))
                 (keep #(get old-contracts %) (into changed-fns removed-fns)))
@@ -2722,7 +2732,15 @@
                                old-predicates
                                (when in-use-symbols dropped-symbols))
                        predicate-functions)
-                new-symbols)]
+                new-symbols)
+        names-rebound? (fn [form] (some rebound (predicate-symbols-in form)))
+        rebound-keys (if (seq rebound)
+                       (into #{} (keep (fn [[k form]] (when (names-rebound? form) k))) forms)
+                       #{})
+        rebound-fns (if (seq rebound)
+                      (into #{} (keep (fn [[sym form]] (when (names-rebound? form) sym)))
+                            function-contracts)
+                      #{})]
     (cond
       (and (empty? changed-keys) (empty? removed-keys)
            (empty? changed-fns) (empty? removed-fns)
@@ -2730,7 +2748,7 @@
            (empty? export-changes) (= predicate-functions old-predicates))
       projection
 
-      (some #(not (qualified-keyword? %)) (into changed-keys removed-keys))
+      (some #(not (qualified-keyword? %)) (-> changed-keys (into removed-keys) (into rebound-keys)))
       (build-projection forms function-contracts
                         {:seon.schema/schema-admissions schema-admissions
                          :seon.schema/function-admissions function-admissions
@@ -2772,13 +2790,14 @@
                     (dependent-schema-keys
                      {:seon.schema.projection/reverse-schema-dependencies
                       reverse-schema-dependencies}
-                     (-> changed-keys (into removed-keys)
+                     (-> changed-keys (into removed-keys) (into rebound-keys)
                          (into (filter keyword?) schema-admission-changes)))
                     removed-keys)
             affected-fns
             (reduce disj
                     (-> (function-dependents-of projection (into affected-keys removed-keys))
                         (into changed-fns)
+                        (into rebound-fns)
                         (into (filter symbol?) function-admission-changes))
                     removed-fns)
             retained
@@ -2886,6 +2905,33 @@
                                (map :seon.schema/key))
                          (render-declarations-in candidate (keys forms)))))))
         (with-compiled-cache candidate function-products)))))
+
+(defn with-bound-predicates
+  "`projection` with `bindings` as the callables of those predicate symbols.
+
+   Bindings `projection` already holds answer `projection` itself. Otherwise
+   the declarations and contracts naming a rebound predicate recompile
+   ([[projection-with-declarations]]), retained in `projection`'s own holder
+   by `bindings`, so one base and one set of bindings derive once."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/projection :seon.schema/projection]
+               [:seon.schema/predicate-functions
+                [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]]
+    :seon.schema/projection]}
+  [projection bindings]
+  (let [held (predicate-functions-in projection)]
+    (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
+      projection
+      (projection-cache-value
+       projection [::bound-predicates bindings]
+       #(projection-with-declarations
+         'seon.schema/with-bound-predicates projection
+         (:seon.schema.projection/forms projection)
+         (get projection :seon.schema.projection/function-contracts {})
+         (assoc (population-options projection)
+                :seon.schema/predicate-functions (merge held bindings)
+                :seon.schema/admission? false
+                :seon.schema/validate-render-contracts? false))))))
 
 (defn- projection-entities
   "Join attribute ranges, retaining historical values for duplicate refusal."

@@ -1499,8 +1499,8 @@
                      (concat (keys (:seon.schema.projection/forms projection))
                              (keys (:seon.schema.projection/function-contracts projection))))))))
 
-(deftest ^{:seon.test/long "Seven full and incremental packaged-population projections, then both committed projection loads."
-           :seon.test/long-ms 10000}
+(deftest ^{:seon.test/long "Ten full and incremental packaged-population projections, then both committed projection loads."
+           :seon.test/long-ms 16000}
   an-incremental-projection-equals-its-full-build
   (test-support/with-database
    (fn [connection]
@@ -1581,6 +1581,36 @@
                [:agent-readmission replaced] projection forms contracts
                (assoc-in options [:seon.schema/schema-admissions replaced]
                          {:seon.schema.admission/source :agent}))
+              ;; A supplied binding replacing a held one: the key naming
+              ;; the predicate and its referrers recompile with it.
+              (let [[rebound-key predicate]
+                    (first (keep (fn [schema-key]
+                                   (when-let [predicate (first (sort (#'schema/predicate-symbols-in
+                                                                       (get forms schema-key))))]
+                                     [schema-key predicate]))
+                                 referenced))
+                    held (get (:seon.schema/predicate-functions options) predicate)]
+                (compare-derivations
+                 [:rebound-predicate rebound-key predicate] projection forms contracts
+                 (assoc-in options [:seon.schema/predicate-functions predicate]
+                           (fn [value] (held value)))))
+              ;; A binding no held binding and no Var has, named only by an
+              ;; inline contract; then that binding replaced.
+              (let [contract [:=> [:cat [:fn {:error/message "must be held"
+                                              :gen/elements [0]}
+                                         'bp.inline-predicate/held?]]
+                              :boolean]
+                    target (assoc contracts 'bp.inline-predicate/takes contract)
+                    bound (fn [binding]
+                            (assoc-in options [:seon.schema/predicate-functions
+                                               'bp.inline-predicate/held?] binding))
+                    first-derivation
+                    (compare-derivations
+                     [:new-inline-predicate] projection forms target (bound (fn [_] true)))]
+                (compare-derivations
+                 [:rebound-inline-predicate] (:projection first-derivation) forms target
+                 (bound (fn [_] false)))
+                first-derivation)
               (compare-derivations
                [:undeclared-reference] projection
                (assoc forms ::undeclared-referrer [:vector ::never-declared])
@@ -1608,6 +1638,24 @@
            (is (= (comparable-projection full) (comparable-projection derived)))
            (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
            (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
+
+(deftest a-rebound-predicate-recompiles-the-keys-naming-it
+  ;; a retained compiled entry kept the predicate it was compiled with
+  (let [options {:seon.schema/admission? false
+                 :seon.schema/validate-render-contracts? false}
+        base (schema/build-projection
+              {:t/k [:fn {:error/message "must be p" :gen/elements [1]} 't/p?]
+               :t/r [:map [:a :t/k]]}
+              {}
+              (assoc options :seon.schema/predicate-functions {'t/p? (fn [_] true)}))
+        rebound (schema/build-projection
+                 (:seon.schema.projection/forms base) {}
+                 (assoc options
+                        :seon.schema/projection base
+                        :seon.schema/predicate-functions {'t/p? (fn [_] false)}))
+        valid? #(m/validate :t/r {:a 1} {:registry (:seon.schema.projection/registry %)})]
+    (is (= [true false] [(valid? base) (valid? rebound)])
+        "the referrer validates with the supplied binding")))
 
 (deftest a-declaration-write-reprojects-only-its-declarations
   (test-support/with-database
