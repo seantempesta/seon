@@ -25,6 +25,46 @@ Prove → Implement for bug fixes and new features alike. Its slices (TASK-CHAIN
 which describes the superseded copies design. Implementation follows TASK-CHAIN §7 (S1 started 2026-10-14); after S3a the three stages develop in parallel with
 live runs.
 
+**Triage and schedule, 2026-10-14 late (root; the order to follow after compaction).**
+
+*In flight (live agents):* S1a rename preparation (dry run only; root gives the go for phase 2 inside the restart
+batch; note `docs/research/agent-platform/2026-10-14/s1a-rename-prep.md`); help cache keyed by read evidence
+(`seon.bootstrap/help-references-follow-the-program-they-cite`); held-value retention design
+(`held-value-retention.md`); proof audit of ten recent commits run red at their parents (`proof-audit.md`); the
+Datahike fork's store-id error (`seon.db/node-not-found-carries-a-store-id-not-the-store`, fork commit on
+`seon/overlay-file-frontend` above 62209ee6).
+
+*Next restart batch (root opens it once S1a's preparation is checked and no lane holds its files):* (1) S1a rename
+phase 2 (TASK-CHAIN §7), with reset; (2) the GC fork bump (Konserve b4b896f, Datahike 62209ee6 plus the store-id
+commit; `gc-one-enumeration.patch`, measured -33% wall, -65% allocation); (3) after default runs e748f08c2's check
+path, commit the `io.github.nextjournal/markdown` removal (`drop-nextjournal-markdown.patch`); live already-committed
+fixes needing the restart: 66de34302 (check JVMs never collect), f87629f9b (help as Markdown), 776a04249
+(`my.edit/text`), 130526a8b, 9925cd944. After the restart: one stale-template check confirms no collection receipt;
+the sentinel with repeated samples (it measured single samples; the "warm regression" was run-to-run variation,
+`warm-request-regression.md`).
+
+*Then, before S1b:* the bulk tier once on the restarted default; classify every red by the commit that turned it red
+(stored runs, `bin/seon check --at`); file every untracked red (known untracked: ten `seon.effect-test` vars,
+`seon.edit-test` odd-map pair, `my.edit-test/public-entries-declare-resolvable-io-capabilities`,
+`seon.cluster.turn-test/a-model-request-is-help-own-exchanges-and-the-block-last`,
+`seon.sci.supplied-database-test/own-record-reads-supply-the-same-database-and-agent-as-explicit-calls`,
+`seon.test.accretion-test/source-harvest-keeps-refusal-render-contracts-coherent` over its bound at 19 s); delete or
+fix by the standing order (fix broken and surviving; skip what TASK-CHAIN deletes).
+
+*Then TASK-CHAIN S1b → S1c → S1d-2 → S2 → S3a, serial; S4b stage lanes in parallel after S3a* (§7). The Prove
+prototype (Prove followed by a held Implement, TASK-CHAIN §4) runs as soon as the platform allows, like Design run 1.
+
+*Process defects found 2026-10-14 (now in the lane preamble):* lanes must record a red run on HEAD before the fix
+(several did not: audited above); a commit message file is per lane (`978f7122c` carries the wrong title; correct
+message in its git note); no lane catches an exception to turn a failure into a value outside CLAUDE.md's entrant
+boundaries (the catch in `seon.test-support/reply`, 130526a8b, is a fence: task
+`seon.test-support/tests-read-the-evaluations-recorded-data-not-printed-text`, design first).
+
+*Beside the chain (design done, slices pending):* the errors cut E2→E3 (restart batch)→E4a→E4b→E6 (`errors-cut-plan.md`;
+E2 must convert `seon.sci.kernel/failure-value`'s stamp check, 80e9cc030 guards blame); held-value retention (after its
+design lands). *Owner question open:* what are the untracked `src-clm/` (a Python project) and `docs/prds/next-turn/`
+(both present before this session)? Left untouched.
+
 **Owner decisions, 2026-10-13 late (supersede the order below where they differ).** (1) Next milestone: a LIVE DeepSeek chain now — `seon.task/chain!` over Define → Design → Prove → Implement on one filed, local Seon defect with a red proof (not a messaging subject); fix what it breaks; acceptance tests continue beside it. (2) The user loop (M13 done in cde025f68; M16, I1–I3, Survey approval) comes after chains run reliably. (3) Right after the first live chain: one set of deftests per task — `:seon.task/proofs` is the one stored set, `:seon/tasks` tags only feed it at ingestion, `:seon.task/product` is deleted, one reader replaces `seon.task/obligations`. (4) Lanes decide spec gaps by the rules, record the decision in the owning spec and commit, and continue. Since this section's measurement: b74344579 (proved = results at current reach), 86430115b (base context pure), cde025f68 (M13: held task opens no turn; execution read at main's head) landed; default runs cde025f68.
 
 **Where we are (measured at HEAD 6a421d96e, check runs abb00f0b2cd6 and eb451aab3a4d on throwaway JVMs).**
