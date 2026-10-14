@@ -523,3 +523,88 @@ run 4 measured.
 - `my.root/merge-requests` lists a running attempt (Broken first 1).
 - `seon.context/attempts` should carry each earlier attempt's last comment or next step.
 - `seon.context/changes` should show an unmapped name as a deletion, not `:unresolved`.
+
+## Run 5: fourth Implement attempt, refused at launch
+
+Lane `s5-run-5` acted as root, 17:12-17:16 UTC. Default pid 1083 booted at 17:10:44 UTC from
+`data/source/7e2546112915…` (HEAD `7e2546112`), with `:seon.boot/missing-layers []`. No lane held any claim.
+
+**Broken first.**
+
+0. **The attempt was never written, so no agent ever started. There were 0 model calls.**
+   - 17:12:50: `(my.root/run! {:seon.task/assigned "c12a57408f49"})` in SCI as root answered `{:seon.task/execution
+     :running}` in 90 ms. Its reply's test step on main cost 1.40 GB and 756 ms, the fourth time this has been seen.
+   - In the same pass (17:12:50.041), fault `482f7508e3d9…` was raised: `seon.cluster.agent/start-claimed-flow!`,
+     "start-flow! refused: no such agent in facts.", `:seon.agent/id "attempt/64b05977e3eb"`. The call path was
+     `run-pass!` → `apply-actions!` → `start-chain-attempt!` → `start-branch-flow!` → `start-flow!`.
+   - `attempt/64b05977e3eb` is `(seon.id/id ["c12a57408f49" 4])`. The pass planned attempt 4.
+   - Neither main nor the chain branch holds that agent or attempt `64b05977e3eb`.
+     `(seon.task/attempt-tx head "c12a57408f49" "attempt/64b05977e3eb" :chain-f1f6dc8e6652)` answers `[]`.
+   - **Cause:** two readers disagree on whether an attempt is open.
+     - `seon.task/next-attempt` treats the latest attempt as open when it has no `:seon.task.attempt/end`. On the
+       branch it answers `[3 "68d331fe623f"]`, which is attempt 3 itself.
+     - Run 4b's `my.root/close!` wrote `:seon.task/outcome :closed` and a reason on attempt 3, but no
+       `:seon.task.attempt/end`.
+     - So `seon.task/attempt-tx` finds attempt 3's row and answers `[]` ("already written").
+       `seon.cluster.agent/write-chain-attempt!` then writes neither the agent's creation nor the attempt.
+     - The planner reads attempt 3 as ended (by its outcome) and goes on to start attempt 4's graph for an agent
+       nobody created.
+   - Owner: one definition of "open attempt".
+     - Either `seon.task/next-attempt` reads the outcome, as the planner does: `:closed`, `:done` and `:merged` are
+       ended.
+     - Or `my.root/close!` writes the attempt's end as every other end does.
+     - Run 4b's hand act 1 (the stalled reply stage) is what led to this. Fixing that stall at its producer
+       (attempts end by themselves) removes most closes, but `close!` is still a designed verb and must leave a
+       runnable task.
+   - Regression: a chain task whose latest attempt `my.root/close!` closed is run again with `my.root/run!`. The
+     next pass writes attempt `n+1` and its agent on the chain branch, and its graph starts.
+   - State left: task `c12a57408f49` reads `:seon.task/execution :running` on the chain branch with no open
+     attempt. Nothing bails it (§2.7 needs an attempt end), and no fault repeated (count 1). The JVM was idle:
+     35 threads, heap about 1 GB.
+1. **`my.root/run!` answers `:running` before anything has started.** Its answer is the intent it wrote, so the
+   refusal above reached root only as an open fault. Once `run!` had been answered, nothing in any reply carried it.
+
+**Run.**
+
+- 17:12:2x: chain `:chain-f1f6dc8e6652` and its chain fact were present. Task `c12a57408f49` was `:held`, with
+  attempts 1-3 all `:closed`. Main also holds a second chain fact, `:chain-e439df9798c6`, from another lane, with
+  open fault `seon.cluster.store/refuse!` "branch :chain-e439df9798c6 already has a connection in this process"
+  (3 occurrences, 14:54 UTC, before this boot).
+- 17:12:39: `bin/seon config apply default tmp/s5r5-config.edn` (no-provider absent, 30, relaunches 0). Verified
+  with `seon.config/effective`: model `"deepseek-flash"`, no-provider absent, 30, relaunches 0, max-running 4. The
+  apply reported `converged? false` (C3).
+- 17:12:50: `run!`, then the refusal above.
+- 17:13:05, 17:13:35, 17:13:45: no new attempt, 31 turns (attempt 3's), no main outcome. Alloc stayed flat at
+  34.4-34.5 GB cumulative and threads at 35.
+- 17:14:34: `bin/seon config apply default tmp/s5-restore.edn`. Verified at 17:14:38: no-provider `true`, 100,
+  relaunches 2.
+
+**Grading form.** Run 4b's form, with `aid "attempt/64b05977e3eb"`. It would answer 0 calls: the agent does not
+exist. There is no first block to paste, because no agent was started.
+
+**Chain totals vs rough run 1:**
+
+| Measure | Rough run 1 | Run 4 + 4b | **Run 4 + 4b + 5** |
+|---|---|---|---|
+| Model calls | 38 | 157 | **157** (attempt 4: 0) |
+| Prompt tokens | 570k (310k cached) | 4.99M (3.90M cached) | **4.99M (3.90M cached)** |
+| Hand acts after `chain!` | 6 | 1 | **1**. Run 5 added none, because root ran nothing after the refusal. The refusal comes from run 4b's hand act. |
+| Furthest point | Implement (write-back conflict) | Implement wired the producer, proof red, stalled | **unchanged: attempt 4 refused at launch** |
+| Merge | Prove auto-merged, Implement refused | none | **none.** The published-diff review and the fresh-agent `(str/subs "abc" 1)` check could not be reached. |
+
+**Residue on default.**
+
+- Chain `:chain-f1f6dc8e6652` and its chain fact are kept. Task `c12a57408f49` is `:running` with no open
+  attempt (above). Root decides whether to repair it, hold it or abandon the chain.
+- Fault `482f7508e3d9…` is open on main.
+- JVM `user` host helpers: `s5r5-conn`, `s5r5-state`, `s5r5-jvm`, `s5r5-watch`.
+- One SCI eval as root: `my.root/run!`. Config was restored and verified.
+
+**To file (this lane commits docs only):**
+
+- **Fix first (Broken first 0):** `seon.task/next-attempt` and the chain planner must share one rule for an open
+  attempt. Otherwise an attempt that `my.root/close!` closed makes the next `my.root/run!` start a graph for an
+  agent that was never written. Owners: `seon.task/next-attempt` or `my.root/close!`. The reproduction is this
+  chain's state.
+- `my.root/run!` should deliver the start's refusal, or answer the started attempt, rather than the intent alone.
+- `my.root/run!`'s reply runs a test step on main: 1.4-2.1 GB and 750-950 ms, now seen four times.
