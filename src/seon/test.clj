@@ -2219,8 +2219,9 @@
   (`registry/branch!`: the first name stands and serves a later preparer too),
   so a request never reads or waits on another's preparation, nested or
   concurrent. The request then owns a private
-  branch off its checkpoint commit, which roots that commit for its members,
-  and writes `program-overlay-tx`'s rows there: the candidate's changes since
+  branch in the overlay, off the checkpoint commit: the durable checkpoint
+  branch roots that commit on disk, and the overlay branch roots only the
+  request's in-memory commits. It writes `program-overlay-tx`'s rows there: the candidate's changes since
   the loaded program it was built on (its adoption record), so a branch forked
   before a restart runs the loaded program, not the one it was forked at, with
   its own and its source branch's changes. Its context interprets

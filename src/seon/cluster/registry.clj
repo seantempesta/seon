@@ -696,9 +696,12 @@
   "The `remove-before` of the plain collection: the epoch, so Datahike marks
   every branch's whole commit ancestry (`gc.cljc` `reachable-in-branch`
   keeps every commit newer than it) and sweeps only what no branch
-  reaches: an unlinked branch's commits and nodes. No commit a live branch, a
-  held value on it or an adopted source commit names is pruned; retention
-  pruning is a separate policy (`retention-cutoff`)."
+  reaches: an unlinked branch's commits and nodes. Every commit on a live
+  branch's ancestry is marked, so a value held on a branch that stays live
+  survives it. A value on a branch retired while held, or a commit no live
+  branch reaches, does not. Retention pruning is a separate policy
+  (`retention-cutoff`, `retained-before`), which keeps a held head for at
+  least one snapshot window."
   (java.util.Date. 0))
 
 (defn- named-commits
@@ -719,16 +722,19 @@
   a branch head's facts name when that is earlier. Datahike marks every
   commit newer than `remove-before` along each branch's ancestry, so a commit
   the facts still name (`named-commits`) is never pruned by a retention
-  window (`retention-cutoff`)."
+  window (`retention-cutoff`). A current branch head is always marked, so
+  naming one moves nothing."
   {:malli/schema [:=> [:cat :seon.store/store :inst] :inst]}
   [store remove-before]
   (let [connection (:seon.store/connection-object store)
         konserve (konserve-store store)
+        heads (into #{} (map :seon.source/commit-id) (branch-heads store (branches store)))
         named (into #{}
-                    (mapcat (fn [branch]
-                              (let [database (d/branch-as-db connection branch)]
-                                (try (named-commits database)
-                                     (finally (d/release-materialized-db database))))))
+                    (comp (mapcat (fn [branch]
+                                    (let [database (d/branch-as-db connection branch)]
+                                      (try (named-commits database)
+                                           (finally (d/release-materialized-db database))))))
+                          (remove heads))
                     (branches store))
         instants (keep #(let [{{:datahike/keys [updated-at created-at]} :meta} (head-record konserve %)]
                           (some-> (or updated-at created-at) .getTime dec))

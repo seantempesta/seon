@@ -497,6 +497,19 @@
                   "and every node of its indexes reads")
               (finally (d/release-materialized-db database)))))))))
 
+(deftest a-fact-naming-a-current-head-leaves-the-retention-cutoff-unchanged
+  ;; A head is always marked by a collection, so a fact naming one needs no
+  ;; older cutoff to keep it. On a copy of default's store one such fact moved
+  ;; the cutoff back 95.8 hours.
+  (with-source-store
+    (fn [opened]
+      ;; The cluster's adoption record names the source branch's head.
+      (registry/ensure-cluster! (cluster-request opened "adopter"))
+      (Thread/sleep 20)
+      (write-marker! (:seon.store/connection-object opened) "later")
+      (let [cutoff (java.util.Date.)]
+        (is (= cutoff (registry/retained-before opened cutoff)))))))
+
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
     (fn [opened]
