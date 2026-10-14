@@ -2,10 +2,12 @@
   (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [my.program :as program]
+            [seon.batch]
             [seon.config :as config]
             [seon.db :as db]
             [seon.profile :as profile]
             [seon.test-support :as support]
+            [seon.turn.world :as world]
             [seon.program :as seon-program]))
 
 (deftest retraction-refuses-before-context-mutation-and-removes-clean-declarations
@@ -35,12 +37,15 @@
        (support/transacted! connection [(support/program-fn-entity (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
        (doseq [target [ctx fork]]
          (sci/eval-string* target "(do (in-ns 'my.program) (defn disposable [] 42))"))
-       (let [removed (program/ns-unmap! context (symbol "my.program" "disposable"))]
-         (is (not (:seon.error/at removed)))
-         (is (= #{(symbol "my.program" "disposable")} (:seon.program/affected removed)))
-         (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.program" "disposable")])))
-         (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
-         (is (nil? (sci/resolve ctx (symbol "my.program" "disposable")))))))))
+       ;; the unmap is an eval request's form: the request records the removal it observes
+       (support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "program-mutation-fixture"
+                                      :seon.sci.eval/ctx fork :seon.batch/sink (seon.batch/sink)
+                                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                      :seon.agent/id "program-mutation"})
+                        'user "(my.program/ns-unmap! 'my.program/disposable)")
+       (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.program" "disposable")])))
+       (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
+       (is (nil? (sci/resolve ctx (symbol "my.program" "disposable"))))))))
 
 (deftest namespace-and-alias-retraction-write-before-native-mutation
   (support/with-database

@@ -538,10 +538,13 @@
              :seon.program/unknown (:seon.program/unknown report)})))))
 
 (defn ns-unmap!
-  "Retract a declaration, then unmap its Var in the executing fork and base.
+  "Unmap a declaration's Var in the executing fork and base; the eval request records its removal.
 
-  Calls breaks first; a refusal changes neither facts nor SCI and names the
-  surviving referrers. :seon.program/unknown counts call sites without a
+  Calls breaks first, on the database the call reads (the request view, so a
+  definition an earlier form of the same request made is found); a refusal
+  changes nothing and names the surviving referrers. The unmap is the native
+  `clojure.core/ns-unmap`, which the request observes and records in its one
+  recording transaction. :seon.program/unknown counts call sites without a
   recorded argument count; dispatch and macro callers are not modelled.
 
   ## Example
@@ -552,9 +555,22 @@
   {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context subject]
-  (retract-operation! context subject 'my.program/ns-unmap!
-                      (list 'clojure.core/ns-unmap (list 'quote (symbol (namespace subject)))
-                            (list 'quote (symbol (name subject))))))
+  (read-result
+   {:seon.program/subject subject} 'my.program/ns-unmap!
+   #(let [database (db/db (:seon.db/connection context))
+          [report affected] (deletion-report database subject)
+          ns-name (list 'quote (symbol (namespace subject)))
+          ;; a context holds the Var only where it holds its namespace: the base lacks one the request made
+          form (list 'clojure.core/when (list 'clojure.core/find-ns ns-name)
+                     (list 'clojure.core/ns-unmap ns-name (list 'quote (symbol (name subject)))))]
+      (if (blocking? report)
+        (refusal 'my.program/ns-unmap! report affected)
+        (do (native! (:seon.sci.eval/ctx context) form)
+            (native! (:my.program/base-ctx context) form)
+            {:seon.program/subject subject
+             :seon.program/affected affected
+             :seon.db/basis-t (db/basis-t database)
+             :seon.program/unknown (:seon.program/unknown report)})))))
 
 (defn remove-ns!
   "Retract a namespace and its owned declarations, then remove it from SCI.

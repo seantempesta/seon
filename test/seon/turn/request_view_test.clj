@@ -23,8 +23,7 @@
        last
        first))
 
-(deftest ^{:seon/tasks #{'my.program/a-function-defined-in-a-request-cannot-be-unmapped-in-the-same-request}
-           :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent request-view, 2026-10-14)."
+(deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent request-view, 2026-10-14)."
            :seon.test/long-ms 15000}
   a-function-defined-earlier-in-the-request-is-unmapped-by-a-later-form
   (support/with-running-agent
@@ -70,3 +69,16 @@
        (is (false? passed?) "the in-request rerun ran the definition the request made")
        (is (pos-int? before) "the first f's green is recorded")
        (is (= before after) "the request recorded no green member: none for the replaced definition")))))
+
+(deftest ^{:seon.test/long "One eval request of an own-branch agent with its automatic test step: about 1 s measured on default's JVM (agent rvland-probe, 2026-10-14)."
+           :seon.test/long-ms 15000}
+  a-schema-registered-earlier-in-the-request-is-found-by-a-later-form
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [agent-id (str "request-view-schema-" (random-uuid))
+           _ (support/own-branch-agent! running agent-id "(ns rv.schema)")
+           answer (last-value
+                   (eval-request running agent-id
+                                 (str "(seon.schema/register! :rv.order/qty :int)\n"
+                                      "(:key (my.program/source :rv.order/qty))")))]
+       (is (= :rv.order/qty answer) "the later form's source finds the key the earlier form registered")))))

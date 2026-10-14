@@ -179,6 +179,12 @@
   connection semantics. Absence preserves current reads through *conn*."
   nil)
 
+(def ^:dynamic *request-facts*
+  "The running eval request's own facts on its connection, as data: `:seon.db/connection`, the
+  `:seon.batch/request-facts` transaction data its earlier forms applied, and their `:seon.batch/facts-digest`.
+  Bound by `seon.turn.world/with-world`; a read of that connection answers its request view (`request-view`)."
+  nil)
+
 (def ^:dynamic ^:private *receipt*
   "The current evaluation receipt lookup ref, bound with connection custody."
   nil)
@@ -330,7 +336,26 @@
         projection (vary-meta assoc :seon.schema/projection projection)))
     database))
 
-(defn- resolve-database-value
+(declare with)
+
+(defn- request-view
+  "`head` with the running eval request's facts applied when `*request-facts*` names `connection`: the request
+  view, derived once per head commit and facts digest in `seon.cache`, so a later form of the request reads what
+  its earlier forms defined while the request still records them in its one transaction. Otherwise `head`."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value]
+                  [:or :seon.db/database-value :seon.db/error-result]]}
+  [connection head]
+  (let [{facts-connection :seon.db/connection facts :seon.batch/request-facts digest :seon.batch/facts-digest}
+        *request-facts*]
+    (if (identical? facts-connection connection)
+      (seon.cache/lookup ::request-view [(get-in head [:meta :datahike/commit-id]) (dbi/-max-tx head) digest]
+                         (constantly (* 1024 (count facts)))
+                         ;; derived from the head alone: the derivation's own reads are not the request's
+                         #(binding [*request-facts* nil] (with head facts))
+                         database-value?)
+      head)))
+
+(defn- head-database-value
   [connection]
   (try
     ;; Resolve latest exactly once at the public-call boundary.
@@ -344,6 +369,11 @@
         database))
     (catch clojure.lang.ExceptionInfo cause
       (dependency-error 'seon.db/db cause))))
+
+(defn- resolve-database-value
+  [connection]
+  (let [head (head-database-value connection)]
+    (if (and *request-facts* (database-value? head)) (request-view connection head) head)))
 
 (defn- missing-connection-error
   {:malli/schema [:=> [:cat :string] :seon.schema/validation-refusal]}
@@ -6441,7 +6471,7 @@
   ([transaction]
    (transaction-result (transact! (current-connection) transaction)))
   ([connection transaction]
-   (let [database (when (connection? connection) (resolve-database-value connection))
+   (let [database (when (connection? connection) (head-database-value connection))
          result
          (or
           (missing-transaction-data-error transaction)

@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
+            [seon.id :as id]
             [seon.schema :as schema]))
 
 ;; `seon.batch` requires nothing of Seon, so the call sink's predicate and
@@ -84,11 +85,20 @@
   [{conn :seon.db/connection}]
   (db/db conn))
 
+(defn- request-facts
+  "The data `seon.db/*request-facts*` binds for `world`: its connection, its request's facts and their digest."
+  {:malli/schema [:=> [:cat :seon.batch/world]
+                  [:map [:seon.db/connection :seon.db/connection] [:seon.batch/request-facts :seon.batch/request-facts]
+                   [:seon.batch/facts-digest :seon.batch/facts-digest]]]}
+  [{connection :seon.db/connection facts :seon.batch/request-facts}]
+  {:seon.db/connection connection :seon.batch/request-facts facts :seon.batch/facts-digest (id/digest 32 facts)})
+
 (defn with-world
   "Run `f` with the world's bindings re-established on this thread: its
   custody (the connection, when it has one) for the elided seon.db arities,
   which read its current value, and the running evaluation's observation
-  scope (`:seon.batch/scope`, the observer's bindings). A body moved to
+  scope (`:seon.batch/scope`, the observer's bindings), and the request's own facts so
+  far (`seon.db/*request-facts*`), so its reads of the connection answer the request view. A body moved to
   another thread (a compute-pool hop) carries the world as a value and calls
   this; nothing is inherited from the submitting thread."
   {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
@@ -98,7 +108,10 @@
                                                        {#'seon.batch/*world* world})
                                           ;; a form's reads land in its own sink
                                           (:seon.batch/reads world)
-                                          (assoc #'db/*read-evidence-sink* (:seon.batch/reads world)))
+                                          (assoc #'db/*read-evidence-sink* (:seon.batch/reads world))
+                                          ;; a later form reads the request view: its connection's head with the request's facts
+                                          (and (:seon.batch/request-facts world) (:seon.db/connection world))
+                                          (assoc #'db/*request-facts* (request-facts world)))
                            (f))))
 
 
