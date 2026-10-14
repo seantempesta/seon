@@ -391,11 +391,16 @@
       (not (or sci-ns (:seon.ns/name row) (seq functions))) (ref/documentation-unavailable authored)
       :else
       (let [doc (or (:seon.ns/doc row) (:doc (meta sci-ns)))
-            scoped (when sci-ns
-                     (map #(symbol (str namespace-name) (str %))
-                          (keys (sci.namespaces/sci-ns-publics* ctx sci-ns))))]
+            ;; A program namespace's SCI table also holds the clojure.core Vars
+            ;; installed for its interpreted callers: its publics are its
+            ;; declared functions, the set `dir` answers. A library namespace
+            ;; has no declarations, so its SCI table answers.
+            publics (concat (map :seon.fn/sym functions)
+                            (when (and sci-ns (not (:seon.ns/name row)))
+                              (map #(symbol (str namespace-name) (str %))
+                                   (keys (sci.namespaces/sci-ns-publics* ctx sci-ns)))))]
         (merge (when doc (ref/docstring doc))
-               {:publics (vec (sort (distinct (concat (map :seon.fn/sym functions) scoped))))})))))
+               {:publics (vec (sort (distinct publics)))})))))
 
 (defn documentation-value
   "Read documentation for a public function, SCI Var, named override, schema key or namespace."
