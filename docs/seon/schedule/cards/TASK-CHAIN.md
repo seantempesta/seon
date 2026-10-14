@@ -472,7 +472,7 @@ one named commit. No compatibility copy.
 - Tags: tag ingestion in `seon.fn` and `seon.fn.analyzer`, `seon.fn/task-links`; the tag queries in
   `seon.task/task-edges`, `open-tasks`, `task-findings`, `candidate-dangling`; `seon.cluster.agent/render-identity-html`'s
   namespace tags; the `:seon.task/tasks` members of the fn, test and ns schemas; `:seon.task/annotation` and its links;
-  the help and `:seon.task/assignment-view` text naming tags; generated-task consumers (`seon.contracts/task`). The
+  the help and `:seon.task/assignment-view` text naming tags; the tag output of `seon.contracts/task` (the generator survives and writes the `proofs` field instead). The
   sweep is one committed rewrite-clj script (aliases resolved as ingestion does): each deftest's symbol joins the
   `:seon.task/proofs` of every task it tagged, unioned with existing proofs; `defn` and `ns` tags name subjects and
   become backticked task references in the var's docstring or are dropped; tags inside strings (fixtures) convert by
