@@ -16,11 +16,14 @@ f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; t
 
 ## 0. Where we are, and the order (revised in place; last 2026-10-13 evening at HEAD 6a421d96e by lane audit-fix, confirming the [session audit](../research/agent-platform/2026-10-13/audit-session-haiku.md); follows [audit-night](../research/agent-platform/2026-10-13/audit-night.md))
 
-**Current lifecycle authority: [TASK-CHAIN — LOCKED](schedule/cards/TASK-CHAIN.md).** Its data, single proof
-selector, candidate acceptance authority, cloned templates, acceptance deftests and deletion-first phases replace
-the lifecycle hybrid and the historical H0–H7 implementation order below. The stages are Intake → Survey →
-Define → Design → Prove → Implement → Land/Retrospective. Implement and verify the scripted chain (A7) with no paid
-calls before the next paid experiment.
+**Current lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), DRAFT of 2026-10-14 (ce9afae2d),
+being fleshed out with the owner before its review round.** A chain is linked task entities (`:seon.task/next`) created
+in one transaction on one branch, worked by a new agent per task, merged to main once; one chain fact on main for
+discovery; one proof set per task (`:seon.task/proofs`, no tags); one done rule for every task; bail to root, no
+relaunch; `my.task/update!` with `update` semantics; help as Markdown through `seon.ref`. The MVP chain is Design →
+Prove → Implement for bug fixes and new features alike. Its slices (TASK-CHAIN §7) replace the critical path below,
+which describes the superseded copies design. No implementation starts until the owner calls the spec ready and the
+Astra + Opus review round has run on the complete draft.
 
 **Owner decisions, 2026-10-13 late (supersede the order below where they differ).** (1) Next milestone: a LIVE DeepSeek chain now — `seon.task/chain!` over Define → Design → Prove → Implement on one filed, local Seon defect with a red proof (not a messaging subject); fix what it breaks; acceptance tests continue beside it. (2) The user loop (M13 done in cde025f68; M16, I1–I3, Survey approval) comes after chains run reliably. (3) Right after the first live chain: one set of deftests per task — `:seon.task/proofs` is the one stored set, `:seon/tasks` tags only feed it at ingestion, `:seon.task/product` is deleted, one reader replaces `seon.task/obligations`. (4) Lanes decide spec gaps by the rules, record the decision in the owning spec and commit, and continue. Since this section's measurement: b74344579 (proved = results at current reach), 86430115b (base context pure), cde025f68 (M13: held task opens no turn; execution read at main's head) landed; default runs cde025f68.
 
