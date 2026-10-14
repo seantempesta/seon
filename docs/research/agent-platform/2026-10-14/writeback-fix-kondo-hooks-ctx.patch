@@ -1,0 +1,45 @@
+--- a/src/clj_kondo/impl/hooks.clj	2026-10-14 15:21:21.746474495 +0700
++++ b/src/clj_kondo/impl/hooks.clj	2026-10-14 15:21:31.912491731 +0700
+@@ -10,8 +10,7 @@
+    [clojure.java.io :as io]
+    [clojure.pprint]
+    [clojure.string :as str]
+-   [sci.core :as sci]
+-   [sci.ctx-store :as store]))
++   [sci.core :as sci]))
+ 
+ (set! *warn-on-reflection* true)
+ 
+@@ -96,8 +95,13 @@
+ (def ^:private hook-resolve-cache
+   (volatile! {}))
+ 
++;; The hooks' own context. sci.ctx-store/*ctx* is the context SCI binds
++;; while it evaluates, so clj-kondo called from inside a host's SCI
++;; evaluation would require its hooks in the host's context.
++(def ^:private hooks-ctx (volatile! nil))
++
+ (defn reset-ctx! []
+-  (store/reset-ctx! (initial-ctx))
++  (vreset! hooks-ctx (initial-ctx))
+   (vreset! hook-resolve-cache {}))
+ 
+ (reset-ctx!)
+@@ -249,7 +253,7 @@
+                                    ns
+                                    (if reload? :reload "")
+                                    x)))]
+-              (sci/eval-string* (store/get-ctx) code))))
++              (sci/eval-string* @hooks-ctx code))))
+         (when-let [x (or (get-in hook-cfg [:macroexpand sym])
+                           (some (fn [group-sym]
+                                   (get-in hook-cfg [:macroexpand (symbol (str group-sym)
+@@ -270,7 +274,7 @@
+                                      ns
+                                      (if reload? :reload "")
+                                      x)))
+-                    the-var (sci/eval-string* (store/get-ctx) code)]
++                    the-var (sci/eval-string* @hooks-ctx code)]
+                 (when (and the-var (not (string? x)) (not (:macro (meta the-var))))
+                   (binding [*out* *err*]
+                     (println (str "WARNING: macroexpand hook " x " is not a macro"))))
