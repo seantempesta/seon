@@ -51,7 +51,7 @@ A task is one entity. Its members (all `:seon.task/*`):
 
 | Member | Type | Meaning | Kind |
 |---|---|---|---|
-| `ns`, `name` | `ns` a symbol, `name` a string (task files and runtime maps both use string names: 869 measured) | the task's name; `:seon.task/id` and `:seon.task/sym` derive from them (`seon.task/task-handle`, `seon.task/task-sym`) | identity |
+| `ns`, `name` | `ns` a symbol, `name` a string (task files and runtime maps both use string names: 872 measured) | the task's name; `:seon.task/id` and `:seon.task/sym` derive from them (`seon.task/task-handle`, `seon.task/task-sym`) | identity |
 | `plan` (renames `intent`) | Markdown string | the plan: blocks such as `## Problem`, `## What exists`, `## Approach`, with references (§3) | content, **flowing** |
 | `instructions` | Markdown string | what this task's agent does | content, **owned** |
 | `proofs` | set of qualified deftest symbols; absent means empty, never proven | the one set that must be green for this task to be done | content, **owned** |
@@ -161,7 +161,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    branch) works the task, and the same block, test steps, done rule, advance and merge apply. Live runs use DeepSeek
    tasks for the measured run and `:outside` tasks to judge the context; no paid Claude API call is made. There is no
    human checkpoint inside a chain in the MVP (owner 2026-10-14): a chain to inspect first is created `:held` and run
-   with `my.root/run!`.
+   with `my.root/run!` (new in S3c-1).
    `:seon.config.agent/max-running` counts open attempts across all chains.
 3. **Work** — the agent reads its block (`seon.context/current-state`: its task's plan, instructions and proofs with
    their status, the tasks before and after it through `next`) and works at the REPL. It reads its own task's execution
@@ -230,7 +230,7 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    share one transaction; this order makes each stopping point derivable on restart without an outbox. Nothing else
    runs; the branch and the chain fact stay. `:cancelled` closes and retires through the existing cleanup with no
    problem task. Root then decides, all by writing data: change the held task's plan or proofs and run it again
-   (`my.root/run!`: one branch transaction that changes `:held` to `:running`, then a payload-free wake offered to root's
+   (`my.root/run!`, new in S3c-1: one branch transaction that changes `:held` to `:running`, then a payload-free wake offered to root's
    existing plan channel; boot's full derivation sees a committed run even if the process stopped before the offer); or
    abandon (record `:closed` with its reason, then the retirement of step 6); or build a new chain (`chain!` with any
    vector of maps, `:seon.chain/from` the old chain's branch to keep its work). A send-back is a bail: the chain never
@@ -365,7 +365,7 @@ Each stage's predicate is one contracted function, `[:=> [:cat :seon.db/database
 in its own namespace, with one deftest that (a) always runs a table of hand-built task values written through the
 canonical writers on a test branch, red and green rows, so it is meaningful and green on main and merge branches, and
 (b) when the runner supplies a task, also asserts the predicate is empty for that task. `seon.test/task` is an optional
-reader: without a supplied task it answers nil and never resolves tags; a request naming a nonexistent task reports
+reader: without a supplied task it answers nil and, after S2c-2, never resolves tags (today it still does); a request naming a nonexistent task reports
 missing input before execution. The supplied value is `{:seon.test/task <the task entity> :seon.test/branch <the
 requesting branch's database, captured after the earlier tests of the request recorded>}`: a member body runs in its own
 test world, where `(seon.db/db)` has no fork point and no recorded results (measured), so predicates read these values.
@@ -554,7 +554,7 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S1a | The `intent` → `plan` rename: inventory and script, then one atomic conversion commit over task files, src, tests, schema, CLAUDE.md, vocabulary, fixtures and namespaced maps | old/new declarations differ only by the renamed key; existing reds unchanged | Sonnet; restart batch + reset | done e6df7e213, 243683f1d |
 | S1b-1 | Defaults and names: Malli `:default :held` on execution decoded in `seon.task/task-delta` and `held-tx` (a supplied `:running` stays running; editing a running task never resets it held), `symbol-name?` in the name schema | `seon.task-test/task-members-have-defaults-and-kinds`: decoding `{}` gives `{:seon.task/execution :held}`; a bad name is refused by the writer; a supplied `:running` survives the writer | Sonnet | done d4566ddd2 |
 | S1b-2 | Chain schemas: `:seon.task/next` (one peer ref, non-component), `{:seon.task/owned true}` on instructions and proofs, outcome `:done` on the attempt, the chain fact (`:seon.chain/*`, non-program, `:seon.wake/starts`) and its claim clause | `seon.task-test/owned-members-are-instructions-and-proofs`: owned members are exactly `#{instructions proofs}` by schema property; `seon.cluster.registry-test/a-chain-fact-keeps-its-branch-and-base-through-retirement`: a branch and its base named by a chain fact survive `retire-unclaimed!`, held chains included | Sonnet | done f6a770bec |
-| S1c-1 | The one task writer: preserve tempids and supplied execution through `seon.task/adopt-tasks-tx`'s replacement; `seon.task/template` | three maps with tempids written in one transaction pull back linked, references derived, identities from `task-handle` | Opus | — |
+| S1c-1 | The one task writer: preserve tempids and supplied execution through `seon.task/adopt-tasks-tx`'s replacement; `seon.task/template` | three maps with tempids written in one transaction pull back linked, references derived, identities from `task-handle` | Opus | done (`seon.task-test/three-tasks-with-tempids-are-written-linked-in-one-transaction`) |
 | S1c-2 | `chain!` (§2.1): request/answer schemas first, fork with main target, one transaction, chain fact, idempotence | `seon.task-test/a-chain-is-linked-tasks-written-in-one-transaction-on-its-branch`: the branch exists; on `(seon.db/branch-database main b)` the first task's `next` path names `[n n-2 n-3]`, all identity datoms in one transaction; template fields present; only the first has the plan; executions `[:running :held :held]`; main holds no chain task or attempt and holds the chain fact; a repeat answers the same value, preserves an edited plan and commits nothing; a `:seon.chain/from` chain's base is main; the durable create measured | Opus | — |
 | S1d-1 | `my.edit/text` and `seon.edit/exact` calling it | zero, one and several matches; `exact!` file behavior unchanged | Sonnet | done 776a04249 |
 | S1d-2 | `my.task/update!` replacing `refine!` and its goal-owner routing | `my.task-test/update-applies-a-function-to-a-member`: `(fnil into #{})` on absent proofs; `my.edit/text` on the plan; same value writes no transaction; f's error value is the answer with no write; an invalid value refused; a stale basis refused with base/current/proposed and `:seon.error/type`; identity, `next` or `execution` as k is refused by the request schema; an unresolved reference answered as a problem with the write kept | Sonnet | — |
@@ -600,7 +600,7 @@ Retired acceptance tests (they test the copies design): A1, A3, A4, A6's relaunc
 invocations live in one `seon.cache` kind and must-reads render through `seon.render/render-call` (35cafc1dc); a
 constructed error carries no world or producer (5a08c13af, errors-cut E1).
 
-**Status (2026-10-14):** ready for implementation; nothing of S1–S5 implemented. Design prototyped live once
+**Status (2026-10-14):** in implementation: S1a, S1b, S1d-1, S1d-3, S3d-1a and S3d-1b done (§7 status column); S1c onward in progress. Design prototyped live once
 (`design-prototype-run-1.md`); its findings are in §2.4, §2.6, §3 and §4.
 
 ## 8. Open questions

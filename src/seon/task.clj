@@ -410,11 +410,44 @@
   (let [held (task-declaration database handle)]
     (if (read-error held) held (some->> held vector (id/digest 64)))))
 
+(defn- owned-members
+  "The members of `:seon.task/task` under `projection` whose schema carries `:seon.task/owned`."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:vector :qualified-keyword]]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::owned-members
+   #(let [registry (:seon.schema.projection/registry projection)]
+      (into [] (comp (map first) (filter (fn [k] (:seon.task/owned (m/properties (mr/schema registry k))))))
+            (m/entries (m/deref (mr/schema registry :seon.task/task)))))))
+
+(defn template
+  "Task `sym`'s owned members (`:seon.task/owned` on their schema) as a map: what a chain's task takes from its
+  template. The `:unknown-task` refusal when `database` holds no task `sym`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
+                  [:or :map :seon.task/refused-error :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database sym]
+  (let [projection (db/carried-projection database)
+        owned (owned-members projection)
+        held (db/pull database (into [:seon.task/id :seon.task/ns :seon.task/name] owned) [:seon.task/sym sym])]
+    (cond (read-error held) held
+          (:seon.task/id held) (select-keys (declaration projection held) owned)
+          :else (refused 'seon.task/template :unknown-task (symbol (namespace sym)) sym))))
+
+(defn- identified
+  "`task` under the handle and symbol its ns and name derive, keeping a negative tempid `:db/id`, which names it to
+  the other maps of the same write (a `:seon.task/next`); any other `:db/id` is its source database's entity."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:seon.task/keys [ns name] :as task}]
+  (cond-> (assoc task :seon.task/id (task-handle ns name) :seon.task/sym (task-sym ns name))
+    (not (neg-int? (:db/id task))) (dissoc :db/id)))
+
 (defn adopt-tasks-tx
   "Reconcile the selected `handles` into a development database from the `rows` the
   exact published source holds for them, against the `basis` the adoption read at
   the destination: a competing edit since refuses (7.16); a handle absent from
-  `rows` retracts. Every task the destination holds without its derived symbol gains it first."
+  `rows` retracts. Each row's handle and symbol derive from its ns and name; a new row keeps its negative tempid,
+  so rows written together link by it, and a supplied execution. Every task the destination holds without its
+  derived symbol gains it first."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle] :seon.task/basis]
                   [:vector :seon.schema/value]]}
   [database entities handles basis]
@@ -422,7 +455,7 @@
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
     (admitted database
               (into (into (symbol-tx database) (held-tx database))
-                    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))))
+                    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id identity)) (map identified entities)) basis)))))
 
 (defn- task-handles
   "Every stored task handle, or with `retracted?` every handle `database`'s history
@@ -769,9 +802,7 @@
     (cond (some read-error copies) (some read-error copies)
           missing (refused 'seon.task/chain! :unknown-task ns missing)
           :else
-          (let [identified #(assoc % :seon.task/id (task-handle (:seon.task/ns %) (:seon.task/name %))
-                                   :seon.task/sym (task-sym (:seon.task/ns %) (:seon.task/name %)))
-                root (assoc subject :seon.task/children (into #{} (map #(vector :seon.task/sym (task-sym ns (:seon.task/name %)))) copies))
+          (let [root (assoc subject :seon.task/children (into #{} (map #(vector :seon.task/sym (task-sym ns (:seon.task/name %)))) copies))
                 entities (mapv identified (cons root copies))
                 handles (into #{} (map :seon.task/id) entities)]
             (refusal-data #(written connection [[:db.fn/call #'adopt-tasks-tx entities handles {}]]))))))

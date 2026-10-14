@@ -481,3 +481,38 @@
        (is (contains? task :seon.task/next) "a task may link its next")
        (is (not-any? (members-of :seon.task/declaration) [:seon.task/next :seon.task/execution])
            "next and execution are never declared")))))
+
+(deftest three-tasks-with-tempids-are-written-linked-in-one-transaction
+  ;; TASK-CHAIN S1c-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#one-writer-for-tasks`)
+  (test-support/with-database
+   (fn [connection]
+     (let [handle #(task/task-handle 'tq.link %)
+           write! (fn [tasks] (test-support/transacted! connection
+                                                        (task/adopt-tasks-tx (db/db connection) tasks
+                                                                             (into #{} (map (comp handle :seon.task/name)) tasks) {})))
+           _ (write! [{:seon.task/ns 'tq.link :seon.task/name "template" :seon.task/plan "A worked example."
+                       :seon.task/instructions "Check with `seon.task/template`." :seon.task/proofs '#{tq.link/proof}}])
+           owned (task/template (db/db connection) 'tq.link/template)
+           report (write! [(merge owned {:db/id -1 :seon.task/ns 'tq.link :seon.task/name "fix" :seon.task/next -2
+                                         :seon.task/plan "Fix `seon.task/task-handle`." :seon.task/execution :running})
+                           (merge owned {:db/id -2 :seon.task/ns 'tq.link :seon.task/name "fix-2" :seon.task/next -3})
+                           (merge owned {:db/id -3 :seon.task/ns 'tq.link :seon.task/name "fix-3"})])
+           database (db/db connection)
+           pulled (fn [task-name] (db/pull database [:seon.task/sym :seon.task/execution :seon.task/references :seon.task/plan
+                                                     {:seon.task/next [:seon.task/id]}]
+                                           [:seon.task/id (handle task-name)]))]
+       (is (= {:seon.task/instructions "Check with `seon.task/template`." :seon.task/proofs '#{tq.link/proof}} owned)
+           "a template answers exactly its owned members")
+       (is (= 1 (count (into #{} (comp (filter #(= :seon.task/id (:a %))) (map :tx)) (:tx-data report))))
+           "the three identities are asserted in one transaction")
+       (is (= [(handle "fix-2") (handle "fix-3") nil] (mapv #(get-in (pulled %) [:seon.task/next :seon.task/id]) ["fix" "fix-2" "fix-3"]))
+           "each task's next is the task its tempid named")
+       (is (= '[tq.link/fix tq.link/fix-2 tq.link/fix-3] (mapv (comp :seon.task/sym pulled) ["fix" "fix-2" "fix-3"]))
+           "identity and symbol derive from ns and name")
+       (is (= [:running :held :held] (mapv (comp :seon.task/execution pulled) ["fix" "fix-2" "fix-3"]))
+           "a supplied execution stays; the rest take the default")
+       (is (= ['#{seon.task/task-handle seon.task/template} '#{seon.task/template}]
+              (mapv (comp set :seon.task/references pulled) ["fix" "fix-2"]))
+           "the writer derives each task's references from its plan and instructions")
+       (is (nil? (:seon.task/plan (pulled "fix-2"))) "a template carries no plan")
+       (is (= :unknown-task (:seon.task/refused (task/template database 'tq.link/absent))) "an absent template is refused by name")))))
