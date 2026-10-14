@@ -1,5 +1,7 @@
 ---
 title: "What fills seon.cache after boot"
+type: research
+status: measured
 ---
 
 # What fills seon.cache after boot (measurement, 2026-10-14)
