@@ -2530,12 +2530,15 @@
 (defn- reply-sources
   "The ordered forms of a model `completion`'s reply text (`planned-sources`).
   A reply with no form whose tool calls named tools that do not exist answers
-  the no-forms refusal naming them."
+  the no-forms refusal naming them; a reply whose body cannot be read answers
+  its own unparseable-body error."
   {:malli/schema
-   [:=> [:cat :seon.ai/successful-completion :seon.ns/name :seon.config.eval.result/max-source]
-    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
-  [{text :seon.ai/text unknown :seon.ai/unknown-tool-calls} namespace-name max-source]
-  (let [planned (planned-sources text namespace-name max-source)]
+   [:=> [:cat [:or :seon.ai/successful-completion :seon.ai/unparseable-body-error] :seon.ns/name :seon.config.eval.result/max-source]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error]]}
+  [{text :seon.ai/text unknown :seon.ai/unknown-tool-calls :as completion} namespace-name max-source]
+  (let [planned (if (:seon.ai/unreadable-response-member completion)
+                  completion
+                  (planned-sources text namespace-name max-source))]
     (if (and unknown (:seon.cluster.reply/no-forms planned))
       (assoc planned
              :seon.ai/unknown-tool-calls unknown
@@ -3978,7 +3981,7 @@
             ;; become durable together before any form runs. A later crash is
             ;; therefore exactly the set difference between intent rows and
             ;; terminal results; recovery never has to reconstruct or rerun it.
-            (let [reply-text (:seon.ai/text completion)
+            (let [reply-text (:seon.ai/text completion "")
                   database (db/db connection)
                   namespace-name (sci.eval/agent-namespace database agent-id)
                   max-source
@@ -3990,7 +3993,7 @@
                            (empty? reply-text))
                     []
                     (reply-sources completion namespace-name max-source))
-                  no-forms? (:seon.cluster.reply/no-forms prepared)
+                  no-forms? (or (:seon.cluster.reply/no-forms prepared) (:seon.ai/unreadable-response-member prepared))
                   sources (cond
                             (vector? prepared) prepared
                             ; Evaluation source is nonempty by contract. An empty
@@ -4073,8 +4076,9 @@
                                          {:seon.ai/exchanges (:seon.context/exchanges model-context)})
                             sink (assoc :seon.ai/stream? true
                                         :seon.ai/sink sink)))
-              failure (when (or (:seon.ai/unreadable-response-member completion)
-                                (:seon.ai/unanswered-reasoning-count completion)
+              ;; An unparseable body is the model's reply, not a failed call: `freeze!` evaluates it as that
+              ;; turn's one reader error (`reply-sources`), so the next context shows it and the next turn opens.
+              failure (when (or (:seon.ai/unanswered-reasoning-count completion)
                                 (:seon.ai/exhausted-finish-reason completion)
                                 (:seon.ai/interrupted-text-count completion)
                                 (:seon.ai/provider-error completion)
@@ -4566,7 +4570,7 @@
                [:seon.turn.loop/work :seon.turn.work/next]
                [:seon.turn.loop/now :inst]
                [:seon.sci.eval/event {:optional true}
-                [:map [:seon.sci.reader/error :seon.cluster.reply/no-forms-error]]]
+                [:map [:seon.sci.reader/error [:or :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error]]]]
                [:seon.turn.loop/report
                 [:function
                  [:=> [:cat :seon.turn.loop/outcome :int] :seon.turn.loop/turn-report]

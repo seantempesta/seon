@@ -888,7 +888,7 @@
 
                 :else
                 (reduced (unparseable 'seon.ai/tool-call-reply "choices.message.tool_calls"
-                                      "The provider's tool call carried no name, or an eval call no code text."
+                                      "Your tool call had no name, or its eval arguments were not a JSON object with code text (a reply cut off mid-call); nothing ran. Send the forms again."
                                       {:seon.error/offending call :seon.error/data {::tool-call call}})))))
           {:seon.ai/text (or content "")}
           calls))

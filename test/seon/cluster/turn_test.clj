@@ -1702,6 +1702,31 @@
                 (async/close! faults)
                 (.shutdownNow executor)))))))))
 
+(deftest an-unparseable-model-reply-is-delivered-and-the-next-turn-proceeds
+  ;; S5 run 3: a truncated tool call (`seon.ai/completion-text`'s unparseable body) closed the turn as a failed
+  ;; provider attempt, which defers every later opening until an outside wake; a chain agent has none, so it
+  ;; waited forever. The model did answer: its unreadable reply is that turn's error, shown in the next context.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            truncated (ai/completion-text
+                       {"choices" [{"message" {"content" nil
+                                               "tool_calls" [{"function" {"name" "eval" "arguments" "{\"code\": \"(+ 1"}}]}
+                                    "finish_reason" "length"}]})
+            replies (atom [{:seon.ai/text "(+ 1 2)"} truncated {:seon.ai/text "(seon.run/complete \"done\")"}])
+            requests (atom [])
+            cluster (assoc cluster :seon.turn.loop/complete
+                           (fn [_projection request]
+                             (swap! requests conj request)
+                             (let [reply (first @replies)] (swap! replies rest) reply)))]
+        (is (= :seon.ai/unparseable-body-error (:seon.error/type truncated)) "the real producer's unparseable body")
+        (drive-agent! cluster "agent-a" 6)
+        (is (= 3 (count @requests)) "the turn after the unparseable reply calls the model with no outside wake")
+        (let [[_ unreadable] (:seon.ai/exchanges (nth @requests 2 nil))]
+          (is (= 1 (count unreadable)) "the unparseable reply is one exchange of the next context")
+          (is (str/includes? (str (:seon.ai/reply (first unreadable))) (:seon.error/message truncated))
+              "its reply is the producer's error"))))))
+
 (deftest a-combined-evaluation-projects-every-terminal-receipt-datom
   (with-cluster
     (fn [cluster]
