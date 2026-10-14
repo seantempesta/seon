@@ -14,6 +14,7 @@
             [sci.impl.utils :as sci.utils]
             [seon.blob :as blob]
             [seon.cache :as cache]
+            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -1223,14 +1224,52 @@
                             (::rows (::declarations prior)) (::schema-ids (::declarations prior))))]
     (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
 
+(declare reach-entries)
+
+(defn- moved-reach
+  "Of a work branch `database`, each declaration main moved past since the
+  merge base (`seon.cluster.registry/moved-past`: the branch never changed it,
+  main did) with its reach digest on the target's head, which is the row the
+  branch runs (`seon.cluster.registry/seen-database`); empty off a work branch.
+  A moved declaration the target cannot digest is `:seon.error/unknown`."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map-of :seon.test/sym [:or [:string {:min 64 :max 64}] [:= :seon.error/unknown]]]]}
+  [database]
+  (if-let [sides (registry/merge-sides database)]
+    (let [{::keys [attributes]} (reach-declarations database)
+          identities (-> []
+                         (into (map #(vector :seon.fn/sym %)) (keys (:seon.fn/sym attributes)))
+                         (into (map #(vector :seon.test/sym %)) (keys (:seon.test/sym attributes))))
+          moved (vec (sort (into #{} (map second) (registry/moved-past database sides identities))))
+          target (reach-entries (:seon.cluster.registry/target sides) moved)]
+      (when (:seon.test/unknown target)
+        (throw (ex-info (:seon.error/message target) target)))
+      (into {} (map (fn [s] [s (get (::digests target) s :seon.error/unknown)])) moved))
+    {}))
+
+(defn- moved-changed
+  "The names whose moved-past digest differs between the `prior` derivation and
+  `moved`, with their reverse closure in `prior`."
+  {:malli/schema [:=> [:cat :map :map] [:set :seon.schema/value]]}
+  [prior moved]
+  (let [held (::moved prior {})
+        names (into #{} (remove #(= (get held %) (get moved %))) (concat (keys held) (keys moved)))]
+    (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
+
 (defn- reach-entries
-  "The requested digests; only changed definitions and their reverse closure lose known components."
+  "The requested digests; only changed definitions and their reverse closure lose known components.
+  A work branch's declaration main moved past is known by its digest on the
+  target (`moved-reach`), so a recorded result is not current after main's
+  change to what it reaches."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
   [database test-symbols]
   (if (empty? test-symbols)
     {::digests {} ::undigested []}
     (try
-      (let [revisions (reach-revision-key database)
+      (let [attribute-revisions (reach-revision-key database)
+            moved (moved-reach database)
+            ;; equal programs share one index; a work branch's also by what main moved past
+            revisions (cond-> attribute-revisions (and attribute-revisions (seq moved)) (vector moved))
             identity (reach-owner database)
             current (when revisions (cache/present ::reach-index-by-revision revisions))
             covered (into (set (keys (::digests current))) (::undigested current))
@@ -1243,9 +1282,15 @@
                                        (assoc ::basis (::basis previous-head))))
                     prior (or current (when (and previous (< (::basis previous) (db/basis-t database))) previous))
                     declarations (reach-declarations database (::declarations prior {}))
-                    changed (if (and prior (not current)) (changed-reach database revisions declarations prior) #{})
-                    known (apply dissoc (::component-digests prior {}) changed)
-                    unknown (set/difference (set (::undigested prior)) changed)
+                    changed (if (and prior (not current))
+                              (into (changed-reach database attribute-revisions declarations prior)
+                                    (moved-changed prior moved))
+                              #{})
+                    known (merge (apply dissoc (::component-digests prior {}) changed)
+                                 ;; an undigested moved declaration is known only as unknown evidence
+                                 (update-vals moved #(if (keyword? %) "" %)))
+                    unknown (into (set/difference (set (::undigested prior)) changed)
+                                  (comp (filter (comp keyword? val)) (map key)) moved)
                     {::keys [nodes schemas] :as graph}
                     (reached-graph database test-symbols declarations known unknown)
                     index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
@@ -1259,7 +1304,7 @@
                              ::component-digests (merge known (::component-digests index))
                              ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
                              ::undigested (into unknown (::unknown-names index))
-                             ::revisions revisions ::declarations declarations}]
+                             ::revisions attribute-revisions ::moved moved ::declarations declarations}]
                 (when revisions
                   (cache/evict! ::reach-index-by-revision revisions)
                   (cache/lookup ::reach-index-by-revision revisions

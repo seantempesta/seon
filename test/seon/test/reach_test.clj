@@ -1,6 +1,9 @@
 (ns seon.test.reach-test
   (:require [clojure.test :refer [deftest is]]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.render.value :as value]
@@ -120,3 +123,34 @@
        (is (= #{reaching} (runner/tests-reaching database symbols 'seon.id/id)))
        (is (= #{} (runner/tests-reaching database symbols reaching))
            "a test never counts as reaching itself")))))
+
+(deftest a-work-branch-result-is-not-current-after-main-changes-what-it-reaches
+  ;; Before, a work branch's reach digest read the branch's own rows, while the
+  ;; branch runs main's row of a declaration main moved past since the merge
+  ;; base (`seon.cluster.registry/seen-database`): chain :chain-f1f6dc8e6652's
+  ;; proof kept a red recorded on the old platform as current (S5 run 6).
+  (support/with-database
+   (fn [connection]
+     (let [reaching 'seon.id-test/identity-is-a-function-of-the-values-structure
+           elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+           symbols [reaching elsewhere]
+           database (db/db connection)
+           store (:seon.store/store (support/execution-handle connection))
+           branch (keyword (str "reach-fork-" (id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (let [before (runner/reach-digests (db/db fork) symbols)]
+               (support/transacted!
+                connection
+                [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id] {:seon.fn/doc "Main moved past the branch."})])
+               (let [after (runner/reach-digests (db/db fork) symbols)]
+                 (is (not= (get before reaching) (get after reaching))
+                     "main's change to a reached definition the branch never changed changes the branch's digest")
+                 (is (= (get before elsewhere) (get after elsewhere))
+                     "a test that does not reach it keeps its digest")))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
