@@ -6,7 +6,8 @@ description: "Distinguish the agent reply reader, persistent agent SCI context, 
 # REPL surfaces and durable observations
 
 Use [root instructions](../../../AGENTS.md) for lane verification and
-[agent-loop.md](../../../docs/seon/specs/agent-loop.md) for the target.
+[agent-loop.md](../../../docs/seon/specs/agent-loop.md) for the one REPL path and
+[TASK-CHAIN](../../../docs/seon/schedule/cards/TASK-CHAIN.md) for the task lifecycle (the target).
 The [ledger](../../../docs/seon/schedule/agent-loop-ledger.md) names what is
 installed. Context is a static prefix, the agent's own forms and results, and
 one fresh current-state block; older turn PRDs are historical research.
@@ -141,15 +142,15 @@ Forms and timings are in the branch REPL note, `docs/prds/agent-platform/landing
 4. **Test there.** `seon.test/run` takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities.
-5. **A done branch is merged by root.** Root assigns the task (`seon.task/assign!`);
-   the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`); its green end
-   writes no request, and root's `db<->flow` merges the branch with the proofs taken from the task.
-   A merge request is the assignment: root reads `(my.root/merge-requests)` (the open assignments) and
-   merges one with `(my.root/merge! {:seon.task/assignment key})` (`seon.merge/merge!`: one transaction
-   from the merge base, the facts inside main's writer and, when the branch changed declarations, the declarations
-   prepared and accepted on a merge branch; the assignment closes `:merged` in it; then write-back and one
-   git commit), or closes it with `my.root/close!` and a reason. Only the proofs gate
-   acceptance; other reaching tests' reds are shown as `:seon.source/red`. They merge the branch's
+5. **A done chain is merged by root.** A task's proofs are its `:seon.task/proofs` field. The agent makes them
+   green on its branch; its turn proposes `:done`, root re-judges it (TASK-CHAIN §2.4), and the chain's last task
+   merges the branch to main once (§2.6). Installed until S3b-1: root assigns the task (`seon.task/assign!`), the
+   agent names its proofs with `:seon/tasks` metadata (until S2c-2), and a merge request is the assignment:
+   root reads `(my.root/merge-requests)` and merges one with `(my.root/merge! {:seon.task/assignment key})`
+   (`seon.merge/merge!`: one transaction from the merge base, the facts inside main's writer and, when the branch
+   changed declarations, the declarations prepared and accepted on a merge branch; the assignment closes
+   `:merged` in it; then write-back and one git commit), or closes it with `my.root/close!` and a reason. The
+   proofs gate acceptance; other reaching tests' reds are shown as `:seon.source/red`. The merge takes the branch's
    changed program entities through the tested head; the basis is each merged entity's
    definition digest, so other writes never stale a merge or its write-back.
    Private SCI defs never merge. Write-back splices the accepted declarations
@@ -163,5 +164,5 @@ Forms and timings are in the branch REPL note, `docs/prds/agent-platform/landing
    retirement now and is deleted once your run exits.
 
 A branch evaluation that persists entities needs an instrumented agent whose checked-out branch is
-the branch. The work then goes through `seon.cluster.agent/submit-source!`, the path a model reply uses. Root assigns
-the worker its task on that branch with `seon.task/assign!`.
+the branch. The work then goes through `seon.cluster.agent/submit-source!`, the path a model reply uses. Root gives
+the worker its task on that branch (installed: `seon.task/assign!`; target: `seon.task/chain!`, TASK-CHAIN §2.1).
