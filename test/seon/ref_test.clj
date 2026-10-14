@@ -255,7 +255,7 @@
        (testing "explicit and bare forms of one name resolve to the same identity"
          (doseq [[explicit bare] [["`seon.task/obligations`" "seon.task/obligations"]
                                   ["`:seon.task/intent`" ":seon.task/intent"]
-                                  ["`docs/seon/schedule/cards/TASK-CHAIN.md#6-phases`" "docs/seon/schedule/cards/TASK-CHAIN.md#6-phases"]]]
+                                  ["`docs/seon/schedule/cards/TASK-CHAIN.md#7-slices`" "docs/seon/schedule/cards/TASK-CHAIN.md#7-slices"]]]
            (is (seq (identities database explicit)) "the explicit form resolves")
            (is (= (identities database explicit) (identities database (str "Read " bare " first.")))
                "the bare form names the same entity")))
@@ -311,8 +311,8 @@
                 [:dial "`:seon.config.eval/time-limit-ms`" [:seon.config.eval/time-limit-ms nil nil] 'seon.render.schema/render-ai]
                 [:namespace "`my.agent`" ['my.agent nil nil] 'seon.render.ns/render-ai]
                 [:document "`docs/seon/schedule/cards/TASK-CHAIN.md`" [nil "docs/seon/schedule/cards/TASK-CHAIN.md" nil] 'seon.ref/render-doc-ai]
-                [:section-link "See [the phases](docs/seon/schedule/cards/TASK-CHAIN.md#6-phases)."
-                 [nil "docs/seon/schedule/cards/TASK-CHAIN.md" "6-phases"] 'seon.ref/render-doc-ai]
+                [:section-link "See [the phases](docs/seon/schedule/cards/TASK-CHAIN.md#7-slices)."
+                 [nil "docs/seon/schedule/cards/TASK-CHAIN.md" "7-slices"] 'seon.ref/render-doc-ai]
                 [:reference-code-section "`reference-code/malli/README.md#quickstart`"
                  [nil "reference-code/malli/README.md" "quickstart"] 'seon.ref/render-doc-ai]]]
          (testing (name kind)

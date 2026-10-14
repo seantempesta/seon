@@ -333,7 +333,7 @@
 (defn- usage-symbol
   "Return the real qualified target name clj-kondo resolved for `usage`.
 
-  `:clj-kondo/unknown-namespace` means there is no target identity. Mapping it
+  The unknown-namespace sentinel means there is no target identity. Mapping it
   to the caller namespace fabricates first-party names for Java methods,
   special forms, gensyms, and unresolved aliases. The conservative file
   relation remains target-keyed and therefore carries only actual qualified
