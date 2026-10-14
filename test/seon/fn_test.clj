@@ -19,6 +19,7 @@
             [seon.sci.observe :as observe]
             [seon.batch]
             [seon.fn :as seon.fn]
+            [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.cluster.source :as source]
@@ -978,7 +979,7 @@
        (is (str/includes? (ex-message failure) ":seon.schedule/zone-id"))
        ;; Since f5fb4466a a missing key's offending value is the map that
        ;; lacks it, never :seon.error/unknown.
-       (is (= {:seon.schedule/id "publication-refusal" :seon.schedule/expression "0 4 * * *"}
+       (is (= (seon.error.refusal/value-reference nil {:seon.schedule/id "publication-refusal" :seon.schedule/expression "0 4 * * *"})
               (:seon.db/offending (ex-data failure))))))))
 
 (deftest retracted-program-identities-leave-no-tombstones

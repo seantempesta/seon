@@ -4044,7 +4044,7 @@
 
 (defn- invalid-write
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
-  [_projection attribute compiled value path entity-form cause candidates]
+  [projection attribute compiled value path entity-form cause candidates]
   (let [form (if (= ::attribute-not-installed cause) compiled (m/form compiled))
         problem (write-problem attribute compiled value path cause nil)]
   (diagnostic
@@ -4055,7 +4055,7 @@
      ::transaction-refused true
      ::attribute attribute
      :seon.schema/form form
-     ::offending value
+     ::offending (error.refusal/value-reference projection value)
      ::path path
      :seon.error/data {:seon.error/problems [problem]}
      :seon.error/layer :seon.db/database-write

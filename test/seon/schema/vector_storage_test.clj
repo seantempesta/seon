@@ -11,6 +11,7 @@
             [datahike.constants :as const]
             [datahike.query :as dq]
             [seon.db :as db]
+            [seon.error.refusal]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -488,9 +489,9 @@
          (tx! c [{:seon.vector-test.q/id "q" :seon.vector-test.q/two ["a" "b"]}])
          (is (refused? c [{:seon.vector-test.q/id "q" :seon.vector-test.q/two ["a" "b" "c"]}] :seon.db/transaction-refused)
              "the submitted vector refuses before it is written")
-         (is (= ["a" "b" "c"]
+         (is (= (seon.error.refusal/value-reference nil ["a" "b" "c"])
                 (:seon.db/offending (db/transact! c [[:db/add [:seon.vector-test.q/id "q"] :seon.vector-test.q/two "c"]])))
-             "an append past the bound refuses at the final report, naming the whole logical vector"))))))
+             "an append past the bound refuses at the final report, holding the whole logical vector as its reference"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; S6: reads through seon.db

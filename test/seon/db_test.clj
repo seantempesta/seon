@@ -2287,9 +2287,10 @@
            (is (= {:seon.schedule/id "f2-invalid"}
                   (get-in refusal [:seon.error/data :seon.db/entity])))
            (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
-           (is (= "f2-invalid" (:seon.schedule/id (:seon.db/offending refusal)))
-               "a missing key's offending value is the entity missing it")
-           (is (not (contains? (:seon.db/offending refusal) :seon.schedule/zone-id)))
+           (is (string? (:seon.error.reference/digest (:seon.db/offending refusal)))
+               "the offending entity is held as its reference")
+           (is (not-any? #(= "seon.schedule" (namespace %)) (keys (:seon.db/offending refusal)))
+               "the reference copies none of the entity's members")
            (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
                                      [:seon.schedule/id "f2-invalid"]))))
            (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
@@ -2353,8 +2354,9 @@
          (is (string? (:seon.db.write.attempt/request-id refusal)))
          (is (= :seon.program/definition-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
-         (is (map? (:seon.db/offending refusal)) "the offending value is the entity missing the key")
-         (is (not (contains? (:seon.db/offending refusal) :seon.program/definition-digest)))
+         (is (string? (:seon.error.reference/digest (:seon.db/offending refusal)))
+             "the offending entity is held as its reference")
+         (is (not (contains? (:seon.db/offending refusal) :seon.fn/sym)) "the reference copies none of the entity's members")
          (is (some #(= :seon.program/definition-digest (last (:seon.error/path %)))
                    (get-in refusal [:seon.error/data :seon.error/problems]))
              "every failing path is a problem")
