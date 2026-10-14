@@ -140,7 +140,7 @@
   exist (`branches` reads the same record through a connection)."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.cluster.registry/branches]}
   [database]
-  (set (head-record (:store database) :branches)))
+  (set (head-record (:store (db/schema-database database)) :branches)))
 
 (defn branch-commit-id
   "The commit ID currently named by a branch. A branch the store does not
@@ -392,7 +392,7 @@
   ([database held branch]
    (let [base (base-branch branch)]
      (when (contains? held base)
-       (get-in (head-record (:store database) base) [:meta :datahike/commit-id])))))
+       (get-in (head-record (:store (db/schema-database database)) base) [:meta :datahike/commit-id])))))
 
 (defn- identity-digests
   "The definition digest `database` holds for each of `identities` it holds."
@@ -412,15 +412,17 @@
   "The two other sides of a work branch `database`'s three-way comparison: its
   merge base (`base-commit-id`) and its target's head (`:seon.branch/target`
   of its fork entity); nil on a branch with no fork entity or base ref, such
-  as a cluster's own."
+  as a cluster's own. The branch is the one every view of the value (as-of,
+  since, history, `with`) carries in its Datahike configuration, read through
+  the value it views (`seon.db/schema-database`)."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:maybe [:map [::merge-base :seon.db/database-value] [::target :seon.db/database-value]]]]}
   [database]
-  (let [branch (get-in database [:config :branch])
+  (let [branch (get-in (db/schema-database database) [:config :branch])
         target (:seon.branch/target (fork-of database branch))
         commit (when target (base-commit-id database branch))]
     (when commit
-      {::merge-base (d/commit-as-db database commit {:secondary-indices? false})
+      {::merge-base (db/commit-database database commit)
        ::target (db/branch-database database target)})))
 
 (defn moved-past

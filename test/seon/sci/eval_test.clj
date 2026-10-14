@@ -2832,6 +2832,34 @@
           (is (vector? (:seon.help/groups (bootstrap/help-value (db/db fork))))
               "help resolves its references on the branch")))))))
 
+(deftest every-view-of-a-work-branch-sees-what-main-moved-past
+  ;; Before, `merge-sides` read the branch from the value's own `:config` field, which an as-of view
+  ;; (the attempt's starting value, read by the current-state block's must-reads) does not have: the
+  ;; branch was nil and `fork-of` refused it (root on bcce0cae1, chain :chain-f1f6dc8e6652).
+  (test-support/with-database
+   (fn [connection]
+     (let [cited [:seon.fn/sym 'my.edit/text]
+           replaced (fn [contract]
+                      (test-support/transacted!
+                       connection
+                       (test-support/replacement-tx
+                        (db/db connection) cited
+                        (str "(defn text \"Replace one exact passage.\" {:malli/schema [:=> [:cat " contract "] :string]} [x] (str x))")
+                        {})))]
+       (replaced "[:fn {:error/message \"must be text\" :gen/elements [\"a\"]} clojure.core/string?]")
+       (with-fresh-fork
+        connection
+        (fn [fork]
+          (replaced ":string")
+          (let [head (db/db fork)
+                views {:connection head
+                       :branch-database (db/branch-database (db/db connection) (get-in head [:config :branch]))
+                       :as-of (db/as-of head (db/basis-t head))
+                       :with (db/with head [])}]
+            (doseq [[kind view] views]
+              (is (= [:cat :string] (:in (lookup/function-documentation view 'my.edit/text)))
+                  (str "the " (name kind) " view documents main's row"))))))))))
+
 (deftest a-stored-contract-that-cannot-compile-documents-its-error
   (test-support/with-database
    (fn [connection]
