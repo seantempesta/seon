@@ -139,7 +139,7 @@
   ;; `check PATH --test NS --test NS/NAME` carries both test names in order;
   ;; the runner receives a namespace as --ns and a test as --test.
   (let [root (System/getProperty "java.io.tmpdir")
-        request (operator/parse-argv ["--seon-root" root "check" "src/seon/operator.clj"
+        request (operator/parse-argv ["--seon-root" root "check" root
                                       "--test" "seon.error.refusal-test"
                                       "--test" "seon.operator-test/check-names-the-tests-its-throwaway-jvm-runs"])
         refused (try (operator/parse-argv ["--seon-root" root "status" "--test" "seon.operator-test"])
@@ -175,7 +175,7 @@
   (let [root (System/getProperty "java.io.tmpdir")
         request (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1"
                                       "--test" "seon.operator-test/check-at-a-revision-names-the-tests-without-paths"])
-        with-path (try (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1" "src/seon/operator.clj"])
+        with-path (try (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1" root])
                        (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]
     (is (= "HEAD~1" (:seon.operator/at request)))
     (is (= 1 (count (:seon.operator/tests request))))
