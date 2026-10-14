@@ -211,6 +211,15 @@
     (connections/active-connection
      (datahike.store/connection-id configuration))))
 
+(defn on-branch
+  "Call `f` with a connection to `branch` of `store` for this one action, holding its own reference
+  (`seon.cluster.store/acquire-branch!`) until `f` returns, so another holder's release never closes it under `f`."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:=> [:cat :seon.db/connection] :seon.schema/value]]
+                  :seon.schema/value]}
+  [store branch f]
+  (let [acquired (store/acquire-branch! store branch)]
+    (try (f acquired) (finally (store/release-branch! acquired)))))
+
 (defn- branch-connected?
   "True when THIS process already holds a connection to `branch`."
   [store branch]

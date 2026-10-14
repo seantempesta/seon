@@ -737,6 +737,22 @@
       ;; the writer's go-loops keep the frame they start in: never an evaluation's
       (db/call-with-root-bindings #(d/connect configuration)))))
 
+(defn acquire-branch!
+  "A counted reference to this process's connection to one existing branch of this already-open store, for one
+  action: Datahike's own reference count (`datahike.api/connect`) shares a connection this process holds, awaits
+  one opening or releasing, else opens it, so every holder of a branch shares its one writer and each
+  `release-branch!` drops only its own reference. Refuses `::branch-absent` as `open-branch!` does."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch] :seon.db/connection]}
+  [store branch]
+  (let [main-connection (:seon.store/connection-object store)]
+    (when-not (contains? (d/branches main-connection) branch)
+      (refuse! ::branch-absent
+               (str "branch " branch " is absent from the store's branches")
+               {::dir (:seon.store/dir store)
+                ::branch branch}))
+    ;; the writer's go-loops keep the frame they start in: never an evaluation's
+    (db/call-with-root-bindings #(d/connect (assoc (:config @main-connection) :branch branch)))))
+
 (defn release-branch!
   "Release one proof branch connection before its branch is retired.
 

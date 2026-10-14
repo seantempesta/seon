@@ -2064,25 +2064,13 @@
     (start-branch-flow! handle execution agent-id (or intent :running))
     nil))
 
-(defn- on-branch
-  "Call `f` with a connection to `branch` of `store` for this one action: the one this process holds
-  (`seon.cluster.registry/active-branch-connection`), else one opened here and released when `f` returns. The
-  same as `seon.task/on-branch`, private there: one owner is `seon.cluster.agent/one-per-action-branch-connection`."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:=> [:cat :seon.db/connection] :seon.schema/value]]
-                  :seon.schema/value]}
-  [store branch f]
-  (if-let [held (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
-    (f held)
-    (let [opened (store/open-branch! store branch)]
-      (try (f opened) (finally (store/release-branch! opened))))))
-
 (defn- write-chain-attempt!
   "Write a chain task's `:attempt` action on its chain branch, never on main, through a connection held for this
   action: the agent's creation (homed on the chain branch) and the attempt row in ONE transaction; nothing when the
   branch already holds the attempt."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.flow.actions/action] :nil]}
   [handle {h :seon.task/assigned agent-id :seon.agent/id branch :seon.chain/branch :as action}]
-  (on-branch (handle-store handle) branch
+  (registry/on-branch (handle-store handle) branch
              (fn [connection]
                (let [database (db/db connection)
                      tx (task/attempt-tx database h agent-id branch)
@@ -2118,7 +2106,7 @@
                                                " Change the task on its branch and run it again with (my.root/run! {:seon.task/assigned \""
                                                h "\"}), abandon the chain, or build a new one from the branch"
                                                " (seon.task/chain! with :seon.chain/from " branch ").")})
-  (on-branch (handle-store handle) branch #(write! % [[:db.fn/call #'task/hold-tx key reason]]))
+  (registry/on-branch (handle-store handle) branch #(write! % [[:db.fn/call #'task/hold-tx key reason]]))
   nil)
 
 (defn- chain-bails
@@ -2133,7 +2121,7 @@
     (when (:seon.error/at attempts) (throw (ex-info (:seon.error/message attempts "db<->flow could not read the chains.") attempts)))
     (into [] (keep (fn [{branch :seon.chain/branch key :seon.task/assignment end :seon.task.attempt/end :as row}]
                      (when (and end (not (:seon.task/outcome row)) (not (#{:done :cancelled} end)))
-                       (on-branch store branch
+                       (registry/on-branch store branch
                                   (fn [connection]
                                     (let [{why :seon.task.attempt/reason}
                                           (db/pull (db/db connection) [:seon.task.attempt/reason] [:seon.task/assignment key])]
@@ -2143,7 +2131,7 @@
                 ;; a refused final merge is recorded on its :done attempt
                 (keep (fn [{branch :seon.chain/branch key :seon.task/assignment end :seon.task.attempt/end :as row}]
                         (when (and (= :done end) (not (:seon.task/outcome row)))
-                          (when-let [refusal (on-branch store branch
+                          (when-let [refusal (registry/on-branch store branch
                                                         #(:seon.task/refusal (db/pull (db/db %) [:seon.task/refusal]
                                                                                       [:seon.task/assignment key])))]
                             (assoc (select-keys row [:seon.chain/branch :seon.task/assignment :seon.task/assigned])
@@ -2176,7 +2164,7 @@
         database @(:seon.db/connection handle)]
     (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
             (chain-ends database (registry/branches store))]
-      (let [refusals (on-branch store branch
+      (let [refusals (registry/on-branch store branch
                                 (fn [on-chain]
                                   (let [at-end (db/commit-database (db/db on-chain) commit)]
                                     (when-not at-end
@@ -2232,7 +2220,7 @@
            (doall
             (for [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
                   (chain-finishes database (registry/branches store))]
-              (let [refusals (on-branch store branch
+              (let [refusals (registry/on-branch store branch
                                         (fn [on-chain]
                                           (let [at-end (db/commit-database (db/db on-chain) commit)]
                                             (try (source/done-refusals at-end (done-judged database at-end branch h))
@@ -2245,7 +2233,7 @@
                                                        (when (string? root) [root])))]
                     (if (:seon.error/at merged)
                       ;; the refusal is recorded on its attempt; this pass's bail closes it (`chain-bails`)
-                      (do (on-branch store branch
+                      (do (registry/on-branch store branch
                                      #(write! % [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]]))
                           false)
                       true))))))))))

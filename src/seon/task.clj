@@ -818,17 +818,6 @@
     (let [after (get-in (db/pull database [{:seon.task/next [:seon.task/id]}] [:seon.task/id handle]) [:seon.task/next :seon.task/id])]
       (if after (recur after (conj handles handle)) (conj handles handle)))))
 
-(defn- on-branch
-  "Call `f` with a connection to `branch` of `store` for this one action: the one this process holds, else one
-  opened here and released when `f` returns."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:=> [:cat :seon.db/connection] :seon.schema/value]]
-                  :seon.schema/value]}
-  [store branch f]
-  (if-let [held (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
-    (f held)
-    (let [opened (store/open-branch! store branch)]
-      (try (f opened) (finally (store/release-branch! opened))))))
-
 (defn hold-tx
   "The transaction data closing attempt `key` at `database`, its chain branch, with `reason`, and holding its task:
   the attempt's outcome `:closed` and `:seon.task/reason`, its task's execution `:held` (TASK-CHAIN §2.7). An
@@ -868,7 +857,7 @@
     (or (read-error chains)
         (into [] (mapcat (fn [[branch first-handle]]
                            (when (contains? held branch)
-                             (on-branch store branch
+                             (registry/on-branch store branch
                                         (fn [connection]
                                           (let [head (db/db connection)
                                                 rows (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned
@@ -890,7 +879,7 @@
     (when-let [failure (read-error chains)] (throw (ex-info (:seon.error/message failure) failure)))
     (some (fn [[branch first-handle]]
             (when (and (contains? held branch)
-                       (on-branch store branch #(some #{handle} (chain-handles (db/db %) first-handle))))
+                       (registry/on-branch store branch #(some #{handle} (chain-handles (db/db %) first-handle))))
               branch))
           (sort chains))))
 
@@ -900,7 +889,7 @@
   {:malli/schema [:=> [:cat [:map [:seon.store/store :seon.store/store]] :seon.chain/branch :seon.task/assignment :seon.task/reason]
                   [:or :seon.task/closed :seon.error/value]]}
   [{store :seon.store/store} branch key reason]
-  (on-branch store branch
+  (registry/on-branch store branch
              (fn [on-chain]
                (let [report (written on-chain [[:db.fn/call #'hold-tx key reason]])]
                  (if (:seon.error/at report)
@@ -917,7 +906,7 @@
                    :seon.error/value]]}
   [{connection :seon.db/connection store :seon.store/store} handle]
   (if-let [branch (chain-branch (db/db connection) store handle)]
-    (on-branch store branch
+    (registry/on-branch store branch
                (fn [on-chain]
                  (let [report (written on-chain [[:db.fn/call #'run-tx handle]])]
                    (if (:seon.error/at report)
@@ -987,14 +976,14 @@
          answer (fn [connection] {:seon.chain/branch branch :seon.chain/first first-handle
                                   :seon.task/handles (chain-handles (db/db connection) first-handle)})]
      (if held
-       (on-branch store branch answer)
+       (registry/on-branch store branch answer)
        (let [forked (when-not (contains? (registry/branches store) branch)
                       (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db main
                                        :seon.branch/target main-branch :seon.cluster.registry/from (or from main-branch)}))
              entities (chain-entities tasks)
              handles (into #{} (map #(task-handle ns (:seon.task/name %))) entities)
              written-tasks (when-not (:seon.error/at forked)
-                             (on-branch store branch
+                             (registry/on-branch store branch
                                         ;; the first task's basis is what the branch holds under its identity: a filed
                                         ;; task's inherited entry, which the chain's first task revises; the writer
                                         ;; revises an entry's declaration only, so that task's chain members (running,
@@ -1011,7 +1000,7 @@
          (cond (:seon.error/at forked) forked
                (not (:db-after written-tasks)) written-tasks
                (not (:db-after fact)) fact
-               :else (on-branch store branch answer)))))))
+               :else (registry/on-branch store branch answer)))))))
 
 (defn assignment-read
   "What assigning task `handle` to `agent` reads at `database`: the task's revision, the agent's

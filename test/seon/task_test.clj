@@ -735,3 +735,28 @@
        (task-run! connection #{'tq.chainproof/unbound} nil)
        (is (= :green (outcome connection 'tq.chainproof/unbound nil))
            "a task-reading test run with no task reads nil, never its tag")))))
+
+(deftest a-branch-call-keeps-its-connection-while-another-call-on-that-branch-releases
+  ;; Lane chain-pass (outside-1/outside-2 faults): two per-action calls on one chain branch (db<->flow's pass and
+  ;; root's `my.root/merge-requests`) borrowed one connection, so the first call's release closed it under the second
+  ;; ("Connection has been released."), and a call in Datahike's opening or releasing window was refused
+  ;; ("already has a connection in this process"), failing db<->flow's whole pass
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "per-action-" (random-uuid)))
+           first-in (promise) second-in (promise) first-out (promise)]
+       (registry/branch! {:seon.store/store store :seon.cluster.registry/from (get-in (db/db connection) [:config :branch])
+                          :seon.store/branch branch})
+       (try
+         (let [outer (future (let [answer (registry/on-branch store branch (fn [_] (deliver first-in true) @second-in :outer))]
+                               (deliver first-out true)
+                               answer))
+               inner (future @first-in
+                             (registry/on-branch store branch
+                                               (fn [held] (deliver second-in true) @first-out
+                                                 (get-in (db/db held) [:config :branch]))))]
+           (is (= :outer (deref outer 5000 ::timeout)) "the first call answers")
+           (is (= branch (try (deref inner 5000 ::timeout) (catch Exception e (ex-message (ex-cause e)))))
+               "the second call still reads its branch after the first released its own"))
+         (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
