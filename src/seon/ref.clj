@@ -276,6 +276,8 @@
         ;; only a span of exactly one qualified symbol or keyword is a name; a dotted bare symbol may name a namespace
         (cond
           (some? more) nil
+          ;; a symbol whose namespace has no dot is an alias form (`str/subs`), which is code (TASK-CHAIN §3a)
+          (and (qualified-symbol? form) (not (str/includes? (namespace form) "."))) nil
           (or (qualified-symbol? form) (qualified-keyword? form)) {:seon.ref/name form}
           (and (simple-symbol? form) (str/includes? (str form) ".")) {:seon.ref/name form :seon.ref/resolve-only true})))))
 

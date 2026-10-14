@@ -154,6 +154,10 @@
     (is (= (:seon.fn/source (db/pull (db/db) [:seon.fn/source] [:seon.fn/sym 'seon.ref/references])) (:source entry))
         "a function at its code is its source, as code")))
 
+(deftest an-alias-form-in-a-code-span-is-code-not-a-reference
+  (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Call `str/subs` and `m/validator`, not `seon.ref/references`."})]
+    (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
+
 (deftest a-span-of-a-name-and-more-words-is-prose
   (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Use `seon.ref/references`, not `seon.ref/section AGENTS.md` or `foo/bar baz`."})]
     (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
