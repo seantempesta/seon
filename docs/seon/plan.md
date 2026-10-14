@@ -56,7 +56,11 @@ permutations of branches and SCI": every derivation is keyed by the content of e
 reach and input digests, `seon.schema/declaration-digest`, read evidence), never by branch name, commit id where content
 would do, instance identity, URL or the deriving thread, so a result is valid on every branch and in every SCI context
 and nothing is invalidated. Each truth states its inputs and is proven by a test that changing anything outside them
-leaves the result unchanged (the hidden-input proof). Order: B1 test results across branches (lane b1-test-reuse) and
+leaves the result unchanged (the hidden-input proof). No duplicate caches (owner 2026-10-14): stored immutable data (datoms, index nodes, konserve
+blobs) is read from its owner's cache (Datahike's node cache, the OS page cache), never copied into `seon.cache`;
+`seon.cache` holds only expensive derived values and per-operation ephemeral ones; an expensive, content-keyed,
+serializable derivation may also be stored in konserve by its digest where a measurement shows the stored read beats
+re-deriving. Order: B1 test results across branches (lane b1-test-reuse) and
 the overlay rebuild (overlay-impl) first; then the catalogue: inventory `../research/agent-platform/2026-10-14/dig-content-keys.md`
 (Haiku, in flight) → independent catalogues and keyings (Opus, Astra, Argon) → hybrid → one lane per derivation. Known
 violations: 62 schema populations keyed per archive URL holding 5 contents (fixed in f8a2773be, live since the
