@@ -1,6 +1,7 @@
 (ns seon.bootstrap-test
   "Help is a Markdown document: its sections and the references they make."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cache :as cache]
             [seon.bootstrap :as bootstrap]
@@ -45,3 +46,8 @@
       (support/replacement-tx @connection [:seon.fn/sym 'seon.db/q] "(defn q \"Changed by the test.\" [] 1)" {}))
      (is (str/includes? (str (:source (cited-doc @connection 'seon.db/q))) "Changed by the test.")
          "a cited function's new definition shows in help's reference"))))
+
+(deftest help-names-only-installed-keys
+  (let [text (slurp (io/resource "seon/help.md"))
+        bare (re-seq #"(?<![\w/.:-]):(?:value|error|findings|result|ms|alloc-mb)(?![\w/-])" text)]
+    (is (empty? bare) "the reply's keys are named as :seon.repl/* keys")))
