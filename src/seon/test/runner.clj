@@ -777,15 +777,21 @@
   [form]
   (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
 
+(defn- reach-out
+  "The names one declaration's reach facts reach: its calls, references and subject."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/value]] [:vector :seon.schema/value]]}
+  [row]
+  (cond-> (into (vec (:seon.fn/calls row)) (:seon.fn/references row))
+    (:seon.test/subject row) (conj (:seon.test/subject row))))
+
 (defn- reach-node
   "One declaration's contribution to reach: its leaf (`::leaf`, the
-  declaration's behavior digest), the names it reaches (calls, references,
-  subject) and the keywords it names (its own and its contract's)."
+  declaration's behavior digest), the names it reaches (`reach-out`) and the
+  keywords it names (its own and its contract's)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/value]] :map]}
   [row]
   {::leaf (::leaf row :seon.error/unknown)
-   ::out (cond-> (into (vec (:seon.fn/calls row)) (:seon.fn/references row))
-           (:seon.test/subject row) (conj (:seon.test/subject row)))
+   ::out (reach-out row)
    ::keys (into (set (:seon.fn/keywords row))
                 (reach-keywords (some-> (:seon.fn/spec row) edn/read-string)))})
 
@@ -2287,6 +2293,18 @@
   execute inside the body's call sink is the runner's work, not the test's."
   '[seon.test.runner/run-var! seon.sci.eval/run-test])
 
+(defn- harness-closure
+  "Every name the static closures of `harness-entries` reach on `tested`, the entries included: a walk of the reach
+  facts by name (`reach-declarations`, `reach-out`), never a node's behavior digest, which no name set needs."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :seon.schema/value]]}
+  [tested]
+  (let [{::keys [rows facts]} (reach-declarations tested)
+        node-of (fn [s] (when-let [e (get rows s)]
+                          {::out (reach-out (into {} (keep (fn [[attribute values]]
+                                                             (when-some [v (get values e)] [attribute v])))
+                                                  (select-keys facts [:seon.fn/calls :seon.fn/references :seon.test/subject])))}))]
+    (set (keys (reach-fixed-point node-of ::out (set harness-entries))))))
+
 (defn- executed-roots
   "What each result's body executed (`:seon.test.member/executed`) beyond its
   static closure on `tested`: `::dynamic-calls`, test -> the declarations it
@@ -2311,12 +2329,10 @@
         ;; The runner's own work inside the body's sink (running the var,
         ;; reporting, printing failures) is the harness's, not the test's, and
         ;; a contract's predicates are its schema's, which the reach names by form.
-        harness (let [closures (when (seq executed) (reach-memberships tested (vec harness-entries)))]
-                  (cond-> (into (set harness-entries)
-                                (keys (schema/predicate-functions-in
-                                       (or (db/carried-projection tested) (schema/handed-projection)))))
-                    (and closures (not (seon.error.refusal/error? closures)))
-                    (into (mapcat val) closures)))]
+        harness (cond-> (into (set harness-entries)
+                              (keys (schema/predicate-functions-in
+                                     (or (db/carried-projection tested) (schema/handed-projection)))))
+                  (seq executed) (into (harness-closure tested)))]
     {::dynamic-calls (into {} (keep (fn [[test-symbol ran]]
                                       (let [closure (get static test-symbol #{})
                                             outside (into (sorted-set)
