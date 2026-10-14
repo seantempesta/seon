@@ -45,8 +45,7 @@
               (:seon.turn.loop/reaching step))
            "the verdict names the nearest tests it ran of those reaching and claims no pass over the rest")))))
 
-(deftest ^{:seon/tasks #{'my.test/a-test-var-run-in-the-defining-request-answers-the-previous-red}
-           :seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
+(deftest ^{:seon.test/long "Two eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent teststep-verdict, 2026-10-14)."
            :seon.test/long-ms 15000}
   a-test-run-in-the-request-that-redefined-its-callee-answers-the-new-definition
   (support/with-running-agent

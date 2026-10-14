@@ -46,8 +46,7 @@
   (str "(seon.db/q '[:find (count ?m) . :where [?m :seon.test.member/symbol rv.rerun/f-is-inc]"
        " [?m :seon.test.member/fail-count 0] [?m :seon.test.member/error-count 0]] (seon.db/db))"))
 
-(deftest ^{:seon/tasks #{'my.test/a-test-var-run-in-the-defining-request-answers-the-previous-red}
-           :seon.test/long "Three eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent request-view, 2026-10-14)."
+(deftest ^{:seon.test/long "Three eval requests of an own-branch agent, each with its automatic test step: about 1 s each measured on default's JVM (agent request-view, 2026-10-14)."
            :seon.test/long-ms 15000}
   a-test-rerun-after-a-defn-in-the-same-request-records-no-green-for-the-replaced-definition
   ;; f-is-inc is green for the first f; the request replaces f with one that makes it red, then reruns it.

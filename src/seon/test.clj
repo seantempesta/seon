@@ -3178,6 +3178,36 @@
               (::admission-refusal outcome)
               (assoc :seon.test/recording-refusal (::admission-refusal outcome))))))))))
 
+(defn- request-view!
+  "The running eval request's view of `execution`'s branch, when `seon.db/*request-facts*` names its connection:
+  that branch opened in an overlay of its store (`seon.cluster.store/open-overlay!`) with the request's facts
+  transacted there, a committed value a test run names, its connection and store. Its writes stay in the overlay,
+  so nothing a run records on it outlives the run: the request's test step records the true results after its one
+  transaction. Nil when no request view names the connection."
+  {:malli/schema [:=> [:cat :seon.agent/context-source]
+                  [:maybe [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]]]}
+  [execution]
+  (let [{connection :seon.db/connection facts :seon.batch/request-facts} db/*request-facts*]
+    (when (and (seq facts) (identical? connection (:seon.db/connection execution)))
+      (binding [db/*request-facts* nil]
+        (let [store (store/open-overlay! (or (:seon.store/store execution) (:seon.store/store (env/of execution))))
+              cluster (:seon.cluster/name execution)
+              view (try (open-world! store (get-in (db/db connection) [:config :branch]) cluster)
+                        (catch Throwable failure
+                          (try (store/release-store! store) (catch Throwable cleanup (.addSuppressed failure cleanup)))
+                          (throw failure)))
+              report (try (db/with-branch {:seon.db/connection view} #(db/transact! view facts))
+                          (catch Throwable failure
+                            (doseq [cleanup! [#(store/release-branch! view) #(store/release-store! store)]]
+                              (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
+                            (throw failure)))]
+          (when-not (:db-after report)
+            (store/release-branch! view)
+            (store/release-store! store)
+            (throw (world-refusal "request view" report)))
+          (carry-world-projection! view cluster)
+          {:seon.db/connection view :seon.store/store store})))))
+
 (defn run
   "Answer one test request on the execution value it names.
 
@@ -3220,7 +3250,17 @@
                    :seon.sci.eval/interpretation-error :seon.test/not-runnable-error
                    :seon.sci.kernel/memory-pressure-error]]}
   [request]
-  (try (run-request request)
+  (try (let [view (request-view! (:seon.test/execution request))]
+         (if-not view
+           (run-request request)
+           ;; The run reads the view through its own connection and writes only there.
+           (try (binding [db/*request-facts* nil]
+                  (db/with-branch view
+                    #(run-request (assoc request
+                                         :seon.test/execution (merge (:seon.test/execution request) view)
+                                         :seon.test/recording-connection (:seon.db/connection view)))))
+                (finally (store/release-branch! (:seon.db/connection view))
+                         (store/release-store! (:seon.store/store view))))))
        ;; The entrant answers its declared variants: an exception no part of the
        ;; request translated is the unknown outcome of this request, its cause kept.
        (catch Throwable failure
