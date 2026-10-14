@@ -105,20 +105,26 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
 
 ## 2. Flow
 
-1. **Create** — `seon.task/chain!`:
-   `[:=> [:cat :seon.db/connection :seon.task/chain-request] [:or :seon.task/chain :seon.error/value]]`, the request
-   `{:seon.task/ns ns :seon.task/name n :seon.task/plan p :seon.task/templates [sym …] :seon.task/overrides {sym {…}}}`,
-   the answer `{:seon.chain/branch b :seon.chain/first h :seon.task/handles [h …]}`. It derives each task's name as
-   `"<template name>-<n>"` (`design-n`, `prove-n`, `implement-n`) and its identity with `task-handle`; links each to
-   the next from the ordered vector (so no cycle and no wrong id can be written; nothing checks them). In order:
-   fork the branch (`seon.cluster.registry/fork!`, `chain-<h>`), unless it exists; on it, write every task in ONE
-   transaction through the task writer, each `(merge defaults template overrides)` with a negative tempid, `plan` on
-   the first task only, the first `:running`, the rest `:held`; then write the chain fact on main. It is idempotent:
-   a repeated call with the same first task returns the existing chain and changes nothing. A crash after the fork
-   and before the fact leaves an unclaimed, never-started branch, which boot retires; no agent starts before the fact
-   is committed. Expected cost: one fork (53–56 ms measured), one committed task transaction and one main transaction
-   (about 22 ms each measured for small writes): about 100 ms. The checked in-memory application alone measured
-   3.6 ms; measure the whole durable create in S1c.
+1. **Create** — `seon.task/chain!` writes a vector of task maps as one linked chain:
+   `(seon.task/chain! connection [task-map …])`, and `(seon.task/chain! connection [task-map …] {:seon.chain/from b})`
+   to fork branch `b`'s head instead of main's. Contract:
+   `[:function [:=> [:cat :seon.db/connection [:vector {:min 1} :seon.task/task-map]] [:or :seon.task/chain :seon.error/value]]
+   [:=> [:cat :seon.db/connection [:vector {:min 1} :seon.task/task-map] :seon.task/chain-options] [:or :seon.task/chain :seon.error/value]]]`.
+   The first map names the chain (it carries `:seon.task/ns` and `:seon.task/name`); a later map without a name is
+   named `"<first name>-<position>"` in the same namespace. The answer `{:seon.chain/branch b :seon.chain/first h :seon.task/handles
+   [h …]}`. Each task map is ordinary data the caller builds with ordinary Clojure: `(merge (seon.task/template
+   'seon.step/design) {:seon.task/plan p})`, where `seon.task/template` (new) answers a template's owned members as a
+   map. `chain!` knows nothing about templates: it fills schema defaults (Malli `:default`), names the unnamed maps, derives identities with `task-handle`, and links each map to the
+   next by position (so no cycle and no wrong id can be written; nothing checks them). The standard chain is three
+   maps (design with the plan, prove, implement); a custom chain is any other vector, assembled the same way. In
+   order: fork the branch (`seon.cluster.registry/fork!` from main or `:seon.chain/from`, `chain-<h>`), unless it
+   exists; on it, write every task in ONE transaction through the task writer, each with a negative tempid, the first
+   `:running`, the rest `:held`; then write the chain fact on main. It is idempotent: a repeated call with the same
+   first task returns the existing chain and changes nothing. A crash after the fork and before the fact leaves an
+   unclaimed, never-started branch, which boot retires; no agent starts before the fact is committed. Expected cost:
+   one fork (53–56 ms measured), one committed task transaction and one main transaction (about 22 ms each measured for
+   small writes): about 100 ms. The checked in-memory application alone measured 3.6 ms; measure the whole durable
+   create in S1c.
 2. **Run a task** — root's listener `seon.cluster.agent/db<->flow`, each pass, reads every chain fact on main and each
    chain's branch head with `seon.db/branch-database` (a store read; it needs no open connection, as
    `seon.cluster.agent/branch-end` does today), cached by head commit id. A chain's work is only its first task's
@@ -184,11 +190,14 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
    `done-refusals` refuses, or a refused final merge. Root processes it once, atomically on the chain branch: the task
    moves to `:held`, the end and its refusal stay, and root writes one problem task on main, its identity derived from
    the terminal attempt so repeated wakes write no second one. Nothing else runs; the branch and the chain fact stay.
-   `:cancelled` ends the chain with nothing for root. Root then decides: change a task's proofs or plan, set a task
-   `:running` again (`my.root/run!`, one root function that writes the branch and touches the chain fact on main, the
-   main write being the wake), or abandon: record root's `:closed` decision with its reason, then the same retirement
-   as step 6. A send-back is a bail: the chain never reruns an earlier task by itself. Reopening an earlier task means
-   root sets it `:running`; its new completion advances again and the successor receives the revised plan.
+   `:cancelled` ends the chain with nothing for root. Root then decides, all of it by writing data:
+   change the held task's plan or proofs and set it `:running` again (`my.root/run!`: one root function that writes
+   the branch and touches the chain fact on main, the main write being the wake); or abandon (record root's
+   `:closed` decision with its reason, then the same retirement as step 6); or build a new chain (`chain!` with any
+   vector of task maps, `:seon.chain/from` the old chain's branch to keep its work, e.g. a prove and an implement map
+   whose plan is the old chain's latest). A send-back is a bail: the chain never reruns an earlier task by itself.
+   Completed tasks and their attempts are history and are never reopened: rerunning earlier work is resetting a held
+   task's fields, or a new chain.
 8. **Restart** — recovery of facts, never of execution, through the existing owners (`seon.cluster/recover-runs!` on
    each retained chain branch; no replay of forms or private SCI values). An attempt interrupted during active work ends
    `:error` (committed work and spent budget kept) and goes to root as step 7. An attempt committed but never started
@@ -464,7 +473,7 @@ for real test execution.
 |---|---|---|---|---|
 | S1a | The `intent` → `plan` rename: one rewrite-clj script over the task files (856 entries in 101 files), src, tests, schema, CLAUDE.md, vocabulary | none new (existing reds unchanged, named in the commit) | Sonnet; in root's restart batch (a rename touching most files) | — |
 | S1b | Schema: `:seon.task/next` (one ref), `{:seon.task/owned true}` on `instructions` and `proofs`, outcome `:done` on the attempt, Malli `:default :held` on execution decoded in `seon.task/task-delta` and `held-tx`, `symbol-name?` in the name schema, the chain fact (`:seon.chain/*`, non-program, `:seon.wake/starts`) and its claim in `seon.cluster.registry/cluster-claims` | `seon.task-test/task-members-have-defaults-and-kinds`: `(m/decode :seon.task/task {} (mt/default-value-transformer {::mt/add-optional-keys true}))` gives `{:seon.task/execution :held}`; the owned members are exactly `#{instructions proofs}` by schema property; a bad name is refused by the writer; a branch named by a chain fact survives `retire-unclaimed!` | Sonnet | — |
-| S1c | The one task writer and `chain!` (§2.1); delete old `chain!`/`chain-copy`, `children`, `needs`, `effective`, `goal-owner` with their callers and tests | `seon.task-test/a-chain-is-linked-tasks-written-in-one-transaction-on-its-branch`: the branch exists; on `(seon.db/branch-database main b)` the first task's `next` path names the three derived symbols in order, all written in one transaction; each has its template's instructions and proofs, references derived; only the first has the plan; executions `[:running :held :held]`; main holds no chain task or attempt and holds the chain fact; a second identical call answers the same value and transacts nothing; the durable create measured end to end (`seon.profile/measure`) | Opus | — |
+| S1c | The one task writer, `seon.task/template` and `chain!` over task maps (§2.1); delete old `chain!`/`chain-copy`, `children`, `needs`, `effective`, `goal-owner` with their callers and tests | `seon.task-test/a-chain-is-linked-tasks-written-in-one-transaction-on-its-branch`: the branch exists; on `(seon.db/branch-database main b)` the first task's `next` path names the three derived symbols in order, all written in one transaction; each has its template's instructions and proofs, references derived; only the first has the plan; executions `[:running :held :held]`; main holds no chain task or attempt and holds the chain fact; a second identical call answers the same value and transacts nothing; the durable create measured end to end (`seon.profile/measure`) | Opus | — |
 | S1d | Agent verbs: `my.task/update!` (replacing `refine!`), `my.edit/text`, help as `resources/seon/help.md` through `seon.ref` | `my.task-test/update-applies-a-function-to-a-member-with-its-basis`: `into` on proofs, `my.edit/text` on the plan, a stale basis refused with the current value, an invalid value refused, an unresolved reference answered as a problem with the write kept; and `seon.bootstrap-test/every-reference-in-help-resolves` | Sonnet | — |
 | S2a | One task input: the explicit task value (task entity, requesting branch database, main database) from selection through execution, recorded input identity and `seon.context/current-results` (Run 25's root cause, reproduced live: `seon.test.runner/reach-digests` with and without the task disagree) | `seon.task-test/a-tasks-proof-is-recorded-and-read-under-its-task`: two tasks sharing one template proof with different plans each record and read their own result at their own key; an unchanged second request reuses; a plan or next-proof change invalidates; a task-reading test with no task reports missing input, no tag fallback; a world that cannot be built is the request's error, not a designed red | Opus | — |
 | S2b | The done rule (`done-refusals`) and whole-branch selection (`seon.test/changes` after every request; the task's own proofs run last) | `seon.cluster.source-test/done-refusals-judges-every-task-alike`, a table: proof red → refused; proof green with a new red test outside the proofs → done; a test main holds green now red → refused; a new function with a contract gap → refused; main holding no result → not a regression | Opus | — |
@@ -488,8 +497,6 @@ Retired acceptance tests (they test the copies design): A1, A3, A4, A6's relaunc
 
 ## 8. Open questions
 
-1. Green at the start ends a task (owner ruling). For a first task this contradicts "a task already green proves
-   nothing" (`seon.task/assign!` refuses it today). Proposed: a chain task green at its start advances with nothing
-   merged (its handoff is already met); `assign!`'s refusal stays for single tasks only.
-2. Should a reopened earlier task's completion clear its successors' completions, or does root restart them one by
-   one? Proposed: root restarts what it chooses; nothing clears automatically.
+None open. Settled on 2026-10-14: a task green at its start is done like any other (no special case: middle tasks
+never merge, the chain merges at its end); completed tasks are history, and rerunning is resetting a held task's
+fields or a new chain, assembled from plain task maps.
