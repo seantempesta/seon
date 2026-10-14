@@ -7,13 +7,19 @@
             [seon.step :as step]))
 
 (defn created-problem
-  "The `problem` section of `task`'s plan as the transaction that first asserted it wrote it (Datahike history on
-  `database`, the chain's creating transaction); empty when none."
+  "The `problem` section of `task`'s plan as it stood in the transaction that created the task as a chain member
+  (`:seon.task/created-by`, written with its plan by `seon.task/chain!`; Datahike history on `database`); empty
+  when none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task] :string]}
   [database task]
-  (let [[_ plan] (first (sort-by first (db/q '[:find ?tx ?plan :in $ ?id
-                                              :where [?e :seon.task/id ?id] [?e :seon.task/plan ?plan ?tx true]]
-                                            (db/history database) (:seon.task/id task))))]
+  (let [history (db/history database)
+        [created] (sort (db/q '[:find [?tx ...] :in $ ?id
+                                :where [?e :seon.task/id ?id] [?e :seon.task/created-by _ ?tx true]]
+                              history (:seon.task/id task)))
+        [_ plan] (last (sort-by first (db/q '[:find ?tx ?plan :in $ ?id ?created
+                                              :where [?e :seon.task/id ?id] [?e :seon.task/plan ?plan ?tx true]
+                                              [(<= ?tx ?created)]]
+                                            history (:seon.task/id task) (or created 0))))]
     (str/trim (get (step/sections (or plan "")) "problem" ""))))
 
 (defn handoff

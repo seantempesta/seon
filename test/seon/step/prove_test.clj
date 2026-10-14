@@ -61,4 +61,4 @@
          (is (= expected (mapv (juxt :seon.step.prove/check :seon.error/offending) (sut/handoff database task))) row-name)))))
   ;; (b) the task the runner supplies, when it supplies one
   (when-let [{task :seon.test/task branch :seon.test/branch} (seon.test/task)]
-    (is (= [] (sut/handoff branch task)) "the task the runner supplies satisfies its own handoff")))
+    (is (= [] (mapv (juxt :seon.step.prove/check :seon.error/offending) (sut/handoff branch task))) "the task the runner supplies satisfies its own handoff")))

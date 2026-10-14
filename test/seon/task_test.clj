@@ -2,6 +2,7 @@
   "The task tree (runtime-follows-db §2): child tasks and needs as facts, the writer's
   needs-cycle refusal, the attempt and firing facts adopted on a branch of the live store."
   (:require [clojure.string :as str]
+            [seon.step.design :as design]
             [clojure.test :refer [deftest is are testing]]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -642,7 +643,14 @@
                 (db/pull on-branch [:seon.task/execution {:seon.task/next [:seon.task/id]} {:seon.task/created-by [:seon.agent/id]}]
                          [:seon.task/id handle]))
              "the filed task's chain runs its first task, linked by next and created by root, as any chain's")
-         (is (= before (pulled (db/db connection))) "main's entry is unchanged until the merge"))))))
+         (is (= before (pulled (db/db connection))) "main's entry is unchanged until the merge")
+         (let [task (db/stored-entity on-branch (:e (first (db/datoms on-branch :avet :seon.task/id handle))))
+               refused (fn [plan] (into [] (comp (map :seon.step.design/check) (filter #{:problem-changed}))
+                                        (design/handoff on-branch (assoc task :seon.task/plan plan))))]
+           (is (= "Fix the bug in `seon.task/chain!`." (design/created-problem on-branch task))
+               "Design's Problem basis is the plan chain! wrote, not the filed entry's heading-less ingestion")
+           (is (= [] (refused (:seon.task/plan (first maps)))) "a Problem left as chain! wrote it is not refused")
+           (is (= [:problem-changed] (refused "## Problem\n\nSomething else.")) "a changed Problem is refused")))))))
 
 (deftest a-tasks-proof-is-recorded-and-read-under-its-task
   (test-support/with-database

@@ -23,7 +23,9 @@
   [plan]
   (test-support/with-database
    (fn [connection]
-     (let [{task :seon.test/task} (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.design :seon.task/name "one" :seon.task/plan problem}] 'tq.design/one)
+     (let [_ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           {task :seon.test/task} (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.design :seon.task/name "one" :seon.task/plan problem
+                                                                       :seon.task/created-by [:seon.agent/id "root"]}] 'tq.design/one)
            _ (db/transact! connection [{:seon.task/id (:seon.task/id task) :seon.task/plan plan}])
            database (db/db connection)
            current (db/stored-entity database (:e (first (db/datoms database :avet :seon.task/sym 'tq.design/one))))]
@@ -48,4 +50,5 @@
         "an existing-schema bug fix cites its key"))
   (testing "the runner's task"
     (when-let [{task :seon.test/task branch :seon.test/branch} (test/task)]
-      (is (= [] (design/handoff branch task)) "the task is satisfied"))))
+      (is (= [] (mapv (juxt :seon.step.design/check :seon.error/offending) (design/handoff branch task)))
+          "the task is satisfied"))))
