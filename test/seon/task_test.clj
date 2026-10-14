@@ -637,6 +637,19 @@
          (is (= [dynamic] (current (db/branch-database (db/db connection) branch))) "the branch head opened from main reads it current")
          (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
 
+(deftest a-tasks-revision-is-its-content-on-an-as-of-view
+  ;; Lane identity-stable (064809752): `seon.task/task-revision` answered nil on an as-of view of the very basis
+  ;; that holds the task, so a task reader's result read back as not current there
+  (test-support/with-database
+   (fn [connection]
+     (test-support/task-input connection [{:db/id -1 :seon.task/ns 'tq.chain :seon.task/name "a" :seon.task/plan "## Problem\n\nP."}]
+                              'tq.chain/a)
+     (let [database (db/db connection)
+           handle (task/task-handle 'tq.chain "a")]
+       (is (string? (task/task-revision database handle)) "the current value answers the task's revision")
+       (is (= (task/task-revision database handle) (task/task-revision (db/as-of database (db/basis-t database)) handle))
+           "an as-of view of the same basis answers the same revision")))))
+
 (deftest a-filed-task-becomes-a-full-chain
   ;; TASK-CHAIN S3f-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#21-create`, From a filed task)
   (test-support/with-database

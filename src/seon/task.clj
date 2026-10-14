@@ -163,10 +163,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
                   [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
   [database attribute values]
-  (let [entities (if (contains? (:schema database) attribute)
+  (let [entities (if (db/attribute-installed? database attribute)
                    (db/q database '[:find [?e ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
                    [])
-        held (filter #(contains? (:schema database) %) tree-attributes)
+        held (filter #(db/attribute-installed? database %) tree-attributes)
         rows (or (read-error entities) (db/pull-many database (into '[*] (map (fn [a] {a [:seon.task/sym]})) held) entities))
         as-lookup (fn [row a] (if-let [targets (get row a)] (assoc row a (into #{} (map #(vector :seon.task/sym (:seon.task/sym %))) targets)) row))]
     (or (read-error rows) (into {} (map (juxt :seon.task/id #(reduce as-lookup % held))) rows))))
@@ -176,7 +176,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] [:vector :seon.schema/value]]}
   [database projection]
   (mapv (fn [[attribute]]
-          (let [datoms (if (contains? (:schema database) attribute)
+          (let [datoms (if (db/attribute-installed? database attribute)
                          (db/datoms database :aevt attribute) [])]
             (when (map? datoms) (throw (ex-info (:seon.error/message datoms) datoms)))
             datoms))
@@ -325,7 +325,7 @@
   no symbol yet: the symbol is derived from its ns and name like its handle."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
   [database]
-  (if (contains? (:schema database) :seon.task/sym)
+  (if (db/attribute-installed? database :seon.task/sym)
     (let [unnamed (db/q '[:find ?e ?ns ?name :where [?e :seon.task/id] [?e :seon.task/ns ?ns] [?e :seon.task/name ?name]
                           (not [?e :seon.task/sym])] database)]
       (when (read-error unnamed) (throw (ex-info (:seon.error/message unnamed) unnamed)))
@@ -338,7 +338,7 @@
   runs under its subject's (`seon.task/execution`)."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
   [database]
-  (if (contains? (:schema database) :seon.task/execution)
+  (if (db/attribute-installed? database :seon.task/execution)
     (let [default (:seon.task/execution (task-defaults (db/carried-projection database)))
           unset (db/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/execution _]) (not [_ :seon.task/children ?e])] database)]
       (when (read-error unset) (throw (ex-info (:seon.error/message unset) unset)))
@@ -460,7 +460,7 @@
   retracted; none when the database declares no tasks."
   {:malli/schema [:=> [:cat :seon.db/database-value :boolean] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
   [database retracted?]
-  (if (contains? (:schema database) :seon.task/id)
+  (if (db/attribute-installed? database :seon.task/id)
     (let [handles (if retracted?
                     (let [history (db/history database)]
                       (or (read-error history) (db/q '[:find [?h ...] :where [_ :seon.task/id ?h _ false]] history)))
@@ -578,7 +578,7 @@
    (let [tagged (fn [database task] (db/q '[:find [?s ...] :in $ ?t :where [?e :seon.task/tasks ?t] [?e :seon.test/sym ?s]] database task))
          at (fn [database]
               (let [task (db/pull database (cond-> [:seon.task/id :seon.task/step]
-                                             (contains? (:schema database) :seon.task/proofs) (conj :seon.task/proofs))
+                                             (db/attribute-installed? database :seon.task/proofs) (conj :seon.task/proofs))
                                   [:seon.task/sym sym])
                     handle (:seon.task/id task)
                     held (when handle (effective database handle))
