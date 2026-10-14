@@ -79,8 +79,9 @@ the slice that retires it lands in a restart batch with a reset (recorded tasks 
 An attempt (`:seon.task/assignment` row, its `:seon.task.attempt/*` members) is one agent's turn at one task, and on a
 chain it lives on the chain branch, never on main. Its **outcome** is the one place completion lives:
 `:seon.task/outcome` on the attempt row, `:done` (new value: its proofs passed and the chain moved on), `:merged` (the
-terminal attempt, accepted into main), or `:closed` (root's decision, with `:seon.task/reason`). A task is done when
-its latest attempt's outcome is `:done` or `:merged`. Attempt numbers keep counting (`:seon.task/attempts-made`), so a
+terminal attempt, accepted into main), or `:closed` (root's decision, with `:seon.task/reason`). A task is done when its latest attempt's outcome is `:done` or `:merged`. Today `seon.merge/merge-tx` maps an end of
+`:done` to outcome `:merged`, and readers such as `seon.task/ready-rules`' `leaf-done` and `seon.context` treat `:merged`
+alone as complete; they convert to `:done`-or-`:merged` in S3a. Attempt numbers keep counting (`:seon.task/attempts-made`), so a
 resumed task's next attempt has a new identity and a new agent id.
 
 ### Templates
@@ -96,8 +97,8 @@ an explicit database (omitted, the caller's bound connection's database).
 
 One entity on main per chain: `:seon.chain/branch` (the branch keyword) and `:seon.chain/first` (the first task's
 `:seon.task/id`), identity `:seon.chain/first`. It is non-program (never merges as program), declared
-`:seon.wake/starts true` (its installation wakes root: the route reacts to added datoms only), and counted by
-`seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause, holding the branch and its `base/` ref) so
+`:seon.wake/starts true` (its installation wakes root: the route reacts to added datoms only), and counted by `seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause evaluated on main, since
+`cluster-claims` answers only for a cluster branch, holding the branch and its `base/` ref) so
 boot's `seon.cluster.registry/retire-unclaimed!` keeps its branch, failed or held chains included (measured: without the
 clause all twenty probe chains were unclaimed). It is discovery, not status: root reads the chain's state on its branch.
 (Not `datahike.reference`: with one store its store id is redundant, an eid selector cannot be written before the eid
@@ -128,8 +129,8 @@ check goes.
    `(merge (seon.task/template 'seon.step.design/template) {:seon.task/ns 'seon.ref :seon.task/name "fix-pathless-section" :seon.task/plan p})`.
    `chain!` knows nothing about templates: it fills schema defaults (Malli `:default` via `malli.core/decode` and
    `malli.transform/default-value-transformer` with optional keys added), names and links the maps by position. In
-   order: fork the branch (`seon.cluster.registry/fork!` with `:seon.branch/target` always main and `:seon.chain/from`
-   selecting only the starting head, so the base and the final merge target stay main; branch `chain-<h>`), unless it
+   order: fork the branch (`seon.cluster.registry/fork!` with `:seon.branch/target` always main, and `:seon.chain/from` passed
+as its `:seon.cluster.registry/from`, selecting only the starting head, so the base and the final merge target stay main; branch `chain-<h>`), unless it
    exists; on it, write every task in ONE transaction through the task writer with negative tempids, the first
    `:running`, the rest `:held`; then write the chain fact on main. Idempotent: a repeated call with the same first task
    returns the existing chain and changes nothing (an edited plan stays). A crash after the fork and before the fact
@@ -495,7 +496,9 @@ one named commit. No compatibility copy.
 
 ## 7. Slices
 
-Serial where owners are shared (`seon.task`, `seon.turn`, `seon.context`, `seon.cluster.agent`, `seon.test.runner`,
+S1a lands first: today's reference derivation (`seon.task/with-references`) reads `intent`, and S1b and S1c are
+written against `plan`. `seon.task/with-references`, `task-delta` and `held-tx` are private: their red proofs reach them
+through the public writers (pre-brief `prebrief-s1.md`). Serial where owners are shared (`seon.task`, `seon.turn`, `seon.context`, `seon.cluster.agent`, `seon.test.runner`,
 `seon.cluster.source`, `seon.merge`). Each slice: a Haiku pre-brief (every caller, test, quoted symbol and schema
 reference it changes or deletes; the reds on HEAD; the task's census numbers rerun), its red deftest first, HEAD boots
 after it, committed through `bin/lane` (a message per lane, never a shared message file), and this table's status
