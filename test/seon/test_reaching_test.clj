@@ -486,6 +486,25 @@
             (support/delete-recursively! marker)
             (remove-ns namespace-name)))))))
 
+(deftest a-host-answer-on-an-unchanged-database-is-derived-once
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol _ _]
+          (let [database (db/db connection)
+                first-answer (sut/host database test-symbol)
+                again (seon.profile/measure #(sut/host database test-symbol))]
+            (is (= :seon.test.host/isolated-snapshot (:seon.test/host first-answer)))
+            (is (= first-answer (:seon.profile/value again)))
+            (is (= 0 (:seon.profile/reads again))
+                "the second answer for the same database reads no graph")
+            (support/transacted! connection
+                                 [[:db/retract [:seon.test/sym test-symbol]
+                                   :seon.fn/calls destructive-owner]])
+            (is (= :seon.test.host/in-process
+                   (:seon.test/host (sut/host (db/db connection) test-symbol)))
+                "a changed call edge changes the answer")))))))
+
 (deftest a-tests-render-pair-shows-where-it-runs-and-why
   (support/with-database
     (fn [connection]

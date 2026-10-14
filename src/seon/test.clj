@@ -1,7 +1,6 @@
 (ns seon.test
   "One test request on the agent execution lifecycle, and the recorded evidence it reads."
   (:require
-            [clojure.core.cache.wrapped :as cache]
             [seon.print :as print]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -465,41 +464,52 @@
                     "in the owner's own metadata at its definition."))
       :else (into {} entities))))
 
+(defn- destructive-key
+  "The content key of the destructive program graph: the program's revisions
+  plus the revisions of the data attributes declared edges name (`:seon.fn/invokes`
+  holders, `:seon.fn/reference-to` keys); empty when the value carries no
+  revision authority. Equal keys prove equal walks."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:tuple] [:tuple :seon.schema/value [:map-of :qualified-keyword :uuid]]]]}
+  [database]
+  (if-let [program (runner/program-revisions database)]
+    (let [edge-attributes (seon.cache/lookup ::edge-attributes program (comp #(+ 256 (* 64 %)) count)
+                                             #(db/q '[:find [?attribute ...]
+                                                      :where (or-join [?attribute]
+                                                                      [_ :seon.fn/invokes ?attribute]
+                                                                      (and [?declaration :seon.fn/reference-to :seon.fn/sym]
+                                                                           [?declaration :seon.schema/key ?attribute]))]
+                                                    database)
+                                             vector?)]
+      (if (vector? edge-attributes)
+        [program (select-keys (get-in database [:cache-context :datahike.cache/attribute-revisions])
+                              edge-attributes)]
+        []))
+    []))
+
 (defn- destructive-reach
   "Every test symbol whose reach includes a destructive owner, mapped to it.
 
   Membership is the shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`,
-  walked from each owner `destroyers` names."
+  walked from each owner `destroyers` names; kept in `seon.cache` by
+  `destructive-key`."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:map-of :seon.test/sym :seon.fn/sym] :seon.error/value]]}
   [database]
   (let [walk (fn []
-                 (let [owners (destroyers database)]
-                   (if (:seon.error/at owners)
-                     owners
-                     (let [by-owner (functions/gate-sets database (sort (keys owners)))]
-                       (if (:seon.db/invalid-read by-owner)
-                         by-owner
-                         (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
-                                 {} (sort by-owner)))))))
-        program (runner/program-revisions database)
-        ;; The walk also reads the data attributes declared edges name
-        ;; (`:seon.fn/invokes` holders, `:seon.fn/reference-to` keys).
-        edge-attributes (when program
-                          (db/q '[:find [?attribute ...]
-                                  :where (or [_ :seon.fn/invokes ?attribute]
-                                             (and [?declaration :seon.fn/reference-to :seon.fn/sym]
-                                                  [?declaration :seon.schema/key ?attribute]))]
-                                database))
-        memo-key (when (and program (vector? edge-attributes))
-              [program (select-keys (get-in database [:cache-context :datahike.cache/attribute-revisions])
-                                    edge-attributes)])
-        memo (when memo-key
-               (schema/projection-cache-value (db/carried-projection database) ::destructive-reach
-                                              #(cache/lru-cache-factory {} :threshold 4)))]
-    (if-not memo
-      (walk)
-      (let [reach @(cache/lookup-or-miss memo memo-key (fn [_] (delay (walk))))]
-        (when (:seon.error/at reach) (cache/evict memo memo-key))
-        reach))))
+               (let [owners (destroyers database)]
+                 (if (:seon.error/at owners)
+                   owners
+                   (let [by-owner (functions/gate-sets database (sort (keys owners)))]
+                     (if (:seon.db/invalid-read by-owner)
+                       by-owner
+                       (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
+                               {} (sort by-owner)))))))]
+    (let [memo-key (destructive-key database)]
+      (if (seq memo-key)
+        (seon.cache/lookup ::destructive-reach memo-key #(+ 256 (* 128 (count %))) walk
+                           #(not (:seon.error/at %)))
+        (walk)))))
 
 (defn- destructive-paths
   "Shortest named call path from every name reaching `owner-symbol` down to it.
@@ -574,31 +584,36 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym]
                   [:or :seon.test/host-report :seon.error/value]]}
   [database test-symbol]
-  (let [owners (destroyers database)]
-    (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
-      owners
-      (let [entity (db/pull database [:db/id] [:seon.test/sym test-symbol])]
-        (cond
-          (and (map? entity) (contains? entity :seon.error/at) (contains? entity :seon.error/layer) (contains? entity :seon.error/operation)) entity
-          (nil? (:db/id entity))
-          (unknown test-symbol
-                   (str "No program entity declares the test " test-symbol
-                        ", so its call graph is unknown and where it runs "
-                        "cannot be derived. Publish the program "
-                        "(bin/seon init --dev default --changed <file>) and "
-                        "ask again."))
-          :else
-          (let [reach (destructive-reach database)]
-            (if (and (map? reach) (contains? reach :seon.error/at) (contains? reach :seon.error/layer) (contains? reach :seon.error/operation))
-              reach
-              (if-let [evidence (destructive-exclusion
-                                 owners reach
-                                 (when-let [owner (get reach test-symbol)]
-                                   {owner (destructive-paths database owner)})
-                                 test-symbol)]
-                (assoc evidence :seon.test/host :seon.test.host/isolated-snapshot)
-                {:seon.test/sym test-symbol
-                 :seon.test/host :seon.test.host/in-process}))))))))
+  (let [memo-key (destructive-key database)
+        derive-host (fn []
+                      (let [owners (destroyers database)]
+                        (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
+                          owners
+                          (let [entity (db/pull database [:db/id] [:seon.test/sym test-symbol])]
+                            (cond
+                              (and (map? entity) (contains? entity :seon.error/at) (contains? entity :seon.error/layer) (contains? entity :seon.error/operation)) entity
+                              (nil? (:db/id entity))
+                              (unknown test-symbol
+                                       (str "No program entity declares the test " test-symbol
+                                            ", so its call graph is unknown and where it runs "
+                                            "cannot be derived. Publish the program "
+                                            "(bin/seon init --dev default --changed <file>) and "
+                                            "ask again."))
+                              :else
+                              (let [reach (destructive-reach database)]
+                                (if (and (map? reach) (contains? reach :seon.error/at) (contains? reach :seon.error/layer) (contains? reach :seon.error/operation))
+                                  reach
+                                  (if-let [evidence (destructive-exclusion
+                                                     owners reach
+                                                     (when-let [owner (get reach test-symbol)]
+                                                       {owner (destructive-paths database owner)})
+                                                     test-symbol)]
+                                    (assoc evidence :seon.test/host :seon.test.host/isolated-snapshot)
+                                    {:seon.test/sym test-symbol
+                                     :seon.test/host :seon.test.host/in-process}))))))))]
+    (if (seq memo-key)
+      (seon.cache/lookup ::host [memo-key test-symbol] (constantly 512) derive-host #(not (:seon.error/at %)))
+      (derive-host))))
 
 (defn host-text
   "One line an agent reads: where this test runs and why.
