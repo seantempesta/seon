@@ -1150,15 +1150,11 @@
                      (:seon.schema/refused-value refusal)))
               (is (= ['seon.sci.eval/evaluate] @missing)))))))))
 
-(deftest the-dispositions-are-callable-and-come-back-as-values
+(deftest a-disposition-is-callable-and-comes-back-as-a-value
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
-            completed (run-in ctx "(my.task/send-back! {:my.task/reason \"done\"})" 2000)
             waiting (run-in ctx "(my.turn/wait {:my.turn/note \"later\"})" 2000)]
-        (is (ok? completed))
-        (is (= {:my.turn/disposition :completed :my.turn/result "done"}
-               (:seon.sci.admit/value completed)))
         (is (ok? waiting))
         (is (= {:my.turn/disposition :wait :my.turn/note "later"}
                (:seon.sci.admit/value waiting)))))))

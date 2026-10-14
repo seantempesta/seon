@@ -239,7 +239,7 @@
                 ["in-ns" (str "(in-ns 'scratch.held-reply)\n(in-ns '" agent-ns ")") :seon.repl/ns]
                 ["set! print-length" "(set! *print-length* 2)\n(range 5)" :seon.repl/value]
                 ["error" "(/ 1 0)\n:after" :seon.repl/value]
-                ["completed disposition" "(my.task/send-back! {:my.task/reason \"done\"})" :seon.repl/value]
+                ["wait disposition" "(my.turn/wait {:my.turn/note \"done\"})" :seon.repl/value]
                 ["faulted" "(+ 2 2)" :seon.repl/errors #(core-fault! connection "raised before the faulted row")]
                 ["defn" "(defn held-inc \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                  :seon.repl/value]]]

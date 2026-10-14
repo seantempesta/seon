@@ -38,13 +38,27 @@
    (fn [connection]
      (is (= {:seon.agent/id "root"} (my.task/current {:seon.db/db (db/db connection) :seon.agent/id "root"}))))))
 
+(defn- send-back-request
+  "A send-back request as the world completes it: root's database on `connection` beside what the caller named."
+  [connection named]
+  (merge {:seon.db/db (db/db connection) :seon.agent/id "root"} named))
+
 (deftest send-back-is-a-completed-disposition-carrying-its-reason-and-data
-  (let [sent (my.task/send-back! {:my.task/reason "The proof contradicts the intent."
-                                  :my.task/target 'tq.assigned/work-root :my.task/counterexample {:expected 1 :actual 2}})]
-    (is (= :completed (:my.turn/disposition sent)) "the disposition the turn derives :given-back from")
-    (is (= "The proof contradicts the intent." (:my.turn/result sent)) "the reason is the reply")
-    (is (= 'tq.assigned/work-root (:my.task/target sent)))
-    (is (= {:expected 1 :actual 2} (:my.task/counterexample sent)))))
+  (with-root true
+   (fn [connection]
+     (let [sent (my.task/send-back! (send-back-request connection
+                                                        {:my.task/reason "The proof contradicts the intent."
+                                                         :my.task/target 'tq.assigned/work-root :my.task/counterexample {:expected 1 :actual 2}}))]
+       (is (= :completed (:my.turn/disposition sent)) "the disposition the turn derives :given-back from")
+       (is (= "The proof contradicts the intent." (:my.turn/result sent)) "the reason is the reply")
+       (is (= 'tq.assigned/work-root (:my.task/target sent)))
+       (is (= {:expected 1 :actual 2} (:my.task/counterexample sent)))))))
+
+(deftest send-back-holding-no-task-answers-its-error
+  (with-root false
+   (fn [connection]
+     (is (= :my.task/no-task-error
+            (:seon.error/type (my.task/send-back! (send-back-request connection {:my.task/reason "I cannot."}))))))))
 
 (deftest a-send-back-with-positional-arguments-is-answered-with-its-example
   ;; chain experiment 2: an Implement agent called (my.task/send-back! target reason); the refusal named only the
@@ -56,7 +70,9 @@
         "the refusal offers the docstring's Example as a form to run")))
 
 (deftest send-back-with-a-blank-reason-answers-its-error
-  (is (:seon.error/at (my.task/send-back! {:my.task/reason "  "}))))
+  (with-root true
+   (fn [connection]
+     (is (:seon.error/at (my.task/send-back! (send-back-request connection {:my.task/reason "  "})))))))
 
 (defn- updating
   "The update request of root's `sym` member `k` on `connection`: what `my.task/update!` builds, with the world's

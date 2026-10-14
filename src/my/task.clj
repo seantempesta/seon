@@ -104,7 +104,8 @@
   "Give my task back without green proofs.
 
   `:my.task/reason` says why, `:my.task/target` optionally names the task that owns the mistake and
-  `:my.task/counterexample` optionally carries the data showing it. Answers
+  `:my.task/counterexample` optionally carries the data showing it; call preparation supplies my database and
+  identity, and holding no task answers `:my.task/no-task-error`. Answers
   the completed disposition whose reply is the reason, with the target and
   counterexample beside it; as my reply's last form it ends my turn, my
   task's end is derived `:sent-back` to the target, recorded on my attempt as
@@ -118,9 +119,13 @@
                        :my.task/target 'seon.task/an-example-task
                        :my.task/counterexample {:expected 1 :actual 2}})
   ```"
-  {:malli/schema [:=> [:cat :my.task/send-back-request] [:or :my.task/sent-back :seon.error/value]]}
-  [{reason :my.task/reason :as request}]
-  (let [completed (run/complete reason)]
-    (if (:seon.error/at completed)
-      completed
-      (merge completed (select-keys request [:my.task/target :my.task/counterexample])))))
+  {:malli/schema [:=> [:cat :my.task/send-back-request] [:or :my.task/sent-back :my.task/no-task-error :seon.error/value]]}
+  [{database :seon.db/db agent-id :seon.agent/id reason :my.task/reason :as request}]
+  (let [held (task/agent-task database agent-id)
+        completed (run/complete reason)]
+    (cond
+      (:seon.error/at held) held
+      (nil? held) (refusal/error :my.task/no-task-error {:seon.error/operation 'my.task/send-back! :my.task/reason reason
+                                                         :seon.error/message "I hold no task, so there is nothing to give back."})
+      (:seon.error/at completed) completed
+      :else (merge completed (select-keys request [:my.task/target :my.task/counterexample])))))

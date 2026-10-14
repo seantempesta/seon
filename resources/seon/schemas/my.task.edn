@@ -8,7 +8,8 @@
           :reason [:string {:min 1 :description "Why an agent gives its task back without green proofs: the reply root reads."}]
           :target [:and {:description "The task that owns the mistake a send-back names, by symbol."} :seon.task/sym]
           :counterexample [:and {:description "The data showing why the task cannot be made green as written."} :seon.schema/value]
-          :send-back-request [:map [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
+          :send-back-request [:map {:description "A send-back's request: the reason, target and counterexample the caller named, and the database and agent the evaluation's world supplies."}
+                              [:seon.db/db :seon.db/database-value] [:seon.agent/id :seon.agent/id] [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
                               [:my.task/counterexample {:optional true} :my.task/counterexample]]
           :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it."}
                       :my.turn/completed
@@ -28,5 +29,6 @@
                            [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                            [:my.task/task :my.task/task] [:my.task/member :my.task/member]
                            [:my.task/function :my.task/function] [:my.task/arguments :my.task/arguments]]
+          :no-task-error [:and {:description "my.task/send-back! was called by an agent that holds no task, so there is nothing to give back; it names the reason that went undelivered."} :seon.error/base [:map [:my.task/reason :my.task/reason]]]
           :invalid-member-error [:and {:description "my.task/update! computed a value that does not satisfy the task declaration's schema."} :seon.error/base [:map [:my.task/member :my.task/member]]]
           :unknown-task-error [:and {:description "my.task/update! named a task that does not exist."} :seon.error/base [:map [:my.task/task :my.task/task]]]}
