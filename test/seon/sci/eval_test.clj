@@ -2775,6 +2775,35 @@
        (is (< (get called 'seon.sci.eval/definition-digest-of 0) 10)
            "only the authored and absent functions are digested")))))
 
+(deftest a-work-branch-interprets-only-what-main-has-not-moved-past
+  ;; Before, a work branch's overlay was its head against the loaded program,
+  ;; so a function main deleted after the fork read as the branch's addition
+  ;; and the reverse closure interpreted its stale callers: chain branch
+  ;; :chain-f1f6dc8e6652 interpreted its merge base's `seon.db/q`, whose callee
+  ;; `seon.db/query-call-valid?` main had deleted (S5 run 5b).
+  (test-support/with-database
+   (fn [connection]
+     ;; the fixture names are built, so this test's own entity references none of them
+     (let [loaded (#'eval/loaded-program (db/db connection))
+           named #(symbol "my.program" (str "overlay-" %))
+           row (fn [suffix] (test-support/program-fn-entity (db/db connection) (named suffix)
+                                                          (str "(defn overlay-" suffix " [] 1)")))]
+       ;; main's change before the fork, not yet loaded: the branch's too
+       (test-support/transacted! connection [(row "kept") (row "gone")])
+       (with-fresh-fork
+        connection
+        (fn [fork]
+          ;; main deletes one after the fork; the branch never touched it
+          (test-support/transacted! connection [[:db/retractEntity [:seon.fn/sym (named "gone")]]])
+          (test-support/transacted! fork [(test-support/program-fn-entity (db/db fork) (named "own")
+                                                                          "(defn overlay-own [] 2)")])
+          (let [plan (#'eval/derive-overlay-plan (db/db fork) loaded)
+                interpreted (into (::eval/overridden plan) (::eval/added plan))]
+            (is (contains? interpreted (named "own")) "the branch's own change")
+            (is (contains? interpreted (named "kept")) "main's unloaded change the branch inherited")
+            (is (not (contains? interpreted (named "gone")))
+                "main's change after the fork binds the platform, never the branch's stale copy"))))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/branches-without-program-changes-add-no-overlay-entry}}
   branches-without-program-changes-add-no-overlay-entry
   (test-support/with-database
