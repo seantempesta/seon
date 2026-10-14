@@ -1,0 +1,162 @@
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index 5b4b4ba97..629cedcd3 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -1001,7 +1001,9 @@
+                                       result (members run)))
+                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
+                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
+-            [observed-direct observed-bound] (if (and changes-since (not proof-request?))
++            [observed-direct observed-bound] (if (and changes-since (not proof-request?)
++                                                      (or (= :incremental policy)
++                                                          (:seon.test/since-previous-run? request)))
+                                                (changed-definition-symbols database changes-since)
+                                                [#{} #{}])
+             observed-changed (into observed-direct observed-bound)
+@@ -1641,35 +1643,29 @@
+     (if (:seon.error/at results) results
+         (or (first results) (unknown test-symbol "No admitted execution is recorded for this test.")))))
+ 
+-(defn- current-result
+-  "`test-symbol`'s result at its current identity judging `task` (nil: none, `seon.test.runner/current-results`)
+-  that still describes its source and inputs; nil when it holds none."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym [:maybe :seon.task/sym]]
+-                  [:or :nil :seon.test/result :seon.test/result-unknown :seon.test/host-error :seon.error/value]]}
+-  [database test-symbol task]
+-  (let [inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
+-        current (runner/current-results database [test-symbol] task)
+-        present (db/pull database [:seon.test/source :seon.test/fixture-observation]
+-                         [:seon.test/sym test-symbol])
+-        result (when (map? current) (get current test-symbol))]
+-    (or (first (filter :seon.error/at [inputs current present]))
+-        (when (and (:seon.test/source present)
+-                   (not (:seon.test/fixture-observation present))
+-                   (= #{(:seon.test.run/input-digest result)} (set inputs)))
+-          result))))
+-
+ (defn- stale-in
+   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol] [:maybe :seon.task/sym]]
+                   [:or [:vector :qualified-symbol] :seon.test/execution-error :seon.error/value]]}
+   [database test-symbols task]
+-  (reduce (fn [result test-symbol]
+-            (let [current (current-result database test-symbol task)]
+-              (cond
+-                (:seon.error/at current)
+-                (reduced (assoc current :seon.test/execution-refusal :seon.test/sym))
+-                current result
+-                :else (conj result test-symbol))))
+-          [] test-symbols))
++  (if (empty? test-symbols)
++    []
++    (let [symbols (vec test-symbols)
++          inputs (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database)
++          current (runner/current-results database symbols task)
++          present (db/q '[:find ?sym ?source ?fixture :in $ [?sym ...]
++                          :where [?e :seon.test/sym ?sym]
++                                 [(get-else $ ?e :seon.test/source nil) ?source]
++                                 [(get-else $ ?e :seon.test/fixture-observation nil) ?fixture]]
++                        database symbols)]
++      (if-let [err (first (filter :seon.error/at [inputs current present]))]
++        (assoc err :seon.test/execution-refusal :seon.test/sym)
++        (let [input-set (set inputs)
++              by-sym (into {} (map (fn [[sym source fixture]] [sym [source fixture]])) present)]
++          (into [] (remove (fn [test-symbol]
++                             (let [[source fixture] (get by-sym test-symbol)
++                                   result (get current test-symbol)]
++                               (and source (not fixture) (= #{(:seon.test.run/input-digest result)} input-set)))))
++                symbols))))))
+ 
+ (defn stale
+   "Source-bearing tests without a result at their current inputs and identity.
+@@ -2128,16 +2124,19 @@
+   binding (`binding-lost?`), in print order; empty when nothing changed, a refused read its refusal."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.test/changed :seon.error/value]]}
+   [base candidate]
+-  (let [changed (program/changed-identities (db/basis-t base) candidate source/merge-bound)]
+-    (if (:seon.error/at changed)
+-      changed
+-      (vec (sort print/compare-values
+-                 (remove (fn [[a v :as declaration]]
+-                           (if (= :seon.ns/name a)
+-                             (not (binding-lost? base candidate v))
+-                             (when-let [behavior (behavior-of base declaration)]
+-                               (= behavior (behavior-of candidate declaration)))))
+-                         changed))))))
++  (seon.cache/lookup
++   (::branch-delta (or (db/cache-owner candidate) (seon.cache/default-cache)))
++   [(or (db/commit-id base) (db/basis-t base)) (runner/program-revisions-digest candidate)]
++   #(let [changed (program/changed-identities (db/basis-t base) candidate source/merge-bound)]
++      (if (:seon.error/at changed)
++        changed
++        (vec (sort print/compare-values
++                   (remove (fn [[a v :as declaration]]
++                             (if (= :seon.ns/name a)
++                               (not (binding-lost? base candidate v))
++                               (when-let [behavior (behavior-of base declaration)]
++                                 (= behavior (behavior-of candidate declaration)))))
++                           changed)))))))
+ 
+ (defn branch-changes
+   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
+diff --git a/src/seon/test/runner.clj b/src/seon/test/runner.clj
+index 63206010e..6413a6d6b 100644
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -2287,6 +2287,23 @@
+   execute inside the body's call sink is the runner's work, not the test's."
+   '[seon.test.runner/run-var! seon.sci.eval/run-test])
+ 
++(defn- harness-closure
++  "The static call, reference and subject symbol closure of `harness-entries` on `tested`,
++  cached in `seon.cache` under the edge attributes' content revisions so body-only edits reuse it."
++  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :qualified-symbol]]}
++  [tested]
++  (let [revisions (db/content-revisions tested [:seon.fn/sym :seon.test/sym :seon.fn/calls :seon.fn/references :seon.test/subject])]
++    (seon.cache/lookup
++     (::harness-closure (or (db/cache-owner tested) (seon.cache/default-cache)))
++     revisions
++     #(let [calls (reach-attribute tested :seon.fn/sym :seon.fn/calls)
++            refs (reach-attribute tested :seon.fn/sym :seon.fn/references)
++            test-calls (reach-attribute tested :seon.test/sym :seon.fn/calls)
++            test-refs (reach-attribute tested :seon.test/sym :seon.test/references)
++            subjects (reach-attribute tested :seon.test/sym :seon.test/subject)
++            edges (merge-with into calls refs test-calls test-refs subjects)]
++        (into #{} (mapcat val) (reach-fixed-point (vec harness-entries) edges))))))
++
+ (defn- executed-roots
+   "What each result's body executed (`:seon.test.member/executed`) beyond its
+   static closure on `tested`: `::dynamic-calls`, test -> the declarations it
+@@ -2311,12 +2328,11 @@
+         ;; The runner's own work inside the body's sink (running the var,
+         ;; reporting, printing failures) is the harness's, not the test's, and
+         ;; a contract's predicates are its schema's, which the reach names by form.
+-        harness (let [closures (when (seq executed) (reach-memberships tested (vec harness-entries)))]
+-                  (cond-> (into (set harness-entries)
+-                                (keys (schema/predicate-functions-in
+-                                       (or (db/carried-projection tested) (schema/handed-projection)))))
+-                    (and closures (not (seon.error.refusal/error? closures)))
+-                    (into (mapcat val) closures)))]
++        harness (cond-> (into (set harness-entries)
++                              (keys (schema/predicate-functions-in
++                                     (or (db/carried-projection tested) (schema/handed-projection)))))
++                  (seq executed)
++                  (into (harness-closure tested)))]
+     {::dynamic-calls (into {} (keep (fn [[test-symbol ran]]
+                                       (let [closure (get static test-symbol #{})
+                                             outside (into (sorted-set)
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index dc97d0ec1..3ec23944c 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -5541,8 +5541,10 @@
+               platform (platform-proof (db/db connection) changed)
+               pending (set (:seon.turn.loop/pending platform))
+               reaching (run-reaching execution (left) changed platform)
++              answered (when-not (error? reaching)
++                         (into #{} (keep :seon.test/sym) (:seon.test/results reaching)))
+               ;; a branch test holding a current result would only answer it again
+-              branched (run-branch execution (left) (into [] (comp (filter (set stale)) (remove pending)) branch))
++              branched (run-branch execution (left) (into [] (comp (filter (set stale)) (remove pending) (remove (or answered #{}))) branch))
+               proved (when (seq proofs) (run-proofs execution agent-id (left) pending))
+               ;; a derivation that fails is shown beside the step's values, never in place of them
+               red (try (step-reds execution agent-id)
