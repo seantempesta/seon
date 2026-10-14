@@ -847,8 +847,9 @@
   {:seon.program/max-datoms 10000})
 
 (defn- agent-owned
-  "The identities of `changed` that belong to an agent the destination `head` lacks: a namespace `branch`
-  holds stewarded by such an agent (`:seon.ns/steward`), and each declaration in it. An agent's own namespace
+  "The identities of `changed` that belong to an agent the destination `head` lacks: a namespace born on `branch`
+  (the destination holds none of its name) stewarded by such an agent (`:seon.ns/steward`), and each declaration
+  in it. An agent's own namespace
   is its compartment, not the branch's program: a chain's agents live only on its branch (TASK-CHAIN §2.2),
   so their namespaces never merge. Interim until `seon.cluster.agent/agent-creation-writes-no-program-namespace`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
@@ -857,8 +858,11 @@
   (let [stewarded (db/q '[:find ?n ?id :where [?ns :seon.ns/steward ?g] [?ns :seon.ns/name ?n] [?g :seon.agent/id ?id]]
                         branch)
         _ (when (map? stewarded) (throw (ex-info (:seon.error/message stewarded "The branch's namespace stewards could not be read.") stewarded)))
+        ;; born on the branch for its agent: a namespace the destination already holds is never an agent's own
         owned (into #{} (keep (fn [[n agent-id]]
-                                (when-not (:db/id (db/pull head [:db/id] [:seon.agent/id agent-id])) n)))
+                                (when-not (or (:db/id (db/pull head [:db/id] [:seon.agent/id agent-id]))
+                                              (:db/id (db/pull head [:db/id] [:seon.ns/name n])))
+                                  n)))
                     stewarded)]
     (into #{} (filter (fn [[attribute value]]
                         (owned (if (= :seon.ns/name attribute)
@@ -1542,9 +1546,28 @@
                                     :seon.program/branch-digest (theirs identity)}]))))
           identities)))
 
+(defn- committed-bytes
+  "The bytes of `path` in the checkout `root`'s git HEAD, the committed tree a merge is judged against; nil when
+  HEAD holds no such file. A lane's uncommitted edit of the working tree is never read here: publication waits for
+  it (`waiting-paths`). Throws when `root` is no git checkout."
+  {:malli/schema [:=> [:cat :seon.fn/root :seon.source/path] [:or :nil :seon.source/file-bytes]]}
+  [root path]
+  (let [run (fn [& args]
+              (let [process (.start (doto (ProcessBuilder. ^java.util.List (into ["git" "-C" root] args))
+                                      (.redirectErrorStream false)))
+                    out (.readAllBytes (.getInputStream process))
+                    err (String. (.readAllBytes (.getErrorStream process)) "UTF-8")]
+                (when-not (zero? (.waitFor process))
+                  (throw (ex-info (str "git " (first args) " failed in the checkout: " err)
+                                  {:seon.error/message (str "git " (first args) " failed in the checkout.")
+                                   :seon.fn/root root :seon.source/path path})))
+                out))]
+    (when (pos? (alength ^bytes (run "ls-tree" "HEAD" "--" path)))
+      (run "show" (str "HEAD:" path)))))
+
 (defn- proven-file
   "The candidate bytes that write the `named` declarations as `after` holds them over
-  their one file under `root` as it is now, proven by the ordinary analyzer to
+  their one file under `root` as git HEAD holds it (`committed-bytes`), proven by the ordinary analyzer to
   declare the file's other declarations unchanged and exactly `after`'s rows of
   them (a new file's namespace among them); else the refusal. A file changed since `before` recorded it
   (a sibling change landed) is read again: each written declaration must still
@@ -1575,9 +1598,8 @@
         {path :seon.fn.file/relative-path recorded-digest :seon.fn.file/digest
          relative-root :seon.fn.file/relative-root} (if fresh? {:seon.fn.file/relative-path (new-path identities)} (first files))
         relative-root (if fresh? (first (str/split path #"/")) relative-root)
-        file (io/file root (str path))
         base-bytes (cond fresh? (some-> ns-source (str "\n") (.getBytes "UTF-8"))
-                         (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
+                         (and (= 1 (count files)) path) (committed-bytes root (str path)))
         base-digest (if fresh? (sha-256 (byte-array 0)) (some-> base-bytes sha-256))
         base-text (some-> ^bytes base-bytes (String. "UTF-8"))
         ;; The file's declarations now: as `before` recorded them, or read again when the file changed since.
@@ -1760,8 +1782,7 @@
                   [:or :seon.source/proof :seon.source/write-back-error]]}
   [before after identities root]
   (let [path (schema-path (second (first identities)))
-        file (io/file root path)
-        base-bytes (when (.isFile file) (Files/readAllBytes (.toPath file)))
+        base-bytes (committed-bytes root path)
         base-text (some-> ^bytes base-bytes (String. "UTF-8"))
         pull (fn [database [_ k]]
                (let [entity (db/pull database [:db/id :seon.schema/key :seon.schema/form :seon.program/definition-digest]
@@ -1877,9 +1898,9 @@
                   [:or :seon.source/proof :seon.source/write-back-error]]}
   [before after identities root]
   (let [path (task-path (second (first identities)))
-        file (io/file root path)
-        fresh? (not (.isFile file))
-        base-bytes (if fresh? (.getBytes "[]" "UTF-8") (Files/readAllBytes (.toPath file)))
+        held (committed-bytes root path)
+        fresh? (nil? held)
+        base-bytes (or held (.getBytes "[]" "UTF-8"))
         base-text (String. ^bytes base-bytes "UTF-8")
         projection (db/carried-projection after)
         held (fn [database sym] (task/task-declaration database (task/task-handle (symbol (namespace sym)) (name sym))))
@@ -2007,7 +2028,10 @@
         proven (when (empty? moved) (proven-files before after identities root))
         disk-digest #(let [file (io/file root (str (:seon.source/path %)))]
                        (sha-256 (if (.isFile file) (Files/readAllBytes (.toPath file)) (byte-array 0))))
-        changed (when (vector? proven) (first (remove #(= (:seon.source/base-digest %) (disk-digest %)) proven)))
+        ;; the disk holds HEAD's bytes, or this merge's own candidate from a write-back a crash left uncommitted
+        changed (when (vector? proven)
+                  (first (remove #(#{(:seon.source/base-digest %) (sha-256 (:seon.source/candidate-bytes %))} (disk-digest %))
+                                 proven)))
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
     (cond
       (seq moved)
@@ -2114,7 +2138,8 @@
 
   Proven before installation. Refuses by reason unless each written
   declaration still holds, on the branch head, the digest the merge commit gave
-  it (other writes never stale it); every change names one file (a replaced or
+  it (other writes never stale it); each file is read at the checkout's git HEAD (`committed-bytes`), never a
+  lane's uncommitted working copy, which `seon.merge/publish!` waits for; every change names one file (a replaced or
   retracted declaration by its state before the merge, an added one by its
   namespace's file) and every before-state a span holding its source; a file
   changed since its declarations were analyzed is read again and each written

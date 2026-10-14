@@ -4,6 +4,7 @@
   (`seon.cluster.source/write-back!`)."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
@@ -26,6 +27,18 @@
                       :seon.task/files {"resources/seon/tasks/tq.write-back.edn"
                                         "[#:seon.task{:name \"fix\" :plan \"Merge and write back the tested change.\"}]"}})
   'tq.write-back/fix)
+
+(defn- committed!
+  "`request` once its checkout root is a git checkout whose HEAD holds every file the fixture wrote there: a
+  write-back reads each file at git HEAD (`seon.cluster.source/committed-bytes`), as a real checkout holds it."
+  [{root :seon.fn/root :as request}]
+  (let [git! (fn [& args] (let [{:keys [exit err]} (apply shell/sh "git" "-C" root args)]
+                            (when-not (zero? exit) (throw (ex-info err {:git args})))))]
+    (when-not (.isDirectory (io/file root ".git"))
+      (git! "init" "-q") (git! "config" "user.email" "wb@test.invalid") (git! "config" "user.name" "wb-test"))
+    (git! "add" "-A")
+    (git! "commit" "-q" "--allow-empty" "-m" "fixture")
+    request))
 
 (defn- fixture-source
   "One small namespace: a callee and its caller. The test reaching both is the
@@ -169,7 +182,7 @@
                 request {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}
                 ;; Before, any write after the accept (root's own recorded run) refused as a moved head.
                 _ (support/transacted! h-conn (support/agents-tx (db/db h-conn) [(str "write-back-test-" suffix)]))
-                written (source/write-back! request)]
+                written (source/write-back! (committed! request))]
             (testing "the exact span is written back and nothing else changes"
               (is (= [path] (:seon.source/changed-paths written)))
               (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced])))
@@ -241,7 +254,7 @@
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 _ (is (:seon.source/commit-id accepted))]
             (when (:seon.source/commit-id accepted)
-              (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
+              (let [written (source/write-back! (committed! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))
                     text (slurp file)]
                 (testing "both additions are appended to the namespace's file, the rest untouched"
                   (is (= #{added-fn added-test} (set (get-in written [:seon.source/files 0 :seon.source/added]))))
@@ -308,13 +321,13 @@
                   (let [h-conn (:seon.db/connection target)
                         check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
                         namespace-entity [:seon.ns/name fixture-ns]
-                        prepared (source/prepare-merge! target store c proofs {:selection #{check} :root root})
+                        prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:selection #{check} :root root}))
                         _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                         _ (is (true? (:seon.test/passed? prepared)))
                         accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
                     (is (= #{check namespace-entity} (:seon.program/identities accepted)))
                     (when (:seon.source/commit-id accepted)
-                      (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
+                      (source/write-back! (committed! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))
                       (let [requires (:seon.ns/requires (db/pull (db/db h-conn) [:seon.ns/requires] namespace-entity))
                             analysis (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
                         (is (contains? (set requires) 'clojure.set) "the merged namespace requires what its definition names")
@@ -330,7 +343,7 @@
                 [(fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} lint-check (clojure.test/is (= 1 1) (pr-str :x)))")]
                 (fn [{:keys [target store c proofs root file made]}]
                   (let [before (slurp file)
-                        refused (source/prepare-merge! target store c proofs {:root root})
+                        refused (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:root root}))
                         finding (first (:seon.source/lint-findings refused))]
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
                     (is (= :seon.source/lint-error (:seon.error/type refused)))
@@ -355,13 +368,13 @@
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
              namespace-entity [:seon.ns/name fixture-ns]
-             prepared (source/prepare-merge! target store c proofs {:selection #{check} :root root})
+             prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:selection #{check} :root root}))
              _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
              _ (is (true? (:seon.test/passed? prepared)))
              accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))]
          (is (= #{check namespace-entity} (:seon.program/identities accepted)))
          (when (:seon.source/commit-id accepted)
-           (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
+           (let [written (source/write-back! (committed! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))
                  reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
              (is (= [namespace-entity] (get-in written [:seon.source/files 0 :seon.source/replaced])))
              ;; the namespace row's source is the `ns` form of its resolver state as SCI holds it
@@ -409,11 +422,11 @@
               (submit! request "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
               (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} callee-check (clojure.test/is (= 3 ("
                                     fixture-ns "/callee 2))))"))))
-          (let [prepared (source/prepare-merge! target store c proved {:root root})
+          (let [prepared (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proved {:root root}))
                 _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
                 accepted (when (:seon.test/passed? prepared) (source/accept-merge! target store prepared))
                 written (when (:seon.source/commit-id accepted)
-                          (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))]
+                          (source/write-back! (committed! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})))]
             (is (= (sort paths) (:seon.source/changed-paths written)) "both files are written")
             (is (= [[callee] [check]] (mapv #(into (:seon.source/replaced %) (:seon.source/added %)) (:seon.source/files written))))
             (is (= (select-keys (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]
@@ -460,10 +473,10 @@
             c-conn (:seon.db/connection candidate)]
         (try
           (support/transacted! c-conn (support/replacement-tx (db/db c-conn) callee replacement {}))
-          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
                                              :seon.source/accepted {:seon.program/identities #{callee}
                                                                     :seon.source/base-commit-id base
-                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))]
             (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced]))
                 "the branch's replacement is written into its file")
             (is (= (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] callee))
@@ -504,10 +517,10 @@
                        (try
                          (support/transacted! conn (support/replacement-tx (db/db conn) identity source {}))
                          {:digest (:seon.program/definition-digest (db/pull (db/db conn) [:seon.program/definition-digest] identity))
-                          :written (source/write-back! {:seon.db/connection conn :seon.fn/root root
+                          :written (source/write-back! (committed! {:seon.db/connection conn :seon.fn/root root
                                                         :seon.source/accepted {:seon.program/identities #{identity}
                                                                                :seon.source/base-commit-id base
-                                                                               :seon.source/commit-id (db/commit-id (db/db conn))}})}
+                                                                               :seon.source/commit-id (db/commit-id (db/db conn))}}))}
                          (finally (agent/release-context! context)))))
             one (write! (branches 0) callee "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
             two (write! (branches 1) caller "(defn caller\n  \"Call the callee twice.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee (callee x)))")
@@ -558,10 +571,10 @@
         (try
           (support/transacted! c-conn (support/replacement-tx (db/db c-conn) helper "(defn helper\n  \"Add two.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 2))" {}))
           (support/transacted! c-conn (support/replacement-tx (db/db c-conn) caller "(defn caller\n  \"Call the helper.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (helper x))" {}))
-          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
                                              :seon.source/accepted {:seon.program/identities #{helper caller}
                                                                     :seon.source/base-commit-id base
-                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))
                 on-disk (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
             (is (nil? (:seon.source/write-back-refused written)) "the addition and its caller write back")
             (is (= (mapv #(:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] %)) [helper caller])
@@ -597,10 +610,10 @@
                                                                    :seon.task/files {path "[#:seon.task{:name \"a\" :plan \"Do it.\"}]"}}))
                               [:seon.task/changed? :seon.error/message]))
               "the branch holds the task in the database only")
-          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
                                              :seon.source/accepted {:seon.program/identities #{identity}
                                                                     :seon.source/base-commit-id base
-                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))
                 projection (db/carried-projection (db/db c-conn))]
             (is (= [identity] (get-in written [:seon.source/files 0 :seon.source/added])) "the task is added to a new file")
             (is (= [(symbol task-ns "a")]
@@ -638,10 +651,10 @@
           ;; The branch holds the namespace and its function, as the agent's defn left them.
           (let [entities (fn/analyze-entities {:seon.fn/root defined :seon.fn/roots ["src"]})]
             (support/transacted! c-conn (fn/reconcile-tx (db/db c-conn) entities (mapv program/row-identity entities))))
-          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
                                              :seon.source/accepted {:seon.program/identities #{added}
                                                                     :seon.source/base-commit-id base
-                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))]
             (is (= [path] (:seon.source/changed-paths written)) "the function's new file is written")
             (is (= (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] added))
                    (get (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})) added))
@@ -685,10 +698,10 @@
         (try
           (doseq [callee callees]
             (support/transacted! c-conn (support/replacement-tx (db/db c-conn) callee replacement {})))
-          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root :seon.source/stage stage
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root :seon.source/stage stage
                                              :seon.source/accepted {:seon.program/identities (set callees)
                                                                     :seon.source/base-commit-id base
-                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))]
             (is (= {:seon.source/write-back-refused :install-failed :seon.source/changed-paths []}
                    (select-keys written [:seon.source/write-back-refused :seon.source/changed-paths]))
                 "the failed stage refuses and names no installed file")

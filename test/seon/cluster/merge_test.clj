@@ -862,6 +862,43 @@
                "only the changed file is written"))
          (finally (support/delete-root! root)))))))
 
+(deftest ^{:seon.test/long "One own-branch agent's first request and assignment, one merge (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one) and two publication passes."
+           :seon.test/long-ms 180000}
+  a-file-another-lane-left-dirty-accepts-the-merge-and-its-publication-waits
+  ;; live-chain-rough-1.md: merge request 51efd81cbc42 was refused :conflict by another lane's uncommitted edit
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/land.clj"
+           root (checkout! "dirty-land-test" {path land-source})
+           _ (checkout-dial! connection root)
+           file (io/file root path)
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           ;; another lane's uncommitted edit of the same declaration
+           dirty (str/replace land-source "  [r]\n  r)\n\n(defn side" "  [r]\n  (+ r 0))\n\n(defn side")]
+       (try
+         (spit file dirty)
+         (let [request (assigned! running connection "area" fix)
+               head (git! root "rev-parse" "HEAD")
+               merged (merge! execution request)]
+           (is (= {} (select-keys merged [:seon.error/type :seon.source/write-back-refused]))
+               "the merge is judged against the file at git HEAD, not the working tree")
+           (is (uuid? (:seon.task/merge-commit (assignment-row connection request))) "main records the merge")
+           (pass! running)
+           (is (= [dirty head nil] [(slurp file) (git! root "rev-parse" "HEAD") (:seon.task/git-commit (assignment-row connection request))])
+               "its publication waits while the path is dirty, writing nothing")
+           (git! root "checkout" "--" path)
+           (pass! running)
+           (is (= (git! root "rev-parse" "HEAD") (:seon.task/git-commit (assignment-row connection request)))
+               "once the path is clean the next pass publishes it")
+           (is (str/includes? (slurp file) fix) "the file holds the merged definition"))
+         (finally (support/delete-root! root)))))))
+
 ;;; TASK-CHAIN A2 (`docs/seon/schedule/cards/TASK-CHAIN.md#interfaces`): one verdict, and the writer compares the tested task basis.
 
 (deftest ^{:seon.test/long "One prepare: one nested seon.test/run on a new candidate commit."
