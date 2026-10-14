@@ -56,7 +56,8 @@
             [:qualified-symbol
              { :seon.db/identity true,
               :seon.program/row-schema :seon.test/test,
-              :seon.program/source-attribute :seon.test/source}],
+              :seon.program/source-attribute :seon.test/source,
+              :seon.ref/shown-by-source true}],
             :result
             [:map
              {:seon.render/ai seon.render.test/render-ai

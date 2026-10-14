@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.ref :as ref]
             [seon.cluster.agent :as agent]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
@@ -257,3 +258,13 @@
     (is (= "Change supplied setting overrides and return my resulting overrides."
            (shown "Change supplied setting overrides and return\n  my resulting overrides.\n\n  More detail.")))
     (is (= "A summary with no period" (shown "A summary with no period\n\n  Then a body.")))))
+
+(deftest a-namespace-a-task-cites-shows-its-stored-requires
+  (let [db (db/db)
+        stored (:seon.ns/requires (db/pull db [:seon.ns/requires] [:seon.ns/name 'seon.edit]))
+        [cited] (ref/references db {:seon.ref/text "`seon.edit`"})]
+    (is (seq stored) "the namespace stores requires")
+    (is (= stored (:seon.ns/requires cited)) "the resolved namespace carries them")
+    (is (not (contains? (sut/render-ai (dissoc (namespace-unit db 'seon.edit 1 100000) :seon.ns/requires))
+                        :seon.ns/requires))
+        "a namespace with no stored requires shows no key")))

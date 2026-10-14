@@ -272,7 +272,7 @@
     (cond
       (nil? listed) named
       (db/read-refusal? listed) listed
-      :else (merge named {:seon.ns/requires (vec (sort requires))} listed))))
+      :else (merge named (when requires {:seon.ns/requires (vec (sort requires))}) listed))))
 
 (defn- agent-namespace-ref
   "The namespace an agent-namespace unit names: the walked namespace itself,

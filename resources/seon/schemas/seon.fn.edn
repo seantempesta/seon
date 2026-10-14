@@ -210,7 +210,8 @@
           [:qualified-symbol
            {:seon.db/identity true,
             :seon.program/row-schema :seon.fn/fn,
-            :seon.program/source-attribute :seon.fn/source}],
+            :seon.program/source-attribute :seon.fn/source,
+            :seon.ref/shown-by-source true}],
           :workload [:enum :io :compute],
           :index-phase :keyword,
           :capability-rule :keyword,

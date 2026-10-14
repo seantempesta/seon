@@ -87,7 +87,8 @@
               [:keyword
                {:seon.db/identity true,
                 :seon.program/row-schema :seon.schema/schema,
-                :seon.program/source-attribute :seon.schema/form}],
+                :seon.program/source-attribute :seon.schema/form,
+                :seon.ref/shown-by-source true}],
               :form :string,
               :ns [:and {:description "The namespace where this schema was declared."} :seon.db/ref],
               :references

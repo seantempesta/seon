@@ -390,8 +390,8 @@
 
 (defn- declarations
   "Each identity attribute's declaration on `database`'s schema, once per projection: the attributes its entity
-  is pulled as (itself and its source attribute, a program family's whole definition, else its row's own
-  attributes that are not refs) and its row schema."
+  is pulled as (itself and its source attribute when its schema declares `:seon.ref/shown-by-source`, a referent
+  that is its source, else its row's own attributes that are not refs) and its row schema."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :qualified-keyword :seon.ref/declaration]]}
   [database]
   (let [projection (schema/projection-from-database database)]
@@ -402,11 +402,11 @@
              forms (:seon.schema.projection/forms projection)
              ref? (fn [form] (or (= :seon.db/ref form) (and (vector? form) (= :seon.db/ref (peek form)))))]
          (into {} (keep (fn [attribute]
-                          (let [{row :seon.program/row-schema source :seon.program/source-attribute}
+                          (let [{row :seon.program/row-schema source :seon.program/source-attribute shown-by-source :seon.ref/shown-by-source}
                                 (some-> (mr/schema registry attribute) m/properties)
                                 definition (some->> row (mr/schema registry))]
                             (when definition
-                              [attribute {:seon.ref/pull (if source
+                              [attribute {:seon.ref/pull (if shown-by-source
                                                            [attribute source]
                                                            (into [] (comp (map first) (filter qualified-keyword?) (remove #(ref? (get forms %))))
                                                                  (internal/entity-entries definition)))
