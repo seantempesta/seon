@@ -312,6 +312,17 @@
          (is (seq (:seon.ref/references function)) "a must-read keeps the references its content makes")
          (is (seq (:arglists library)) "a library Var shows its arglists"))))))
 
+(deftest a-plain-eval-renders-each-must-read-from-its-world
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (let [view (shown running agent-id
+                       (str "(seon.context/current-state-ai (assoc (seon.context/current-state) :seon.context/must-reads "
+                            "[{:seon.ref/name 'x :seon.render/ai 'seon.render.value/render-ai :seon.ref/references []}]))"))
+           [entry] (:seon.context/must-reads view)]
+       (is (= 'x (:seon.ref/name entry)) "the must-read is rendered beside its name")
+       (is (not-any? #(and (map? %) (contains? % :seon.error/type)) (tree-seq coll? seq view))
+           "the render's admission caps and time limit come from the evaluation's world")))))
+
 (deftest ^{:seon/tasks #{'seon.context/a-message-to-the-agent-is-not-in-the-model-context}}
   unread-shows-each-undelivered-item-once-with-its-identity
   (test-support/with-running-agent

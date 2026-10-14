@@ -61,7 +61,9 @@
    :seon.store/store :seon.store/store
    :seon.agent/routing :seon.agent/routing
    :seon.agent/context-source :seon.agent/context-source
-   :seon.batch/defined :seon.batch/defined})
+   :seon.batch/defined :seon.batch/defined
+   :seon.sci.admit/caps :seon.sci.admit/caps
+   :seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms})
 
 (defn environment-members
   "The world members an execution's environment holds: its store and its

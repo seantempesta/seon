@@ -5,6 +5,7 @@
   diagnostic in it. Every stage reads the world from its request."
   (:require [clojure.test.check.generators :as gen]
             [seon.batch]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
@@ -43,17 +44,34 @@
    :seon.render/profile :seon.batch/sink :seon.sci.eval/time-limit-ms :seon.batch/settlement
    :seon.agent/context-source])
 
+(defn- admission
+  "The admission caps and evaluation time limit of `cluster`'s effective
+  configuration on `conn`'s current value, read once per world; a refused
+  configuration throws its error."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection]
+                  [:map [:seon.sci.admit/caps :seon.sci.admit/caps]
+                   [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]]]}
+  [cluster conn]
+  (let [effective (config/effective (db/db conn) cluster)
+        caps (config/result-caps effective)]
+    (when (:seon.error/at caps)
+      (throw (ex-info (:seon.error/message caps) caps)))
+    {:seon.sci.admit/caps caps
+     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)}))
+
 (defn world
   "The one world an evaluation runs in, an agent's or a test member's: its
   identity, custody (the connection and the writer), its environment with that
   environment's store and routing, its SCI context (the caller's fork) and
-  its call sink, as the request gives them. It holds no database value. An agent's world is this value plus its Flow graph and task facts; a
+  its call sink, as the request gives them, and its cluster's admission caps
+  and evaluation time limit (a given time limit wins). It holds no database value. An agent's world is this value plus its Flow graph and task facts; a
   test member's is this value alone."
   {:malli/schema [:=> [:cat :seon.batch/world-request] :seon.batch/world-base]}
   [{conn :seon.db/connection cluster :seon.boot/cluster-name environment :seon.env/environment
     writer :seon.db/writer :as request}]
   (let [environment (or environment (execution-environment cluster conn))]
-    (merge (select-keys request carried)
+    (merge (admission cluster conn)
+           (select-keys request carried)
            {:seon.db/writer (or writer db/transact!)
             :seon.env/environment environment}
            (seon.batch/environment-members environment))))

@@ -17,6 +17,7 @@
          [:seon.task/id {:optional true} :seon.task/id]
          [:seon.render/profile {:optional true} :seon.render/profile]
          [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
+         [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
          [:seon.turn/id {:optional true} :seon.turn/id]
          [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
          [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its branches."} :seon.store/store]
@@ -37,7 +38,7 @@
                  [:seon.task/id {:optional true} :seon.batch/given-task-id]
                  [:seon.render/profile {:optional true} :seon.batch/given-profile]
                  [:seon.batch/sink {:optional true} :seon.batch/given-sink]
-                 [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
+                 [:seon.sci.eval/time-limit-ms {:optional true} :seon.batch/given-time-limit-ms]
                  [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
                  [:seon.agent/context-source {:optional true} :seon.batch/given-context-source]]
 
@@ -47,8 +48,9 @@
  :given-task-id [:and {:description "The task a world is built for, as its caller gives it: never supplied from the calling world."} :seon.task/id]
  :given-profile [:and {:description "The render profile a world is built with, as its caller gives it: never supplied from the calling world."} :seon.render/profile]
  :given-sink [:and {:description "The call sink a world counts into, as its caller gives it: never supplied from the calling world."} :seon.batch/sink]
+ :given-time-limit-ms [:and {:description "The evaluation time limit a world is built with, as its caller gives it: never supplied from the calling world; absent, the world reads its cluster's dial."} :seon.sci.eval/time-limit-ms]
  :given-context-source [:and {:description "The cluster handle a world carries, as its caller gives it: never supplied from the calling world."} :seon.agent/context-source]
- :world-base [:map {:closed true :description "The world seon.turn.world/world builds, for an agent or a test member: identity, custody (connection and writer), the environment and its store and routing, the SCI context, and the call sink. It never holds a database value: a call omitting one reads the connection's current value."}
+ :world-base [:map {:closed true :description "The world seon.turn.world/world builds, for an agent or a test member: identity, custody (connection and writer), the environment and its store and routing, the SCI context, the call sink, and its cluster's admission caps and evaluation time limit. It never holds a database value: a call omitting one reads the connection's current value."}
               [:seon.boot/cluster-name :seon.boot/cluster-name]
               [:seon.db/connection :seon.db/connection]
               [:seon.db/writer :seon.db/writer]
@@ -61,7 +63,8 @@
               [:seon.task/id {:optional true} :seon.task/id]
               [:seon.render/profile {:optional true} :seon.render/profile]
               [:seon.batch/sink {:optional true} :seon.batch/sink]
-              [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
+              [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+              [:seon.sci.admit/caps :seon.sci.admit/caps]
               [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
               [:seon.store/store {:optional true} :seon.store/store]
               [:seon.agent/routing {:optional true} :seon.agent/routing]
