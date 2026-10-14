@@ -91,7 +91,8 @@
   [unit]
   (zero? (long (get unit :seon.render/distance 1))))
 
-(defn- description
+(defn description
+  "The `:description` property of a schema form, nil when it declares none."
   {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :string]]}
   [definition]
   (when (and (vector? definition) (map? (second definition)))

@@ -83,7 +83,7 @@
        (is (= :seon.config/agent-overlay (second (:in entity))))
        (doseq [target ["my.message/send" "my.task/current"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
-         (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys doc))))
+         (is (= #{:summary :body :example :arglists :in :out :supplied :schemas} (set (keys doc))))
          (is (not (str/blank? (:summary doc))))
          (is (not (str/blank? (:body doc))))
          (is (seq (read-string (:example doc)))))
@@ -417,3 +417,15 @@
   (is (= "Read the head, i.e. the newest commit."
          (:summary (ref/docstring "Read the head, i.e. the newest commit. Then more."))))
   (is (= "Read one." (:summary (ref/docstring "Read one. Then more.")))))
+
+(deftest doc-describes-each-schema-its-contract-names
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           in-sci (lookup/documentation-value (support/fork-cluster-ctx connection) database
+                                              'seon.ref/section 'seon.ref/section)
+           in-jvm (lookup/function-documentation database 'seon.ref/section)
+           schema (get-in in-sci [:schemas :seon.ref/section])]
+       (is (string? (:description schema)) "a schema with a description shows that description")
+       (is (not (contains? schema :source)) "a schema shows no source")
+       (is (= in-sci in-jvm) "the same value in JVM mode with no SCI context")))))

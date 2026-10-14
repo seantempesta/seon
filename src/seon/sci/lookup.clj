@@ -15,6 +15,7 @@
             [seon.error.refusal]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
+            [seon.render.schema :as render.schema]
             [seon.ref :as ref]
             [seon.schema :as schema]
             [seon.sci.reader :as reader]))
@@ -305,29 +306,50 @@
                  arglist))
              arglists)))))
 
+(defn- schema-descriptions
+  "Each schema `row`'s contract names, as its description, else its form."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:map-of :qualified-keyword :map]]}
+  [database row]
+  (into (sorted-map)
+        (map (fn [[key form]]
+               [key (if-let [text (render.schema/description form)] {:description text} {:form form})]))
+        (documentation-schemas database row)))
+
 (defn- function-doc-map
-  "The documentation of one program row: the SCI Var's doc and arglists, the
-  stored contract and, for an accepted override, its JVM-boundary note."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :map [:maybe :map]] [:or :map :seon.db/error-result]]
-                  [:=> [:cat :seon.db/database-value :map [:maybe :map] :boolean] [:or :map :seon.db/error-result]]]}
-  ([database row metadata]
-   (let [overrides (when (= :agent (:seon.schema.admission/source row))
-                     (program/overrides database))]
-     (if (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides))
-       overrides
-       (function-doc-map database row metadata
-                         (boolean (some #{(:seon.fn/sym row)} overrides))))))
-  ([database row metadata overridden?]
-   (merge (when-let [doc (:doc metadata)]
-            (ref/docstring doc))
-          {:arglists (if-let [arglists (:arglists metadata)]
-                       (agent-arglists database (:seon.fn/sym row) arglists)
-                       (declaration-absent :seon.fn/arglists))}
-          (agent-documentation-contract database row)
-          (when overridden?
-            {:seon.schema.admission/note
-             "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
+  "The documentation of one program row: its doc and arglists, the stored
+  contract with the schemas it names and, for an accepted override, its
+  JVM-boundary note."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]}
+  [database row overridden?]
+  (let [arglists (when-let [text (:seon.fn/arglists row)]
+                   ((arglists-reader database (symbol (namespace (:seon.fn/sym row)))) text))]
+    (merge (when-let [doc (:seon.fn/doc row)]
+             (ref/docstring doc))
+           {:arglists (if arglists
+                        (agent-arglists database (:seon.fn/sym row) arglists)
+                        (declaration-absent :seon.fn/arglists))}
+           (agent-documentation-contract database row)
+           (when-let [schemas (not-empty (schema-descriptions database row))]
+             {:schemas schemas})
+           (when overridden?
+             {:seon.schema.admission/note
+              "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
+
+(defn function-documentation
+  "The documentation of the program function `sym`, read from its program row
+  alone (no SCI context): doc parts, agent arglists, contract and the schemas
+  it names. `documentation-unavailable` when no row declares it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
+                  [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [database sym]
+  (let [row (db/pull database program-documentation-selector [:seon.fn/sym sym])
+        overrides (when (= :agent (:seon.schema.admission/source row))
+                    (program/overrides database))]
+    (cond
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+      (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
+      (:seon.fn/sym row) (function-doc-map database row (boolean (some #{sym} overrides)))
+      :else (ref/documentation-unavailable sym))))
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
@@ -411,22 +433,14 @@
     (qualified-keyword? resolved) (ref/schema-documentation database resolved authored)
     (not (symbol? resolved)) (ref/documentation-unavailable authored)
     (namespace resolved)
-    (let [row (db/pull database
-                       program-documentation-selector
-                       [:seon.fn/sym resolved])
-          metadata (meta (sci/resolve ctx resolved))
-          overrides (when (= :agent (:seon.schema.admission/source row))
-                      (program/overrides database))
-          overridden? (boolean (some #{resolved} overrides))]
-      (cond
-        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
-        (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
-        (:seon.fn/sym row)
-        (function-doc-map database row metadata overridden?)
-        (or (:doc metadata) (:arglists metadata))
-        (merge (when-let [doc (:doc metadata)] (ref/docstring doc))
-               (when-let [arglists (:arglists metadata)] {:arglists arglists}))
-        :else (ref/documentation-unavailable authored)))
+    (let [found (function-documentation database resolved)]
+      (if (:seon.sci.eval/documentation-unavailable found)
+        (let [metadata (meta (sci/resolve ctx resolved))]
+          (if (or (:doc metadata) (:arglists metadata))
+            (merge (when-let [doc (:doc metadata)] (ref/docstring doc))
+                   (when-let [arglists (:arglists metadata)] {:arglists arglists}))
+            (ref/documentation-unavailable authored)))
+        found))
     :else (namespace-documentation ctx database resolved authored)))
 
 (defn- program-doc-var
