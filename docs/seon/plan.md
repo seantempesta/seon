@@ -14,188 +14,62 @@ One plan, revised in place. First written by lane fable-docs on 2026-10-10; rewr
 two reviews (`schedule/cards/TASK-CHAIN.md` §8). Live facts were checked on default (archive c1230efc3, then
 f51240f34) in JVM mode, read-only. Dated evidence lives in the research pages; this file holds direction and decisions.
 
-## 0. Where we are, and the order (revised in place by root; last 2026-10-14 afternoon)
+## 0. Where we are, and the order (revised in place by root; last 2026-10-14 16:00 local, from the afternoon audit `../research/agent-platform/2026-10-14/audit-afternoon.md`)
 
-**Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), READY (56f31a105, 5e0774bd6, f7ce8d41f).** A chain
-is a vector of plain task maps written by `seon.task/chain!` in one transaction on one branch, linked by
-`:seon.task/next`, and worked by a new agent per task. It has one chain fact on main and one proof set per task
-(`:seon.task/proofs`, no tags). One done rule (`seon.cluster.source/done-refusals`) applies to every task. A failure
-bails to root, with no relaunch; the chain merges to main once. The MVP chain is Design → Prove → Implement, for bug
-fixes and new features alike. Implementation follows TASK-CHAIN §7: S1 → S2 → S3a in order, then the three stage
-lanes (S4b) in parallel with live runs. Everything older in this file and in `schedule/cards/` that describes copies,
-children, `seon.task/effective`, obligations, tags or relaunch is superseded; git history keeps it.
+**State.** Lifecycle authority: [TASK-CHAIN](schedule/cards/TASK-CHAIN.md), §7 status column. Done: S1 (S1a, S1b-1/2,
+S1c-1/2, S1d-1/2/3) and S3d-1a/1b; the overlay rebuild (phases 1-3); write-back's all-or-nothing install and new-namespace
+write. Default runs 5fddc2bfd; later commits go live at the next restart. Lanes in flight, their files and root's queue:
+`../research/agent-platform/2026-10-14/root-working-state.md`. A rough live chain (Prove → Implement on the subject Design
+run 1 designed, root carrying plan and proofs as counted hand acts; a deliberate paid DeepSeek run) is running.
 
-**Landed since TASK-CHAIN was READY (2026-10-14).** S1d-1 `my.edit/text` (776a04249); S1d-3 help as Markdown
-(f87629f9b), its references re-resolved by what they read (e552417e3); S1a rename prepared (4da46c8e7: script
-`script/seon/rename_task_intent.clj`, 156 files, dry run clean); value defs as program (de1f48c23); errors-cut E1
-(5a08c13af); retention: a current head no longer moves the cutoff (0691cb23c), the held-value rule recorded
-(284ec61e5, TASK-CHAIN §2). Research: reply data (6ff790bb7; REPL prototypes 7b5ca80b9 Sonnet, 1b574d429 Haiku),
-proof audit, red triage, flake hunt, lint inventory (notes under `../research/agent-platform/2026-10-14/`).
+**The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge; about 6 h if no slice
+waits on a held file):
 
-**In flight.** `bin/lane` asks `seon.test.cache/input-roots` instead of a hand list of documentation paths (lane
-lane-input-roots; then root commits the owner's experimental `src-clm/`). Retention off by dial,
-`:seon.config.maintenance/retention?` false (owner 2026-10-14: keep main's history to measure true growth and optimize
-the producers; deleted branches are still reclaimed; the window code stays). Documentation cleanup against
-TASK-CHAIN (Haiku inventories → Sonnet edits).
+| Step | Slice | Files | Model | Waits for |
+|---|---|---|---|---|
+| 1 | writeback-fix (done), verdict-honest, b1-durable: commit or leave a patch and release | `cluster/source.clj`, `my/program.clj`; `turn.clj`; `test.clj`, `test/runner.clj` | in flight | a 30-minute box |
+| 2a | S2b-2 `done-refusals` | `cluster/source.clj`, `source_test.clj` | Opus | 1 |
+| 2b | S2a one task input | `turn.clj`, `test/runner.clj`, `context.clj`, `task.clj`, `task_test.clj` | Opus | 1 |
+| 2c | S2b-1 whole-branch selection | `test.clj`, `test_test.clj` | Sonnet | 1 |
+| 2d | S3a-1 root reads chains | `cluster/agent.clj` | Opus, in flight | — |
+| 2e | S4a templates | `seon.step.*.edn`, `step.clj`, `test_support.clj` | Sonnet, in flight | — |
+| 3a | S3a-2 turn authority and context | `turn.clj`, `context.clj` | Opus | 2b |
+| 3b | S3b-1 + S3b-2 acceptance, publication, retirement | `merge.clj`, `cluster/source.clj` | Opus | 2a |
+| 3c | S2c-1 tag sweep (one commit window) | task files | Sonnet | 2e |
+| 4 | S3a-3 advance | `task.clj`, `cluster/agent.clj`, `db_flow_test.clj` | Opus | 2b, 2d, 3a |
+| 5 | S4b-design, S4b-prove predicates | `step/<stage>.clj` | Sonnet ×2 | 2e |
+| 6 | S5 live DeepSeek chain | none (root REPL) | Opus | 3b, 4, 5 |
 
-**Files at merge; `bin/lane` retires (owner 2026-10-14).** Agents, ours included, work through the REPL as much as
-possible: `defn` on their own branch, source read through `my.program/source`; root's merge writes the accepted
-entities to files, and once it does (with what `bin/lane commit` checks today carried by the merge), `bin/lane` claims
-and commits retire. No per-agent git worktree (both Gemini pitches, `../research/agent-platform/2026-10-14/gemini/`).
-The merge already writes files and commits them (`seon.merge/publish!` → `seon.cluster.source/write-back!` →
-`seon.cluster.source/commit!`, `git commit --only`; `../research/agent-platform/2026-10-14/dig-merge-writes-files.md`,
-ce3617af2). Gaps, designed after S3b: the throwaway-boot check (`bin/seon check`) and lint parity in the merge gate;
-gate-input classification (`seon.test.cache/gate-input?`); a write-back path for non-program files (docs, help,
-skills, scripts, `deps.edn`, `bin/`; today only `my.fs/write!`, uncommitted, unchecked); the restart-batch rule for
-dependencies; the merge commit's hard-coded co-author; our lanes working as `:outside` Seon agents (S3f-2). Filed now:
-two functions named `publish!` with different meanings (`seon.merge/publish!` writes files, `seon.cluster.source/publish!`
-reads the checkout into a cluster).
+Deferred until S5, each for a reason: S2c-2, S3c, S3e, S3f (the first run is watched; Claude-Code-as-Seon-agent runs
+follow S5); S3d-2..6 and the S3d-3 patch (context is usable, 58f130e03); the cache phases 2 and 4-8 and the Argon third
+catalogue (one design round at a time); reconcile-writer and boot-dup-analysis (unless a live run shows the cost
+blocking); the namespace-agents retirement (needs a restart batch); the red sweep (bulk tier first, centrally, in a quiet
+hour; owner 2026-10-14: old reds matter less once chains mine and fix).
 
-**Everything immutable is shared (owner 2026-10-14).** "A list of things we know to be true, cachable across all the
-permutations of branches and SCI": every derivation is keyed by the content of exactly what it reads (definition,
-reach and input digests, `seon.schema/declaration-digest`, read evidence), never by branch name, commit id where content
-would do, instance identity, URL or the deriving thread, so a result is valid on every branch and in every SCI context
-and nothing is invalidated. Each truth states its inputs and is proven by a test that changing anything outside them
-leaves the result unchanged (the hidden-input proof). No duplicate caches (owner 2026-10-14): stored immutable data (datoms, index nodes, konserve
-blobs) is read from its owner's cache (Datahike's node cache, the OS page cache), never copied into `seon.cache`;
-`seon.cache` holds only expensive derived values and per-operation ephemeral ones; an expensive, content-keyed,
-serializable derivation may also be stored in konserve by its digest where a measurement shows the stored read beats
-re-deriving. Order: B1 test results across branches (lane b1-test-reuse) and
-the overlay rebuild (overlay-impl) first; then the catalogue: inventory `../research/agent-platform/2026-10-14/dig-content-keys.md`
-(Haiku, in flight) → independent catalogues and keyings (Opus, Astra, Argon) → hybrid → one lane per derivation. Known
-violations: 62 schema populations keyed per archive URL holding 5 contents (fixed in f8a2773be, live since the
-2026-10-14 14:16Z restart); the cache at 472 of 512 MB right after boot (in the inventory).
+**Beside the chain** (only into a free slot and free files; never a critical-path file while S2-S3b are open):
+REPL-path frictions by producer (`repl-trial.md`, `dig-repl-commit-path.md`; filed under `my.program`, `my.test`,
+`seon.cluster.source`, `seon.operator`); request-view (later forms see the request's own definitions, one recording
+transaction); projections (one per content, speculative per operation); the cache phases of `truths-hybrid.md`; the
+errors cut E2 → E6 (`errors-cut-plan.md`); the check queue wait (`seon.operator/a-check-waits-for-a-slot-longer-than-it-runs`);
+the test step's 2.6-7.3 GB per `defn` (Astra).
 
-**Landed since the morning (2026-10-14).** TASK-CHAIN S1 complete except S1d-2: S1a (e6df7e213, 243683f1d), S1b-1
-(d4566ddd2), S1b-2 (f6a770bec); S3d-1a `doc` describes its contract's schemas (f8f582caa); restart batch 1b (06bbba850:
-GC one enumeration, gfm tables); the lifecycle branch race (8b6473ed8); perf B4 schema derivations by digest (f8a2773be),
-B2 config once per state (92a99f39a), `seon.db` projections in `seon.cache` (fbf611da5); markdown dependency removed
-(c2d555626). Default runs 86beed937.
+**Rules** (AGENTS.md is the authority; these are the ones today's audit sharpened): claims are commit windows and a
+stopped lane releases; at most one host-bound lane per check slot (4); REPL-first for ordinary function changes, every
+friction filed; a Haiku or Gemini claim is reproduced before it is a task; restarts pause and resume lanes; one design
+round in flight; a dependency or fork bump only just before its restart.
 
-**Overlay rebuild (owner answers 2026-10-14, hybrid `../research/agent-platform/2026-10-14/overlay-hybrid.md`, 723bce2e1).**
-A branch's program context derives from its previous frozen context by the changed definitions plus the value rows,
-macros and interpreted callers reaching them; an unchanged init runs once per content of itself and its callees; removals
-and macros rebuild fully until counted frequent; an init's refusal arrives in the defining reply. Phases 1-3 (lane
-overlay-impl, Opus) before S3a; phase 4 (defining reply) with S3a-2.
+**Restart batches.** Next restart: the clj-kondo fork bump `eb245d82` (`../research/agent-platform/2026-10-14/kondo-fork-bump.md`;
+fixes `my.program/write-branch!`'s NullPointerException; proven by `an-agent-writes-back-a-file-whose-analysis-runs-a-hook`),
+plus every commit since 5fddc2bfd. After S5: the namespace-agents retirement (`namespace-agents-inventory.md`).
 
-**Working order (root, 2026-10-14 15:05Z; owner: "methodically work through the problems in the optimal order").**
-(1) The REPL path works end to end, because our lanes depend on it: write-back (lane writeback-fix: the
-`write-branch!` NPE, refusals, dropped comments, partial install), test-step verdicts (lane teststep-verdict: a proof
-red while the reply said green; a stale pre-edit result), the reader's `\u2026` literal (lane reader-charlit); trial
-`../research/agent-platform/2026-10-14/repl-trial.md` (a283068f1). (2) Cache sharing, phases of
-`truths-hybrid.md` (579d9a774; root took its three recommendations, owner may veto: derivations see no evaluation
-binding, at `seon.cache/lookup`; speculative projections live only for their operation; when one identity records two
-outcomes the newest terminated outcome answers and a problem task is filed): phase 1 projections one per content
-(proj-content-key), phase 3 reds retained (with b1-test-reuse), then phase 2 speculative projections and phase 4
-bindings at lookup, then 8, 5, 6, 7. (3) TASK-CHAIN S1c-2, S1d-2, then S2 and S3a; overlay phase 3 (overlay-p3).
-(4) Performance: boot double analysis (boot-dup-analysis), reconciliation (reconcile-writer), the test step's
-2.6-7.3 GB per `defn` (Astra, after teststep-verdict names it).
-
-**Live chain today (owner 2026-10-14: "run the live chain today, maybe in a rougher version").** TASK-CHAIN S1 is
-complete (S1d-2 6b6a825f9). Rough run now on the installed single-task path (lane live-chain-rough: Prove → Implement on
-the subject Design run 1 designed, root carrying plan and proofs between them as counted hand acts; a deliberate paid
-DeepSeek run with the development cluster's `no-provider` lifted for it only); the automatic chain follows S3a-1 (in
-flight), S4a templates (in flight), S2b-2, S2a/S2b-1, S3a-2, S3a-3 and S3b.
-
-**Dogfood the REPL path (owner 2026-10-14).** Our lanes work REPL-first by default for ordinary function changes
-(`defn` on their own branch, `my.program/write-branch!`, `bin/lane commit --branch-evidence`); when a step fails they
-apply the edit by hand and file the friction as a task, so the path Seon agents use gets smooth by being used. Trial and
-dig in flight: `../research/agent-platform/2026-10-14/repl-trial.md`, `dig-repl-commit-path.md`.
-
-**Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
-context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
-lanes, restarts and resumes them (owner 2026-10-14), so a restart never waits for every lane; a dependency or fork bump
-still commits only just before its restart. Design rounds in flight (reference levels, overlay rebuild) end as notes and
-a hybrid; reference levels implements as S3d-1, the overlay rebuild after S3a unless live runs show its cost blocking.
-
-**Next restart batch** (root opens it when the in-flight code lanes have committed): (1) S1a phase 2, with reset; db<->flow's decision is renamed first (`seon.cluster.agent/launch-actions`, `:seon.flow.actions/*`) so "plan" names
-only the task field; (2) the GC fork bump (Konserve b4b896f, Datahike 6d49110d; `gc-one-enumeration.patch`; retire
-`seon.db/node-not-found-carries-a-store-id-not-the-store`); (3) the `io.github.nextjournal/markdown` removal
-(`drop-nextjournal-markdown.patch`); (4) the retention dial applied. After the restart: the sentinel with repeated
-samples; a stale-template check.
-
-**Next restart (batch 1b):** the GC fork bump (rebased patch 0d7005536; after lane-lifecycle-branch commits, since both touch `registry.clj`), `org.commonmark/commonmark-ext-gfm-tables` 0.24.0 (owner 2026-10-14, so a table is never a section's lead; S3d-2), and default picks up c2d555626 (markdown dependency removed). Batch 1 is done: S1a (e6df7e213, 243683f1d), restart onto 243683f1d and reset 2026-10-14 06:10Z.
-
-**Restart batch after that:** retire namespace agents (owner 2026-10-14: a task supersedes them; a namespace agent
-is a task about a namespace): delete `steward-call`, `:seon.ns/steward`, `:seon.error/of-steward`, `:my.agent/steward`,
-their readers and the unowned-namespace problem family in one slice with every caller converted
-(`../research/agent-platform/2026-10-14/namespace-agents-inventory.md`, b80a0fc67); `:seon.agent/namespace` (the
-REPL's current namespace) stays. S3d-1 (doc views) runs beside S1b after the first batch (e962f5a11).
-
-**Before the red sweep: the bulk tier must finish.** At 46992f75b it hit the check's 600 s bound with 185 of 2,993
-members run (`../research/agent-platform/2026-10-14/red-triage.md`, 5036d2264). Opus (test runner) or Astra
-(performance): measure where the bulk tier's time goes and make it finish, before reds are classified. Known so far: 14
-deterministic reds (10 untracked, listed there), 3 load flakes in `seon.blob-*`; `bin/seon check` refuses a whole run
-when one named namespace has no eligible tests; `seon.repl-parity-test`'s macro-generated deftests may be untested.
-
-**Then, before S1b: the red sweep.** The bulk tier once on the restarted default; classify every red by the commit
-that turned it red (stored runs, `bin/seon check --at`); fix broken and surviving reds, skip what TASK-CHAIN §6
-deletes, file the rest. Known untracked reds: ten `seon.effect-test` vars, the `seon.edit-test` odd-map pair,
-`my.edit-test/public-entries-declare-resolvable-io-capabilities`,
-`seon.cluster.turn-test/a-model-request-is-help-own-exchanges-and-the-block-last`,
-`seon.sci.supplied-database-test/own-record-reads-supply-the-same-database-and-agent-as-explicit-calls`,
-`seon.help-test/source-finds-a-schema-registered-in-the-same-eval-request`,
-`seon.test.accretion-test/source-harvest-keeps-refusal-render-contracts-coherent` (19 s over its bound); eight reds identical at HEAD from 86942d3d0 (three `seon.cluster.publication-inputs-test` errors on 64-character gitlink pins, three `seon.cluster.source-test` fails, `seon.test-cache-test/a-documentation-edit-never-widens-a-gate`, `seon.test.selection-test/a-proof-request-runs-only-its-proofs`); the collection test body at ~70 s (flake-collection-test.md); 157 real dead-code lint warnings (lint-warnings.md) as a Sonnet sweep. To file: a new test file calling a missing var makes the check's throwaway JVM refuse to boot, so the red names no test (proof-audit.md, 3081f15fa; f87629f9b's red).
-
-**Beside the chain** (file-disjoint, never ahead of it): the errors cut E2 → E3 (restart batch) → E4a → E4b → E6
-(`../research/agent-platform/2026-10-14/errors-cut-plan.md`); the reply fence (`seon.test-support/reply`'s catch,
-130526a8b; task `seon.test-support/tests-read-the-evaluations-recorded-data-not-printed-text`), designed from the
-two prototypes: two of three call kinds assert an emission's data, the rest read `seon.mcp/eval-clj`'s value through
-a data-returning split.
-
-**Models** (owner 2026-10-14, tailored by measured outcome). Haiku gathers and summarizes (digs, inventories, flake
-runs, red triage) so root reads conclusions, not bulk; Sonnet does well-specified work and REPL prototypes (on the
-same prototype brief Sonnet answered 3.5 of 4 questions at the REPL, Haiku 1); Opus takes the hard problems and
-planning; Astra gives the independent second opinion and the hard performance work. Gemini through `bin/agy-agent` (owner 2026-10-14; `.claude/skills/agy-lanes`): Flash-high finds root causes, audits documents against the code and judges a proposal before it is built; Argon-low runs long performance hunts and independent plans; every quote and count they report is reproduced before acting; neither implements. Gemini through `bin/agy-agent`
-(agy-lanes skill) finds root causes and judges proposals: on four blind tests with known answers Flash-high was
-right every time and fastest (F53's exact clause from its symptom in 7 min), and Argon was right but slower; Argon
-takes long performance hunts and independent plans
-([evidence](../research/agent-platform/2026-10-14/gemini/README.md)). Every quote and retire-this list from a Gemini
-lane is reproduced before use: Argon once invented code excerpts, and Flash called tasks moot whose subject is yet to
-be built.
-
-**Performance is on the path** (owner 2026-10-14: "huge gains can be found by identifying them and methodically
-fixing them"; everything computed from immutable inputs is shared across agents, branches and contexts, keyed by
-content; tests already green for an unchanged reach never rerun). Leads from the Gemini hunt, each confirmed in the
-code or on default, in order of measured weight
-([evidence](../research/agent-platform/2026-10-14/gemini/README.md)): (1) `seon.program/authored-shapes` keys
-`seon.cache/lookup` by the whole packaged forms map (two lanes independently), and `seon.cache` sits at its 512 MB
-budget evicting the schema projection while it holds ten 105 MB declaration projections; (2) the recording
-transaction is about 41 ms of a 40-48 ms trivial eval request (`seon.db/transact-call` 285 ms mean since boot), with
-`seon.config/effective` read 7 times and `seon.print/emit-both` building HTML for AI replies; (3)
-`seon.fn.analyzer/attributed-usages` scans every var-quote per usage (80.6M checks since boot); (4)
-`seon.cluster/rehearse-source!` and `seon.fn/analyzed-artifacts` re-derive the whole program per change (to measure);
-(5) the profiler's own predicates carry contracts, so `seon.profile/summary` costs about 88k checked calls. Each fix
-is proven by `seon.profile/measure` on the end-to-end probe it targets; Astra or Opus implements, Flash-high judges
-proposals first.
-
-**Backlog by root cause** (owner 2026-10-14: many queued tasks exist because the system does the wrong thing
-upstream). Flash-high clustered all 872 declared tasks into nine producer clusters (51 tasks) and eight fence
-requests; none is acted on until verified one by one. Its list of 25 "moot" tasks failed verification: most name
-namespaces that do not exist because the task asks for them to be built (`seon.census-test` is the red proof of a
-`seon.census` still to write), the five `seon.step` entries are the live chain templates, and four are deletion tasks
-not yet done; only `seon.turn/receipt-attributes-are-a-hand-list` is confirmed moot. A Gemini "subject is absent"
-claim therefore never retires a task by itself. Argon's independent clustering is in flight.
-
-**Worktree experiment** (owner 2026-10-14). The goal is the database as the source of truth with files the vetted
-write-back, reliable two-way sync until then, lanes replaced by parallel work resolved at merge, and every immutable
-computation shared across places. Two independent pitches (Flash-high, Argon) decide whether each agent's place is a
-Datahike branch, an SCI context and a git worktree cut from one commit; the owner decides from the pitches before
-anything is built. The worktree prohibition is lifted for the experiment (a54610348).
-
-**Live runs** (owner 2026-10-14): no paid Claude API calls. Two kinds of run after S3a (Design, then Prove with
-Implement held): (1) DeepSeek product agents, the measured live run; (2) Claude Code agents acting as Seon agents
-through the MCP servers (`eval_clj` as their own agent on the chain branch, reading their current-state block and
-working by `defn`, as CLAUDE.md's outside agents do), which judge the agent experience and whether each task's
-generated context is complete and correct before the DeepSeek runs are graded on it.
-
-**Goals, in order** (owner, 2026-10-12): (1) chains run unattended, measured by hand acts after launch (target 0),
-calls, tokens and errors by signature; (2) context useful by construction; (3) tasks improve as work proceeds; (4)
-agents mine Seon for tasks, after goal 1 holds.
-
-**Deferred, not on the path:** user surfaces; concurrency (two chains at once). Older performance follow-ups join the
-performance leads above when measured: `my.program/search` allocation, publication ~1.3 s per namespace, the 2.3 s cold
-one-test check, check JVM runs of 160–190 s for one test.
+**Owner rulings of 2026-10-14** (one line each; recorded in their owning documents):
+- TASK-CHAIN: filed tasks enter as full chains and are deleted at merge; per-task model with `:outside`; no checkpoint; three reference levels (bare summary, one-backtick doc, three-backtick code) with the structural fallback; "plan" names only the task field.
+- Agents work through the REPL; files are written at merge and `bin/lane` retires once the merge carries its checks; no per-agent worktree.
+- Everything immutable is shared, keyed by the content it reads; no duplicate caches (stored data is read from its owner); test results carry across branches, red included.
+- Retention pruning off (`:seon.config.maintenance/retention?` false); deleted branches still reclaimed.
+- Models by evidence: Haiku gathers, Sonnet implements and prototypes, Opus takes hard problems and the critical path, Astra performance and second plans, Fable hybrids and audits, Gemini Flash root causes and audits, Argon long hunts; no paid Claude API; DeepSeek for live runs, Claude Code agents as Seon agents for context checks.
+- Check slots 4: development tooling may exceed the 16 GB runtime budget; the queue wait is a defect to fix.
+- Namespace agents retire (a task supersedes them); question tasks parked.
 
 ## 1. The goal
 

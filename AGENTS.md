@@ -197,7 +197,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
      the file collisions); inventories; red triage from stored runs by the commit that changed the behavior; **flake
      hunting** (run a suspect test alone several times at the suspect commits before anyone designs a fix); the
      **performance sentinel** after each restart (`script/seon/sentinel.clj` against its last baseline). Haiku never
-     makes SCI requests as root on default (they write test runs to main): JVM mode or throwaway checks only. Its
+     makes SCI requests as root on default (they write test runs to main): JVM mode or throwaway checks only. A Haiku
+     or Gemini claim becomes a task or a decision only with a reproduction form that root or a stronger lane ran (on
+     2026-10-14, 4 of 6 Haiku causal claims and Gemini's corpus-wide counts were wrong). Its
      output is evidence, verified against the code or a test before use; it does not pick tasks or decide on
      judgement.
    - **Sonnet** does clearly specified work and REPL prototypes (measured 2026-10-14: 3.5 of 4 REPL prototype questions,
@@ -226,7 +228,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
      general rule over modeling a rare construct.
    - **Schedule** (root): file-disjoint lanes run in parallel; two lanes needing one file run one after the other, the
      second briefed with the first's commit; a phase waits for the files it needs rather than editing around them
-     (patch files for a held file). A design round is dig → two independent plans → hybrid → narrow check → tasks
+     (patch files for a held file). The critical path's files go to the critical path: while a milestone's slices are
+     open, a side lane touches those files only as a patch. Host-bound lanes run at most one per check slot; REPL-first
+     and docs lanes run beside them. One design round is in flight at a time, and its phases are in the order before the
+     next round opens (three rounds in two hours produced 26 phases and 4 landings). A design round is dig → two independent plans → hybrid → narrow check → tasks
      (see "Design by independent plans and a hybrid"). One goal probe is always in flight: a chain experiment on HEAD
      with small ordinary tasks that carry red proofs, its hand acts counted against the previous run.
    - **Every lane refuses bad changes on sight** and proves its own slice before committing (see "Prove each slice
@@ -595,7 +600,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   proceeding. HEAD must load and the named probe answer.
 - **Make bounds honest.** Tests fail beyond their declared bound, default five seconds; a longer bound carries a
   reason naming the measured operation, its numbers in profile evidence. Distinguish acquisition from warm execution; priming never
-  excuses a timeout. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
+  excuses a timeout. A timing proof compares parent and change in the same run, or asserts allocation, call counts or
+  CPU time, so concurrent checks cannot fail it; a wall-clock bound alone flakes under load. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
 - **Make ordinary work sub-second.** Profile every contracted call; time boot, reload, publication, probes, tests
   and transactions; measure memory. A result over one second names the responsible instrumented functions and the causing
   agent fixes the cost before continuing, or justifies beside the number its proportionality and why it cannot be
@@ -674,7 +680,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   pause hooks during source cuts and record pause and resumption.
 - **One file, one owner.** A file has one owner at a time, no shared hunks. A lane claims every file it will edit,
   tests included, with `bin/lane claim LANE PATHS` before editing; the claim refuses a file another lane holds or one
-  with uncommitted changes nobody claimed, and `bin/lane status` is the ledger. A change to a held file goes to its
+  with uncommitted changes nobody claimed, and `bin/lane status` is the ledger. A claim covers one commit window
+  (claim, edit, prove, commit, release), never a lane's whole run; a scripted sweep claims its files only for its
+  window; a lane that stops releases every claim, leaving unfinished work as a patch with its files at HEAD (on
+  2026-10-14 a 166-path hold stalled the critical path two hours). A change to a held file goes to its
   owner as a patch or waits; a lane needing another file claims it with `bin/lane add` or asks root. At each check-in root launches all ready
   file-disjoint work or names its dependency or collision, with no artificial JVM-slot or prober cap; editing lanes are limited to what root can prove
   in one central test round, and
