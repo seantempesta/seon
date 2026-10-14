@@ -5,7 +5,8 @@
   loading, or JVM-handler dependency so the edit hook can load it while Seon
   is down."
   (:require [rewrite-clj.zip :as z]
-            [seon.error.refusal :as error]))
+            [seon.error.refusal :as error]
+            [seon.sci.reader]))
 
 (defn- utf8-bytes
   [text]
@@ -152,9 +153,12 @@
     (if (:my.edit/parse-byte-count parsed)
       (assoc parsed
              :seon.error/message message)
-      (let [locations (top-level-locations (:seon.edit/root parsed))
+      (let [read (seon.sci.reader/read {:seon.sci.reader/text source
+                                        :seon.config.eval.result/max-source (count source)})
+            readable? (and (vector? read) (not-any? :seon.sci.reader/error read))
+            locations (top-level-locations (:seon.edit/root parsed))
             location (first locations)
-            semantic (some-> location location-sexpr)]
+            semantic (when readable? (some-> location location-sexpr))]
         (if (and (= 1 (count locations)) semantic)
           {:seon.edit/location location
            :seon.edit/node (z/node location)
