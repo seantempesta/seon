@@ -15,6 +15,8 @@
             [seon.eval]
             [seon.render]
             [seon.repl :as repl]
+            [seon.render.value :as value]
+            [seon.ai.tokens :as tokens]
             [seon.sci.eval :as sci.eval]
             [seon.problems :as problems]
             [seon.ref :as ref]
@@ -761,21 +763,31 @@
   '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
     {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:db/id]}]}])
 
-(defn- exchange-form
-  "One evaluation as the REPL showed it: the form as sent and what the REPL answered; a unit older than the newest
-  exchange answers without the turn's meta (`seon.repl/reply-text`)."
-  {:malli/schema [:=> [:cat :seon.repl/emission :boolean] [:map :seon.ai/form [:seon.ai/reply {:optional true}]]]}
-  [emission newest?]
-  (let [reply (repl/reply-text emission newest?)]
+(defn exchange-form
+  "One evaluation as the REPL showed it: the form as sent and what the REPL answered, by the unit's `age` among the
+  agent's model exchanges. The `:newest` exchange answers with the turn's meta, a `:recent` one without it
+  (`seon.repl/reply-text`); an `:older` one whose reply is over `limit` (`:seon.config.context/reference-tokens`) and
+  holds a result handle is shown by reference: its handle, its reply's size in estimated tokens and the form that reads the
+  value whole, never its reply text. After eviction or restart the handle answers that the value is gone."
+  {:malli/schema [:=> [:cat :seon.repl/emission :seon.context/age :seon.config.context/reference-tokens] :seon.context/exchange-unit]}
+  [emission age limit]
+  (let [reply (repl/reply-text emission (= :newest age))
+        handle (:seon.repl/handle emission)
+        tokens (some-> reply tokens/estimate)
+        reference (when (and (= :older age) handle tokens (> tokens limit))
+                    {:seon.repl/handle handle :seon.context/reply-tokens tokens
+                     :seon.render/operations [(list 'get-in handle [])]})]
     (cond-> {:seon.ai/form (repl/input-text emission)}
-      reply (assoc :seon.ai/reply reply))))
+      reference (assoc :seon.ai/reply (value/core-text reference) :seon.context/reference reference)
+      (and reply (not reference)) (assoc :seon.ai/reply reply))))
 
 (defn- exchanges
-  "The agent's own model exchanges in agent order: one per call row carrying a model attempt; only the newest
-  exchange's replies keep the turn's meta (`exchange-form`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+  "The agent's own model exchanges in agent order: one per call row carrying a model attempt, each unit by its age
+  (`exchange-form`): the newest exchange, the `:seon.config.context/history-whole` before it shown whole, and the
+  older ones."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.config/effective]
                   [:or :seon.context/exchanges :seon.error/value]]}
-  [database agent-id]
+  [database agent-id dials]
   (let [evaluations (seon.eval/of-agent database agent-id exchange-selector)]
     (if (:seon.error/at evaluations)
       evaluations
@@ -783,11 +795,21 @@
                       (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
                       (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
                       vec)
-            newest (dec (count runs))]
+            newest (dec (count runs))
+            age #(cond (= % newest) :newest
+                       (< (- newest %) (inc (:seon.config.context/history-whole dials))) :recent
+                       :else :older)]
         (into [] (map-indexed (fn [index run]
-                                (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database)) (= index newest))
+                                (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database)) (age index)
+                                                     (:seon.config.context/reference-tokens dials))
                                       run)))
               runs)))))
+
+(defn- dials
+  "The effective configuration of the cluster `database` belongs to (`seon.config/effective`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.config/effective :seon.error/value]]}
+  [database]
+  (config/effective database (db/q '[:find ?n . :where [_ :seon.config/cluster ?n]] database)))
 
 (defn model-context
   "What one model pass sends, as shown text.
@@ -799,7 +821,8 @@
                   [:or :seon.context/model-context :seon.error/value]]}
   [database request agent-id]
   (let [request (assoc request :seon.db/db database :seon.agent/id agent-id)
-        history (exchanges database agent-id)
+        effective (dials database)
+        history (if (:seon.error/at effective) effective (exchanges database agent-id effective))
         block (current-state database agent-id)
         profile (seon.render/request-profile request)
         shown #(sci.eval/shown-result %1 %2 nil)

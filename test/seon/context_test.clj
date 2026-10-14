@@ -10,6 +10,9 @@
             [seon.id]
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
+            [seon.ai.tokens :as tokens]
+            [seon.eval]
+            [seon.repl :as repl]
             [seon.task :as task]
             [seon.turn :as turn]
             [seon.test-support :as test-support]))
@@ -435,6 +438,27 @@
        (is (every? string? ((juxt :seon.ai/system :seon.ai/prompt)
                             (context/model-context database (dissoc world :seon.db/db :seon.agent/id) agent-id)))
            "the model pass lays both parts out")))))
+
+(deftest an-older-history-unit-over-the-dial-is-shown-by-reference
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (evaluate running agent-id "(vec (range 4000))")
+     (let [database (db/db connection)
+           [evaluation] (seon.eval/of-agent database agent-id '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}])
+           emission (repl/entity-emission (assoc evaluation :seon.db/db database))
+           handle (:seon.repl/handle emission)
+           older (context/exchange-form emission :older 400)
+           recent (context/exchange-form emission :recent 400)]
+       (is (qualified-symbol? handle) "the evaluation holds a result handle")
+       (is (= {:seon.repl/handle handle :seon.render/operations [(list 'get-in handle [])]}
+              (dissoc (:seon.context/reference older) :seon.context/reply-tokens))
+           "the older unit names its handle and the form that reads the value whole")
+       (is (= (tokens/estimate (:seon.ai/reply recent)) (get-in older [:seon.context/reference :seon.context/reply-tokens]))
+           "the reference carries the whole reply's size in estimated tokens")
+       (is (< (tokens/estimate (:seon.ai/reply older)) 100) "the older unit carries no reply text")
+       (is (not (contains? recent :seon.context/reference)) "a recent unit is shown whole")
+       (is (not (contains? (context/exchange-form emission :older 1000000) :seon.context/reference))
+           "a reply under the dial is shown whole")))))
 
 (deftest the-block-shows-the-agents-cost-against-main
   (test-support/with-running-agent
