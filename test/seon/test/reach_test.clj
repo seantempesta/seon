@@ -1,5 +1,6 @@
 (ns seon.test.reach-test
   (:require [clojure.test :refer [deftest is]]
+            [seon.cluster.agent :as agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -7,6 +8,7 @@
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.render.value :as value]
+            [seon.test :as test]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -154,3 +156,42 @@
                      "a test that does not reach it keeps its digest")))
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
+
+(deftest a-work-branch-result-that-ran-what-main-moved-past-is-recorded-at-its-identity
+  ;; S5 run 7: a work branch runs the platform's row of a declaration main moved past since the merge base
+  ;; (`seon.cluster.registry/seen-database`), but the recorder judged what the body executed against the branch's
+  ;; own stale row, called every result stale and keyed none: `seon.test.runner/current-results` found no green,
+  ;; and the attempt's prove pass ran the proof again ~130 times in one agent context.
+  (support/with-database
+   (fn [connection]
+     (let [reaching 'seon.id-test/a-host-object-has-no-identity
+           cited [:seon.fn/sym 'seon.id/id]
+           platform-doc (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc] cited))
+           revise! #(support/transacted! connection [(support/revision (db/db connection) cited {:seon.fn/doc %})])
+           handle (support/execution-handle connection)
+           store (:seon.store/store handle)
+           branch (keyword (str "moved-run-" (id/id)))]
+       ;; the branch's copy differs from the platform's row: main's change before the fork
+       (revise! "Main's row before the fork.")
+       (let [request {:seon.store/store store :seon.store/branch branch
+                      :seon.cluster.registry/from (db/commit-id (db/db connection)) :seon.db/db (db/db connection)}]
+         (is (:seon.cluster/created? (registry/fork! request)))
+         (try
+           ;; main moves past the branch's copy, back to the platform's row: the branch runs the compiled function
+           (revise! platform-doc)
+           (let [attempt (agent/acquire-context! handle nil {:seon.agent/branch branch})
+                 conn (:seon.db/connection attempt)
+                 run-once #(db/with-branch {:seon.db/connection conn}
+                             (fn [] (test/run {:seon.test/execution (assoc attempt :seon.agent/id "moved-run")
+                                               :seon.test/recording-connection conn :seon.test/policy :named
+                                               :seon.test/identities #{reaching}})))]
+             (try
+               (let [first-run (run-once)]
+                 (is (= [1 true] ((juxt :seon.test/executed-count :seon.test/passed?) first-run))
+                     "the test runs once on the branch, green")
+                 (is (= [reaching] (keys (runner/current-results (db/db conn) [reaching] nil)))
+                     "its result is current at the identity its readers compute")
+                 (is (= [0 true] ((juxt :seon.test/executed-count :seon.test/passed?) (run-once)))
+                     "so the same input is answered from it, not run again"))
+               (finally (agent/release-context! attempt))))
+           (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))))))

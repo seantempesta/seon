@@ -2350,11 +2350,36 @@
                                                   (select-keys facts [:seon.fn/calls :seon.fn/references :seon.test/subject])))}))]
     (set (keys (reach-fixed-point node-of ::out (set harness-entries))))))
 
+(defn- function-digests
+  "The definition digest `database` holds for each of the function `symbols` it holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]] [:map-of :seon.fn/sym :string]]}
+  [database symbols]
+  (if (seq symbols)
+    (into {} (execution-read
+              (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
+                      :where [?e :seon.fn/sym ?symbol] [?e :seon.program/definition-digest ?digest]]
+                    database (vec symbols))))
+    {}))
+
+(defn- seen-digests
+  "The definition digest of the row of each function of `symbols` that `database` runs: its target's head's for
+  one main moved past since the merge base (`seon.cluster.registry/moved-past`, the row
+  `seon.cluster.registry/seen-database` answers), else `database`'s own."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]] [:map-of :seon.fn/sym :string]]}
+  [database symbols]
+  (let [own (function-digests database symbols)
+        sides (when (seq own) (registry/merge-sides database))
+        moved (when sides
+                (into [] (map second) (registry/moved-past database sides (mapv #(vector :seon.fn/sym %) (keys own)))))]
+    (if (seq moved)
+      (merge (apply dissoc own moved) (function-digests (:seon.cluster.registry/target sides) moved))
+      own)))
+
 (defn- executed-roots
   "What each result's body executed (`:seon.test.member/executed`) beyond its
   static closure on `tested`: `::dynamic-calls`, test -> the declarations it
   ran outside `reaches` (absent when none), and `::stale`, the tests whose body
-  ran a definition whose digest differs from `tested`'s for that symbol."
+  ran a definition whose digest differs from the row `tested` runs for that symbol (`seen-digests`)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.test/reaches :seon.test/unknown-error]
                        :seon.test.runner/captured-results]
                   [:map [::dynamic-calls [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
@@ -2364,12 +2389,7 @@
                                   (when (seq ran) [test-symbol ran])))
                        results)
         symbols (into [] (comp (mapcat val) (map first) (distinct)) executed)
-        declared (if (seq symbols)
-                   (into {} (execution-read
-                             (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
-                                     :where [?e :seon.fn/sym ?symbol] [?e :seon.program/definition-digest ?digest]]
-                                   tested symbols)))
-                   {})
+        declared (seen-digests tested symbols)
         static (if (seon.error.refusal/error? reaches) {} reaches)
         ;; The runner's own work inside the body's sink (running the var,
         ;; reporting, printing failures) is the harness's, not the test's, and
