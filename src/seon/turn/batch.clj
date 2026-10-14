@@ -580,7 +580,8 @@
   (seon.error.refusal/diagnostic
    (java.util.Date.) :seon.sci.eval/program `form-facts
    {:seon.error/message (str "Cyclic load dependency: " n " cannot require " (str/join ", " (sort closing))
-                             ", which already requires " n "; the require is refused and nothing is recorded.")
+                             ", which already requires " n "; the require is refused, adds no alias and records nothing."
+                             " Require it from a namespace it does not reach, such as user or a test namespace.")
     :seon.error/offending {n closing}
     :seon.error/member :seon.ns/requires
     :seon.error/expected :seon.sci.eval/acyclic-bindings}))

@@ -4437,7 +4437,6 @@
                       :seon.sci.eval/time-limit-ms limit})
                     (dissoc :seon.batch/settle))
         batch (seon.batch/evaluate-batch request)
-        registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))
         bound (entry-bindings batch ctx)
         uncontracted (turn.batch/uncontracted-measures request (:seon.batch/working batch) agent-id (:seon.batch/entries batch))]
     {:seon.turn.loop/evaluated-sources
@@ -4456,11 +4455,9 @@
                                 (assoc :seon.cluster.eval/read-evidence (db/read-evidence reads))
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (get bound ordinal)) (assoc :seon.sci.eval/bindings (get bound ordinal))
-                                ;; only a form that declares has something to admit: a Var bound,
-                                ;; or a schema registered by this run (a plain call whose namespace
-                                ;; map SCI touched proposes nothing to refuse)
-                                (and facts-error (or (seq (get bound ordinal)) registered?))
-                                (not-admitted facts-error))]
+                                ;; a form whose proposed change was refused (a Var, a schema, or a
+                                ;; namespace's requires, such as one closing a cycle) is told why
+                                facts-error (not-admitted facts-error))]
                (when (and run-id (= :pending (:seon.cluster.eval/code-evidence evaluation)))
                  (kernel/own-pending! (receipt-identity run-id ordinal) (:seon.batch/owned entry)))
                (cond-> {:seon.cluster.eval/ordinal ordinal

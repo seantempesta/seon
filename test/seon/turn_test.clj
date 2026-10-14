@@ -1865,6 +1865,31 @@
                      evaluations)
            "a form that declares nothing has nothing to admit")))))
 
+(deftest a-require-in-a-program-namespace-aliases-or-answers-why-not
+  ;; S5 run 4, 2026-10-14: `(require '[seon.test-support :as test-support])` in
+  ;; `seon.error` answered nil and added no alias; the cycle refusal that dropped
+  ;; it was withheld because the form bound no Var, and Implement retried ~15 times.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [eval! (fn [namespace-name code]
+                   (support/mcp-replies
+                    (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                              "arguments" {"cluster" running "agent" agent-id
+                                                                           "mode" "sci" "namespace" namespace-name
+                                                                           "code" code}})))))
+           refused? (fn [reply] (some #(= :seon.sci.eval/acyclic-bindings (:seon.error/expected %))
+                                      (tree-seq coll? seq reply)))]
+       (eval! "user" "(in-ns 'rq.a) (defn f [] 1)")
+       (eval! "user" "(in-ns 'rq.b) (require '[rq.a :as a]) (defn g [] (a/f))")
+       (doseq [[label code check]
+               [["an alias serves the next form of its request"
+                 "(require '[clojure.string :as cs]) (cs/upper-case \"a\")" #(= "A" (:seon.repl/value (peek %)))]
+                ["an alias serves the next request" "(cs/upper-case \"a\")" #(= "A" (:seon.repl/value (peek %)))]
+                ["a require closing a namespace cycle answers its refusal"
+                 "(require '[rq.b :as b])" #(refused? (peek %))]]]
+         (testing label
+           (is (check (eval! "rq.a" code)))))))))
+
 (deftest a-branch-operation-is-supplied-its-context-from-the-world
   ;; Lanes, 2026-09-28: `(my.agent/retire-branch! {...})` from MCP refused
   ;; its argument count: its context's store and routing were no world's
