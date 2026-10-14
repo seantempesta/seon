@@ -1,0 +1,249 @@
+diff --git a/resources/seon/tasks/seon.db.edn b/resources/seon/tasks/seon.db.edn
+index 1dc01e7a2..f2df8aa16 100644
+--- a/resources/seon/tasks/seon.db.edn
++++ b/resources/seon/tasks/seon.db.edn
+@@ -1,4 +1,6 @@
+-[#:seon.task{:name "a-branch-loaded-by-name-reads-without-its-commit-identity"
++[#:seon.task{:name "one-projection-per-declaration-content"
++             :plan "`seon.db/declaration-content-key` named each declaration datom with its entity id and transaction, and the writer's advanced projection (`seon.db/speculative-report-projection`) was held under `seon.db/advanced-key`, so one declaration population was held once per writing and per derivation path (projection-duplicates.md: 34-37 entries for 9-11 contents). Key the projection by the declaration rows `seon.schema/load-projection` joins (identity, values, admission source), never e or tx, and hold the advanced projection under that same content key, the advanced key only an alias. Read `docs/research/agent-platform/2026-10-14/truths-hybrid.md`."}
++ #:seon.task{:name "a-branch-loaded-by-name-reads-without-its-commit-identity"
+              :plan "`datahike.versioning/branch-as-db` over a connection answers a value with no committed identity (`datahike.db/committed-value-identity` nil, empty `:cache-context`), while `datahike.versioning/commit-as-db` over the same connection attaches it. So every projection read on a branch loaded by name misses `seon.db/carried-projection`'s commit and revision keys and recomputes `seon.db/content-projection` from its declaration datoms. Measured on default 487388073, warm, on Run 18's `:attempt-0343dd641b00` (F55): `seon.context/step-verdict` 132-242 ms with 21 `seon.db/content-projection` calls (99 ms in `seon.db/declaration-content-key`), against 4.6 ms and none for the same head through `commit-as-db`; a cold miss costs about 7 s each (health: 21 calls, mean 6,852 ms self). Run 18's >20 s and >62 s reads were those cold misses on a JVM one turn proc held at a core. The owner is Datahike's (our fork): load the branch head as `commit-as-db` does, with `attached-cache-context`, in a restart batch; then a branch read by name costs what its commit read costs. Read `datahike.versioning/branch-as-db`, `datahike.versioning/commit-as-db` and `docs/research/agent-platform/2026-10-12/run-18.md`."}
+  #:seon.task{:name "a-query-derives-its-read-plan-once"
+              :plan "`seon.db/q` and `seon.db/replay-read` derive `seon.db/query-patterns` and `seon.db/query-variable-attributes` once per read and pass those values through encoding, execution and decoding. Preserve native result identity and read evidence. Read `docs/research/agent-platform/2026-10-12/cost-record.md`."}
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index afe2d2b7e..669d9c41b 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -1479,9 +1479,11 @@
+ ;;; The projection memos are kinds of the process cache (`seon.cache`), bounded
+ ;;; by its one byte budget. A projection is held once, under its canonical key
+ ;;; at its full weight: `::projection` for a committed population's declaration
+-;;; content, `::value-projection` for what a speculative value derived (its
+-;;; content or the advance of its basis). Every other name of it (a revision
+-;;; key, a commit, an as-of point) is an entry of `::projection-alias` holding
++;;; content, `::value-projection` for a content a speculative value derived
++;;; first, by a full derivation or the advance of its basis: both are held under
++;;; the declaration content (`declaration-content-key`), one entry per content.
++;;; Every other name of it (a revision key, a commit, an as-of point, an
++;;; advance) is an entry of `::projection-alias` holding
+ ;;; only the canonical `[kind key]`; an alias whose canonical entry was evicted
+ ;;; reads as absent and is replaced when the projection derives again.
+ ;;; `::builder-digest` holds the loaded builder's digests. A derivation that
+@@ -1539,25 +1541,33 @@
+                         schema/projection-attributes))))
+ 
+ (defn- declaration-content-key
+-  "The loader's declaration datoms and transactions in AEVT order.
+-  Native database indexes already have that order; temporal views are sorted."
++  "The declaration rows `schema/load-projection` joins, per range in
++  `schema/projection-ranges`: each identity in value order with its values
++  and admission sources. Entity ids and transactions are how a population was
++  written, not what it holds, so equal declarations share one key however and
++  wherever they were asserted. One pass over the declaration index ranges
++  (3.9 ms on default's 10,644 rows); a digest of it would cost 9 ms more,
++  and its strings are the projection's own definition strings."
+   {:malli/schema
+-   ;; The shape of each attribute's entry, not each of its ~30k datoms, which
+-   ;; the index produced: validating every datom cost 148 ms per armed key
+-   ;; (cache-invalidation audit, 2026-09-23).
+-   [:=> [:cat :seon.db/database-value]
+-    [:vector [:tuple :qualified-keyword [:fn clojure.core/vector?] [:fn clojure.core/vector?]]]]}
++   ;; The shape of each range's entry, not each of its ~10k rows: validating
++   ;; every datom cost 148 ms per armed key (cache-invalidation audit, 2026-09-23).
++   [:=> [:cat :seon.db/database-value] [:vector [:fn clojure.core/vector?]]]}
+   [database]
+-  (let [installed (dbi/-schema (schema-database database))]
+-    (mapv (fn [attribute]
+-            (let [datoms (if (get installed attribute)
+-                           (let [ordered (d/datoms database :aevt attribute)]
+-                             (vec (if (instance? DB database)
+-                                    ordered
+-                                    (sort datahike.datom/cmp-datoms-aevt-quick ordered))))
+-                           [])]
+-              [attribute datoms (into [] (map :tx) datoms)]))
+-          schema/projection-attributes)))
++  (let [installed (dbi/-schema (schema-database database))
++        by-entity (fn [attribute]
++                    (if (get installed attribute)
++                      (persistent! (reduce (fn [rows datom]
++                                             (assoc! rows (:e datom) (conj (get rows (:e datom) []) (:v datom))))
++                                           (transient {}) (d/datoms database :aevt attribute)))
++                      {}))
++        sources (by-entity :seon.schema.admission/source)]
++    (mapv (fn [[identity-attribute value-attribute _]]
++            (if (get installed identity-attribute)
++              (let [values (by-entity value-attribute)]
++                (into [] (map (fn [datom] [(:v datom) (get values (:e datom)) (get sources (:e datom))]))
++                      (d/datoms database :avet identity-attribute)))
++              []))
++          (vals schema/projection-ranges))))
+ 
+ (defn- revision-agreement
+   "How many members of a revision key `candidate` shares with `context`:
+@@ -1602,19 +1612,25 @@
+   "The projection of `database`'s declaration content, held once under that
+   content and the loaded `builder` and named by each of `aliases`. A miss
+   takes the projection a speculative value of the same content derived
+-  (`speculative-projection`), else derives under `kind` from its `nearest-base`."
++  (`speculative-projection`), else derives under `kind` by `derivation`, by
++  default from its `nearest-base`."
+   {:malli/schema [:function
+                   [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]
+                   [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
+                         [:sequential :seon.schema/value]]
++                   :seon.schema/projection]
++                  [:=> [:cat :seon.source/digest :seon.db/database-value :qualified-keyword
++                        [:sequential :seon.schema/value] :seon.instrument/callable]
+                    :seon.schema/projection]]}
+   ([builder database] (content-projection builder database ::projection []))
+   ([builder database kind aliases]
++   (content-projection builder database kind aliases
++                       #(schema/load-projection database (nearest-base builder database))))
++  ([builder database kind aliases derivation]
+    (let [content-key [::declaration-content builder (declaration-content-key database)]
+          held (some #(when (seon.cache/present % content-key) %) [::projection ::value-projection])
+          canonical-kind (or held kind)
+-         projection (seon.cache/lookup canonical-kind content-key projection-bytes
+-                                       #(schema/load-projection database (nearest-base builder database)))]
++         projection (seon.cache/lookup canonical-kind content-key projection-bytes derivation)]
+      (run! #(alias! % [canonical-kind content-key]) aliases)
+      projection)))
+ 
+@@ -1815,8 +1831,8 @@
+   (set schema/projection-attributes))
+ 
+ (defn- advanced-key
+-  "The value-tier key of a report's projection advanced from its basis
+-  `before`: the basis's revision key and the declaration datoms `written`."
++  "The alias naming a report's projection advanced from its basis `before`:
++  the basis's revision key and the declaration datoms `written`."
+   {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value [:sequential :seon.schema/value]]
+                   :seon.schema/value]}
+   [builder before written]
+@@ -1835,22 +1851,23 @@
+ (defn- speculative-report-projection
+   "The projection of a writer's speculative report's `:db-after`, advanced
+   from its basis's held projection by the declaration datoms the report wrote
+-  (`schema/advance-projection`) and memoized in the value tier under
+-  `advanced-key` and that value's revision key, so its later reads and its
+-  commit (`hold-committed-projection!`) share the derivation. Nil when it
+-  wrote no declaration, the basis holds no projection or the base cannot be
+-  advanced from; the caller then derives as before."
++  (`schema/advance-projection`) and held under that value's declaration
++  content (`content-projection`), so a population already held answers the
++  held object. `advanced-key` and the value's revision key are aliases of it,
++  so its later reads and its commit (`hold-committed-projection!`) share the
++  derivation. Nil when it wrote no declaration or the basis holds no
++  projection; the caller then derives as before."
+   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
+   [{before :db-before after :db-after :as report}]
+   (when-let [written (written-declarations report)]
+-    (let [builder (projection-builder after)]
+-      (when-let [base (held-projection builder before)]
+-        (when-let [advanced (seon.cache/lookup ::value-projection (advanced-key builder before written)
+-                                               projection-bytes
+-                                               #(schema/advance-projection before after base written))]
+-          (alias! [builder (assoc (projection-cache-key after) ::builder builder)]
+-                  [::value-projection (advanced-key builder before written)])
+-          advanced)))))
++    (let [builder (projection-builder after)
++          advanced (advanced-key builder before written)]
++      (or (second (resolved advanced))
++          (when-let [base (held-projection builder before)]
++            (content-projection builder after ::value-projection
++                                [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]
++                                #(or (schema/advance-projection before after base written)
++                                     (schema/load-projection after base))))))))
+ 
+ (defn- hold-committed-projection!
+   "Hold the committed value's already derived projection under its commit.
+@@ -1865,8 +1882,7 @@
+           canonical (or (first (resolved revision-key))
+                         (when (= (:max-tx after) (:tx (first tx-data)))
+                           (when-let [written (written-declarations report)]
+-                            (let [k (advanced-key builder before written)]
+-                              (when (seon.cache/present ::value-projection k) [::value-projection k])))))]
++                            (first (resolved (advanced-key builder before written))))))]
+       (when canonical
+         (alias! revision-key canonical)
+         (alias! [::commit (:datahike.value/commit-id committed) builder] canonical))))
+@@ -1878,7 +1894,7 @@
+   A committed value keys by its declaration attributes' revisions, then by
+   its commit. A speculative value reuses its basis's entry through the same
+   revision key when it wrote no declaration attribute. Any other value, and a
+-  miss, keys by the declaration datoms themselves
++  miss, keys by the declaration rows it holds
+   (`declaration-content-key`), so equal populations share one derivation
+   across connections, branches and in-transaction values. An as-of view keys
+   by its own declaration datoms: a view older than a declaration change sees
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index 4afbcc06e..d02a10b20 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -928,12 +928,65 @@
+            (is (some? projection) "the definition commits")
+            (is (= (:seon.fn/spec stored) (get-in projection [:seon.schema.projection/definition-strings sym]))
+                "the committed value reads the written contract")
+-           (is (zero? (get calls 'seon.db/declaration-content-key)) "no declaration datom is copied for a key")
++           (is (= 1 (get calls 'seon.db/declaration-content-key))
++               "the written population is named once, so it is held once")
+            (is (zero? (get calls 'seon.schema/load-projection)) "no declaration range is walked")
+            (is (= (select-keys (schema/load-projection (db/db connection)) members)
+                   (select-keys projection members))
+                "the advanced projection is the one a full derivation gives")))))))
+ 
++;; A projection is a function of the declaration rows' values and how they
++;; join. The transaction that asserted a row and the entity id that carries it
++;; are not among them, so equal declarations are one population: one
++;; projection object, whichever transaction, entity ids or derivation path
++;; (a full derivation, the writer's advance of its basis) produced it.
++(deftest ^{:seon/tasks #{'seon.db/one-projection-per-declaration-content}}
++  equal-declarations-in-another-transaction-share-one-projection
++  (test-support/with-database
++   (fn [connection]
++     (let [kinds [:seon.db/projection :seon.db/value-projection]
++           held-entries #(reduce + (map (fn [kind] (count (seon.cache/retained kind))) kinds))
++           misses #(reduce + (map (fn [kind] (get-in (seon.cache/status) [:seon.cache/kinds kind :seon.cache/misses] 0))
++                                  kinds))
++           content-key @#'seon.db/declaration-content-key
++           head (db/db connection)
++           held (db/carried-projection head)
++           row (first (d/datoms head :aevt :seon.schema/key))
++           datoms (vec (d/datoms head :eavt (:e row)))
++           retracted (:db-after (d/with head (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) datoms)))
++           renumbered (:db-after (d/with retracted (mapv (fn [x] [:db/add -1 (:a x) (:v x)]) datoms)))
++           readded (:db-after (d/with (:db-after (d/with head [[:db/retract (:e row) :seon.schema/key (:v row)]]))
++                                      [[:db/add (:e row) :seon.schema/key (:v row)]]))
++           changed (:db-after (d/with head [{:seon.schema/key ::content-changed :seon.schema/form ":int"}]))
++           entries (held-entries)
++           shared (db/carried-projection readded)
++           shared-entity (db/carried-projection renumbered)]
++       (is (not= (:tx row) (:tx (first (filter #(= (:e row) (:e %)) (d/datoms readded :aevt :seon.schema/key)))))
++           "the row was asserted by another transaction")
++       (is (not= (:e row) (:e (first (filter #(= (:v row) (:v %)) (d/datoms renumbered :aevt :seon.schema/key)))))
++           "the row is carried by another entity")
++       (is (= (content-key head) (content-key readded) (content-key renumbered))
++           "the content key is the rows, not their transactions or entity ids")
++       (is (not= (content-key head) (content-key changed)) "a changed declaration has its own")
++       (is (identical? held shared) "another transaction reads the held projection")
++       (is (identical? held shared-entity) "other entity ids read the held projection")
++       (is (= entries (held-entries)) "equal content holds one entry, not one per writing")
++       (is (not (identical? held (db/carried-projection changed))) "a changed declaration derives its own")
++       ;; The writer advances its basis's projection; the committed population
++       ;; is the same content as a value that writes it again elsewhere.
++       (let [registration [[:db.fn/call #'turn/row-tx {} {:seon.schema/key ::content-written :seon.schema/form ":string"}]]
++             report (test-support/transacted! connection registration)
++             committed (db/carried-projection (db/db connection))
++             before-misses (misses)
++             before-entries (held-entries)
++             again (:db-after (d/with (:db-before report) registration))
++             reread (db/carried-projection again)]
++         (is (contains? (:seon.schema.projection/forms committed) ::content-written))
++         (is (= (content-key (db/db connection)) (content-key again)) "the same declarations, written twice")
++         (is (identical? committed reread) "the writer's advanced projection is the content's one projection")
++         (is (= before-misses (misses)) "reading it again derives nothing")
++         (is (= before-entries (held-entries)) "and holds no second entry"))))))
++
+ ;; CLASS: a per-read whole-program derivation during boot. Before a boot
+ ;; instance names its commit, an uncommitted value's builder identity was
+ ;; derived on every projection read: a transaction function comparing stored

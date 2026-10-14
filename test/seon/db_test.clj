@@ -928,11 +928,63 @@
            (is (some? projection) "the definition commits")
            (is (= (:seon.fn/spec stored) (get-in projection [:seon.schema.projection/definition-strings sym]))
                "the committed value reads the written contract")
-           (is (zero? (get calls 'seon.db/declaration-content-key)) "no declaration datom is copied for a key")
+           (is (= 1 (get calls 'seon.db/declaration-content-key))
+               "the written population is named once, so it is held once")
            (is (zero? (get calls 'seon.schema/load-projection)) "no declaration range is walked")
            (is (= (select-keys (schema/load-projection (db/db connection)) members)
                   (select-keys projection members))
                "the advanced projection is the one a full derivation gives")))))))
+
+;; A projection is a function of the declaration rows' values and how they
+;; join. The transaction that asserted a row and the entity id that carries it
+;; are not among them, so equal declarations are one population: one
+;; projection object, whichever transaction, entity ids or derivation path
+;; (a full derivation, the writer's advance of its basis) produced it.
+(deftest equal-declarations-in-another-transaction-share-one-projection
+  (test-support/with-database
+   (fn [connection]
+     (let [kinds [:seon.db/projection :seon.db/value-projection]
+           held-entries #(reduce + (map (fn [kind] (count (seon.cache/retained kind))) kinds))
+           misses #(reduce + (map (fn [kind] (get-in (seon.cache/status) [:seon.cache/kinds kind :seon.cache/misses] 0))
+                                  kinds))
+           content-key @#'seon.db/declaration-content-key
+           head (db/db connection)
+           held (db/carried-projection head)
+           row (first (d/datoms head :aevt :seon.schema/key))
+           datoms (vec (d/datoms head :eavt (:e row)))
+           retracted (:db-after (d/with head (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) datoms)))
+           renumbered (:db-after (d/with retracted (mapv (fn [x] [:db/add -1 (:a x) (:v x)]) datoms)))
+           readded (:db-after (d/with (:db-after (d/with head [[:db/retract (:e row) :seon.schema/key (:v row)]]))
+                                      [[:db/add (:e row) :seon.schema/key (:v row)]]))
+           changed (:db-after (d/with head [{:seon.schema/key ::content-changed :seon.schema/form ":int"}]))
+           entries (held-entries)
+           shared (db/carried-projection readded)
+           shared-entity (db/carried-projection renumbered)]
+       (is (not= (:tx row) (:tx (first (filter #(= (:e row) (:e %)) (d/datoms readded :aevt :seon.schema/key)))))
+           "the row was asserted by another transaction")
+       (is (not= (:e row) (:e (first (filter #(= (:v row) (:v %)) (d/datoms renumbered :aevt :seon.schema/key)))))
+           "the row is carried by another entity")
+       (is (= (content-key head) (content-key readded) (content-key renumbered))
+           "the content key is the rows, not their transactions or entity ids")
+       (is (not= (content-key head) (content-key changed)) "a changed declaration has its own")
+       (is (identical? held shared) "another transaction reads the held projection")
+       (is (identical? held shared-entity) "other entity ids read the held projection")
+       (is (= entries (held-entries)) "equal content holds one entry, not one per writing")
+       (is (not (identical? held (db/carried-projection changed))) "a changed declaration derives its own")
+       ;; The writer advances its basis's projection; the committed population
+       ;; is the same content as a value that writes it again elsewhere.
+       (let [registration [[:db.fn/call #'turn/row-tx {} {:seon.schema/key ::content-written :seon.schema/form ":string"}]]
+             report (test-support/transacted! connection registration)
+             committed (db/carried-projection (db/db connection))
+             before-misses (misses)
+             before-entries (held-entries)
+             again (:db-after (d/with (:db-before report) registration))
+             reread (db/carried-projection again)]
+         (is (contains? (:seon.schema.projection/forms committed) ::content-written))
+         (is (= (content-key (db/db connection)) (content-key again)) "the same declarations, written twice")
+         (is (identical? committed reread) "the writer's advanced projection is the content's one projection")
+         (is (= before-misses (misses)) "reading it again derives nothing")
+         (is (= before-entries (held-entries)) "and holds no second entry"))))))
 
 ;; CLASS: a per-read whole-program derivation during boot. Before a boot
 ;; instance names its commit, an uncommitted value's builder identity was
