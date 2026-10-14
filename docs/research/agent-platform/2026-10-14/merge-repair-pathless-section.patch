@@ -1,0 +1,114 @@
+diff -ru a/resources/seon/schemas/seon.ref.edn b/resources/seon/schemas/seon.ref.edn
+--- a/resources/seon/schemas/seon.ref.edn	2026-10-14 16:29:13.465434357 +0700
++++ b/resources/seon/schemas/seon.ref.edn	2026-10-14 16:29:50.192109667 +0700
+@@ -133,5 +133,5 @@
+            :section-missing [:enum :file :heading]
+            :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
+            :section-error [:and :seon.error/base
+-                           [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path :seon.ref/path]
++                           [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path]
+                             [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}
+diff -ru a/resources/seon/tasks/seon.ref.edn b/resources/seon/tasks/seon.ref.edn
+--- a/resources/seon/tasks/seon.ref.edn	2026-10-14 16:29:13.488960084 +0700
++++ b/resources/seon/tasks/seon.ref.edn	2026-10-14 16:29:50.192291918 +0700
+@@ -4,8 +4,6 @@
+              :plan "seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size took 18,404 ms against its 5,000 ms bound on default 795a770c2 (fanout-2 run, 2026-10-08) and errs on every run, so any request reaching seon.ref-test holds a live thread for it past the step's time limit (see `seon.test.runner/a-timed-out-unrelated-test-restarts-in-every-eval-request`). Done when it passes within its bound, with the measured cost of the (my.fs/section \"AGENTS.md#data-and-contracts\") read it runs through a running agent. Read `my.fs/section` and `seon.test-support/with-running-agent`."}
+  #:seon.task{:name "a-task-target-reads-as-an-unresolved-reference"
+              :plan "A typed task names the function the agent must create in backticks (`comp.geo/area` in `seon.competency/area-is-contracted-typed`, `:comp.order/qty` in `seon.competency/quantity-schema-then-function-typed`), and `seon.ref/references` answers it as `:problem-kind :unresolved`, the same problem a broken reference gets: the block tells the agent its task is defective exactly where the task is correct. Done when a reference the task's intent names as its target (a name in the task's own subject namespace, or one the intent marks as to be defined) reads as a target to create, distinct from an unresolved reference. Read `seon.context/current-state`."}
+- #:seon.task{:name "a-reference-with-no-path-is-a-missing-file"
+-             :plan "`seon.ref/section` of a reference with no path (\"#the-goal\", \"#\") must answer a `:seon.ref/section-error` with `:seon.ref/section-missing` `:file`, as \"the evidence\" does; today it throws, because it calls `seon.ref/locate` with \"\" and `locate` is contracted `[:cat :seon.ref/path]` (a string of length at least 1). Two changes, both needed, and the second is why two agents (rounds 1 and 2) did not finish: (1) in `seon.ref/section`, call `seon.ref/locate` only for a non-empty path, `(when (seq path) (locate path))`, so an empty path takes the missing-file branch; (2) the missing-file branch builds the error with `seon.ref/section-error`, whose contract `[:cat :keyword :seon.ref/path ...]` and whose output schema `:seon.ref/section-error` both require `:seon.ref/path` (`[:string {:min 1}]`), so an empty path fails them. Fix at the producer: `seon.ref/section-error` takes `[:maybe :seon.ref/path]` and omits the key when the path is empty (`(not-empty path)`, also from `:seon.error/offending`; absence is no key), and the schema `:seon.ref/section-error` makes `:seon.ref/path` optional (register it with `(seon.schema/register! :seon.ref/section-error [:and :seon.error/base [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]])` and keep `:seon.ref/path` itself unchanged, its other users need a non-empty path); `:seon.ref/nearest` for an empty path is already the Markdown files of the checkout root, from `seon.ref/nearest-files`. Verified at an agent's REPL (2026-10-10): with the schema registered and `section-error` and `section` redefined this way, `(seon.ref/section \"#the-goal\")` answers `{:seon.ref/section-missing :file :seon.ref/anchor \"the-goal\"}` and no path. Read a schema with `(doc :seon.ref/section-error)` (a keyword is not a symbol: `my.program/source` refuses it); `seon.schema/snapshot` is not the schema listing. Proofs: `seon.ref-test/a-reference-with-no-path-is-a-missing-file` (three rows, the first already green) and `seon.ref-test/a-reference-with-no-path-answers-an-error-that-holds-no-path` (the error's anchor, no :seon.ref/path key, the evidence among the nearest). Read `my.fs/section` and `README.md`."}
+  #:seon.task{:name "design-a-pathless-reference-section"
+              :plan "## Problem\n\n`seon.ref/section` of a reference with no path, such as `\"#the-goal\"`, throws instead of answering a missing-file `:seon.ref/section-error`, as it does for a path that names no file. On main:\n\n```clojure\n(seon.ref/section \"#the-goal\")\n;; throws: seon.ref/locate refused argument 0 `path`: expected :seon.ref/path (a string of length at least 1), got a string.\n```\n"
+              :instructions "## Work\n\nMake the intent say exactly what the problem is, in terms of the data. Read `## Problem` first. Then search the system for what already exists: `my.program/search` with the words of the problem, `docs/seon/architecture/vocabulary.md` for the words we use, `my.program/source` on each owner you find. Change the plan with `my.task/update!`, passing the whole new plan text: `(my.task/update! the-subject :seon.task/plan (constantly whole-new-plan))`. Keep `## Problem` as it is and add:\n\n- `## What exists`: the producer of the wrong or missing value, its callers, the schemas its inputs and outputs use, and the tests that cover it, each cited in backticks as a fully qualified symbol or keyword.\n- `## Approach`: the data first (the schema keys involved, and any schema to add or change, registered on this branch), then each function to change or add with its name, arity and complete contract over named schemas, and what it replaces or deletes. A new function is a `defn` in its owner's namespace with its full contract and the body `(throw (ex-info \"not yet\" {:seon.error/type :seon.error/unimplemented}))`.\n\nBacktick every name you cite: a backticked name that does not resolve shows up as a problem to fix.\n\n## Done\n\nThe three sections have content, every reference resolves, the intent names the schemas involved, and every function you defined or changed has a complete contract. Your proofs show what is missing after each evaluation.\n"}
+diff -ru a/src/seon/ref.clj b/src/seon/ref.clj
+--- a/src/seon/ref.clj	2026-10-14 16:29:13.440708163 +0700
++++ b/src/seon/ref.clj	2026-10-14 16:29:50.191941499 +0700
+@@ -707,15 +707,15 @@
+     (vec (sort (filter #(str/ends-with? % ".md") (.list directory))))))
+ 
+ (defn- section-error
+-  "The error for a reference with no file or no such heading, naming the nearest."
+-  {:malli/schema [:=> [:cat :keyword :seon.ref/path [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
++  "The error for a reference with no file or no such heading, naming the nearest; a reference with no path names none."
++  {:malli/schema [:=> [:cat :keyword [:maybe :seon.ref/path] [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
+   [missing path anchor nearest]
+-  (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
+-                      (cond-> {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
+-                               :seon.error/offending (cond-> {:seon.ref/path path} anchor (assoc :seon.ref/anchor anchor))
+-                               :seon.error/expected nearest
+-                               :seon.ref/section-missing missing :seon.ref/path path :seon.ref/nearest nearest}
+-                        anchor (assoc :seon.ref/anchor anchor))))
++  (let [named (cond-> {} path (assoc :seon.ref/path path) anchor (assoc :seon.ref/anchor anchor))]
++    (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
++                        (cond-> (merge named {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
++                                              :seon.error/expected nearest
++                                              :seon.ref/section-missing missing :seon.ref/nearest nearest})
++                          (seq named) (assoc :seon.error/offending named)))))
+ 
+ (defn- span-tokens
+   "The estimated tokens of source lines `from` (1-based) up to `end`."
+@@ -738,9 +738,9 @@
+   (let [hash-at (str/index-of reference "#")
+         path (cond-> reference hash-at (subs 0 hash-at))
+         anchor (when hash-at (not-empty (subs reference (inc hash-at))))
+-        located (locate path)]
++        located (when (seq path) (locate path))]
+     (if-not located
+-      (section-error :file path anchor (nearest-files path))
++      (section-error :file (not-empty path) anchor (nearest-files path))
+       (let [text (slurp (:seon.ref/file located))
+             {:seon.ref/keys [headings line-count body-line]} (document text)
+             lines (vec (str/split-lines text))
+diff -ru a/test/seon/ref_test.clj b/test/seon/ref_test.clj
+--- a/test/seon/ref_test.clj	2026-10-14 16:29:13.512205891 +0700
++++ b/test/seon/ref_test.clj	2026-10-14 16:29:50.192618046 +0700
+@@ -196,8 +196,8 @@
+            [(:seon.ref/path entry) (:seon.ref/anchor entry) (:seon.ref/heading entry)]))))
+ 
+ (deftest a-referenced-task-shows-its-intent
+-  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/a-reference-with-no-path-is-a-missing-file`"})]
+-    (is (= 'seon.ref/a-reference-with-no-path-is-a-missing-file (:seon.ref/name entry)))
++  (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/documentation-and-source-take-a-path-string`"})]
++    (is (= 'seon.ref/documentation-and-source-take-a-path-string (:seon.ref/name entry)))
+     (is (string? (:seon.task/plan entry)) "a task resolves to its own content, its intent")))
+ 
+ (deftest a-referenced-test-shows-its-own-source
+@@ -214,7 +214,7 @@
+ (deftest a-referents-own-references-show-one-level-for-every-text-kind
+   (are [text name] (= [(list 'my.program/source (list 'quote name))] (:seon.render/operations (get (cited text) name)))
+     ;; a task's intent
+-    "`seon.ref/a-reference-with-no-path-is-a-missing-file`" 'seon.ref/locate
++    "`seon.ref/documentation-and-source-take-a-path-string`" 'seon.ref/section
+     ;; a doc section's text
+     "`AGENTS.md#data-and-contracts`" 'seon.blob/inline-or-stage))
+ 
+@@ -235,16 +235,14 @@
+     (is (= :unresolved (:seon.ref/problem-kind problem)))
+     (is (re-find #"my.message/send" (:seon.ref/message problem)) "it names what to do")))
+ 
+-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
+-  a-reference-with-no-path-is-a-missing-file
++(deftest a-reference-with-no-path-is-a-missing-file
+   ;; section declares [:or :seon.ref/section :seon.ref/section-error]; an anchor with no path threw from locate's contract.
+   (are [reference] (= :file (:seon.ref/section-missing (try (ref/section reference) (catch Exception e (ex-message e)))))
+     "no-such-file.md#the-goal"
+     "#the-goal"
+     "#"))
+ 
+-(deftest ^{:seon/tasks #{'seon.ref/a-reference-with-no-path-is-a-missing-file}}
+-  a-reference-with-no-path-answers-an-error-that-holds-no-path
++(deftest a-reference-with-no-path-answers-an-error-that-holds-no-path
+   ;; an empty path names no file: the error carries no :seon.ref/path (absence is no key) and lists the checkout root's Markdown
+   (are [reference expected] (= expected
+                                (let [error (ref/section reference)]
+@@ -345,8 +343,8 @@
+                 [:function-bare "Merged by seon.task/effective down the children." ['seon.task/effective nil nil] 'seon.render.value/render-ai]
+                 [:deftest "`seon.ref-test/fenced-code-and-prose-spans-are-not-references`"
+                  ['seon.ref-test/fenced-code-and-prose-spans-are-not-references nil nil] 'seon.render.test/render-ai]
+-                [:task "`seon.ref/a-reference-with-no-path-is-a-missing-file`"
+-                 ['seon.ref/a-reference-with-no-path-is-a-missing-file nil nil] 'seon.render.ns/task-ai]
++                [:task "`seon.ref/documentation-and-source-take-a-path-string`"
++                 ['seon.ref/documentation-and-source-take-a-path-string nil nil] 'seon.render.ns/task-ai]
+                 [:library-var "`malli.core/validator`" ['malli.core/validator nil nil] 'seon.render.value/render-ai]
+                 [:schema-key "`:seon.task/handle`" [:seon.task/handle nil nil] 'seon.render.value/render-ai]
+                 [:attribute "`:seon.task/plan`" [:seon.task/plan nil nil] 'seon.render.value/render-ai]
