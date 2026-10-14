@@ -136,6 +136,13 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    returns the existing chain and changes nothing (an edited plan stays). A crash after the fork and before the fact
    leaves an unclaimed, never-started branch, which boot retires; no agent starts before the fact is committed. Expected
    cost about 100 ms (fork 53–56 ms, two small committed transactions ~22 ms each); measure the durable create in S1c.
+   **From a filed task** (owner 2026-10-14). A filed task (a task-file entry: the backlog) enters as a full
+   Design → Prove → Implement chain, loaded with everything the entry carries, so the pipeline can find what the entry
+   did not know: `seon.task/from-filed` (new, pure) answers
+   `[(merge (template design) (dissoc filed :seon.task/proofs)) (template prove) (cond-> (template implement) (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))]`:
+   the first map takes the entry's identity and content (its plan flows from there), and the entry's proofs, owned,
+   become Implement's starting proofs, which Prove may extend. A stage with nothing left to do is green at its start and
+   ends (§2.4). Custom chains are ordinary vectors of templates and maps; templates are tasks in task files.
 2. **Run a task** — root's listener `seon.cluster.agent/db<->flow`, each pass, reads every chain fact on main and each
    chain's branch head with `seon.db/branch-database` (a store read needing no open connection, as
    `seon.cluster.agent/branch-end` does today), released after use (`seon.cluster.source/release!`); a chain value is never read after the same pass deletes its
@@ -148,6 +155,13 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    `seon.cluster.registry/active-branch-connection`, else the store's open), then starts a NEW agent id on that branch
    (`seon.cluster.agent/acquire-context!` with `{:seon.agent/branch b}`: 3.9 ms while another agent holds the branch,
    22.7 ms when nobody does). It never forks a branch per task and never reuses an agent's SCI context.
+   **The model is per task** (owner 2026-10-14): owned `:seon.task/model`, a model name (absent: the cluster's
+   `:seon.config.ai/model`) or `:outside`. With `:outside` root starts the agent exactly as for any task but its graph
+   takes no model turns; an outside agent (a Claude Code agent through MCP `eval_clj`, as that agent id on the chain
+   branch) works the task, and the same block, test steps, done rule, advance and merge apply. Live runs use DeepSeek
+   tasks for the measured run and `:outside` tasks to judge the context; no paid Claude API call is made. There is no
+   human checkpoint inside a chain in the MVP (owner 2026-10-14): a chain to inspect first is created `:held` and run
+   with `my.root/run!`.
    `:seon.config.agent/max-running` counts open attempts across all chains.
 3. **Work** — the agent reads its block (`seon.context/current-state`: its task's plan, instructions and proofs with
    their status, the tasks before and after it through `next`) and works at the REPL. It reads its own task's execution
@@ -204,7 +218,9 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    identity of the merge to publish, so a restart between acceptance and its answer publishes exactly once. Then, in
    order: `seon.merge/publish!` (a `:seon.merge/waiting` or a publication refusal is not success: the chain fact stays
    and root sees it); on success join the chain's graphs, release its connections, retire the branch and its base
-   (`seon.cluster.registry/retire-branch!`), then retract the chain fact. On restart, a chain fact whose branch is gone
+   (`seon.cluster.registry/retire-branch!`), then retract the chain fact. Chain tasks are runtime data and are never written into task files; when the chain's
+   first task has a filed task's identity (`ns`, `name` of a task-file entry), the same write-back deletes that entry
+   (owner 2026-10-14: after the merge the filed task is removed), so no done backlog entry is picked up again. On restart, a chain fact whose branch is gone
    after a recorded merge is cleaned up; one whose branch is gone otherwise is shown to root as unknown.
 7. **Bail or fail** — every end that is not done: `:capped` (turns spent; `seon.turn/turns-left` is the budget),
    `:stalled`, `:given-back`, `:sent-back` (`my.task/send-back!` with its reason), `:error`, a done that
@@ -529,6 +545,8 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S3b-2 | Publication and retirement after acceptance | publication commits once, including across a restart between acceptance and its answer; branch, base and chain fact gone after; `:seon.merge/waiting` keeps the chain fact | Opus | — |
 | S3c-1 | Bail, resume and abandon (§2.7) | a `:capped` end gives exactly one problem task after repeated wakes, the attempt `:closed` with its reason, the task `:held`, the branch and chain fact kept, no successor started; after `my.root/run!` with no other main write exactly one new attempt and agent start on the same branch, with the next attempt number | Sonnet (after S3a) | — |
 | S3c-2 | Restart (§2.8) | one row per durable stopping point: attempt identity, model-call count, outcome, retained branches, pending publication | Opus | — |
+| S3f-1 | From a filed task (§2.1): `seon.task/from-filed`, and the final merge's write-back deleting the entry whose identity the chain's first task has (§2.6) | `seon.task-test/a-filed-task-becomes-a-full-chain`: a filed entry with a plan and red proofs gives three maps, the first with its identity and plan and no proofs, the last with its proofs; `seon.cluster.write-back-test/a-merged-chain-deletes-its-filed-entry`: after the merge the entry is gone from its task file and no chain task was written to any task file | Sonnet (after S3b) | — |
+| S3f-2 | Per-task model (§2.2): owned `:seon.task/model`, `:outside` starts the agent with no model turns | `seon.cluster.db-flow-test/an-outside-task-takes-no-model-turn-and-is-worked-through-the-repl`: an `:outside` task's agent makes no model call over repeated passes; eval requests as its agent id through the MCP entrance run its test step and its done rule advances the chain | Opus (after S3a) | — |
 | S3d-1 | Doc view render tier (§3a) | `seon.context-test/a-referenced-function-shows-its-doc-view`: distance 1 shows docstring, contract, schema descriptions and the read form, no source; distance 2 keeps the source; a reference inside help renders at the compact tier (name and summary), its doc view one `doc` away | Sonnet (parallel with S1b after the restart batch: file-disjoint, prebrief-s1b-s3d1.md) | — |
 | S3d-2 | Context section and history reuse | measured on target HEAD first; then a `seon.profile/measure` assertion that a second turn's `model-context` after one new evaluation costs in proportion to that unit, with the raw block's tokens and the elision count before/after | Opus (after the errors cut's E4a) | — |
 | S3e | Delete the task tree (`children`, `needs`, `effective`) with their last readers (§6) | no live reader; retained reds unchanged | Sonnet | — |
