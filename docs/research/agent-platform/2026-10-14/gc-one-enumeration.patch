@@ -17,7 +17,7 @@ index c9e57c6fb..62209ee62 160000
 +++ b/reference-code/datahike
 @@ -1 +1 @@
 -Subproject commit c9e57c6fb65365d5ce92b59854fb02ea59054fe7
-+Subproject commit 62209ee62051bfcd52f7135b7dc898f25457e1bc
++Subproject commit 6d49110d336f8e21bf828d006e3a885ac1c12a34
 diff --git a/reference-code/konserve b/reference-code/konserve
 index 26444d372..b4b896f24 160000
 --- a/reference-code/konserve
