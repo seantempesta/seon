@@ -42,8 +42,14 @@ TASK-CHAIN (Haiku inventories → Sonnet edits).
 possible: `defn` on their own branch, source read through `my.program/source`; root's merge writes the accepted
 entities to files, and once it does (with what `bin/lane commit` checks today carried by the merge), `bin/lane` claims
 and commits retire. No per-agent git worktree (both Gemini pitches, `../research/agent-platform/2026-10-14/gemini/`).
-Gaps to close, from `dig-merge-writes-files.md` (in flight): the merge's write and commit of files, the non-program
-files (docs, scripts, deps, bin), and our lanes working as `:outside` Seon agents (S3f-2).
+The merge already writes files and commits them (`seon.merge/publish!` → `seon.cluster.source/write-back!` →
+`seon.cluster.source/commit!`, `git commit --only`; `../research/agent-platform/2026-10-14/dig-merge-writes-files.md`,
+ce3617af2). Gaps, designed after S3b: the throwaway-boot check (`bin/seon check`) and lint parity in the merge gate;
+gate-input classification (`seon.test.cache/gate-input?`); a write-back path for non-program files (docs, help,
+skills, scripts, `deps.edn`, `bin/`; today only `my.fs/write!`, uncommitted, unchecked); the restart-batch rule for
+dependencies; the merge commit's hard-coded co-author; our lanes working as `:outside` Seon agents (S3f-2). Filed now:
+two functions named `publish!` with different meanings (`seon.merge/publish!` writes files, `seon.cluster.source/publish!`
+reads the checkout into a cluster).
 
 **Focus rules (root, 2026-10-14).** Defects: fix now only what blocks the chain path (S1–S3) or makes generated
 context wrong; file everything else with its evidence (good first chain tasks later). Restarts: root pauses running
