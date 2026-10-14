@@ -546,7 +546,7 @@
   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
   nil)
 
-(deftest ^{:seon.test/long "One chain world: a chain fork, its first attempt capped after one scripted model turn and bailed over three db<->flow passes, then root's run and the second attempt's start and close." :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "One chain world: a chain fork, its first attempt capped after one scripted model turn and bailed over three db<->flow passes, then root's run and the second attempt's start and close, and root's run of that closed attempt's task and the third attempt's start." :seon.test/long-ms 30000}
   a-capped-chain-attempt-bails-to-root-once-and-root-runs-it-again
   ;; TASK-CHAIN S3c-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Bail or fail): an end that is not done is
   ;; processed once by root's pass: one problem task on main named by the attempt, the attempt :closed with its
@@ -585,6 +585,7 @@
                 [first-task second-task] (:seon.task/handles chain)
                 key-1 (id/id [first-task 1])
                 key-2 (id/id [first-task 2])
+                key-3 (id/id [first-task 3])
                 context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                          :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
                 problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
@@ -621,8 +622,10 @@
                 (is (some? (db/q '[:find ?c . :in $ ?b :where [?c :seon.chain/branch ?b]] (db/db connection) branch))
                     "the chain fact is kept")
                 (let [ran ((requiring-resolve (quote my.root/run!)) {:my.program/context context :seon.task/assigned first-task})]
-                  (is (= {:seon.task/assigned first-task :seon.chain/branch branch :seon.task/execution :running} ran)
-                      "root runs the held task again on its branch"))
+                  (is (= {:seon.task/assigned first-task :seon.chain/branch branch :seon.task/execution :running
+                          :seon.task.attempt/number 2 :seon.task/assignment key-2}
+                         ran)
+                      "root runs the held task again on its branch, answering the attempt its next pass starts"))
                 (pass! handle routing)
                 (is (= #{[key-1 1 (str "attempt/" key-1)] [key-2 2 (str "attempt/" key-2)]} (attempt-rows (db/db on-branch)))
                     "exactly one new attempt, the next number, with a new agent on the same branch")
@@ -637,7 +640,20 @@
                     "root closes the chain attempt with its own tool")
                 (is (= :closed (:seon.task/outcome (db/pull (chain-db) [:seon.task/outcome] [:seon.task/assignment key-2])))
                     "on the chain branch")
-                (is (contains? (registry/branches store) branch) "the branch stays for root"))
+                (is (contains? (registry/branches store) branch) "the branch stays for root")
+                ;; S5 run 5: an attempt root closed before its agent reported an end is decided, not open, so running
+                ;; its task again starts exactly the next attempt with a new agent
+                (is (= {:seon.task.attempt/number 3 :seon.task/assignment key-3}
+                       (select-keys ((requiring-resolve (quote my.root/run!)) {:my.program/context context :seon.task/assigned first-task})
+                                    [:seon.task.attempt/number :seon.task/assignment]))
+                    "root runs the task whose attempt it closed with no end, answering the next attempt")
+                (pass! handle routing)
+                (is (= #{[key-1 1 (str "attempt/" key-1)] [key-2 2 (str "attempt/" key-2)] [key-3 3 (str "attempt/" key-3)]}
+                       (attempt-rows (db/db on-branch)))
+                    "a closed attempt with no end starts exactly one new attempt, the next number, with a new agent")
+                (is (some? (some-> (get-in @routing [:seon.agent/children branch]) deref
+                                   (get-in [:seon.agent/started (str "attempt/" key-3)])))
+                    "and its agent starts"))
               (finally (release-chain! routing store branch))))))))))
 
 (deftest ^{:seon.test/long "One chain world: a task-reading proof recorded green on main with no task, a chain whose first attempt proves it red and makes one scripted model call; then a chain whose proof main already holds green, ended done by its prove pass; measured with the S3a-2 row's world." :seon.test/long-ms 30000}

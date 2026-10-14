@@ -1732,7 +1732,7 @@
   "What db<->flow reads of the chain whose first task is `first-handle` on its branch head `head`: along the first
   task's `:seon.task/next` path only (the branch also inherits main's unrelated tasks, which are not its work), the
   tasks that start (execution :running, latest attempt neither :done nor :merged, no attempt lacking an outcome),
-  every attempt with no end and no outcome, attempts made, creation order and the chain `branch` of each."
+  every open attempt (`seon.task/open-attempt?`), attempts made, creation order and the chain `branch` of each."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/branch :seon.task/handle]
                   [:or [:map [:seon.flow.actions/startable :seon.flow.actions/startable]
                         [:seon.flow.actions/open :seon.flow.actions/open]
@@ -1748,10 +1748,9 @@
                         [:seon.task/id handle])
           created (when (:db/id task) (db/q '[:find ?tx . :in $ ?h :where [_ :seon.task/id ?h ?tx]] head handle))
           rows (when (:db/id task)
-                 (db/q '[:find ?k ?n ?id ?o ?e :in $ ?t
-                         :where [?a :seon.task/attempt-of ?t] [?a :seon.task/assignment ?k] [?a :seon.task.attempt/number ?n]
-                         [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]
-                         [(get-else $ ?a :seon.task/outcome :none) ?o] [(get-else $ ?a :seon.task.attempt/end :none) ?e]]
+                 (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task.attempt/number :seon.task.attempt/end
+                                          :seon.task/outcome {:seon.task/agent [:seon.agent/id]}]) ...]
+                         :in $ ?t :where [?a :seon.task/attempt-of ?t]]
                        head (:db/id task)))]
       (cond
         (read-failure [task created rows]) (read-failure [task created rows])
@@ -1759,11 +1758,12 @@
         (nil? (:db/id task)) read
         :else
         (let [execution (:seon.task/execution task)
-              latest (last (sort-by second rows))
-              starts? (and (= :running execution) (not (#{:done :merged} (nth latest 3 nil)))
-                           (not-any? #(= :none (nth % 3)) rows))
-              open (for [[k _ id outcome end] (sort rows) :when (= :none outcome end)]
-                     {:seon.task/assigned handle :seon.task/assignment k :seon.agent/id id :seon.task/branch branch
+              latest (last (sort-by :seon.task.attempt/number rows))
+              starts? (and (= :running execution) (not (#{:done :merged} (:seon.task/outcome latest)))
+                           (every? :seon.task/outcome rows))
+              open (for [row (sort-by :seon.task/assignment rows) :when (task/open-attempt? row)]
+                     {:seon.task/assigned handle :seon.task/assignment (:seon.task/assignment row)
+                      :seon.agent/id (get-in row [:seon.task/agent :seon.agent/id]) :seon.task/branch branch
                       :seon.task/execution execution :seon.chain/branch branch})
               read (cond-> (-> read
                                (update :seon.flow.actions/open into open)
@@ -1878,7 +1878,7 @@
         syms (when leaves (db/q '[:find ?h ?s :in $ [?h ...] :where [?t :seon.task/id ?h] [?t :seon.task/sym ?s]]
                                 database leaves))
         open (db/q '[:find ?h ?k ?id ?b ?i :in $ %
-                     :where [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
+                     :where [?a :seon.task/attempt-of ?t] (open-attempt ?a)
                      [?a :seon.task/assigned ?h] [?a :seon.task/assignment ?k] [?a :seon.task/branch ?b]
                      [?a :seon.task/agent ?g] [?g :seon.agent/id ?id] (execution ?t ?i)]
                    database task/ready-rules)

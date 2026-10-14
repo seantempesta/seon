@@ -818,10 +818,27 @@
     (let [after (get-in (db/pull database [{:seon.task/next [:seon.task/id]}] [:seon.task/id handle]) [:seon.task/next :seon.task/id])]
       (if after (recur after (conj handles handle)) (conj handles handle)))))
 
+(defn open-attempt?
+  "Whether attempt `row` is open (TASK-CHAIN §1): its agent reported no end (`:seon.task.attempt/end`) and nothing
+  decided it (`:seon.task/outcome`). An end with no outcome waits for root's decision; an outcome with no end is root's
+  close of an attempt its agent never ended. Neither is open: no agent works it, and its task's next attempt is a new one."
+  {:malli/schema [:=> [:cat [:map [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                             [:seon.task/outcome {:optional true} :seon.task/outcome]]]
+                  :boolean]}
+  [row]
+  (not (or (:seon.task.attempt/end row) (:seon.task/outcome row))))
+
+(def attempt-rules
+  "The Datalog form of `open-attempt?`: `(open-attempt ?a)`, an assignment row with no end and no outcome."
+  '[[(open-attempt ?a) [?a :seon.task/assignment _] (not [?a :seon.task.attempt/end _]) (not [?a :seon.task/outcome _])]])
+
+(declare next-attempt)
+
 (defn hold-tx
   "The transaction data closing attempt `key` at `database`, its chain branch, with `reason`, and holding its task:
   the attempt's outcome `:closed` and `:seon.task/reason`, its task's execution `:held` (TASK-CHAIN §2.7). An
-  attempt already holding an outcome, or none at all, answers none, so a repeat writes nothing.
+  attempt already holding an outcome, or none at all, answers none, so a repeat writes nothing. It writes no
+  `:seon.task.attempt/end`, which is the agent's own report: the outcome alone closes an attempt (`open-attempt?`).
   Invoke as `[:db.fn/call seon.task/hold-tx key reason]`, decided over the value the writer holds."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment :seon.task/reason] :seon.db/tx-data]}
   [database key reason]
@@ -899,10 +916,12 @@
 (defn run-held!
   "Run held chain task `handle` again (TASK-CHAIN §2.7): ONE transaction on its chain branch changing `:held` to
   `:running` (`run-tx`); the committed execution wakes root's plan through the branch's route (`:seon.wake/starts`),
-  and root's next pass starts its next attempt with a new agent. Answers the task, its branch and execution."
+  and root's next pass starts its next attempt with a new agent. Answers the task, its branch and execution, and that
+  attempt's number and key as the branch now reads them (`next-attempt`), the attempt root's pass writes."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]] :seon.task/handle]
                   [:or [:map [:seon.task/assigned :seon.task/handle] [:seon.chain/branch :seon.chain/branch]
-                        [:seon.task/execution :seon.task/execution]]
+                        [:seon.task/execution :seon.task/execution]
+                        [:seon.task.attempt/number :seon.task.attempt/number] [:seon.task/assignment :seon.task/assignment]]
                    :seon.error/value]]}
   [{connection :seon.db/connection store :seon.store/store} handle]
   (if-let [branch (chain-branch (db/db connection) store handle)]
@@ -911,9 +930,13 @@
                  (let [report (written on-chain [[:db.fn/call #'run-tx handle]])]
                    (if (:seon.error/at report)
                      report
-                     {:seon.task/assigned handle :seon.chain/branch branch
-                      :seon.task/execution (:seon.task/execution (db/pull (:db-after report) [:seon.task/execution]
-                                                                          [:seon.task/id handle]))}))))
+                     (let [after (:db-after report)
+                           [number attempt :as upcoming] (next-attempt after handle)]
+                       (if (read-error upcoming)
+                         upcoming
+                         {:seon.task/assigned handle :seon.chain/branch branch
+                          :seon.task/execution (:seon.task/execution (db/pull after [:seon.task/execution] [:seon.task/id handle]))
+                          :seon.task.attempt/number number :seon.task/assignment attempt}))))))
     (refusal/diagnostic (java.util.Date.) :seon.program/write `run-held!
                         {:seon.error/message (str "Task " handle " is on no chain.")
                          :seon.error/member :seon.task/assigned :seon.error/offending handle})))
@@ -1023,16 +1046,17 @@
 
 (defn- next-attempt
   "The number and identity `seon.id/id [handle number]` of task `handle`'s next attempt at `database`: its
-  latest, `:seon.task/attempts-made`, while that attempt is open, else one more, so a removed attempt never
-  re-mints its identity or branch."
+  latest, `:seon.task/attempts-made`, while that attempt is open (`open-attempt?`), else one more, so a removed
+  attempt never re-mints its identity or branch."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or [:tuple [:int {:min 1}] :seon.task/assignment] :seon.db/invalid-read-error]]}
   [database handle]
   (let [made (db/q '[:find ?m . :in $ ?handle :where [?t :seon.task/id ?handle] [?t :seon.task/attempts-made ?m]]
                    database handle)
-        latest (when (int? made) (db/pull database [:db/id :seon.task.attempt/end] [:seon.task/assignment (id/id [handle made])]))]
+        latest (when (int? made) (db/pull database [:db/id :seon.task.attempt/end :seon.task/outcome]
+                                          [:seon.task/assignment (id/id [handle made])]))]
     (or (read-error made) (read-error latest)
-        (let [number (if (and (:db/id latest) (not (:seon.task.attempt/end latest))) made (inc (or made 0)))]
+        (let [number (if (and (:db/id latest) (open-attempt? latest)) made (inc (or made 0)))]
           [number (id/id [handle number])]))))
 
 (defn relaunched
@@ -1200,13 +1224,13 @@
 
 (defn agent-attempt
   "The open attempt `agent-id` holds in `database`, its world: the entity of its latest assignment row
-  with no end; nil when it holds none."
+  open by `attempt-rules`; nil when it holds none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.db/invalid-read-error]]}
   [database agent-id]
-  (let [open (db/q '[:find ?a ?tx :in $ ?id
+  (let [open (db/q '[:find ?a ?tx :in $ % ?id
                      :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned _ ?tx]
-                     (not [?a :seon.task.attempt/end _])]
-                   database agent-id)]
+                     (open-attempt ?a)]
+                   database attempt-rules agent-id)]
     (or (read-error open) (first (apply max-key second [nil 0] (seq open))))))
 
 (defonce ^:private retire-branch!
@@ -1302,10 +1326,11 @@
   (into #{} (remove (comp #{:merge} end-kind)) (keys end-kinds)))
 
 (def ready-rules
-  "The stratified rules `ready` reads: `leaf-done` (an assignment of it merged on main, outcome
+  "The stratified rules `ready` reads, `attempt-rules` among them: `leaf-done` (an assignment of it merged on main, outcome
   :merged, with no later :sent-back targeting it), `under`, `self-or-under`, `needs*` (own and
   inherited needs), `blocked` (a need with an open leaf at or under it) and `execution` (a task's own
   `:seon.task/execution`, else its nearest ancestor's down `:seon.task/children`)."
+  (into attempt-rules
   '[[(execution ?t ?e) [?t :seon.task/execution ?e]]
     [(execution ?t ?e) [?p :seon.task/children ?t] [(missing? $ ?t :seon.task/execution)] (execution ?p ?e)]
     [(leaf-done ?t) [?a :seon.task/attempt-of ?t] [?a :seon.task/outcome :merged ?tx]
@@ -1316,7 +1341,7 @@
     [(self-or-under ?n ?l) (under ?n ?l)]
     [(needs* ?t ?n) [?t :seon.task/needs ?n]]
     [(needs* ?t ?n) [?p :seon.task/children ?t] (needs* ?p ?n)]
-    [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]])
+    [(blocked ?t) (needs* ?t ?n) (self-or-under ?n ?l) [?l :seon.task/id] (not [?l :seon.task/children _]) (not (leaf-done ?l))]]))
 
 (defn execution
   "The execution task `handle` runs under in `database`: its own `:seon.task/execution`, else its nearest

@@ -880,7 +880,7 @@
   [database recipient cause]
   (let [intent (db/q '[:find ?intent . :in $ % ?id
                        :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g]
-                              [?a :seon.task/attempt-of ?t] (not [?a :seon.task.attempt/end _])
+                              [?a :seon.task/attempt-of ?t] (open-attempt ?a)
                               (execution ?t ?intent)] database task/ready-rules recipient)]
     (seon.error.refusal/error
      :seon.message/undeliverable
