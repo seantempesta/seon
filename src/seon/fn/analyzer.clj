@@ -545,29 +545,38 @@
          (or (< row end-row) (and (= row end-row) (< col end-col))))))
 
 (defn- span-index
-  "`spans` in start order (stable), for [[innermost-span]]."
+  "`spans` in start order (stable) with, at each position, the latest end of
+  the spans up to it, for [[innermost-span]]."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]}
   [spans]
-  (vec (sort-by (juxt :row :col) spans)))
+  (let [ordered (vec (sort-by (juxt :row :col) spans))]
+    {:spans ordered
+     :reach (vec (rest (reductions (fn [latest span]
+                                     (let [end [(:end-row span) (:end-col span)]]
+                                       (if (pos? (compare end latest)) end latest)))
+                                   [nil nil] ordered)))}))
 
 (defn- innermost-span
   "The containing span of `entry` that starts last in the start-ordered `index`
   (among equal starts, the last in the spans' order): a binary search for the
   spans starting at or before `entry`, then a walk back to the first that
-  contains it. Proportional to log n plus the spans passed over, not to every
-  span of the file for every usage."
-  [index entry]
+  contains it, stopping once no earlier span reaches `entry`. Proportional to
+  log n plus the spans passed over, not to every span of the file for every
+  usage."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:maybe :map]]}
+  [{:keys [spans reach]} entry]
   (let [position [(:row entry) (:col entry)]
-        starting (loop [low 0 high (count index)]
+        starting (loop [low 0 high (count spans)]
                    (if (< low high)
                      (let [middle (quot (+ low high) 2)
-                           span (nth index middle)]
+                           span (nth spans middle)]
                        (if (pos? (compare [(:row span) (:col span)] position))
                          (recur low middle)
                          (recur (inc middle) high)))
                      low))]
     (loop [i (dec starting)]
-      (when-not (neg? i)
-        (let [span (nth index i)]
+      (when (and (not (neg? i)) (pos? (compare (nth reach i) position)))
+        (let [span (nth spans i)]
           (if (contains-position? span entry) span (recur (dec i))))))))
 
 (defn- attributed-usages
@@ -599,7 +608,7 @@
                                       :from-var (:method-name %))
                              (:protocol-impls analysis))
         spans (update-vals (group-by :filename (concat methods implementations)) span-index)
-        var-quotes (group-by :filename (:var-quotes analysis))]
+        var-quotes (update-vals (group-by :filename (:var-quotes analysis)) span-index)]
     (mapv (fn [usage]
             (if-let [span (innermost-span (get spans (:filename usage)) usage)]
               (merge usage (select-keys span [:from :from-var]))
@@ -607,8 +616,7 @@
                                  (innermost-span (get definitions (:filename usage)) usage))]
                 (cond-> usage
                   definition (assoc :from (:ns definition) :from-var (:name definition))
-                  (some #(contains-position? % usage)
-                        (get var-quotes (:filename usage)))
+                  (innermost-span (get var-quotes (:filename usage)) usage)
                   (assoc :var-quote true)))))
           usages)))
 

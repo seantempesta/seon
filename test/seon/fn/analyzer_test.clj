@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [clj-kondo.impl.cache :as kondo-cache]
             [seon.fn.analyzer :as analyzer]
+            [seon.profile :as profile]
             [seon.test-support :as test-support]))
 
 (defn- fixture-directory
@@ -250,3 +251,12 @@
         (is (not-any? #(= :invalid-arity (::analyzer/type %)) (::analyzer/findings result)))
         (is (= 1 (get calls 'seon.fn.analyzer/invoke-kondo))))
       (finally (test-support/delete-recursively! directory)))))
+
+(deftest var-quote-membership-reads-an-index-not-every-quote
+  (let [file (io/file "test/seon/fn_test.clj")
+        measured (profile/measure
+                  #(analyzer/analyze {::analyzer/sources {(.getCanonicalPath file) (slurp file)}}))
+        usages (::analyzer/var-usages (:seon.profile/value measured))]
+    (is (pos? (count (filter ::analyzer/var-quote usages))))
+    (is (< (profile/calls-of measured 'seon.fn.analyzer/contains-position?) (* 8 (count usages)))
+        "a handful of containment checks per usage, not one per quote of the file")))
