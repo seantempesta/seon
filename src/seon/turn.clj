@@ -5367,18 +5367,27 @@
 
 (defn- request-summary
   "What one test request executed, as the reply shows it: whether all of it passed, the red tests' names (those
-  that ended in an error rather than a failed assertion also in `:seon.turn.loop/errored`) and the tests left pending. A result answered from its record is not shown again."
+  that ended in an error rather than a failed assertion also in `:seon.turn.loop/errored`), each red test's first
+  failing assertion as its runner stored it (`:seon.turn.loop/failures`: type, message, contexts, expected and
+  actual as the value printer showed them) and the tests left pending. A result answered from its record is not shown again."
   {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/request-summary]}
   [run]
   (if (:seon.error/at run)
     {:seon.turn.loop/test-error run}
     (let [pending (pending-syms run)
-          red (vec (for [r (executed run)
-                         :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
-                     (:seon.test/sym r)))
+          reds (filterv #(pos? (+ (:seon.test/fail-count %) (:seon.test/error-count %))) (executed run))
+          red (mapv :seon.test/sym reds)
+          failures (into {} (keep (fn [r]
+                                    (when-let [report (first (:seon.test.failure/reports r))]
+                                      [(:seon.test/sym r)
+                                       (select-keys report [:seon.test.failure/type :seon.test.failure/message
+                                                            :seon.test.failure/testing-contexts
+                                                            :seon.test.failure/expected :seon.test.failure/actual])])))
+                         reds)
           errored (vec (for [r (executed run) :when (pos? (:seon.test/error-count r))] (:seon.test/sym r)))]
       (cond-> {:seon.test/passed? (and (empty? red) (empty? pending))
                :seon.turn.loop/red red}
+        (seq failures) (assoc :seon.turn.loop/failures failures)
         (seq errored) (assoc :seon.turn.loop/errored errored)
         (seq pending) (assoc :seon.turn.loop/pending pending)))))
 

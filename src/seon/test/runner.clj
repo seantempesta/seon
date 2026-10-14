@@ -157,15 +157,20 @@
                    ::failure-identities #{}}))))
 
 (defn- report-pair
-  "An assertion's expected and actual texts as ONE shown unit: the profile's
-  one token budget is shared, never granted twice (CLAUDE.md \"Apply
-  presentation limits once\"). Expected renders under half of it and actual
-  under the rest, so a small expected leaves its unused share to actual. A
-  thrown value is the floor's text, which the profile does not bound."
+  "An assertion's expected and actual texts as ONE shown unit: one token budget
+  is shared, never granted twice (CLAUDE.md \"Apply presentation limits
+  once\"). That budget is the profile's, no more than the characters the
+  blob threshold keeps inline (`seon.ai.tokens/estimate-of-characters`), so
+  the shown text is stored inline beside the failure and every reader shows
+  it. Expected renders under half of it and actual under the rest, so a small
+  expected leaves its unused share to actual. A thrown value is the floor's
+  text, which the profile does not bound."
   {:malli/schema [:=> [:cat :map :map] [:tuple [:maybe :string] [:maybe :string]]]}
   [options event]
   (let [profile (or (:seon.render/profile options) (:seon.render/profile (report-options)))
-        budget (:seon.render.profile/token-budget profile)
+        budget (min (:seon.render.profile/token-budget profile)
+                    (tokens/estimate-of-characters
+                     (:seon.config.eval.result/blob-threshold config/defaults)))
         under (fn [tokens] (assoc options :seon.render/profile
                                   (assoc profile :seon.render.profile/token-budget (max 1 tokens))))
         share (if (and (find event :expected) (find event :actual)) (quot budget 2) budget)

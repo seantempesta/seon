@@ -1,5 +1,7 @@
 (ns seon.test.runner-test
-  (:require [seon.config]
+  (:require [clojure.data.json :as json]
+            [seon.config]
+            [seon.mcp :as mcp]
             [seon.cache :as cache]
             [seon.sci.eval]
             [seon.batch]
@@ -543,3 +545,33 @@
        (is (= [0 1] (counts (first (runner/latest-results database [proof])))) "the newest execution is red")
        (is (= [1 0] (counts (get (runner/result-at-reach database {proof base}) proof))) "the base run answers at the base digest")
        (is (= {} (runner/result-at-reach database {proof (apply str (repeat 64 "0"))})) "no run at a digest is absent")))))
+
+
+(deftest a-red-members-reply-carries-its-first-failing-expected-and-actual
+  ;; Lanes read only `:red [var]` in the test step and reran bodies by hand to see why
+  ;; (2026-10-14); a large actual printed under the whole reply budget went to the blob tier
+  ;; and its `actual:` line vanished.
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [namespace-name (str "tq.red" (id/id))
+           sym #(symbol namespace-name %)
+           code (str "(ns " namespace-name " (:require [clojure.test :refer [deftest is]]))"
+                     " (deftest one-is-two (is (= 1 2)))"
+                     " (deftest a-map-is-a-contract-error (is (= {:a 1} {:seon.error/type :seon.error/contract"
+                     " :seon.error/message \"The output does not conform.\" :malli/problems [{:in [:a] :value \"s\"}]})))"
+                     " (deftest a-large-actual (is (= {} {:rows (vec (for [i (range 400)] {:i i :name (str \"row-\" i)}))})))")
+           result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                            "arguments" {"code" code "agent" agent-id "cluster" running}})))
+           tests (some :seon.turn.loop/tests (map #(test-support/reply (get % "text")) (get result "content")))
+           failures (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/failures])
+           threshold (:seon.config.eval.result/blob-threshold seon.config/defaults)]
+       (doseq [[test-name expected actual-holds]
+               [["one-is-two" "(= 1 2)" #(= "(not (= 1 2))" %)]
+                ["a-map-is-a-contract-error" nil #(str/includes? % ":seon.error/contract")]
+                ["a-large-actual" nil #(and (<= (count %) threshold) (re-find #"…\+?\d+" %))]]]
+         (let [failure (get failures (sym test-name))]
+           (is (= :fail (:seon.test.failure/type failure)) "the red entry carries its first failing assertion")
+           (when expected (is (= expected (:seon.test.failure/expected failure)) "its expected form"))
+           (is (string? (:seon.test.failure/actual failure)) "its actual, never dropped")
+           (is (actual-holds (str (:seon.test.failure/actual failure)))
+               "the actual as the value printer showed it, within the inline budget, its cut named")))))))
