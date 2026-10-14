@@ -35,7 +35,7 @@
                 [:seon.task/status {:optional true} :seon.task/status]
                 [:seon.context/namespace {:optional true} :seon.context/namespace]],
                :namespace [:and {:description "The namespace the agent is in: where its latest evaluation ended, else its held task's namespace. Producer: seon.context/current-state."} :seon.ns/name],
-               :must-reads [:vector {:description "Each reference the held task's attributes make (its effective intent's and instructions' code spans and links, its needs), resolved once by one rule or as its problem; a reference to one of its proofs is placed with that proof instead."} [:or :seon.ref/resolved :seon.ref/problem]]
+               :must-reads [:vector {:description "Each reference the held task's attributes make (its effective intent's and instructions' code spans and links, its needs), resolved once by one rule or as its problem; a reference to one of its proofs is placed with that proof instead. The block shows each as its entity's own render: a function as its doc line and :seon.render.ns/source-lines (its source; at distance 0 only the doc line), with the forms that read its callers and tests."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
                :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner and handed on as printed values."}
                                [:seon.error/type {:optional true} :seon.error/type]

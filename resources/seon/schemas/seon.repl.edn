@@ -8,8 +8,8 @@
             [:map {:description "One finding in the reply map's :seon.repl/findings: its kind, the measure it exceeded with the observed value, the other measures it reports, and its fix."}
              [:seon.repl/finding :seon.repl/finding]
              [:seon.repl/fix {:optional true} :seon.repl/fix]]
-            :findings [:vector :seon.repl/finding-value]
-            :request :seon.cost/request
+            :findings [:vector {:description "The declared bounds this evaluation exceeded (:seon.config.eval/bounds), each with the measure, its observed value and the fix; read it to correct how you evaluate. Absent when every bound held."} :seon.repl/finding-value]
+            :request [:and {:description "What the whole request cost, measured from the MCP entrance: wall time, armed calls, reads, transactions, allocation and CPU by thread, and the stage times. Read it to judge whether a form cost what it should; a request 10x over its work is wrong work."} :seon.cost/request]
             :out-tokens
             [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
             :directory
@@ -32,13 +32,13 @@
              {:min 1,
               :description
               "The value renderer's text for the new open errors recorded on the evaluation's branch between the previous evaluation's settlement and this one's, one entry per signature with its count. Present only when there are any."}]
+            :shown-value :seon.schema/value
+            :comment [:string {:min 1}],
             :diagnostics
             [:string
              {:min 1,
               :description
-              "The flat errors a later stage (printing, a renderer, settlement) attached beside the evaluation's unchanged value, as the floor printed them (:seon.cluster.eval/diagnostics). Present only beside :seon.repl/value."}]
-            :shown-value :seon.schema/value
-            :comment [:string {:min 1}],
+              "The flat errors a later stage (printing, a renderer, settlement) attached beside the evaluation's unchanged value, as the value printer shows them; the value still stands. Present only beside :seon.repl/value."}]
             :subject :seon.render.walk/lookup,
             :interrupted
             [:string
@@ -60,7 +60,7 @@
             :error
             [:string
              {:description
-              "The failed evaluation's saved shown text: its whole flat error as the floor printed it, readable as data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
+              "The failed evaluation's error as shown: one flat error map (its :seon.error/type, operation and message) read as data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
             :settled
             [:map
              [:seon.repl/key :seon.repl/key]
@@ -75,7 +75,7 @@
             :value
             [:string
              {:description
-              "The exact shown text from evaluation-time rendering. Historical responses preserve these bytes without decoding an object or applying another profile."}],
+              "The evaluation's result as shown: the text its render or the value printer produced when it was evaluated, with runnable elision forms for what it cut. Present unless the evaluation failed, when :seon.repl/error takes its place."}],
             :out
             [:string
              {:description
@@ -155,6 +155,7 @@
             [:map
              {:description
               "The REPL's one answer to one evaluated form, emitted in exactly this key order by seon.repl/response. The agent is never asked to write one; every key is absent when the evaluation has nothing to say for it."}
+             [:seon.repl/findings {:optional true} :seon.repl/findings]
              [:seon.repl/interrupted
               {:optional true}
               :seon.repl/interrupted]
@@ -166,6 +167,7 @@
              [:seon.repl/alloc-mb {:optional true} :seon.repl/alloc-mb]
              [:seon.repl/repairs {:optional true} :seon.repl/repairs]
              [:seon.repl/errors {:optional true} :seon.repl/errors]
+             [:seon.repl/diagnostics {:optional true} :seon.repl/diagnostics]
              [:seon.repl/value {:optional true} :seon.repl/value]
              [:seon.repl/error {:optional true} :seon.repl/error]],
             :candidates [:vector :seon.repl/candidate],
