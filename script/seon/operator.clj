@@ -2219,15 +2219,45 @@
                       (not (str/blank? (command! ["git" "ls-files" "--" %] repository 30000))))
                  positionals)))
 
-(defn parse-argv [arguments]
+(def ^:private command-usage
+  "The command usage shared by general and command-specific help."
+  [[:start "start [NAME] [--config PATH] | start --head"]
+   [:init "init [NAME --force | --dev NAME] [--changed PATH...]"]
+   [:status "status [--verbose]"]
+   [:open "open [NAME]"]
+   [:stop "stop [NAME]"]
+   [:down "down [--force]"]
+   [:reset "reset [NAME] --force"]
+   [:nuke "nuke --force"]
+   [:logs "logs [NAME]"]
+   [:config-apply "config apply [NAME] PATH"]
+   [:check "check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]])
+
+(defn parse-argv
+  "The operator request, or usage data when the caller asks for help."
+  {:malli/schema [:=> [:cat [:sequential :string]]
+                  [:map [:seon.operator/managed-root :seon.operator/managed-root]
+                   [:seon.operator/command [:or :seon.operator/command [:enum :help :nuke]]]
+                   [:seon.operator/help {:optional true} :string]]]}
+  [arguments]
   (let [[root args] (if (= "--seon-root" (first arguments))
                       [(canonical-root (second arguments)) (drop 2 arguments)]
                       [(canonical-root (repository-root)) arguments])
         [command & args] args
         command (case command "config" :config-apply (if (#{"--help" "-h"} command) :help (keyword (or command "help"))))
-        args (if (= command :config-apply)
-               (if (= "apply" (first args)) (rest args) (fail! "Use config apply." {})) args)
-        base {:seon.operator/managed-root root :seon.operator/command command}]
+        help? (or (= :help command) (some #{"--help" "-h"} args))
+        usage (when help?
+                (if (= :help command)
+                  (str/join " | " (map second command-usage))
+                  (or (some (fn [[entry-command text]] (when (= command entry-command) text)) command-usage)
+                      (fail! "Unknown command." {:seon.operator/command command}))))
+        args (cond help? nil
+                   (= command :config-apply)
+                   (if (= "apply" (first args)) (rest args) (fail! "Use config apply." {}))
+                   :else args)
+        command (if help? :help command)
+        base (cond-> {:seon.operator/managed-root root :seon.operator/command command}
+               help? (assoc :seon.operator/help (str "seon [--root PATH] " usage)))]
     (loop [args (seq args) request base positionals []]
       (if-let [arg (first args)]
         (case arg
@@ -2401,11 +2431,13 @@
      :seon.operator/pruned-archives-count (count (get-in result [:seon.operator/archives :seon.operator/pruned]))
      :seon.operator/detail detail-path}))
 
-(defn -main [& args]
+(defn -main
+  {:malli/schema [:=> [:cat [:* :string]] :nil]}
+  [& args]
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"}
+                   (select-keys request [:seon.operator/help])
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.

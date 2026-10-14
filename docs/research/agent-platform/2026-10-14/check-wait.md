@@ -16,7 +16,7 @@ The source path was unchanged: a doc-free HEAD candidate, not another lane's dir
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | operator-check-20261014T160131.030.edn / 39f97869b7f0 | 155.273 | 75.553 | 3.197 | 4.429 | 31.086 | 23.488 | 5.640 | 30.066, unavailable | 23.485 |
 | operator-check-20261014T160139.126.edn / 822b05d06a34 | 103.970 | 57.207 | 2.348 | 3.567 | 28.180 | 20.150 | 3.313 | 3.790, 1 executed | 29.500 |
-| operator-check-20261014T160227.274.edn / see diagnostic | 150.110 | 90.522 | 2.649 | 3.543 | 31.426 | 21.646 | 3.650 | 12.303, 14 executed | 31.273 |
+| operator-check-20261014T160227.274.edn / d83e8f619214 | 150.110 | 90.522 | 2.649 | 3.543 | 31.426 | 21.646 | 3.650 | 12.303, 14 executed | 31.273 |
 | Fresh / 923eff09d35e, run 831c5b5eb9f7 | 74.820 | 21.855 | 2.870 | 3.767 | 33.247 | 21.109 | 4.297 | 3.781, 1 executed | 32.939 |
 | Same archive, `--at 923eff09d35e1b12df229acee30bc2f6f3950d46`, run 3e3a3ff3744b | 45.734 | 0.002 | 2.614 | 3.934 | 28.496 | 22.624 | 4.341 | 3.974, 1 executed | 0.001 |
 
@@ -88,13 +88,15 @@ is the existing admission order, not a queue defect. No stub or lint exemption w
 
 ## Proposed next change, not implemented
 
-First measure and narrow publication on the cloned template to the actual archive delta. Keep the existing
-throwaway JVM and the existing publisher/reloader as owners. The template already contains the base's facts;
-pass the base-to-candidate changed paths to the publisher and preserve its deletion/dependency handling.
-This removes repeated whole-program work without a second program registry or long-lived mutable host.
-The source/current interval gives an upper bound of about 20 s saved per check; actual gain must subtract
-the changed namespaces' publication cost. Queue reduction is a consequence of shorter slot occupancy,
-not a guaranteed fixed saving. Four slots may increase throughput but do not remove this fixed work.
+First profile and narrow the reconciliation of the cloned template with the actual archive delta. Keep the
+existing throwaway JVM and publisher/reloader as owners. The template already contains the base's facts,
+and the existing publisher already compares file digests before publishing changed files. Merely adding
+another changed-file filter would duplicate that mechanism. Measure the work before that comparison and
+in the no-change publication/reload path, then move the unchanged-input decision to its owner.
+The source/current interval is an upper bound of about 20 s on the earlier drifted candidate, not a
+promise that all of it is removable. After the restart, the same-base candidate below reached readiness
+in 6.191 s. Queue reduction follows shorter slot occupancy; four slots alone do not remove fixed work.
+No performance implementation is justified until this profile identifies and measures the repeated work.
 
 A retained JVM keyed by exact archive digest could remove roughly 28 s boot plus 2.6 s seed and 3.9 s
 prepare on a repeat of that exact candidate. Different edits produce different digests, so measure the
@@ -129,3 +131,48 @@ A fresh check of the original failing archive 39f97869b7f08fdde96a67da55800a6486
 It then explicitly refused fixture identity `seon.test-runner-failure-fixture/distinct-error`
 (operator-check-20261014T162004.871.edn, total 50.155 s). This is transport evidence, not a passing test run.
 The original 30 s failure still lacks its exact argv/form; list length alone does not reproduce it.
+
+
+## Note commit and CLI follow-up
+
+The note committed as 19a8e2c1b after run 549d9720e102 passed four assertions. Total 125.783 s:
+24.554 s queue, 69.878 s seed (including a 63.418 s template build), 5.101 s prepare,
+13.507 s JVM launch/boot (6.191 s readiness), 0.313 s adoption, 5.839 s tests. In parallel,
+rehearsal spent 29.651 s publishing and 1.176 s adopting **zero identities**.
+Root had restarted onto e1db21f25; this lane did not restart it.
+
+`seon.operator/seeded-store!` deliberately keys a template by base commit AND slot: the Datahike
+store identity is derived from its canonical path. A shared template cannot simply delete the slot
+from that key. Investigate that dependency seam before proposing cross-slot template reuse; the
+63.418 s measured cold build is not evidence that changing the key preserves a valid store.
+
+The CLI follow-up changes `seon.operator/parse-argv` to answer usage before reading operational options,
+using one usage table for general and command help. `seon.operator/-main` prints the returned usage.
+The two parser regressions give four failures and six errors on the parent, then ten passing assertions
+on the change. The actual Babashka entry point answers check --help with the command's usage and exit 0.
+No timeout or queue policy changes. The silent-check failure remains unproven and unfixed; the two cold
+and warm 100-identity probes above are the reproducible counterevidence to list length being sufficient.
+
+Exact read-only JVM forms used for the profile and boot timeline (the latter on this lane's owned
+throwaway endpoint, not on default):
+
+```clojure
+(let [database (seon.db/db (seon.cluster.boot/connection "default"))
+      tests (into #{} (take 100)
+                  (seon.db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database))]
+  (seon.profile/measure #(seon.test/requested-bound-ms database tests #{})))
+
+(select-keys
+ (seon.cluster.boot/readiness (get @seon.operator.runtime/running-instances "default"))
+ [:seon.boot/layers :seon.boot/ready-ms])
+```
+
+The CLI candidate's run ccdc0955f6ec executed eight tests: the seven CLI/parser tests passed;
+`seon.cluster.publication-host-test/live-init-keeps-the-host-process-and-launches-no-jvm` alone failed
+(eight assertions, one error). Its operator calls reported Request root does not match this process;
+its later lookup reported an absent fork branch. Diagnostic: operator-check-20261014T163136.103.edn.
+The exact parent 840d175a854e88fd88e4ceafe2767553adf44add reproduced the same eight failures and one
+error in run 39aa091d2489 (66.215 s; operator-check-20261014T163419.614.edn). The candidate had the same
+14 passing integration assertions plus 24 passing assertions in the seven CLI/parser tests. This
+pre-existing integration red is excluded by var from the final commit check; no test was deleted or
+relaxed. The foreign root/branch boundary is outside this lane's files.
