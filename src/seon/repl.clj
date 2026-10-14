@@ -166,65 +166,70 @@
   declared render's text included), the `:error` when the failure was shown,
   and `:diagnostics`. Only an unshown failure's prose `:seon.cluster.eval/error`
   is quoted, by the printer's `string-literal`. The declared bounds' findings
-  are `:findings`; nothing is printed above or around the map."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector [:tuple :qualified-keyword :string]]]}
-  [{output :seon.cluster.eval/output
-    handle :seon.repl/handle
-    ending-ns :seon.sci.eval/ending-ns
-    prompt-ns :seon.ns/name
-    duration :seon.eval/duration-ms
-    allocated :seon.eval/allocated-bytes
-    interrupted-at :seon.cluster.eval/interrupted-at
-    :as emission}]
-  (let [value (value-text emission)
-        ;; The evaluation's own failure: its shown text IS its flat error.
-        ;; Diagnostics are a later stage's, beside a value that stands.
-        diagnostics (:seon.cluster.eval/diagnostics emission)
-        failed? (and (:seon.cluster.eval/error emission) (not diagnostics))
-        found (findings emission)
-        by-key {:seon.repl/value (when-not failed? value)
-                ;; Where the text came from decides, never parsing: shown
-                ;; text is the printer's; the prose error string is quoted.
-                :seon.repl/error (when failed?
-                                   (or value (print/string-literal (:seon.cluster.eval/error emission))))
-                :seon.repl/findings (when (seq found) (value/core-text found))
-                :seon.repl/diagnostics diagnostics
-                :seon.repl/repairs (some-> (:seon.cluster.eval/delimiter-repairs emission) value/core-text)
-                ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
-                ;; for an interrupted evaluation carried `:ms` alone and read
-                ;; exactly like one still running — absence of signal read as
-                ;; health, in the agent's own history (PRD §4).
-                :seon.repl/interrupted
-                ;; An instant prints as the printer prints every instant: `#inst` data.
-                (when (inst? interrupted-at)
-                  (value/core-text interrupted-at))
-                ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
-                ;; one hands the symbol it bound; ruling 59c's "no handle" is
-                ;; simply its absence, so nothing here re-decides what the
-                ;; binding already settled.
-                :seon.repl/result (some-> handle str)
-                ;; ALREADY TEXT: the value renderer bounded it once.
-                :seon.repl/errors (:seon.repl/errors emission)
-                :seon.repl/note (when-not failed?
-                                  (some-> (def-note (:seon.eval/private emission)) print/string-literal))
-                :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
-                                (str ending-ns))
-                :seon.repl/ms (when (and (int? duration)
-                                        (not (:seon.repl/changed-since? emission)))
-                               (str duration))
-                ;; What the evaluation allocated, as data in MB to 0.1, with
-                ;; the measure's scope documented on :seon.eval/allocated-bytes.
-                :seon.repl/alloc-mb (when (and (int? allocated) (not (neg? allocated))
-                                               (not (:seon.repl/changed-since? emission)))
-                                      (value/core-text (/ (Math/round (/ (double allocated) 1e5)) 10.0)))}]
-    (entries-in-order
-     (cond-> by-key
-       ;; ONE BUDGET PER REPLY: the output shows in what the reply's other
-       ;; entries left of it (the value held back the output's share).
-       (seq output)
-       (assoc :seon.repl/out
-              (shown-output output (:seon.cluster.eval/id emission)
-                            (+ (count ":out ") (count (reply-map (entries-in-order by-key))))))))))
+  are `:findings`; nothing is printed above or around the map. A reply that is not the `current?` one (an older
+  history unit) keeps its value and each finding's keyword and measure, and drops the turn's meta (`:ms`, `:alloc-mb`,
+  `:ns`) and each finding's fix prose, which the help already says."
+  {:malli/schema [:function [:=> [:cat :seon.repl/emission] [:vector [:tuple :qualified-keyword :string]]]
+                  [:=> [:cat :seon.repl/emission :boolean] [:vector [:tuple :qualified-keyword :string]]]]}
+  ([emission] (response-entries emission true))
+  ([{output :seon.cluster.eval/output
+     handle :seon.repl/handle
+     ending-ns :seon.sci.eval/ending-ns
+     prompt-ns :seon.ns/name
+     duration :seon.eval/duration-ms
+     allocated :seon.eval/allocated-bytes
+     interrupted-at :seon.cluster.eval/interrupted-at
+     :as emission}
+    current?]
+   (let [value (value-text emission)
+         ;; The evaluation's own failure: its shown text IS its flat error.
+         ;; Diagnostics are a later stage's, beside a value that stands.
+         diagnostics (:seon.cluster.eval/diagnostics emission)
+         failed? (and (:seon.cluster.eval/error emission) (not diagnostics))
+         found (cond->> (findings emission) (not current?) (mapv #(dissoc % :seon.repl/fix)))
+         by-key {:seon.repl/value (when-not failed? value)
+                 ;; Where the text came from decides, never parsing: shown
+                 ;; text is the printer's; the prose error string is quoted.
+                 :seon.repl/error (when failed?
+                                    (or value (print/string-literal (:seon.cluster.eval/error emission))))
+                 :seon.repl/findings (when (seq found) (value/core-text found))
+                 :seon.repl/diagnostics diagnostics
+                 :seon.repl/repairs (some-> (:seon.cluster.eval/delimiter-repairs emission) value/core-text)
+                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
+                 ;; for an interrupted evaluation carried `:ms` alone and read
+                 ;; exactly like one still running — absence of signal read as
+                 ;; health, in the agent's own history (PRD §4).
+                 :seon.repl/interrupted
+                 ;; An instant prints as the printer prints every instant: `#inst` data.
+                 (when (inst? interrupted-at)
+                   (value/core-text interrupted-at))
+                 ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
+                 ;; one hands the symbol it bound; ruling 59c's "no handle" is
+                 ;; simply its absence, so nothing here re-decides what the
+                 ;; binding already settled.
+                 :seon.repl/result (some-> handle str)
+                 ;; ALREADY TEXT: the value renderer bounded it once.
+                 :seon.repl/errors (:seon.repl/errors emission)
+                 :seon.repl/note (when-not failed?
+                                   (some-> (def-note (:seon.eval/private emission)) print/string-literal))
+                 :seon.repl/ns (when (and current? ending-ns (not= ending-ns prompt-ns))
+                                 (str ending-ns))
+                 :seon.repl/ms (when (and current? (int? duration)
+                                         (not (:seon.repl/changed-since? emission)))
+                                (str duration))
+                 ;; What the evaluation allocated, as data in MB to 0.1, with
+                 ;; the measure's scope documented on :seon.eval/allocated-bytes.
+                 :seon.repl/alloc-mb (when (and current? (int? allocated) (not (neg? allocated))
+                                                (not (:seon.repl/changed-since? emission)))
+                                       (value/core-text (/ (Math/round (/ (double allocated) 1e5)) 10.0)))}]
+     (entries-in-order
+      (cond-> by-key
+        ;; ONE BUDGET PER REPLY: the output shows in what the reply's other
+        ;; entries left of it (the value held back the output's share).
+        (seq output)
+        (assoc :seon.repl/out
+               (shown-output output (:seon.cluster.eval/id emission)
+                             (+ (count ":out ") (count (reply-map (entries-in-order by-key)))))))))))
 
 (defn- ends-in-comment?
   "True when `text`'s last line could hold a line comment, so the reply map
@@ -323,10 +328,12 @@
   its shown text as shown (`response-entries`).
 
   Returns nil when the evaluation has settled nothing — a running form has
-  not printed a result, and inventing an empty map would say it had."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [emission]
-  (reply-map (response-entries emission)))
+  not printed a result, and inventing an empty map would say it had. An older history unit is not `current?`
+  (`response-entries`)."
+  {:malli/schema [:function [:=> [:cat :seon.repl/emission] [:maybe :string]]
+                  [:=> [:cat :seon.repl/emission :boolean] [:maybe :string]]]}
+  ([emission] (response emission true))
+  ([emission current?] (reply-map (response-entries emission current?))))
 
 (defn- thinking-text
   "The agent's own `;;` prose for this evaluation, or nil.
@@ -355,18 +362,21 @@
 
 (defn reply-text
   "What the REPL answered one evaluation: its response map and, for a changed
-  value, the form reading it whole; nil when it has settled nothing."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [emission]
-  (let [answer (response emission)
-        changed (when (and (:seon.repl/changed-since? emission)
-                           (:seon.eval/shown emission))
-                  (shown-value (:seon.eval/shown emission)))
-        full-handle (:seon.repl/handle emission)
-        full (when (and full-handle (map? changed) (:seon.repl/changes changed))
-               (str ";; full value: " (print/form-text (list 'get-in full-handle []))))]
-    (when (or answer full)
-      (str/join "\n" (remove nil? [answer full])))))
+  value, the form reading it whole; nil when it has settled nothing. An older history unit is not `current?`: it
+  keeps its value and findings and drops the turn's meta (`response-entries`)."
+  {:malli/schema [:function [:=> [:cat :seon.repl/emission] [:maybe :string]]
+                  [:=> [:cat :seon.repl/emission :boolean] [:maybe :string]]]}
+  ([emission] (reply-text emission true))
+  ([emission current?]
+   (let [answer (response emission current?)
+         changed (when (and (:seon.repl/changed-since? emission)
+                            (:seon.eval/shown emission))
+                   (shown-value (:seon.eval/shown emission)))
+         full-handle (:seon.repl/handle emission)
+         full (when (and full-handle (map? changed) (:seon.repl/changes changed))
+                (str ";; full value: " (print/form-text (list 'get-in full-handle []))))]
+     (when (or answer full)
+       (str/join "\n" (remove nil? [answer full]))))))
 
 (defn text
   "The REPL bytes for one evaluation: prompt, agent input, response.

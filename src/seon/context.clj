@@ -762,26 +762,32 @@
     {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:db/id]}]}])
 
 (defn- exchange-form
-  "One evaluation as the REPL showed it: the form as sent and what the REPL answered."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:map :seon.ai/form [:seon.ai/reply {:optional true}]]]}
-  [emission]
-  (let [reply (repl/reply-text emission)]
+  "One evaluation as the REPL showed it: the form as sent and what the REPL answered; a unit older than the newest
+  exchange answers without the turn's meta (`seon.repl/reply-text`)."
+  {:malli/schema [:=> [:cat :seon.repl/emission :boolean] [:map :seon.ai/form [:seon.ai/reply {:optional true}]]]}
+  [emission newest?]
+  (let [reply (repl/reply-text emission newest?)]
     (cond-> {:seon.ai/form (repl/input-text emission)}
       reply (assoc :seon.ai/reply reply))))
 
 (defn- exchanges
-  "The agent's own model exchanges in agent order: one per call row carrying a model attempt."
+  "The agent's own model exchanges in agent order: one per call row carrying a model attempt; only the newest
+  exchange's replies keep the turn's meta (`exchange-form`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/exchanges :seon.error/value]]}
   [database agent-id]
   (let [evaluations (seon.eval/of-agent database agent-id exchange-selector)]
     (if (:seon.error/at evaluations)
       evaluations
-      (->> evaluations
-           (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
-           (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
-           (mapv (fn [run]
-                   (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database))) run)))))))
+      (let [runs (->> evaluations
+                      (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
+                      (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
+                      vec)
+            newest (dec (count runs))]
+        (into [] (map-indexed (fn [index run]
+                                (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database)) (= index newest))
+                                      run)))
+              runs)))))
 
 (defn model-context
   "What one model pass sends, as shown text.

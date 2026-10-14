@@ -217,6 +217,22 @@
                                          :seon.eval/shown "2"}))
                         :seon.repl/ns)))))
 
+(deftest an-older-history-reply-keeps-its-value-and-findings-without-the-turns-meta
+  (let [emission {:seon.cluster.eval/source "(in-ns 'my.agents.probe)"
+                  :seon.ns/name 'my.agents.juniper
+                  :seon.sci.eval/ending-ns 'my.agents.probe
+                  :seon.eval/shown "1"
+                  :seon.eval/duration-ms 2500
+                  :seon.eval/allocated-bytes 1000000}
+        newest (support/reply (repl/reply-text emission true))
+        older (support/reply (repl/reply-text emission false))]
+    (is (every? #(contains? newest %) [:seon.repl/ms :seon.repl/alloc-mb :seon.repl/ns]) "the newest reply keeps its cost and namespace")
+    (is (some :seon.repl/fix (:seon.repl/findings newest)) "the newest reply's finding says its fix")
+    (is (= 1 (:seon.repl/value older)) "an older reply keeps its value")
+    (is (not-any? #(contains? older %) [:seon.repl/ms :seon.repl/alloc-mb :seon.repl/ns]) "an older reply drops the turn's meta")
+    (is (= [:slow] (mapv :seon.repl/finding (:seon.repl/findings older))) "an older reply keeps each finding's keyword")
+    (is (not-any? :seon.repl/fix (:seon.repl/findings older)) "an older reply drops each finding's fix prose")))
+
 (deftest history-preserves-shown-text-without-applying-a-later-profile
   (let [shown "[my.turn/usage-form my.turn/wait]"
         emission {:seon.cluster.eval/source "(dir my.turn)"
