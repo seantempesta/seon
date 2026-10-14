@@ -787,6 +787,16 @@
                 (apply db/q query arguments))
              "Seon passes every Datahike-accepted positional shape through"))))))
 
+(deftest an-in-mismatch-answers-its-read-refusal-once
+  ;; one refusal, the read's own: no contract guard refuses the refusal again
+  ;; and repeats its message (taught-forms lane, 3b900522d)
+  (test-support/with-database
+   (fn [connection]
+     (let [refusal (db/q '[:find ?entity :in $ ?id :where [?entity :seon.agent/id ?id]] @connection)]
+       (is (= :seon.db/invalid-read-error (:seon.error/type refusal)))
+       (is (= '[$ ?id] (:seon.error/expected refusal)) "the refusal names the query's :in")
+       (is (not (contains? refusal :seon.error/problems)) "no contract refusal wraps it")))))
+
 (deftest database-identities-support-explicit-and-current-custody
   (test-support/with-database
    (fn [connection]

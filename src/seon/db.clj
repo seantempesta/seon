@@ -2906,55 +2906,13 @@
                 (into (conj (subvec arguments 0 position) database)
                       (subvec arguments position)))))))))
 
-(defn- query-call-valid?
-  "Whether `q`'s supplied inputs match the parsed query's `:in`.
-
-  A result that is `q`'s own dependency refusal already answers the call:
-  the body caught Datahike's throwable (a malformed query among them) and
-  carries its whole cause, so the guard has no input count to check. Any
-  other failure while parsing here is not health: it escapes the guard."
-  {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]]
-                  :boolean]}
-  [[call-arguments result]]
-  (let [[query-or-database & arguments] call-arguments]
-    (cond
-      ;; Not one of the union's database or query members: its error member.
-      (not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
-                (:find query-or-database) (:query query-or-database)))
-      true
-
-      (and (map? result) (::invalid-read result)
-           (= 'seon.db/q (:seon.db/refused-read-operation result))
-           (:seon.error/exception-class result))
-      true
-
-      :else
-      (let [explicit? (db.utils/db? query-or-database)
-            query-input (if explicit? (first arguments) query-or-database)
-            supplied (if explicit? (rest arguments) arguments)
-            normalized (query/normalize-q-input query-input supplied)]
-        (and (not (and (map? query-input) (contains? query-input :args) (seq supplied)))
-             (not= :invalid (query-input-position explicit? (:query normalized) (:args normalized))))))))
-
-(defn- query-guard-message
-  "The refusal sentence for a `q` call whose inputs do not match `:in`:
-  fixed text; the inputs are the refusal's data."
-  {:malli/schema [:=> [:cat [:map [:value [:tuple [:sequential :seon.schema/value]
-                                             :seon.schema/value]]]
-                        :seon.schema/value]
-                  :string]}
-  [{value :value} _options]
-  (let [[_ result] value]
-    (or (when (:seon.db/invalid-read result) (:seon.error/message result))
-        query-argument-message)))
-
 (defn q
   "Run a Datalog query over explicit inputs or the current database value.
   Nil scalar inputs, including members of tuple and collection bindings,
   return an invalid-read error before executing the query. False and empty
   collections remain ordinary inputs."
   {:malli/schema
-   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]). An input beyond the database is declared in the query, as in [:find ?e :in $ ?x :where ...]. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
+   [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The body derives input count and database source positions from the parsed query and refuses a mismatch with :in.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error]]}
   [query-or-database & arguments]
   (if-not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
                 (:find query-or-database) (:query query-or-database))
