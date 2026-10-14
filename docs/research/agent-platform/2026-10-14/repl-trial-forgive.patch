@@ -1,0 +1,115 @@
+--- a/src/seon/sci/forgive.clj	2026-10-12 20:13:10.061343591 +0700
++++ b/src/seon/sci/forgive.clj	2026-10-14 14:46:27.883066532 +0700
+@@ -143,6 +143,12 @@
+ 
+ ;;; The scan
+ 
++(defn- closing-quote
++  "The quote closing an unterminated string whose text so far is `text`; escaped when `text` ends in an odd run of backslashes."
++  {:malli/schema [:=> [:cat :string] :string]}
++  [text]
++  (if (odd? (count (take-while #(= \\ %) (reverse text)))) "\\\"" "\""))
++
+ (defn- scan
+   "One pass over `text`: the forgiven text, each top-level form's span
+   `[start end line column]` in it, the repairs, and whether `text`'s own
+@@ -165,13 +171,16 @@
+         ;; code item in `out`, and its line (kept only when repairing)
+         marks (long-array [0 0 1])
+         fence (volatile! nil)
++        pending (volatile! nil)
+         closers (fn [from] (let [sb (StringBuilder.)]
+                              (loop [k (dec (.length open))]
+                                (when (>= k from) (.append sb (char (closer-of (.charAt open k)))) (recur (dec k))))
+                              (str sb)))
+         matching (fn [c] (loop [k (dec (.length open))]
+                            (cond (neg? k) -1 (= c (closer-of (.charAt open k))) k :else (recur (dec k)))))
+-        at-code! (fn [o line] (when repair? (aset marks 1 (long o)) (aset marks 2 (long line))))
++        at-code! (fn [o line] (when repair? (vreset! pending nil) (aset marks 1 (long o)) (aset marks 2 (long line))))
++        token-char? (fn [x] (and x (not (Character/isWhitespace (char x))) (neg? (.indexOf ",;)]}" (int x)))))
++        dangle! (fn [o line ols] (when (and repair? (pos? (.length open)) (nil? @pending)) (vreset! pending [o line (inc (- o ols))])))
+         repair! (fn [line at k v] (vswap! repairs conj! {:seon.batch/line line :seon.batch/at at k v}))
+         ;; closers inserted at `o` move every repair made after `o` by `d`
+         shift! (fn [o d]
+@@ -190,13 +199,18 @@
+         close-all! (fn []
+                      (let [o (aget marks 1)
+                            line (aget marks 2)
+-                           cls (closers 0)]
++                           cls (closers 0)
++                           pend @pending]
+                        (.insert out (int o) ^String cls)
+                        (shift! o (count cls))
+                        (repair! line o :seon.batch/inserted cls)
+                        (.setLength open 0)
+                        (aset marks 0 1)
+-                       (item! (+ o (count cls)) line)))
++                       (item! (+ o (count cls)) line)
++                       (when-let [[po pline pcol] pend]
++                         (vreset! pending nil)
++                         (vreset! form [(+ po (count cls)) pline (if (= pline line) (+ pcol (count cls)) pcol)])
++                         (aset marks 0 1))))
+         code-line!
+         (fn [^long ls ^long le ^long line trailing?]
+           (let [ols (.length out)]
+@@ -216,7 +230,7 @@
+                     (cond
+                       (or (Character/isWhitespace c) (= \, c)) (recur (inc i) copied after)
+                       ;; tool markup is no code: dropped, as a stray closer is
+-                      (and (#{\< \. \u2026} c) (markup-end text i le top?))
++                      (and (or (#{\< \.} c) (= 8230 (int c))) (markup-end text i le top?))
+                       (let [j (long (markup-end text i le top?))]
+                         (.append out text (int copied) (int i))
+                         (repair! line (.length out) :seon.batch/dropped (subs text i j))
+@@ -253,13 +267,18 @@
+                                 (recur (inc i) i (or (item! (+ (.length out) 1) line) after)))
+                               :else
+                               (do (.append out text (int copied) (int i))
+-                                  (repair! line (.length out) :seon.batch/dropped (str c))
++                                  (let [joins? (and (pos? (.length out)) (not (Character/isWhitespace (.charAt out (dec (.length out))))) (token-char? d))]
++                                    (vswap! repairs conj! (cond-> {:seon.batch/line line :seon.batch/at (.length out) :seon.batch/dropped (str c)}
++                                                            joins? (assoc :seon.batch/inserted " ")))
++                                    (when joins? (.append out (char 32))))
+                                   (when top? (vreset! form nil) (aset marks 0 0))
+                                   (recur (inc i) (inc i) after))))
+-                          \\ (let [j (token-end text (Math/min (+ i 2) le) le)] (recur j copied (or (item! (+ o (- j i)) line) after)))
+-                          (\' \@ \`) (do (prefix! 1) (recur (inc i) copied after))
+-                          \~ (do (prefix! 1) (recur (if (= \@ d) (+ i 2) (inc i)) copied after))
+-                          \^ (do (prefix! 2) (recur (inc i) copied after))
++                          \\ (if (>= (inc i) le)
++                              (do (dangle! o line ols) (recur (inc i) copied after))
++                              (let [j (token-end text (Math/min (+ i 2) le) le)] (recur j copied (or (item! (+ o (- j i)) line) after))))
++                          (\' \@ \`) (do (prefix! 1) (dangle! o line ols) (recur (inc i) copied after))
++                          \~ (do (prefix! 1) (dangle! o line ols) (recur (if (= \@ d) (+ i 2) (inc i)) copied after))
++                          \^ (do (prefix! 2) (dangle! o line ols) (recur (inc i) copied after))
+                           \# (case d
+                                (\( \{) (do (.append open (char d)) (at-code! (+ o 2) line) (recur (+ i 2) copied after))
+                                \" (do (vreset! in-string true) (recur (+ i 2) copied after))
+@@ -321,8 +340,8 @@
+       (when @in-string
+         (vreset! balanced false)
+         (when repair?
+-          (repair! last-line (.length out) :seon.batch/inserted "\"")
+-          (.append out \")
++          (repair! last-line (.length out) :seon.batch/inserted (closing-quote (str out)))
++          (.append out ^String (closing-quote (str out)))
+           (vreset! in-string false)
+           (item! (.length out) last-line))))
+     (when (pos? (.length open))
+--- a/test/seon/sci/forgive_test.clj	2026-10-12 20:16:14.692452444 +0700
++++ b/test/seon/sci/forgive_test.clj	2026-10-14 14:46:27.883230238 +0700
+@@ -243,6 +243,14 @@
+    (tc/quick-check 300 (prop/for-all [text text-gen] (= text (unrepair (forgive/forgive text :code))))
+                    :seed 20261010 :max-size 40)))
+ 
++(deftest a-stray-closer-between-tokens-names-both-changes
++  (is (= [#:seon.batch{:line 1 :at 1 :dropped "]" :inserted " "}]
++         (:seon.batch/repairs (forgive/forgive "a]a" :code)))
++      "the closer is dropped and one space takes its place")
++  (is (= [#:seon.batch{:line 1 :at 7 :dropped ")"}]
++         (:seon.batch/repairs (forgive/forgive "(+ 1 2))" :code)))
++      "a closer after a closer joins nothing: dropped alone"))
++
+ (deftest tool-markup-among-code-is-dropped-at-read
+   ;; A model's tool-call closers and DSML tags are no names: they are dropped
+   ;; as repairs, never read as symbols (health: `Unable to resolve symbol: </invoke>`).
