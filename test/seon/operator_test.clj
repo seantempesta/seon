@@ -431,3 +431,33 @@
       (finally
         (doseq [file (reverse (file-seq (.toFile root)))] (.delete ^java.io.File file))))
     (is (not (.exists (.toFile root))) "a sealed pin is deleted whole")))
+
+(deftest changed-dependencies-name-the-inputs-a-running-jvm-cannot-adopt
+  ;; The running JVM's classpath is fixed at launch, so its rehearsal cannot
+  ;; adopt a candidate that changes `deps.edn` or a gitlink pin; the throwaway
+  ;; JVM, booted from the candidate's archive, is that candidate's proof. The
+  ;; operator names the changed dependency inputs between the running commit
+  ;; and the candidate so `check!` leaves the rehearsal to the throwaway.
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-deps" (make-array java.nio.file.attribute.FileAttribute 0)))
+        git (fn [& args] (str/trim (#'operator/command! (into ["git" "-c" "user.name=t" "-c" "user.email=t@t"] args)
+                                                       repository 30000)))
+        commit (fn [message] (git "add" "deps.edn" "src.clj") (git "commit" "-q" "-m" message) (git "rev-parse" "HEAD"))]
+    (try
+      (git "init" "-q")
+      (spit (java.io.File. repository "deps.edn") "{:deps {a/a {} b/b {}}}")
+      (spit (java.io.File. repository "src.clj") "1")
+      (git "add" "-A")
+      (let [base (commit "base")
+            _ (spit (java.io.File. repository "src.clj") "2")
+            source-only (commit "source")
+            _ (spit (java.io.File. repository "deps.edn") "{:deps {a/a {}}}")
+            removal (commit "removal")
+            _ (git "update-index" "--add" "--cacheinfo" (str "160000," base ",reference-code/pin"))
+            pinned (commit "pin")]
+        (is (= [] (#'operator/changed-dependencies repository base source-only)))
+        (is (= ["deps.edn"] (#'operator/changed-dependencies repository source-only removal)))
+        (is (= ["reference-code/pin"] (#'operator/changed-dependencies repository removal pinned)))
+        (is (= ["deps.edn" "reference-code/pin"] (#'operator/changed-dependencies repository base pinned))))
+      (finally
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))

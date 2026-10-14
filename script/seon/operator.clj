@@ -1957,6 +1957,30 @@
              :when deleted]
          deleted)))
 
+(defn- running-commit
+  "The commit whose archive `root`'s live JVM runs, or nil when it runs no
+  commit of `repository`."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [root repository]
+  (when-let [program (some-> (advertisement root nil) program-source :seon.operator/source-root io/file .getName)]
+    (let [sha (try (str/trim (command! ["git" "rev-parse" "--verify" (str program "^{commit}")]
+                                       repository 30000))
+                   (catch clojure.lang.ExceptionInfo _ nil))]
+      (when (= sha program) sha))))
+
+(defn- changed-dependencies
+  "The dependency inputs (`deps.edn` and gitlink pins) that differ between
+  commits `from` and `to`, sorted. A running JVM's classpath is fixed at launch,
+  so it cannot adopt such a change (`seon.cluster.source/classify-paths`)."
+  {:malli/schema [:=> [:cat :string :string :string] [:vector :string]]}
+  [repository from to]
+  (->> (str/split-lines (command! ["git" "diff" "--raw" "--no-abbrev" "--no-renames" from to] repository 30000))
+       (keep (fn [line]
+               (let [[meta path] (str/split line #"\t" 2)]
+                 (when (and path (or (= "deps.edn" path) (str/includes? meta " 160000 ") (str/starts-with? meta ":160000 ")))
+                   path))))
+       sort vec))
+
 (defn- seeded-store!
   "Place a clone of slot `slot`'s template store of the commit `root`'s live
   JVM runs at the slot root `disposable`'s `data/store`, building the template
@@ -1966,12 +1990,7 @@
   [root disposable slot]
   (let [began (System/nanoTime)
         repository (committed-repository)
-        program (some-> (advertisement root nil) program-source :seon.operator/source-root io/file .getName)
-        base (when program
-               (let [sha (try (str/trim (command! ["git" "rev-parse" "--verify" (str program "^{commit}")]
-                                                  repository 30000))
-                              (catch clojure.lang.ExceptionInfo _ nil))]
-                 (when (= sha program) sha)))]
+        base (running-commit root repository)]
     (if-not base
       {:seon.operator/seeded :empty :seon.operator/reason :no-running-published-commit}
       (let [directory (doto (io/file root "data/check/template") .mkdirs)
@@ -2096,7 +2115,12 @@
             run (when (seq tests)
                   (future (candidate-tests! root sha tests (true? (:seon.operator/include-long? request)))))
             ;; `--at REV` only runs tests on REV's archive: nothing to adopt.
-            rehearsal (try (when-not at
+            ;; A candidate that changes the running JVM's dependencies cannot be
+            ;; adopted there; the throwaway JVM booted from its archive is its proof.
+            dependencies (when-not (or at (empty? tests))
+                           (when-let [running (running-commit root repository)]
+                             (seq (changed-dependencies repository running sha))))
+            rehearsal (try (when-not (or at dependencies)
                              (connected! (assoc request :seon.source/directory source-root
                                                 :seon.boot/cluster-name (get request :seon.boot/cluster-name "default"))))
                            (catch Exception cause (some-> run awaited!) (throw cause)))
@@ -2112,7 +2136,8 @@
           (or (nil? run) (:seon.error/message run))
           (assoc (or run rehearsal) :seon.source/git-sha sha :seon.operator/phases phases)
           (:seon.operator/tests-passed? run)
-          (merge rehearsal run {:seon.source/git-sha sha :seon.operator/phases phases})
+          (cond-> (merge rehearsal run {:seon.source/git-sha sha :seon.operator/phases phases})
+            dependencies (assoc :seon.operator/dependencies-changed (vec dependencies)))
           :else
           (diagnostic (str "The candidate " sha " is red: " (first-line (:seon.operator/test-summary run)))
                       (merge run {:seon.source/git-sha sha :seon.operator/phases phases})
