@@ -88,9 +88,9 @@ are contracted functions in `src/seon/step.clj`; their deftests are in `test/seo
 
 One entity on main per chain: `:seon.chain/branch` (the branch keyword) and `:seon.chain/first` (the first task's
 `:seon.task/id`, a value), identity `:seon.chain/first`. It is non-program (never merges as program), declared
-`:seon.wake/starts true` (its installation and retraction wake root), and counted by
-`seon.cluster.registry/cluster-claims` so boot's `seon.cluster.registry/retire-unclaimed!` keeps its branch, failed or
-paused chains included. It is discovery, not status: root reads the chain's state on its branch. (Not
+`:seon.wake/starts true` (its installation and retraction wake root), and counted by `seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause, holding the branch
+and its `base/` ref) so boot's `seon.cluster.registry/retire-unclaimed!` keeps its branch, failed or paused chains
+included (measured: without the clause all twenty probe chains were unclaimed). It is discovery, not status: root reads the chain's state on its branch. (Not
 `datahike.reference`: with one store its store id is redundant, an eid selector cannot be written before the eid
 exists, and `resolve-reference` needs a live connection that a stopped task has released.)
 
@@ -127,9 +127,11 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
    create in S1c.
 2. **Run a task** — root's listener `seon.cluster.agent/db<->flow`, each pass, reads every chain fact on main and each
    chain's branch head with `seon.db/branch-database` (a store read; it needs no open connection, as
-   `seon.cluster.agent/branch-end` does today), cached by head commit id. A chain's work is only its first task's
-   `next` path and those tasks' attempts: the branch also inherits main's unrelated tasks, which are not its work. For
-   a `:running` task with no open attempt, root writes the attempt row on the chain branch (through
+   `seon.cluster.agent/branch-end` does today), cached by head commit id (`seon.cluster.registry/branch-commit-id`, about 0.085 ms per branch) and released after
+   use (`seon.cluster.source/release!`). Measured: 0.45–0.7 ms and 1.4–1.8 MB per chain read and walked; 20 chains
+   13.9 ms cold, about 2 ms cached; a write to one branch costs one miss. A chain's work is only its first task's
+   `next` path and those tasks' attempts: the branch also inherits main's unrelated tasks, which are not its work. An open attempt is one with no `:seon.task/outcome` (not "no end": a
+   bailed attempt has an end and no outcome until root processes it). For a `:running` task with no open attempt, root writes the attempt row on the chain branch (through
    `seon.cluster.registry/active-branch-connection`, else the store owner's `open-branch!`), then starts a NEW agent id
    on that branch (`seon.cluster.agent/acquire-context!` with `{:seon.agent/branch b}`: 3.9 ms while another agent
    holds the branch, 22.7 ms when nobody does). It never forks a branch per task and never reuses an agent's SCI
@@ -166,7 +168,8 @@ writer refuses a bad name for every writer and `seon.task/create!`'s separate ch
    root re-judges `done-refusals` over the branch value at the attempt's end commit (`:seon.task.attempt/commit`).
    `seon.cluster.source/results-verdict` stays the judge of the final merge only, its product clause deleted.
 5. **Advance** — root, in the lifecycle phase of `seon.cluster.agent/run-pass!`, one transaction on the chain branch
-   through the task writer, decided at the writer (a `:db.fn/call` over the held value, so a repeated pass finds the
+   through the task writer's replacement (a hand-written `:db/add` left a stale `:seon.task/references` entry after a
+   rerun, measured), given only the finished attempt's key and reading the next task from its `:seon.task/next`, decided at the writer (a `:db.fn/call` over the held value, so a repeated pass finds the
    outcome and derives no work): the finished attempt gets `:seon.task/outcome :done`; the next task receives the
    finished task's flowing members (the finished value wins) with re-derived references, and `:execution :running`.
    The plan phase of the same pass reads the branch after the advance and starts the next agent, as `run-pass!`
@@ -242,9 +245,11 @@ starting convention, revised as live runs teach us: the chain's creator writes `
 
 - `task` is a task symbol; `k` a declared member, `execution` and `next` excepted (root's and `chain!`'s).
 - It reads the member on the caller's branch, applies `f` there (an ordinary call, in the agent's own context), and
-  writes the result through the task writer with the read value as its basis, so a member changed in between is
-  refused with the current value (`:seon.task/conflict-error`) rather than lost, like `compare-and-set!`. Nothing
-  retries; the agent reapplies.
+  writes the result through the task writer, comparing at the writer the one member it read (not the whole
+  declaration: a change to another member must not conflict), so a member changed in between is refused with its
+  current value (`:seon.task/conflict-error`, carrying `:seon.error/type`) rather than lost, like
+  `compare-and-set!`. Nothing retries; the agent reapplies. If `f` returns an error value, that error is the answer.
+  Other members, `execution` included, are untouched. Measured with the real task writer: 33–36 ms per write.
 - The new value is validated against the member's schema before writing.
 - It answers `{:seon.task/id … :seon.task/changed? bool}` plus `:my.task/problems`, each reference in a text member
   that does not resolve (`seon.ref/references`). An unresolved name never rejects the write.
@@ -252,8 +257,8 @@ starting convention, revised as live runs teach us: the chain's creator writes `
 
 **One text function, `my.edit/text`.** `(my.edit/text s old new)` answers `s` with the one exact occurrence of `old`
 replaced by `new`, or `:my.edit/no-match-error` / `:my.edit/ambiguous-match-error` (with the matching lines) when
-`old` occurs zero or several times. It is the string core of `seon.edit/exact` (which `my.edit/exact!` applies to
-files), split out as a pure function over strings and shared by both: no second editor. Exact replacement finds its
+`old` occurs zero or several times. It is a new pure function over strings, and `seon.edit/exact` (which `my.edit/exact!` applies to files,
+with a path and a digest) is changed to call it for its replacement, so there is still one editor. Exact replacement finds its
 place by content, so it survives edits above it, unlike line-numbered patches.
 
 **Help is a Markdown document like the plan.** Its text moves out of code (`seon.bootstrap/help-value` builds it
@@ -281,10 +286,20 @@ source unless the agent asks.
 | Document section | heading, the headings below it, its size in tokens | `(my.fs/section "path#anchor")` |
 | Task | name, the plan's first line, its proofs with their status | `(my.task/current …)` |
 
-The doc view is each kind's declared AI render at brief depth (distance 1), with the schemas it names one level
-below, cited once (`seon.ref/cite-once`). Today the block renders a task's must-reads whole; the raw block measured
-about 38k characters, 31k of them must-reads (an estimate of about 9.5k tokens from characters; the rendered AI context
-was not measured). The doc view replaces that, measured before and after on the same task's block.
+The doc view is a new tier of each kind's declared AI render: today renders have two tiers (name and doc line at
+distance 0, whole source at distance 1, which `seon.context/must-read-ai` already uses), so the doc view becomes
+distance 1 and the source moves to distance 2. Its nested references are only the schemas the contract names, cited
+once (`seon.ref/cite-once`), not every callee. Per kind, from `doc-view-measure.md`: a deftest has no docstring
+attribute, so its doc view is its name, the functions it reaches and its status; a schema's description function
+(`seon.render.schema/description`) becomes public, and schemas a contract names must carry a description (three do
+not today); a document section keeps its token size and the headings below it (`seon.ref/render-doc-ai` drops them
+today); a task shows the first sentence of its plan's Problem section, not its first line; every summary is the first
+sentence, never a long first line (`seon.ref/brief` emitted a 150-token one for `seon.merge/merge!`). Measured (`seon.ai.tokens/estimate`): the raw block is 37.4k characters, about 11.7k tokens, must-reads 9.8k; the
+prompt the model sees is about 6.0k tokens because the value printer's budget cuts it (91 elisions, function and
+deftest sources cut mid-form). With every must-read as a doc view the raw block falls to about 7.1k tokens (-41%),
+about 5.0k (-58%) when nested references are only the contract's schemas; the shown prompt stays about 6k, but
+elisions fall from 91 to 30, so the agent sees whole values instead of cut ones. Help today is about 2.1k tokens;
+doc views of its references add an estimated 0.6–2.5k per request, measured in S1d.
 
 ## 4. Templates and their proofs (version 1; S5's one-task live runs revise them)
 
@@ -481,7 +496,7 @@ for real test execution.
 | S3a | Root reads chains: chain facts, `branch-database` reads cached by head, a chain's own `next` path only, attempts on the chain branch, a new agent per task, `attempt-running?` on the branch, the advance (§2.5) | `seon.cluster.db-flow-test/a-two-task-chain-reaches-its-second-model-call`: after `chain!` alone, task one ends done by the scripted model, task two's first model call happens with zero hand acts, three distinct agent ids would appear across three tasks, no chain task or attempt on main, an unrelated `:running` task on main is not launched on the chain | Opus | — |
 | S3b | The final merge of a multi-attempt branch (§2.6) | `seon.cluster.merge-test/a-chain-merges-once-and-closes-every-attempt`: before acceptance main holds no chain task; one acceptance admits all three tasks and every earlier code change; `my.root/merge-requests` is empty after; publication commits once; branch, base and chain fact are gone; a second pass is a no-op; a conflicting second chain reports its conflict and keeps its branch | Opus | — |
 | S3c | Bail, abandon and restart (§2.7, §2.8) | `seon.cluster.db-flow-test/a-bail-goes-to-root-once`: a `:capped` end leaves the branch and chain fact, the task `:held`, exactly one problem task after repeated wakes, no successor started, nothing merged; plus a restart table over the durable stopping points of §2.8 | Sonnet (after S3a) | — |
-| S3d | Doc views (§3a): references render at brief depth; must-reads stop rendering whole | `seon.context-test/a-referenced-function-shows-its-doc-view`: the block shows docstring, contract and schema descriptions, no source, and the read form; the block's tokens measured before and after on one task (`seon.profile/measure`) | Sonnet (after S3a) | — |
+| S3d | Doc views (§3a): references render at brief depth; must-reads stop rendering whole | `seon.context-test/a-referenced-function-shows-its-doc-view`: the block shows docstring, contract and schema descriptions, no source, and the read form; the raw block's tokens and the shown prompt's elision count measured before and after on one task (not the shown tokens, which the printer's budget holds near 6k either way) | Sonnet (after S3a) | — |
 | S4 | Template predicates and deftests (§4), after S2a fixes the task input | `seon.step-test/design-handoff` and `prove-handoff`, each its table (rows from `design-stage-table.md` and `prove-stage-table.md`) plus the bound-task assertion | Sonnet | — |
 | S5 | Live, one task at a time: a one-task chain of Design on a real defect, graded against its predicate; then Prove from a hand-written plan; then Implement from hand-written proofs. A one-task chain of Design or Prove is not mergeable on purpose (stubs, red tests): it is graded and retained, never merged. Revise instructions and predicates from what each run shows | each run's record: hand acts, calls, tokens, and whether the predicate judged the work right | Opus run lane | — |
 | S6 | Run 26: the full Design → Prove → Implement chain, live DeepSeek | 0 hand acts after `chain!`, one merge, the defect fixed | Opus run lane | — |
