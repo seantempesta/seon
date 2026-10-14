@@ -829,6 +829,106 @@
     (let [opened (store/open-branch! store branch)]
       (try (f opened) (finally (store/release-branch! opened))))))
 
+(defn hold-tx
+  "The transaction data closing attempt `key` at `database`, its chain branch, with `reason`, and holding its task:
+  the attempt's outcome `:closed` and `:seon.task/reason`, its task's execution `:held` (TASK-CHAIN §2.7). An
+  attempt already holding an outcome, or none at all, answers none, so a repeat writes nothing.
+  Invoke as `[:db.fn/call seon.task/hold-tx key reason]`, decided over the value the writer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment :seon.task/reason] :seon.db/tx-data]}
+  [database key reason]
+  (let [row (db/pull database [:db/id :seon.task/outcome {:seon.task/attempt-of [:db/id]}] [:seon.task/assignment key])]
+    (when-let [failure (read-error row)] (throw (ex-info (:seon.error/message failure) failure)))
+    (if (or (nil? (:db/id row)) (:seon.task/outcome row))
+      []
+      [[:db/add (:db/id row) :seon.task/outcome :closed]
+       [:db/add (:db/id row) :seon.task/reason reason]
+       [:db/add (get-in row [:seon.task/attempt-of :db/id]) :seon.task/execution :held]])))
+
+(defn run-tx
+  "The transaction data running held task `handle` at `database`, its chain branch: `:execution :held` becomes
+  `:running`; any other execution answers none. Invoke as `[:db.fn/call seon.task/run-tx handle]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.db/tx-data]}
+  [database handle]
+  (let [task (db/pull database [:db/id :seon.task/execution] [:seon.task/id handle])]
+    (when-let [failure (read-error task)] (throw (ex-info (:seon.error/message failure) failure)))
+    (if (= :held (:seon.task/execution task)) [[:db/add (:db/id task) :seon.task/execution :running]] [])))
+
+(defn chain-attempts
+  "Every attempt on a chain's `:seon.task/next` path, read through `store` for each chain fact on main `database`:
+  its key, task, chain branch, end and outcome when it holds them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store]
+                  [:or [:vector [:map [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/handle]
+                                 [:seon.chain/branch :seon.chain/branch]
+                                 [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                                 [:seon.task/outcome {:optional true} :seon.task/outcome]]]
+                   :seon.db/invalid-read-error]]}
+  [database store]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)
+        held (registry/branches store)]
+    (or (read-error chains)
+        (into [] (mapcat (fn [[branch first-handle]]
+                           (when (contains? held branch)
+                             (on-branch store branch
+                                        (fn [connection]
+                                          (let [head (db/db connection)
+                                                rows (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned
+                                                                             :seon.task.attempt/end :seon.task/outcome]) ...]
+                                                             :in $ [?h ...] :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]]
+                                                           head (chain-handles head first-handle))]
+                                            (when-let [failure (read-error rows)] (throw (ex-info (:seon.error/message failure) failure)))
+                                            (mapv #(assoc (dissoc % :db/id) :seon.chain/branch branch)
+                                                  (sort-by :seon.task/assignment rows))))))))
+              (sort chains)))))
+
+(defn chain-branch
+  "The branch of the chain on main `database` whose `:seon.task/next` path holds task `handle`, read through
+  `store`; nil when no chain holds it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.task/handle] [:maybe :seon.chain/branch]]}
+  [database store handle]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)
+        held (registry/branches store)]
+    (when-let [failure (read-error chains)] (throw (ex-info (:seon.error/message failure) failure)))
+    (some (fn [[branch first-handle]]
+            (when (and (contains? held branch)
+                       (on-branch store branch #(some #{handle} (chain-handles (db/db %) first-handle))))
+              branch))
+          (sort chains))))
+
+(defn hold!
+  "Close chain attempt `key` on chain `branch` of `store` with `reason` and hold its task (`hold-tx`), in ONE
+  transaction on the branch; the branch and chain fact stay. Answers the closed assignment."
+  {:malli/schema [:=> [:cat [:map [:seon.store/store :seon.store/store]] :seon.chain/branch :seon.task/assignment :seon.task/reason]
+                  [:or :seon.task/closed :seon.error/value]]}
+  [{store :seon.store/store} branch key reason]
+  (on-branch store branch
+             (fn [on-chain]
+               (let [report (written on-chain [[:db.fn/call #'hold-tx key reason]])]
+                 (if (:seon.error/at report)
+                   report
+                   {:seon.task/assignment key :seon.task/outcome :closed :seon.task/reason reason})))))
+
+(defn run-held!
+  "Run held chain task `handle` again (TASK-CHAIN §2.7): ONE transaction on its chain branch changing `:held` to
+  `:running` (`run-tx`); the committed execution wakes root's plan through the branch's route (`:seon.wake/starts`),
+  and root's next pass starts its next attempt with a new agent. Answers the task, its branch and execution."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]] :seon.task/handle]
+                  [:or [:map [:seon.task/assigned :seon.task/handle] [:seon.chain/branch :seon.chain/branch]
+                        [:seon.task/execution :seon.task/execution]]
+                   :seon.error/value]]}
+  [{connection :seon.db/connection store :seon.store/store} handle]
+  (if-let [branch (chain-branch (db/db connection) store handle)]
+    (on-branch store branch
+               (fn [on-chain]
+                 (let [report (written on-chain [[:db.fn/call #'run-tx handle]])]
+                   (if (:seon.error/at report)
+                     report
+                     {:seon.task/assigned handle :seon.chain/branch branch
+                      :seon.task/execution (:seon.task/execution (db/pull (:db-after report) [:seon.task/execution]
+                                                                          [:seon.task/id handle]))}))))
+    (refusal/diagnostic (java.util.Date.) :seon.program/write `run-held!
+                        {:seon.error/message (str "Task " handle " is on no chain.")
+                         :seon.error/member :seon.task/assigned :seon.error/offending handle})))
+
 (defn from-filed
   "A filed task's chain: `filed` (a task-file entry) as the Design task, with its identity and plan, its proofs left
   out, then the Prove template, then the Implement template carrying the entry's proofs. A plan with no `## Problem`

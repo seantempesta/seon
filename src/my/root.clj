@@ -14,14 +14,16 @@
             [seon.db :as db]
             [seon.merge :as merge]
             [seon.error.refusal :as refusal]
-            [seon.task :as task]))
+            [seon.task :as task])
+  (:refer-clojure :exclude [run!]))
 
 (def ^:private laws
   ["Read a merge request's diff before merging it (my.program/diff on its source branch): until criteria for automatic merges are written, root reviews every merge of code."
    "A task chain runs in order: model the data and specify the interface, then write the proofs, then implement the body; each step is its own task with its own proofs."
    "A merge request is an assignment: (my.root/merge-requests) lists the open ones. Merge one with (my.root/merge! {:seon.task/assignment key}); the branch is deleted once merged, closing the agent."
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
-   "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."])
+   "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
+   "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."])
 
 (defn instructions
   "The laws root applies to merge requests and agents, as data.
@@ -58,10 +60,23 @@
            (finally (source/release! [head])))
       row)))
 
+(defn- chain-requests
+  "Every chain attempt with no outcome on its chain branch (`seon.task/chain-attempts`), read through `store`, as
+  an open assignment on that branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.store/store]]
+                  [:or [:vector :my.root/open-assignment] :seon.db/invalid-read-error]]}
+  [database store]
+  (let [attempts (if store (task/chain-attempts database store) [])]
+    (if (:seon.error/at attempts)
+      attempts
+      (into [] (comp (remove :seon.task/outcome)
+                     (map #(-> % (assoc :seon.task/branch (:seon.chain/branch %)) (dissoc :seon.chain/branch))))
+            attempts))))
+
 (defn merge-requests
   "The open merge requests on my cluster: every assignment with no outcome yet (`seon.task/close!`,
-  `seon.merge/merge-tx`), with its task, branch, merge base and its end (main's, else its branch head's), each
-  offering its merge and its close.
+  `seon.merge/merge-tx`), on main and every chain attempt on its chain branch, with its task, branch, merge base
+  and its end (main's, else its branch head's), each offering its merge and its close.
 
   ## Example
 
@@ -69,14 +84,16 @@
   (my.root/merge-requests)
   ```"
   {:malli/schema [:=> [:cat :my.root/merge-request-read] [:or :my.root/merge-requests :seon.db/error-result]]}
-  [{database :seon.db/db}]
+  [{database :seon.db/db store :seon.store/store}]
   (let [found (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned :seon.task/branch :seon.task/merge-base
                                        :seon.task.attempt/end]) ...]
                       :where [?a :seon.task/assignment] [?a :seon.task/branch] (not [?a :seon.task/outcome])]
-                    database)]
-    (if (db/read-refusal? found)
-      found
-      (mapv #(offered (with-branch-end database (dissoc % :db/id))) (sort-by :seon.task/assignment found)))))
+                    database)
+        chained (when-not (db/read-refusal? found) (chain-requests database store))]
+    (cond (db/read-refusal? found) found
+          (:seon.error/at chained) chained
+          :else (into (mapv #(offered (with-branch-end database (dissoc % :db/id))) (sort-by :seon.task/assignment found))
+                      (map offered) chained))))
 
 (defn- open-assignment
   "Assignment `key` on my cluster when it records no outcome, else the refusal naming it."
@@ -116,8 +133,9 @@
 
 (defn close!
   "Close the open assignment `:seon.task/assignment` without merging it, saying why (`:seon.task/reason`): it
-  records `:closed` and deletes the source branch, closing its agent (`seon.task/close!`). Answers the closed
-  assignment.
+  records `:closed` and deletes the source branch, closing its agent (`seon.task/close!`). A chain attempt closes
+  on its chain branch with its task held (`seon.task/hold!`); the branch and chain fact stay for root. Answers the
+  closed assignment.
 
   ## Example
 
@@ -127,12 +145,34 @@
   {:malli/schema [:=> [:cat :my.root/close-request] [:or :seon.task/closed :seon.error/value]]}
   [{context :my.program/context key :seon.task/assignment reason :seon.task/reason}]
   (let [connection (:seon.db/connection context)
-        open (open-assignment (db/db connection) key 'my.root/close!)]
-    (if (:seon.error/at open)
-      open
-      (task/close! (cond-> (select-keys context [:seon.db/connection :seon.store/store :seon.agent/routing])
-                     (:seon.env/environment context) (assoc :seon.env/environment (:seon.env/environment context)))
-                   key :closed reason))))
+        database (db/db connection)
+        chained (when-let [store (:seon.store/store context)]
+                  (some #(when (and (= key (:seon.task/assignment %)) (not (:seon.task/outcome %))) %)
+                        (let [attempts (task/chain-attempts database store)] (if (:seon.error/at attempts) [] attempts))))
+        open (when-not chained (open-assignment database key 'my.root/close!))]
+    (cond
+      chained (task/hold! (select-keys context [:seon.store/store]) (:seon.chain/branch chained) key reason)
+      (:seon.error/at open) open
+      :else (task/close! (cond-> (select-keys context [:seon.db/connection :seon.store/store :seon.agent/routing])
+                           (:seon.env/environment context) (assoc :seon.env/environment (:seon.env/environment context)))
+                         key :closed reason))))
+
+(defn run!
+  "Run held chain task `:seon.task/assigned` again (TASK-CHAIN §2.7, `seon.task/run-held!`): one transaction on its
+  chain branch changing `:held` to `:running`, which wakes my plan; my next pass starts its next attempt there with
+  a new agent. Answers the task, its branch and its execution.
+
+  ## Example
+
+  ```clojure
+  (my.root/run! {:seon.task/assigned \"0123456789ab\"})
+  ```"
+  {:malli/schema [:=> [:cat :my.root/run-request]
+                  [:or [:map [:seon.task/assigned :seon.task/handle] [:seon.chain/branch :seon.chain/branch]
+                        [:seon.task/execution :seon.task/execution]]
+                   :seon.error/value]]}
+  [{context :my.program/context handle :seon.task/assigned}]
+  (task/run-held! (select-keys context [:seon.db/connection :seon.store/store]) handle))
 
 (defn ended
   "The task ends in my unread inbox, each as the value its end message stands

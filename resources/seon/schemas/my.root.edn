@@ -7,7 +7,9 @@
           :merge-request [:and {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
                           :my.root/open-assignment [:map [:seon.render/operations :seon.render/operations]]]
           :merge-requests [:vector :my.root/merge-request]
-          :merge-request-read [:map [:seon.db/db :seon.db/database-value]]
+          :merge-request-read [:map [:seon.db/db :seon.db/database-value] [:seon.store/store {:optional true} :seon.store/store]]
+          :run-request [:map {:description "The held chain task root runs again."}
+                        [:my.program/context :my.program/context] [:seon.task/assigned :seon.task/handle]]
           :merge-request-request [:map {:description "The open assignment root merges; its declarations publish into the cluster's :seon.config.fs/working-root."}
                                   [:my.program/context :my.program/context] [:seon.task/assignment :seon.task/assignment]]
           :close-request [:map {:description "The open assignment root closes without merging, and why."}

@@ -544,6 +544,100 @@
   (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
   nil)
 
+(deftest ^{:seon.test/long "One chain world: a chain fork, its first attempt capped after one scripted model turn and bailed over three db<->flow passes, then root's run and the second attempt's start and close." :seon.test/long-ms 30000}
+  a-capped-chain-attempt-bails-to-root-once-and-root-runs-it-again
+  ;; TASK-CHAIN S3c-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#2-flow`, Bail or fail): an end that is not done is
+  ;; processed once by root's pass: one problem task on main named by the attempt, the attempt :closed with its
+  ;; reason and the task :held on the chain branch, the branch and chain fact kept, no successor started;
+  ;; `my.root/run!` then starts exactly one new attempt with a new agent on the same branch, which root lists and
+  ;; closes with its own tools
+  (binding [*space* "tq.chainbail"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                              :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                            (db/db connection) connection)
+                                              :seon.batch/sink (seon.batch/sink)
+                                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                              :seon.agent/id "tq-chain-author"})
+                                (symbol (str *space* "-proofs"))
+                                "(clojure.test/deftest proves-c (clojure.test/is (= 1 2)))\n")
+          ;; one turn: the attempt's red proof opens it, the scripted model waits, and the spent budget ends it :capped
+          (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                          :seon.config/manifest {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
+                                                 :seon.config.ai/endpoint "http://127.0.0.1:9/chat"
+                                                 :seon.config.ai/model "fixture-provider"
+                                                 :seon.config.run/max-episode-runs 1}})
+          (let [handle (assoc handle :seon.turn.loop/complete (fn [_projection _request]
+                                                                {:seon.ai/text "(my.turn/wait {:my.turn/note \"Waiting.\"})"}))
+                routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "c")}}
+                                    {:seon.task/ns (symbol *space*) :seon.task/name "ignored"}])
+                branch (:seon.chain/branch chain)
+                [first-task second-task] (:seon.task/handles chain)
+                key-1 (id/id [first-task 1])
+                key-2 (id/id [first-task 2])
+                context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                         :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                problems #(set (db/q '[:find [?n ...] :where [?t :seon.task/ns seon.task] [?t :seon.task/name ?n]
+                                       [(clojure.string/starts-with? ?n "unfinished-task-")]]
+                                     (db/db connection)))
+                chain-db #(db/branch-database (db/db connection) branch)
+                attempt-rows (fn [database] (set (db/q '[:find ?k ?n ?id :in $ ?h
+                                                         :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]
+                                                         [?a :seon.task/assignment ?k] [?a :seon.task.attempt/number ?n]
+                                                         [?a :seon.task/agent ?g] [?g :seon.agent/id ?id]]
+                                                       database first-task)))]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :capped (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                             [?a :seon.task.attempt/end ?e]]
+                                                           (db/db on-branch) key-1)
+                                          ::capped))
+                    "the first attempt ends :capped")
+                (pass! handle routing)
+                (pass! handle routing)
+                (pass! handle routing)
+                (is (= #{(str "unfinished-task-" key-1)} (problems)) "exactly one problem task on main, named by the attempt")
+                (let [database (db/db on-branch)
+                      row (db/pull database [:seon.task/outcome :seon.task/reason] [:seon.task/assignment key-1])]
+                  (is (= :closed (:seon.task/outcome row)) "the attempt is :closed on the chain branch")
+                  (is (string? (:seon.task/reason row)) "with its reason")
+                  (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id first-task])))
+                      "its task is :held")
+                  (is (= #{[key-1 1 (str "attempt/" key-1)]} (attempt-rows database)) "no attempt was started again")
+                  (is (= :held (:seon.task/execution (db/pull database [:seon.task/execution] [:seon.task/id second-task])))
+                      "no successor started"))
+                (is (contains? (registry/branches store) branch) "the branch is kept")
+                (is (some? (db/q '[:find ?c . :in $ ?b :where [?c :seon.chain/branch ?b]] (db/db connection) branch))
+                    "the chain fact is kept")
+                (let [ran ((requiring-resolve (quote my.root/run!)) {:my.program/context context :seon.task/assigned first-task})]
+                  (is (= {:seon.task/assigned first-task :seon.chain/branch branch :seon.task/execution :running} ran)
+                      "root runs the held task again on its branch"))
+                (pass! handle routing)
+                (is (= #{[key-1 1 (str "attempt/" key-1)] [key-2 2 (str "attempt/" key-2)]} (attempt-rows (db/db on-branch)))
+                    "exactly one new attempt, the next number, with a new agent on the same branch")
+                (is (some? (some-> (get-in @routing [:seon.agent/children branch]) deref
+                                   (get-in [:seon.agent/started (str "attempt/" key-2)])))
+                    "its agent started on the chain branch")
+                (is (some #(and (= key-2 (:seon.task/assignment %)) (= branch (:seon.task/branch %)))
+                          (my.root/merge-requests {:seon.db/db (db/db connection) :seon.store/store store}))
+                    "root lists the open chain attempt on its branch")
+                (is (= :closed (:seon.task/outcome (my.root/close! {:my.program/context context :seon.task/assignment key-2
+                                                                     :seon.task/reason "Root abandons this attempt."})))
+                    "root closes the chain attempt with its own tool")
+                (is (= :closed (:seon.task/outcome (db/pull (chain-db) [:seon.task/outcome] [:seon.task/assignment key-2])))
+                    "on the chain branch")
+                (is (contains? (registry/branches store) branch) "the branch stays for root"))
+              (finally (release-chain! routing store branch))))))))))
+
 (deftest ^{:seon.test/long "One chain world: a task-reading proof recorded green on main with no task, a chain whose first attempt proves it red and makes one scripted model call; then a chain whose proof main already holds green, ended done by its prove pass; measured with the S3a-2 row's world." :seon.test/long-ms 30000}
   a-green-recorded-without-the-task-never-proves-a-chain-task
   ;; S5 run 1 D1 (`docs/research/agent-platform/2026-10-14/s5-run-1.md`): a test reading its task (`seon.test/task`)
