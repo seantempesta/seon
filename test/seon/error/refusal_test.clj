@@ -378,7 +378,7 @@
                 (map (:seon.error/offending error) [:seon.agent/routing :seon.probe/memo]))
         "each place is its #object name, as a string a reader reads back")))
 
-(deftest a-large-argument-stays-whole-in-the-chain
+(deftest a-large-argument-is-held-by-reference-in-the-chain
   ;; value-hygiene 2026-09-27: an eval_clj call refused on argument 0 of
   ;; `seon.schema/projection-with-declarations` held a projection's 3,576
   ;; forms in its offending arguments. The chain keeps the ex-data whole, by
@@ -394,8 +394,8 @@
         link-data (get-in error [:seon.error/chain 0 :seon.error/data])]
     (is (< 1000 (count forms)) "the subject: a large argument")
     (is (= 'unqualified (get-in link-data [:seon.error/offending 0])) "the refused argument stays")
-    (is (identical? forms (get-in link-data [:seon.error/offending 1]))
-        "the large argument is the actual value, not a copy or a name")))
+    (is (= (count forms) (get-in link-data [:seon.error/offending 1 :seon.error.reference/count]))
+        "the large argument is held by reference, never a copy")))
 
 (deftest the-chain-still-names-places
   ;; A place's state is never evidence: the registry atom printed 2 GB

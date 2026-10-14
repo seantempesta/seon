@@ -542,13 +542,8 @@
            fact (:seon.error/fact prepared)
            fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown)))
-       (is (= [:seon.ns/name 'user] (edn/read-string (:seon.instrument/actual fact)))
-           "the value at the violation path is kept: the leaf, never the request it rode in")
-       (is (pos? (:seon.instrument/actual-size fact))
-           "the offending value's own size is recorded")
-       (is (< (:seon.instrument/actual-size fact)
-              (:seon.error/data-size fact))
-           "the offending value is measured, never the source it rode in")
+       (is (not (find fact :seon.instrument/actual))
+           "a collection leaf is named by its path, never copied into the fact")
        (is (<= fact-bytes evidence-bytes)
            "stored fault fact was UTF-8 bytes")))))
 
@@ -1792,7 +1787,7 @@
   (let [described (fn [value]
                     (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:sequential :map] value)))
                                                  :seon.error/path [] :seon.error/argument "xs" :seon.error/parent value}))]
-    (is (= {:a 1} (:seon.error/offending (described {:a 1}))))
+    (is (not (find (described {:a 1}) :seon.error/offending)) "a collection leaf is never copied")
     (is (= [:sequential :map] (:seon.error/expected (described {:a 1}))))
     (is (= 2 (:seon.error/offending (described [{:a 1} 2]))) "a bad member of a sequence is still named")))
 

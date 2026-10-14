@@ -1,0 +1,8 @@
+{:seon.error.reference/class
+ [:string {:min 1 :description "The held collection's class name."}]
+
+ :seon.error.reference/count
+ [:int {:min 0 :description "How many members the held collection has."}]
+
+ :seon.error.reference/digest
+ [:string {:min 64 :max 64 :description "seon.id/digest of the held collection's data, its worlds referenced and host objects named."}]}

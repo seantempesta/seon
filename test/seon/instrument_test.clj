@@ -47,10 +47,11 @@
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.flow :as flow]
             [seon.fs :as fs]
+            [seon.id :as id]
             [seon.instrument :as instrument]
-            [seon.print :as print]
             [seon.problems :as problems]
             [seon.profile :as profile]
             [seon.repl :as repl]
@@ -631,8 +632,9 @@
     (is ((schema/projection-validator (schema/handed-projection)
                                      :seon.instrument/contract-error) refusal))
     (is (= :input (:seon.instrument/check refusal)))
-    (is (= [observed]
-           (get-in refusal [:seon.error/offending])))))
+    (is (= [(error.refusal/value-reference nil observed)]
+           (get-in refusal [:seon.error/offending]))
+        "the error-shaped argument is held once, by reference")))
 
 (deftest contract-problems-are-semantic-once-never-a-serialized-print-tree
   (let [caps (assoc (config/result-caps (test-support/effective-config))
@@ -734,28 +736,17 @@
             (is (= 200 (:seon.instrument/problem-count instrument-data))
                 "the problem count is the broken-system signal"))))))
 
-(deftest refusal-value-projection-obeys-the-profile-in-both-faces-and-the-whole-value-stays-retrievable
-  ;; THE OFFENDING VALUE IS THE FAILING LEAF, not the container it sat in
-  ;; (error-entities PRD 2026-09-17, "Offending value": the fault retains the
-  ;; independently bounded projection of its own LEAF; AGENTS.md 2.4, a
-  ;; refusal names "the offending value"). `940f4b426` moved the wording and
-  ;; the leaf together, so the member schema and the member value are what a
-  ;; collection violation now reports. The whole checked value is not lost:
-  ;; it stays beside the leaf as the diagnostic's own offending value.
-  ;;
-  ;; The leaf is therefore what both faces are measured on. AI agents and the
-  ;; browser share one selection, node tree and cut retrieval; only the final
-  ;; face differs (CLAUDE.md, Presentation; root ruling 2026-09-27). The
-  ;; original value stays whole and retrievable from its reference; neither
-  ;; face prints it whole unless asked.
+(deftest a-collection-violation-names-its-member-path-and-holds-the-argument-once
+  ;; A collection violation names the failing member by its path and schema;
+  ;; the checked argument is held once, at the top level, by reference (an
+  ;; error holds references, never copies). The caller still holds its value.
   (let [member (vec (range 100 140))
-        raw (concat (range 8) [member])
+        raw (conj (vec (range 8)) member)
         wrapped (instrument/wrap-interpreted
                  'my.agents.audit/vector-input '[:=> [:cat [:vector :int]] :int]
                  (schema/handed-projection) (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
-        offending (get-in refusal [:seon.error/problems 0 :seon.error/offending])
-        checked (get-in refusal [:seon.error/offending])
+        problem (get-in refusal [:seon.error/problems 0])
         unit {:seon.render/value refusal
               :seon.repl/handle 'result/eaudit
               :seon.render/profile
@@ -765,25 +756,13 @@
                :seon.render.profile/max-children 3
                :seon.render.profile/max-string-length 256
                :seon.render.profile/composition :multiline}}
-        ai (error/render-ai unit)
-        html (pr-str (error/render-html unit))]
-    (is (identical? member offending)
-        "the refusal names the failing member, and retains the actual object")
-    (is (identical? raw (first checked))
-        "the whole checked argument survives beside the leaf, unprojected")
-    ;; The AI face is the selection as data (renders return data, 313e81181):
-    ;; the failing member itself, whole, with its expectation. Limits, cuts and
-    ;; their continuations are the value printer's, applied once at the edge.
-    (is (identical? member (get-in ai [:seon.error/problems 0 :seon.error/offending]))
-        "the selection carries the failing member itself, unclipped")
+        ai (error/render-ai unit)]
+    (is (= :int (:seon.error/expected problem)))
+    (is (not (find problem :seon.error/offending)) "the problem names its path, never the member")
+    (is (= [(error.refusal/value-reference nil raw)] (:seon.error/offending refusal))
+        "the checked argument is held once, by reference")
     (is (= :int (get-in ai [:seon.error/problems 0 :seon.error/expected])))
-    (testing "the HTML face lays out the same selection"
-      (is (every? #(str/includes? html (str %)) [100 101 102])))
-    (testing "the whole value stays retrievable from the stored reference"
-      (is (= member (print/value-at refusal [:seon.error/problems 0 :seon.error/offending])))
-      (is (= (drop 3 member)
-             (drop 3 (get-in refusal [:seon.error/problems 0 :seon.error/offending])))
-          "the continuation form, evaluated over the held value, is exactly the omitted rest"))))
+    (is (string? (pr-str (error/render-html unit))) "the HTML face renders the same refusal")))
 
 (deftest registry-sized-contract-evidence-retains-the-offending-object
   (let [caps (config/result-caps (test-support/effective-config))
@@ -811,15 +790,15 @@
             data (ex-data failure)
             instrument-data data
             received (first (:seon.error/offending instrument-data))]
-        (is (identical? registry received)
-            "the seam retains the actual object; presentation alone elides it")
+        (is (= (count registry) (:seon.error.reference/count received))
+            "the seam holds the registry once, by reference, never a copy")
         (is (pos? allocated) "the body's thread counts its allocation")
         (is (< allocated allocation-ceiling)
             "construction allocation stays below the issue baseline of 150,063,304 bytes")
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
         (is (= :int (:seon.error/expected instrument-data)))
-        (is (identical? registry
-                        (get-in instrument-data [:seon.error/problems 0 :seon.error/offending]))))))
+        (is (not (find (get-in instrument-data [:seon.error/problems 0]) :seon.error/offending))
+            "the problem names its path, never the collection"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Idempotence, and the measured hot-reload strip
@@ -1443,9 +1422,9 @@
                  (get-in refusal [:seon.error/operation])))))
       (let [refusal (test-support/refusal-data #(private-integer-boundary original-error))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
-        (is (= original-error
-               (get-in refusal [:seon.error/problems 0 :seon.error/offending]))
-            "The consumer refuses its input and retains the causal value.")))))
+        (is (= [(error.refusal/value-reference nil original-error)]
+               (:seon.error/offending refusal))
+            "The consumer refuses its input and holds the causal value by reference.")))))
 
 (deftest stored-error-pull-remains-data-through-an-armed-function
   (test-support/with-database
@@ -1603,6 +1582,42 @@
        (is (= [[:seon.db/db]] (mapv :seon.error/path (:seon.error/problems refusal))))
        (is (< (count message) 400))
        (is (< (count printed) 2000))))))
+
+(deftest a-refusal-holds-the-refused-argument-once-as-a-reference
+  ;; An error holds references, never copies (CLAUDE.md, errors): the refused
+  ;; argument is held once, at the top level, a collection as its class, count
+  ;; and digest; each problem carries its path, its schema and only a scalar leaf.
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        refused (fn [contract argument]
+                  (let [wrapped (instrument/wrap-interpreted 'my.agents.audit/refused contract projection caps
+                                                             (constantly 1))]
+                    (try (wrapped argument) (catch Exception failure (ex-data failure)))))
+        rows (into {} (map (fn [i] [i (str "v" i)])) (range 14000))
+        failed-execution {:seon.error/at #inst "2026-10-14T00:00:00Z"
+                          :seon.error/layer :seon.cluster.agent/context
+                          :seon.error/operation 'seon.cluster.agent/acquire-context!
+                          :seon.error/message "Cannot call seon.cluster.agent/acquire-context!: :seon.agent/context-source is unavailable"}]
+    (doseq [[case contract argument] [[:a-14k-map-for-a-sequence [:=> [:cat [:sequential :any]] :any] rows]
+                                      [:an-error-map-for-an-execution [:=> [:cat :seon.agent/execution-handle] :any] failed-execution]
+                                      [:a-vector-with-a-scalar-leaf [:=> [:cat [:vector :int]] :any] [1 2 "three"]]]]
+      (testing (name case)
+        (let [refusal (refused contract argument)]
+          (is (= :seon.instrument/contract-error (:seon.error/type refusal)))
+          (is (= [{:seon.error.reference/class (.getName (class argument))
+                   :seon.error.reference/count (count argument)
+                   :seon.error.reference/digest (id/digest 64 [argument])}]
+                 (:seon.error/offending refusal))
+              "the top-level slot holds the argument once, a collection as its reference")
+          (is (seq (:seon.error/problems refusal)))
+          (is (not-any? (fn [problem] (coll? (:seon.error/offending problem)))
+                        (:seon.error/problems refusal))
+              "no problem copies a collection")
+          (is (not-any? #(= argument %) (tree-seq coll? seq refusal))
+              "the argument itself occurs nowhere in the refusal"))))
+    (testing "a scalar leaf stays on its problem"
+      (is (= ["three"] (keep :seon.error/offending
+                             (:seon.error/problems (refused [:=> [:cat [:vector :int]] :any] [1 2 "three"]))))))))
 
 (deftest ^{:seon.test/golden "The refusal's sentence is its message producer's output: the caller frame is part of that text."}
   the-caller-frame-is-part-of-the-refusal-sentence

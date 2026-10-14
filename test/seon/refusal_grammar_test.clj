@@ -129,5 +129,5 @@
                        (schema/handed-projection) (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]
-          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])))
+          (is (= [[7] 7] (:seon.error/offending refusal)) "the guard holds its arguments and result once")
           (is (= :int (get-in text [:seon.error/problems 0 :seon.error/result-contract]))))))))

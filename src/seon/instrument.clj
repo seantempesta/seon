@@ -446,10 +446,11 @@
           (mu/subschemas schema)))
 
 (defn- violation
-  "Retain the actual offending values with every world in them referenced
-  (`seon.error.refusal/references` under the arming projection): a database,
-  connection, projection, environment or SCI context argument is its
-  identity, never a copy. The error render pair owns presentation."
+  "The refusal of one contract check: the checked value held once under
+  `:seon.error/offending`, a collection as its reference and every world as
+  its identity (`seon.error.refusal/value-reference` under the arming
+  projection), and per problem its path, schema and scalar leaf. The error
+  render pair owns presentation."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map]  :seon.error/base]}
   [projection kind data]
   (let [function-symbol (:fn-name data)
@@ -559,8 +560,7 @@
                     (or supplied? (= :malli.core/missing-key (:type problem))))
                    :seon.error/schema-path (vec (:path problem)))
                     (= :guard arm)
-                    (assoc :seon.error/input arguments
-                           :seon.error/result-contract
+                    (assoc :seon.error/result-contract
                            (m/form (:output (m/-function-info (:schema data))))))))
               explained-problems))
            first-problem (first problems)
@@ -575,9 +575,15 @@
            ;; and the position it failed at — `probe/g "a" 1` reported a bare
            ;; `[1]` at path `[]`, with nothing but the message's prose saying
            ;; which argument — while a second problem went unnamed. Every leaf
-           ;; value and its path are already carried per problem in
-           ;; `:seon.error/problems`, so this loses no evidence.
-           offending (if arity? (:arity data) value)
+           ;; scalar leaf and every path are carried per problem in
+           ;; `:seon.error/problems`. The checked value is held ONCE, here, and
+           ;; a collection in it as its reference: an error holds references,
+           ;; never copies; the caller still holds its own value.
+           held (fn [v] (refusal/value-reference projection v))
+           offending (case arm
+                       :output (held value)
+                       :guard [(mapv held arguments) (held (:value data))]
+                       (if arity? (:arity data) (mapv held arguments)))
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)
            ;; A refused output that is itself an error keeps that error as the

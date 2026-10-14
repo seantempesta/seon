@@ -362,6 +362,37 @@
   [projection value]
   (referenced (identity-projector projection) value))
 
+(defn value-reference
+  "`value` as an error holds it in its one offending slot: a world is its
+  identity and any other non-collection is itself; a collection is its class,
+  its count and one digest of its data. The digest is one walk that projects
+  nothing: a record or an object `seon.id` has no encoding for (a database, a
+  connection, a context, a function) is hashed as its name, class and
+  identity. A sequence that is not counted is its class alone, never realized."
+  {:malli/schema [:=> [:cat [:maybe :map]
+                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data.", :gen/elements [nil false 0 "" :k [] {}]}]]
+                  [:or :seon.error/reference
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A value that is not a collection is held as itself.", :gen/elements [nil false 0 "" :k]}]]]}
+  [projection value]
+  (let [project (identity-projector projection)]
+    (if (or (not (coll? value)) (some? (project value)))
+      (referenced project value)
+      (cond-> {:seon.error.reference/class (.getName (class value))}
+        (counted? value)
+        (assoc :seon.error.reference/count (count value)
+               :seon.error.reference/digest
+               (id/digest 64 [(referenced
+                               ;; class tests only, run at every node: `inst?` is a
+                               ;; protocol check whose miss allocates
+                               (fn [v]
+                                 (when (or (record? v)
+                                           (not (or (coll? v) (nil? v) (string? v) (keyword? v) (symbol? v)
+                                                    (number? v) (boolean? v) (char? v) (uuid? v)
+                                                    (instance? java.util.Date v) (instance? java.time.Instant v)
+                                                    (instance? java.util.regex.Pattern v) (tagged-literal? v))))
+                                   {:seon.schema/identity-value (object-name v)}))
+                               value)]))))))
+
 (defn- link
   "One throwable as a flat link, the frames it does not share with
   `enclosing` (`stack-frames`) held under `::frames` until the chain keeps

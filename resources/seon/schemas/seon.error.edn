@@ -21,11 +21,16 @@
               [:seon.error/argument :string]
               [:seon.error/expected :seon.schema/value]
               [:seon.error/expected-description :string]
-              [:seon.error/offending :seon.schema/value]
+              [:seon.error/offending {:optional true :description "The failing leaf when it is a scalar; a collection is held once, by reference, in the refusal's own :seon.error/offending."} :seon.schema/value]
               [:seon.error/actual-description :string]
               [:seon.error/input {:optional true} :seon.schema/value]
               [:seon.error/result-contract {:optional true} :seon.schema/value]
               [:seon.error/fix :string]],
+             :reference
+             [:map {:description "A collection as an error holds it, never a copy (seon.error.refusal/value-reference)."}
+              [:seon.error.reference/class :seon.error.reference/class]
+              [:seon.error.reference/count {:optional true} :seon.error.reference/count]
+              [:seon.error.reference/digest {:optional true} :seon.error.reference/digest]],
              :run [:and #:seon.db{:index true} :seon.db/ref],
              :shown-blob :seon.blob/digest,
              :shown-size [:int {:min 0}],

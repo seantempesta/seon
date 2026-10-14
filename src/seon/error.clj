@@ -867,7 +867,8 @@
          ::collection-type schema-type}))))
 
 (defn explain-problem
-  "Translate Malli's structured problem into semantic refusal evidence.
+  "Translate Malli's structured problem into semantic refusal evidence: its
+   path, expectation and fix, and its leaf only when the leaf is a scalar.
    No message parsing or value printing occurs at this seam."
   {:malli/schema [:=> [:cat :seon.error/explain-request] :seon.error/problem-description]}
   [{:seon.error/keys [problem path argument parent]}]
@@ -912,7 +913,6 @@
        missing? (str "the required key " (pr-str missing-key) " with " expected)
        member? (str "a collection member satisfying " expected)
        :else expected)
-     :seon.error/offending (if (and missing? (map? parent)) parent (:value problem))
      :seon.error/actual-description
      (cond
        missing? (str "a map missing " (pr-str missing-key))
@@ -930,6 +930,10 @@
        checked-output "Return a value satisfying the declared result contract for the shown input."
        :else (str "Supply " expected
                   (when (seq path) (str " at " (pr-str (vec path)))) "."))}
+      ;; one reference rule: a problem holds its leaf only when it is a scalar;
+      ;; a collection (a missing key's map included) is held once, by its
+      ;; refusal, as `seon.error.refusal/value-reference`
+      (not (or missing? (coll? (:value problem)))) (assoc :seon.error/offending (:value problem))
       check (assoc :seon.error/input (first (:smallest check))))))
 
 (defn- problem-parts
