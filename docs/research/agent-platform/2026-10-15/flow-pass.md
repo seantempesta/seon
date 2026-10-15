@@ -196,3 +196,33 @@ Forms, for root or the owning lane:
 | `guessed-schema` | `:agent-862174c0ee20` | 2026-10-15T07:17 | open |
 | `eval-cost` | `:agent-442b1cdf86ab` | 2026-10-15T07:29 | **ended on main, unmerged** |
 | `flow-pass` | `:agent-aab26ec91f9c` | 2026-10-15T07:35 | open (graph running) |
+
+## Retirement of the stale scratch admissions (lane retire-stale, 2026-10-15 ~07:50-08:10 UTC)
+
+Re-derived from default first (JVM mode, read-only): 128 agents with a held branch, 8 ended on their branch,
+no `attempt/` agents. Branches held in the store: 259 before, 14 after.
+
+- Retired 114 open lane agents (the 118 open, less the 3 active in the last 2 hours: `merge-callees`
+  (06:27), `step-merge` (06:41), `guessed-schema` (07:17)) with `bin/lane release retire-stale --agent AGENT`;
+  every call closed the admission (exit 0).
+- Closing the admission alone deleted only the ~83 whose branch held nothing unmerged, and only on a later wake
+  (root's pass runs on a branch write; none came until a disposable agent wrote). The other 81 closed agents held
+  unmerged definitions, so their branches stayed. Dropped with `(my.agent/retire-branch! {:seon.store/branch B})`
+  run as a disposable agent (`retire-stale-b`, `retire-stale-c`), all 81 and the 8 ended ones returned
+  `{:my.agent/retired? true}`. Run as the ended agent itself it is refused ("The hosted agent's admission is
+  closed"), which is why a different agent runs it; the helper agents were then released with `bin/lane release`.
+- Not touched: `flow-pass` (07:35, inside 2 hours, and the lane is the caller of this chore), `eval-cost` (already
+  ended on main; no branch held), `root`, `attempt/*` (none admitted), `:chain-f1f6dc8e6652`, `:chain-e439df9798c6`,
+  `:merge-3298699a379e`, `:base/*` (all verified still held after).
+- Refusals: none unexpected.
+
+Numbers, `seon.cluster.agent/taskless-agents` (private var, JVM mode, warm, same inputs shape as the pass):
+
+| | agents returned | ms warm |
+|---|---:|---:|
+| before | 127 | 172 / 174 (first call 626) |
+| after | 5 | 8.1 / 8.5 (first call 12.9) |
+
+The 5 left: `flow-pass`, `guessed-schema`, `merge-callees`, `step-merge` and a helper awaiting its deletion.
+Observation for root: a closed admission does not delete a branch until some branch writes, and a branch with
+unmerged work needs the explicit `retire-branch!` above; `bin/lane release --agent` cannot drop unmerged work.
