@@ -4,6 +4,7 @@
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.host :as host]
             [seon.cluster.source :as source]
@@ -54,8 +55,13 @@
            (str "the definition is stored: " (keys defined)))
        (is (= before (ns-row connection)) "a definition leaves its namespace row as it was")
        (eval! "(in-ns 'merge-m8.fixture) (require '[clojure.string :as merge-m8-str])" agent-id running)
+       (is (= (dissoc before :seon.program/definition-digest) (dissoc (ns-row connection) :seon.program/definition-digest))
+           "a require no declaration uses changes the runtime namespace, not its stored ns form")
+       (eval! "(in-ns 'merge-m8.fixture) (defn merge-m8-joins [xs] (merge-m8-str/join \",\" xs))" agent-id running)
        (let [after (ns-row connection)]
          (is (= #{'merge-m8-str} (into #{} (map :seon.ns.alias/local) (:seon.ns/aliases after))))
+         (is (str/includes? (:seon.ns/source after) "[clojure.string :as merge-m8-str]")
+             "a definition that uses the alias declares it in the ns form")
          (is (= (dissoc before :seon.ns/source :seon.program/definition-digest)
                 (dissoc after :seon.ns/aliases :seon.ns/requires :seon.ns/source :seon.program/definition-digest))
              "a require changes only the require attributes"))))))

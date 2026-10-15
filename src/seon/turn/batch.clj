@@ -225,21 +225,36 @@
                           (assoc w :seon.batch/call-span (into (relative [l c]) (relative [el ec]))))))
           writes)))
 
+(defn- live-bindings
+  "A reader context's resolver bindings as `seon.sci.eval/row-bindings` shapes them."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [context]
+  {:requires (set (:seon.sci.eval/requires context))
+   :aliases (or (:seon.sci.reader/aliases context) {})
+   :refers (or (:seon.sci.reader/refers context) {})
+   :imports (or (:seon.sci.eval/imports context) {})})
+
 (defn- stored-namespace-row
-  "The namespace fact a form's transaction leaves stored for `namespace-name`:
-  SCI's live bindings when the form changed its resolver state (`changed`) or
-  `db` holds no row for it, else the row `db` holds (`namespace-facts` writes a
-  stored namespace only when its resolver state changed). The writer digests a
-  definition under this row, so its producer must too."
+  "The namespace fact a form's transaction leaves stored for `namespace-name`, as far as a
+  definition digests under it: SCI's live bindings when the form changed its resolver state
+  (`changed`) or `db` holds no row for it, else the row `db` holds with SCI's live bindings
+  laid over it, the ones `namespace-facts` declares when a definition uses them. The writer
+  digests a definition under the stored row, so its producer must too."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:set :symbol] :symbol] :map]}
   [ctx db changed namespace-name]
   (or (when-not (contains? changed namespace-name)
         (when (dbu/entid db [:seon.ns/name namespace-name])
-          (db/pull db [:seon.ns/name :seon.ns/requires
-                       {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
-                       {:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns :seon.ns.refer/target-name]}
-                       {:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]}]
-                   [:seon.ns/name namespace-name])))
+          (let [stored (db/pull db @#'eval/namespace-pattern [:seon.ns/name namespace-name])
+                held (#'eval/row-bindings stored)
+                live (live-bindings (#'eval/reader-context ctx namespace-name))]
+            (merge {:seon.ns/name namespace-name}
+                   (#'eval/binding-rows
+                    {:seon.sci.reader/aliases (merge (:aliases held) (:aliases live))
+                     :seon.sci.reader/refers (merge (:refers held) (:refers live))
+                     :seon.sci.eval/imports (merge (:imports held) (:imports live))
+                     
+                     :seon.sci.eval/requires (into (:requires held) (:requires live))
+                     :seon.sci.eval/fixtures {}})))))
       (namespace-entity ctx namespace-name)))
 
 (defn- analyze-form
@@ -501,21 +516,55 @@
               [(assoc row :db/id (str (name ident) ":" v))])
       missing-ns (conj {:db/id (str "namespace:" missing-ns) :seon.ns/name missing-ns}))))
 
+(defn- declared-bindings
+  "The bindings the stored namespace's row `stored` leaves declared given `live`, the bindings SCI
+  holds for it, and `used`, what its changed declarations use of them
+  (`seon.program/used-resolver-context`): a REPL `require` changes the runtime namespace, and reaches
+  the namespace's ns form only through a declaration that uses it, as Clojure's own `require` never
+  edits a file. A namespace whose resolver state SCI changed (`added-only?` false) keeps of `stored`
+  what `live` still holds; one only its declarations named keeps all of `stored`."
+  {:malli/schema [:=> [:cat :map :map [:vector :map] :boolean] :map]}
+  [stored live used added-only?]
+  (let [used-in (fn [k] (into {} (mapcat k) used))
+        entries (fn [k] (let [u (used-in k)
+                              held (get stored k)]
+                          (merge (if added-only? held (into {} (filter (fn [[l t]] (= t (get-in live [k l])))) held))
+                                 (into {} (filter (fn [[l t]] (= t (get u l)))) (get live k)))))
+        required (fn [r] (some #(contains? (:requires %) r) used))]
+    {:requires (into (if added-only? (:requires stored) (into #{} (filter (:requires live)) (:requires stored)))
+                     (filter required) (:requires live))
+     :aliases (entries :aliases)
+     :refers (entries :refers)
+     :imports (:imports live)}))
+
 (defn- namespace-facts
-  "The namespace fact of `n` as SCI holds it now, on `db`."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :symbol] :seon.store/transaction-data]}
-  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} db n]
+  "The namespace fact of `n` as SCI holds it now, on `db`, declaring of a stored namespace's live
+  bindings only the ones its stored row or `entities` use (`declared-bindings`); nothing
+  for a namespace only `entities` named whose declared bindings are as stored."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:vector :map] :symbol :boolean]
+                  :seon.store/transaction-data]}
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} db entities n entity-only?]
   (or (when (sci/find-ns ctx n)
-        (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n {}
-                                                     (#'eval/reader-context ctx n) true)]
-          (if-let [stored (dbu/entid db [:seon.ns/name n])]
-            ;; a stored namespace changes only the attributes the context row
-            ;; carries: its doc, file, tasks and admission source stay, so its
-            ;; digest is the digest of the row as it is left stored
-            (let [row (dissoc row :seon.schema.admission/source)
-                  row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored row))]
-              (program/exact-replacement-tx (select-keys (db/pull db '[*] stored) (cons :db/id (keys row))) row))
-            (entity-facts db row))))
+        (let [context (#'eval/reader-context ctx n)
+              stored-id (dbu/entid db [:seon.ns/name n])
+              stored (when stored-id (#'eval/row-bindings (db/pull db @#'eval/namespace-pattern [:seon.ns/name n])))
+              in-n (filterv #(= [:seon.ns/name n] (or (:seon.fn/ns %) (:seon.test/ns %))) entities)
+              live (live-bindings context)
+              kept (when stored
+                     (declared-bindings stored live (mapv #(#'program/used-resolver-context % live) in-n) entity-only?))
+              context (cond-> context
+                        kept (assoc :seon.sci.eval/requires (:requires kept) :seon.sci.reader/aliases (:aliases kept)
+                                    :seon.sci.reader/refers (:refers kept) :seon.sci.eval/imports (:imports kept)))]
+          (when-not (and entity-only? stored (= kept stored))
+            (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n {} context true)]
+              (if stored-id
+                ;; a stored namespace changes only the attributes the context row
+                ;; carries: its doc, file, tasks and admission source stay, so its
+                ;; digest is the digest of the row as it is left stored
+                (let [row (dissoc row :seon.schema.admission/source)
+                      row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored-id row))]
+                  (program/exact-replacement-tx (select-keys (db/pull db '[*] stored-id) (cons :db/id (keys row))) row))
+                (entity-facts db row))))))
       []))
 
 (defn- removal-facts
@@ -604,7 +653,8 @@
     (or cyclic
         (first (filter :seon.error/at removed))
         (-> stx
-            (into (mapcat #(namespace-facts request db' %)) (sort namespaces))
+            (into (mapcat #(namespace-facts request db' entities % (not (contains? namespaces %))))
+                  (sort (into (set namespaces) (keep #(let [r (or (:seon.fn/ns %) (:seon.test/ns %))] (when (vector? r) (second r)))) entities)))
             (into (mapcat #(entity-facts db' %)) entities)
             (into cat removed)))))
 
