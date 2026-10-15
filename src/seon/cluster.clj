@@ -3461,6 +3461,10 @@
         ;; The cluster owns its agents' routing; its handle carries it so each
         ;; live acquisition, and so each start, holds the same one.
         routing (cluster.agent/routing)
+        ;; the render proc's wake channel and interest: the handle carries them so every route a branch
+        ;; registers (`seon.cluster.agent/start-branch-flow!`) wakes the one render proc, as main's does
+        render-channel (async/chan (async/sliding-buffer 1))
+        render-interest (atom :all)
         handle
         (assoc
          (loop-handle connection cluster-name process
@@ -3469,6 +3473,8 @@
                       plan-channel stream-channel completion)
          :seon.flow/executor io-executor
          :seon.agent/routing routing
+         :seon.render.web/render-channel render-channel
+         :seon.render.web/interest render-interest
          ;; The model call is the handle's external effect: the Var in
          ;; production, so a reload of `seon.ai` reaches the next turn; a
          ;; boot request may name its own function of the same contract.
@@ -3479,11 +3485,9 @@
         ;; snapshots exit on (multed here, tapped per tab), the watched
         ;; registration the feed writes, and the proc's own orderly-stop
         ;; completion — all process-local, all free to lose
-        render-channel (async/chan (async/sliding-buffer 1))
         runtime-eval-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
-        render-interest (atom :all)
         view {:seon.render.web/render-channel render-channel
               :seon.render.web/runtime-eval-channel runtime-eval-channel
               :seon.render.web/pages-channel pages-channel

@@ -828,3 +828,17 @@
                        (send-from-cluster! handle connection "orphan-sender"
                                            {:my.message/to "mcp/orphan" :my.message/content "Why?"})))
             "the send's error names the absent home branch")))))
+
+(deftest an-eval-request-on-a-hosted-branch-offers-one-render-wake
+  ;; C0 slice 2a: the owner watches an agent's page live, and the page reads the agent's branch, so a commit there
+  ;; must wake the cluster's render proc as a commit on main does.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [render-channel (async/chan (async/sliding-buffer 1))
+            handle (assoc handle :seon.render.web/render-channel render-channel
+                                 :seon.render.web/interest (atom :all))
+            hosted (host-on! handle (branch!) "mcp/watched")]
+        (async/poll! render-channel)
+        (is (= ["42"] (hosted-run! hosted "(+ 40 2)")))
+        (is (= :seon.cluster.wake/wake (support/await-event! render-channel [:branch-render-wake]))
+            "the branch's route offered the cluster's render channel a wake for the eval request's commit")))))

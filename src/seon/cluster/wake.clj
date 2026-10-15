@@ -495,8 +495,9 @@
   The existing datom pass records whether any changed attribute
   intersects that value, then offers at most one payload-free render
   wake. There is no query, report payload, call-id routing, or second
-  registration. A route with no render channel (a hosted branch, which
-  serves no page) makes no second delivery.
+  registration. A branch's route carries the cluster's render channel and
+  interest too, since an agent's page reads its branch; a route with no
+  render channel (a cluster serving no view) makes no second delivery.
 
   A route refusing delivery becomes a stored fault, the route kept — a
   swallowed failure nobody hears about is an invisible one, and a refused

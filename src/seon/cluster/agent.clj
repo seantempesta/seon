@@ -70,6 +70,7 @@
             [clojure.core.protocols :as core.protocols]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
+            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.cache :as cache]
@@ -1945,17 +1946,23 @@
   "Start `agent-id`'s graph on `execution`'s branch under `intent`.
   Answers its started entry.
   The branch's wake route is registered first: its mailbox wakes route to the
-  agent, and an unrouted recipient wakes the cluster's db<->flow."
+  agent, an unrouted recipient wakes the cluster's db<->flow, and a commit whose
+  attributes meet the cluster's render interest wakes the cluster's render proc,
+  since the agent's page reads its branch (`seon.render.web/agent-connection`)."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/execution-handle :seon.agent/id
                        :seon.task/execution]
                   :seon.agent/started]}
   [cluster-handle execution agent-id intent]
   (let [registry (:seon.agent/routing execution)
-        route (wake/route! {:seon.cluster.wake/connection (:seon.db/connection execution)
-                            :seon.cluster.wake/channels (fn [] (channels registry))
-                            :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? registry eid channel))
-                            :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
-                            :seon.cluster.wake/key (branch-route-key (:seon.agent/branch execution))})]
+        route (wake/route! (merge {:seon.cluster.wake/connection (:seon.db/connection execution)
+                                   :seon.cluster.wake/channels (fn [] (channels registry))
+                                   :seon.cluster.wake/fenced? (fn [eid channel] (fenced-route? registry eid channel))
+                                   :seon.flow/plan-channel (:seon.cluster.wake/channel cluster-handle)
+                                   :seon.cluster.wake/key (branch-route-key (:seon.agent/branch execution))}
+                                  ;; a cluster that serves no view carries neither, and its branches deliver no render wake
+                                  (set/rename-keys (select-keys cluster-handle [:seon.render.web/render-channel
+                                                                                :seon.render.web/interest])
+                                                   {:seon.render.web/render-channel :seon.cluster.wake/render-channel})))]
     (when (map? route)
       (throw (ex-info (:seon.error/message route "The branch's wake declarations cannot route.") route)))
     (start-flow! {:seon.turn.loop/cluster (branch-handle cluster-handle execution)

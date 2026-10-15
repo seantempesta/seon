@@ -7,7 +7,9 @@
   [:seon.store/store {:optional true} :seon.store/store]
   [:my.program/base-ctx {:optional true} :seon.sci.eval/ctx]
   [:seon.sci.eval/base-ctx {:optional true} :seon.sci.eval/ctx]
-  [:seon.agent/routing :seon.agent/routing]]
+  [:seon.agent/routing :seon.agent/routing]
+  [:seon.render.web/render-channel {:optional true :description "The cluster's render proc wake channel; every branch route it registers delivers its render wakes there (seon.cluster.agent/start-branch-flow!)."} :seon.flow/channel]
+  [:seon.render.web/interest {:optional true} :seon.render.web/interest]]
  :execution-handle [:map
   [:seon.cluster/name :seon.cluster/name]
   [:seon.sci.eval/base-ctx :seon.sci.eval/ctx]
