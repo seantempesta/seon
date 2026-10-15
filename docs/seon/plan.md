@@ -26,6 +26,36 @@ reverted e5dd2abd5). Live DeepSeek S5 run 4: Design and Prove done with 0 hand a
 times on context waste and REPL defects, since fixed. Default runs HEAD; lanes, findings and the morning questions:
 `../research/agent-platform/2026-10-14/root-working-state.md` ("Night of 10-14").
 
+**FIRST, before any other work or live run: every context defect, and the live agent view** (owner, 2026-10-15
+afternoon): "Why are we doing so many stupid things with the context and running agents with shitty context with known
+defects? I want you to focus on fixing all context related defects first. Don't throw away good data an agent may want
+the full readout for later on, write a render function for it and write html and ai versions so the user can see it if
+it's important. The user should be able to follow along with the agent in realtime based on what they are doing on the
+repl. A function is returned and we auto run with tests, all of that should be visible somehow even if it's nice text
+that's live updating the status at first. Just tailor it to your audience. I want this UI up and running so I can help
+you by saying 'that is way too much perf data for every call'."
+
+Rules for this work: no data is thrown away to shorten a reply — the full value stays (requeryable by its handle) and a
+render function per schema chooses what each audience sees: the AI face terse, the HTML face full; both faces are one
+derivation (AGENTS.md "Choosing the design" 5). The live agent view comes first because it lets the owner judge the
+context directly. No live (provider) run until the context defects below are fixed and the owner has looked at the view.
+
+| # | Context defect (evidence) | Fix at the producer |
+|---|---|---|
+| C0 | The owner cannot watch an agent: no live view of its eval requests (forms, value, test step, cost) | Live agent view: per eval request, the forms, value, auto-run tests' live status, done refusals and cost, through the render proc's Datastar morph; keyed by agent id, not namespace; render functions beside their data; the focus layout (main panel = most recently changed unit, right rail by recency) |
+| C1 | Every reply's cost map is ~25 lines, half work the reply cannot attribute (`:jvm-window`, `:shared`) | One render function for the cost value: AI face one line (ms, alloc, calls; slow functions only when over), HTML face the whole map |
+| C2 | An error's cause chain carries ~60 frames into replies (task `seon.error/a-cause-chain-holds-a-reference-not-its-frames`) | The chain holds a reference; its render shows the first-party frames, the full chain requeryable |
+| C3 | A failed test's report copies a whole 14k value into `:seon.test.failure/actual` | The report holds the value's reference; its render shows the differing part |
+| C4 | Prompt caching fell to 23% (S5 run 6) | Argon task A (in flight): the first unit that varies per call moves after the stable prefix |
+| C5 | Cold block 4.7-18 s | Argon task B (in flight) + the three-way readers' deletion (P1+P3) |
+| C6 | Must-reads of uncontracted functions show declaration-absent error maps with timestamps; ~400 tokens of library must-reads from plan prose | Must-reads render the declaration (or its absence as one typed line), library names at name level |
+| C7 | The merge preview shows `:seon.error/at` and `:unknown` under "not green"; a reply carries no proofs/branch summary when proofs go green | The block's proofs and merge sections render result states as data: green, red with assertion, not run — never an error stamp |
+| C8 | The changes section is not yet the merge list; forward-merge conflicts appear only in `merge-main!`'s reply | Merge list (ruling 5a) and conflicts (P4) rendered in the block, after the merge round |
+| C9 | Reasoning-without-answer / token-starved replies are delivered like unparseable ones | The turn tells the agent what happened (its reply had reasoning and no forms) as data |
+| C10 | A quoted symbol in test data yields an `:auto-required` finding; multi-word `my.program/search` answers nothing; `my.program/diff` cannot inspect a changed namespace | Fix each producer; file what is over 15 minutes |
+| C11 | Context and help tests are red on HEAD (`seon.context-test` 3, `seon.help-test` 5) | Red census (in flight) classifies; fix or retire with the census |
+| C12 | ~150 scratch agent branches list in `my.agent/branches` | Root closes their admissions after the lanes end (649029d26 lifecycle deletes) |
+
 **The order (owner rulings 2026-10-15, `../research/agent-platform/2026-10-15/branch-model-rulings.md`):** a branch's
 program is its own writes over main's HEAD; merge by reach closure, reusing the branch's results; the writer follows the
 branch; config reads main's HEAD unless the branch wrote it.
