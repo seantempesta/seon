@@ -2121,6 +2121,16 @@
                                (= behavior (behavior-of candidate declaration)))))
                          changed))))))
 
+(defn- untouched?
+  "Whether `candidate`, a work branch, wrote no declaration digest since its fork (`seon.cluster.registry/fork-of`,
+  the walk's start in `seon.program/own-changed-identities`): its branch delta is then empty whatever its merge
+  base, so the merge base is not read. False on a branch with no fork entity or a refused read."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}
+  [candidate]
+  (let [t (:seon.branch/base-t (registry/fork-of candidate (get-in candidate [:config :branch])))
+        touched (when t (program/changed-identities t candidate source/merge-bound))]
+    (and (set? touched) (empty? touched))))
+
 (defn branch-changes
   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
   cluster's own branch, the merge base on a work branch), the `branch-delta`: empty when nothing changed;
@@ -2136,9 +2146,11 @@
                        "The cluster records no adopted source commit to compare my program against: there is no change to check."
                        cluster)
       (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-            candidate (db/db (:seon.db/connection execution))
-            base (change-base cluster candidate recorded)]
-        (if (:seon.error/at base) base (branch-delta (source/database store base) candidate))))))
+            candidate (db/db (:seon.db/connection execution))]
+        (if (untouched? candidate)
+          []
+          (let [base (change-base cluster candidate recorded)]
+            (if (:seon.error/at base) base (branch-delta (source/database store base) candidate))))))))
 
 (defn branch-tests
   "The tests `execution`'s branch defined or changed since its base (`branch-changes`), sorted: empty when none."

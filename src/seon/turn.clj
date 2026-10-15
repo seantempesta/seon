@@ -5585,7 +5585,8 @@
           branch (@test-branch-tests cluster (:seon.db/connection cluster))
           _ (when (:seon.error/at branch) (throw (ex-info (:seon.error/message branch) branch)))
           branch (into [] (remove proofs) branch)
-          changed (if run
+          ;; a recording that wrote no program entity changed nothing a test reaches
+          changed (if (seq (:seon.turn.loop/entities run))
                     (@test-request-changes (:seon.turn.loop/before run) (:seon.turn.loop/after run) (:seon.turn.loop/entities run))
                     [])
           ;; a proof is current under the task it judges, a branch test under none (`run-proofs`, `run-branch`)

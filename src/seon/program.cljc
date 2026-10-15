@@ -798,25 +798,27 @@
   deleted ones named by history: `digest-map`'s scoping identities. Only
   functions, tests, namespaces and schemas may change; another or no family, missing history and
   more than `:seon.program/max-datoms` changed entities refuse by name.
-  Datahike indexes no transaction prefix: this walks the digest's history."
+  Datahike indexes no transaction prefix: the digest's history is filtered by
+  transaction inside the native index read (`seon.db/entities-changed-after`)."
      {:malli/schema
       [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t] :seon.db/database-value
             [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
        [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
      [base database {:seon.program/keys [max-datoms]}]
-     (let [[q history since carried basis-t]
-           (map requiring-resolve '[seon.db/q seon.db/history seon.db/since
+     (let [[q history entities-changed-after carried basis-t]
+           (map requiring-resolve '[seon.db/q seon.db/history seon.db/entities-changed-after
                                     seon.db/carried-projection seon.db/basis-t])
            refuse #(digest-map-refusal %1 %2 (assoc %3 :seon.error/operation
                                                     'seon.program/changed-identities))
            past (history database)
            entities (if (:seon.error/at past) past
-                      (q '[:find [?e ...] :where [?e :seon.program/definition-digest]]
-                         (since past (if (int? base) base (basis-t base)))))
-           entity-maps (if (:seon.error/at entities) entities
-                  (q '[:find ?e ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
-                     past entities (vec (:seon.program/compared-families
-                                         (declaration-families (carried database))))))
+                      (vec (entities-changed-after database (if (int? base) base (basis-t base))
+                                                   :seon.program/definition-digest)))
+           entity-maps (cond (:seon.error/at entities) entities
+                             (empty? entities) []
+                             :else (q '[:find ?e ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
+                                      past entities (vec (:seon.program/compared-families
+                                                          (declaration-families (carried database))))))
            identities (when-not (:seon.error/at entity-maps) (into #{} (map (comp vec rest)) entity-maps))
            outside (into #{} (remove (comp #{:seon.fn/sym :seon.test/sym :seon.ns/name :seon.schema/key} first)) identities)]
        (cond
