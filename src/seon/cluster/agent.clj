@@ -2398,15 +2398,23 @@
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
                                                        (when root [root])))]
                     (if (:seon.error/at merged)
-                      (let [step (merge-step database merged
-                                             (set (registry/on-branch store branch
-                                                             #(:seon.task/proofs (db/pull (db/db %) [:seon.task/proofs] [:seon.task/id h])))))
-                            first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]]
-                                               database branch)]
+                      (let [first-handle (db/q '[:find ?h . :in $ ?b :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]]
+                                               database branch)
+                            proposed (merge-step database merged
+                                                 (set (registry/on-branch store branch
+                                                                          #(:seon.task/proofs (db/pull (db/db %) [:seon.task/proofs] [:seon.task/id h])))))
+                            ;; the append validates the step it appends (reactive start §3): one that cannot run is
+                            ;; never appended, and root reads why in the bail's reason
+                            unrunnable (when proposed
+                                         (registry/on-branch store branch #(task/next-refusal (db/db %) first-handle proposed)))
+                            step (when-not unrunnable proposed)]
                         (bail-chain! handle branch key h
                                      (cond-> (merge-refused-reason merged)
                                        step (str " Its merge branch " (name (:seon.task/branch step)) " is kept, and a held merge step"
-                                                 " after task " h " works on it: run it with my.root/run!."))
+                                                 " after task " h " works on it: run it with my.root/run!.")
+                                       unrunnable (str " Its merge branch " (name (:seon.task/branch proposed)) " is kept; no merge"
+                                                       " step is appended, since it could not run: "
+                                                       "its runnable view refuses " (str/join ", " (sort (map str (keys (:seon.task/explanation unrunnable))))) "."))
                                      (cond-> [[:db/add [:seon.task/assignment key] :seon.task/refusal (:seon.error/type merged)]]
                                        step (conj [:db.fn/call #'task/next-tx first-handle step])))
                         false)

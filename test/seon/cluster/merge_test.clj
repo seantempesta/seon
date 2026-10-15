@@ -976,7 +976,7 @@
         _ (support/transacted! h-conn (support/agent-tx (db/db h-conn) "root"))
         handle (task/task-handle 'tq.chainmerge "fix")
         chain (task/chain! {:seon.db/connection h-conn :seon.store/store store}
-                           [{:seon.task/ns 'tq.chainmerge :seon.task/name "fix" :seon.task/plan "Merge the chain."}
+                           [{:seon.task/ns 'tq.chainmerge :seon.task/name "fix" :seon.task/plan "Merge the chain." :seon.task/proofs #{(sym "chain-check")}}
                             {:seon.task/ns 'tq.chainmerge :seon.task/name "ignored"}
                             ;; the terminal task holds the plan advance flowed to it (S3a-3)
                             {:seon.task/ns 'tq.chainmerge :seon.task/name "ignored" :seon.task/plan "Merge the chain."

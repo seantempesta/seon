@@ -794,7 +794,8 @@
 (defn- chain-entities
   "The `tasks` of the chain whose first map names it, as the writer's maps: only the first map supplies `ns` and
   `name`, every later task is named `<first name>-<index>` (1-based) in its namespace, each takes the negative tempid
-  of its position and names the next one's as its `:seon.task/next`; the first runs and the rest are held; each is
+  of its position and names the next one's as its `:seon.task/next`; a map's own execution is kept, else the first
+  runs and the rest are held; each is
   created by root (`:seon.task/created-by`), a runtime task no task file declares. A map's own
   `:db/id`, `:seon.task/id`, `:seon.task/sym` and `:seon.task/next` are ignored."
   {:malli/schema [:=> [:cat [:vector {:min 1} :seon.task/task-map]] [:vector :map]]}
@@ -806,7 +807,7 @@
                 (cond-> (assoc (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
                                :db/id (- (inc i)) :seon.task/ns ns
                                :seon.task/name (if (zero? i) first-name (str first-name "-" (inc i)))
-                               :seon.task/execution (if (zero? i) :running :held)
+                               :seon.task/execution (or (:seon.task/execution task) (if (zero? i) :running :held))
                                ;; a chain task is runtime data, root's, never a task file's entry
                                :seon.task/created-by [:seon.agent/id "root"])
                   (< (inc i) n) (assoc :seon.task/next (- (+ i 2))))))
@@ -819,6 +820,59 @@
   (loop [handle handle handles []]
     (let [after (get-in (db/pull database [{:seon.task/next [:seon.task/id]}] [:seon.task/id handle]) [:seon.task/next :seon.task/id])]
       (if after (recur after (conj handles handle)) (conj handles handle)))))
+
+(defn- schema-keys
+  "The keys of the map schema `schema-key` declares under `projection`, in schema order."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:vector :qualified-keyword]]}
+  [projection schema-key]
+  (schema/projection-cache-value
+   projection [::schema-keys schema-key]
+   #(mapv first (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) schema-key))))))
+
+(defn desired-config
+  "The config a chain task on `database`'s branch runs under (`:seon.task/desired-config`): cluster `cluster-name`'s
+  effective row there, its decided dials the launch reads, with `overlay` (dial to value, or `seon.config/absent`)
+  decided over them; the effective read's refusal when it has none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name [:maybe :seon.chain/config]]
+                  [:or :map :seon.config/error :seon.db/invalid-read-error]]}
+  [database cluster-name overlay]
+  (let [effective (config/effective database cluster-name)]
+    (if (refusal/error? effective)
+      effective
+      (reduce-kv (fn [decided dial value] (if (= config/absent value) (dissoc decided dial) (assoc decided dial value)))
+                 (select-keys effective (schema-keys (db/carried-projection database) :seon.task/desired-config))
+                 overlay))))
+
+(defn runnable
+  "Task `task`'s desired state as `:seon.task/runnable` validates it (TASK-CHAIN §2): its members that schema names, on
+  chain `branch`, under `config` (`desired-config`)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.chain/branch :map] :map]}
+  [projection task branch config]
+  (assoc (select-keys task (schema-keys projection :seon.task/runnable)) :seon.chain/branch branch :seon.task/config config))
+
+(defn unrunnable
+  "The `:unrunnable` refusal of the runnable view `view` under `projection`, Malli's explanation humanized as its
+  `:seon.task/explanation`; nil when it validates."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :map] [:maybe :seon.task/refused-error]]}
+  [projection operation view]
+  (when-let [explanation ((schema/projection-cache-value
+                           projection ::runnable-explainer
+                           #(m/explainer (mr/schema (:seon.schema.projection/registry projection) :seon.task/runnable)))
+                          view)]
+    (assoc (refused operation :unrunnable (:seon.task/ns view (symbol "seon.task")) (:seon.task/id view (:seon.task/name view)))
+           :seon.task/explanation (me/humanize explanation))))
+
+(defn- unrunnable-here
+  "The `:unrunnable` refusal of `task` as the chain branch `database` holds it (the writer's value), under the config
+  of the cluster its root agent names; nil when it validates."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :map] [:maybe :seon.error/value]]}
+  [database operation task]
+  (let [cluster-name (config/agent-cluster database "root")
+        config (if (string? cluster-name) (desired-config database cluster-name nil) cluster-name)]
+    (if (refusal/error? config)
+      config
+      (unrunnable (db/carried-projection database) operation
+                  (runnable (db/carried-projection database) task (get-in database [:config :branch]) config)))))
 
 (defn open-attempt?
   "Whether attempt `row` is open (TASK-CHAIN §1): its agent reported no end (`:seon.task.attempt/end`) and nothing
@@ -854,35 +908,58 @@
 
 (defn run-tx
   "The transaction data running held task `handle` at `database`, its chain branch: `:execution :held` becomes
-  `:running`; any other execution answers none. Invoke as `[:db.fn/call seon.task/run-tx handle]`."
+  `:running` once the task's runnable view there validates (`unrunnable-here`, thrown as the writer's refusal); any
+  other execution answers none. Invoke as `[:db.fn/call seon.task/run-tx handle]`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :seon.db/tx-data]}
   [database handle]
-  (let [task (db/pull database [:db/id :seon.task/execution] [:seon.task/id handle])]
+  (let [task (db/pull database '[*] [:seon.task/id handle])]
     (when-let [failure (read-error task)] (throw (ex-info (:seon.error/message failure) failure)))
-    (if (= :held (:seon.task/execution task)) [[:db/add (:db/id task) :seon.task/execution :running]] [])))
+    (if (= :held (:seon.task/execution task))
+      (if-let [refusal (unrunnable-here database `run-tx (assoc task :seon.task/execution :running))]
+        (throw (ex-info (:seon.error/message refusal) refusal))
+        [[:db/add (:db/id task) :seon.task/execution :running]])
+      [])))
 
-(defn next-tx
-  "The transaction data appending `task` (a task map: a template's owned members and the task's own) to the chain whose
-  first task is `first-handle` at `database`, its chain branch, through the task writer (MERGE-STEP, TASK-CHAIN §2.7):
-  named by position as `chain!` names a later task, taking the last task's flowing members, `:held` and created by
-  root, and the last task's `:seon.task/next` naming it. Invoke as `[:db.fn/call seon.task/next-tx first-handle task]`,
-  beside root's bail of the last task's attempt, decided over the value the writer holds."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/task-map] :seon.db/tx-data]}
+(defn- next-entity
+  "The task `task` (a task map) becomes when appended to the chain whose first task is `first-handle` at `database`,
+  its chain branch: named by position as `chain!` names a later task, taking the last task's flowing members, `:held`
+  and created by root, with its derived handle; and the last task's handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/task-map]
+                  [:tuple :map :seon.task/handle]]}
   [database first-handle task]
   (let [handles (chain-handles database first-handle)
         last-handle (peek handles)
         {ns :seon.task/ns first-name :seon.task/name} (db/pull database [:seon.task/ns :seon.task/name] [:seon.task/id first-handle])
         task-name (str first-name "-" (inc (count handles)))
-        handle (task-handle ns task-name)
         stored (stored-tasks database :seon.task/id #{last-handle})]
     (when-let [failure (read-error stored)] (throw (ex-info (:seon.error/message failure) failure)))
     (let [projection (db/carried-projection database)
-          flowed (select-keys (declaration projection (stored last-handle)) (flowing-members projection))
-          entity (merge flowed (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
-                        {:db/id -1 :seon.task/ns ns :seon.task/name task-name :seon.task/execution :held
-                         :seon.task/created-by [:seon.agent/id "root"]})]
-      (conj (adopt-tasks-tx database [entity] #{handle} {})
-            [:db/add [:seon.task/id last-handle] :seon.task/next -1]))))
+          flowed (select-keys (declaration projection (stored last-handle)) (flowing-members projection))]
+      [(merge flowed (dissoc task :db/id :seon.task/id :seon.task/sym :seon.task/next)
+              {:seon.task/id (task-handle ns task-name) :seon.task/ns ns :seon.task/name task-name
+               :seon.task/execution :held :seon.task/created-by [:seon.agent/id "root"]})
+       last-handle])))
+
+(defn next-refusal
+  "The `:unrunnable` refusal of `task` appended to the chain whose first task is `first-handle` at `database`, its
+  chain branch, as `next-tx` would write it (MERGE-STEP); nil when its runnable view validates."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/task-map] [:maybe :seon.error/value]]}
+  [database first-handle task]
+  (unrunnable-here database `next-tx (first (next-entity database first-handle task))))
+
+(defn next-tx
+  "The transaction data appending `task` (a task map: a template's owned members and the task's own) to the chain whose
+  first task is `first-handle` at `database`, its chain branch, through the task writer (MERGE-STEP, TASK-CHAIN §2.7):
+  as `next-entity` derives it, its runnable view validated (`next-refusal`, thrown as the writer's refusal), and the
+  last task's `:seon.task/next` naming it. Invoke as `[:db.fn/call seon.task/next-tx first-handle task]`, beside
+  root's bail of the last task's attempt, decided over the value the writer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/task-map] :seon.db/tx-data]}
+  [database first-handle task]
+  (let [[entity last-handle] (next-entity database first-handle task)]
+    (when-let [refusal (unrunnable-here database `next-tx entity)]
+      (throw (ex-info (:seon.error/message refusal) refusal)))
+    (conj (adopt-tasks-tx database [(assoc entity :db/id -1)] #{(:seon.task/id entity)} {})
+          [:db/add [:seon.task/id last-handle] :seon.task/next -1])))
 
 (def ^:private agent-written
   "The members of an attempt row its agent writes with its end (`seon.turn`), on the branch the agent works on."
@@ -974,7 +1051,8 @@
 
 (defn run-held!
   "Run held chain task `handle` again (TASK-CHAIN §2.7): ONE transaction on its chain branch changing `:held` to
-  `:running` (`run-tx`); the committed execution wakes root's plan through the branch's route (`:seon.wake/starts`),
+  `:running` (`run-tx`), or the `:unrunnable` refusal naming what its runnable view lacks, writing nothing; the
+  committed execution wakes root's plan through the branch's route (`:seon.wake/starts`),
   and root's next pass starts its next attempt with a new agent. Answers the task, its branch and execution, and that
   attempt's number and key as the branch now reads them (`next-attempt`), the attempt root's pass writes."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]] :seon.task/handle]
@@ -986,7 +1064,7 @@
   (if-let [branch (chain-branch (db/db connection) store handle)]
     (registry/on-branch store branch
                (fn [on-chain]
-                 (let [report (written on-chain [[:db.fn/call #'run-tx handle]])]
+                 (let [report (refusal-data #(written on-chain [[:db.fn/call #'run-tx handle]]))]
                    (if (:seon.error/at report)
                      report
                      (let [after (:db-after report)
@@ -1028,12 +1106,30 @@
                prove
                (cond-> implement (:seon.task/proofs filed) (assoc :seon.task/proofs (:seon.task/proofs filed)))]))))
 
+(defn- chain-refusal
+  "The first `:unrunnable` refusal among the first and the running `entities` of a chain on `branch` (the first runs
+  first, held or not, and carries the chain's config), each viewed under main
+  `database`'s config for the cluster its root agent names with `overlay` decided over it (`desired-config`), or the
+  config read's refusal; nil when every running task validates."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/branch [:vector :map] [:maybe :seon.chain/config]]
+                  [:maybe :seon.error/value]]}
+  [database branch entities overlay]
+  (let [cluster-name (config/agent-cluster database "root")
+        config (if (string? cluster-name) (desired-config database cluster-name overlay) cluster-name)
+        projection (db/carried-projection database)]
+    (if (refusal/error? config)
+      config
+      (some #(unrunnable projection `chain! (runnable projection (identified %) branch config))
+            (cons (first entities) (filter (comp #{:running} :seon.task/execution) (rest entities)))))))
+
 (defn chain!
   "Write `tasks` as one linked chain on its own branch, forked from main (`:seon.chain/from` names another branch
   whose head it starts from; it still merges toward main): the first map names the chain and the branch
   `chain-<handle>`, later tasks are named by position (`chain-entities`), all written in one transaction through
-  the task writer, then the chain fact on main. A chain whose fact main holds is answered as it stands and nothing
-  is written. Answers the branch, the first task and every handle in order.
+  the task writer, then the chain fact on main. Before anything is written, the first and each running task's runnable view
+  (`chain-refusal`: its members, its branch and main's config with `:seon.chain/config` decided over it) must validate,
+  else its `:unrunnable` refusal answers and nothing is forked or written. A chain whose fact main holds is answered
+  as it stands and nothing is written. Answers the branch, the first task and every handle in order.
 
   ## Example
 
@@ -1048,7 +1144,7 @@
                   [:=> [:cat :seon.task/chain-context [:vector {:min 1} :seon.task/task-map] :seon.task/chain-options]
                    [:or :seon.task/chain :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]]}
   ([context tasks] (chain! context tasks {}))
-  ([{connection :seon.db/connection store :seon.store/store} tasks {from :seon.chain/from}]
+  ([{connection :seon.db/connection store :seon.store/store} tasks {from :seon.chain/from overlay :seon.chain/config}]
    (let [main (db/db connection)
          main-branch (get-in main [:config :branch])
          {ns :seon.task/ns first-name :seon.task/name} (first tasks)
@@ -1059,12 +1155,13 @@
                                   :seon.task/handles (chain-handles (db/db connection) first-handle)})]
      (if held
        (registry/on-branch store branch answer)
-       (let [forked (when-not (contains? (registry/branches store) branch)
+       (let [entities (chain-entities tasks)
+             refusal (chain-refusal main branch entities overlay)
+             forked (when-not (or refusal (contains? (registry/branches store) branch))
                       (registry/fork! {:seon.store/store store :seon.store/branch branch :seon.db/db main
                                        :seon.branch/target main-branch :seon.cluster.registry/from (or from main-branch)}))
-             entities (chain-entities tasks)
              handles (into #{} (map #(task-handle ns (:seon.task/name %))) entities)
-             written-tasks (when-not (:seon.error/at forked)
+             written-tasks (when-not (or refusal (:seon.error/at forked))
                              (registry/on-branch store branch
                                         ;; the first task's basis is what the branch holds under its identity: a filed
                                         ;; task's inherited entry, which the chain's first task revises; the writer
@@ -1079,7 +1176,8 @@
                                                                                  chained)))))))
              fact (when (:db-after written-tasks)
                     (written connection [{:seon.chain/first first-handle :seon.chain/branch branch}]))]
-         (cond (:seon.error/at forked) forked
+         (cond refusal refusal
+               (:seon.error/at forked) forked
                (not (:db-after written-tasks)) written-tasks
                (not (:db-after fact)) fact
                :else (registry/on-branch store branch answer)))))))

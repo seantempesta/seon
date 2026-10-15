@@ -162,14 +162,15 @@
                [:seon.task/product :seon.task/product]]
  :subjects [:set :symbol] :referrers [:set :symbol]
  :proofs [:set {:seon.task/owned true :description "The deftests that must be green for this task to be done, by symbol: set from its template when its chain is created (seon.task/chain!), changed by an agent (Prove writes the next task's), joined with the task's own tagged tests until tags go; owned, never flowing."} :symbol]
- :task-map [:map {:description "One task of a chain as seon.task/chain! takes it: ordinary task members, a template's owned members merged with a plan. Only the first map's ns and name are read; identity, tempid and next are derived by position."}
+ :task-map [:map {:description "One task of a chain as seon.task/chain! takes it: ordinary task members, a template's owned members merged with a plan. Only the first map's ns and name are read; identity, tempid and next are derived by position; an omitted execution is :running for the first and :held for the rest."}
             [:seon.task/ns {:optional true} :seon.task/ns] [:seon.task/name {:optional true} :seon.task/name]
             [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/instructions {:optional true} :seon.task/instructions]
-            [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]]
+            [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/model {:optional true} :seon.task/model]
+            [:seon.task/execution {:optional true} :seon.task/execution]]
  :chain-context [:map {:description "What creating a chain writes through: main's connection, which holds the chain fact, and the store whose branches hold the chain's branch."}
                  [:seon.db/connection :seon.db/connection] [:seon.store/store :seon.store/store]]
- :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's."}
-                 [:seon.chain/from {:optional true} :seon.chain/from]]
+ :chain-options [:map {:description "How a chain starts: :seon.chain/from names the branch whose head it forks from instead of main's; :seon.chain/config the chain's own config decisions over main's."}
+                 [:seon.chain/from {:optional true} :seon.chain/from] [:seon.chain/config {:optional true} :seon.chain/config]]
  :handles [:vector {:min 1 :description "Task handles in chain order, along :seon.task/next."} :seon.task/handle]
  :chain [:map {:description "A chain as seon.task/chain! answers it: its branch, its first task and every task in order."}
          [:seon.chain/branch :seon.chain/branch] [:seon.chain/first :seon.chain/first] [:seon.task/handles :seon.task/handles]]
@@ -228,7 +229,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :duplicate-name :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :needs-cycle :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
+           :unknown-task :unassigned :revised-since-assignment :needs-cycle :no-proofs :unrunnable :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:merge :seon.error/base

@@ -142,7 +142,7 @@
         connection (:seon.db/connection target)
         _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
         chain (task/chain! {:seon.db/connection connection :seon.store/store store}
-                           [{:seon.task/ns 'tq.rootmr :seon.task/name "fix" :seon.task/plan "Fix."}])
+                           [{:seon.task/ns 'tq.rootmr :seon.task/name "fix" :seon.task/plan "Fix." :seon.task/proofs '#{tq.rootmr/proof}}])
         branch (:seon.chain/branch chain)
         [handle] (:seon.task/handles chain)
         on-chain (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})

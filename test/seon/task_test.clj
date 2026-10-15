@@ -572,7 +572,7 @@
            (is (= answer (chain! context maps)) "a repeat answers the existing chain")
            (is (= before (commits)) "a repeat commits nothing on main or the branch")
            (is (= edited (:seon.task/plan (pulled (chain-db) "fix"))) "a repeat keeps the edited plan"))
-         (let [from (chain! context [(assoc owned :seon.task/ns 'tq.chain :seon.task/name "again")] {:seon.chain/from branch})
+         (let [from (chain! context [(assoc owned :seon.task/ns 'tq.chain :seon.task/name "again" :seon.task/plan plan)] {:seon.chain/from branch})
                _ (is (= from-branch (:seon.chain/branch from)) "a chain's branch is named by its first task")
                database (db/db connection)]
            (is (= main-branch (:seon.branch/target (registry/fork-of (db/branch-database database from-branch)
@@ -587,6 +587,47 @@
          (finally
            (doseq [b [branch from-branch] :when (contains? (registry/branches store) b)]
              (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))))
+
+(deftest a-chain-whose-config-names-a-rejected-dial-value-is-refused
+  ;; reactive-start plan §3: nothing executes until its desired state validates. `seon.task/chain!` validates each
+  ;; running task's `:seon.task/runnable` view before it forks, and a refusal carries Malli's explanation as data
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           context {:seon.db/connection connection :seon.store/store store}
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           task {:seon.task/ns 'tq.unrun :seon.task/name "fix" :seon.task/plan "Fix it." :seon.task/proofs '#{tq.unrun/proof}}]
+       (doseq [[label tasks options explained]
+               [["a dial value its schema rejects" [task] {:seon.chain/config {:seon.config.ai/max-tokens 0}}
+                 [:seon.task/config :seon.config.ai/max-tokens]]
+                ["a dial no chain branch reads" [task] {:seon.chain/config {:seon.config.agent/max-running 2}}
+                 [:seon.task/config :seon.config.agent/max-running]]
+                ["a running task with no proofs" [(dissoc task :seon.task/proofs)] {} [:seon.task/proofs]]]]
+         (let [before [(db/commit-id (db/db connection)) (registry/branches store)]
+               refusal (task/chain! context tasks options)]
+           (is (= :unrunnable (:seon.task/refused refusal)) label)
+           (is (some? (get-in (:seon.task/explanation refusal) explained)) "the explanation names the offending key")
+           (is (= before [(db/commit-id (db/db connection)) (registry/branches store)])
+               "nothing is written: no fork, no task, no chain fact")))))))
+
+(deftest a-complete-chain-is-written
+  ;; reactive-start plan §3: a chain whose running tasks validate is written as given, its execution honored, so a
+  ;; chain written :held starts nothing until root runs it
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           {branch :seon.chain/branch [first-task] :seon.task/handles}
+           (task/chain! {:seon.db/connection connection :seon.store/store store}
+                        [{:seon.task/ns 'tq.complete :seon.task/name "fix" :seon.task/plan "Fix it."
+                          :seon.task/proofs '#{tq.complete/proof} :seon.task/execution :held}]
+                        {:seon.chain/config {:seon.config.ai/max-tokens 512}})]
+       (try
+         (is (contains? (registry/branches store) branch) "the chain's branch exists")
+         (is (= :held (:seon.task/execution (db/pull (db/branch-database (db/db connection) branch)
+                                                     [:seon.task/execution] [:seon.task/id first-task])))
+             "the written execution is honored")
+         (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
 
 (def ^:private chain-proofs
   ;; A template proof reading its task's plan, a successor proof, a handoff reading the successor's result on the
@@ -799,7 +840,7 @@
            _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
            {branch :seon.chain/branch first-task :seon.chain/first}
            (task/chain! {:seon.db/connection connection :seon.store/store store}
-                        [{:seon.task/ns 'tq.view :seon.task/name "design" :seon.task/plan "Design it."}
+                        [{:seon.task/ns 'tq.view :seon.task/name "design" :seon.task/plan "Design it." :seon.task/proofs '#{tq.view/proof}}
                          {:seon.task/ns 'tq.view :seon.task/step :prove :seon.task/plan "Prove it."}
                          {:seon.task/ns 'tq.view :seon.task/step :implement :seon.task/plan "Implement it."}])
            views #(task/chain-views (db/db connection) {branch (db/branch-database (db/db connection) branch)})

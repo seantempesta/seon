@@ -602,7 +602,7 @@ handle))}}
       (let [store (:seon.store/store (support/execution-handle connection))
             {branch :seon.chain/branch first-task :seon.chain/first}
             (task/chain! {:seon.db/connection connection :seon.store/store store}
-                         [{:seon.task/ns 'tq.page :seon.task/name "design" :seon.task/plan "Design it."}
+                         [{:seon.task/ns 'tq.page :seon.task/name "design" :seon.task/plan "Design it." :seon.task/proofs '#{tq.page/proof}}
                           {:seon.task/ns 'tq.page :seon.task/step :implement :seon.task/plan "Implement it."}])
             ;; attempts and their outcomes are written on the chain's branch
             on-chain! (fn [f] (registry/on-branch store branch f))
@@ -632,7 +632,7 @@ handle))}}
               ;; and the pass reads every chain at its branch's head
               (close!)
               (task/chain! {:seon.db/connection connection :seon.store/store store}
-                           [{:seon.task/ns 'tq.page :seon.task/name "later" :seon.task/plan "A later chain."}])
+                           [{:seon.task/ns 'tq.page :seon.task/name "later" :seon.task/plan "A later chain." :seon.task/proofs '#{tq.page/proof}}])
               (is (str/includes? (read-until! stream "seon-chain-bailed") "seon-chain-bailed")
                   "a new chain on main repaints the page with the first chain, closed on its branch, bailed")
               (finally (.close stream))))

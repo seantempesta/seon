@@ -595,7 +595,8 @@
         {chain :seon.chain/branch first-task :seon.chain/first}
         (task/chain! {:seon.db/connection main-conn :seon.store/store store}
                      [{:seon.task/ns 'fixture.forward :seon.task/name (str "chain-" (id/id))
-                       :seon.task/plan "Merge main forward into `seon.merge/merge-main!`'s chain."}])
+                       :seon.task/plan "Merge main forward into `seon.merge/merge-main!`'s chain."
+                       :seon.task/proofs '#{fixture.forward/proof}}])
         on-chain (fn [f] (registry/on-branch store chain f))
         ;; the chain's first attempt, on its branch, as root's run writes it
         attempt (on-chain #(let [tx (task/attempt-tx (db/db %) first-task "root" chain)]

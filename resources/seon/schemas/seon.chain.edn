@@ -4,6 +4,8 @@
                :description "The chain's first task, by its :seon.task/id: the chain's identity, since only the first task supplies a chain's name."}
          :seon.task/handle]
  :from [:and {:description "The branch whose head a new chain forks from instead of main's (seon.task/chain!): it selects only the starting head; the chain's base and merge target stay main."} :seon.store/branch]
+ :config [:map-of {:description "A chain's own config decisions as seon.task/chain! takes them: dial to value, or seon.config/absent to decide it absent, over main's effective config. Only the dials of :seon.task/desired-config are a chain's; the runnable view refuses any other."}
+          :qualified-keyword :seon.schema/value]
  :chain [:map {:seon.db/attributes true :seon.program/partition :seon.data
                :description "The chain fact on main, one per chain: discovery, not status. Root finds every chain through it and reads the chain's state on its branch."}
          [:seon.chain/first :seon.chain/first]

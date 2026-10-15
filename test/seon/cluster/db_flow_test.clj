@@ -682,12 +682,9 @@
            store (agent/handle-store handle)
            chain (task/chain! {:seon.db/connection connection :seon.store/store store}
                               [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
-                                :seon.task/proofs #{(proof "c")}}])
+                                :seon.task/proofs #{(proof "c")} :seon.task/execution :held}])
            branch (:seon.chain/branch chain)]
        (try
-         (registry/on-branch store branch
-                             #(test-support/transacted! % [[:db/add [:seon.task/id (first (:seon.task/handles chain))]
-                                                            :seon.task/execution :held]]))
          (body handle chain {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                              :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store})
          (finally (release-chain! routing store branch)))))))

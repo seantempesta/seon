@@ -26,7 +26,8 @@
         {chain :seon.chain/branch}
         (task/chain! {:seon.db/connection main-conn :seon.store/store store}
                      [{:seon.task/ns 'fixture.forward :seon.task/name (str "file-" suffix)
-                       :seon.task/plan "Merge main's new file forward into `seon.merge/merge-main!`'s chain."}])
+                       :seon.task/plan "Merge main's new file forward into `seon.merge/merge-main!`'s chain."
+                       :seon.task/proofs '#{fixture.forward/proof}}])
         on-chain (fn [f] (registry/on-branch store chain f))]
     (try
       (write! main-conn [{:seon.fn.file/relative-path path :seon.fn.file/digest (id/digest 64 [path])}])
@@ -57,7 +58,8 @@
         {chain :seon.chain/branch}
         (task/chain! {:seon.db/connection main-conn :seon.store/store store}
                      [{:seon.task/ns 'fixture.forward :seon.task/name (str "record-" suffix)
-                       :seon.task/plan "Merge main forward as a merge commit in `seon.merge/merge-main!`."}])
+                       :seon.task/plan "Merge main forward as a merge commit in `seon.merge/merge-main!`."
+                       :seon.task/proofs '#{fixture.forward/proof}}])
         record (fn [database] (into {} (db/q '[:find ?n ?c :where [?e :seon.cluster/name ?n] [?e :seon.source/commit-id ?c]]
                                             database)))
         [cluster-name] (first (record (db/db main-conn)))
@@ -100,7 +102,8 @@
         {chain :seon.chain/branch}
         (task/chain! {:seon.db/connection main-conn :seon.store/store store}
                      [{:seon.task/ns 'fixture.forward :seon.task/name (str "own-" suffix)
-                       :seon.task/plan "Judge only the branch's own change after `seon.merge/merge-main!`."}])
+                       :seon.task/plan "Judge only the branch's own change after `seon.merge/merge-main!`."
+                       :seon.task/proofs '#{fixture.forward/proof}}])
         on-chain (fn [f] (registry/on-branch store chain f))
         functions (fn [identities] (into #{} (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) identities))]
     (try
