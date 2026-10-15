@@ -1247,7 +1247,9 @@
                            {:seon.cluster/name (:seon.cluster/name handle)
                             :seon.db/connection connection
                             :seon.source/commit-id (db/commit-id selected)
-                            :seon.schema/projection (db/carried-projection (db/db connection))
+                            ;; the value this acquisition selected, never a second read of the connection, which
+                            ;; another holder may have released meanwhile (a refusal map, 2026-10-14 and -15)
+                            :seon.schema/projection (db/carried-projection selected)
                             :seon.sci.eval/ctx ctx
                             :seon.sci.eval/base-ctx base
                             :seon.env/environment (env/of ctx)
