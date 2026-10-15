@@ -773,18 +773,17 @@
           proofs)))
 
 (defn- task-source
-  "A task's code level (TASK-CHAIN §3a): its plan, instructions, proofs with their latest status and next task, or nil
-  when no task has that symbol."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:maybe :my.program/task-source]]}
+  "The task `sym`'s code level (TASK-CHAIN §3a): its plan, instructions, proofs with their latest status and next
+  task; a member the task lacks is absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :my.program/task-source]}
   [database sym]
   (let [task (db/pull database [:seon.task/plan :seon.task/instructions :seon.task/proofs {:seon.task/next [:seon.task/sym]}]
                       [:seon.task/sym sym])]
-    (when (and (map? task) (not (db/read-refusal? task)))
-      (cond-> {:sym sym :kind :task}
-        (:seon.task/plan task) (assoc :plan (:seon.task/plan task))
-        (:seon.task/instructions task) (assoc :instructions (:seon.task/instructions task))
-        (seq (:seon.task/proofs task)) (assoc :proofs (proof-status database (set (:seon.task/proofs task))))
-        (get-in task [:seon.task/next :seon.task/sym]) (assoc :next (get-in task [:seon.task/next :seon.task/sym]))))))
+    (cond-> {:sym sym :kind :task}
+      (:seon.task/plan task) (assoc :plan (:seon.task/plan task))
+      (:seon.task/instructions task) (assoc :instructions (:seon.task/instructions task))
+      (seq (:seon.task/proofs task)) (assoc :proofs (proof-status database (set (:seon.task/proofs task))))
+      (get-in task [:seon.task/next :seon.task/sym]) (assoc :next (get-in task [:seon.task/next :seon.task/sym])))))
 
 (defn- member-description
   "A member schema described one level: its description, else its form; nothing for a key with no stored form."
@@ -850,7 +849,8 @@
   (cond
     (keyword? subject) (schema-source database subject)
     (simple-symbol? subject) (namespace-declarations database subject)
-    :else (or (task-source database subject) (declaration-source database subject))))
+    (seq (db/datoms database :avet :seon.task/sym subject)) (task-source database subject)
+    :else (declaration-source database subject)))
 
 (defn render-source-ai
   "A declaration's source as its own text: the code an agent can copy into a `defn`

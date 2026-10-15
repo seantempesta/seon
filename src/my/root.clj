@@ -65,10 +65,10 @@
 (defn- chain-requests
   "Every chain attempt that has ended and holds no outcome on its chain branch (`seon.task/chain-attempts`), read
   through `store`, as an open assignment on that branch: a running attempt is not a merge request."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.store/store]]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store]
                   [:or [:vector :my.root/open-assignment] :seon.db/invalid-read-error]]}
   [database store]
-  (let [attempts (if store (task/chain-attempts database store) [])]
+  (let [attempts (task/chain-attempts database store)]
     (if (:seon.error/at attempts)
       attempts
       (into [] (comp (filter :seon.task.attempt/end) (remove :seon.task/outcome)
@@ -91,7 +91,7 @@
                                        :seon.task.attempt/end]) ...]
                       :where [?a :seon.task/assignment] [?a :seon.task/branch] (not [?a :seon.task/outcome])]
                     database)
-        chained (when-not (db/read-refusal? found) (chain-requests database store))]
+        chained (if store (when-not (db/read-refusal? found) (chain-requests database store)) [])]
     (cond (db/read-refusal? found) found
           (:seon.error/at chained) chained
           :else (into (mapv #(offered (with-branch-end database (dissoc % :db/id))) (sort-by :seon.task/assignment found))
