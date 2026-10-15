@@ -38,9 +38,11 @@ model below.
    writes with that branch's predicates (context-bound projection), so a predicate the agent defines on its branch
    (a "branch-born predicate") can be used by its contracts before the merge
    (`seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer`).
-4. **Config** (the word; never "cluster dials"): config the branch wrote itself (e.g. a task's `:seon.task/model`) wins;
-   everything else reads main's HEAD, so `bin/seon config apply` reaches running agents. (S5 run 8's attempt read run
-   4's frozen cap because it read its own branch's fork-time config.)
+4. **Config** (the word; never "cluster dials") is branch data like everything else (amended 10-15, below): a branch
+   reads its own config. Root changes a branch's config explicitly by applying it to that branch (`seon.config/apply!`
+   takes the branch's connection; an entrance `bin/seon config apply --branch B` / `--chains`). Root acts
+   cluster-wide and may write any branch; agents never write main. Config is not a program entity, so a merge never
+   carries it. (S5 run 8's attempt read run 4's cap 40 because root applied 100 to main only.)
 5. **Merge by reach closure.** Seeds: the chain's proofs plus the tests the branch defines that are green and reach
    something it changed. The merge carries their closure through all hops — called functions transitively, the schemas
    their contracts name, the schemas those reference, predicates named inside, the defs they read, their namespaces —
@@ -65,6 +67,18 @@ model below.
     merge, becee4d99, broke it; reverted e5dd2abd5).
 11. **Rejected for now:** binding main's compiled JVM Vars per context so compiled callers follow a branch (the
     predicates hybrid's "larger option", 8926d8d61).
+
+## Amendment, 10-15 late morning: branches diverge like git (owner)
+
+"I want main and branches to diverge just like in git and we explicitly merge things back. Make it as immutable and
+pointer based as possible." And: config apply to a branch, done by root. This replaces ruling 1's "everything else
+binds the loaded program and every reader reads the loaded program's row": a branch runs exactly its own HEAD; every
+reader reads the branch's own database value; main's later changes are not seen until the merge, which reconciles
+once. The only cross-pointer computation is which declarations SCI interprets: those whose digest at the branch HEAD
+differs from the loaded commit's, plus their callers — a pure function of two commit ids, cached by that pair. The one
+exception is host-bound platform code (evaluator, writer, runner), which always runs as loaded. Branch HEADs are
+Datahike branch pointers held by the world's connection; nothing recomputes where a HEAD is. The hybrid
+(own-delta-hybrid.md) settles own-delta vs this model; the owner's preference is this model.
 
 ## The work, in order (plan §0)
 
