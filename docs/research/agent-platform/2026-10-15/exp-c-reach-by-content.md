@@ -113,3 +113,20 @@ stopped per the 1.5 GB rule. File separately: `reach-revision-key` on an uncommi
   the 7.1 GB and 2,376-test OOM cases are consistent with the cold cost scaling to the whole program and being paid again per branch and
   generation, but I did not reproduce those). With the change: the delta's reverse closure only. The 7.1 GB case needs its own measurement
   once the change lands.
+
+## 7. Separate finding: reach on an uncommitted `d/with` value (~1.9 GB)
+
+Reading the code during lane reach-content (2026-10-15; not fixed there). The probable cause is not `content-revisions` itself:
+`seon.db/content-revisions` returns nil for a value with no committed identity (`seon.db/committed-context`), so
+`seon.test.runner/reach-revision-key` is nil. Then every `seon.test.runner/reach-attribute` takes the `derive` branch with no
+`::reach-attribute` cache and no incremental head, a full `:aevt` scan of each of the 11 reach attributes. There is no prior either
+(no store identity), and `reached-graph` + `reach-index` run cold. Measured per full attribute scan on default (68ceef4ad, JVM mode,
+read-only, thread allocation): `:seon.fn/calls` 391 MB / 128 ms (10,309 entities), `:seon.fn/keywords` 179 MB / 59 ms,
+`:seon.fn/doc` 14 MB, others at most 10 MB. The total is ~600 MB per declarations build. The heavy part is `seon.db/datoms`, which
+realizes every datom as a map and validates each one through its output contract (several KB per datom of the `:many` attributes).
+Owners: `seon.db/datoms` for the per-datom cost, and `seon.test.runner/reach-attribute` for the full scan with no revision. The same
+full scan is what a new branch still pays for each changed `:many` attribute after 6ce9dd8ad: `::reach-attribute-head` is still
+keyed by `reach-owner`, because its incremental update reads `seon.db/entities-changed-after` a basis t that is valid only on its own
+branch. Proposed slice: derive the changed attribute's map from the store head's held map, with the changed entities taken from
+`datahike.versioning/merge-base` of the two commits (each side's `entities-changed-after` the base's t). Then `reach-owner` and
+`retire-replaced-revision!`'s owner key can go.
