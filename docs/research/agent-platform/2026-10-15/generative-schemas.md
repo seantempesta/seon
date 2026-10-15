@@ -1,5 +1,8 @@
 ---
 title: "Generative schemas and functions: accumulating knowledge"
+type: research
+status: active
+created: 2026-10-15
 ---
 
 # Generative schemas and functions (2026-10-15)
@@ -10,7 +13,7 @@ input. An agent viewing a function (for example from a `fn.ns/symbol` reference)
 Every schema and function an agent wrote is discovered and generatively tested when it changes, visible in the UI, and
 must be green to exit a stage.
 
-This document accumulates across lanes. Section 1 is this lane (`gen-dig`, research only, no source edited): how the libraries work, how Seon uses them, what is measured, and the facts and questions the next lanes rely on. Sections 2 and 3 are reserved for the next lanes and are empty on purpose.
+This document accumulates across lanes. Section 1 is this lane (`gen-dig`, research only, no source edited): how the libraries work, how Seon uses them, what is measured, and the facts and questions the next lanes rely on. Section 2 (lane `gen-web`) is the web research and section 3 (lane `gen-design`) the design.
 
 ## Pins and evidence used
 
@@ -495,5 +498,211 @@ probe's output only (`tmp` is gitignored); the producer rule is simple: the 199 
 - Before sizing the work, rerun the count (2.8) with Seon's namespaces loaded in a throwaway JVM so the 408 `:sci/error` keys are
   classified; the design should quote that number, not 276 or 400.
 
+## 3. Design: generative checks at each stage
 
-## 3. Design (next lane)
+Lane `gen-design` (Opus, 2026-10-15), on HEAD 40db32d49. It replaces the hybrid of the two measured-gates plans
+(`measured-gates-plan-opus.md` 222e9ab61, `measured-gates-plan-astra.md` 1ff9589e2). It is docs only and uses no REPL
+probe; every claim about current code below was read at its symbol. **What exists:** the runner runs deftests as
+members. It keys each result by reach digest (`seon.test.runner/reach-digests`), and keys a task-reading test by its
+input's content as well (`seon.test.runner/task-inputs`, `task-identity`, `task-reach-digests`, reader `seon.test/task`).
+The branch's changes since its fork come from `seon.test/branch-delta`, which `seon.step/changed` reads and the done rule
+judges as `:seon.program/identities`. Omitted inputs are filled from `seon.batch/world-members`. A function is shown
+through `seon.render.ns/function-ai`. Nothing generates from a schema except the build-only
+`seon.test.accretion/generatable?`, and nothing checks a function against its `:=>`. **Approach in one line:** a
+derived check is an ordinary test member that judges one subject. It does this by generalising the task input into a
+subject input, so selection, digest, reuse, cost, the done rule and the view are all the installed runner's.
+
+### 3.1 One mechanism: two derived deftests, one subject input
+
+- **Two deftests, written once** in `test/seon/check_test.clj`: `schema-generates-and-validates` and
+  `function-meets-its-contract`. Each reads `(seon.test/subject)`, which is `seon.test/task` generalised: the supplied
+  input is the subject's declaration, and a task is one kind of subject. No deftest is written per schema or function
+  (Opus §1). The bodies call one contracted namespace, `seon.check` (new, `src/seon/check.clj`). It holds the
+  properties and nothing else.
+- **Reach digest** = `id[closure(check deftest), closure(subject)]`. This is the fold `task-reach-digests` already does,
+  with `subject-identity` (the subject closure's content digest) in place of `task-identity`. When the same schema is on
+  two branches, both have one digest and one cached result (rule 3). That sharing is the goal: it is a cache hit, not a
+  read across branches. A subject whose content has not changed never runs again.
+- **Seed** = `seon.check/seed`, the first 63 bits of the member's reach digest. The check is therefore deterministic for
+  its content. It also gets fresh coverage on every change, because a new digest gives a new seed (§2.3: Hypothesis's
+  `derandomize` and proptest's committed seeds converge on this).
+- **Schema property** (`seon.check/schema-property`):
+  `(tc/quick-check n (prop/for-all* [(mg/generator s)] (m/validate s %)) :seed seed :max-size size)`.
+  - It catches all three failure kinds as one member result:
+    - a build error (`::mg/no-generator`, `::m/invalid-schema`), thrown and recorded by the runner (the entrant boundary)
+      with its `ex-data`;
+    - such-that exhaustion (`::mg/such-that-failure`, thrown at generate time, §1.1);
+    - a generated value that fails its own schema (`:gen/elements`, `:gen/return`, §2.6), returned with
+      `:shrunk :smallest`.
+  - `n` = `:seon.config.check/values` (20) and `size` = `:seon.config.check/size` (10).
+  - Setup and steady state are measured separately (Astra): the generator and validator are built once, cached on the
+    compiled schema by `m/-cached`, and timed apart from the trials.
+- **Function property** (`seon.check/function-property`): Seon's own `prop/for-all*`, because
+  `malli.generator/function-checker` calls `(check/quick-check =>iterations)` without a seed (read at
+  `malli.generator/function-checker`; §2.3 measured an 82% miss at 10 trials).
+  - For each arity from `m/-function-schema-arities` and `m/-function-info`, it generates `:input` with
+    `mg/generator`, applies the subject's Var value (whatever the branch runs, compiled or interpreted), and validates
+    `:output` and `:guard` with `m/validator`.
+  - It runs `quick-check` with `:seed`, `n` = `:seon.config.check/iterations` (100: §2.5 measured 1–10 ms for pure
+    functions) and `:max-size`.
+  - On failure it builds **Malli's result shape** from the shrunk args: `::m/explain-input`, `::m/explain-output`,
+    `::m/explain-guard` and `::m/result`. The body is about 15 lines that compose Malli's seams; it does not copy the
+    checker.
+  - Root's library batch files the upstream gap: forward `:seed` and `:max-size` through `function-checker`. When it
+    lands, `function-property` shrinks to a call of `mg/function-checker`, and that change names the deletion.
+- **Unknown is a typed result and is never green.** The check answers `{:seon.check/unknown reason}` in three cases:
+  - `:world-input`: an input slot whose schema is a `seon.batch/world-members` key or `:seon.db/database-value`, or a
+    closure that reaches a function with such a slot. This is derived from the reach graph the digest already walks, not
+    from a list. Effects go through declared bindings by law, so this is also the effect detector. A host effect hidden
+    behind an undeclared binding is that function's own defect, and running the check exposes it.
+  - `:unimplemented`: the shrunk failure's `ex-data` names `:seon.error/unimplemented`, as the Design stub does.
+  - `:unmeasured`: the member has no attributed allocation.
+
+  Filling world inputs from the member's disposable test world, where database effects die with its branch, comes
+  later, after §3.6's phase 0 has counted these functions.
+
+### 3.2 Shrunk counterexample: stored as data, replayed first, dropped when inadmissible
+
+- A red member keeps `:seon.check/counterexample`. It holds the shrunk args (or the schema's failing value) as the value
+  printer's printed value, plus the `m/form` digest of the input schema it was found against. It goes through
+  `seon.blob/inline-or-stage` when it is large. A Throwable result is stored as its printed value, never as the object
+  (§2.5).
+- **Replay first:** before it generates, `function-property` reads the latest counterexample for its subject on its own
+  branch (a query by `:seon.test.member/subject`, never another branch). If `(m/validate input args)` holds, it runs
+  those args as trial 0 (`:seon.check/replayed`). This is Hypothesis's database and test.check's `gen/return` habit
+  (§2.9).
+- **Drop when the contract no longer admits it:** when the validation fails, the counterexample is listed in the new
+  member as `:seon.check/dropped`. It is never run and never carried further.
+- A counterexample worth keeping becomes a row in an authored table test. The reply shows the form that adds it, as
+  data. That is Hypothesis's `@example`, and it is what lets the regression merge.
+
+### 3.3 The database round trip for entity schemas
+
+- The trigger is a schema that declares `:seon.db/attributes true` (253 packaged ones). Its schema check adds a
+  property:
+  1. generate each attribute's value;
+  2. call `seon.db/with` on the member's test-world value with `{:db/id "e" attr v}`, which applies the writer's own
+     checks and is never committed;
+  3. pull `[attr]` and compare it with `v` after Seon's own "absence is no key" law: an empty cardinality-many value
+     equals absent.
+- This is the check that found `[:set :keyword]` admitting `#{}`, a value the database does not keep. It found it in one
+  run and shrank it to the minimum (§2.7). The fix is at the producer: `[:set {:min 1} …]`.
+- Ref attributes and digest-checked identities are relational, so a generated value cannot satisfy them alone. They
+  answer `{:seon.check/unknown :relational}`. Whole entities stay proven by authored tests through the canonical writers.
+
+### 3.4 Discovery, examples and the live view: one derivation
+
+- **Discovery:** the subjects are `(seon.step/changed branch :seon.schema/key)` ∪ `(… :seon.fn/sym)`. This is the same
+  `seon.test/branch-delta` as the merge list's candidates (rulings 5a), checked in the eval request's test step whenever
+  a subject's reach digest moves.
+  - Derived checks judge their subjects but are **not seeds of the merge list**. Tests curate what merges (rule 6), and
+    if checks were seeds, every contracted scratch function would merge.
+  - Dependents that the branch did not change are rechecked on the merge candidate, where their digest differs (5b). That
+    comes later.
+- **One function, `seon.check/subjects`** `[branch dials] → [{subject kind verdict cost counterexample examples data}]`,
+  is read by three consumers:
+  - the current-state block (`seon.context/current-state`);
+  - the agent's web page (`seon.render.web`, C0);
+  - the done rule's judged input.
+- **`seon.check/verdict`** `[member dials] → :green|:red|:unknown|:over` applies the cost law to the stored observation.
+  The dials are not in the digest, so changing a dial re-judges without re-running (Astra).
+- **Live view panel:**
+  - for each changed schema: does it generate (verdict and failure kind), and generate/validate bytes and µs per node;
+  - the data present: for an entity schema, the branch's count of entities with its identity attribute, one
+    `:avet` index count. This is view only and never a gate (owner: real data);
+  - for each changed function: is it checked (verdict or unknown reason), its shrunk counterexample with the explain
+    path, and whether a seed reaches it ("merges" or "stays on the branch", rulings 5a).
+- **Examples for agents:**
+  - The check member also records three seeded `[args ret]` pairs. They come from `mg/sample` of the input at sizes 1, 3
+    and 10 with `seon.check/seed`, applied in the member, and shrinking makes small values the simplest in their domain
+    (§2.1).
+  - `seon.render.ns/function-ai` reads them, with the counterexample, from the subject's member at its current digest
+    and shows them as `:seon.check/examples`. The schema render shows sample values the same way.
+  - The render only reads; the evaluation that changed the function ran the check (AGENTS.md "Presentation"). It is
+    cached by the function's content digest, so a reference resolving to `fn.ns/symbol` costs one cached read.
+
+### 3.5 Stage exits and the gate, in `seon.cluster.source/done-refusals`
+
+`done-refusals` stays the one rule. It runs no test, and its judged input gains `(seon.check/subjects branch dials)`.
+TASK-CHAIN §2.4 and §4 are amended in the implementing commit (the design is locked). Two clauses change:
+
+- **Widened `:seon.source/stray-red-error`:** a derived check whose subject is in `:seon.program/identities` and whose
+  verdict is `:red` or `:over` refuses at every task. An `:unknown :unimplemented` passes mid-chain and refuses on the
+  last task, the same terminal clause stray reds use.
+- **New, on the last task only:** a function changed on the branch that the merge list leaves "on the branch" refuses
+  (`:seon.source/unmerged-change-error`, registered in `seon.source.edn`). The agent either tests it or unmaps it
+  (`my.program/ns-unmap!`). This is the owner's workspace cleanup, and the form for each choice is shown beside it. An
+  unknown check is never green, but a function a green seed reaches is proven by that seed.
+
+Per stage, that gives:
+
+- **Design** (schemas): every changed schema's check is `:green`. A stub's function check answers `:unimplemented`.
+- **Prove** (tests): the proofs are `seon.test.runner/designed-red?`, strengthened so that a result whose only failing
+  reports are bound failures, harness errors or generator errors is not designed. "Red for the stated reason, fast" is
+  then the existing `seon.step.prove/handoff` `:not-designed-red`.
+- **Implement** (functions): the proofs are green, every changed function's check is green or (if unknown) reached by a
+  green seed, and nothing is left on the branch unmerged. This clears scratch.
+
+**The gate signal** is a member's body-thread allocation and its armed calls, which repeat exactly when warm. Wall
+milliseconds are only the execution bound and are never compared. The gate applies only to Seon's own checks over
+bounded generated inputs: derived checks and authored test members. An eval request, a render or a model call over
+real data is measured and shown, and never refused (owner, `tmp/measured-gates-round.md`).
+
+The cost law is per unit of work. Dials live under `:seon.config.check/*`:
+
+- `gen-bytes-per-node` and `validate-bytes-per-node`, per generated or validated node;
+- `call-bytes-per-node` and `calls-per-call`, per function call per input node.
+
+Each ships at 10× the phase-0 median. That gives the owner's "10× is wrong work" with no factor dial (Opus §2). An
+over-target result is data: `{:unit :observed :target :values :nodes}`, beside the member's `:seon.test.member/top`.
+The two hard-coded 5000 ms limits (`seon.test/run`, `seon.test/declared-bound-ms`) become `:seon.config.test/bound-ms`,
+with `bound-mb` added beside it. `duration-failures` becomes `bound-failures`.
+
+### 3.6 Fix at the producer first, then the phases
+
+**Producer fixes**, before any gate:
+
+- **The error variants.** About 208 schema forms in `resources/seon/schemas` are `[:and :seon.error/base [:map …]]`
+  (§2.8 counted 199 `*error` keys failing `such-that`). One rewrite-clj script turns each into
+  `[:merge :seon.error/base [:map …]]`.
+- **Registering `malli.util`.** `:merge` needs `malli.util/schemas` (§2.7). Today nothing registers it: ten sites in
+  `seon.config`, `seon.schema`, `seon.schema.internal`, `seon.fn.analyzer` and `seon.test.accretion` each compose a bare
+  `(m/default-schemas)`. They become one var, `seon.schema.internal/default-schemas` =
+  `(merge (m/default-schemas) (malli.util/schemas))`. It is cljc, so the bb-loadable edit hook (ruling 10) keeps
+  loading.
+- **The `:and` readers.** Their readers convert in the same commit:
+  - `seon.schema.internal/extends-schema?` and `entity-maps` read `:and` children;
+  - `seon.error`'s declared-schema-keys tests `(= :and (m/type …))`.
+
+  They must read `:merge` the same way (`m/children`, or `m/deref` to the merged `:map`). Otherwise the sweep silently
+  drops every variant from the declared set.
+- **Predicate schemas.** Predicate schemas whose generator exhausts get `:gen/schema` or `:gen/fmap` on their own
+  registration (§2.2), never more `:max-tries`.
+- **Later.** The errors cut's `:multi` on `:seon.error/type` supersedes the per-variant form.
+
+| # | Phase | Kind | Red proof (data assertion) | Deletes |
+|---|---|---|---|---|
+| 0 | Count the corpus with Seon's namespaces loaded, in a throwaway check JVM, never on default: the 408 `:sci/error` keys classified, per-node medians, dependents per key, world-input share. Committed as `script/seon/check_corpus.clj` plus evidence. | host-bound (`script/`) | `seon.error-test/an-error-variant-generates` (`are`: `:my.edit/no-match-error`, `:my.shell/error` generate and validate at seed 0). Red today (§1.8). | — |
+| 1 | Producer fixes above: `default-schemas` with `malli.util`, the `:merge` sweep, its three readers, and predicate generators. Published and reloaded on a branch of the live store. | host-bound (schema resources) | phase 0's test green; `seon.schema.internal-test/a-merge-variant-extends-the-error-base` (`extends-schema?` true for a `[:merge :seon.error/base …]` key) | 10 bare `m/default-schemas` sites |
+| 2 | Subject input: `seon.test/subject`, `:seon.test.member/subject`, `subject-identity` in the reach fold | host-bound (runner; patch to the chain lane: `src/seon/test.clj` and `test/runner.clj` are critical path) | `seon.test.runner-test/a-subject-check-runs-once-per-subject-content`: the same schema on two branches gives one execution and one `reused-run`; a changed form gives a new run | — |
+| 3 | `seon.check/schema-property` and `seed`; `schema-generates-and-validates`; selection of changed subjects | host-bound (selection) | `seon.check-test/a-changed-schema-is-checked-in-its-reply` rows: `[:and :int [:fn neg?] [:fn pos?]]` → red `::mg/such-that-failure`; `[:int {:gen/elements ["wrong"]}]` → red, `:smallest ["wrong"]`; `[:map [:a :int]]` → green; the same seed twice gives an equal trace | `generatable?`, `schema-row`, `schema-row-in`, `:seon.schema/generatable?` (with its `seon.program` reader), `every-packaged-schema-answers-generatability-as-a-boolean`, accretion's `:auto-check` schemas and render branch, `:seon.config.test/auto-check-cases` and its 2 test writes |
+| 4 | `seon.check/function-property`; `function-meets-its-contract`; unknown reasons | REPL-first (`seon.check`) | `seon.check-test/a-function-is-checked-against-its-contract` rows: `(fn [x] (if (> x 17) "no" x))` vs `[:=> [:cat :int] :int]` → red, `:smallest [18]`, `::m/explain-output`, at 100 iterations; a `:seon.db/connection` slot → `:unknown :world-input`; a stub → `:unknown :unimplemented` | — |
+| 5 | `done-refusals`: widened stray-red and terminal `unmerged-change-error`; `designed-red?` strengthened | REPL-first patch to the chain lane (`source.clj`); host-bound for the variant schema | new rows in `seon.cluster.source-test/done-refusals-judges-every-task-alike`: a red check of a changed key refuses; a stub passes mid-chain and refuses last; a changed function no seed reaches refuses last | — |
+| 6 | Cost dials, `verdict`, `bound-failures`, `bound-ms`/`bound-mb` | host-bound (config) | `seon.check-test/a-dial-change-rejudges-without-rerunning`: lowering `gen-bytes-per-node` turns the same member `:over` with `{:unit :observed :target}` and 0 new executions | the two hard-coded 5000s |
+| 7 | Counterexample stored, replayed, dropped | REPL-first | `seon.check-test/a-counterexample-is-replayed-first-and-dropped-when-inadmissible`: the next digest replays `[18]` as trial 0 (`:seon.check/replayed`); after `[:=> [:cat [:int {:max 10}]] :int]` it is listed in `:seon.check/dropped` and the check is green | — |
+| 8 | Entity round trip through `seon.db/with` | REPL-first | `seon.check-test/an-entity-schema-round-trips-through-the-writer`: `[:set :keyword]` → red `:smallest` holding `#{}`; `[:set {:min 1} :keyword]` → green; a ref attribute → `:unknown :relational` | — |
+| 9 | Examples in `function-ai` and the schema render; `seon.check/subjects` in the block and on the page | REPL-first (render, context) | `seon.render.ns-test/a-function-view-shows-its-checked-examples` (3 `[args ret]` pairs, equal across two renders, one cache read); `seon.context-test/the-block-shows-each-changed-subject-check` | FEEDBACK-LOOP §2 item 5 and stages 14–15 (`seon.schema.cost/*`, never built), revised in place |
+
+**Needed now:** phases 0–5. That is the count, the producer fix, the subject input, both properties and the exit
+clauses, which together are the owner's "every schema and function checked when it changes, green to exit".
+**Later:** phases 6–9, world inputs filled from the test world, dependents rechecked at merge, non-gating fresh-seed
+discovery runs that only record counterexamples, and the upstream Malli seed forwarding. HEAD boots after each phase,
+and each deletion goes in the commit that converts its last reader.
+
+**Risks:**
+
+- Phase 0 may show that many contracted functions are `:world-input`. Then phase 5's "reached by a green seed" carries
+  most of Implement's exit, and world-filled checks move to "now".
+- `:merge`'s proxy may surprise other readers of `m/type` (phase 1 greps them all).
+- A compiled host call inside a check cannot be interrupted. It is bounded by the runner's existing actual-exit
+  ownership, not by a new deadline.
