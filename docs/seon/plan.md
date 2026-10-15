@@ -26,28 +26,17 @@ reverted e5dd2abd5). Live DeepSeek S5 run 4: Design and Prove done with 0 hand a
 times on context waste and REPL defects, since fixed. Default runs HEAD; lanes, findings and the morning questions:
 `../research/agent-platform/2026-10-14/root-working-state.md` ("Night of 10-14").
 
-**The order to the automatic chain** (target S5: one `seon.task/chain!`, 0 hand acts, one merge). The critical path is
-run in parallel, not in series (owner 2026-10-14 evening: "the time is now"): every remaining slice
-prototypes at the REPL on its own branch while its files are held and claims only for its commit window, and the S5
-run plan (`../research/agent-platform/2026-10-14/s5-run-plan.md`) is prepared beside them, so S5 runs tonight as soon
-as the slices land. Landed since 16:45: S3b-1 (e958b1700), the stage templates (840d175a8), S3d-2, S3d-3, the
-pathless-section fix from rough run 1 (6133c9670).
+**The order (owner rulings 2026-10-15, `../research/agent-platform/2026-10-15/branch-model-rulings.md`):** a branch's
+program is its own writes over main's HEAD; merge by reach closure, reusing the branch's results; the writer follows the
+branch; config reads main's HEAD unless the branch wrote it.
 
-| Step | Slice | Files | Model | Waits for |
-|---|---|---|---|---|
-| 1 | S2a one task input | `turn.clj`, `test/runner.clj`, `context.clj`, `task.clj`, `task_test.clj`, `step.clj`, `test_support.clj` | Opus, in flight | — |
-| 1 | S2b-1 whole-branch selection, and `seon.step/changed` | `test.clj`, `test_test.clj` (+ a `turn.clj` window) | Opus, in flight (the runner is Opus's) | — |
-| 1 | S3b-1 + S3b-2 acceptance, publication, retirement; the write-back basis question (below) | `merge.clj`, `cluster/source.clj`, `merge_test.clj` | Opus, in flight | — |
-| 2 | S3a-2 turn authority and context | `turn.clj`, `context.clj` | Opus | S2a |
-| 2 | S2c-1 tag sweep (one commit window) | task files | Sonnet | the restart |
-| 2 | S4b-design, S4b-prove predicates | `step/<stage>.clj` | Sonnet ×2 | S2a (S4a's `results` and task input are interim until it) |
-| 2 | S3f-2 per-task model, `:outside` (our Claude Code lanes become Seon agents with a block, proofs and the done rule: the dogfood gap, working state item 31) | `cluster/agent.clj`, `turn.clj` | Opus | S3a-2 |
-| 3 | S3a-3 advance | `task.clj`, `cluster/agent.clj`, `db_flow_test.clj` | Opus | S2a, S3a-2 |
-| 4 | S5 live DeepSeek chain | none (root REPL) | Opus | S3b, S3a-3, S4b |
-
-**Open on S3b (from rough run 1):** the merge's write-back compared against the shared working tree, so another lane's
-uncommitted edit refused a correct merge. Under "files are written at merge" the basis should be the committed file
-the merge base corresponds to; lane s3b answers with evidence before S3b-2.
+| Step | Work | Model | Waits for |
+|---|---|---|---|
+| 1 | Design round: `own-delta` (interpreted = own writes ∪ callers; every other read = the loaded program), config reads, delete the three-way readers (`seen-database`, `moved-past`, `merge-sides` and their caches); with the writer-follows-the-branch slice | dig Haiku → Opus + Astra → Fable hybrid → narrow check | — |
+| 2 | Merge by reach closure (seeds: proofs + green branch tests reaching changes; all hops; program entities only; unreached additions reported) and by result lookup | Opus | 1 |
+| 3 | `ns-unmap!` [subject]/[ns sym] with a world-derived context; retire non-chain agent branches; bb-load property for the hook's namespaces | Sonnet ×3 | — |
+| 4 | Stage exits that tell each agent what done is, revised from `:outside` runs | Opus + Sonnet | 1, 2 |
+| 5 | S5 chain (held task c12a57408f49, `:chain-f1f6dc8e6652`): after 1 and 2 its merge carries only the reach closure | Opus run lane | 2 |
 
 Deferred until S5, each for a reason: S2c-2, S3c, S3e, S3f (the first run is watched; Claude-Code-as-Seon-agent runs
 follow S5); S3d-2..6 and the S3d-3 patch (context is usable, 58f130e03); the cache phases 2 and 4-8 and the Argon third
