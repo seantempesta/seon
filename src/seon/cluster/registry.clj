@@ -457,16 +457,6 @@
     (when head
       {::base-commit commit ::target-commit head ::target-branch target})))
 
-(defn merge-sides
-  "The two other sides of a work branch `database`'s three-way comparison (`side-commits`) as values: its merge
-  base and its target's head; nil on a branch with no fork entity or base ref, such as a cluster's own."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:maybe [:map [::merge-base :seon.db/database-value] [::target :seon.db/database-value]]]]}
-  [database]
-  (when-let [{::keys [base-commit target-commit]} (side-commits database)]
-    {::merge-base (db/commit-database database base-commit)
-     ::target (db/commit-database database target-commit)}))
-
 (defn- moved-identities
   "Of `identities`, those main changed since the merge base (`main-changed` of `commits`) that `database` still
   holds as the merge base held them."
@@ -483,25 +473,10 @@
             based (commit-digests database base-commit)]
         (into #{} (filter #(= (get own %) (get based %))) candidates)))))
 
-(defn moved-past
-  "The `identities` a work branch holds as its merge base held them while its
-  target has since changed them: what main changed after the fork, which the
-  branch never changed. The branch sees main's row of each, never its stale
-  copy; whether the branch's own definitions conflict with that change is the
-  merge's three-way business. Main's change made before the fork and not yet
-  loaded is the branch's too: the target still holds it."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map] [:sequential :seon.program/identity]]
-                  [:set :seon.program/identity]]}
-  [database {base ::merge-base target ::target} identities]
-  (if-not base
-    #{}
-    (moved-identities database {::base-commit (db/commit-id base) ::target-commit (db/commit-id target)}
-                      identities)))
-
 (defn seen-database
   "The database whose row of the program declaration `declaration` (its identity) the branch
-  `database` sees: its target's head when main moved past the branch's copy
-  (`moved-past`), else `database` itself. Every branch-side reader that
+  `database` sees: its target's head when main changed it since the merge base
+  and the branch never did (`moved-identities`), else `database` itself. Every branch-side reader that
   documents, shows or compiles one declaration's row reads it here; only a
   declaration main changed since the merge base reads the branch's digest."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity] :seon.db/database-value]}

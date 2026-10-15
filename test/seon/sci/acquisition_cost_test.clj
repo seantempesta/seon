@@ -3,8 +3,11 @@
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id]
             [seon.mcp :as mcp]
             [seon.profile :as profile]
             [seon.render.value :as value]
@@ -143,6 +146,49 @@
          (is (zero? (profile/calls-of again 'seon.sci.eval/interpret-overlay!)))
          (is (true? (support/agent-value (:seon.profile/value again)
                                         "(seon.sci.eval-test/cut? {})"))))))))
+
+(deftest the-interpret-set-is-derived-once-per-commit-pair
+  ;; The interpret set I(B, L) is a function of the branch's program and the
+  ;; loaded commit alone (branch-model ruling 2). Before, a work branch's
+  ;; overlay plan was also keyed by main's program revisions, so every program
+  ;; write main made after the fork derived the branch's plan again.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           store (:seon.store/store (support/execution-handle connection))
+           branch (keyword (str "interpret-pair-" (seon.id/id)))
+           request {:seon.store/store store :seon.store/branch branch
+                    :seon.cluster.registry/from (db/commit-id database) :seon.db/db database}
+           loaded (#'evaluation/loaded-program database)
+           plan #(#'evaluation/overlay-plan (db/db %) loaded)
+           derived #(profile/calls-of % 'seon.sci.eval/derive-overlay-plan)]
+       (is (:seon.cluster/created? (registry/fork! request)))
+       (try
+         (let [fork (store/open-branch! store branch)]
+           (try
+             (support/transacted!
+              fork (support/replacement-tx (db/db fork) [:seon.fn/sym 'seon.sci.eval-test/paired?]
+                                           "(defn paired? [] true)" {:seon.schema.admission/source :agent}))
+             (let [parent (measured ::interpret-set-first #(plan fork))
+                   again (measured ::interpret-set-again #(plan fork))
+                   _ (support/transacted! fork [(support/task-row "interpairone" "Advance only data.")])
+                   result-only (measured ::interpret-set-result-only #(plan fork))
+                   _ (support/transacted!
+                      connection (support/replacement-tx (db/db connection) [:seon.fn/sym 'seon.sci.eval-test/main-moved?]
+                                                         "(defn main-moved? [] true)" {:seon.schema.admission/source :agent}))
+                   main-moved (measured ::interpret-set-after-main-moved #(plan fork))]
+               (is (= 1 (derived parent)) "the first request derives the branch's interpret set")
+               (is (contains? (:seon.sci.eval/overridden (:seon.profile/value parent)) 'seon.sci.eval-test/paired?)
+                   "the branch's own definition")
+               (doseq [[label change] {"a second request" again "a result-only commit" result-only
+                                       "a program commit on main" main-moved}]
+                 (is (zero? (derived change)) (str label " derives nothing"))
+                 (is (< (:seon.profile/alloc-bytes change) (:seon.profile/alloc-bytes parent))
+                     (str label " allocates less than the derivation")))
+               (is (= (:seon.profile/value parent) (:seon.profile/value main-moved))
+                   "main's later program does not change the branch's interpret set"))
+             (finally (store/release-branch! fork))))
+         (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/install-row-is-twice-as-slow-after-the-stale-var-fix}}
   a-core-row-installs-without-opening-the-loaded-program

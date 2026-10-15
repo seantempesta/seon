@@ -14,7 +14,6 @@
             [sci.impl.utils :as sci.utils]
             [seon.blob :as blob]
             [seon.cache :as cache]
-            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -1224,52 +1223,18 @@
                             (::rows (::declarations prior)) (::schema-ids (::declarations prior))))]
     (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
 
-(declare reach-entries)
-
-(defn- moved-reach
-  "Of a work branch `database`, each declaration main moved past since the
-  merge base (`seon.cluster.registry/moved-past`: the branch never changed it,
-  main did) with its reach digest on the target's head, which is the row the
-  branch runs (`seon.cluster.registry/seen-database`); empty off a work branch.
-  A moved declaration the target cannot digest is `:seon.error/unknown`."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:map-of :seon.test/sym [:or [:string {:min 64 :max 64}] [:= :seon.error/unknown]]]]}
-  [database]
-  (if-let [sides (registry/merge-sides database)]
-    (let [{::keys [attributes]} (reach-declarations database)
-          identities (-> []
-                         (into (map #(vector :seon.fn/sym %)) (keys (:seon.fn/sym attributes)))
-                         (into (map #(vector :seon.test/sym %)) (keys (:seon.test/sym attributes))))
-          moved (vec (sort (into #{} (map second) (registry/moved-past database sides identities))))
-          target (reach-entries (:seon.cluster.registry/target sides) moved)]
-      (when (:seon.test/unknown target)
-        (throw (ex-info (:seon.error/message target) target)))
-      (into {} (map (fn [s] [s (get (::digests target) s :seon.error/unknown)])) moved))
-    {}))
-
-(defn- moved-changed
-  "The names whose moved-past digest differs between the `prior` derivation and
-  `moved`, with their reverse closure in `prior`."
-  {:malli/schema [:=> [:cat :map :map] [:set :seon.schema/value]]}
-  [prior moved]
-  (let [held (::moved prior {})
-        names (into #{} (remove #(= (get held %) (get moved %))) (concat (keys held) (keys moved)))]
-    (set (keys (reach-fixed-point #(hash-map ::out (get (::reverse prior) %)) ::out names)))))
-
 (defn- reach-entries
   "The requested digests; only changed definitions and their reverse closure lose known components.
-  A work branch's declaration main moved past is known by its digest on the
-  target (`moved-reach`), so a recorded result is not current after main's
-  change to what it reaches."
+  A work branch's digests are a function of its own HEAD: main's later
+  changes reach it only when merged."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
   [database test-symbols]
   (if (empty? test-symbols)
     {::digests {} ::undigested []}
     (try
       (let [attribute-revisions (reach-revision-key database)
-            moved (moved-reach database)
-            ;; equal programs share one index; a work branch's also by what main moved past
-            revisions (cond-> attribute-revisions (and attribute-revisions (seq moved)) (vector moved))
+            ;; equal programs share one index
+            revisions attribute-revisions
             identity (reach-owner database)
             current (when revisions (cache/present ::reach-index-by-revision revisions))
             covered (into (set (keys (::digests current))) (::undigested current))
@@ -1283,14 +1248,10 @@
                     prior (or current (when (and previous (< (::basis previous) (db/basis-t database))) previous))
                     declarations (reach-declarations database (::declarations prior {}))
                     changed (if (and prior (not current))
-                              (into (changed-reach database attribute-revisions declarations prior)
-                                    (moved-changed prior moved))
+                              (changed-reach database attribute-revisions declarations prior)
                               #{})
-                    known (merge (apply dissoc (::component-digests prior {}) changed)
-                                 ;; an undigested moved declaration is known only as unknown evidence
-                                 (update-vals moved #(if (keyword? %) "" %)))
-                    unknown (into (set/difference (set (::undigested prior)) changed)
-                                  (comp (filter (comp keyword? val)) (map key)) moved)
+                    known (apply dissoc (::component-digests prior {}) changed)
+                    unknown (set/difference (set (::undigested prior)) changed)
                     {::keys [nodes schemas] :as graph}
                     (reached-graph database test-symbols declarations known unknown)
                     index (cache/lookup ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
@@ -1304,7 +1265,7 @@
                              ::component-digests (merge known (::component-digests index))
                              ::digests (merge (apply dissoc (::digests prior) changed) (::digests index))
                              ::undigested (into unknown (::unknown-names index))
-                             ::revisions attribute-revisions ::moved moved ::declarations declarations}]
+                             ::revisions attribute-revisions ::declarations declarations}]
                 (when revisions
                   (cache/evict! ::reach-index-by-revision revisions)
                   (cache/lookup ::reach-index-by-revision revisions
@@ -2361,35 +2322,19 @@
                     database (vec symbols))))
     {}))
 
-(defn- seen-digests
-  "The definition digest of the row of each function of `symbols` that `database` runs: its target's head's for
-  one main moved past since the merge base (`seon.cluster.registry/moved-past`, the row
-  `seon.cluster.registry/seen-database` answers), else `database`'s own."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]] [:map-of :seon.fn/sym :string]]}
-  [database symbols]
-  (let [own (function-digests database symbols)
-        sides (when (seq own) (registry/merge-sides database))
-        moved (when sides
-                (into [] (map second) (registry/moved-past database sides (mapv #(vector :seon.fn/sym %) (keys own)))))]
-    (if (seq moved)
-      (merge (apply dissoc own moved) (function-digests (:seon.cluster.registry/target sides) moved))
-      own)))
-
 (defn- executed-roots
   "What each result's body executed (`:seon.test.member/executed`) beyond its
-  static closure on `tested`: `::dynamic-calls`, test -> the declarations it
-  ran outside `reaches` (absent when none), and `::stale`, the tests whose body
-  ran a definition whose digest differs from the row `tested` runs for that symbol (`seen-digests`)."
+  static closure on `tested`: test -> the declarations it ran outside `reaches`
+  (absent when none)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.test/reaches :seon.test/unknown-error]
                        :seon.test.runner/captured-results]
-                  [:map [::dynamic-calls [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]
-                   [::stale [:set :seon.test/sym]]]]}
+                  [:map-of :seon.test/sym :seon.test.member/dynamic-calls]]}
   [tested reaches results]
   (let [executed (into {} (keep (fn [{test-symbol :seon.test/sym ran :seon.test.member/executed}]
                                   (when (seq ran) [test-symbol ran])))
                        results)
         symbols (into [] (comp (mapcat val) (map first) (distinct)) executed)
-        declared (seen-digests tested symbols)
+        declared (function-digests tested symbols)
         static (if (seon.error.refusal/error? reaches) {} reaches)
         ;; The runner's own work inside the body's sink (running the var,
         ;; reporting, printing failures) is the harness's, not the test's, and
@@ -2398,23 +2343,16 @@
                               (keys (schema/predicate-functions-in
                                      (or (db/carried-projection tested) (schema/handed-projection)))))
                   (seq executed) (into (harness-closure tested)))]
-    {::dynamic-calls (into {} (keep (fn [[test-symbol ran]]
-                                      (let [closure (get static test-symbol #{})
-                                            outside (into (sorted-set)
-                                                          (comp (map first)
-                                                                (filter #(contains? declared %))
-                                                                (remove #(or (= test-symbol %) (contains? closure %)
-                                                                             (contains? harness %))))
-                                                          ran)]
-                                        (when (seq outside) [test-symbol outside]))))
-                           executed)
-     ::stale (into #{} (keep (fn [[test-symbol ran]]
-                               (when (some (fn [[symbol digest]]
-                                             (and (string? digest) (contains? declared symbol)
-                                                  (not= digest (get declared symbol))))
-                                           ran)
-                                 test-symbol)))
-                   executed)}))
+    (into {} (keep (fn [[test-symbol ran]]
+                     (let [closure (get static test-symbol #{})
+                           outside (into (sorted-set)
+                                         (comp (map first)
+                                               (filter #(contains? declared %))
+                                               (remove #(or (= test-symbol %) (contains? closure %)
+                                                            (contains? harness %))))
+                                         ran)]
+                       (when (seq outside) [test-symbol outside]))))
+          executed)))
 
 (defn- retain-results!
   "Retain each terminated outcome of run `run-id` on `database`, red included, in `seon.cache` under its reuse
@@ -2462,7 +2400,7 @@
         test-symbols (mapv :seon.test/sym results)
         reaches (when tested (reach-memberships tested test-symbols))
         prepared (:seon.test.runner/results completion)
-        {dynamic ::dynamic-calls stale ::stale} (when tested (executed-roots tested reaches prepared))
+        dynamic (when tested (executed-roots tested reaches prepared))
         completion (assoc completion :seon.test.runner/results
                           (mapv (fn [{test-symbol :seon.test/sym :as result}]
                                   (cond-> (dissoc result :seon.test.member/executed)
@@ -2472,12 +2410,9 @@
         completion (if tested
                      (assoc (dissoc completion :seon.db/db)
                             :seon.test/reach-digests
-                            ;; A result whose body ran a definition other than the
-                            ;; tested one keys nothing: it is kept and never reused.
-                            (let [digests (if-let [task (:seon.test/task completion)]
-                                            (reach-digests tested test-symbols dynamic task)
-                                            (reach-digests tested test-symbols dynamic))]
-                              (cond->> digests (not (seon.error.refusal/error? digests)) (#(apply dissoc % stale))))
+                            (if-let [task (:seon.test/task completion)]
+                              (reach-digests tested test-symbols dynamic task)
+                              (reach-digests tested test-symbols dynamic))
                             :seon.test/reaches reaches)
                      completion)
         transaction-report

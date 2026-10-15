@@ -1,5 +1,6 @@
 (ns seon.test.reach-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -126,16 +127,17 @@
        (is (= #{} (runner/tests-reaching database symbols reaching))
            "a test never counts as reaching itself")))))
 
-(deftest a-work-branch-result-is-not-current-after-main-changes-what-it-reaches
-  ;; Before, a work branch's reach digest read the branch's own rows, while the
-  ;; branch runs main's row of a declaration main moved past since the merge
-  ;; base (`seon.cluster.registry/seen-database`): chain :chain-f1f6dc8e6652's
-  ;; proof kept a red recorded on the old platform as current (S5 run 6).
+(deftest a-branch-result-identity-is-a-function-of-its-own-head
+  ;; A branch runs its own HEAD (branch-model ruling 1): its reach digests read
+  ;; its own rows. Before, a work branch's digest of a declaration main changed
+  ;; after the fork was main's (`moved-reach`), so the branch's identity moved
+  ;; with every main commit and no recorded result stayed current.
   (support/with-database
    (fn [connection]
      (let [reaching 'seon.id-test/identity-is-a-function-of-the-values-structure
            elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
            symbols [reaching elsewhere]
+           cited [:seon.fn/sym 'seon.id/id]
            database (db/db connection)
            store (:seon.store/store (support/execution-handle connection))
            branch (keyword (str "reach-fork-" (id/id)))
@@ -145,23 +147,31 @@
        (try
          (let [fork (store/open-branch! store branch)]
            (try
-             (let [before (runner/reach-digests (db/db fork) symbols)]
+             (let [own [(support/revision (db/db fork) [:seon.fn/sym 'seon.id/digest] {:seon.fn/doc "The branch's own row."})]
+                   _ (support/transacted! fork own)
+                   before (runner/reach-digests (db/db fork) symbols)
+                   independent (runner/reach-digests (db/with database own) symbols)]
+               (is (every? string? (vals before)))
+               (is (= before independent)
+                   "the branch's digests equal those of the same rows built apart from it")
+               ;; main changes the behavior of a definition the test reaches and the branch never changed
                (support/transacted!
                 connection
-                [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id] {:seon.fn/doc "Main moved past the branch."})])
-               (let [after (runner/reach-digests (db/db fork) symbols)]
-                 (is (not= (get before reaching) (get after reaching))
-                     "main's change to a reached definition the branch never changed changes the branch's digest")
-                 (is (= (get before elsewhere) (get after elsewhere))
-                     "a test that does not reach it keeps its digest")))
+                [(let [source (str/trim (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] cited)))]
+                   (support/revision (db/db connection) cited
+                                     {:seon.fn/source (str (subs source 0 (dec (count source))) "\n  ;; main's change\n  )")}))])
+               (is (= before (runner/reach-digests (db/db fork) symbols))
+                   "main's later change is not the branch's until it is merged")
+               (is (not= (get before reaching) (get (runner/reach-digests (db/db connection) symbols) reaching))
+                   "main's own digest of the test follows main's row"))
              (finally (store/release-branch! fork))))
          (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch]))))))))
 
-(deftest a-work-branch-result-that-ran-what-main-moved-past-is-recorded-at-its-identity
-  ;; S5 run 7: a work branch runs the platform's row of a declaration main moved past since the merge base
-  ;; (`seon.cluster.registry/seen-database`), but the recorder judged what the body executed against the branch's
-  ;; own stale row, called every result stale and keyed none: `seon.test.runner/current-results` found no green,
-  ;; and the attempt's prove pass ran the proof again ~130 times in one agent context.
+(deftest a-branch-result-is-recorded-at-its-own-heads-identity
+  ;; S5 run 7: the recorder judged what the body executed against another row than its reach digest read, called
+  ;; every result stale and keyed none: `seon.test.runner/current-results` found no green, and the attempt's prove
+  ;; pass ran the proof again ~130 times in one agent context. The branch's copy differs from the loaded commit's
+  ;; only in documentation, so it runs the compiled function; its reach digest reads the branch's own row.
   (support/with-database
    (fn [connection]
      (let [reaching 'seon.id-test/a-host-object-has-no-identity
@@ -171,13 +181,13 @@
            handle (support/execution-handle connection)
            store (:seon.store/store handle)
            branch (keyword (str "moved-run-" (id/id)))]
-       ;; the branch's copy differs from the platform's row: main's change before the fork
+       ;; the branch's copy differs from the loaded commit's row in documentation only
        (revise! "Main's row before the fork.")
        (let [request {:seon.store/store store :seon.store/branch branch
                       :seon.cluster.registry/from (db/commit-id (db/db connection)) :seon.db/db (db/db connection)}]
          (is (:seon.cluster/created? (registry/fork! request)))
          (try
-           ;; main moves past the branch's copy, back to the platform's row: the branch runs the compiled function
+           ;; main returns to the loaded commit's row after the fork; the branch keeps its own
            (revise! platform-doc)
            (let [attempt (agent/acquire-context! handle nil {:seon.agent/branch branch})
                  conn (:seon.db/connection attempt)
@@ -192,6 +202,11 @@
                  (is (= [reaching] (keys (runner/current-results (db/db conn) [reaching] nil)))
                      "its result is current at the identity its readers compute")
                  (is (= [0 true] ((juxt :seon.test/executed-count :seon.test/passed?) (run-once)))
-                     "so the same input is answered from it, not run again"))
+                     "so the same input is answered from it, not run again")
+                 (revise! "Main's row after the result.")
+                 (is (= [reaching] (keys (runner/current-results (db/db conn) [reaching] nil)))
+                     "main's later change leaves the branch's result current")
+                 (is (= [0 true] ((juxt :seon.test/executed-count :seon.test/passed?) (run-once)))
+                     "and runs nothing again"))
                (finally (agent/release-context! attempt))))
            (finally (registry/retire-branch! (select-keys request [:seon.store/store :seon.store/branch])))))))))

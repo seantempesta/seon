@@ -119,7 +119,6 @@
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
-            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.cache]
             [seon.batch]
@@ -1340,12 +1339,6 @@
       (throw (ex-info "Function symbols could not be read." symbols)))
     (into #{} (map :v) symbols)))
 
-(defn- definition-digest-of
-  "The definition identity of function `sym` in `database`, as `function-digests` holds it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :seon.program/definition-digest]}
-  [database sym]
-  (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))
-
 (defn- loaded-digests
   "`function-digests` of a loaded program, once per store and commit: every
   acquisition compares against the same few loaded commits. `loaded` is a
@@ -1376,9 +1369,9 @@
   "Whether `row`, as `database` holds it, is this program's own change to the
   loaded program: a row an agent authored (`:seon.schema.admission/source
   :agent`) that the loaded program lacks or holds at another digest and
-  behavior (`behavior-changed?`). A file-derived row that differs was
-  published, not authored here: the branch is behind the loaded program,
-  whose compiled Var it runs."
+  behavior (`behavior-changed?`), before any plan names it. A file-derived
+  row that differs is in the plan's interpret set (`derive-overlay-plan`)
+  when SCI can interpret it; a host-bound one runs as loaded."
   {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.db/database-value :map] :boolean]}
   [loaded database row]
   (and (= :agent (:seon.schema.admission/source row))
@@ -2197,7 +2190,8 @@
                   (install-selected!
                    ctx database (select-keys (:namespaces snapshot) names)
                    (filterv (comp eager first) function-rows) (vec test-rows) eager
-                   (-> (::acquisition snapshot)
+                   ;; entered while its base acquires, a context holds no acquisition yet: none installed
+                   (-> (::acquisition snapshot {:seon.sci.eval/installed 0})
                        (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
                        (assoc :seon.schema/projection (context-projection ctx))))
                   (:seon.flow/commit-fault! snapshot))]
@@ -2860,7 +2854,7 @@
                 all-function-rows)})
          commit-fault!))))))
 
-(declare same-program-root? program-context program-revisions loaded-basis)
+(declare same-program-root? program-context program-revisions loaded-basis interpretable-functions)
 
 (defn- inherited?
   "Whether `ctx` holds the Var at `qualified` as `base`'s Var, or as its own Var holding the base's root."
@@ -2956,18 +2950,16 @@
     (set pairs)))
 
 (defn- derive-overlay-plan
-  "What `database` changes of the `loaded` program: the authored functions whose
-  digest the loaded program lacks or holds otherwise, the other functions it
-  lacks, the authored test rows it does not hold as they are, and every
-  namespace row it does not hold as it is, authored or file-derived (a file's
-  namespace main declared after the loaded commit is entered from its row);
-  of a work branch, only those its merge sides (`seon.cluster.registry/merge-sides`)
-  leave its own (`seon.cluster.registry/moved-past`)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]
-                  [:=> [:cat :seon.db/database-value :seon.db/database-value [:maybe :map]] :map]]}
-  ([database loaded] (derive-overlay-plan database loaded (registry/merge-sides database)))
-  ([database loaded sides]
+  "What `database` changes of the `loaded` commit, the interpret set I(B, L):
+  the functions whose digest differs (`::overridden`, where the behavior differs
+  too, and the agent's own the loaded commit lacks) or the other functions the
+  loaded commit lacks (`::added`), the functions it holds that
+  `database` lacks (`::retracted`), the authored test rows it does not hold as
+  they are, and every namespace row it does not hold as it is, authored or
+  file-derived. A work branch runs its own HEAD: what main changed since the
+  fork is a difference like any other until it is merged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
+  [database loaded]
   (let [authored (authored-rows database)
         authored-names (into #{} (keep :seon.ns/name) authored)
         changed-files (into [] (comp (map first) (remove authored-names) (distinct) (map #(vector :seon.ns/name %)))
@@ -2975,63 +2967,63 @@
         rows (into authored (when (seq changed-files) (db/pull-many database namespace-pattern changed-files)))
         previous (authored-rows loaded)
         digests (loaded-digests loaded)
-        present (function-symbols database)
-        overridden (into #{} (keep (fn [{sym :seon.fn/sym :as row}]
-                                     (when (and (contains? present sym) (not= (row-definition-digest row) (get digests sym))
-                                                (behavior-changed? database loaded sym))
-                                       sym)))
-                         rows)
+        own (function-digests database)
+        differing (into [] (keep (fn [[sym digest]] (when (and (contains? digests sym) (not= digest (get digests sym))) sym)))
+                        own)
+        ;; host-bound platform code runs as loaded (ruling 2); an agent's own
+        ;; host-bound change is interpreted, refusing by name when called
+        own-authored (into #{} (keep :seon.fn/sym) authored)
+        absent (into #{} (remove #(contains? digests %)) (keys own))
+        ;; an agent's own definition the loaded commit lacks is its override,
+        ;; interpreted now with its reverse closure
+        overridden (-> #{}
+                       (into (filter #(behavior-changed? database loaded %))
+                             (into (interpretable-functions database (vec (remove own-authored differing)))
+                                   (filter own-authored) differing))
+                       (into (filter own-authored) absent))
+        added (into #{} (remove own-authored) absent)
+        retracted (interpretable-functions loaded (into [] (remove #(contains? own %)) (keys digests)))
         namespace-key (fn [row] [(:seon.ns/source row) (row-bindings row)])
         test-row (fn [row] [(:seon.test/sym row) (:seon.test/source row)
                             (get-in row [:seon.test/ns :seon.ns/name]) (:seon.schema.admission/source row)])
         held-namespaces (into #{} (comp (filter :seon.ns/name) (map namespace-key)) previous)
         held-tests (into #{} (comp (filter :seon.test/sym) (map test-row)) previous)
-        added (into #{} (remove #(or (contains? digests %) (overridden %))) present)
         namespaces (into [] (filter #(and (:seon.ns/name %) (:seon.ns/source %)
                                           (not (held-namespaces (namespace-key %)))))
                          rows)
         tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)
-        moved (registry/moved-past database sides
-                          (-> []
-                              (into (map #(vector :seon.fn/sym %)) (concat overridden added))
-                              (into (map #(vector :seon.ns/name (:seon.ns/name %))) namespaces)
-                              (into (map #(vector :seon.test/sym (first %))) tests)))
-        overridden (into #{} (remove #(moved [:seon.fn/sym %])) overridden)
-        added (into #{} (remove #(moved [:seon.fn/sym %])) added)
-        namespaces (into [] (remove #(moved [:seon.ns/name (:seon.ns/name %)])) namespaces)
-        tests (into [] (remove #(moved [:seon.test/sym (first %)])) tests)
-        held (into {} (map (juxt identity #(definition-digest-of database %))) (concat overridden added))]
+        held (into {} (map (juxt identity own)) (concat overridden added))]
     {::overridden overridden
      ::added added
+     ::retracted retracted
      ::namespaces namespaces
      ::tests tests
      ::held held
      ;; What the plan's interpretation is a function of, by content only: its
-     ;; definitions by digest, its namespaces by name, source and bindings, its
-     ;; tests by row content. Entity ids differ per branch for equal programs.
+     ;; definitions by digest, its retractions, its namespaces by name, source
+     ;; and bindings, its tests by row content. Entity ids differ per branch
+     ;; for equal programs.
      ::digest (id/digest 32 [held
+                             (vec (sort retracted))
                              (mapv (juxt :seon.ns/name namespace-key) namespaces)
-                             tests])})))
+                             tests])}))
 
 (defn- overlay-plan
-  "The overlay of one program against the loaded commit, shared across data
-  writes: of a work branch, also across its merge sides' programs."
+  "The overlay of one program against the loaded commit, once per pair: keyed
+  by the store, `database`'s program revisions (the commit whose program
+  datoms equal its own, so a result-only commit answers its parent's entry)
+  and the loaded commit."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
   [database loaded]
   (if-let [basis (when (commit-id-of loaded) (program-revisions database (db/carried-projection database)))]
-    (let [sides (registry/merge-sides database)
-          projection (db/carried-projection database)
-          sides-key (when sides
-                      [(db/commit-id (::registry/merge-base sides))
-                       (program-revisions (::registry/target sides) projection)])]
     (seon.cache/lookup
-     ::overlay-plan [(store-identity database) basis (db/commit-id loaded) sides-key]
-     (fn [{::keys [overridden added namespaces tests]}]
+     ::overlay-plan [(store-identity database) basis (db/commit-id loaded)]
+     (fn [{::keys [overridden added retracted namespaces tests]}]
        (+ (* 128 (count basis))
-          (* 256 (+ (count overridden) (count added) (count namespaces) (count tests)))
+          (* 256 (+ (count overridden) (count added) (count retracted) (count namespaces) (count tests)))
           (* 2 (+ (reduce + 0 (map (comp count :seon.ns/source) namespaces))
                   (reduce + 0 (map (comp count second) tests))))))
-     #(derive-overlay-plan database loaded sides)))
+     #(derive-overlay-plan database loaded))
     (derive-overlay-plan database loaded)))
 
 (defn- function-rows-in
@@ -3207,7 +3199,7 @@
   `::held` (an evaluation's `::evaluated` definitions, which `ctx` holds as
   evaluated) changes its `::overridden` and keeps what `ctx` interprets."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
-  [ctx database {::keys [overridden added namespaces tests evaluated held] :as plan}]
+  [ctx database {::keys [overridden added retracted namespaces tests evaluated held] :as plan}]
   (let [snapshot @(::kernel/program-snapshot ctx)
         ;; the plan this context's program was derived with: none on the loaded base
         previous (::plan (::acquisition snapshot))
@@ -3243,12 +3235,14 @@
                                                            (and held (not (contains? delta %))))
                                                       added))
         entered (::entered-namespaces snapshot #{})
-        ;; an added function of a source namespace has no compiled Var: it
-        ;; interprets now, a test namespace's once that namespace is entered
+        ;; an added function with no compiled Var (of a source namespace, or
+        ;; one the loaded JVM lacks, as a callee main deleted) interprets now,
+        ;; a test namespace's once that namespace is entered
         sourced (into [] (keep (fn [[sym _ namespace-name]]
-                                 (when (and (source-namespace? ctx namespace-name)
-                                            (or (entered namespace-name)
-                                                (not (contains? (::test-namespaces snapshot) namespace-name))))
+                                 (when (if (source-namespace? ctx namespace-name)
+                                         (or (entered namespace-name)
+                                             (not (contains? (::test-namespaces snapshot) namespace-name)))
+                                         (nil? (get (ns-interns namespace-name) (symbol (name sym)))))
                                    sym)))
                       added-rows)
         function-rows (function-rows-in database (into (vec (remove already overridden))
@@ -3289,6 +3283,9 @@
        (install-first-party-namespaces! ctx [] namespace-rows added-rows)
        (install-required-libraries! ctx namespace-rows)
        (unbind-reinstalled! ctx (map first function-rows))
+       ;; a declaration the branch does not hold is not in its program
+       (doseq [sym retracted]
+         (sci/eval-form ctx (list 'ns-unmap (list 'quote (symbol (namespace sym))) (list 'quote (symbol (name sym))))))
        (let [acquired (install-selected!
                        ctx database namespace-row-by-name
                        function-rows tests (into #{} (map first) function-rows)

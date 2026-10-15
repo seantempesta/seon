@@ -2758,7 +2758,9 @@
             (is (< (:seon.profile/ms measured) 3))
             (is (< (:seon.profile/alloc-bytes measured) 3000000)))))))))
 
-(deftest an-overlay-plan-digests-only-the-authored-rows
+(deftest an-overlay-plan-reads-the-branch-digests-by-index-range
+  ;; I(B, L) compares every digest the branch holds with the loaded commit's:
+  ;; two attribute ranges of the branch, never a pull per declaration.
   (test-support/with-database
    (fn [connection]
      (let [loaded (#'eval/loaded-program (db/db connection))
@@ -2771,39 +2773,53 @@
            called (:seon.profile/called measured)
            plan (:seon.profile/value measured)]
        (is (contains? (into (::eval/overridden plan) (::eval/added plan)) 'my.program/planned))
-       (is (zero? (get called 'seon.sci.eval/function-digests 0))
-           "the branch's whole program is not digested")
-       (is (< (get called 'seon.sci.eval/definition-digest-of 0) 10)
-           "only the authored and absent functions are digested")))))
+       (is (= 1 (get called 'seon.sci.eval/function-digests 0))
+           "the branch's digests are read once")
+       (is (< (get called 'seon.db/pull 0) 10)
+           "no declaration is pulled one by one")))))
 
-(deftest a-work-branch-interprets-only-what-main-has-not-moved-past
-  ;; Before, a work branch's overlay was its head against the loaded program,
-  ;; so a function main deleted after the fork read as the branch's addition
-  ;; and the reverse closure interpreted its stale callers: chain branch
-  ;; :chain-f1f6dc8e6652 interpreted its merge base's `seon.db/q`, whose callee
-  ;; `seon.db/query-call-valid?` main had deleted (S5 run 5b).
+(deftest a-work-branch-interprets-exactly-its-head-against-the-loaded-commit
+  ;; A branch runs its own HEAD (branch-model rulings 1-2): SCI interprets the
+  ;; declarations whose digest at the branch differs from the loaded commit's.
+  ;; Before, a function main changed after the fork was filtered out as
+  ;; moved past, and one main deleted (absent on the loaded commit) was never
+  ;; installed, so its branch caller failed analysis on it: chain branch
+  ;; :chain-f1f6dc8e6652's `seon.db/q` calling `seon.db/query-call-valid?` (S5 run 5b).
   (test-support/with-database
    (fn [connection]
      ;; the fixture names are built, so this test's own entity references none of them
-     (let [loaded (#'eval/loaded-program (db/db connection))
-           named #(symbol "my.program" (str "overlay-" %))
-           row (fn [suffix] (test-support/program-fn-entity (db/db connection) (named suffix)
-                                                          (str "(defn overlay-" suffix " [] 1)")))]
-       ;; main's change before the fork, not yet loaded: the branch's too
-       (test-support/transacted! connection [(row "kept") (row "gone")])
+     (let [named #(symbol "my.program" (str "head-" %))
+           probe (symbol "probe.head" "head-m")
+           define! (fn [conn sym source]
+                     (test-support/transacted!
+                      conn (test-support/replacement-tx (db/db conn) [:seon.fn/sym sym] source
+                                                        {:seon.schema.admission/source :agent})))]
+       (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'probe.head)])
+       (define! connection (named "g") "(defn head-g [] 1)")
+       (define! connection (named "k") "(defn head-k [] 1)")
+       (define! connection (named "c") "(defn head-c [] (+ (head-g) (head-k)))")
+       (define! connection probe "(defn head-m [] 1)")
        (with-fresh-fork
         connection
         (fn [fork]
-          ;; main deletes one after the fork; the branch never touched it
-          (test-support/transacted! connection [[:db/retractEntity [:seon.fn/sym (named "gone")]]])
-          (test-support/transacted! fork [(test-support/program-fn-entity (db/db fork) (named "own")
-                                                                          "(defn overlay-own [] 2)")])
-          (let [plan (#'eval/derive-overlay-plan (db/db fork) loaded)
-                interpreted (into (::eval/overridden plan) (::eval/added plan))]
-            (is (contains? interpreted (named "own")) "the branch's own change")
-            (is (contains? interpreted (named "kept")) "main's unloaded change the branch inherited")
-            (is (not (contains? interpreted (named "gone")))
-                "main's change after the fork binds the platform, never the branch's stale copy"))))))))
+          ;; after the fork main changes `g`, drops `k` and its call, and reloads (the loaded commit)
+          (define! connection (named "c") "(defn head-c [] (head-g))")
+          (define! connection (named "g") "(defn head-g [] 10)")
+          (test-support/transacted! connection [[:db/retractEntity [:seon.fn/sym (named "k")]]])
+          ;; the branch defines `f` and retracts `m`
+          (define! fork (named "f") "(defn head-f [] 2)")
+          (test-support/transacted! fork [[:db/retractEntity [:seon.fn/sym probe]]])
+          (let [loaded (db/db connection)
+                branch (db/db fork)
+                plan (#'eval/derive-overlay-plan branch loaded)
+                ctx (sci/fork (eval/program-context branch loaded))]
+            (is (= #{(named "f") (named "g") (named "k") (named "c")}
+                   (into (::eval/overridden plan) (::eval/added plan)))
+                "every declaration whose digest differs from the loaded commit's, main's changes since the fork included")
+            (is (= #{probe} (::eval/retracted plan)) "the branch's retraction")
+            (is (= 2 (sci/eval-string* ctx "(my.program/head-c)"))
+                "the branch's caller runs the branch's `g` and the callee the loaded commit lacks")
+            (is (nil? (sci/resolve ctx probe)) "the retracted declaration is unmapped in the fork"))))))))
 
 (deftest a-work-branch-documents-what-main-moved-past-as-main-holds-it
   ;; Before, documentation and help read the branch's own row: chain branch

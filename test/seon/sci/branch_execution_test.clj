@@ -478,10 +478,10 @@
 
 (deftest ^{:seon.test/long "Two complete SCI acquisitions of the canonical fixture program (the loaded one and a branch value lacking one declaration)."
            :seon.test/long-ms 12000}
-  a-branch-forked-before-a-platform-change-binds-the-loaded-compiled-var
-  ;; Root, 2026-09-28: an agent forked before a reload could not resolve
-  ;; `my.program/search`, which the reload added: host bindings came from the
-  ;; branch's own rows only, and the branch predates the row.
+  a-branch-lacking-a-declaration-the-loaded-commit-holds-does-not-resolve-it
+  ;; A branch runs its own HEAD (branch-model ruling 1): a declaration main
+  ;; added after the fork is not the branch's until root merges main forward.
+  ;; Before, the branch bound the loaded commit's compiled Var for it.
   (support/with-database
    (fn [connection]
      (db/with-branch {:seon.db/connection connection}
@@ -498,9 +498,7 @@
              "the branch value has no row for the function the loaded program has")
          (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db predating
                          :seon.schema/projection projection})
-         (is (some? (sci/resolve ctx subject)) "the loaded program's function resolves in the branch's context")
-         (is (identical? @(find-var subject) @(sci/resolve ctx subject))
-             "it is the compiled Var's root, running as compiled on every branch")))))))
+         (is (nil? (sci/resolve ctx subject)) "the branch's context holds only what the branch holds")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program with two changed entities whose closures reach four declarations."
            :seon.test/long-ms 8000}
