@@ -1704,33 +1704,41 @@
        (is (m/validate compiled (mg/generate compiled {:seed 20260926}))
            "the named generator still generates a valid value")))))
 
-(deftest a-stored-declaration-naming-a-deleted-predicate-stays-readable
+(deftest a-declaration-naming-an-unloaded-predicate-stays-readable
   ;; A resume reads the published commit before the changed files replace its
   ;; entities; a contract there may name a predicate the loaded files deleted
-  ;; (ec1b53b38 deleted seon.db/projection-value-key?). It compiles to a
-  ;; callable that refuses by name, never a projection that refuses to build.
-  ;; With a base projection only its bindings and the changed definitions are
-  ;; examined; every row answers what the whole-population walk answers.
-  (let [deleted @#'seon.schema/deleted-predicate-functions
+  ;; (ec1b53b38 deleted seon.db/projection-value-key?). A branch's contract may
+  ;; name a predicate the branch defines and contracts, which no file holds.
+  ;; Each compiles to a callable that refuses by name, never a projection that
+  ;; refuses to build; a base's refusing callable is kept, so an advance
+  ;; rebinds nothing. A predicate of an unloaded namespace the population does
+  ;; not contract keeps the ordinary resolution.
+  (let [unloaded @#'seon.schema/unloaded-predicate-functions
         stale [:fn 'seon.schema/no-such-deleted-predicate?]
         forms {:probe/stale stale
                :probe/live [:fn 'clojure.core/int?]
                :probe/unloaded [:fn 'no.such.namespace/predicate?]}
         live (dissoc forms :probe/stale)
+        branch-contracts {'no.such.namespace/predicate? [:=> [:cat :int] :boolean]}
         base (schema/with-predicate-functions {:seon.schema.projection/forms live} {'clojure.core/int? #'int?})]
-    (doseq [[label forms base expected]
-            [[:no-base forms {} ['seon.schema/no-such-deleted-predicate?]]
-             [:changed-definition-names-it forms base ['seon.schema/no-such-deleted-predicate?]]
-             [:base-binds-it live (schema/with-predicate-functions base {'seon.schema/no-such-deleted-predicate? #'int?})
+    (doseq [[label forms contracts base expected]
+            [[:no-base forms {} {} ['seon.schema/no-such-deleted-predicate?]]
+             [:a-definition-names-it forms {} base ['seon.schema/no-such-deleted-predicate?]]
+             [:base-binds-it live {} (schema/with-predicate-functions base {'seon.schema/no-such-deleted-predicate? #'int?})
               []]
-             [:nothing-deleted live base []]]]
-      (let [found (deleted forms {} base)]
-        (is (= expected (vec (keys found))) (name label))
-        (when-let [refusing (get found 'seon.schema/no-such-deleted-predicate?)]
-          (is (= 'seon.schema/no-such-deleted-predicate?
+             [:nothing-deleted live {} base []]
+             [:the-population-contracts-it live branch-contracts base ['no.such.namespace/predicate?]]]]
+      (let [found (unloaded forms contracts base)]
+        (is (= (set expected) (set (keys found))) (name label))
+        (doseq [[predicate refusing] found]
+          (is (= predicate
                  (:seon.schema/unresolved-predicate
                   (try (refusing 1) (catch clojure.lang.ExceptionInfo failure (ex-data failure)))))
-              (name label)))))))
+              (name label)))))
+    (let [found (unloaded live branch-contracts {})
+          again (unloaded live branch-contracts (schema/with-predicate-functions base found))]
+      (is (identical? (get found 'no.such.namespace/predicate?) (get again 'no.such.namespace/predicate?))
+          "a base's refusing callable is kept"))))
 
 (deftest a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate
   ;; CLASS: `runtime-predicate` caught every Throwable as nil, so a predicate

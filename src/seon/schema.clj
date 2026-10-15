@@ -2982,55 +2982,49 @@
                   [[:seon.schema/key (:v datom)] {:seon.schema.admission/source source}])))
         (d/datoms database :avet :seon.schema/key)))
 
-(defn- deleted-predicate-functions
-  "Refusing callables for the predicates stored rows name but the loaded files deleted.
+(defn- unloaded-predicate-functions
+  "Refusing callables for the predicates a population names that no loaded Var defines.
 
-  A stored commit (the published source a resume diffs, a cluster that
-  retains its program) may name a predicate whose namespace is loaded but no
-  longer defines it. Those rows stay readable: each such predicate compiles
-  to a callable that refuses by name when a value is validated against it,
-  and its namespace is never reloaded to look for it. A predicate of an
-  unloaded namespace keeps the ordinary resolution. With a `base` projection,
-  only the predicates it binds and those the definitions not identical to its
-  own name are examined; the whole population is walked only when one of them
-  is deleted."
+  Two populations name such a predicate. A stored commit (the published source
+  a resume diffs, a cluster that retains its program) may name one whose
+  namespace is loaded but no longer defines it. A branch's program may name
+  one it defines itself, a function the population contracts that no file
+  holds yet (its namespace has no file to load): compiled callers and the
+  checked writer see it only after merge,
+  and a context that defines it binds its own Var
+  (`seon.sci.kernel/context-bound-projection`). Those declarations stay
+  admissible and readable: each such predicate compiles to a callable that
+  refuses by name when a value is validated against it, a function of the
+  predicate's name alone, so equal populations derive equal projections on
+  every branch, and its namespace is never loaded to look for it. A predicate
+  `base` already binds to its refusing callable keeps that callable. Any other
+  predicate of an unloaded namespace keeps the ordinary resolution."
   {:malli/schema [:=> [:cat :map :map :map] [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
   [forms function-contracts base]
-  (let [named (comp (filter #(and (vector? %) (= :fn (first %))))
-                    (map #(get % (if (map? (second %)) 2 1)))
-                    (filter qualified-symbol?))
-        deleted? #(and (find-ns (symbol (namespace %))) (nil? (loaded-predicate-var %)))
-        changed (fn [definitions prior]
-                  (keep (fn [[k v]] (when-not (identical? v (get prior k)) v)) definitions))
-        ;; `base` binds every predicate its own definitions name, and an
-        ;; unchanged definition is `base`'s own object.
-        candidates (when (seq base)
-                     (into (set (keys (predicate-functions-in base))) named
-                           (tree-seq coll? seq
-                                     [(changed forms (:seon.schema.projection/forms base))
-                                      (changed function-contracts
-                                               (:seon.schema.projection/function-contracts base))])))]
-    (if (and candidates (not-any? deleted? candidates))
-      {}
-      (into {}
-        (comp named
-              (distinct)
-              (filter deleted?)
-              (map (fn [predicate]
-                     [predicate
-                      (fn [value]
-                        (throw
-                         (ex-info (str "Predicate " predicate
-                                       " was deleted from its loaded namespace; a stored"
-                                       " declaration still names it.")
-                                  {:seon.error/at (java.util.Date.)
-                                   :seon.error/layer :seon.schema/compilation
-                                   :seon.error/operation 'seon.schema/projection-from-entities
-                                   :seon.error/message "A stored declaration names a deleted predicate."
-                                   :seon.schema/error :seon.schema/unresolved-predicate
-                                   :seon.schema/unresolved-predicate predicate
-                                   :seon.error/offending value})))])))
-        (tree-seq coll? seq [(vals forms) (vals function-contracts)])))))
+  (let [unloaded? #(and (nil? (loaded-predicate-var %))
+                        (or (find-ns (symbol (namespace %)))
+                            (and (contains? function-contracts %) (nil? (runtime-predicate %)))))
+        held (predicate-functions-in base)
+        refusing (fn [predicate]
+                   (let [prior (get held predicate)]
+                     (if (= predicate (::unloaded-predicate (meta prior)))
+                       prior
+                       (with-meta
+                         (fn [value]
+                           (throw
+                            (ex-info (str "Predicate " predicate
+                                          " has no loaded definition; a declaration names it.")
+                                     {:seon.error/at (java.util.Date.)
+                                      :seon.error/layer :seon.schema/compilation
+                                      :seon.error/operation 'seon.schema/projection-from-entities
+                                      :seon.error/message "A declaration names a predicate no loaded Var defines."
+                                      :seon.schema/error :seon.schema/unresolved-predicate
+                                      :seon.schema/unresolved-predicate predicate
+                                      :seon.error/offending value})))
+                         {::unloaded-predicate predicate}))))]
+    (into {}
+          (comp (filter unloaded?) (map (juxt identity refusing)))
+          (population-predicate-symbols forms function-contracts))))
 
 (defn- schema-identity
   "The schema key a committed schema row names; refuses any other identity."
@@ -3125,7 +3119,7 @@
             :seon.schema/function-admissions function-admissions
             :seon.schema/artifact-exports artifact-exports
             :seon.schema/predicate-functions
-            (deleted-predicate-functions forms function-contracts reusable)
+            (unloaded-predicate-functions forms function-contracts reusable)
             ;; Reading committed entities re-admits nothing: completeness and
             ;; renderer coherence were judged when the entities were written
             ;; (`projection-with-schema` and the other replacements,

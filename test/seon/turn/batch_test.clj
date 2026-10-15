@@ -300,13 +300,47 @@
      'f40.named-predicate/takes-ifn '[:=> [:cat [:fn {:error/message "must be callable" :gen/elements [:k]} clojure.core/ifn?]] :int]
      "(takes-ifn inc)" 2 "(takes-ifn 1)"]]))
 
-(deftest ^{:seon/tasks #{'seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer}}
-  a-contract-naming-a-predicate-defined-on-the-branch-is-admitted-and-armed
+(deftest a-contract-naming-a-predicate-defined-on-the-branch-is-admitted-and-armed
   (named-predicate-contract-is-armed
    [["(defn even-int? {:malli/schema [:=> [:cat :int] :boolean]} [x] (even? x))
       (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be an even integer\" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]} [x] (quot x 2))"
      'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
      "(halve 4)" 2 "(halve 3)"]]))
+
+(deftest ^{:seon.test/long "Three own-branch agents, each forking its branch and defining a predicate and its contract through two MCP eval requests."
+           :seon.test/long-ms 15000}
+  branches-declaring-one-predicate-contract-share-one-projection
+  ;; The writer's projection resolves a branch's predicate by name, never by
+  ;; the context's Var, so branches declaring the same contracts share one
+  ;; projection however their bodies differ, a different contract derives
+  ;; another, and each context calls its own body.
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ _]
+     (let [define (fn [predicate-contract body]
+                    (let [agent-id (str "shared-predicate-" (id/id))
+                          {connection :seon.db/connection reply :seon.test/reply}
+                          ((requiring-resolve 'seon.test-support/own-branch-agent!)
+                           running agent-id "(in-ns 'f40.shared-predicate)")
+                          defined (eval! (str "(defn even-int? {:malli/schema " predicate-contract "} [x] " body ")
+                                               (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be even\" :gen/elements [0 2]} f40.shared-predicate/even-int?]] :int]} [x] (quot x 2))")
+                                         agent-id running)]
+                      (is (false? (get reply "isError")) "the agent is hosted on its own branch")
+                      (is (false? (get defined "isError")) "the definitions are admitted")
+                      {:agent agent-id :projection (db/carried-projection (db/db connection))}))
+           call (fn [{agent :agent} code]
+                  (let [reply ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent running))]
+                    (or (:seon.repl/value reply) (get-in reply [:seon.repl/error :seon.error/type]))))
+           even (define "[:=> [:cat :int] :boolean]" "(even? x)")
+           odd (define "[:=> [:cat :int] :boolean]" "(odd? x)")
+           other (define "[:=> [:cat :int] [:enum true false]]" "(even? x)")]
+       (is (identical? (:projection even) (:projection odd))
+           "equal declarations on two branches share one projection")
+       (is (not (identical? (:projection even) (:projection other)))
+           "a different contract derives its own projection")
+       (is (= [2 :seon.instrument/contract-error] [(call even "(halve 4)") (call even "(halve 3)")])
+           "the first context calls its own predicate")
+       (is (= [1 :seon.instrument/contract-error] [(call odd "(halve 3)") (call odd "(halve 4)")])
+           "the second context calls its own predicate")))))
 
 (def ^:private form-request-taker
   "An interpreted function contracted on `:my.edit/form-request`, whose predicate
