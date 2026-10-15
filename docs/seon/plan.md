@@ -64,6 +64,9 @@ directly. No live (provider) run until the context defects below are fixed and t
 | C10 | A quoted symbol in test data yields an `:auto-required` finding; multi-word `my.program/search` answers nothing; `my.program/diff` cannot inspect a changed namespace | Fix each producer; file what is over 15 minutes |
 | C11 | Context and help tests are red on HEAD (`seon.context-test` 3, `seon.help-test` 5) | Red census (in flight) classifies; fix or retire with the census |
 | C12 | ~150 scratch agent branches list in `my.agent/branches` | Root closes their admissions after the lanes end (649029d26 lifecycle deletes) |
+| C13 | A request whose forms do no work (`(+ 1 1)`) costs 120-200 ms, its test step 44-150 ms and 67-263 MB on a branch with nothing new to test (lane redefine-cost, HEAD 1119db9e1, measured under load) | Measure on a quiet JVM; the test step's per-request selection does only what changed |
+| C14 | A reply's `:seon.cost/diff` lists `seon.db/db`, `pull`, `pull-call` as `#{:interpreted :new}` for an agent that never touched `seon.db` (same lane) | Find whether the diff reads other branches' profile data or seon.db is interpreted on the branch; fix the producer |
+| C15 | 32 tests red on HEAD (red-census.md a6d059a75), 8 of them context and help (rows 5-7: a missing reference shows no problem; 11-15 help) | Lanes context-help-reds and classified-reds; the 25 UNKNOWN rows bisected before 76c4bed09 next |
 
 **Second: generative schemas and functions, specified** (owner, 2026-10-15; brief tmp/gen-pipeline.md). Every schema an
 agent defines is checked for being generative and fast (and round-trips to the database when it is an entity schema);
