@@ -6,13 +6,17 @@
                      [:my.agent/namespace {:optional true} :my.agent/namespace]
                      [:my.agent/steward {:optional true} :my.agent/steward]]
  :my.agent/settings :seon.config/agent-overlay
- :my.agent/branch-request [:map {:description "A lane branch named by its store branch keyword."} [:seon.store/branch :seon.store/branch]]
+ :my.agent/branch-request [:map {:description "A lane branch named by its store branch keyword."} [:seon.store/branch :seon.store/branch]
+                           [:my.agent/keep? {:optional true} :my.agent/keep?]]
+ :my.agent/keep? [:boolean {:description "End the lane's work (admission, graphs, connections, root's chain route) and keep its branch as history instead of deleting it: what an ended branch gets when its cluster keeps ended branches (:seon.config.agent/keep-ended-branches?, seon.task/end-branch!)."}]
+ :my.agent/kept? [:boolean {:description "True when the lane's work ended and its branch stays, readable by its name, until a retirement without :my.agent/keep? deletes it."}]
  :my.agent/created-branch [:map {:description "A branch created off my cluster's head: the commit it forks and that commit's basis."}
                            [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]
                            [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.db/basis-t :seon.db/basis-t]]
  :my.agent/retired? :boolean
- :my.agent/retired-branch [:map {:description "A lane branch removed from the store's branches; its data goes when retention collects."}
-                           [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?] [:my.agent/retiring? {:optional true} :boolean]]
+ :my.agent/retired-branch [:map {:description "A lane branch whose work ended: removed from the store's branches (its data goes when retention collects), or kept as history (:my.agent/kept?)."}
+                           [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?] [:my.agent/retiring? {:optional true} :boolean]
+                           [:my.agent/kept? {:optional true} :my.agent/kept?]]
  :my.agent/own-branch [:and {:description "The branch my cluster's connection holds; shared, never a lane's."} :seon.store/branch]
  :my.agent/branches [:map [:my.agent/own-branch :my.agent/own-branch] [:my.agent/roster :my.agent/roster]]
  :my.agent/roster [:and {:description "Every branch in the store."} :seon.cluster.registry/branches]

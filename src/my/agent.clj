@@ -185,8 +185,9 @@
       {:seon.store/branch lane :my.agent/retired? false :my.agent/retiring? true})))
 
 (defn retire-branch!
-  "Retire a lane branch after closing admission and joining its graphs.
-  its executions and owned connection, then delete its branch.
+  "Retire a lane branch: close its admission, join its graphs, release its executions, owned connection and root's
+  route on it, then delete it, or with `:my.agent/keep? true` keep it as history (`:my.agent/kept?`), readable by
+  its name until a retirement without it deletes it.
   Works through the branch's own registry or its parent's. My cluster's shared
   branch refuses. My own branch records my end (`:my.agent/retiring?`), and root
   deletes it once nothing on it is unmerged. Its data goes when retention
@@ -196,11 +197,12 @@
 
   ```clojure
   (my.agent/retire-branch! {:seon.store/branch :my-lane})
+  (my.agent/retire-branch! {:seon.store/branch :my-lane :my.agent/keep? true})
   ```"
   {:seon/tasks #{'seon.turn/a-closed-attempt-releases-its-connection-before-branch-deletion}
    :malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/retired-branch :seon.error/value]]}
-  [{lane :seon.store/branch} {store :seon.store/store routing :seon.agent/routing :as context}]
+  [{lane :seon.store/branch keep? :my.agent/keep?} {store :seon.store/store routing :seon.agent/routing :as context}]
   (cond
     (nil? store) (branch-refusal `retire-branch! "My context holds no store to retire from." {})
     (shared-branch? context lane)
@@ -223,10 +225,12 @@
               (cluster.agent/release-context! execution))
             ;; root's route on a chain branch holds a connection too, and Datahike deletes no connected branch
             (some-> routing (cluster.agent/release-chain-route! lane))
-            (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
-                 {:seon.store/branch lane :my.agent/retired? true}
-                 (catch clojure.lang.ExceptionInfo refused
-                   (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
-                     (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
-                                     {:seon.store/branch lane :seon.error/expected rule})
-                     (throw refused)))))))))
+            (if keep?
+              {:seon.store/branch lane :my.agent/retired? false :my.agent/kept? true}
+              (try (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
+                   {:seon.store/branch lane :my.agent/retired? true}
+                   (catch clojure.lang.ExceptionInfo refused
+                     (if-let [rule (:seon.cluster.registry/refused (ex-data refused))]
+                       (branch-refusal `retire-branch! (str (ex-message refused) "; release its connection, then retire it.")
+                                       {:seon.store/branch lane :seon.error/expected rule})
+                       (throw refused))))))))))

@@ -140,6 +140,27 @@
        (is (= :seon.store/branch (:seon.error/member refused)) "a held branch's retirement is refused by name")
        (is (true? (:my.agent/retired? retired)) "once released, the branch retires")))))
 
+(deftest a-kept-lane-ends-and-stays-readable-until-it-is-retired
+  ;; KEEP-BRANCHES: an ended branch stays as history when its cluster keeps ended branches; ending it with
+  ;; `:my.agent/keep?` closes its work and leaves the branch, and a later plain retirement deletes it.
+  (support/with-database
+   (fn [connection]
+     (let [execution (support/execution-handle connection)
+           context {:seon.store/store (or (:seon.store/store execution)
+                                          (:seon.store/store (:seon.env/environment execution)))
+                    :seon.db/connection connection}
+           roster #(set (:my.agent/roster (my.agent/branches context)))
+           _ (my.agent/create-branch! {:seon.store/branch :kept-lane} context)
+           kept (my.agent/retire-branch! {:seon.store/branch :kept-lane :my.agent/keep? true} context)
+           readable (db/branch-database @connection :kept-lane)
+           kept-roster (roster)
+           retired (my.agent/retire-branch! {:seon.store/branch :kept-lane} context)]
+       (is (= {:seon.store/branch :kept-lane :my.agent/retired? false :my.agent/kept? true} kept))
+       (is (contains? kept-roster :kept-lane) "the kept branch stays in the store's branches")
+       (is (db/database-value? readable) "the kept branch reads by its name")
+       (is (true? (:my.agent/retired? retired)) "a plain retirement deletes a kept branch")
+       (is (not (contains? (roster) :kept-lane)))))))
+
 (deftest retire-branch-accepts-what-branch-returns
   (let [parent (support/execution-handle db/*conn*)
         _ (support/transacted! (:seon.db/connection parent)
