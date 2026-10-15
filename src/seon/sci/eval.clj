@@ -3112,20 +3112,21 @@
 (defn- lazy-root
   "The root of closure member `sym` at `sci-var` until its first call: that
   call interprets the member, in the context executing it, from the stored
-  source at `database`'s commit, reopened from the executing context's custody so the
-  closure retains no database value (`promote-member!`), so cost follows the members called; then
-  it and every later call run what that context binds."
+  source its own custody's database holds (`promote-member!`), so cost follows the members called; then
+  it and every later call run what that context binds. The closure retains no database value and no
+  commit: the program context holding this root is shared by content (`program-context`), so the
+  database that built it may live in a store the executing context never holds (a released test
+  world's overlay), while the executing context's database holds the same program."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
                   [:fn clojure.core/ifn?]]}
   [ctx database sym sci-var]
-  (let [commit (db/commit-id database)
-        projection (db/carried-projection database)]
+  (let [projection (db/carried-projection database)]
     (fn lazy-member [& args]
       (let [executing (executing-ctx ctx)
             held #(sci.ctx-store/with-ctx executing @sci-var)]
         (when (identical? lazy-member (held))
           (promote-member! executing
-                           (cond-> (d/commit-as-db (context-database executing) commit {:secondary-indices? false})
+                           (cond-> (context-database executing)
                              projection (vary-meta assoc :seon.schema/projection projection))
                            sym sci-var lazy-member))
         (apply (held) args)))))

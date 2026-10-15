@@ -460,6 +460,75 @@
           (cluster.agent/release-context! h)
           (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
 
+(defn- world-leaf
+  "What the world callers answer; a branch changes it."
+  {:malli/schema [:=> [:cat] :keyword]}
+  []
+  :loaded)
+
+(defn world-first
+  "The leaf, as the first request's test calls it."
+  {:malli/schema [:=> [:cat] :keyword]}
+  []
+  (world-leaf))
+
+(defn world-second
+  "The leaf, as the second request's test calls it."
+  {:malli/schema [:=> [:cat] :keyword]}
+  []
+  (world-leaf))
+
+(deftest ^{:seon.test/long "Two forks and two nested seon.test/run requests, one interpreted member each."
+           :seon.test/long-ms 20000}
+  a-second-test-world-of-one-program-runs-its-interpreted-callers
+  ;; S5's merge branch (2026-10-15) recorded a program other than the loaded one at its merge base, so its test
+  ;; world interprets its changes over an in-memory overlay commit. The program context is shared by content: a
+  ;; later request's member called a lazy caller root naming the first request's released overlay commit and threw
+  ;; NullPointerException (withMeta on nil) before its body.
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        main (db/db (:seon.db/connection target))
+        cluster (:seon.cluster/name target)
+        fork! (fn [branch database]
+                (registry/fork! {:seon.store/store store :seon.store/branch branch
+                                 :seon.cluster.registry/from (db/commit-id database) :seon.db/db database})
+                (cluster.agent/acquire-context! target nil {:seon.agent/branch branch}))
+        source (keyword (str "world-source-" (id/id)))
+        branch (keyword (str "world-candidate-" (id/id)))
+        source-handle (fork! source main)
+        source-conn (:seon.db/connection source-handle)
+        ;; the merge base records another program than the loaded one, as S5's did
+        _ (test-support/transacted! source-conn [{:seon.cluster/name cluster :seon.source/commit-id (db/commit-id main)}])
+        ;; the branch changes the leaf, so both its loaded callers interpret lazily in the world
+        _ (test-support/transacted! source-conn (test-support/replacement-tx
+                                                  (db/db source-conn) '[:seon.fn/sym seon.test-test/world-leaf]
+                                                  (str "(defn- world-leaf \"What the world callers answer; a branch changes it.\""
+                                                       " {:malli/schema [:=> [:cat] :keyword]} [] :changed)")
+                                                  {}))
+        ;; one test per request, each calling a caller the other request never called
+        _ (doseq [n ["first" "second"]]
+            (test-support/transacted! source-conn [(test-support/program-entity
+                                                     (db/db source-conn) [:seon.test/sym (symbol "seon.test-test" (str "calls-world-" n))]
+                                                     (str "(clojure.test/deftest calls-world-" n
+                                                          " (clojure.test/is (= :changed (seon.test-test/world-" n "))))"))]))
+        handle (fork! branch (db/db source-conn))
+        conn (:seon.db/connection handle)
+        run! (fn [n] (db/with-branch {:seon.db/connection conn}
+                       #(sut/run {:seon.test/policy :named :seon.test/execution handle :seon.test/rerun? true
+                                  :seon.test/recording-connection conn
+                                  :seon.test/identities #{(symbol "seon.test-test" (str "calls-world-" n))}})))
+        counts #(mapv (fn [result] (select-keys result [:seon.test/fail-count :seon.test/error-count]))
+                      (:seon.test/results %))]
+    (try
+      (is (= [{:seon.test/fail-count 0 :seon.test/error-count 0}] (counts (run! "first")))
+          "the first world interprets the branch's change through its caller")
+      (is (= [{:seon.test/fail-count 0 :seon.test/error-count 0}] (counts (run! "second")))
+          "a second world of the same program interprets its other caller from its own commit")
+      (finally
+        (doseq [[h b] [[handle branch] [source-handle source]]]
+          (cluster.agent/release-context! h)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
 (deftest ^{:seon/tasks #{'seon.test/a-members-reads-stay-out-of-its-callers-evidence}
            :seon.test/long "Two member runs, one of them a canonical problems fixture (measured 1,572 ms run on default)."
            :seon.test/long-ms 15000}
