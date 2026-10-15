@@ -1,0 +1,20 @@
+diff --git a/src/seon/cluster/source.clj b/src/seon/cluster/source.clj
+index 000570d..b0d08cf 100644
+--- a/src/seon/cluster/source.clj
++++ b/src/seon/cluster/source.clj
+@@ -744,8 +744,13 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.source/commit-id]
+                   [:or :seon.source/commit-id :seon.program/digest-map-refusal]]}
+   [database a b]
+-  (let [found (try (seon.cache/lookup ::merge-base (vec (sort [a b])) (constantly 64)
+-                                      #(d/merge-base (db/schema-database database) a b))
++  (let [schema-db (db/schema-database database)
++        ;; every merge base shares the commits' graph records: a commit is immutable, so its record is cached by
++        ;; its id and a collection's merge bases of every work branch read main's history once
++        record (fn [cid] (seon.cache/lookup ::commit-graph-record cid (constantly 128)
++                                            #(d/commit-graph-record schema-db cid)))
++        found (try (seon.cache/lookup ::merge-base (vec (sort [a b])) (constantly 64)
++                                      #(d/merge-base schema-db a b record))
+                    (catch clojure.lang.ExceptionInfo failure
+                      ;; a deliberate translation: Datahike's named refusal, answered as this reader's
+                      (if (merge-base-refusals (:type (ex-data failure)))
