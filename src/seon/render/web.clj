@@ -59,7 +59,6 @@
             [seon.turn :as turn]
 
             [seon.config :as config]
-            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
             [seon.health :as health]
@@ -70,6 +69,7 @@
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
+            [seon.render.sent :as sent]
             [seon.render.transcript :as transcript]
             [seon.print :as print]
             [seon.render.value :as value]
@@ -3165,34 +3165,50 @@
                  :seon.render.web/feed-url
                  (route/path ::route/feed {:id agent-id})}))))))
 
-(defn- sent-context
-  "The agent's context as its next model call is sent it, derived at the
-  query's `basis` (else the head), and the value at the query's cursor."
-  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :map]}
-  [{connection :seon.store/connection-object :as service} agent-id query]
-  (let [head (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
-        basis (or (some-> (get query "basis") parse-long) (db/basis-t head))
-        database (db/as-of head basis)
-        composed (context/model-context database
-                                        (debug-turn-request database connection agent-id (:seon.sci.admit/caps service)
-                                                            (dissoc service :seon.turn/id))
-                                        agent-id)
-        cursor (data/parse-cursor (get query "path") (get query "offset"))]
-    {::database database ::basis basis ::cursor cursor ::found (data/at composed cursor)}))
+(defn- sent-html
+  "Agent `agent-id`'s context as it was sent through `seon.render.sent/view-html`: call `call-id`'s at its recorded
+  basis, else the next call's at the agent's branch head, at the morph target the session page opened. The web
+  handler is the entrant boundary: a context the assembler throws on shows as its error value in its place."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id [:maybe :seon.ai.attempt/id]] :seon.render/hiccup]}
+  [{connection :seon.store/connection-object :as service} agent-id call-id]
+  (let [database (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
+        request (debug-turn-request database connection agent-id (:seon.sci.admit/caps service) (dissoc service :seon.turn/id))
+        call (when call-id (some #(when (= call-id (:seon.ai.attempt/id %)) %) (sent/calls database agent-id)))
+        shown (try (if call (sent/view database request agent-id call) (sent/view database request agent-id))
+                   (catch Throwable failure
+                     (cond-> {:seon.render.sent/basis (if call (:seon.ai.attempt/basis-t call) (db/basis-t database))
+                              :seon.render.sent/context
+                              (seon.error.refusal/diagnostic
+                               {:seon.error/at (java.util.Date.) :seon.error/layer :seon.render.web/request
+                                :seon.error/operation 'seon.context/model-context :seon.error/throwable failure})}
+                       call (assoc :seon.render.sent/call call))))]
+    [:div {:id (block/surface-id (keyword (if call-id "sent-call" "graph-sent") (or call-id agent-id)))}
+     (sent/view-html {:seon.render/value shown :seon.db/db database})]))
 
-(defn- sent-context-html
-  "The agent's context as its next model call is sent it, through the value
-  printer's HTML face; every cut pages it at the same basis."
-  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :seon.render/hiccup]}
-  [service agent-id query]
-  (let [{::keys [database basis cursor found]} (sent-context service agent-id query)]
-    [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
-     (value/html {:seon.render/value (if (contains? found :seon.render.data/value) (:seon.render.data/value found) found)
-                  :seon.db/db database
-                  :seon.render.value/root [::context agent-id]
-                  :seon.render.data/cursor cursor
-                  :seon.render.value/route-base (route/path ::route/agent-debug {:id agent-id} {:sent "true"})
-                  :seon.render.value/basis basis})]))
+(defn- calls-html
+  "Agent `agent-id`'s model calls at `database`, oldest first, each a disclosure whose body loads that call's context
+  as it was sent when opened."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.render/hiccup]}
+  [database agent-id]
+  (let [calls (sent/calls database agent-id)]
+    (if (:seon.error/at calls)
+      (value/html {:seon.render/value calls :seon.db/db database :seon.render.value/root [::calls agent-id]})
+      (into [:ol {:class "seon-sent-calls"}]
+            (map-indexed
+             (fn [index {id :seon.ai.attempt/id :as call}]
+               [:li {:data-call id}
+                [:details {(keyword "data-on:toggle")
+                           (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:call id}) "')")}
+                 [:summary
+                  [:span {:class "seon-sent-call-number"} (str "call " (inc index))]
+                  [:span (str "run " (:seon.turn/id call))]
+                  [:span (str "t " (:seon.ai.attempt/basis-t call))]
+                  (when-let [prompt (:seon.ai.usage/prompt-tokens call)]
+                    [:span (str prompt " prompt tokens" (when-let [cached (:seon.ai.usage/cached-tokens call)] (str ", " cached " cached")))])
+                  (when-let [completion (:seon.ai.usage/completion-tokens call)] [:span (str completion " completion")])
+                  (when-let [finish (:seon.ai.attempt/finish-reason call)] [:span {:class "seon-sent-finish"} finish])]
+                 [:div {:id (block/surface-id (keyword "sent-call" id))} "Loading what this call was sent…"]]]))
+            calls))))
 
 (defn- debug-response
   "The ring response for one agent's or namespace's debug page, or for its record or context fragment."
@@ -3215,15 +3231,8 @@
                 (vals (dissoc page stream-strip-id))))
          {"datastar-mode" "replace"}))
 
-      ;; A string cut's whole text: the string itself, no printing step.
-      (and agent-id (= "true" (get query "sent")) (= "1" (get query "text")))
-      (let [{value :seon.render.data/value :as found} (::found (sent-context service agent-id query))]
-        (if (string? value)
-          (text-response 200 value)
-          (text-response 422 (or (:seon.error/message found) "The path does not name a string."))))
-
-      (and agent-id (= "true" (get query "sent")) datastar?)
-      (html-response (hiccup/->string (sent-context-html service agent-id query))
+      (and agent-id datastar? (or (= "true" (get query "sent")) (get query "call")))
+      (html-response (hiccup/->string (sent-html service agent-id (get query "call")))
                      {"datastar-mode" "replace"})
 
       (and agent-id (not (get query "subject")))
@@ -3238,10 +3247,13 @@
            (transcript/render-agent-header
             (session-controls (debug-turn-request (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
                                                   connection agent-id (:seon.sci.admit/caps service) service)))
+           [:section {:class "seon-session-calls"}
+            [:h2 "Model calls: what each was sent"]
+            (calls-html (agent-database (:seon.agent/routing service) (db/db connection) agent-id) agent-id)]
            [:details {:class "seon-session-context"
                       (keyword "data-on:toggle")
                       (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
-            [:summary "Context"]
+            [:summary "Next call: what it would be sent now"]
             [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
              "Loading the agent’s context…"]]
            [:details {:class "seon-session-record"

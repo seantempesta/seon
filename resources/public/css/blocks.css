@@ -97,3 +97,46 @@
 .seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) { font: 0.75rem/1.55 var(--font-mono); overflow-wrap: anywhere; padding: 0.35rem 0; }
 .seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) .seon-kicker { color: var(--color-text-400); font-size: 0.625rem; }
 .seon-family-entry:is(.seon-namespace-alias-entry, .seon-namespace-refer-entry, .seon-namespace-import-entry) code { color: var(--color-info); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* What a model call was sent (seon.render.sent/view-html) and the debug page's call list. A form and the REPL's
+   reply sit side by side; every cut is amber: an older reply sent by reference, and the value printer's cuts. */
+.seon-syntax-elision { color: var(--color-warning); text-decoration: underline dotted; text-underline-offset: 0.2em; }
+.seon-session-calls { margin-top: 0.75rem; border-top: 1px solid var(--color-base-800); padding-top: 0.5rem; }
+.seon-sent-calls { list-style: none; margin: 0.25rem 0 0; padding: 0; }
+.seon-sent-calls > li { border-bottom: 1px solid var(--color-base-850); }
+.seon-sent-calls summary { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; padding: 0.3rem 0; cursor: pointer; color: var(--color-text-300); }
+.seon-sent-calls summary:hover { color: var(--color-text-100); }
+.seon-sent-calls details[open] > summary { color: var(--color-text-50); }
+.seon-sent-call-number { color: var(--color-signal); min-width: 4.5rem; }
+.seon-sent-finish { color: var(--color-text-500); }
+.seon-sent { display: grid; gap: 0.75rem; padding: 0.5rem 0 1rem; }
+.seon-sent-call { display: flex; flex-wrap: wrap; gap: 0.15rem 1.25rem; margin: 0; font-size: 0.66rem; color: var(--color-text-400); }
+.seon-sent-call dt { color: var(--color-text-500); }
+.seon-sent-call dt::after { content: ":"; }
+.seon-sent-call dd { margin: 0 0 0 0.35rem; color: var(--color-text-200); }
+.seon-sent-call dt + dd { display: inline; }
+.seon-sent-section { border: 1px solid var(--color-base-800); background: var(--color-base-900); }
+.seon-sent-section > header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--color-base-800); background: var(--color-base-850); }
+.seon-sent-section h3 { margin: 0; font-size: 0.72rem; font-weight: 600; color: var(--color-text-100); }
+.seon-sent-tokens, .seon-sent-count { font-size: 0.625rem; color: var(--color-text-400); font-variant-numeric: tabular-nums; }
+.seon-sent-text { margin: 0; padding: 0.5rem 0.6rem; max-height: 32rem; overflow: auto; font-size: 0.7rem; line-height: 1.5; }
+.seon-sent-exchanges > header { position: sticky; top: 0; z-index: 1; }
+.seon-sent-exchange-list, .seon-sent-pairs { list-style: none; margin: 0; padding: 0; }
+.seon-sent-exchange { border-top: 1px solid var(--color-base-800); }
+.seon-sent-exchange:first-child { border-top: 0; }
+.seon-sent-exchange > header { display: flex; gap: 1rem; align-items: baseline; padding: 0.35rem 0.6rem 0; }
+.seon-sent-exchange h4 { margin: 0; font-size: 0.66rem; font-weight: 600; color: var(--color-signal); }
+.seon-sent-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 0.5rem; padding: 0.35rem 0.6rem; }
+.seon-sent-pair + .seon-sent-pair { border-top: 1px dashed var(--color-base-800); }
+.seon-sent-form, .seon-sent-reply { min-width: 0; border-left: 2px solid var(--color-base-700); }
+.seon-sent-form { border-left-color: var(--color-eval); }
+.seon-sent-reply { border-left-color: var(--color-success); }
+.seon-sent-referenced { border-left-color: var(--color-warning); }
+.seon-sent-form .seon-sent-text, .seon-sent-reply .seon-sent-text { padding: 0.25rem 0.5rem; max-height: 20rem; background: var(--color-base-950); }
+.seon-sent-label { display: flex; flex-wrap: wrap; gap: 0.15rem 0.75rem; padding: 0 0.5rem; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-500); }
+.seon-sent-cut { color: var(--color-warning); text-transform: none; letter-spacing: 0; }
+.seon-sent-elision { display: grid; gap: 0.15rem; margin: 0.2rem 0.5rem; padding: 0.3rem 0.5rem; border: 1px dashed var(--color-warning); font-size: 0.66rem; }
+.seon-sent-requery { color: var(--color-text-200); }
+.seon-sent-refused { border-color: var(--color-error); }
+.seon-sent-refused > header h3 { color: var(--color-error); }
+@media (max-width: 900px) { .seon-sent-pair { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; } }

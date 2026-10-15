@@ -6,6 +6,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.render.block :as block]
             [seon.render.web]
             [seon.render.web-test :as web-test]
             [seon.task :as task]
@@ -46,3 +47,21 @@
          (finally
            (when (contains? (registry/branches store) branch)
              (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
+
+(deftest the-debug-page-lists-each-model-call-and-opens-what-it-was-sent
+  (#'web-test/with-server
+   (fn [connection server _context]
+     (#'web-test/open-run! connection "called-run")
+     (support/transacted! connection
+                          [{:db/id "call" :seon.ai.attempt/id "called" :seon.ai.attempt/ordinal 0
+                            :seon.ai.attempt/basis-t (db/basis-t (db/db connection)) :seon.ai.attempt/at #inst "2026-10-16"
+                            :seon.ai/endpoint "http://localhost/sent" :seon.ai/model "fixture" :seon.ai.attempt/settings-edn "{}"
+                            :seon.ai.usage/prompt-tokens 120}
+                           [:db/add [:seon.turn/id "called-run"] :seon.turn/attempts "call"]])
+     (let [page (web-test/dom (.body (#'web-test/fetch server "/agent/root/debug")))
+           opened (web-test/dom (.body (#'web-test/fetch server "/agent/root/debug?call=called" {"datastar-request" "true"})))
+           target (.selectFirst opened (str "#" (block/surface-id (keyword "sent-call" "called"))))]
+       (is (= ["called"] (mapv #(.attr ^org.jsoup.nodes.Element % "data-call") (.select page ".seon-session-calls li[data-call]")))
+           "the debug page lists the agent's model call")
+       (is (= "called" (some-> target (.selectFirst "article.seon-sent") (.attr "data-call")))
+           "opening it answers the call's context in its own morph target")))))

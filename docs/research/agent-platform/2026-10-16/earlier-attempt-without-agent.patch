@@ -1,0 +1,31 @@
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -554,11 +554,14 @@
+       rows
+       (let [shown (into [] (comp (remove #(= agent-id (get-in % [:seon.task/agent :seon.agent/id])))
+                                  (map (fn [row]
++                                        ;; an earlier attempt's agent lived on its own branch; once that branch is
++                                        ;; gone its row names no agent this value holds, and its calls are unknown here
+                                         (let [earlier (get-in row [:seon.task/agent :seon.agent/id])
+-                                              usage (model-usage database earlier)
+-                                              step (last-step database earlier)]
++                                              usage (when earlier (model-usage database earlier))
++                                              step (when earlier (last-step database earlier))]
+                                           (or (some #(when (:seon.error/at %) %) [usage step])
+-                                              (cond-> (assoc (dissoc row :seon.task/agent :db/id) :seon.task/calls (:seon.task/calls usage))
++                                              (cond-> (dissoc row :seon.task/agent :db/id)
++                                                usage (assoc :seon.task/calls (:seon.task/calls usage))
+                                                 step (assoc :seon.context/last-step step)))))))
+                         (sort-by :seon.task.attempt/number rows))]
+         (or (some #(when (:seon.error/at %) %) shown) shown)))))
+--- a/resources/seon/schemas/seon.context.edn
++++ b/resources/seon/schemas/seon.context.edn
+@@ -34,7 +34,7 @@
+                          [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
+                          [:seon.task/outcome {:optional true} :seon.task/outcome]
+                          [:seon.task/reason {:optional true} :seon.task/reason]
+-                         [:seon.task/calls :seon.task/calls]
++                         [:seon.task/calls {:optional true :description "Absent when the attempt's agent is on a branch the store no longer holds."} :seon.task/calls]
+                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
+                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
+                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]

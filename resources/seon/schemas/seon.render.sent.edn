@@ -1,0 +1,20 @@
+#:seon.render.sent
+{:call [:map {:description "One model call of an agent as the debug page lists it: the provider attempt's facts and the run it answered. Producer: seon.render.sent/calls."}
+        [:seon.ai.attempt/id :seon.ai.attempt/id]
+        [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+        [:seon.ai.attempt/basis-t :seon.ai.attempt/basis-t]
+        [:seon.ai.attempt/at {:optional true} :seon.ai.attempt/at]
+        [:seon.ai/model {:optional true} :seon.ai/model]
+        [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason]
+        [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
+        [:seon.ai.usage/cached-tokens {:optional true} :seon.ai.usage/cached-tokens]
+        [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]
+        [:seon.turn/id :seon.turn/id]]
+ :calls [:vector {:description "An agent's model calls, oldest first. Producer: seon.render.sent/calls."} :seon.render.sent/call]
+ :view [:map {:seon.render/html seon.render.sent/view-html
+              :description "An agent's context as `seon.context/model-context` assembles it, or that assembler's refusal, at a basis: a call's recorded one (the call present), else its branch head (its next call). With the dial that elides older replies. Producer: seon.render.sent/view."}
+        [:seon.render.sent/basis :seon.render.sent/basis]
+        [:seon.render.sent/call {:optional true} :seon.render.sent/call]
+        [:seon.render.sent/context [:or :seon.context/model-context :seon.error/value]]
+        [:seon.config.context/reference-tokens {:optional true} :seon.config.context/reference-tokens]]
+ :basis [:int {:min 0 :description "The basis t of the database value a view's context was assembled over."}]}

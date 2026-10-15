@@ -438,12 +438,17 @@
                           (and (#{\+ \-} character) (> (count token) 1)
                                (Character/isDigit ^char (.charAt ^String token 1)))) "number"
                       (str/starts-with? token "result/") "result"
+                      ;; the value printer's cut (`seon.print/elided-text`): `…N`, `…+N`, `…?`
+                      (= character \…) "elision"
                       (Character/isWhitespace ^char character) "space"
                       (Character/isLetter ^char character) "symbol"
                       :else "plain")]
           (recur end (conj tokens [style token])))))))
 
-(defn- syntax-spans [source]
+(defn syntax-spans
+  "`source` as hiccup spans, one per `syntax-tokens` token, each classed by its style; their text is `source`."
+  {:malli/schema [:=> [:cat :string] [:sequential :seon.render/hiccup]]}
+  [source]
   (map (fn [[style token]] [:span {:class (str "seon-syntax-" style)} token])
        (syntax-tokens source)))
 

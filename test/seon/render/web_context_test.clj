@@ -107,38 +107,11 @@
        (is (some? (web-test/element (.body ordinary) "details.seon-session-record")))
        (is (= 200 (.statusCode opened)))
        (is (= 1 opened-prompts) "opening the view assembles the context once")
-       (is (some? (web-test/element (.body opened) ".seon-data-panel")) "the value printer's panel shows it")
+       (is (some? (web-test/element (.body opened) "#surface-graph-sent_2f_root article.seon-sent")) "the sent-context view shows it")
        (is (= 200 (.statusCode inspection)))
        (is (str/includes? (.body inspection) "debug-units"))
        (is (not (str/includes? (.body inspection) "Context now")))
        (is (not (str/includes? (.body inspection) "debug-ai-")))))))
-
-(deftest a-context-view-string-cut-links-to-its-next-page-with-the-basis-and-text-answers-plain
-  (#'web-test/with-server
-   (fn [connection server _context]
-     (#'web-test/open-run! connection "long-context")
-     (support/transacted! connection
-                          [{:seon.cluster.eval/id "long-context-e0"
-                            :seon.cluster.eval/at (java.util.Date. 0)
-                            :seon.cluster.eval/run [:seon.turn/id "long-context"]
-                            :seon.cluster.eval/ordinal 0
-                            :seon.cluster.eval/source (str "(count \"" (str/join " " (repeat 20000 "word")) "\")")}])
-     (let [datastar {"datastar-request" "true"}
-           opened (#'web-test/fetch server "/agent/root/debug?sent=true" datastar)
-           hrefs (map #(.attr ^org.jsoup.nodes.Element % "href")
-                      (.select (web-test/dom (.body opened)) "a.seon-print-whole-text"))
-           href (first (filter #(str/includes? % "text=1") hrefs))
-           whole (#'web-test/fetch server (str/replace href #"^.*/agent/" "/agent/") datastar)]
-       (is (some? (some #(re-find #"offset=[1-9]\d*&amp;basis=\d+|offset=[1-9]\d*&basis=\d+" %)
-                        (map #(.attr ^org.jsoup.nodes.Element % "href")
-                             (.select (web-test/dom (.body opened)) "a.seon-print-elision"))))
-           "a string cut links to its next page at the view's basis")
-       (is (some? href) "a cut string offers its whole text")
-       (is (re-find #"basis=\d+" href) "the link keeps the basis the view was derived at")
-       (is (= 200 (.statusCode whole)))
-       (is (= ["text/plain"] (map #(first (str/split % #";")) (.allValues (.headers whole) "content-type")))
-           "text=1 answers text/plain")
-       (is (pos? (count (.body whole))))))))
 
 (deftest a-new-message-does-not-reinvoke-the-identity-pair
   (#'web-test/with-server
