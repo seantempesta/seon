@@ -1,4 +1,4 @@
-(ns seon.error.refusal
+(ns ^{:seon/babashka true} seon.error.refusal
   "Diagnostic construction and cause-chain reading for error boundaries. An
   error holds references, never copies: every world in it is referenced here."
   (:require [clojure.edn :as edn]

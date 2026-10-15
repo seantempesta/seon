@@ -1,4 +1,4 @@
-(ns seon.dev.dependency-digest
+(ns ^{:seon/babashka true} seon.dev.dependency-digest
   "THE ONE dependency-set identity the development class cache keys on.
 
   `dev_cache.clj` asks whether this checkout's dependency SET changed and

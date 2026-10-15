@@ -1,4 +1,4 @@
-(ns seon.id
+(ns ^{:seon/babashka true} seon.id
   "One identity entry: `id` hashes the data's structure, or creates a fresh
   event identity when called without data. Stable identities retain the
   supplied data's shape; callers choose their own identity parts."

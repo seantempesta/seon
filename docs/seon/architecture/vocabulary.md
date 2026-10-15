@@ -84,6 +84,7 @@ Words no library names. Each has one meaning.
 | current-state block | the part of an agent's context rendered live from its record each turn (`seon.context/current-state`) | status tail |
 | write-back | writing accepted declarations into source files, checking the files did not change since read, then reindexing (`seon.cluster.source/write-back!`) | export, push |
 | wake | a listened event the agent has not yet answered (a message, an attempt end, a task change) | notification, trigger |
+| babashka-loadable | the `{:seon/babashka true}` metadata on an `ns` form: the edit hook loads this namespace in Babashka (`bin/seon-hook`, `seon.edit/exact`), so it and everything it requires must load there; `seon.babashka-load-test` runs `bb` over every declaring namespace | bb-safe, hook-ns |
 | help | `(help)`, the first form an agent reads: the Markdown document `resources/seon/help.md` in titled sections, resolved like a plan (`seon.bootstrap/help-value`) | fixed help strings |
 | answered t | `:seon.agent/answered-t`: the database basis `t` the agent has answered; wakes after it are due (Datomic's basis t) | answered basis, handled |
 | references | `:seon.task/references`: the qualified symbols a task's `plan` and `instructions` cite as code spans, derived by the one task writer through the one reference parser (`seon.ref/names`) and re-derived whenever either changes; never authored | must-read, evidence, reading list |

@@ -1,4 +1,4 @@
-(ns seon.operator
+(ns ^{:seon/babashka true} seon.operator
   "Source-independent CLI client: argv data, one request, exact process identity."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]

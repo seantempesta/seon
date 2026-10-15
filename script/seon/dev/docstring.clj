@@ -1,4 +1,4 @@
-(ns seon.dev.docstring
+(ns ^{:seon/babashka true} seon.dev.docstring
   "WARN-ONLY doc-lint for public-fn docstring FIRST LINES.
 
    The compact-namespace-card render shows ONLY a fn's docstring line 1

@@ -1,4 +1,4 @@
-(ns seon.ai.tokens
+(ns ^{:seon/babashka true} seon.ai.tokens
   "Token estimation, the one sizer: a characters-per-token ratio applied to a string.
 
   Human-visible sizes are estimated tokens, never character counts. The

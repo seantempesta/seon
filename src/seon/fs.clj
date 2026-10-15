@@ -1,4 +1,4 @@
-(ns seon.fs
+(ns ^{:seon/babashka true} seon.fs
   "Filesystem operations whose safety depends on path ownership."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]

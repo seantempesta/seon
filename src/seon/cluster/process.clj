@@ -1,4 +1,4 @@
-(ns seon.cluster.process
+(ns ^{:seon/babashka true} seon.cluster.process
   "The one owner of JVM process identity and liveness.
 
   A pid alone is not an identity because operating systems recycle it.

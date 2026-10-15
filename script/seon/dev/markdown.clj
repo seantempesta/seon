@@ -1,4 +1,4 @@
-(ns seon.dev.markdown
+(ns ^{:seon/babashka true} seon.dev.markdown
   "Pure markdown analysis namespace for development hook integration.
 
    Parses, validates, and auto-fixes markdown files. Replaces the external

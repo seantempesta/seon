@@ -1,4 +1,4 @@
-(ns seon.edit
+(ns ^{:seon/babashka true} seon.edit
   "Pure structural and exact source transformations.
 
   This namespace deliberately has no cluster, database, filesystem, schema
