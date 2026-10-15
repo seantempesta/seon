@@ -170,6 +170,36 @@
       (is (nil? (kernel/memory-pressure held)))
       (is (nil? @held)))))
 
+(deftest memory-pressure-resumes-on-live-bytes-not-promoted-garbage
+  ;; G1 updates the old pool's collection usage after young pauses, counting
+  ;; promoted garbage. Resuming measures live bytes as entering does: a pool
+  ;; reading is a function of `force?`, the unforced one stale-high.
+  (let [pressure {::kernel/pool "G1 Old Gen" ::kernel/used-bytes 8 ::kernel/max-bytes 10
+                  ::kernel/collections 5
+                  ::kernel/enter-bytes 7 ::kernel/resume-bytes 5
+                  ::kernel/entered-at (java.util.Date.)
+                  ::kernel/in-flight [["root" "run-1"]]}
+        forced (atom 0)
+        pool (fn [live-bytes collections]
+               (fn [force?]
+                 (when force? (swap! forced inc))
+                 {::kernel/pool "G1 Old Gen" ::kernel/max-bytes 10
+                  ::kernel/collections collections
+                  ::kernel/used-bytes (if force? live-bytes 9)}))]
+    (testing "no collection since the last measure: holds without forcing one"
+      (let [held (volatile! pressure)]
+        (is (= pressure (kernel/memory-pressure held (pool 1 5))))
+        (is (zero? @forced))))
+    (testing "a collection ran and live bytes are freed: resumes though the unforced usage reads above the bound"
+      (let [held (volatile! pressure)]
+        (is (nil? (kernel/memory-pressure held (pool 1 6))))
+        (is (nil? @held))
+        (is (= 1 @forced))))
+    (testing "a collection ran and live bytes stay high: holds on the live measure"
+      (let [held (volatile! pressure)]
+        (is (= 6 (::kernel/used-bytes (kernel/memory-pressure held (pool 6 7)))))
+        (is (= 7 (::kernel/collections @held)))))))
+
 ;;; SCHEMA PAIRS SELECT; VALUES STAY WHOLE (owner 2026-09-26, "Three points";
 ;;; render-specificity audit slice 1). Each pair's source is read back and its
 ;;; forms evaluated in a world holding the value under its handle, as the

@@ -38,6 +38,7 @@
  :seon.sci.kernel/pool :string
  :seon.sci.kernel/used-bytes :int
  :seon.sci.kernel/max-bytes :int
+ :seon.sci.kernel/collections :int
  :seon.sci.kernel/enter-bytes :int
  :seon.sci.kernel/resume-bytes :int
  :seon.sci.kernel/entered-at inst?
@@ -47,6 +48,7 @@
   [:seon.sci.kernel/pool :seon.sci.kernel/pool]
   [:seon.sci.kernel/used-bytes :seon.sci.kernel/used-bytes]
   [:seon.sci.kernel/max-bytes :seon.sci.kernel/max-bytes]
+  [:seon.sci.kernel/collections :seon.sci.kernel/collections]
   [:seon.sci.kernel/enter-bytes :seon.sci.kernel/enter-bytes]
   [:seon.sci.kernel/resume-bytes :seon.sci.kernel/resume-bytes]
   [:seon.sci.kernel/entered-at :seon.sci.kernel/entered-at]

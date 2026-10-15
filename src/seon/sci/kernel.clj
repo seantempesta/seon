@@ -28,7 +28,7 @@
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.admit :as admit])
-  (:import [java.lang.management ManagementFactory MemoryNotificationInfo MemoryPoolMXBean MemoryType]
+  (:import [java.lang.management GarbageCollectorMXBean ManagementFactory MemoryNotificationInfo MemoryPoolMXBean MemoryType]
            [javax.management Notification NotificationEmitter NotificationListener]
            [java.util.concurrent CountDownLatch ExecutionException Future ScheduledThreadPoolExecutor TimeUnit]
            [java.util.concurrent.atomic AtomicBoolean AtomicLong AtomicReference]))
@@ -132,10 +132,22 @@
         (ManagementFactory/getMemoryPoolMXBeans)))
 
 (defn- collection-usage
-  "The tenured pool's occupancy after its most recent collection."
+  "The tenured pool's occupancy after its most recent collection, with the
+  collections its managers have run (any young pause updates that occupancy)."
   [^MemoryPoolMXBean pool]
-  (let [usage (.getCollectionUsage pool)]
-    {::pool (.getName pool) ::used-bytes (.getUsed usage) ::max-bytes (.getMax usage)}))
+  (let [usage (.getCollectionUsage pool)
+        managers (set (.getMemoryManagerNames pool))]
+    {::pool (.getName pool) ::used-bytes (.getUsed usage) ::max-bytes (.getMax usage)
+     ::collections (transduce (comp (filter #(contains? managers (.getName ^GarbageCollectorMXBean %)))
+                                    (map #(.getCollectionCount ^GarbageCollectorMXBean %)))
+                              + 0 (ManagementFactory/getGarbageCollectorMXBeans))}))
+
+(defn- measure-tenured
+  "The tenured pool's usage as a function of `force?`: false reads what the
+  JVM last recorded, true first runs one full collection so the bytes are live."
+  [force?]
+  (when force? (System/gc))
+  (collection-usage (tenured-pool)))
 
 (defn memory-pressure-error
   "The refusal a new arm answers under `pressure`: a fixed message, the pool,
@@ -164,8 +176,7 @@
   {:malli/schema [:=> [:cat ::in-flight] [:maybe ::memory-pressure]]}
   [in-flight]
   (when-not @memory-pressure-state
-    (System/gc)
-    (let [usage (collection-usage (tenured-pool))
+    (let [usage (measure-tenured true)
           bound #(long (* (% memory-bounds) (::max-bytes usage)))]
       (when (>= (::used-bytes usage) (bound ::enter))
         (vreset! memory-pressure-state
@@ -177,17 +188,27 @@
 
 (defn memory-pressure
   "The memory pressure `state` holds (this process's by default), or nil while
-  arms admit work. Ordinary admission pays one volatile read; a held pressure
-  re-reads the JVM and clears once usage is below its `::resume-bytes`."
+  arms admit work. Ordinary admission pays one volatile read. A held pressure
+  reads the JVM's collection count and, only when a collection has run since
+  its last measure, re-measures live bytes as entering does (`measure` is
+  `measure-tenured`'s function of `force?`), clearing once they are below its
+  `::resume-bytes`; otherwise it holds on the bytes it last measured."
   {:malli/schema [:function [:=> [:cat] [:maybe ::memory-pressure]]
-                  [:=> [:cat [:fn clojure.core/volatile?]] [:maybe ::memory-pressure]]]}
+                  [:=> [:cat [:fn clojure.core/volatile?]] [:maybe ::memory-pressure]]
+                  [:=> [:cat [:fn clojure.core/volatile?] [:fn clojure.core/ifn?]]
+                   [:maybe ::memory-pressure]]]}
   ([] (memory-pressure memory-pressure-state))
-  ([state]
+  ([state] (memory-pressure state measure-tenured))
+  ([state measure]
    (when-let [pressure @state]
-     (let [used (::used-bytes (collection-usage (tenured-pool)))]
-       (if (< used (::resume-bytes pressure))
-         (vreset! state nil)
-         (assoc pressure ::used-bytes used))))))
+     (if (= (::collections (measure false)) (::collections pressure))
+       pressure
+       (let [usage (measure true)]
+         (if (< (::used-bytes usage) (::resume-bytes pressure))
+           (vreset! state nil)
+           (vreset! state (assoc pressure
+                                 ::used-bytes (::used-bytes usage)
+                                 ::collections (::collections usage)))))))))
 
 (defn watch-memory!
   "Set the tenured pool's collection usage threshold at `::enter` and call
