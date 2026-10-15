@@ -611,7 +611,10 @@
             before (on-chain db/db)
             merged (merge/merge-main! target chain)
             after (on-chain db/db)
-            moved (into #{} (comp (remove #(= (:e %) (:tx %))) (map :a))
+            ;; cost entities (and their process) ride on any transaction when the world's observed cost moved:
+            ;; evidence stamped by the writer, present in some runs and absent in others, not what the merge wrote
+            cost-stamp? #(or (= "seon.fn.cost" (namespace %)) (contains? #{:seon.db/process :seon.db.process/id} %))
+            moved (into #{} (comp (remove #(= (:e %) (:tx %))) (map :a) (remove cost-stamp?))
                         (d/datoms (db/since after (db/basis-t before)) :eavt))
             base (db/commit-database after (source/merge-base after (db/commit-id after) (db/commit-id main)))
             forked (db/commit-database main fork-commit)]
