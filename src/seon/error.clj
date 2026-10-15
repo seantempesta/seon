@@ -35,7 +35,9 @@
             [seon.schema.datahike :as schema.datahike]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
-            [seon.sci.admit :as admit]))
+            [seon.sci.admit :as admit]
+            [clojure.pprint :as pp]
+            [seon.config :as config]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -2079,10 +2081,76 @@
            sort
            (into [] (take names-shown))))))
 
+(defn- library-names
+  "The public names of the JVM namespace `namespace-name`, qualified, else
+  none when the JVM has not loaded it."
+  {:malli/schema [:=> [:cat :symbol] [:vector :qualified-symbol]]}
+  [namespace-name]
+  (if-let [host (find-ns namespace-name)]
+    (mapv (fn [entry] (symbol (str namespace-name) (str entry)))
+          (keys (ns-publics host)))
+    []))
+
+(def ^:private core-namespace
+  "The namespace whose public names widen a qualified name reached through
+  an alias: a simple name the alias's target does not declare may be declared
+  here, as `subs` is for `(str/subs ...)`."
+  'clojure.core)
+
+(defn- alias-target
+  "The namespace the qualifier of `missing` aliases to, read from the stored
+  namespace aliases, else nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  [:or :symbol [:= {} nil]]]}
+  [database missing]
+  (when-let [local (some-> (namespace missing) symbol)]
+    (let [found (db/q '[:find ?target . :in $ ?local
+                        :where [?a :seon.ns.alias/local ?local]
+                        [?a :seon.ns.alias/target-ns ?target]]
+                      database local)]
+      (when-not (db/read-refusal? found) found))))
+
+(defn- alias-candidates
+  "The library names `missing` may mean when its qualifier `aliases` to a
+  namespace: that target's public names, widened with `core-namespace`'s, in
+  that order. None when the missing name is not qualified or its qualifier
+  aliases to nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:vector :qualified-symbol]]}
+  [database missing]
+  (if-let [target (and (qualified-symbol? missing) (alias-target database missing))]
+    (into (library-names target) (library-names core-namespace))
+    []))
+
+(defn- library-calling-form
+  "The call a JVM declaration makes: `(sym arg ...)` from its host arglists,
+  or `(sym)` when the JVM holds no readable arglist."
+  {:malli/schema [:=> [:cat :qualified-symbol] :seon.schema/value]}
+  [sym]
+  (let [shortest (some->> (:arglists (meta (resolve sym))) (sort-by count) first)]
+    (apply list sym shortest)))
+
+(defn- candidate-calling-form
+  "The call `sym` makes: from its stored program arglists when it is a
+  declaration, else from its host arglists (`library-calling-form`), else nil
+  when neither knows it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
+                  [:or :seon.schema/value [:= {} nil]]]}
+  [database sym]
+  (let [arglists (db/q '[:find ?arglists . :in $ ?sym
+                         :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arglists ?arglists]]
+                       database sym)]
+    (if (db/read-refusal? arglists)
+      nil
+      (if (some? arglists)
+        (calling-form sym arglists)
+        (when (resolve sym)
+          (library-calling-form sym))))))
+
 (defn- nearest-calls
   "The calling forms of the program declarations `missing` may mean, at most
   eight: first the definitions of `namespace-name` that bind it as a local
   (when it is a simple name), then the public declarations nearest to it
+  against the names of the alias's target and `core-namespace`
   (`nearest-names`). Nothing when the read is refused: `names-in` shows that
   refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol [:maybe :symbol]] [:vector :seon.schema/value]]}
@@ -2092,10 +2160,13 @@
                     database)]
     (if (db/read-refusal? found)
       []
-      (let [owners (if (and namespace-name (simple-symbol? missing)) (local-owners database namespace-name missing) [])
-            near (nearest-names missing (remove declared-by-test? (map first found)) names-shown)]
-        (->> (calling-forms database (distinct (concat owners near)))
-             (into [] (take names-shown)))))))
+      (let [declared (remove declared-by-test? (map first found))
+            candidates (distinct (concat declared (alias-candidates database missing)))
+            owners (if (and namespace-name (simple-symbol? missing)) (local-owners database namespace-name missing) [])
+            near (nearest-names missing candidates names-shown)]
+        (->> (concat owners near)
+             (distinct)
+             (into [] (comp (keep #(candidate-calling-form database %)) (take names-shown))))))))
 
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored

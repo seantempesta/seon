@@ -1958,3 +1958,28 @@
       (let [compiled (mr/schema registry variant)
             sample (malli.generator/generate compiled {:seed 0 :size 10})]
         (is (malli.core/validate compiled sample))))))
+
+(deftest an-unresolved-alias-name-is-answered-with-its-nearest-core-name
+  ;; Live chain rough run 1: an agent wrote (str/subs "#the-goal" 1) and read
+  ;; "Unable to resolve symbol: str/subs" with no suggestion, then retried six
+  ;; times. The alias `str` resolves to clojure.string in the agent's namespace;
+  ;; `subs` is declared in clojure.core, so the reply must offer
+  ;; `clojure.core/subs` even though that name belongs to another namespace.
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "nearest-alias"})
+     (let [ctx (test-support/fork-cluster-ctx connection "nearest-alias")
+           nearest (fn [source]
+                     (:seon.error/nearest
+                      (error/reply-value (db/db connection)
+                                         (test-support/agent-value ctx source))))]
+       (clojure.test/are [source owner] (some #{owner} (map first (nearest source)))
+         ;; the simple name is declared in clojure.core, no program declaration
+         "(str/subs \"abc\" 1)"    'clojure.core/subs
+         ;; the simple name is declared in clojure.string, a loaded namespace
+         "(str/replace \"abc\" \"a\" \"b\")" 'clojure.string/replace)
+       (testing "the alias itself resolves, so the guess is only the simple name"
+         (let [failure (test-support/agent-value ctx "(str/subs \"abc\" 1)")]
+           (is (= 'str/subs (:seon.error/offending failure)))))
+       (testing "a name nothing resembles still has no key"
+         (is (not (contains? (nearest "(str/qqqzzz \"abc\" 1)") :seon.error/nearest))))))))
