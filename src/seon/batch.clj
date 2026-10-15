@@ -222,6 +222,32 @@
     (merge counts {:seon.cost/ms elapsed
                    :seon.cost/stages (assoc stages :unattributed remainder)})))
 
+(defn render-request-cost-ai
+  "A request's cost as the AI face shows it: wall milliseconds, allocated
+  megabytes and armed calls, the three an agent judges a form by."
+  {:malli/schema [:=> [:cat :seon.cost/request] :seon.cost/headline]}
+  [cost]
+  (select-keys cost [:seon.cost/ms :seon.cost/alloc-mb :seon.cost/calls]))
+
+(defn- cost-cell
+  "One member's value as a table cell: a map is a nested table."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  [value]
+  (if (map? value)
+    [:table (into [:tbody]
+                  (map (fn [[k v]] [:tr [:th (str k)
+                                       (when (#{:seon.cost/jvm-window :seon.cost/shared} k)
+                                         [:small " whole-JVM activity during the request, including other sessions"])]
+                                    [:td (cost-cell v)]]))
+                  (sort-by (comp str key) value))]
+    [:span (pr-str value)]))
+
+(defn render-request-cost-html
+  "A request's whole cost as a table, every member and nested member a row."
+  {:malli/schema [:=> [:cat :seon.cost/request] :seon.render/hiccup]}
+  [cost]
+  [:div {:class "seon-request-cost"} (cost-cell cost)])
+
 (defn jvm-shared-counters
   "JVM-wide garbage-collection CPU nanoseconds and JIT compilation
   milliseconds; an unavailable reading is -1."

@@ -105,8 +105,15 @@
   [:seon.cost/gc-ms {:optional true} :seon.cost/gc-ms]
   [:seon.cost/jit-ms {:optional true} :seon.cost/jit-ms]
   [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
+ :seon.cost/headline
+ [:map {:description "A request's cost as the AI face shows it: wall milliseconds, allocated megabytes and armed calls. Producer: seon.batch/render-request-cost-ai."}
+  [:seon.cost/ms :seon.cost/ms]
+  [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+  [:seon.cost/calls {:optional true} :seon.cost/calls]]
  :seon.cost/request
- [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms (whose owning thread is the step's or the entrance's), step the turn step's proc thread, entrance the MCP caller's thread, shared the window's residual. jvm-window covers every thread in the observation window, including unrelated work; unavailable counters are absent."}
+ [:map {:seon.render/ai seon.batch/render-request-cost-ai
+        :seon.render/html seon.batch/render-request-cost-html
+        :description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms (whose owning thread is the step's or the entrance's), step the turn step's proc thread, entrance the MCP caller's thread, shared the window's residual. jvm-window covers every thread in the observation window, including unrelated work; unavailable counters are absent."}
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
   [:seon.cost/step {:optional true} :seon.cost/step]
