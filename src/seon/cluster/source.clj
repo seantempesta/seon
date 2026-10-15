@@ -1399,7 +1399,8 @@
 
 (defn done-refusals
   "Every refusal the done rule gives a task over the recorded results in `judged`, the same for every task: each
-  of its `:seon.task/proofs` without a current result (an empty set never finishes) or not green; each other
+  of its `:seon.task/proofs` without an executed current result (absent, or a result that never started: unknown
+  evidence, never red; an empty set never finishes) or whose executed result is not green; each other
   member red here that `:seon.source/green-on-target` holds green on main, and each red test defined or changed
   on the branch (in `:seon.program/identities`, `:seon.source/stray-red-error`), unless it is one of the
   `:seon.source/next-proofs` (none on the last task); and every function of the identities `branch` holds with a
@@ -1424,8 +1425,9 @@
         red? (requiring-resolve 'seon.test.runner/red-result?)
         by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
         on-main (set on-main)
-        unknown (vec (sort (remove by-sym proofs)))
-        red-proofs (filterv #(some-> (by-sym %) green-result? not) proofs)
+        executed (fn [test-symbol] (let [result (by-sym test-symbol)] (and result (not (:seon.error/at result)))))
+        unknown (vec (sort (remove executed proofs)))
+        red-proofs (filterv #(and (executed %) (not (green-result? (by-sym %)))) proofs)
         others (into #{} (filter #(some-> (by-sym %) red?)) (remove (into (set proofs) next-proofs) members))
         regressed (filterv on-main others)
         stray (filterv #(and (delta [:seon.test/sym %]) (not (on-main %))) others)

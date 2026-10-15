@@ -9,6 +9,7 @@
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.error.refusal]
             [seon.fn :as fn]
             [seon.id :as id]
             [seon.task :as task]
@@ -473,6 +474,15 @@
                 ["own proof red: refused"
                  (assoc base :seon.source/results [(recorded 'tq.done-test/proof false)]) [:seon.source/red-test-error]]
                 ["own proof with no result: refused" (assoc base :seon.source/results []) [:seon.source/test-evidence-error]]
+                ["own proof that never started: unknown evidence, not red"
+                 (assoc base :seon.source/results
+                        [(seon.error.refusal/error :seon.test/result-unknown
+                          {:seon.error/layer :seon.test/execution :seon.error/operation 'seon.test.runner/recorded-member-results
+                           :seon.error/message "Never started." :seon.error/expected :completed-member
+                           :seon.error/offending 'tq.done-test/proof :seon.test/execution-refusal :seon.test/population-unknown
+                           :seon.test/error-test-symbol 'tq.done-test/proof :seon.test/run [:seon.test.run/id "run-1"]
+                           :seon.test/run-at #inst "2026-10-14"})])
+                 [:seon.source/test-evidence-error]]
                 ["an empty proof set never finishes" (assoc base :seon.task/proofs #{}) [:seon.source/test-evidence-error]]
                 ["a branch-new red outside the next proofs: stray"
                  (assoc (new-red base) :seon.source/next-proofs #{'tq.done-test/other}) [:seon.source/stray-red-error]]
