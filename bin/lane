@@ -16,7 +16,11 @@
 #   bin/lane evidence AGENT PATH... [-- TEST...]
 #                                        ask the branch-evidence question alone (exit 0 proven, 2 not, 3 unavailable);
 #                                        tests after -- are accepted as red before the change
-#   bin/lane release LANE [PATH...]      drop the named claims, or all of the lane's when none is named
+#   bin/lane release LANE [--agent AGENT] [PATH...]
+#                                        drop the named claims, or all of the lane's when none is named;
+#                                        with --agent, also write AGENT's end (close its admission) through the
+#                                        live root, so root's next db<->flow pass deletes its branch when nothing
+#                                        is unmerged (exit 3 when no live root answers; the claims are released)
 #   bin/lane status [LANE]               one line per lane with its path count; a lane's paths one per line
 #   bin/lane commit takes each test as its own `--test NS` (never `--test A B C`)
 #   LANE_ADOPT=1 bin/lane claim ...      root only: record a claim for a lane already editing those files
@@ -636,11 +640,39 @@ commit_locked() {
   git log --oneline -1
 }
 
+# Ask the live root to close AGENT's admission, its end (`seon.cluster.host/close-admissions!` on the agent's
+# branch), so root's next db<->flow pass deletes the branch when nothing on it is unmerged.
+retire_agent() {
+  local agent="$1"
+  bb -cp "$root/script:$root/src" -e '
+(require (quote [seon.operator :as operator]))
+(let [[root agent cluster] *command-line-args*
+      form (str "(let [c (seon.cluster.boot/connection " (pr-str cluster) ") b (seon.db/q (quote [:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]]) (seon.db/db c) " (pr-str agent) ")] (if b (seon.cluster.host/close-admissions! c b) {:lane/unavailable \"the agent holds no branch\"}))")
+      live (try (operator/live-root-value! root form {})
+                (catch Exception e {:seon.operator/live-process? true
+                                    :seon.operator/value {:lane/unavailable (str "the prepl call failed: " (ex-message e))}}))
+      answer (:seon.operator/value live)]
+  (cond
+    (not (:seon.operator/live-process? live)) (do (println "== no live root answers; agent" agent "keeps its branch") (System/exit 3))
+    (:lane/unavailable answer) (do (println "==" (:lane/unavailable answer)) (System/exit 3))
+    (:seon.error/at answer) (do (println "== agent end refused:" (:seon.error/message answer)) (System/exit 3))
+    :else (println "== agent" agent "ended (admission closed); root deletes its branch when nothing is unmerged")))' "$root" "$agent" "${SEON_CLUSTER:-default}"
+}
+
 release() {
   local lane="$1"; shift
   valid_lane "$lane"
+  local agent=""
+  if [[ "${1:-}" == --agent ]]; then
+    [[ $# -ge 2 ]] || refuse "--agent needs the lane's agent id"
+    agent="$2"; shift 2
+  fi
   local file="$claims/$lane.paths" path
-  [[ -e "$file" ]] || { echo "lane $lane holds no claims"; return 0; }
+  if [[ ! -e "$file" ]]; then
+    echo "lane $lane holds no claims"
+    [[ -z "$agent" ]] || retire_agent "$agent"
+    return 0
+  fi
   if [[ $# -eq 0 ]]; then set -- $(cat "$file"); fi
   for path in "$@"; do
     path="${path#./}"
@@ -654,6 +686,7 @@ release() {
   done
   if [[ ! -s "$file" ]]; then rm -f "$file" "$claims/$lane.base"; fi
   echo "lane $lane released ${#} path(s)"
+  [[ -z "$agent" ]] || retire_agent "$agent"
 }
 
 status() {

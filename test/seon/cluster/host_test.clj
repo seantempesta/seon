@@ -770,6 +770,29 @@
               (some-> (host/hosted handle branch) host/retire!)
               (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
 
+(deftest a-released-lane-agent-closed-from-main-has-its-branch-deleted
+  ;; `bin/lane release --agent` asks root to close the agent's admission on main's connection
+  ;; (`seon.cluster.host/close-admissions!`): the agent then holds its end and the next pass deletes its branch
+  (with-host-world {}
+    (fn [{:keys [handle connection]}]
+      (let [store (:seon.store/store handle)
+            routing (:seon.agent/routing handle)
+            branch (:seon.store/branch (registry/fork! {:seon.store/store store :seon.store/branch (keyword (str "host-test-" (id/id)))
+                                                        :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                                        :seon.db/db (db/db connection)}))
+            _ (host-on! handle branch "mcp/released")]
+        (try
+          (is (vector? (host/close-admissions! connection branch)) "root closes the agent's admission")
+          (is (some? (:seon.agent/admission-closed-tx
+                      (db/pull (db/db connection) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/released"])))
+              "the agent holds its end")
+          (agent/db<->flow {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing) :seon.agent/routing routing}
+                           :seon.flow/plan :seon.agent/test-wake)
+          (is (not (contains? (registry/branches store) branch)) "the pass deleted its branch")
+          (finally
+            (some-> (host/hosted handle branch) host/retire!)
+            (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
+
 (deftest a-lifecycle-pass-answers-an-ended-agent-whose-branch-is-deleted-after-its-roster-was-read
   ;; the deletion lands between db<->flow's roster read and its comparison, as another lane's
   ;; `my.agent/retire-branch!` or root's detached :delete-branch lands

@@ -54,6 +54,16 @@
     (lane dir "release" "one")
     (is (str/includes? (:out (lane dir "status" "one")) "holds no claims"))))
 
+(deftest release-with-an-agent-releases-the-claims-and-names-an-unanswered-end
+  ;; the scratch root runs no JVM, so the agent's end cannot be written: the exit says so, the claims are gone
+  (let [dir (scratch)]
+    (with-sources dir)
+    (lane dir "claim" "one" "a.txt")
+    (let [released (lane dir "release" "one" "--agent" "lane-agent")]
+      (is (= 3 (:exit released)))
+      (is (str/includes? (:out released) "no live root answers"))
+      (is (str/includes? (:out (lane dir "status" "one")) "holds no claims")))))
+
 (deftest the-last-holder-may-reclaim-a-dirty-file-and-others-may-not
   (let [dir (scratch)]
     (is (zero? (:exit (lane dir "claim" "one" "b.txt"))) "an untracked file nobody holds is claimable")
