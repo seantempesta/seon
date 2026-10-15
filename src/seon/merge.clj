@@ -377,6 +377,42 @@
   ([execution key] (merge-onto execution key {}))
   ([execution key root] (merge-onto execution key {:root root})))
 
+(defn- absent-references
+  "The identities `entities` reference by lookup ref that no map among them carries and `head` lacks: the entities
+  main created since the merge base (a file it added) that these declarations name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/rows] [:or :seon.fn.file/identities :seon.error/value]]}
+  [head entities]
+  (let [schema (:schema head)
+        identities (db/identity-attributes head)
+        lookup? #(and (vector? %) (= 2 (count %)) (qualified-keyword? (first %)))
+        maps (filter map? (tree-seq coll? seq entities))
+        carried (into #{} (for [m maps a identities :let [e (find m a)] :when e] [a (val e)]))
+        named (into #{} (for [m maps [a v] m :when (= :db.type/ref (get-in schema [a :db/valueType]))
+                              r (cond (lookup? v) [v] (and (coll? v) (not (map? v))) (filter lookup? v))
+                              :when (not (carried r))]
+                          r))
+        named (vec named)
+        held (db/pull-many head [:db/id] named)]
+    (if (:seon.error/at held)
+      held
+      (into [] (keep (fn [[r found]] (when-not (:db/id found) r))) (map vector named held)))))
+
+(defn- carried-entities
+  "Main's rows for the declarations `delta` main changed, with every entity they name that `head` lacks, read from
+  `main` until none is missing, as `git merge main` brings a file main added: one population, so the one
+  transaction creates each before the declarations that name it (`seon.fn/reconcile-tx`'s tempids)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :seon.program/identity]]
+                  [:or :seon.program/rows :seon.error/value]]}
+  [main head delta]
+  (loop [identities (vec delta)]
+    (let [entities (fn/published-index-entities main identities)
+          missing (when-not (:seon.error/at entities) (absent-references head entities))]
+      (cond
+        (:seon.error/at entities) entities
+        (:seon.error/at missing) missing
+        (empty? missing) entities
+        :else (recur (into identities missing))))))
+
 (defn merge-main!
   "Merge main forward into chain `branch` as `git merge main` does, through `execution` (root's world: main's
   connection and its store): the program declarations main changed since the branch's merge base and the branch
@@ -417,7 +453,7 @@
                   (mapv #(program/digest-map % (assoc source/merge-bound :seon.program/identities changed)) [base head main]))
            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
            delta (:seon.program/changed-on-head three)
-           entities (when (seq delta) (fn/published-index-entities main (vec delta)))
+           entities (when (seq delta) (carried-entities main head delta))
            tx (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
            written (when (vector? tx)
                      (db/with-branch {:seon.db/connection chain-connection}
