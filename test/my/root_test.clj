@@ -30,9 +30,12 @@
   "Root's supplied world on `connection`, as call preparation hands it to my.root."
   {:malli/schema [:=> [:cat :seon.db/connection] :my.program/context]}
   [connection]
-  (let [ctx (test-support/fork-cluster-ctx connection)]
+  (let [ctx (test-support/fork-cluster-ctx connection)
+        handle (test-support/execution-handle connection)]
+    ;; the cluster handle's own members: a merge's gate is a `:seon.agent/context-source`
     {:seon.db/connection connection :seon.sci.eval/ctx ctx :my.program/base-ctx ctx
-     :seon.store/store (:seon.store/store (test-support/execution-handle connection))}))
+     :seon.cluster/name (:seon.cluster/name handle) :seon.agent/routing (:seon.agent/routing handle)
+     :seon.store/store (:seon.store/store handle)}))
 
 (deftest instructions-are-the-laws-root-applies
   (is (every? string? (:my.root/laws (my.root/instructions)))))
@@ -97,7 +100,8 @@
            agent-id "merge-keyed-agent"
            held (:seon.store/store (test-support/execution-handle connection))
            branch (keyword (str "merge-keyed-" (random-uuid)))]
-       (test-support/transacted! connection (into [(test-support/task-row handle "Do it.")]
+       (test-support/transacted! connection (into [(assoc (test-support/task-row handle "Do it.")
+                                                          :seon.task/proofs #{'my.root-test/instructions-are-the-laws-root-applies})]
                                                   (test-support/agent-tx (db/db connection) agent-id)))
        ;; root assigns the task, then the agent's branch forks main (its merge base, written by the merge)
        (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)
