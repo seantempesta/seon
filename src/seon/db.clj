@@ -5644,13 +5644,21 @@
              identity-attrs (identity-attributes database)
              entity-map (declaration-value projection database identity-attrs entity-id)
              namespace-name (second (or (:seon.fn/ns entity-map) (:seon.test/ns entity-map)))
-             namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)]
+             namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
+             namespace-digest (some->> namespace-entity
+                                       (#(d/datoms database :eavt % :seon.program/definition-digest))
+                                       first :v)]
          (@program-behavior-digest
           (@program-canonical-entity
            (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
            entity-map)
-          (some->> namespace-entity (declaration-value projection database identity-attrs)
-                   (@stored-namespace-context))))))))
+          ;; The namespace's stored definition digest determines its resolver context, so
+          ;; its functions share one derivation.
+          (when namespace-digest
+            (seon.cache/lookup
+             ::namespace-resolver-context namespace-digest (constantly 1024)
+             #(@stored-namespace-context
+               (declaration-value projection database identity-attrs namespace-entity))))))))))
 
 (defn- namespace-digests-tx
   "Transaction data re-deriving, on the transaction's own value `database`, the

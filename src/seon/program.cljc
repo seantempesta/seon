@@ -540,6 +540,16 @@
      :refers (into {} (filter (if symbols (comp symbols key) (comp used val))) refers)
      :imports (or imports {})}))
 
+(defn- declaration-digest
+  "The digest of `declaration` (its attributes) with `used`, the part of the
+  resolver context its usages resolve through (nil: none)."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]}
+  [declaration used]
+  (id/id (cond-> {:seon.program/declaration
+                  (apply dissoc declaration definition-digest-excluded-attributes)}
+           used (assoc :seon.program/resolver-context used))
+         64))
+
 (defn definition-digest
   "Digest one declaration's identity and effective meaning.
 
@@ -553,13 +563,7 @@
     [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]]}
   ([entity] (definition-digest entity nil))
   ([entity resolver-context]
-   (let [parts
-         (cond-> {:seon.program/declaration
-                  (apply dissoc entity definition-digest-excluded-attributes)}
-           resolver-context
-           (assoc :seon.program/resolver-context
-                  (used-resolver-context entity resolver-context)))]
-     (id/id parts 64))))
+   (declaration-digest entity (some->> resolver-context (used-resolver-context entity)))))
 
 (defn- without-docstring
   "`source` without its def form's docstring literal `doc`: the form's third
@@ -584,9 +588,11 @@
   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]}
   [entity resolver-context]
   (if-let [doc (:seon.fn/doc entity)]
-    (definition-digest (cond-> (dissoc entity :seon.fn/doc :seon.fn/doc-order)
-                         (:seon.fn/source entity) (update :seon.fn/source without-docstring doc))
-                       resolver-context)
+    ;; A docstring literal spells no symbol or qualifier, so the resolver
+    ;; context the entity uses is the one its unstripped source already named.
+    (declaration-digest (cond-> (dissoc entity :seon.fn/doc :seon.fn/doc-order)
+                          (:seon.fn/source entity) (update :seon.fn/source without-docstring doc))
+                        (some->> resolver-context (used-resolver-context entity)))
     (definition-digest entity resolver-context)))
 
 #?(:clj
