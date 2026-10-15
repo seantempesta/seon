@@ -3109,10 +3109,23 @@
                                      sym (str sym " has no stored definition this context can interpret.")))))
         nil))))
 
+(def ^:dynamic ^:private *deriving-database*
+  "The database a program context derivation interprets (`derive-base-ctx`, `derive-overlay-ctx`): a derivation
+  holds no custody, so a lazy root its acquisition calls (a value definition calling a closure member) reads its
+  stored source here."
+  nil)
+
+(defn- source-database
+  "The database `ctx` interprets its program's stored source from: its custody's while it evaluates, the one
+  being derived while its program context is built."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] [:maybe :seon.db/database-value]]}
+  [ctx]
+  (or (context-database ctx) *deriving-database*))
+
 (defn- lazy-root
   "The root of closure member `sym` at `sci-var` until its first call: that
   call interprets the member, in the context executing it, from the stored
-  source its own custody's database holds (`promote-member!`), so cost follows the members called; then
+  source its executing context reads (`source-database`, `promote-member!`), so cost follows the members called; then
   it and every later call run what that context binds. The closure retains no database value and no
   commit: the program context holding this root is shared by content (`program-context`), so the
   database that built it may live in a store the executing context never holds (a released test
@@ -3126,7 +3139,7 @@
             held #(sci.ctx-store/with-ctx executing @sci-var)]
         (when (identical? lazy-member (held))
           (promote-member! executing
-                           (cond-> (context-database executing)
+                           (cond-> (source-database executing)
                              projection (vary-meta assoc :seon.schema/projection projection))
                            sym sci-var lazy-member))
         (apply (held) args)))))
@@ -3744,7 +3757,7 @@
   [loaded]
   ;; A program context is a function of its content: no init reads the
   ;; deriving thread's connection or read basis.
-  (binding [db/*conn* nil db/*read-database* nil]
+  (binding [db/*conn* nil db/*read-database* nil *deriving-database* loaded]
     ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
     ;; its loaded program's namespaces loaded.
     (load-core-namespaces! loaded)
@@ -3869,7 +3882,7 @@
   ([parent cluster database loaded projection plan]
    ;; A program context is a function of its content: no init reads the
    ;; deriving thread's connection or read basis.
-   (binding [db/*conn* nil db/*read-database* nil]
+   (binding [db/*conn* nil db/*read-database* nil *deriving-database* database]
      (let [ctx (assoc (copy-base-ctx parent database loaded nil)
                       ::custody {} :seon.schema/projection projection)
            acquired (overlay! ctx database plan)

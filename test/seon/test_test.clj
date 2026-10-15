@@ -15,6 +15,7 @@
             [seon.profile :as profile]
             [seon.render.value :as value]
             [seon.schema :as schema]
+            [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
             [seon.test.runner :as runner]
@@ -528,6 +529,40 @@
         (doseq [[h b] [[handle branch] [source-handle source]]]
           (cluster.agent/release-context! h)
           (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
+(deftest ^{:seon.test/long "One fork and one program context derivation of its branch."
+           :seon.test/long-ms 15000}
+  a-value-definition-calling-a-lazy-caller-installs-when-its-program-is-derived
+  ;; Chain 10d1fd5956a9 attempt 3, 2026-10-15: the agent's (def task (get-in (my.task/current) ...)) is
+  ;; interpreted when its branch's program context is derived, with no custody; `my.task/current` was a lazy
+  ;; caller root, whose promotion read the executing context's connection, absent there, and every value
+  ;; definition refused with NullPointerException (withMeta on nil), so the agent's definitions never installed.
+  (let [target (test-support/execution-handle nil)
+        store (:seon.store/store target)
+        main (db/db (:seon.db/connection target))
+        branch (keyword (str "derived-value-" (id/id)))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch branch
+                           :seon.cluster.registry/from (db/commit-id main) :seon.db/db main})
+        handle (cluster.agent/acquire-context! target nil {:seon.agent/branch branch})
+        conn (:seon.db/connection handle)]
+    (try
+      ;; the branch changes the leaf, so its loaded caller is a lazy root, and defines a value calling that caller
+      (test-support/transacted! conn (test-support/replacement-tx
+                                      (db/db conn) '[:seon.fn/sym seon.test-test/world-leaf]
+                                      (str "(defn- world-leaf \"What the world callers answer; a branch changes it.\""
+                                           " {:malli/schema [:=> [:cat] :keyword]} [] :changed)")
+                                      {}))
+      (test-support/transacted! conn [(test-support/program-fn-entity
+                                       (db/db conn) 'seon.test-test/world-value
+                                       "(def world-value (seon.test-test/world-first))")])
+      (let [ctx (sci.eval/base-ctx (db/db conn))]
+        (is (empty? (:seon.sci.eval/agent-mistakes (:seon.sci.eval/acquisition ctx)))
+            "the derivation interprets the value definition without a refusal")
+        (is (= :changed (sci/eval-string* ctx "seon.test-test/world-value"))
+            "the value is the branch's change, read through the lazy caller"))
+      (finally
+        (cluster.agent/release-context! handle)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
 
 (deftest ^{:seon/tasks #{'seon.test/a-members-reads-stay-out-of-its-callers-evidence}
            :seon.test/long "Two member runs, one of them a canonical problems fixture (measured 1,572 ms run on default)."
