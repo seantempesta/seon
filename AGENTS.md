@@ -272,6 +272,12 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 ## The system: one JVM, many realities
 
+**The opposite of virtual machines** (owner, 2026-10-15): reuse as much as possible, and still give every agent its own
+small world to build out, change and experiment in. Isolation comes from immutable values and branches, never from
+copies: a branch shares main's indexes and runs its own HEAD (like a git checkout); only what it changed is
+interpreted; everything else is the one loaded program; every derivation is keyed by the content it reads, so the same
+definition with the same input is computed once for every branch and agent that has it.
+
 - **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
   JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
   boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from `d/branches`; retention
