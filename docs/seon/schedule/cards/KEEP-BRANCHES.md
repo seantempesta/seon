@@ -108,4 +108,5 @@ a reason to default the dial false.
   `seon.cluster.registry/retained-before-fails-on-a-branch-whose-schema-lacks-the-fork-name`.
 - Main shows task `b7ab51e090d5` `:seon.task/execution :running` after its merge: the merge carried the chain branch's
   value at merge time (`:running`, main tx 536873806); root's later hold on the branch (`:held`, branch tx 536873884)
-  never reaches main. Belongs to the reactive-start lane (flow-pass, R-P3/R-P4), which holds the writers.
+  never reaches main. Already filed: `seon.merge/a-merged-task-reads-running-on-main-while-its-attempt-is-done` (fix at
+  the writer of execution state); not this card's writer.
