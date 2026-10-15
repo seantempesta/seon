@@ -84,7 +84,7 @@ model below.
    from the world's connection and contexts), never a positional argument; `ns-unmap!` declares `[subject]` and
    `[ns sym]` only. Same principle as "a database value is never bound".
 9. **Agent branches of MCP lanes are scratch.** Retire every non-chain agent branch with no running graph (about 100
-   from 2026-10-14, each with a `base/` copy); standing rule: an outside agent's branch is retired like an abandoned
+   from 2026-10-14, each with its `base/` merge-base ref, a pointer, not a copy); standing rule: an outside agent's branch is retired like an abandoned
    chain once it has no running graph and no unmerged change. Nothing in them is mined.
 10. **The edit hook's babashka-loadable namespaces** (`seon.edit`, `seon.error`, …): root handles it — a declared
     namespace property checked by a bb-load test, so a merge that breaks the hook fails a test (the first automatic

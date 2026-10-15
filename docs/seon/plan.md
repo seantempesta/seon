@@ -82,6 +82,25 @@ that root merges to main once. Tasks are mined from the database (slow functions
 red proofs), and root closes a filed task whose proofs turn green on main (goal 4; not designed yet). A core of about
 10,000 lines where ordinary work is sub-second.
 
+**The direction: the opposite of virtual machines** (owner, 2026-10-15; AGENTS.md "The system"). Reuse as much as
+possible, and still give every agent its own small world to build out, change and experiment in. Isolation comes from
+immutable values and branches, never from copies, walls or per-agent recomputation: a branch is a pointer to main's
+shared indexes and runs its own HEAD like a git checkout; SCI interprets only what the branch changed, everything else is
+the one loaded program; every derivation is keyed by the content it reads, so identical work is done once for every
+branch and agent that has it; main moves only by an explicit merge curated by the branch's tests.
+
+Root and its lanes drifted from this repeatedly on 2026-10-14/15. Check every design against these before writing it:
+
+| Drift (observed) | The direction |
+|---|---|
+| Three-way readers comparing each declaration against main's history (`seen-database`, `moved-past`, `merge-sides`) | A branch reads its own database value; the only cross-pointer work is which declarations to interpret, a lookup between two values, cached |
+| Cache keys by context, agent, branch or commit identity, to "keep agents apart" (P6 brief) | Key by the content read: the same definition with the same input shares one entry across branches; sharing is not a leak |
+| An exception reading across branches (config read from main) | Root writes to the branch explicitly (`config apply --branch`); a branch never reads another's state implicitly |
+| A candidate world booted to re-test at merge | Reuse the branch's results by reach digest; rerun only tests whose reach the merge changed |
+| A hand list or junk filter for what merges | The branch's tests curate it: changes reached by its proofs and green tests merge, the rest stay and are shown |
+| Per-agent leftovers kept alive (a closed attempt's graph; ~100 never-retired scratch branches) | An agent's world exists while it works; end it, retire its branch, keep nothing a value already holds |
+| Guards against agents harming each other | No security isolation (owner); correctness comes from values, branches and the merge, never fences |
+
 ## 2. The essentials
 
 1. **An honest, short number in every reply.** Committed (FEEDBACK-LOOP stages 1–13, 16; like-for-like cold and warm cost
