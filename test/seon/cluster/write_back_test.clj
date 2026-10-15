@@ -585,6 +585,50 @@
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (support/delete-root! root)))))
 
+(deftest ^{:seon.test/long "Analyses of a one-file fixture onto H, one branch adding two functions and replacing their caller, and one write-back (one analysis of the candidate)."
+           :seon.test/long-ms 20000}
+  added-functions-are-written-before-the-added-functions-calling-them
+  ;; Two additions where the caller's name sorts before its callee's (S5's
+  ;; `alias-candidates` calling `alias-target`): each is written before the
+  ;; additions calling it, as Clojure reads a file, so the candidate analyzes.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbord" suffix ".core"))
+        root (support/temp-root (str "write-back-order-test-" suffix))
+        path (str "src/wbord" suffix "/core.clj")
+        outer [:seon.fn/sym (symbol (str fixture-ns) "added-outer")]
+        inner [:seon.fn/sym (symbol (str fixture-ns) "zz-inner")]
+        caller [:seon.fn/sym (symbol (str fixture-ns) "caller")]
+        c (keyword (str "write-back-order-c-" suffix))]
+    (io/make-parents (io/file root path))
+    (spit (io/file root path) (fixture-source fixture-ns))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            base (db/commit-id (db/db h-conn))
+            _ (registry/fork! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base :seon.db/db (db/db h-conn)})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) inner "(defn zz-inner\n  \"Add two.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 2))" {}))
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) outer "(defn added-outer\n  \"Add two, then one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc (zz-inner x)))" {}))
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) caller "(defn caller\n  \"Call the outer addition.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (added-outer x))" {}))
+          (let [written (source/write-back! (committed! {:seon.db/connection c-conn :seon.fn/root root
+                                             :seon.source/accepted {:seon.program/identities #{outer inner caller}
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}}))
+                on-disk (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
+            (is (nil? (:seon.source/write-back-refused written)) "both additions and their caller write back")
+            (is (= (mapv #(:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] %)) [inner outer caller])
+                   (mapv on-disk [inner outer caller]))
+                "the file reindexed from disk declares the branch's additions and caller"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-root! root)))))
+
 (deftest a-merged-db-only-task-gets-a-fresh-task-file
   ;; A filed task that lives only in the database (indexed on the branch, no
   ;; file yet) gets a task file at its merge, started from an empty vector as a

@@ -1624,6 +1624,20 @@
     (when (pos? (alength ^bytes (run "ls-tree" "HEAD" "--" path)))
       (run "show" (str "HEAD:" path)))))
 
+(defn- definition-order
+  "`changes` with each addition (a row with no before-state) placed after the additions it calls
+  (`:seon.fn/calls`), as Clojure reads a file: defined before use; otherwise in their given order."
+  {:malli/schema [:=> [:cat :seon.source/proof-rows] :seon.source/proof-rows]}
+  [changes]
+  (let [added (filterv (fn [[_ was now]] (and now (not was))) changes)
+        by-name (into {} (map (fn [[[_ declared] :as change]] [declared change])) added)
+        visit (fn visit [[order seen] [_ _ now :as change]]
+                (if (seen change)
+                  [order seen]
+                  (let [[order seen] (reduce visit [order (conj seen change)] (keep by-name (:seon.fn/calls now)))]
+                    [(conj order change) seen])))]
+    (into (first (reduce visit [[] #{}] added)) (remove (set added)) changes)))
+
 (defn- proven-file
   "The candidate bytes that write the `named` declarations as `after` holds them over
   their one file under `root` as git HEAD holds it (`committed-bytes`), proven by the ordinary analyzer to
@@ -1636,7 +1650,7 @@
   [before after named root]
   (let [pull (fn [database identity]
                (let [entity (db/pull database [:db/id :seon.fn/sym :seon.test/sym :seon.ns/name :seon.fn/form-span :seon.fn/source
-                                            :seon.test/source :seon.ns/source :seon.program/definition-digest
+                                            :seon.test/source :seon.ns/source :seon.program/definition-digest :seon.fn/calls
                                             {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/relative-root
                                                             :seon.fn.file/digest]}]
                                   identity)]
@@ -1682,8 +1696,9 @@
         anchor (some->> changes
                         (keep (fn [[_ was now]] (when (and was now (not (:seon.ns/name was))) (first (span-of was)))))
                         seq (apply min))
-        ;; Additions first: one inserted at the anchor precedes the replacement starting there.
-        edits (fn [] (vec (for [[_ was now] (sort-by (fn [[_ was]] (if was 1 0)) changes)
+        ;; Additions first, each after the additions it calls: one inserted at the anchor precedes the
+        ;; replacement starting there.
+        edits (fn [] (vec (for [[_ was now] (sort-by (fn [[_ was]] (if was 1 0)) (definition-order changes))
                                 :when (not (and fresh? (:seon.ns/name now)))]
                             (cond
                               (and was now) [(span-of was) (source-of now)]
