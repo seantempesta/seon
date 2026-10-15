@@ -1975,7 +1975,10 @@
   function reached only through callers is selected by the nearest tests above
   it. A test reaches by calling a walked function, naming one as
   `:seon.test/subject` or being a seed. Declared invocation edges count; symbol
-  mentions do not. Throws a read refusal."
+  mentions do not. A host-bound caller (`:seon.fn/host-bound?` not false, the
+  rule of `seon.sci.eval/host-bound-row?`) is reached but never walked: a branch
+  keeps it compiled, so it and its callers call the compiled seed and cannot see
+  the change. Throws a read refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym] [:maybe [:int {:min 1}]]]
                   [:map [::affected {:optional true} :seon.fn/affected] [::tests :seon.fn/tests]]]}
   [database seeds depth]
@@ -1991,6 +1994,13 @@
                         (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
                                        :where [?entity ?attribute ?symbol]]
                                      database attribute (vec entities))))))
+        ;; the callers SCI interprets on a branch: the walk's next frontier
+        interpreted (fn [entities]
+                      (if (empty? entities)
+                        #{}
+                        (set (read! (db/q '[:find [?symbol ...] :in $ [?entity ...]
+                                            :where [?entity :seon.fn/sym ?symbol] [?entity :seon.fn/host-bound? false]]
+                                          database (vec entities))))))
         present (when-not depth
                   (into #{} (keep :seon.fn/sym)
                         (read! (db/pull-many database [:seon.fn/sym]
@@ -2017,17 +2027,16 @@
                                 (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
                                         (mapcat (or declared (declared-callers read! database frontier)) frontier)))
                   fresh (vec (remove seen (named :seon.fn/sym callers)))]
-              (recur fresh (into seen fresh) (into entities callers) (when-not depth (into affected fresh))
+              (recur (filterv (interpreted callers) fresh) (into seen fresh) (into entities callers) (when-not depth (into affected fresh))
                      (conj levels [frontier callers])))))]
     (cond-> {::tests (tests-of levels)}
       (nil? depth) (assoc ::affected affected))))
 
 (defn reverse-closure
-  "The transitive callers of `seeds` and the tests reaching them at any depth,
-  the tests a branch runs interpreted for a change to `seeds`
-  (`seon.fn/closure-walk`)."
-  {:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}
-   :malli/schema [:=> [:cat :seon.fn/gate-request]
+  "The transitive callers of `seeds` up to their first compiled callers, and the
+  tests reaching them at any depth: the tests a branch runs interpreted for a
+  change to `seeds` (`seon.fn/closure-walk`)."
+  {:malli/schema [:=> [:cat :seon.fn/gate-request]
                   [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
   [{database :seon.db/db seeds :seon.fn/seeds}]
   (try

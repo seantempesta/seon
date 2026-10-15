@@ -1107,8 +1107,7 @@
                                 {::analyzer/paths ["src/seon/await.clj"]}))))
           "a real file calling seon.error's vars still resolves them"))))
 
-(deftest ^{:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}}
-  tests-reaching-follows-calls-and-explicit-subjects
+(deftest tests-reaching-follows-calls-and-explicit-subjects
   (test-support/with-database
     (fn [connection]
       (let [namespace-ref [:seon.ns/name 'sample.reach]
@@ -1184,6 +1183,47 @@
             "absence is derived from the same test-reach graph")
         (is (= []
                (seon.fn/tests-reaching @connection (quote sample.reach/absent))))))))
+
+(deftest the-reach-walk-stops-at-a-compiled-caller
+  ;; A branch keeps a host-bound caller compiled (`seon.sci.eval/interpret-overlay!`):
+  ;; it and everything above it call the compiled seed and never see the
+  ;; branch's change. The walk counts the compiled caller as reached and goes no
+  ;; further, so a real change to `seon.db/database-value?` stops selecting the
+  ;; 2,376 tests that reach it only through compiled callers.
+  (test-support/with-database
+    (fn [connection]
+      (let [function-entity
+            (fn [function-symbol calls overrides]
+              (test-support/program-fn-entity
+               (db/db connection) function-symbol
+               (str "(defn " (name function-symbol) " [] nil)")
+               (cond-> overrides (seq calls) (assoc :seon.fn/calls calls))))
+            test-entity
+            (fn [test-symbol calls]
+              (analyzed-test-entity (db/db connection) test-symbol {:seon.fn/calls calls}))
+            seeds #{'sample.compiled/seed}]
+        (test-support/transacted!
+         connection
+         [(test-support/namespace-entity @connection 'sample.compiled)
+          (function-entity 'sample.compiled/seed nil {})
+          (function-entity 'sample.compiled/interpreted #{'sample.compiled/seed} {})
+          (function-entity 'sample.compiled/compiled #{'sample.compiled/seed} {:seon.fn/host-bound? true})
+          (function-entity 'sample.compiled/above #{'sample.compiled/compiled} {})])
+        (test-support/transacted!
+         connection
+         [(test-entity 'sample.compiled/interpreted-test #{'sample.compiled/interpreted})
+          (test-entity 'sample.compiled/compiled-test #{'sample.compiled/compiled})
+          (test-entity 'sample.compiled/above-test #{'sample.compiled/above})])
+        (is (false? (:seon.fn/host-bound? (db/pull @connection [:seon.fn/host-bound?]
+                                                   [:seon.fn/sym 'sample.compiled/above])))
+            "an ordinary defn is interpretable")
+        (is (= {:seon.fn/affected #{'sample.compiled/seed 'sample.compiled/interpreted 'sample.compiled/compiled}
+                :seon.fn/tests ['sample.compiled/interpreted-test]}
+               (seon.fn/reverse-closure {:seon.db/db @connection :seon.fn/seeds seeds}))
+            "the compiled caller is reached; nothing above it and none of its tests")
+        (is (= ['sample.compiled/interpreted-test]
+               (seon.fn/gate-sets {:seon.db/db @connection :seon.fn/seeds seeds}))
+            "selection follows the same walk")))))
 
 ;; Class: a program attribute is a stored attribute. The contract-finding report
 ;; entity declared a program partition, so `program/program-attributes` named four

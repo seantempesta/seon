@@ -655,8 +655,7 @@
             (is (not (contains? (loaded-digests before) 'seon.sci.eval-test/loaded-digest-probe))))))))))
 
 
-(deftest ^{:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}
-           :seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed definition's reverse closure (24 functions on default)."
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed definition's reverse closure (24 functions on default)."
            :seon.test/long-ms 8000}
   a-file-test-callers-away-from-a-branch-change-runs-interpreted
   ;; seon.ref-test/a-span-of-a-name-and-more-words-is-prose calls
