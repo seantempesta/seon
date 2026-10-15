@@ -347,10 +347,11 @@
           (is (not= (:db/id (db/pull (db/db left) [:db/id] [:seon.fn/sym target]))
                     (:db/id (db/pull (db/db right) [:db/id] [:seon.fn/sym target]))))
           (is (string? (content left)))
-          (is (not= (:seon.program/analyzed-source-digest
-                     (db/pull (db/db left) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))
-                    (:seon.program/analyzed-source-digest
-                     (db/pull (db/db right) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))))
+          ;; Position is not analyzed input: the same definition at another offset keeps its digest.
+          (is (= (:seon.program/analyzed-source-digest
+                  (db/pull (db/db left) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))
+                 (:seon.program/analyzed-source-digest
+                  (db/pull (db/db right) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))))
           (is (= (content left) (content right)))
           (is (= #{target} (apply into (#'sut/changed-definition-symbols (db/db left) left-basis))
                           (apply into (#'sut/changed-definition-symbols (db/db right) right-basis))))

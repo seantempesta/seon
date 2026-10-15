@@ -276,27 +276,23 @@
        (is (nil? (db/pull (db/db connection) [:db/id]
                           [:seon.ns/name (symbol (namespace target))])))))))
 
-(deftest analysis-digest-covers-the-resolver-prelude-and-the-exact-input
+(deftest analysis-digest-covers-the-resolver-context-and-the-exact-source
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           namespace-entity (support/namespace-entity database 'seon.id)
-           source "(defn reset-analysis-proof [] true)"
-           analyze (fn [database]
-                     (#'functions/runtime-analysis-batch
-                      database [{:namespace-name 'seon.id :form-source source
-                                 :seon.fn/namespace-row namespace-entity}]))
-           captured (analyze database)
-           entities (functions/source-rows database (program/shapes) namespace-entity source #{})
-           expected (id/sha-256 [(.getBytes ^String (:seon.fn/source captured)
-                                           java.nio.charset.StandardCharsets/UTF_8)])]
-       (is (not= source (:seon.fn/source captured)) "resolver declarations are part of the input")
-       (is (= expected (:seon.program/analyzed-source-digest (first entities))))
-       (support/transacted! connection (mapv #(support/revised-entity database % {}) entities))
-       (let [next-captured (analyze (db/db connection))]
-         (is (not= (:seon.fn/source captured) (:seon.fn/source next-captured)))
-         (is (not= expected (id/sha-256 [(.getBytes ^String (:seon.fn/source next-captured)
-                                                  java.nio.charset.StandardCharsets/UTF_8)]))))))))
+           projection (db/carried-projection database)
+           namespace-row (fn [ns-source]
+                           (program/declaration-row projection {:seon.ns/name 'seon.id :seon.ns/source ns-source}
+                                                    :all :agent))
+           ;; The resolver context's share is proven on files (seon.fn-test).
+           digest (fn [namespace-entity source]
+                    (:seon.program/analyzed-source-digest
+                     (first (functions/source-rows database (program/shapes) namespace-entity source #{}))))
+           plain (namespace-row "(ns seon.id)")
+           source "(defn reset-analysis-proof [] true)"]
+       (is (= 64 (count (digest plain source))))
+       (is (= (digest plain source) (digest plain (str "\n\n" source))) "position is not analyzed input")
+       (is (not= (digest plain source) (digest plain "(defn reset-analysis-proof [] false)")))))))
 
 (deftest a-test-retraction-is-not-a-function-deletion
   (support/with-database

@@ -749,6 +749,16 @@
           {:seon.fn/malformed-spec (id/printed qualified)}
           (throw refusal))))))
 
+;; Position is not analyzed input: a declaration moved by an edit above it
+;; keeps its digest, so a publication rewrites only what changed.
+(defn- analyzed-source-digest
+  "The `:seon.program/analyzed-source-digest` of one declaration: its exact
+  `source` and the resolver context of its namespace, never its position or
+  the rest of its file."
+  {:malli/schema [:=> [:cat :string [:maybe :map]] :seon.program/analyzed-source-digest]}
+  [source namespace-context]
+  (id/digest 64 [source (select-keys namespace-context [:requires :aliases :refers :imports])]))
+
 (defn- var-entity
   {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map :map] [:maybe :map]]}
   [projection contexts namespace-contexts
@@ -762,6 +772,7 @@
         source (exact-source contexts entry)
         file [:seon.fn.file/relative-path (::analyzer/filename entry)]
         span (exact-form-span contexts entry)
+        analyzed-digest (analyzed-source-digest source (get namespace-contexts namespace-name))
         external-sink (:seon.fn/external-sink metadata)
         destroys (:seon.fn/destroys metadata)
         projection-boundary (:seon.fn/projection-boundary metadata)
@@ -781,8 +792,7 @@
       (cond-> {:seon.test/sym qualified
                :seon.test/ns [:seon.ns/name namespace-name]
                :seon.test/source source
-               :seon.program/analyzed-source-digest
-               (:seon.fn.file/digest (get contexts (::analyzer/filename entry)))
+               :seon.program/analyzed-source-digest analyzed-digest
                :seon.fn/file file
                :seon.fn/form-span span}
         (find metadata :seon.test/fixture-observation)
@@ -821,8 +831,7 @@
       (cond-> {:seon.fn/sym qualified
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source
-               :seon.program/analyzed-source-digest
-               (:seon.fn.file/digest (get contexts (::analyzer/filename entry)))
+               :seon.program/analyzed-source-digest analyzed-digest
                :seon.fn/file file
                :seon.fn/form-span span
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")

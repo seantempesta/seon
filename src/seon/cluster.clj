@@ -2540,7 +2540,10 @@
       (require-committed!
        (schema/call-with-forms
         (:seon.schema.projection/forms projection)
-        #(schema/call-with-projection projection (fn [] (db/transact! connection {:tx-data tx-data}))))
+        #(schema/call-with-projection projection
+                                      ;; Named here: its first named call is the task merge, a small part of it.
+                                      (fn [] (db/transact! connection {:tx-data tx-data
+                                                                       :seon.db.transaction/operation 'seon.cluster/adopt-entities!}))))
        {:seon.boot/population :seon.source/adoption-rows}))
     program-identities))
 

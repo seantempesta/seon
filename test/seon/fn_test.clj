@@ -216,6 +216,24 @@
       nil
       (catch clojure.lang.ExceptionInfo error error))))
 
+(deftest an-edit-above-a-declaration-keeps-its-analyzed-source-digest
+  ;; Position is not analyzed input: a declaration moved by an edit above it
+  ;; is not rewritten; its resolver context and its own source are.
+  (let [root (fixture-root)
+        digests (fn [source]
+                  (write-source! root "sample/moved.clj" source)
+                  (into {} (keep (fn [entity] (when-let [sym (:seon.fn/sym entity)]
+                                               [sym (:seon.program/analyzed-source-digest entity)])))
+                        (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]})))
+        before (digests "(ns sample.moved)\n(defn below [] 1)\n")
+        moved (digests "(ns sample.moved)\n(defn above [] 0)\n\n(defn below [] 1)\n")
+        edited (digests "(ns sample.moved)\n(defn above [] 0)\n\n(defn below [] 2)\n")
+        aliased (digests "(ns sample.moved (:require [clojure.string :as str]))\n(defn above [] 0)\n\n(defn below [] 2)\n")]
+    (is (= (get before 'sample.moved/below) (get moved 'sample.moved/below)))
+    (is (not= (get moved 'sample.moved/below) (get edited 'sample.moved/below)))
+    (is (= (get moved 'sample.moved/above) (get edited 'sample.moved/above)))
+    (is (not= (get edited 'sample.moved/below) (get aliased 'sample.moved/below)))))
+
 (deftest capability-metadata-is-one-program-graph-contract
   (let [root
         (capability-fixture!
