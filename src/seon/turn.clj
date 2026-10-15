@@ -2116,13 +2116,16 @@
   [database handle]
   (= :outside (:seon.task/model (db/pull database [:seon.task/model] [:seon.task/id handle]))))
 
+(declare proved-unanswered?)
+
 (defn- stalled?
-  "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
-  turn chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an error before any reply,
-  a refused context or a failed provider call, never does) and no wake opens a turn: none is unanswered, or opening
-  waits for a new outside wake (`opening-deferred?`, as after a failed provider call)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
-  [database agent-id]
+  "True when the loop has stopped calling `agent-id` on `database` while its task `handle` is not done: its latest
+  closed turn chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an error before any
+  reply, a refused context or a failed provider call, never does) and nothing opens a turn: opening waits for a new
+  outside wake (`opening-deferred?`, as after a failed provider call), or no wake is unanswered and no red proving
+  is unanswered (`proved-unanswered?`, a fresh attempt's work after its prove pass), as `next-agent-work` opens."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/handle] :boolean]}
+  [database agent-id handle]
   (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
                          :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
                          [?turn :seon.turn/id _ ?t] [?turn :seon.turn/closed-tx _]]
@@ -2134,8 +2137,9 @@
                           database agent-id latest-t))]
     (boolean (and latest-t (not disposed?)
                   (not (continuing-reply? database agent-id))
-                  (or (empty? (unanswered-wakes database agent-id {}))
-                      (true? (opening-deferred? database agent-id)))))))
+                  (or (true? (opening-deferred? database agent-id))
+                      (and (empty? (unanswered-wakes database agent-id {}))
+                           (not (proved-unanswered? database agent-id handle))))))))
 
 (defn sent-back-to
   "The task the completed turn of `agent-id` on `database` sent its work back to (`:seon.turn/sent-back-to`), or nil."
@@ -2175,7 +2179,7 @@
                       [?turn :seon.turn/disposition :completed]]
                     database agent-id) :given-back
               (= 0 (turns-left database agent-id)) :capped
-              (and (not (outside? database held)) (stalled? database agent-id)) :stalled)))))
+              (and (not (outside? database held)) (stalled? database agent-id held)) :stalled)))))
 
 (defn end-task-call
   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its

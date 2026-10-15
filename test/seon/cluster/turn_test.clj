@@ -2984,14 +2984,27 @@
    (fn [running agent-id _connection]
      (is (nil? (test-support/mcp-tests (eval-result running agent-id "(+ 1 2)")))))))
 
+(defn- assign-area!
+  "Create the task `task-ns`/area under execution :running, as root launches it, and assign it to `agent-id`."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection :seon.task/ns] :map]}
+  [running agent-id connection task-ns]
+  (let [id (test-support/running!
+            connection
+            (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                               :seon.task/ns task-ns :seon.task/name "area" :seon.task/plan "Square."})))]
+    (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
+                        :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
+                        :seon.task/branch (get-in (db/db connection) [:config :branch])})))
+
 (defn- model-requests!
-  "Wake `agent-id` once with an outside message and answer its model calls with `replies`; the request
+  "Point `agent-id` at the fixture provider, run `assign!` (assigning its :running task, whose red proof opens its
+  first model turn), wake it once with an outside message and answer its model calls with `replies`; the request
   documents, once `expected` calls (every reply, by default) are taken and the agent's last call row is closed."
-  {:malli/schema [:function [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]
-                  [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string] pos-int?] [:vector :map]]]}
-  ([running agent-id connection replies]
-   (model-requests! running agent-id connection replies (count replies)))
-  ([running agent-id connection replies expected]
+  {:malli/schema [:function [:=> [:cat :string :seon.agent/id :seon.db/connection [:=> [:cat] :any] [:vector :string]] [:vector :map]]
+                  [:=> [:cat :string :seon.agent/id :seon.db/connection [:=> [:cat] :any] [:vector :string] pos-int?] [:vector :map]]]}
+  ([running agent-id connection assign! replies]
+   (model-requests! running agent-id connection assign! replies (count replies)))
+  ([running agent-id connection assign! replies expected]
   (let [ledger (atom [])
         closed-calls #(or (db/q '[:find (count ?turn) . :in $ ?agent-id
                                   :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
@@ -3007,6 +3020,7 @@
                                                                  :seon.config.ai/no-provider false))
                                          ")"))))
            "the agent's provider settings are accepted")
+       (assign!)
        ;; an outside wake comes from no evaluation: written on a thread with no conveyed custody
        (let [cluster-name (:seon.cluster/name (test-support/execution-handle nil))
              wake (java.util.concurrent.FutureTask.
@@ -3028,12 +3042,9 @@
   a-model-request-is-help-own-exchanges-and-the-block-last
   (test-support/with-running-agent
    (fn [running agent-id connection]
+     ;; the task is assigned last, inside model-requests!: a :running task's red proof opens its first model turn
      (agent-eval running agent-id "(ns tq.cx1) (defn area [r] r)")
      (agent-eval running agent-id "(in-ns 'tq.cx1) (clojure.test/deftest ^{:seon/tasks #{'tq.cx1/area}} area-test (clojure.test/is (= 25 (tq.cx1/area 5))))")
-     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.cx1 :seon.task/name "area" :seon.task/plan "Square."}))]
-       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :transcript})")))
          "this test reads the transcript wire format, set on the agent")
      (let [help-reply (str/join (map #(get % "text") (get (eval-result running agent-id "(help)") "content")))
@@ -3041,7 +3052,8 @@
            wrong "(in-ns 'tq.cx1)\n(defn area [r] (* r 2))"
            definition "(in-ns 'tq.cx1)\n(defn area [r] (* r r))"
            ;; the definition turns the proof green: the fourth reply is never asked for
-           sent (model-requests! running agent-id connection ["(+ 40 2)" wrong definition "(+ 7 7)"] 3)
+           sent (model-requests! running agent-id connection #(assign-area! running agent-id connection 'tq.cx1)
+                                 ["(+ 40 2)" wrong definition "(+ 7 7)"] 3)
            messages (mapv #(get % "messages") sent)
            system (fn [ms] (some #(when (= "system" (get % "role")) (get % "content")) ms))
            user (fn [ms] (some #(when (= "user" (get % "role")) (get % "content")) ms))
@@ -3088,15 +3100,13 @@
   a-chat-model-request-carries-its-forms-as-assistant-messages
   (test-support/with-running-agent
    (fn [running agent-id connection]
+     ;; the task is assigned last, inside model-requests!: a :running task's red proof opens its first model turn
      (agent-eval running agent-id "(ns tq.cx12) (defn area [r] r)")
      (agent-eval running agent-id "(in-ns 'tq.cx12) (clojure.test/deftest ^{:seon/tasks #{'tq.cx12/area}} area-test (clojure.test/is (= 25 (tq.cx12/area 5))))")
-     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
-                                                 :seon.task/ns 'tq.cx12 :seon.task/name "area" :seon.task/plan "Square."}))]
-       (seon.task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
-                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])}))
      (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :chat})")))
          "the wire format is the agent's own setting")
-     (let [sent (model-requests! running agent-id connection ["(+ 40 2)" "(+ 7 7)" "(in-ns 'tq.cx12)\n(defn area [r] (* r r))"] 3)
+     (let [sent (model-requests! running agent-id connection #(assign-area! running agent-id connection 'tq.cx12)
+                                 ["(+ 40 2)" "(+ 7 7)" "(in-ns 'tq.cx12)\n(defn area [r] (* r r))"] 3)
            messages (mapv #(get % "messages") sent)
            roles (fn [ms] (mapv #(get % "role") ms))
            [first-sent second-sent third-sent] messages
