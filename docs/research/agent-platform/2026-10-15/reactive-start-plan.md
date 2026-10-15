@@ -1,7 +1,7 @@
 ---
 title: "reactive-start plan: desired state validated at the write, steps derived each pass"
 type: research
-status: "corrected after the narrow check f684c6181 (C1-C13); P1 next"
+status: "corrected after the narrow check f684c6181 (C1-C13); P1 committed, P2 next"
 ---
 
 # Reactive start: desired state validated at the write, steps derived each pass
@@ -14,7 +14,7 @@ hold a launch (the agent resolves them in its context), and the process is one p
 The narrow check of revision 49fdd1bb5 (`reactive-start-check.md`, f684c6181) is folded in below, each correction in
 its owning section.
 
-**Phase status:** plan corrected (C1-C13 folded in); P1 next, then P2. P3-P6 and D2 open.
+**Phase status:** plan corrected (C1-C13 folded in); P1 committed with this revision of §2; P2 next. P3-P6 and D2 open.
 
 **Today:** `seon.cluster.agent/run-pass!` is already a level-triggered derivation: `launch-facts`, then
 `launch-actions`, then `apply-actions!`. What fails is around it. Wakes are edge-triggered (a chain branch has a
@@ -58,7 +58,7 @@ The owner's rulings, in order:
   an ancestor of the branch's merge base) or `:main-head`. `:main-head` is resolved once, to `[:main-at-least C]`
   with C main's head at that pass, by the pass that writes the attempt row (C8): a running chain is never "behind"
   because main moved;
-- the branch's config entries (the 14 decided dials of §2);
+- the branch's config entries (the decided dials of §2);
 - the task's execution (`:running`, `:held`, `:stopped`);
 - for a merge, its target (`:seon.task.desired/merge-into`, main).
 
@@ -150,21 +150,21 @@ one function, `seon.task/runnable`, the one derivation every consumer validates.
  [:seon.task/config :seon.task/desired-config]]
 ```
 
-**`:seon.task/desired-config` holds the 14 dials the launch and the turn loop read on the chain branch** (C1). Each
-entry is tied to its reader:
-
-| entry | reader (on the chain branch's config row) |
-|---|---|
-| `:seon.config.ai/model` | `seon.agent/effective-settings`, `seon.eval.drive` |
-| `:seon.config.ai/no-provider` | `seon.turn` (the model-call decision) |
-| `:seon.config.ai/endpoint`, `:seon.config.ai/api-key-variable`, `:seon.config.ai/no-auth`, `:seon.config.ai/max-tokens` | `seon.ai/settings` (provider build) |
-| `:seon.config.ai/retain-reasoning` | `seon.turn/record-attempt!` |
-| `:seon.config.run/max-episode-runs` | `seon.turn` (episode cap), `seon.bootstrap` |
-| `:seon.config.agent/inbox-size` | `seon.cluster.agent/start-claimed-flow!` (the agent handle's branch) |
-| `:seon.config.agent/turn-completion-backstop-ms` | `seon.turn` (turn completion, permit await); `seon.cluster/stop-flows!` reads main's |
-| `:seon.config.agent/write-refusal-bound` | `seon.turn` (`agent-dial`) |
-| `:seon.config.test/step?`, `:seon.config.test/step-time-limit-ms` | `seon.turn/step`, `seon.turn` step limit |
-| `:seon.config.eval/time-limit-ms` | `seon.effect`, `seon.eval.drive`, `seon.cluster`, `my.agent` (the eval request's bound) |
+**`:seon.task/desired-config` holds the 35 dials the launch and the turn loop read on the chain branch** (C1,
+measured by P1's test, which supersedes the check's count of 17). They are, by reader:
+- **read by keyword** (clj-kondo keyword analysis of `seon.turn`, `seon.ai`, `seon.agent` and `seon.cluster.agent`):
+  the agent dials `inbox-size`, `show-all-settings`, `turn-completion-backstop-ms`, `write-refusal-bound`; the
+  provider dials `model`, `no-provider`, `endpoint`, `api-key-variable`, `no-auth`, `max-tokens`,
+  `retain-reasoning`; `error/escalate-to`, `error/max-evidence-bytes`, `error/recurrence-limit`;
+  `eval/time-limit-ms`, `eval.result/blob-threshold`, `eval.result/max-source`; `fn.cost/min-total-us`;
+  `message/max-chain`; `run/max-episode-runs`; `test/step?`, `test/step-time-limit-ms`, `test.cost/top` (23);
+- **read generically** by `seon.ai` through the dial's `:seon.ai/request-attribute` property (`wire-setting-triples`,
+  `agent-setting-attributes`): `chars-per-token-prior`, `extra-body-edn`, `frequency-penalty`, `presence-penalty`,
+  `prompt-token-budget`, `response-format`, `stop`, `temperature`, `thinking`, `timeout-ms`, `top-p`, `wrapping`
+  (12 more).
+- Known limit: keyword analysis cannot tell a read of the branch's row from a read of main's; the `error/*` and
+  `message/max-chain` reads may be main-side. P4's convergence step measures where each is read and narrows the list
+  with the test.
 
 Three dials are **cluster dials root reads from main**, and are excluded: `:seon.config.agent/max-running`
 (`run-pass!`, root's connection), `:seon.config.run/relaunches` (`allowance-left`, main's `config/effective`) and
@@ -175,8 +175,8 @@ them is a copy nobody reads, and it lies (the S5 branch's row says `relaunches 0
   decision. That is exactly what `seon.config/effective` answers over the shipped document `config/default.edn`
   (`seon.config/defaults`), which makes one decision for every registered dial. `no-auth` and `retain-reasoning` are
   `[:= true]` presence dials ("clear by retracting"; `false` violates their own schema) and `no-provider` is optional;
-  the shipped document writes `:seon.config/absent` for all three deliberately. So the schema declares each of the 14
-  as `{:optional true}` over its dial schema, and the view is built from `effective`; there is no required list,
+  the shipped document writes `:seon.config/absent` for all three deliberately. So the schema declares each of the 35
+  as `{:optional true}` over its dial schema in a closed map, and the view is built from `effective`; there is no required list,
   no Malli `:default` in the dial schemas, and no `malli.transform/default-value-transformer`. P1 edits no
   `seon.config.*.edn` file.
 - **The list is checked, not trusted.** P1's test checks it against the code: every `:seon.config.*` keyword read
@@ -290,7 +290,7 @@ them is a copy nobody reads, and it lies (the S5 branch's row says `relaunches 0
 
 | phase | change | files | red proof (by var) |
 |---|---|---|---|
-| P1 | TASK-CHAIN amendment (§8); `:seon.task/runnable` and `:seon.task/desired-config` (14 optional dials) registered at their producer; the reader-coverage test | `docs/seon/schedule/cards/TASK-CHAIN.md`, `resources/seon/schemas/seon.task.edn`, `test/seon/task_test.clj` | `seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads` (excludes the three cluster dials; reads both the branch-side and the main-side readers, so it fails for a wrong list either way) |
+| P1 | TASK-CHAIN amendment (§8); `:seon.task/runnable` and `:seon.task/desired-config` (35 optional dials) registered at their producer; the reader-coverage test | `docs/seon/schedule/cards/TASK-CHAIN.md`, `resources/seon/schemas/seon.task.edn`, `test/seon/task_test.clj` | `seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads` (excludes the three cluster dials; reads both the branch-side and the main-side readers, so it fails for a wrong list either way) |
 | P2 | Chain routes (step 2) with C4, C9 and C12: registration, sweep, release through the branch owner and at stop, registry entry, readiness; `acquire-context!` counts its reference; `start-branch-flow!` skips a chained branch | `src/seon/cluster/agent.clj`, `src/seon/cluster/boot.clj`, `src/my/agent.clj`, `src/seon/task.clj` (docstring), `src/my/root.clj` (docstring), `test/seon/cluster/db_flow_test.clj` | `seon.cluster.db-flow-test/a-held-chain-with-no-graph-runs-from-run-alone`: a chain whose task is held from its start, so no graph ever ran on its branch (no hand-built state); one pass; `my.root/run!` alone; the route's wake reaches the plan channel (bounded await on the channel); the next pass writes the attempt row and starts its graph, asserted on the branch's facts and the registry after the bounded await, never on elapsed ms. C4's regression `a-chain-route-outlives-its-attempts`: end attempt 1, release it, `my.root/run!` again, still woken |
 | P3 | Validation at the writers (§3) | `src/seon/task.clj`, `src/my/root.clj`, `src/seon/cluster/agent.clj` (merge-step append), `test/seon/task_test.clj` | `seon.task-test/a-chain-whose-config-names-a-rejected-dial-value-is-refused` (a reachable refusal: `:seon.chain/config` names a dial with a value its schema rejects; the explanation names it; `registry/branches` and main unchanged); `seon.task-test/a-complete-chain-is-written` |
 | P4 | Config in `chain!`'s transaction, plus the convergence step (step 4) before steps 5-7; the operator's `--chains`/`--branch` converted | `src/seon/task.clj`, `src/seon/config.clj` (expose the difference step), `src/seon/cluster/agent.clj`, `src/seon/cluster/registry.clj`, `src/seon/cluster/boot.clj`, `script/seon/operator.clj`, `script/seon/operator_cli_test.clj`, `test/seon/config_test.clj`, `test/seon/cluster/db_flow_test.clj` | `a-chain-written-with-a-provider-has-its-first-attempt-see-it` (the first turn's recorded settings); `config-converges-before-the-agent-starts` (orders only the two rows: the config row's tx < the attempt row's tx) |
@@ -341,7 +341,7 @@ wake root through the chain route. §5's "`my.root/run!` offers its own wake, §
 - **Members.** Read on its branch: id, ns, name, plan, instructions, proofs, execution `:running`, attempts-made 4,
   created-by, sym, references. No `:seon.task/model` and no own `:seon.task/branch`, both optional. Its chain branch
   comes from the chain fact on main. Its members validate.
-- **Config.** Its branch row decides every one of the 14 dials (three by absence), so its view validates. Its
+- **Config.** Its branch row decides every one of the 35 dials (some by absence), so its view validates. Its
   provider dial is whatever root last wrote (provider off for the live check), and it toggled across reconciles (§0).
 - **What root does after P2 (restart onto it):** boot's first pass registers the chain route and plans the
   `:start-flow` for the open attempt `e88599e46009`; then root sets the provider on the branch when it wants the agent
@@ -350,7 +350,7 @@ wake root through the chain route. §5's "`my.root/run!` offers its own wake, §
 
 ## 10. Questions resolved by the narrow check
 
-- **Every dial, or only the model-facing ones?** The 14 dials read on the chain branch, each decided by `effective`;
+- **Every dial, or only the model-facing ones?** The 35 dials read on the chain branch, each decided by `effective`;
   the three cluster dials read from main are excluded (C1-C3).
 - **Does the writer refuse a stale planning basis?** Yes, for the head of the branch written:
   `:datahike/expected-basis-t` (an int) at the top of the transaction map, passed through `seon.db/transact!` and

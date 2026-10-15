@@ -1,7 +1,9 @@
 (ns seon.task-test
   "The task tree (runtime-follows-db §2): child tasks and needs as facts, the writer's
   needs-cycle refusal, the attempt and firing facts adopted on a branch of the live store."
-  (:require [clojure.string :as str]
+  (:require [clj-kondo.core :as clj-kondo]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [seon.step.design :as design]
             [clojure.test :refer [deftest is are testing]]
             [malli.core :as m]
@@ -442,6 +444,33 @@
        (is (contains? task :seon.task/next) "a task may link its next")
        (is (not-any? (members-of :seon.task/declaration) [:seon.task/next :seon.task/execution])
            "next and execution are never declared")))))
+
+(deftest the-runnable-schema-names-every-dial-the-launch-reads
+  ;; reactive-start plan 2: the desired config is checked against its readers, never trusted. A dial is read by
+  ;; keyword in the turn loop, the provider, the agent's settings and the launch, or generically by seon.ai through
+  ;; its :seon.ai/request-attribute; the three cluster dials root reads from main are no chain's entry.
+  (test-support/with-database
+   (fn [connection]
+     (let [registry (:seon.schema.projection/registry (db/carried-projection (db/db connection)))
+           dial? #(and (qualified-keyword? %) (str/starts-with? (namespace %) "seon.config."))
+           read-by-keyword (into #{}
+                                 (comp (map #(keyword (str (:ns %)) (:name %))) (filter dial?))
+                                 (:keywords (:analysis (clj-kondo/run!
+                                                        {:lint (mapv #(.getPath (io/resource %))
+                                                                     ["seon/turn.clj" "seon/ai.clj" "seon/agent.clj"
+                                                                      "seon/cluster/agent.clj"])
+                                                         :cache false
+                                                         :config {:output {:canonical-paths true}
+                                                                  :analysis {:keywords true}}}))))
+           read-generically (into #{} (filter #(and (dial? %) (:seon.ai/request-attribute (m/properties (mr/schema registry %)))))
+                                  (keys (mr/schemas registry)))
+           cluster-dials #{:seon.config.agent/max-running :seon.config.run/relaunches :seon.config.agent/keep-ended-branches?}
+           declared (into #{} (map first) (m/entries (m/deref (mr/schema registry :seon.task/desired-config))))]
+       (is (every? read-by-keyword cluster-dials) "the cluster dials are read where the launch reads")
+       (is (= (into (apply disj read-by-keyword cluster-dials) read-generically) declared)
+           "the desired config declares exactly the dials read on the chain branch")
+       (is (every? #(get-in (m/properties (mr/schema registry %)) [:seon.config/dial]) declared)
+           "every entry is a registered dial")))))
 
 (deftest three-tasks-with-tempids-are-written-linked-in-one-transaction
   ;; TASK-CHAIN S1c-1 (`docs/seon/schedule/cards/TASK-CHAIN.md#one-writer-for-tasks`)

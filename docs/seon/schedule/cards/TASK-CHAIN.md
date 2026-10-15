@@ -100,7 +100,8 @@ an explicit database (omitted, the caller's bound connection's database).
 
 One entity on main per chain: `:seon.chain/branch` (the branch keyword) and `:seon.chain/first` (the first task's
 `:seon.task/id`), identity `:seon.chain/first`. It is non-program (never merges as program), declared
-`:seon.wake/starts true` (its installation wakes root: the route reacts to added datoms only), and counted by `seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause evaluated on main, since
+`:seon.wake/starts true` (its installation wakes root through main's route, which reacts to added datoms only; from
+the pass that first sees it, root holds a route on the chain branch too, so every later commit there wakes root, §2.2), and counted by `seon.cluster.registry/cluster-claims` (a `[_ :seon.chain/branch ?b]` clause evaluated on main, since
 `cluster-claims` answers only for a cluster branch, holding the branch and its `base/` ref) so
 boot's `seon.cluster.registry/retire-unclaimed!` keeps its branch, failed or held chains included (measured: without the
 clause all twenty probe chains were unclaimed). It is discovery, not status: root reads the chain's state on its branch.
@@ -169,6 +170,26 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    human checkpoint inside a chain in the MVP (owner 2026-10-14): a chain to inspect first is created `:held` and run
    with `my.root/run!` (new in S3c-1).
    `:seon.config.agent/max-running` counts open attempts across all chains.
+   **Start is a reconciliation** (owner 2026-10-15; `docs/research/agent-platform/2026-10-15/reactive-start-plan.md`).
+   A runnable task's desired state is one value under `:seon.task/runnable`: its members, its chain branch (from the
+   chain fact on main) and its branch's config under `:seon.task/desired-config`, every dial the launch and the turn
+   loop read on that branch decided (a value of its dial schema or the explicit absent decision, as
+   `seon.config/effective` answers over the shipped document); the cluster dials root reads from main
+   (`:seon.config.agent/max-running`, `:seon.config.run/relaunches`, `:seon.config.agent/keep-ended-branches?`) are
+   not a chain's. `seon.task/chain!`, the task writer, `my.root/run!` and the merge-step append validate it with Malli
+   before they transact and refuse with its explanation, writing nothing. Root's pass derives, from current facts and
+   in order, the steps from what is to what is desired: the branch exists, root listens on it, it is merged forward to
+   its base, its config converged, the attempt row, the agent's context acquired, the agent's graph started; and in
+   reverse when it is desired stopped: graph stopped and exited, context released, attempt closed, route released,
+   branch retired. A forward merge's conflicts are facts on the branch the agent's context shows; they never hold the
+   launch. The plan is one pure function of the facts and the registry; a write it emits while no graph holds the
+   branch carries the branch head it planned on (`:datahike/expected-basis-t`), so a concurrent change refuses it and
+   the next pass plans again. A step already satisfied emits nothing. A step that takes time is a transition held in
+   the routing registry with its basis; the next pass observes it and never plans a duplicate, and a crash, which
+   empties the registry, is observed as the step not done. Root holds one wake route per chain branch main names
+   (`:seon.agent/chain-routes`, its own key), from the pass that first sees the chain fact until the chain retires, so
+   every commit on a chain branch wakes root. A task whose desired state does not validate never starts: root records
+   one problem carrying the explanation. Slices R-P1 to R-P6 in §7.
 3. **Work** — the agent reads its block (`seon.context/current-state`: its task's plan, instructions and proofs with
    their status, the tasks before and after it through `next`) and works at the REPL. It reads its own task's execution
    on its own branch (`seon.turn/attempt-running?` changes from main's head to the branch: root is the only writer of a
@@ -254,8 +275,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    share one transaction; this order makes each stopping point derivable on restart without an outbox. Nothing else
    runs; the branch and the chain fact stay. `:cancelled` closes and retires through the existing cleanup with no
    problem task. Root then decides, all by writing data: change the held task's plan or proofs and run it again
-   (`my.root/run!`, new in S3c-1: one branch transaction that changes `:held` to `:running`, then a payload-free wake offered to root's
-   existing plan channel; boot's full derivation sees a committed run even if the process stopped before the offer); or
+   (`my.root/run!`, new in S3c-1: one validated branch transaction that changes `:held` to `:running`; root's route on
+   the chain branch delivers its wake, and boot's full derivation sees a committed run after any restart); or
    abandon (record `:closed` with its reason, then the retirement of step 6); or build a new chain (`chain!` with any
    vector of maps, `:seon.chain/from` the old chain's branch to keep its work). A send-back is a bail: the chain never
    reruns an earlier task by itself. Completed tasks and their attempts are history and are never reopened.
@@ -523,7 +544,8 @@ user's latest answer approves the current plan.
 ## 5. Scheduling
 
 `seon.cluster.wake/route!` wakes root's plan channel for added datoms of starting attributes (an attempt end is one;
-the chain fact's installation is one; `my.root/run!` offers its own wake, §2.7). The wake carries no data and
+the chain fact's installation is one; a chain task's `:seon.task/execution`, so `my.root/run!`'s commit is one, heard
+through root's route on the chain branch, §2.2). The wake carries no data and
 `run-pass!` re-derives every chain each pass; the plan channel's sliding buffer of one coalesces wakes into full
 derivations, which is correct. Measured over chains: 9–14 ms for 20. First delete the relaunch derivations and
 `basis-valid?`'s commit-keyed cache with `obligations` (S2/S3), then measure a pass over real chains; only then decide
@@ -561,6 +583,9 @@ one named commit. No compatibility copy.
   `seon.task/ready`); `copied?` in `assignment-actions`; `seed-attempt!` and the per-attempt main merge-base write;
   per-step `:merge`, `:publish` and `:delete-branch` for tasks with a `next`; the per-assignment branch fork of today's
   single-task launch (a single task is a chain of one).
+- Start (reactive start, §2.2): the post-hoc chain config apply (`bin/seon config apply --chains` and `--branch` on a
+  chain branch, R-P4); `start-branch-flow!`'s own route on a chain branch (R-P2); the `more-agent-work?` start of chain
+  attempt agents, a filter: root and branch agents keep it (R-P5).
 - Text: `my.task/refine!`, the string replacement inside `seon.edit/exact` (it calls `my.edit/text`'s core), the
   fixed help strings in `seon.bootstrap/help-value`.
 - Templates: `resources/seon/tasks/seon.step.edn`, `test/seon/step_test.clj` and the survey/define templates and their
@@ -617,6 +642,7 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S4a | Stage preparation: `seon.step` shared helpers, the task-input fixture in `seon.test-support`, the three template files, deletion of `seon.step.edn`, `step_test.clj` and their readers, a grading form for live runs | each helper's contract; each template ingests | Sonnet (after S2a, S2b, S3a) | done 619c73d14, 840d175a8 (templates), 99997d214 (a task without a plan) |
 | S4b-design / S4b-prove / S4b-implement | One lane per stage, in parallel: its predicate and deftest table (rows from the stage tables), its template's instructions, and its live runs (one-task Design chains; Prove followed by a held Implement; Implement from hand-written proofs once S3b lands) | each predicate's table: Design rows (sections, problem changed, unresolved reference, producer not cited, data not modeled, existing-schema bug fix, registered-schema new feature) and Prove rows (no successor, empty proofs, not a deftest, missing or green result, world error, unreached changed or cited function, assertion-red and body-error success); refusal sets asserted exactly | Sonnet per stage; Opus run lane for live runs | design and prove done: 38cca803d, 14cc74ab4 (reach on the tested closure 65f4c292e); Implement has no predicate; live runs S5 1-4 (`../research/agent-platform/2026-10-14/s5-run-*.md`) |
 | S6 (A-E) | The merge step (`MERGE-STEP.md`): keep the refused merge branch, hold a merge step for root, a task's own branch | `MERGE-STEP.md` § Phases | Opus | A done (card, template, schema member, red deftests); B-E in `MERGE-STEP.md` |
+| R-P1 to R-P6 | Reactive start (§2.2): `:seon.task/runnable` and `:seon.task/desired-config`; chain routes; validation at the writers; config in `chain!`'s transaction and its convergence; the ordered steps with forward merge and transitions; stop and retire as inverses | the phase table of `docs/research/agent-platform/2026-10-15/reactive-start-plan.md` §7, first `seon.task-test/the-runnable-schema-names-every-dial-the-launch-reads` and `seon.cluster.db-flow-test/a-held-chain-with-no-graph-runs-from-run-alone` | Opus (flow-pass) | R-P1 done with this commit; R-P2 next |
 | S5 | Run 26: the full Design → Prove → Implement chain, live DeepSeek | 0 hand acts after `chain!`, one merge, the defect fixed | Opus run lane | run 4 (2026-10-14): Design and Prove done and advanced with 0 hand acts; Implement bailed and was rerun by `my.root/run!` three times (capped twice, one stall); context and REPL defects fixed since; no merge yet |
 
 **Parallel stages.** After S4a, each stage lane owns `src/seon/step/<stage>.clj` (`seon.step.<stage>/handoff`; none
