@@ -134,7 +134,7 @@
                 [:seon.context/turns :seon.context/turns]],
                :cost [:vector {:description "The branch's stored function costs whose digest differs from main's beside main's value, most self time spent first, at most :seon.config.test.cost/top. Producer: seon.context/current-state."} :seon.cost/comparison]
                :exchanges :seon.ai/exchanges
-               :age [:enum {:description "A history unit's age among the agent's model exchanges: the newest, one of the :seon.config.context/history-whole before it, or older. Producer: seon.context/exchanges."} :newest :recent :older]
+               :age [:enum {:description "A history unit's age among the agent's model exchanges: the newest, or older. Producer: seon.context/exchanges."} :newest :older]
                :reply-tokens [:int {:min 0 :description "The estimated tokens of the reply an older history unit shows by reference (seon.ai.tokens/estimate)."}]
                :reference [:map {:description "An older history unit's reply shown by reference: the evaluation's result handle, its reply's size in estimated tokens and the form that reads the value whole. Producer: seon.context/exchange-form."}
                            [:seon.repl/handle :seon.repl/handle]

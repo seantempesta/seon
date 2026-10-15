@@ -2,6 +2,7 @@
   "Contract proof for context derivation between runs."
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
@@ -10,6 +11,7 @@
             [seon.id]
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
+            [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.eval]
             [seon.repl :as repl]
@@ -506,6 +508,43 @@
        (is (= :summary (get-in reads ['clojure.core/subs :seon.ref/level])) "a library Var is read at its summary")
        (is (not= :summary (get-in reads ['tq.stable/cited :seon.ref/level])) "a program function keeps its citation's level")))))
 
+(deftest ^{:seon.test/long "An agent's setup and seven eval requests with their test steps, each followed by one model context."
+           :seon.test/long-ms 60000}
+  each-model-request-of-an-attempt-starts-with-the-previous-one-but-its-last-message
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [handle (test-support/running-cluster running)
+           _ (evaluate running agent-id "(ns tq.pfx-test (:require [clojure.test :refer [deftest is]])) (deftest cited-red (is (= 1 2)))")
+           _ (test-support/declare-proof! connection 'tq.pfx-test 'held 'tq.pfx/held)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.pfx
+                                            :seon.task/name "held"
+                                            :seon.task/plan "Green `tq.pfx-test/cited-red`."}))
+           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
+                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+           world #(hash-map :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle))
+           ;; one model pass: its form evaluated, the model's attempt (the provider is the external effect) on its call row,
+           ;; then the messages the next pass sends
+           pass! (fn [ordinal code]
+                   (evaluate running agent-id code)
+                   (let [run (-> (seon.eval/of-agent (db/db connection) agent-id '[{:seon.cluster.eval/run [:seon.turn/id]}])
+                                 peek (get-in [:seon.cluster.eval/run :seon.turn/id]))
+                         attempt (str "prefix-attempt-" ordinal)]
+                     (test-support/transacted! connection
+                                               [{:db/id attempt :seon.ai.attempt/id attempt :seon.ai.attempt/ordinal 0
+                                                 :seon.ai.attempt/at #inst "2026-10-15" :seon.ai/endpoint "http://localhost/prefix"
+                                                 :seon.ai/model "fixture" :seon.ai.attempt/settings-edn "{}"}
+                                                [:db/add [:seon.turn/id run] :seon.turn/attempts attempt]])
+                     (let [context (context/model-context (db/db connection) (world) agent-id)]
+                       (ai/messages :chat (:seon.ai/system context) (:seon.context/exchanges context)
+                                    (:seon.ai/prompt context)))))
+           ;; the first reply is over the reference dial and, by the last pass, older than any window of whole replies
+           sent (mapv pass! (range) ["(vec (range 600))" "(+ 1 2)" "(+ 3 4)" "(+ 5 6)" "(+ 7 8)" "(+ 9 10)"])]
+       (is (str/includes? (str (get (peek (first sent)) "content")) "599") "the newest exchange shows its reply whole")
+       (doseq [[before after] (partition 2 1 sent)]
+         (is (= (pop before) (subvec after 0 (dec (count before))))
+             "every message but the last is identical in the next request: the provider's prefix cache holds"))))))
+
 (deftest an-older-history-unit-over-the-dial-is-shown-by-reference
   (test-support/with-running-agent
    (fn [running agent-id connection]
@@ -515,17 +554,17 @@
            emission (repl/entity-emission (assoc evaluation :seon.db/db database))
            handle (:seon.repl/handle emission)
            older (context/exchange-form emission :older 400)
-           recent (context/exchange-form emission :recent 400)]
+           whole (context/exchange-form emission :older 1000000)]
        (is (qualified-symbol? handle) "the evaluation holds a result handle")
        (is (= {:seon.repl/handle handle :seon.render/operations [(list 'get-in handle [])]}
               (dissoc (:seon.context/reference older) :seon.context/reply-tokens))
            "the older unit names its handle and the form that reads the value whole")
-       (is (= (tokens/estimate (:seon.ai/reply recent)) (get-in older [:seon.context/reference :seon.context/reply-tokens]))
+       (is (= (tokens/estimate (:seon.ai/reply whole)) (get-in older [:seon.context/reference :seon.context/reply-tokens]))
            "the reference carries the whole reply's size in estimated tokens")
        (is (< (tokens/estimate (:seon.ai/reply older)) 100) "the older unit carries no reply text")
-       (is (not (contains? recent :seon.context/reference)) "a recent unit is shown whole")
-       (is (not (contains? (context/exchange-form emission :older 1000000) :seon.context/reference))
-           "a reply under the dial is shown whole")))))
+       (is (not (contains? whole :seon.context/reference)) "a reply under the dial is shown whole")
+       (is (not (contains? (context/exchange-form emission :newest 400) :seon.context/reference))
+           "the newest unit is shown whole")))))
 
 (deftest the-block-shows-the-agents-cost-against-main
   (test-support/with-running-agent

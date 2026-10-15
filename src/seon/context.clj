@@ -863,9 +863,9 @@
 
 (defn exchange-form
   "One evaluation as the REPL showed it: the form as sent and what the REPL answered, by the unit's `age` among the
-  agent's model exchanges. The `:newest` exchange answers with the turn's meta, a `:recent` one without it
-  (`seon.repl/reply-text`); an `:older` one whose reply is over `limit` (`:seon.config.context/reference-tokens`) and
-  holds a result handle is shown by reference: its handle, its reply's size in estimated tokens and the form that reads the
+  agent's model exchanges. The `:newest` exchange answers whole with the turn's meta; an `:older` one without it
+  (`seon.repl/reply-text`), and when its reply is over `limit` (`:seon.config.context/reference-tokens`) and it
+  holds a result handle, by reference: its handle, its reply's size in estimated tokens and the form that reads the
   value whole, never its reply text. After eviction or restart the handle answers that the value is gone."
   {:malli/schema [:=> [:cat :seon.repl/emission :seon.context/age :seon.config.context/reference-tokens] :seon.context/exchange-unit]}
   [emission age limit]
@@ -881,8 +881,9 @@
 
 (defn- exchanges
   "The agent's own model exchanges in agent order: one per call row carrying a model attempt, each unit by its age
-  (`exchange-form`): the newest exchange, the `:seon.config.context/history-whole` before it shown whole, and the
-  older ones."
+  (`exchange-form`): the newest exchange, and the older ones. An exchange's form is decided once, when it stops being
+  the newest, so every request of an attempt starts with the previous one but its last message (the provider's cached
+  prefix)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.config/effective]
                   [:or :seon.context/exchanges :seon.error/value]]}
   [database agent-id dials]
@@ -894,9 +895,7 @@
                       (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
                       vec)
             newest (dec (count runs))
-            age #(cond (= % newest) :newest
-                       (< (- newest %) (inc (:seon.config.context/history-whole dials))) :recent
-                       :else :older)]
+            age #(if (= % newest) :newest :older)]
         (into [] (map-indexed (fn [index run]
                                 (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database)) (age index)
                                                      (:seon.config.context/reference-tokens dials))

@@ -2,6 +2,7 @@
   "Entity projections for tests; execution remains in seon.test."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.id :as id]
             [seon.test :as test]
             [seon.render.block :as block]
@@ -50,10 +51,17 @@
    :seon.test.failure/testing-contexts :seon.test.failure/message
    :seon.test.failure/expected :seon.test.failure/actual])
 
+(defn- shown-read
+  "A read the view shows: its value, or a refused read through the error's AI face (`seon.error/reply-value`), so
+  the view holds what the agent acts on and stays the same while the read's answer does."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value] :seon.schema/value]}
+  [database read]
+  (if (and (map? read) (:seon.error/at read)) (error/reply-value database read) read))
+
 (defn render-ai
   "A test as data: its name and, once it has run, its state; beyond distance zero also
   its source as its lines (what it asserts), where it runs, its failed assertions and, when red, the definitions
-  changed since it last passed.
+  changed since it last passed. A refused read shows as its error's AI face.
 
   ## Costs
 
@@ -74,13 +82,13 @@
                                           :seon.test/failure-message :seon.test/reach-unknown]))
         (:seon.test/source entity) (assoc :seon.render.ns/source-lines (str/split-lines (:seon.test/source entity)))
         ;; the host report without the symbol the view already names
-        read? (assoc :seon.render.test/host (let [host (test/host database test-name)]
+        read? (assoc :seon.render.test/host (let [host (shown-read database (test/host database test-name))]
                                               (cond-> host (map? host) (dissoc :seon.test/sym))))
         (seq (:seon.test.failure/reports entity))
         (assoc :seon.test.failure/reports (mapv #(select-keys % failure-keys) (failures entity)))
         ;; only a red test has definitions changed since it last passed
         (and read? (#{"fail" "error"} shown-state))
-        (assoc :seon.render.test/changed-since-green (test/changed-since-green database test-name))))))
+        (assoc :seon.render.test/changed-since-green (shown-read database (test/changed-since-green database test-name)))))))
 
 (defn render-form
   "The read that finds this test's recorded result again. Shown, never executed."

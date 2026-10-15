@@ -202,7 +202,7 @@ Everything that describes copies, subjects, children, `needs`, `seon.task/effect
 - DYNAMIC-CONTEXT stages 4, 5 and 7 (shown declarations, working set, reflection on a snapshot): only if a chain run
   shows prompt growth caps agents. Stage 6, history by reference, is installed by size (S5 run 4b prompt cost; the
   card's declaration-showing rule is not): an exchange
-  older than the newest `:seon.config.context/history-whole` whose reply is over `:seon.config.context/reference-tokens`
+  other than the newest whose reply is over `:seon.config.context/reference-tokens`
   shows its form, result handle, reply size in estimated tokens and requery form (`seon.context/exchange-form`).
 - Publication (a compiled check is 32–45 s measured) and boot's whole-program derivation: platform commits pay the
   existing check; per-file derivation inputs when the chain runs show the cost dominating.

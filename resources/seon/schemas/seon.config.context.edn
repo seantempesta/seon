@@ -1,8 +1,4 @@
-#:seon.config.context{:history-whole
-                      [:int
-                       {:min 0, :seon.config/dial true, :seon.config/default 3,
-                        :description "How many model exchanges before the newest a model pass shows whole; older ones over :seon.config.context/reference-tokens are shown by reference (seon.context/exchange-form)."}],
-                      :reference-tokens
+#:seon.config.context{:reference-tokens
                       [:int
                        {:min 0, :seon.config/dial true, :seon.config/default 400,
-                        :description "Estimated tokens past which an older history unit's reply is shown by reference: its result handle, its size and the form that reads it (seon.context/exchange-form)."}]}
+                        :description "Estimated tokens past which a history unit's reply, once it is not the newest, is shown by reference: its result handle, its size and the form that reads it (seon.context/exchange-form)."}]}

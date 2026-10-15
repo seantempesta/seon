@@ -21,7 +21,7 @@
   [:seon.render.test/outcomes [:map-of [:enum :error :fail :pass :unfinished] [:int {:min 0}]]]
   [:seon.render.test/red {:optional true} [:vector :seon.test/sym]]]
  :seon.render.test/view
- [:map {:description "A test as its AI face shows it: state once it has run (absent otherwise), beyond distance zero its source lines, host, failed assertions and, unless green, the definitions changed since it last passed."}
+ [:map {:description "A test as its AI face shows it: state once it has run (absent otherwise), beyond distance zero its source lines, host, failed assertions and, unless green, the definitions changed since it last passed; a refused read as its error's AI face."}
   [:seon.test/sym [:maybe :seon.test/sym]]
   [:seon.render.test/state {:optional true} [:enum "pass" "fail" "error"]]
   [:seon.test/unchanged {:optional true} :seon.test/unchanged]
@@ -30,7 +30,7 @@
   [:seon.render.ns/source-lines {:optional true} [:vector :string]]
   [:seon.test/failure-message {:optional true} :seon.test/failure-message]
   [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
-  [:seon.render.test/host {:optional true} [:or [:map [:seon.test/host :seon.test/host]] :seon.error/value]]
+  [:seon.render.test/host {:optional true} [:or [:map [:seon.test/host :seon.test/host]] :seon.error/reply]]
   [:seon.test.failure/reports {:optional true} [:vector :map]]
   [:seon.render.test/changed-since-green {:optional true}
-   [:or [:vector :seon.fn/sym] :seon.test/unknown-error]]]}
+   [:or [:vector :seon.fn/sym] :seon.error/reply]]]}
