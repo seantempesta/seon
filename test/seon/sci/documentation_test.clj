@@ -35,6 +35,13 @@
          (is (not-any? #(= function-symbol (:sym %)) (:functions directory))
              "a private override stays out of the public directory"))))))
 
+(deftest the-directory-of-a-test-namespace-lists-its-deftests
+  (support/with-database
+    (fn [connection]
+      (let [directory (lookup/directory-value (db/db connection) 'seon.ref-test false)]
+        (is (some #{'seon.ref-test/a-reference-with-no-path-is-a-missing-file} (:tests directory))
+            "a deftest the namespace defines is listed")))))
+
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
     (fn [connection]

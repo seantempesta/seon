@@ -404,7 +404,8 @@
   (let [namespace-row (db/pull database
                              '[:seon.ns/name
                                {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
-                               {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
+                               {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}
+                               {:seon.test/_ns [:seon.test/sym]}]
                              [:seon.ns/name namespace-name])
         functions (program-documentation database namespace-name)
         read-arglists (arglists-reader database namespace-name)]
@@ -416,7 +417,8 @@
                                     :seon.fn/sym) functions)]
         ;; `dir` is a macro, so its call names no producer; the directory
         ;; carries its own pair (the render law's master override).
-        {:seon.render/ai 'seon.repl/render-directory-ai
+        (cond->
+         {:seon.render/ai 'seon.repl/render-directory-ai
          :seon.render/html 'seon.repl/render-directory-html
          :schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
                         (map (fn [row]
@@ -431,7 +433,9 @@
                                    (when-let [doc (:seon.fn/doc row)]
                                      {:doc (:summary (ref/docstring doc))})
                                    (agent-documentation-contract database row)))
-                          functions)})
+                          functions)}
+          (seq (:seon.test/_ns namespace-row))
+          (assoc :tests (vec (sort-by str (map :seon.test/sym (:seon.test/_ns namespace-row)))))))
       :else (ref/documentation-unavailable namespace-name))))
 
 (defn reference-in

@@ -28,14 +28,16 @@
 
 (defn render-directory-ai
   "The namespace's public functions as data, one entry each: symbol, arglists
-  and the summary sentence (absent when undocumented). Contracts are one
-  `(doc sym)` away."
+  and the summary sentence (absent when undocumented), then its deftests as
+  entries with no arguments. Contracts are one `(doc sym)` away."
   {:malli/schema [:=> [:cat :seon.repl/directory]
                   [:vector [:map [:sym :qualified-symbol] [:arglists :seon.schema/value] [:summary {:optional true} :string]]]]}
   [directory]
-  (mapv (fn [{:keys [sym arglists doc]}]
-          (cond-> {:sym sym :arglists arglists} doc (assoc :summary doc)))
-        (:functions directory)))
+  (into (mapv (fn [{:keys [sym arglists doc]}]
+                (cond-> {:sym sym :arglists arglists} doc (assoc :summary doc)))
+              (:functions directory))
+        (map (fn [sym] {:sym sym :arglists '([]) :summary "A deftest."}))
+        (:tests directory)))
 
 (defn render-directory-html
   "Show complete directory data using the same named columns."

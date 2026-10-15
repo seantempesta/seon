@@ -36,6 +36,7 @@
                                     [:out {:optional true} :seon.schema/value]
                                     [:seon.sci.eval/missing-declaration {:optional true} :qualified-keyword]
                                     [:supplied {:optional true} [:vector :qualified-keyword]]]]]
+             [:tests {:optional true} [:vector :seon.test/sym]]
              [:schemas [:map-of :qualified-keyword :seon.schema/value]]]
             :columns [:vector :keyword]
             :rows [:vector [:vector :seon.schema/value]]
