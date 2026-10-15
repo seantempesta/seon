@@ -306,8 +306,11 @@ definition with the same input is computed once for every branch and agent that 
 - **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
   JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
   boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from `d/branches`; retention
-  GC reclaims its commits without per-branch cleanup. A chain's branch is retired once its one merge publishes or root
-  abandons it, so its history and blobs can be collected; a bailed chain keeps its branch for root.
+  GC reclaims its commits without per-branch cleanup. An ended branch (assignment, chain or merge) stays
+  as history when `:seon.config.agent/keep-ended-branches?` holds (shipped true, owner 2026-10-16: keep them and mine the
+  sessions; keeping must be cheap, and a cost that is not is a defect at its producer), else it is deleted once its
+  merge publishes or root abandons it; main's attempt rows name the branch, and root's `my.agent/retire-branch!` removes
+  a kept one.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
