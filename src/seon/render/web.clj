@@ -2066,6 +2066,27 @@
           (= (lineage retained) (lineage database))
           (> (long (db/basis-t retained)) (long (db/basis-t database)))))))
 
+(defn- agent-connection
+  "The connection an agent's page renders through: the branch the agent runs on, where its evaluations, test runs
+  and task rows are written, since a render reads the database from its bound connection. A running agent's own
+  (`seon.cluster.agent/started-custody`), else this process's open connection to the branch `database` names for
+  it (`seon.db/branch-connection`); nil when neither is open."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.db/database-value :seon.agent/id]
+                  [:maybe :seon.db/connection]]}
+  [routing database agent-id]
+  (or (some-> routing (cluster.agent/started-custody agent-id) (get-in [:seon.turn.loop/cluster :seon.db/connection]))
+      (when-let [branch (db/q '[:find ?branch . :in $ ?id
+                                :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
+                              database agent-id)]
+        (db/branch-connection database branch))))
+
+(defn- agent-database
+  "The database an agent's page renders: its branch's (`agent-connection`), else `database`."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/routing] :seon.db/database-value :seon.agent/id]
+                  :seon.db/database-value]}
+  [routing database agent-id]
+  (or (some-> (agent-connection routing database agent-id) db/db) database))
+
 (defn- derive-page!
   "Derive on this caller, sharing immutable call evidence with every reader.
 
@@ -2076,7 +2097,12 @@
                        [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab] :map]] :boolean :boolean]
                   :map]}
   [handle database streams profile registration-key derive-all? invalidate-calls?]
-  (let [cache (render/shared-cache (:seon.sci.eval/ctx handle))
+  (let [;; an agent's page reads its own world: the branch it runs on, through that branch's connection
+        connection (when (string? registration-key)
+                     (agent-connection (:seon.agent/routing handle) database registration-key))
+        database (if connection (db/db connection) database)
+        handle (cond-> handle connection (assoc :seon.db/connection connection))
+        cache (render/shared-cache (:seon.sci.eval/ctx handle))
         retained @cache
         program (program-key handle database)
         changed-code? (not= program (get-in retained [::programs registration-key]))
@@ -2974,7 +3000,8 @@
     (if (:seon.error/at database)
       ;; a refused read answers as that refusal, never as a page's database
       (text-response 503 (:seon.error/message database))
-      (let [page (current-page service database agent-id)
+      (let [database (agent-database (:seon.agent/routing service) database agent-id)
+            page (current-page service database agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
         (html-response
@@ -3148,11 +3175,12 @@
 
 (defn- agent-alias-response
   [{connection :seon.store/connection-object :as service} debug? request]
-  (let [agent-id (get-in request [:path-params :id])]
-    (if (agent-namespace (db/db connection) agent-id)
+  (let [agent-id (get-in request [:path-params :id])
+        namespace-name (agent-namespace (agent-database (:seon.agent/routing service) (db/db connection) agent-id)
+                                        agent-id)]
+    (if namespace-name
       (if debug?
-        (debug-response service (agent-namespace (db/db connection) agent-id)
-                        agent-id request)
+        (debug-response service namespace-name agent-id request)
         (page-response service agent-id))
       (not-found request))))
 

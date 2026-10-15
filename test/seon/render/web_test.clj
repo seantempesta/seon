@@ -41,6 +41,7 @@
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.context :as seon.context]
+            [datahike.api :as d]
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.problems :as problems]
@@ -516,6 +517,29 @@ handle))}}
         (is (= [{:title "seon · root" :namespace "my.agents.root" :walk-root? true}
                 {:title "seon · agent-b" :namespace "my.agents.agent-b" :walk-root? true}]
                [(page "/") (page "/agent/agent-b")]))))))
+
+(deftest an-agent-page-renders-the-eval-requests-on-its-own-branch
+  ;; C0: an agent's evaluations are written on its branch, never main, so its page reads that branch's head.
+  (with-server
+    (fn [connection server _context]
+      (support/transacted! connection
+                           (cluster.agent/creation-tx
+                            {:seon.agent/id "brancher" :seon.cluster/name "web-test"
+                             :seon.ns/name 'my.agents.brancher :seon.agent/branch :brancher}))
+      (d/branch! connection (get-in @connection [:config :branch]) :brancher)
+      (let [branch (d/connect (assoc (:config @connection) :branch :brancher))]
+        (try
+          (support/transacted!
+           branch
+           [{:seon.turn/id "branch-run" :seon.turn/agent [:seon.agent/id "brancher"]
+             :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+            {:seon.cluster.eval/id "branch-eval" :seon.cluster.eval/run [:seon.turn/id "branch-run"]
+             :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+             :seon.eval/shown "42" :seon.cluster.eval/source "(+ 40 2)"}])
+          (let [unit (texts (.body (fetch server "/agent/brancher")) "[data-turn=branch-run]")]
+            (is (= [true] (mapv #(str/includes? % "(+ 40 2)") unit))
+                "the page shows, as one unit, the eval request its branch holds and main does not"))
+          (finally (d/release branch)))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server

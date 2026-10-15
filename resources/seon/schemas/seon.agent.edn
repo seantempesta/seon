@@ -42,6 +42,7 @@
                       {:seon.db/attributes true,
                        :seon.render/units
                        [:seon.task/of-agent
+                        :seon.turn/_agent
                         :seon.message/_to
                         :seon.agent/settings
                         :seon.agent/namespace

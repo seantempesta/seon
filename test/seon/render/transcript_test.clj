@@ -1272,3 +1272,31 @@
              (finally
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
+
+(deftest each-eval-request-shows-its-test-steps-live-status
+  ;; C0: the owner watches each eval request's automatic test step as it runs: a test run selected after a run
+  ;; opened belongs to that run, each member with its live status.
+  (support/with-database
+    (fn [connection]
+      (support/transacted! connection (agents-tx connection agent-id))
+      (doseq [ordinal (range 2)]
+        (support/transacted!
+         connection
+         [{:seon.turn/id (str "step-run-" ordinal) :seon.turn/agent [:seon.agent/id agent-id]
+           :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}]))
+      (support/transacted!
+       connection
+       [{:seon.test.run/id "step-test-run" :seon.test.run/at (java.util.Date.) :seon.test.run/selection-tx "datomic.tx"
+         :seon.test.run/members
+         #{{:seon.test.member/symbol 'step.test/red :seon.test.member/reasons #{:named}
+            :seon.test.member/began? true :seon.test.member/ended? true
+            :seon.test.member/pass-count 0 :seon.test.member/fail-count 1 :seon.test.member/error-count 0}
+           {:seon.test.member/symbol 'step.test/running :seon.test.member/reasons #{:named}
+            :seon.test.member/began? true}
+           {:seon.test.member/symbol 'step.test/pending :seon.test.member/reasons #{:named}}}}])
+      (let [statuses #(into {} (map (juxt :seon.test.member/symbol :seon.render.transcript/status))
+                            (transcript/step-tests @connection %))]
+        (is (= {'step.test/red :red 'step.test/running :running 'step.test/pending :pending}
+               (statuses "step-run-1"))
+            "the newer run holds its step's tests with their live status")
+        (is (= {} (statuses "step-run-0")) "a test run selected after the next run opened is not the older run's")))))

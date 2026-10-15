@@ -723,6 +723,79 @@
                                    (str (or evaluations 0)))]
         [:dt "Reply"] [:dd (if (find entity :seon.turn/reply-size) "Recorded" "None")]]])))
 
+(def ^:private member-selector
+  [:seon.test.member/symbol :seon.test.member/began? :seon.test.member/ended?
+   :seon.test.member/pass-count :seon.test.member/fail-count :seon.test.member/error-count
+   {:seon.test.member/failures [:seon.test.failure/message]}])
+
+(defn- member-status
+  "A test member's live status: `:pending` before its body began, `:running` until it ended, then `:green` or `:red`."
+  {:malli/schema [:=> [:cat :map] [:enum :pending :running :green :red]]}
+  [member]
+  (cond (not (:seon.test.member/began? member)) :pending
+        (not (:seon.test.member/ended? member)) :running
+        (pos? (+ (:seon.test.member/fail-count member 0) (:seon.test.member/error-count member 0))) :red
+        :else :green))
+
+(defn step-tests
+  "The tests the automatic step of run `run-id` selected on `database`, its agent's branch: the members of every test
+  run whose selection transaction falls from the run's opening up to its agent's next run's opening, each with its
+  live status (`member-status`), by test symbol."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id] [:vector :map]]}
+  [database run-id]
+  (let [[opened owner] (db/q '[:find [?opened ?agent] :in $ ?id
+                               :where [?run :seon.turn/id ?id] [?run :seon.turn/opened-tx ?opened]
+                                      [?run :seon.turn/agent ?agent]]
+                             database run-id)
+        next-opening (when opened
+                       (db/q '[:find (min ?later) . :in $ ?agent ?opened
+                               :where [?run :seon.turn/agent ?agent] [?run :seon.turn/opened-tx ?later]
+                                      [(> ?later ?opened)]]
+                             database owner opened))
+        runs (when opened
+               (db/q '[:find [?test-run ...] :in $ ?from ?until
+                       :where [?test-run :seon.test.run/selection-tx ?tx] [(>= ?tx ?from)] [(< ?tx ?until)]]
+                     database opened (or next-opening Long/MAX_VALUE)))]
+    (into [] (comp (mapcat #(:seon.test.run/members (db/pull database [{:seon.test.run/members member-selector}] %)))
+                   (map #(assoc % :seon.render.transcript/status (member-status %))))
+          (sort runs))))
+
+(defn- test-html
+  {:malli/schema [:=> [:cat :map] :seon.render/hiccup]}
+  [member]
+  (let [status (name (:seon.render.transcript/status member))
+        test-name (str (:seon.test.member/symbol member))]
+    (into [:li {:class (str "seon-test-" status) :data-status status :data-test test-name}
+           [:code test-name] (str " " status)]
+          (keep #(some->> (:seon.test.failure/message %) (vector :div {:class "seon-test-failure"})))
+          (:seon.test.member/failures member))))
+
+(defn- cost-html
+  "One evaluation's stored cost: wall milliseconds, allocated megabytes and the calls its code made."
+  {:malli/schema [:=> [:cat :map] :seon.render/hiccup]}
+  [evaluation]
+  [:li {:class "seon-eval-cost" :data-ordinal (str (:seon.cluster.eval/ordinal evaluation))}
+   (str "form " (:seon.cluster.eval/ordinal evaluation)
+        (some->> (:seon.eval/duration-ms evaluation) (str " · ms "))
+        (some->> (:seon.eval/allocated-bytes evaluation) double (* 1e-6) (format " · %.1f MB"))
+        (some->> (:seon.cluster.eval/call-count evaluation) (str " · calls ")))])
+
+(defn- step-html
+  "Run `run-id`'s automatic test step and each evaluation's cost, as the owner watches them live."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id] :seon.render/hiccup]}
+  [database run-id]
+  (let [tests (step-tests database run-id)
+        costs (sort-by :seon.cluster.eval/ordinal
+                       (db/q '[:find [(pull ?e [:seon.cluster.eval/ordinal :seon.eval/duration-ms
+                                                 :seon.eval/allocated-bytes :seon.cluster.eval/call-count]) ...]
+                               :in $ ?id :where [?run :seon.turn/id ?id] [?e :seon.cluster.eval/run ?run]]
+                             database run-id))]
+    [:section {:class "seon-eval-step"}
+     (into [:ul {:class "seon-eval-costs"}] (map cost-html) costs)
+     (if (seq tests)
+       (into [:ul {:class "seon-test-step"}] (map test-html) tests)
+       [:p {:class "seon-test-step"} "No tests ran."])]))
+
 (defn render-run-html
   "Show the selected turn's header, state and evaluations."
   {:malli/schema [:=> [:cat :seon.render/unit]
@@ -735,11 +808,12 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      [:section {:class "seon-turn"}
+      [:section {:class "seon-turn" :data-turn run-id}
        (turn-header (:seon.db/db unit) run-id)
        [:p (turn/render-ai unit)]
        (render-html (assoc unit :seon.agent/id agent-id
-                          ::selected-run-id run-id))]
+                          ::selected-run-id run-id))
+       (step-html (:seon.db/db unit) run-id)]
       :else (missing-selected-run unit identities))))
 
 ;;; ---------------------------------------------------------------------------
