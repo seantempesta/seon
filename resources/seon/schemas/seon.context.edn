@@ -38,19 +38,17 @@
                          [:seon.context/last-step {:optional true} :seon.context/last-step]]
                :last-step [:string {:min 1 :description "The last step an earlier attempt's agent took: its last my.turn/wait note, else the prose it wrote with its last form, else that form's source. Producer: seon.context/last-step."}]
                :attempts [:vector {:description "The held task's attempts by other agents, by number; absent when none. Producer: seon.context/earlier-attempts."} :seon.context/attempt]
-               :changes [:map {:description "Every declaration the agent's branch changed since its task's merge base, by family, each by its name and the form that reads it (seon.context/branch-changes): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!); a function no test reaches says so; a declaration the branch removed is named under :seon.context/removed. Absent when nothing changed."}
+               :changes [:map {:description "Every declaration the agent's branch changed since its task's merge base, by family, each by its name and the form that reads it (seon.context/branch-changes): its earlier attempts' work and its own scratch, each a name to keep or to remove (my.program/ns-unmap!); a change its merge would not carry (seon.cluster.source/merge-list, the merge's own derivation) is :seon.context/stays; a declaration the branch removed is named under :seon.context/removed. Absent when nothing changed."}
                          [:seon.context/functions {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/schemas {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/tests {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/tasks {:optional true} [:vector :seon.context/changed]]
                          [:seon.context/removed {:optional true} :seon.context/removed]]
-               :changed [:map {:description "One declaration the branch changed: its name and the form that reads it, and for a function no test reaches, :seon.context/reached-by-no-test with the form that removes it. Producer: seon.context/branch-changes."}
+               :changed [:map {:description "One declaration the branch changed: its name and the form that reads it, and for a change its merge would not carry, :seon.context/stays with the form that removes it when one exists. Producer: seon.context/branch-changes."}
                          [:seon.ref/name :seon.ref/name]
-                         [:seon.context/reached-by-no-test {:optional true} :seon.context/reached-by-no-test]
-                         [:seon.context/used-by-no-function-or-test {:optional true} :seon.context/used-by-no-function-or-test]
+                         [:seon.context/stays {:optional true} :seon.context/stays]
                          [:seon.render/operations [:vector {:min 1} :seon.render/read-form]]]
-               :reached-by-no-test [:= {:description "Present on a changed function none of the branch's tests (its changed tests and the held task's proofs) tested as recorded: in no current result's static closure, which its reach digest covers, or dynamic calls (seon.context/tested-names). Keep it by giving it a test, or remove it."} true]
-               :used-by-no-function-or-test [:= {:description "Present on a schema key the branch added that no function or test writes (`:seon.fn/keywords`); there is no REPL form that removes a schema key (`my.program/a-schema-key-added-on-a-branch-can-be-removed-at-the-repl`)."} true]
+               :stays [:= {:description "Present on a change the branch's merge would not carry: no seed (the held task's proofs and the branch's green tests reaching a change) reaches it through any hop (seon.cluster.source/merge-list). It stays on the branch; a test that reaches it merges it, my.program/ns-unmap! drops it."} true]
                :removed [:vector {:description "The declarations the branch removed since its merge base, by name."} [:map [:seon.ref/name :seon.ref/name]]]
                :turns
                [:map {:description "Model calls left against the current wake and the held task's status."}

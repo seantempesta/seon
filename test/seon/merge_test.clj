@@ -709,7 +709,10 @@
        (is (= #{} (set (remove stays [[:seon.fn/sym (sym "reach-scratch")] [:seon.schema/key :tmp/probe]
                                       [:seon.ns/name 'user]])))
            "the scratch def, the probe schema and the user namespace stay")
-       (is (= changed (into will stays)) "every change is listed once")))))
+       (is (= changed (into will stays)) "every change is listed once")
+       (is (= #{} (set (remove (:seon.merge/stays (source/merge-list after changed #{}))
+                               [[:seon.fn/sym (sym "reach-f")] [:seon.fn/sym (sym "reach-scratch")]])))
+           "with no seed every change that is not a removal stays: an empty closure, never a refusal")))))
 
 (deftest ^{:seon.test/long "One prepare-merge!: a nested seon.test/run on a fresh merge branch of main."
            :seon.test/long-ms 60000}
