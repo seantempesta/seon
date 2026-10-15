@@ -65,6 +65,15 @@ directly. No live (provider) run until the context defects below are fixed and t
 | C11 | Context and help tests are red on HEAD (`seon.context-test` 3, `seon.help-test` 5) | Red census (in flight) classifies; fix or retire with the census |
 | C12 | ~150 scratch agent branches list in `my.agent/branches` | Root closes their admissions after the lanes end (649029d26 lifecycle deletes) |
 
+**Second: generative schemas and functions, specified** (owner, 2026-10-15; brief tmp/gen-pipeline.md). Every schema an
+agent defines is checked for being generative and fast (and round-trips to the database when it is an entity schema);
+every contracted function is checked generatively when it changes, failures shrunk to the smallest case; agents see
+shrunk example inputs and outputs when they view a function; the live view lists the branch's changed schemas and
+functions with their check results and data present; every function the branch changed must be checked green to exit a
+stage (this also clears scratch). Pipeline: Haiku library dig (§1) → Sonnet web research (§2) → Opus design (§3) in
+docs/research/agent-platform/2026-10-15/generative-schemas.md; it supersedes the measured-gates hybrid (both plans feed
+§3). Infrastructure first where the whole cannot land now.
+
 **The order (owner rulings 2026-10-15, `../research/agent-platform/2026-10-15/branch-model-rulings.md`):** a branch's
 program is its own writes over main's HEAD; merge by reach closure, reusing the branch's results; the writer follows the
 branch; config reads main's HEAD unless the branch wrote it.
