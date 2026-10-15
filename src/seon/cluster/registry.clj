@@ -581,29 +581,39 @@
     (retire-branch! {:seon.store/store store :seon.store/branch (base-branch branch)}))
   nil)
 
+(defn- task-branch-claims
+  "The branches the tasks on chain branch `branch`, one the store holds, name as theirs (`:seon.task/branch`, a merge
+  step's kept merge branch, MERGE-STEP)."
+  {:malli/schema [:=> [:cat :seon.store/connection-object :seon.store/branch] [:set :seon.store/branch]]}
+  [connection branch]
+  (let [db (d/branch-as-db connection branch)]
+    (try (set (d/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] db))
+         (finally (d/release-materialized-db db)))))
+
 (defn- cluster-claims
   "The branches `branch` claims when it is a cluster branch, else nil: itself,
-  the branch of every agent row on it whose admission is open and the branch of
-  every chain fact on it (`:seon.chain/branch`), held chains included.
+  the branch of every agent row on it whose admission is open, the branch of
+  every chain fact on it (`:seon.chain/branch`), held chains included, and the branch each of those chains the store
+  `held` names for a task as its own (`task-branch-claims`).
   A cluster branch is one whose own `:seon.cluster/name` row names it through
   `cluster.branch/cluster-branch`. A fork inherits its cluster's name row, so
   the comparison, never the branch's spelling, tells a cluster from its forks."
-  {:malli/schema [:=> [:cat :seon.store/connection-object :seon.store/branch]
+  {:malli/schema [:=> [:cat :seon.store/connection-object [:set :seon.store/branch] :seon.store/branch]
                   [:maybe [:set :seon.store/branch]]]}
-  [connection branch]
+  [connection held branch]
   (let [db (d/branch-as-db connection branch)]
     (try
       ;; a query, not an index read: `:db` and `:current-src` install no
       ;; `:seon.cluster/name`, and `d/datoms` refuses an unknown attribute
       (when (some #(= branch (cluster.branch/cluster-branch %))
                   (d/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db))
-        (into #{branch}
-              (d/q '[:find [?branch ...]
-                     :where (or-join [?branch]
-                                 (and [?agent :seon.agent/branch ?branch]
-                                      (not [?agent :seon.agent/admission-closed-tx]))
-                                 [_ :seon.chain/branch ?branch])]
-                   db)))
+        (let [chains (d/q '[:find [?branch ...] :where [_ :seon.chain/branch ?branch]] db)]
+          (-> #{branch}
+              (into (d/q '[:find [?branch ...]
+                           :where [?agent :seon.agent/branch ?branch] (not [?agent :seon.agent/admission-closed-tx])]
+                         db))
+              (into chains)
+              (into (comp (filter held) (mapcat #(task-branch-claims connection %))) chains))))
       (finally (d/release-materialized-db db)))))
 
 (defn retire-unclaimed!
@@ -623,7 +633,7 @@
   [store claimed]
   (let [connection (:seon.store/connection-object store)
         branches (branches store)
-        claims (into (conj claimed :db) (mapcat #(cluster-claims connection %)) branches)
+        claims (into (conj claimed :db) (mapcat #(cluster-claims connection branches %)) branches)
         held (into claims (filter #(branch-connected? store %)) branches)
         held (into held (map base-branch) held)
         unclaimed (into #{} (remove held) branches)]

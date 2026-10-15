@@ -2254,6 +2254,81 @@
                   "its graph runs on the task's branch")
               (is (nil? (some-> (get-in @routing [:seon.agent/children branch]) deref (get-in [:seon.agent/started agent-id])))
                   "not on the chain's branch")
+              ;; its agent writes its end where it works; root reads it there (`seon.task/attempt-rows`)
+              (let [there (registry/active-branch-connection {:seon.store/store store :seon.store/branch elsewhere})]
+                (is (= :done (await-on! there #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                      [?a :seon.task.attempt/end ?e]]
+                                                    (db/db there) key)
+                                        ::elsewhere-done))
+                    "the attempt, green at its start, ends done on the task's branch")
+                (is (= :done (some #(when (= key (:seon.task/assignment %)) (:seon.task.attempt/end %))
+                                   (task/chain-attempts (db/db connection) store)))
+                    "root reads that end on the branch its row names"))
               (finally
                 (release-chain! routing store elsewhere)
+                (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a refused final merge holds a merge step; root runs it, its scripted turn repairs the merge branch, and root's pass merges that branch; about eight db<->flow passes." :seon.test/long-ms 60000}
+  a-done-merge-step-merges-its-branch-onto-main
+  ;; MERGE-STEP row iii: root changes the held merge step's proofs to the refused test (TASK-CHAIN §2.7: root decides
+  ;; by writing data) and runs it; its agent, on the merge branch, makes the test green there, ends done, and root's
+  ;; pass takes that attempt, read where its row names, to the final merge of the merge branch
+  (binding [*space* "tq.mergedone"]
+    (test-support/with-database
+     (fn [connection]
+       (fixed-chain-world
+        connection ["u"] {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (with-merge-template! connection)
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")}}])
+                branch (:seon.chain/branch chain)
+                [last-task] (:seon.task/handles chain)
+                key (id/id [last-task 1])
+                before (merge-branches store)
+                context {:seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                         :my.program/base-ctx (:seon.sci.eval/ctx handle) :seon.store/store store}
+                end-of (fn [on k] (await-on! on #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                         [?a :seon.task.attempt/end ?e]]
+                                                       (db/db on) k)
+                                             ::ended))]
+            (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                              (db/db connection) connection)
+                                                :seon.batch/sink (seon.batch/sink)
+                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                :seon.agent/id "tq-chain-author"})
+                                  (symbol (str *space* "-proofs"))
+                                  "(clojure.test/deftest proves-u (clojure.test/is (= 1 2)))\n")
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :done (end-of on-branch key)) "the chain's last task ends done")
+                (pass! handle routing)
+                (let [step (get-in (db/pull (db/db on-branch) [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                   [:seon.task/next :seon.task/id])
+                      kept (:seon.task/branch (db/pull (db/db on-branch) [:seon.task/branch] [:seon.task/id (or step "")]))
+                      step-key (id/id [step 1])]
+                  (is (keyword? kept) "the refused merge holds a merge step on its kept merge branch")
+                  (registry/on-branch store branch
+                                      #(db/transact! % [[:db/retract [:seon.task/id step] :seon.task/proofs 'seon.step.merge-test/gate]
+                                                        [:db/add [:seon.task/id step] :seon.task/proofs (proof "u")]]))
+                  (is (= :running (:seon.task/execution ((requiring-resolve 'my.root/run!) {:my.program/context context :seon.task/assigned step})))
+                      "root runs the held merge step")
+                  (pass! handle routing)
+                  (let [there (registry/active-branch-connection {:seon.store/store store :seon.store/branch kept})]
+                    (is (= :done (end-of there step-key)) "its agent repairs the merge branch and ends done there"))
+                  (pass! handle routing)
+                  ;; this world's cluster names no checkout that holds the repaired proof's file, so the merge refuses at
+                  ;; the write-back root (`seon.cluster.source/root-refusal`), after the done rule passed on the merge
+                  ;; branch: the merge itself is shown with a checkout in `seon.cluster.merge-test`
+                  (is (str/starts-with? (str (:seon.task/reason (db/pull (db/db on-branch) [:seon.task/reason] [:seon.task/assignment step-key])))
+                                        "The final merge refused it, :seon.source/write-back-error")
+                      "root's pass judges the step done on its merge branch and merges that attempt")))
+              (finally
+                (doseq [kept (remove before (merge-branches store))]
+                  (release-chain! routing store kept))
                 (release-chain! routing store branch))))))))))

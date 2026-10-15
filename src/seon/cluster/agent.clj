@@ -1761,11 +1761,10 @@
                               {:seon.task/next [:seon.task/id]}]
                         [:seon.task/id handle])
           created (when (:db/id task) (db/q '[:find ?tx . :in $ ?h :where [_ :seon.task/id ?h ?tx]] head handle))
+          ;; each attempt as the branch its row names holds it (`seon.task/branch-attempts`)
           rows (when (:db/id task)
-                 (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task.attempt/number :seon.task.attempt/end
-                                          :seon.task/outcome {:seon.task/agent [:seon.agent/id]}]) ...]
-                         :in $ ?t :where [?a :seon.task/attempt-of ?t]]
-                       head (:db/id task)))]
+                 (task/branch-attempts head branch handle [:seon.task.attempt/number :seon.task/outcome
+                                                        {:seon.task/agent [:seon.agent/id]}]))]
       (cond
         (read-failure [task created rows]) (read-failure [task created rows])
         ;; a path whose task the head lacks ends there
@@ -2213,24 +2212,38 @@
   commit."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches]
                   [:vector [:map [:seon.chain/branch :seon.chain/branch] [:seon.task/assignment :seon.task/assignment]
-                            [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]]]]}
+                            [:seon.task/assigned :seon.task/handle] [:seon.task.attempt/commit :seon.task.attempt/commit]
+                            [:seon.task/branch :seon.task/branch]]]]}
   [database branches]
   (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
     (when (map? chains) (throw (ex-info (:seon.error/message chains "db<->flow could not read the chains.") chains)))
     (into [] (mapcat (fn [[branch first-handle]]
                        (when-let [head (when (contains? branches branch) (db/branch-database database branch))]
                          (try
-                           (let [rows (db/q '[:find ?k ?h ?c :in $ [?h ...]
-                                              :where [?t :seon.task/id ?h] (not [?t :seon.task/next _]) [?a :seon.task/attempt-of ?t]
-                                              [?a :seon.task/assignment ?k] [?a :seon.task.attempt/end :done]
-                                              [?a :seon.task.attempt/commit ?c] (not [?a :seon.task/outcome _])]
-                                            head (task/chain-handles head first-handle))]
+                           (let [last-handle (peek (task/chain-handles head first-handle))
+                                 ;; each attempt as the branch its row names holds it (`seon.task/branch-attempts`)
+                                 rows (task/branch-attempts head branch last-handle [:seon.task/outcome])]
                              (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read a chain's ends.") rows)))
-                             (for [[k h c] (sort rows)
-                                   :when (nil? (:db/id (db/pull database [:db/id] [:seon.task/assignment k])))]
-                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned h :seon.task.attempt/commit c}))
+                             (for [{k :seon.task/assignment c :seon.task.attempt/commit works-on :seon.task/branch :as row} rows
+                                   :when (and (= :done (:seon.task.attempt/end row)) c (not (:seon.task/outcome row))
+                                              (nil? (:db/id (db/pull database [:db/id] [:seon.task/assignment k]))))]
+                               {:seon.chain/branch branch :seon.task/assignment k :seon.task/assigned last-handle
+                                :seon.task.attempt/commit c :seon.task/branch (or works-on branch)}))
                            (finally (source/release! [head]))))))
           (sort chains))))
+
+(defn- refusal-section
+  "The `## Merge refusal` section of a merge step's instructions: what refused it, as references its block resolves
+  (each red test and conflicted declaration backticked), with the refusal's own message and file."
+  {:malli/schema [:=> [:cat :seon.error/value] :string]}
+  [{refused :seon.error/type message :seon.error/message red :seon.source/red conflict :seon.program/conflict path :seon.source/path}]
+  (str "## Merge refusal\n\n"
+       "Root's final merge refused `" refused "`" (when message (str ": " message)) "\n"
+       (when path (str "\nFile: " path "\n"))
+       (when (seq red) (str "\nRed on the merge branch:\n\n" (apply str (map #(str "- `" % "`\n") (sort red)))))
+       (when (seq conflict)
+         (str "\nChanged by main and the chain since the merge base; the chain's version is on this branch, main's is"
+              " main's head (`my.program/diff`):\n\n" (apply str (map #(str "- `" % "`\n") (sort-by str conflict)))))))
 
 (defn- merge-step
   "The merge step root appends after a final merge `refused` by its gate (MERGE-STEP): `seon.step.merge/template`'s
@@ -2242,7 +2255,8 @@
     (let [template (task/template database 'seon.step.merge/template)]
       (when (:seon.error/at template)
         (throw (ex-info (:seon.error/message template "The merge step's template is not ingested.") template)))
-      (cond-> (assoc template :seon.task/branch kept :seon.task/refusal (:seon.error/type refused))
+      (cond-> (assoc template :seon.task/branch kept :seon.task/refusal (:seon.error/type refused)
+                     :seon.task/instructions (str (:seon.task/instructions template) "\n\n" (refusal-section refused)))
         (seq (:seon.source/red refused)) (assoc :seon.task/refused-tests (set (:seon.source/red refused)))))))
 
 (defn- merge-chains!
@@ -2259,12 +2273,14 @@
     (boolean
      (some identity
            (doall
-            (for [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
+            (for [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit
+                   works-on :seon.task/branch}
                   (chain-finishes database (registry/branches store))]
-              (let [refusals (registry/on-branch store branch
+              ;; judged where its agent worked: the end commit is on the branch its row names
+              (let [refusals (registry/on-branch store works-on
                                         (fn [on-chain]
                                           (let [at-end (db/commit-database (db/db on-chain) commit)]
-                                            (try (source/done-refusals at-end (done-judged database at-end branch h))
+                                            (try (source/done-refusals at-end (done-judged database at-end works-on h))
                                                  (finally (source/release! [at-end]))))))]
                 (if (seq refusals)
                   (do (bail-chain! handle branch key h (refused-reason refusals) []) false)
@@ -2311,6 +2327,12 @@
         (when (:seon.error/at published)
           (throw (ex-info (:seon.error/message published "The chain's publication was refused.") published)))
         (when (or (not moved?) (:seon.task/git-commit (recorded)))
+          ;; the merge branches its tasks named (a merge step's, MERGE-STEP) go with the chain: its merge published
+          (when (contains? (registry/branches store) branch)
+            (doseq [kept (registry/on-branch store branch
+                                    #(db/q '[:find [?b ...] :where [?t :seon.task/id _] [?t :seon.task/branch ?b]] (db/db %)))
+                    :when (contains? (registry/branches store) kept)]
+              (registry/retire-branch! {:seon.store/store store :seon.store/branch kept})))
           (when (contains? (registry/branches store) branch)
             (when-let [refused (task/delete-branch! {:seon.db/connection connection :seon.store/store store
                                                      :seon.agent/routing routing :seon.env/environment (env/of handle)}

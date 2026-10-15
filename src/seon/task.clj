@@ -2,7 +2,8 @@
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge request. Tasks live on the cluster, so every write goes to
   main through the one task writer (`seon.task/adopt-tasks-tx`)."
-  (:require [seon.cache :as cache]
+  (:require [datahike.api :as d]
+            [seon.cache :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -883,6 +884,31 @@
       (conj (adopt-tasks-tx database [entity] #{handle} {})
             [:db/add [:seon.task/id last-handle] :seon.task/next -1]))))
 
+(def ^:private agent-written
+  "The members of an attempt row its agent writes with its end (`seon.turn`), on the branch the agent works on."
+  [:seon.task.attempt/end :seon.task.attempt/commit :seon.task.attempt/reason])
+
+(defn branch-attempts
+  "Task `handle`'s attempts on chain `branch` whose head is `head`, each as the branch its row names holds it
+  (MERGE-STEP): pulled by `selector` on the chain head, where root writes its outcome, with the members its agent
+  writes (`agent-written`: end, end commit, reason) read on the branch its `:seon.task/branch` names when that is
+  another branch the store holds, where its agent works. Each row carries its `:seon.task/assignment`,
+  `:seon.task/branch` and the agent-written members it holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/branch :seon.task/handle [:vector :seon.schema/value]]
+                  [:or [:vector :map] :seon.db/invalid-read-error]]}
+  [head branch handle selector]
+  (let [eids (db/q '[:find [?a ...] :in $ ?h :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]] head handle)
+        rows (if (read-error eids) eids (db/pull-many head (into selector (concat [:seon.task/assignment :seon.task/branch] agent-written)) (vec (sort eids))))]
+    (or (read-error rows)
+        (mapv (fn [{works-on :seon.task/branch key :seon.task/assignment :as row}]
+                (if-let [there (when (and works-on (not= works-on branch)) (db/branch-database head works-on))]
+                  (try (let [written (db/pull there agent-written [:seon.task/assignment key])]
+                         (when-let [failure (read-error written)] (throw (ex-info (:seon.error/message failure) failure)))
+                         (merge row (select-keys written agent-written)))
+                       (finally (d/release-materialized-db there)))
+                  row))
+              (sort-by :seon.task/assignment rows)))))
+
 (defn chain-attempts
   "Every attempt on a chain's `:seon.task/next` path, read through `store` for each chain fact on main `database`:
   its key, task, chain branch, end and outcome when it holds them."
@@ -901,12 +927,14 @@
                              (registry/on-branch store branch
                                         (fn [connection]
                                           (let [head (db/db connection)
-                                                rows (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned
-                                                                             :seon.task.attempt/end :seon.task/outcome]) ...]
-                                                             :in $ [?h ...] :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]]
-                                                           head (chain-handles head first-handle))]
-                                            (when-let [failure (read-error rows)] (throw (ex-info (:seon.error/message failure) failure)))
-                                            (mapv #(assoc (dissoc % :db/id) :seon.chain/branch branch)
+                                                rows (into [] (mapcat (fn [h]
+                                                                        (let [rows (branch-attempts head branch h [:seon.task/assigned :seon.task.attempt/end
+                                                                                                                :seon.task/outcome])]
+                                                                          (when-let [failure (read-error rows)]
+                                                                            (throw (ex-info (:seon.error/message failure) failure)))
+                                                                          rows)))
+                                                           (chain-handles head first-handle))]
+                                            (mapv #(assoc (dissoc % :db/id :seon.task/branch) :seon.chain/branch branch)
                                                   (sort-by :seon.task/assignment rows))))))))
               (sort chains)))))
 

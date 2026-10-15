@@ -34,36 +34,29 @@ The change, from the data outward:
    `(or (:seon.task/branch task) chain-branch)` for its attempt's branch, and the attempt's world, block and tests
    follow from that row. The merge step's agent therefore checks out the merge branch, its compartment: it writes
    nothing else. Its task and attempt are placed on that branch when the attempt starts (as `seon.task/assign!` places
-   a task on an agent's own branch), and root reads that attempt's end there.
+   a task on an agent's own branch), and root reads that attempt's end there: one reader,
+   `seon.task/branch-attempts`, gives every attempt as the branch its row names holds it. Boot keeps a branch a
+   chain's task names (`seon.cluster.registry/cluster-claims`).
 5. **Its proof is the merge gate.** `seon.step.merge-test/gate` asserts `seon.step.merge/gate` refuses nothing for the
-   supplied task over the supplied branch: every refused test green, every changed file analyzes cleanly, no
-   conflicted declaration left at the value the refusal found. The done rule (`seon.cluster.source/done-refusals`) is
+   supplied task over the supplied branch: every refused test green; files that do not analyze and conflicts are
+   judged again by root's merge of the branch (6). The done rule (`seon.cluster.source/done-refusals`) is
    unchanged: the proof is the step's clause.
 6. **Root merges the repaired branch.** A merge step that ends done is the chain's last task: root's pass merges its
    attempt's branch (the merge branch) like any finished chain; the gate runs again on main's latest head, so a moved
    main is judged again, and a new refusal holds a new merge step the same way.
-7. **Root's context shows held merge steps.** `my.root/instructions` carries the law; a held merge step is listed with
+7. **Root's context shows held merge steps.** `my.root/instructions` carries the law; `my.root/merge-steps` lists each held merge step with
    its `my.root/run!` form.
 
 ## Phases
 
 | Phase | Change | Red proofs | Status |
 |---|---|---|---|
-| A | This card; TASK-CHAIN amended; `resources/seon/tasks/seon.step.merge.edn`; `:seon.task/branch` on the task schema | `seon.cluster.db-flow-test/a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step` (rows i and iv); `seon.cluster.db-flow-test/a-task-naming-a-branch-starts-its-attempt-there` (row ii) | done c09651be8 (both proofs red for the right reason) |
-| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis check inside the gate | the phase A deftest's merge-branch assertions | part: `seon.merge/merge!` keeps a refused merge branch and names it on the refusal (`:seon.source/candidate`, red tests as `:seon.source/red`); the hand merge (`my.root/merge!`) and the per-assignment path retire it. Open in `seon.cluster.source` (held by another lane today): the analysis check inside the gate, a conflict building its merge branch, retirement on a gate run error |
-| C | The append in `seon.task` (one transaction, the template and the `next` ref); `merge-chains!` writes it on a gate refusal | the phase A deftest's merge-step assertions | done (`seon.task/next-tx`; `merge-chains!` appends on a refusal that kept a merge branch; proof green) |
-| D | `:seon.task/branch` in root's launch (`seon.cluster.agent/chain-read`) with the task placed on that branch; `seon.step.merge/gate` and its deftest; the refusal in the block | `a-task-naming-a-branch-starts-its-attempt-there`; `seon.step.merge-test/gate` | part: launch done (`chain-read` reads `:seon.task/branch`; `launch-actions` uses it; the task, agent and row placed on that branch by identity; proof green). Open: root reads the step's end on its branch (below); `seon.step.merge/gate` and its deftest; the refusal in the block |
-| E | Root's merge of a done merge step's branch; root's instructions and held merge steps | row iii: a green merge step's branch merges on root's pass | — |
+| A | This card; TASK-CHAIN amended; `resources/seon/tasks/seon.step.merge.edn`; `:seon.task/branch` on the task schema | `seon.cluster.db-flow-test/a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step` (rows i and iv); `seon.cluster.db-flow-test/a-task-naming-a-branch-starts-its-attempt-there` (row ii) | done c09651be8 |
+| B | Keep on refusal, one retirement rule (`seon.merge/merge!`, `seon.cluster.source/prepare-merge!`); the analysis and lint checks and a conflict are the gate's refusals, each answered with the merge branch the gate built (a conflicted declaration forced on top as the chain holds it); a gate run error retires its branch | the phase A deftest's merge-branch assertions; `seon.cluster.merge-test`, `seon.cluster.write-back-test` | done (merge side c62266fd4; source side with this status) |
+| C | `seon.task/next-tx` (one transaction, the template and the `next` ref); `merge-chains!` appends on a refusal that kept a merge branch | the phase A deftest's merge-step assertions | done c62266fd4 |
+| D | A task's own branch: `chain-read` reads it, `launch-actions` uses it, the task, agent and row placed there by identity; root reads an attempt where its row names (`seon.task/branch-attempts`, called by `chain-read`, `chain-finishes`, `seon.task/chain-attempts`; `seon.merge` reads the row there too); boot keeps a branch a chain's task names (`seon.cluster.registry/cluster-claims`); `seon.step.merge/gate` and `seon.step.merge-test/gate`; the refusal in the step's instructions (`## Merge refusal`, each red test and conflicted declaration a reference its block resolves) | `a-task-naming-a-branch-starts-its-attempt-there` (end read on its branch); `seon.cluster.registry-test/a-chain-fact-keeps-its-branch-and-base-through-retirement` (a task-named branch survives); `seon.step.merge-test/gate` | done with this status |
+| E | Root's pass merges a done merge step's attempt from its branch (the gate runs again on main's latest head); the chain's publication retires the merge branches its tasks named; `my.root/merge-steps` and root's law | `seon.cluster.db-flow-test/a-done-merge-step-merges-its-branch-onto-main` (row iii) | part: the done step's end is read on its merge branch, judged done there and taken to `seon.merge/merge!` with the merge branch as source; that world names no checkout, so its merge stops at the write-back root. Open: row iii's accepted merge in a world with a checkout (`seon.cluster.merge-test`'s), and the merge test's two reds already on c09651be8 (`a-chain-merges-once-and-closes-every-attempt` lines 1020, 1023) |
 
-## Open (2026-10-15)
-
-- **Root reads the merge step's end where its agent writes it.** The attempt row is on the chain branch (root's
-  readers walk it) and placed on the merge branch (the agent's world); the agent writes its end on the merge branch.
-  `seon.cluster.agent/chain-read`, `chain-finishes` and `seon.task/chain-attempts` read ends on the chain head only.
-  Options for root: (1) those three read a row's end on the branch its row names (one shared reader, three callers);
-  (2) on the refusal the chain moves to its merge branch (`:seon.chain/branch` re-pointed; the merge branch already
-  holds the chain's tasks and attempts from the merge's facts), so no reader changes and `:seon.task/branch` is not
-  needed by the step; (3) root copies the end onto the chain branch on the merge branch's wake.
-- **A kept merge branch survives a restart.** `seon.cluster.registry/cluster-claims` claims chain branches only; a
-  merge branch named by a chain task's `:seon.task/branch` is retired by boot's `retire-unclaimed!` until it claims
-  those too.
+Analysis and conflicts are judged by the gate root runs when it merges the repaired branch, not by
+`seon.step.merge/gate`: the step's proof checks the refused tests, and a still-broken file or a conflict main made since
+refuses the merge again and holds a new merge step.

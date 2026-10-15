@@ -25,6 +25,7 @@
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
    "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."
+   "A chain whose final merge its gate refused (a conflict, a red test, a file that does not analyze) keeps its merge branch, main's latest head with the chain's changes on top, and holds a merge step after its last task: (my.root/merge-steps) lists each with its refusal. Nothing runs it by itself; run it with (my.root/run! {:seon.task/assigned handle}), and when it is done my pass merges its branch, judging main's latest head again."
    "Merge main forward into a chain branch, as git merge main into a feature branch, at each restart batch and before a chain's final merge: (my.root/merge-main! {:seon.chain/branch b}) moves the declarations main changed since the branch's merge base and the branch did not, as one merge commit with main's head as a parent, which is then its merge base, so the branch interprets only its own changes; a declaration both changed is answered in :seon.program/conflict and stays the branch's for its agent to resolve; tasks, attempts and config never move, so the chain's final merge carries its own changes to them since its fork point and keeps main's."
    "A branch reads its own config and a merge never carries it: apply a changed dial to a chain branch with bin/seon config apply [NAME] PATH --branch B (or --chains for every chain branch a running graph holds); the agent's next dial read there sees it and main's is unchanged."])
 
@@ -181,6 +182,42 @@
                    :seon.error/value]]}
   [{context :my.program/context handle :seon.task/assigned}]
   (task/run-held! (select-keys context [:seon.db/connection :seon.store/store]) handle))
+
+(defn merge-steps
+  "The held merge steps on my cluster's chains (MERGE-STEP): each chain task naming its own branch, a refused final
+  merge's kept merge branch, that is `:held`, with its chain branch, its refusal and refused tests, offering its run.
+
+  ## Example
+
+  ```clojure
+  (my.root/merge-steps)
+  ```"
+  {:malli/schema [:=> [:cat :my.root/merge-request-read]
+                  [:or [:vector [:map [:seon.task/id :seon.task/id] [:seon.task/branch :seon.task/branch]
+                                 [:seon.chain/branch :seon.chain/branch]
+                                 [:seon.task/refusal {:optional true} :seon.task/refusal]
+                                 [:seon.task/refused-tests {:optional true} :seon.task/refused-tests]
+                                 [:seon.render/operations :seon.render/operations]]]
+                   :seon.error/value]]}
+  [{database :seon.db/db store :seon.store/store}]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
+    (if (db/read-refusal? chains)
+      chains
+      (into [] (mapcat (fn [[branch first-handle]]
+                         (when (contains? (registry/branches store) branch)
+                           (registry/on-branch store branch
+                                      (fn [connection]
+                                        (let [head (db/db connection)]
+                                          (into [] (comp (map #(db/pull head [:seon.task/id :seon.task/branch :seon.task/execution
+                                                                              :seon.task/refusal :seon.task/refused-tests]
+                                                                        [:seon.task/id %]))
+                                                         (filter #(and (:seon.task/branch %) (= :held (:seon.task/execution %))))
+                                                         (map #(-> (dissoc % :db/id :seon.task/execution)
+                                                                   (assoc :seon.chain/branch branch
+                                                                          :seon.render/operations
+                                                                          [(list 'my.root/run! {:seon.task/assigned (:seon.task/id %)})]))))
+                                                (task/chain-handles head first-handle))))))))
+            (sort chains)))))
 
 (defn merge-main!
   "Merge my cluster's main forward into chain branch `:seon.chain/branch` (`seon.merge/merge-main!`): the program

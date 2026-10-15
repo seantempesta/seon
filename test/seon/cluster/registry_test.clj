@@ -733,16 +733,24 @@
             fork! #(registry/fork! {:seon.store/store opened
                                     :seon.cluster.registry/from cluster
                                     :seon.store/branch %})
-            _ (run! fork! [:chain-named :chain-held :chain-unnamed])
+            _ (run! fork! [:chain-named :chain-held :chain-unnamed :merge-kept :merge-unnamed])
             connection (store/open-branch! opened cluster)
-            held (store/open-branch! opened :chain-held)]
+            held (store/open-branch! opened :chain-held)
+            named (store/open-branch! opened :chain-named)]
         (try
           (test-support/transacted!
            connection
            {:tx-data [{:seon.chain/first "aaaaaaaaaaaa" :seon.chain/branch :chain-named}
                       {:seon.chain/first "bbbbbbbbbbbb" :seon.chain/branch :chain-held}]})
-          (is (= #{:chain-unnamed} (registry/retire-unclaimed! opened #{source-branch}))
-              "only the branch no chain fact names is retired")
+          ;; MERGE-STEP: a chain's task naming its own branch (a merge step's kept merge branch) claims it
+          (test-support/transacted!
+           named
+           {:tx-data [{:seon.task/id (task/task-handle 'tq.claims "m") :seon.task/ns 'tq.claims :seon.task/name "m"
+                       :seon.task/sym 'tq.claims/m :seon.task/branch :merge-kept}]})
+          (d/release named)
+          (is (= #{:chain-unnamed :merge-unnamed} (registry/retire-unclaimed! opened #{source-branch}))
+              "only the branches no chain fact or chain task names are retired")
+          (is (contains? (registry/branches opened) :merge-kept) "a branch a chain's task names survives")
           (is (every? (registry/branches opened) [:chain-named :chain-held])
               "a named chain, held or not, keeps its branch")
           (is (not-any? (registry/branches opened) (map registry/base-branch [:chain-named :chain-held :chain-unnamed]))

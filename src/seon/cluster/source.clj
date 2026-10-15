@@ -1043,7 +1043,8 @@
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
-  empty delta runs the proofs alone, so a task-only change is accepted like any other.
+  empty delta runs the proofs alone, so a task-only change is accepted like any other. A conflicted declaration
+  is written as the source holds it (forced on top), and the conflict is answered with the merge branch built.
 
   An `:selection` option of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
@@ -1056,9 +1057,10 @@
   the candidate's one write, so the tested world holds the source's tasks beside its program: a proof that reads
   its task reads it there.
 
-  With the `:root` option, the checkout, the files write-back would produce are proven first
-  (`proven-files` over the merged value, `seon.db/with`): a declaration naming
-  a namespace its file does not require refuses before any test runs."
+  With the `:root` option, the checkout, the files write-back would produce are proven over the merged value
+  (`proven-files`, `seon.db/with`) as part of the gate: a declaration naming a namespace its file does not require
+  refuses, before main moves, with the merge branch the gate built (`:seon.source/candidate`, its reds as
+  `:seon.source/red`), as a conflict and a clj-kondo error do (MERGE-STEP). A gate whose run fails retires its branch."
   {:malli/schema [:function
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/sym]
                    [:or :seon.source/prepared :seon.program/three-way :seon.error/value]]
@@ -1096,41 +1098,48 @@
             delta (if (and whole selection)
                     (into selection (filter whole) (for [[_ v] selection :when (qualified-symbol? v)] [:seon.ns/name (symbol (namespace v))]))
                     whole)
-            tx (when (and delta (empty? unchanged) (empty? reach) (empty? blocking))
+            ;; a conflicted declaration is forced on top as the source holds it (theirs): the merge branch is main's
+            ;; head with the source's changes, which a merge step corrects against main (MERGE-STEP)
+            delta (cond-> delta (and delta (seq blocking)) (into blocking))
+            tx (when (and delta (empty? unchanged) (empty? reach))
                  (if (seq delta) (replacement branch head delta) []))
-            ;; The file the merge would write back, proven before any test runs;
-            ;; an empty delta writes no file, so it names no root to judge.
+            ;; The file the merge would write back, proven over the merged value; a refusal is the gate's, answered
+            ;; with the merge branch it built (MERGE-STEP); an empty delta writes no file, so it names no root to judge.
             root-error (when (and root (seq tx)) (root-refusal root))
             proof (when (and root (nil? root-error) (seq tx))
                     (let [merged (db/with head {:tx-data tx})]
                       (if (:seon.error/at merged) merged (proven-files head merged delta root))))
             ;; The bar a lane commit holds (bin/lane): no clj-kondo error in a file the merge publishes.
             lint (when (vector? proof) (lint-errors root proof))
-            refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
+            refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})
+            ;; the gate's own refusals, each answered with the merge branch the gate builds: a conflict, a file that
+            ;; does not analyze cleanly, a clj-kondo error in a file this merge would publish
+            gate-refusal
+            (cond
+              (seq blocking) (assoc three :seon.program/conflict blocking
+                                    :seon.program/conflict-digests (select-keys (:seon.program/conflict-digests three) blocking))
+              (:seon.error/at proof) proof
+              (seq lint)
+              (seon.error.refusal/error :seon.source/lint-error
+               {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/prepare-merge!
+                :seon.error/message (str "clj-kondo reports an error in a file this merge would publish, which a lane commit refuses: "
+                                         (str/join "; " (map (fn [{:seon.source/keys [path] :seon.lint/keys [row col type message]}]
+                                                               (str path ":" row ":" col " " type " " message))
+                                                             lint))
+                                         ". Fix it on the candidate branch and request the merge again.")
+                :seon.source/path (:seon.source/path (first lint)) :seon.source/lint-findings lint}))]
         (try
           (cond
             root-error root-error
             (not (set? changed)) changed
             (not three) (some #(when (:seon.error/at %) %) maps)
             (:seon.error/at listed) listed
-            (seq blocking) (assoc three :seon.program/conflict blocking
-                                  :seon.program/conflict-digests (select-keys (:seon.program/conflict-digests three) blocking))
             (seq unchanged) (refuse "A selected declaration is not a change on the candidate." unchanged)
             (:seon.db/invalid-read reach) reach
             (seq reach) (refuse "A selected declaration reaches an unselected change; select that change too."
                                 {:seon.program/identities reach :seon.program/unselected (set (remove selection whole))})
             (db/read-refusal? tested) tested
             (:seon.error/at tx) tx
-            (:seon.error/at proof) proof
-            (seq lint)
-            (seon.error.refusal/error :seon.source/lint-error
-             {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/prepare-merge!
-              :seon.error/message (str "clj-kondo reports an error in a file this merge would publish, which a lane commit refuses: "
-                                       (str/join "; " (map (fn [{:seon.source/keys [path] :seon.lint/keys [row col type message]}]
-                                                             (str path ":" row ":" col " " type " " message))
-                                                           lint))
-                                       ". Fix it on the candidate branch and request the merge again.")
-              :seon.source/path (:seon.source/path (first lint)) :seon.source/lint-findings lint})
             (empty? proofs) (refuse "A merge names the tests that prove it; none were given." proofs)
             :else
             (let [s (keyword (str "merge-" (id/id)))
@@ -1163,8 +1172,12 @@
                         (into [] (comp (mapcat :seon.source/red-tests) (map :seon.test/sym) (distinct))
                               (merge-verdict head branch base prepared)))]
               (cond
-                (:seon.error/at run) run
-                (:seon.error/at on-main) on-main
+                ;; a gate that could not run kept nothing worth repairing: one retirement rule, the branch goes
+                (or (:seon.error/at run) (:seon.error/at on-main))
+                (do (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})
+                    (if (:seon.error/at run) run on-main))
+                gate-refusal (cond-> (assoc gate-refusal :seon.source/candidate s)
+                               (seq reds) (assoc :seon.source/red (vec (sort reds))))
                 :else (cond-> prepared (seq red) (assoc :seon.source/red (vec (sort red)))))))
           (finally (release! [base branch]))))))))
 

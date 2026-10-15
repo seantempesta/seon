@@ -351,7 +351,8 @@
                     (is (= [(subs (.getPath ^java.io.File file) (inc (count root))) :seon/unbounded-assertion-message]
                            ((juxt :seon.source/path :seon.lint/type) finding)))
                     (is (pos-int? (:seon.lint/row finding)))
-                    (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
+                    (is (contains? (registry/branches store) (:seon.source/candidate refused))
+                        "the gate's refusal keeps the merge branch it built, for a merge step to repair (MERGE-STEP)")
                     (is (= before (slurp file)))))))
 
 (deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."

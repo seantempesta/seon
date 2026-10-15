@@ -202,14 +202,22 @@
 
 (defn- chain-row
   "Assignment `key`'s row on the head of the chain branch that holds it, among the chain facts main `database`
-  holds (`:seon.chain/branch`), else {}: a chain's attempts live on its branch, never on main, until its one merge."
+  holds (`:seon.chain/branch`), else {}: a chain's attempts live on its branch, never on main, until its one merge;
+  a row naming another branch (a merge step's, MERGE-STEP) is read there, where its agent works."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
                   [:map [:db/id {:optional true} :seon.db/entity-id] [:seon.task/branch {:optional true} :seon.task/branch]]]}
   [database key]
   (or (some (fn [branch]
           (when-let [head (db/branch-database database branch)]
-            (try (let [row (db/pull head [:db/id :seon.task/branch] [:seon.task/assignment key])]
-                   (when (:seon.task/branch row) row))
+            (try (let [row (db/pull head [:db/id :seon.task/branch] [:seon.task/assignment key])
+                       works-on (:seon.task/branch row)]
+                   ;; a row naming another branch is held there as its agent wrote it (`seon.task/branch-attempts`)
+                   (if (and works-on (not= works-on branch))
+                     (when-let [there (db/branch-database database works-on)]
+                       (try (let [row (db/pull there [:db/id :seon.task/branch] [:seon.task/assignment key])]
+                              (when (:seon.task/branch row) row))
+                            (finally (source/release! [there]))))
+                     (when works-on row)))
                  (finally (source/release! [head])))))
         (sort (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] database)))
       {}))
@@ -327,7 +335,9 @@
           :else
           (let [prepared (source/prepare-merge! context store branch (on-head #(assigned-task % a))
                                                  (cond-> {:merging merge-call} root (assoc :root root)))
-                accepted (when (:seon.source/candidate prepared)
+                ;; only a gate that refused nothing is judged for acceptance
+                accepted (when (and (:seon.source/candidate prepared) (not (:seon.error/at prepared))
+                                    (empty? (:seon.program/conflict prepared)))
                            (source/accept-merge! context store prepared
                                                  {:tx-data merge-call :tx-meta meta}))
                 ;; an accepted candidate has served; a refused one stays, the merge branch its refusal names
@@ -341,11 +351,13 @@
                            (try (answer before done) (finally (source/release! [before done])))))]
             (cond
               (seq (:seon.program/conflict prepared))
-              (refusal/error :seon.source/conflict-error
-                             {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.merge/merge!
-                              :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and merge again."
-                              :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
-                             :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
+              (cond-> (refusal/error :seon.source/conflict-error
+                                     {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.merge/merge!
+                                      :seon.error/message "The source branch and main changed the same declarations since the merge base; resolve on the branch and merge again."
+                                      :seon.program/conflict (into #{} (map second) (:seon.program/conflict prepared))
+                                      :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
+                (:seon.source/candidate prepared) (merge (select-keys prepared [:seon.source/candidate :seon.source/red])))
+              (:seon.error/at prepared) prepared
               (not (:seon.source/candidate prepared)) prepared
               (not (:seon.source/commit-id accepted))
               (cond-> (assoc accepted :seon.source/candidate (:seon.source/candidate prepared))

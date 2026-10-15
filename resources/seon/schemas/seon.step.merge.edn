@@ -1,0 +1,5 @@
+#:seon.step.merge{:check [:enum {:description "The merge gate check a merge step failed (MERGE-STEP): a test the refused merge found red that is not green on the merge branch."}
+                          :red]
+                  :refusal [:merge {:description "One failed merge step check, naming what failed it."} :seon.error/base
+                            [:map [:seon.step.merge/check :seon.step.merge/check]
+                             [:seon.error/offending {:optional true} :seon.schema/value]]]}
