@@ -1,3 +1,3 @@
 {:seon.render.hiccup/tag :string
  :seon.render.hiccup/unparseable-tag :seon.render.hiccup/tag
- :seon.render.hiccup/unparseable-tag-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag]]]}
+ :seon.render.hiccup/unparseable-tag-error [:merge {:seon.db/attributes true} :seon.error/base [:map [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag]]]}

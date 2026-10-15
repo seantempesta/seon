@@ -30,7 +30,7 @@
   [:seon.test.selection/requested-inputs [:map-of :string :seon.source/digest]]]
  :seon.test.selection/widening [:enum :missing-basis :removed-file :outside-program-graph]
  :seon.test.selection/reused
- [:and :seon.test/result
+ [:merge :seon.test/result
   [:map
    [:seon.test/unchanged [:= true]]
    [:seon.test.run/basis-t :seon.test.run/basis-t]

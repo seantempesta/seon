@@ -317,7 +317,7 @@
           :conflict-owner :seon.db/entity-id,
           :transaction-refused [:= true]
           :transaction-refused-error
-          [:and :seon.error/base
+          [:merge :seon.error/base
            [:map {:seon.db/attributes true}
             [:seon.db/transaction-refused :seon.db/transaction-refused]
             [:seon.db/owned-value-refusal {:optional true} :seon.db/owned-value-refusal]
@@ -334,9 +334,9 @@
           :transaction-outcome-unknown [:= true]
  :seon.db/refused-read-operation :qualified-symbol
  :seon.db/invalid-read [:= true]
- :seon.db/invalid-read-error [:and :seon.error/base [:map {:error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
+ :seon.db/invalid-read-error [:merge :seon.error/base [:map {:error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
  :seon.db/pull-budget-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:datahike.budget/name :datahike.budget/name]
    [:datahike.budget/observed :datahike.budget/observed]
@@ -344,7 +344,7 @@
  :seon.db/invalid-request [:= true]
  :seon.db/missing-request-member :keyword
  :seon.db/invalid-request-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.db/invalid-request :seon.db/invalid-request]
    [:seon.db/missing-request-member :seon.db/missing-request-member]]]

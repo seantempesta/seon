@@ -80,7 +80,7 @@
            [:seon.health/wake {:optional true} [:fn {:error/message "must be a function of no arguments"} clojure.core/ifn?]]]
  :deadline-ms [:int {:min 0}]
  :wake [:fn clojure.core/ifn?]
- :missing-cluster-error [:and :seon.error/base [:map [:seon.health/cluster :seon.health/cluster]]]
+ :missing-cluster-error [:merge :seon.error/base [:map [:seon.health/cluster :seon.health/cluster]]]
 
  :view [:map {:description "The AI face: state, basis, each unit's counts, the top findings with their clues and tasks, and the reads that dig further."}
         [:seon.health/cluster :seon.health/cluster]

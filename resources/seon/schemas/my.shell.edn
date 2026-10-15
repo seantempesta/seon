@@ -35,7 +35,7 @@
  :my.shell/stdin-blob-digest :seon.blob/digest
  :my.shell/stdin-blob-offset [:int {:min 0}]
  :my.shell/blob-unavailable-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:my.shell/stdin-blob-digest :my.shell/stdin-blob-digest]
    [:my.shell/stdin-blob-offset :my.shell/stdin-blob-offset]
@@ -43,7 +43,7 @@
  :my.shell/stdin-byte-limit [:int {:min 0}]
  :my.shell/observed-stdin-bytes [:int {:min 0}]
  :my.shell/stdin-limit-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:my.shell/stdin-byte-limit :my.shell/stdin-byte-limit]
    [:my.shell/observed-stdin-bytes :my.shell/observed-stdin-bytes]
@@ -54,7 +54,7 @@
  :my.shell/process-exception-data :map
  :my.shell/refused-cwd :my.fs/path
  :my.shell/cwd-refused-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:my.shell/refused-cwd :my.shell/refused-cwd]
    [:my.shell/cwd-observation {:optional true} :my.shell/cwd-observation]
@@ -62,14 +62,14 @@
  :my.shell/terminated-pid :int
  :my.shell/limiting-config-key :qualified-keyword
  :my.shell/time-limit-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:my.shell/terminated-pid :my.shell/terminated-pid]
    [:my.shell/limiting-config-key :my.shell/limiting-config-key]
 ]]
  :my.shell/failed-argv :my.shell/argv
  :my.shell/start-failed-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:my.shell/failed-argv :my.shell/failed-argv]
    [:my.shell/process-exception-data {:optional true} :my.shell/process-exception-data]
@@ -77,7 +77,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.shell/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

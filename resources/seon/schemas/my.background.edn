@@ -22,9 +22,9 @@
                 :call-source [:string {:min 1 :description "Value observation of the macro forms refused before a background request exists; it outlives no target and has value deletion semantics."}]
                 :result-observation [:string {:min 1 :description "Value observation of an invalid result reference supplied to poll; it outlives no target and has value deletion semantics."}]
                 :missing-result-ref [:and {:description "Value observation of the valid effect lookup ref for which no receipt exists; it is not an entity relation and has value deletion semantics."} :my.background/result]
-                :invalid-call-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the refused macro call source"} :seon.error/base [:map [:my.background/call-source :my.background/call-source]]]
-                :invalid-result-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the offending background result observation"} :seon.error/base [:map [:my.background/result-observation :my.background/result-observation]]]
-                :missing-result-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the valid lookup ref whose receipt is absent"} :seon.error/base [:map [:my.background/missing-result-ref :my.background/missing-result-ref]]]
+                :invalid-call-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the refused macro call source"} :seon.error/base [:map [:my.background/call-source :my.background/call-source]]]
+                :invalid-result-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the offending background result observation"} :seon.error/base [:map [:my.background/result-observation :my.background/result-observation]]]
+                :missing-result-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the valid lookup ref whose receipt is absent"} :seon.error/base [:map [:my.background/missing-result-ref :my.background/missing-result-ref]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.background/authored-form
@@ -34,7 +34,7 @@
  :seon.db/ref]
 
  :my.background/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

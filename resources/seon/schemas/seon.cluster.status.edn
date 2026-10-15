@@ -1,6 +1,6 @@
 {:seon.cluster.status/unavailable-observation :string
  :seon.cluster.status/unavailable-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map [:seon.cluster.status/unavailable-observation
          :seon.cluster.status/unavailable-observation]]]
  :seon.cluster.status/root

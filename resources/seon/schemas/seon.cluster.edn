@@ -30,11 +30,11 @@
   [:seon.boot/cluster-connection :seon.store/connection-object]
   [:seon.render.web/view :map]]
  :seon.cluster/served
- [:and {:description "An instance serve! has bound: its web descriptor published beside its advertisement."}
+ [:merge {:description "An instance serve! has bound: its web descriptor published beside its advertisement."}
   :seon.cluster/servable
   [:map [:seon.render.web/served :seon.render.web/server]]]
  :seon.cluster/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

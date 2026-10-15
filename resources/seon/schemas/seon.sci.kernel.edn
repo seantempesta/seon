@@ -13,7 +13,7 @@
  ; A kernel guard's refusal: it names the guard's observation (a deadline
  ; that fired, a symbol with no installed Var, an unadmittable failure).
  :seon.sci.kernel/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -27,7 +27,7 @@
  ; author stacktrace; its pair selects what an agent sees. No bookkeeping:
  ; duration, allocation and outcome stay on the evaluation record.
  :seon.sci.kernel/execution-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -52,7 +52,7 @@
   [:seon.sci.kernel/entered-at :seon.sci.kernel/entered-at]
   [:seon.sci.kernel/in-flight :seon.sci.kernel/in-flight]]
  :seon.sci.kernel/memory-pressure-error
- [:and :seon.error/base :seon.sci.kernel/memory-pressure]
+ [:merge :seon.error/base :seon.sci.kernel/memory-pressure]
 
  :seon.sci.kernel/guard-observation
  [:and

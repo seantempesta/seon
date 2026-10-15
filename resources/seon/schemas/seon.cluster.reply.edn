@@ -16,7 +16,7 @@
                      :no-forms [:= true]
                      :commented-forms [:vector :string]
                      :dropped-markup [:vector {:description "The tool-call markup (DSML or antml tags) the scan dropped from a reply with no form, in text order."} :string]
-                     :no-forms-error [:and {:error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.cluster.reply/commented-forms {:optional true} :seon.cluster.reply/commented-forms] [:seon.cluster.reply/dropped-markup {:optional true} :seon.cluster.reply/dropped-markup] [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls] [:seon.error/message :seon.error/message]]]
+                     :no-forms-error [:merge {:error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.cluster.reply/commented-forms {:optional true} :seon.cluster.reply/commented-forms] [:seon.cluster.reply/dropped-markup {:optional true} :seon.cluster.reply/dropped-markup] [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls] [:seon.error/message :seon.error/message]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.cluster.reply/authored-reply
@@ -26,7 +26,7 @@
  :seon.db/ref]
 
  :seon.cluster.reply/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

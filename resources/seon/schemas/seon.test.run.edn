@@ -80,18 +80,18 @@
                   [:seon.test.run/terminated? :seon.test.run/terminated?]]],
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
-                [:and :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
+                [:merge :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
                 :retracted-definitions
                 [:vector {:min 1 :description "The test symbols a completion recorded results for whose test definitions the writer's database no longer holds."}
                  :seon.test/sym],
                 :retracted-definition-error
-                [:and :seon.error/base
+                [:merge :seon.error/base
                  [:map [:seon.test.run/retracted-definitions :seon.test.run/retracted-definitions]
                   [:seon.db/basis-t :seon.db/basis-t]]],
                 :unavailable [:= true],
                 :provenance-failure [:string {:min 1}],
                 :unavailable-error
-                [:and :seon.error/base
+                [:merge :seon.error/base
                  [:map [:seon.test.run/unavailable :seon.test.run/unavailable]
                   [:seon.test.run/provenance-failure :seon.test.run/provenance-failure]]],
                 :provenance
@@ -144,7 +144,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.test.run/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

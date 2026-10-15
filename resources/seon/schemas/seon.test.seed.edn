@@ -22,5 +22,5 @@
            :contract-mismatch :undeclared-attribute :invalid-attribute-value]
  :preparation [:enum {:description "Why one seed entry could not prepare the member's world before its body."} :no-member :invalid-value :write-refused :changes-test]
  :preparation-error
- [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
+ [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
   [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test.seed/ordinal {:optional true} :seon.test.seed/ordinal]]]}

@@ -45,12 +45,12 @@
  :seon.schedule/missing-receipt-id :string
  :seon.schedule/unresolved-handler-symbol :qualified-symbol
  :seon.schedule/unresolved-handler-error
- [:and {:seon.db/attributes true}
+ [:merge {:seon.db/attributes true}
   :seon.error/base [:map [:seon.schedule/unresolved-handler-symbol :seon.schedule/unresolved-handler-symbol]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.schedule/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -74,6 +74,6 @@
  :seon.schedule/handler-exception-data :map
  :seon.schedule/failed-handler-symbol :qualified-symbol
  :seon.schedule/handler-failed-error
- [:and :seon.error/base [:map [:seon.schedule/failed-handler-symbol :seon.schedule/failed-handler-symbol]
+ [:merge :seon.error/base [:map [:seon.schedule/failed-handler-symbol :seon.schedule/failed-handler-symbol]
   [:seon.schedule/handler-exception-data {:optional true} :seon.schedule/handler-exception-data]]]
 }

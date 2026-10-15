@@ -1,6 +1,6 @@
 #:seon.operator{:disposition [:enum :refused :client-failed :argv-failed],
                 :operation-error
-                [:and :seon.error/base
+                [:merge :seon.error/base
                  [:map {:seon.db/attributes true}
                   [:seon.operator/disposition :seon.operator/disposition]]],
                 :census
@@ -121,7 +121,7 @@
                   :seon.operator/managed-root]],
                 :error-root [:string {:min 1}],
                 :failed-error
-                [:and
+                [:merge
                  :seon.error/base
                  [:map
                   [:seon.operator/exception-class
@@ -147,7 +147,7 @@
                  [:seon.config.maintenance/log-retained-files
                   :seon.config.maintenance/log-retained-files]],
                 :error
-                [:and
+                [:merge
                  #:seon.db{:attributes true}
                  :seon.error/base
                  [:map

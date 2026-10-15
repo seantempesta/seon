@@ -3,7 +3,7 @@
 
  :seon.db.read/error
  [:and
- [:and
+ [:merge
   {:seon.db/attributes true}
   :seon.error/base
   [:map
@@ -26,7 +26,7 @@
 
  :seon.db.read/unreadable-declarations :qualified-symbol
  :seon.db.read/unreadable-declarations-error
- [:and :seon.error/base :seon.db/invalid-read-error
+ [:merge :seon.error/base :seon.db/invalid-read-error
   [:map {:seon.db/attributes true}
    [:seon.db.read/unreadable-declarations :seon.db.read/unreadable-declarations]]]
 

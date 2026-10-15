@@ -1,6 +1,6 @@
 #:seon.cluster.boot
 {:disposition [:enum :refused :boot-failed :operation-failed]
  :operation-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.cluster.boot/disposition :seon.cluster.boot/disposition]]]}

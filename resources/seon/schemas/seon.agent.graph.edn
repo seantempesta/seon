@@ -8,7 +8,7 @@
  :seon.db/ref]
 
  :seon.agent.graph/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

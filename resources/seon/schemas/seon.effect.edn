@@ -6,7 +6,7 @@
                 :seon.db/index true}
                :seon.db/ref],
               :handler-failed-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/failed-owner
@@ -20,7 +20,7 @@
               :request-edn [:string #:seon.db{:no-history? true}],
               :result-edn [:string #:seon.db{:no-history? true}],
               :error
-              [:and
+              [:merge
                #:seon.db{:attributes true}
                :seon.error/base
                [:map
@@ -54,7 +54,7 @@
                 :seon.db/index true}
                :seon.db/ref],
               :invalid-time-limit-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/time-limit-attribute
@@ -63,7 +63,7 @@
               :time-limit-attribute :qualified-keyword,
               :unavailable-handler-symbol :qualified-symbol,
               :request-too-large-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/unadmitted-owner
@@ -91,7 +91,7 @@
                :seon.db/ref],
               :interrupted-effect-id [:string {:min 1}],
               :undeclared-owner-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/owner-without-handler
@@ -130,7 +130,7 @@
                          [:cat [:fn clojure.core/ifn?] :qualified-symbol :string :seon.schema/value :map] :seon.schema/value],
               :notify [:and #:seon.db{:index true} :seon.db/ref],
               :interrupted-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/interrupted-effect-id
@@ -139,14 +139,14 @@
               :failed-owner :qualified-symbol,
               :missing-bound :qualified-keyword,
               :unavailable-handler-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/unavailable-handler-symbol
                  :seon.effect/unavailable-handler-symbol]]],
               :missing-effect-id [:string {:min 1}],
               :missing-background-time-limit-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/missing-bound
@@ -159,13 +159,13 @@
                {:description
                 "The admitted request or result map, handed to the writer beside the receipt so the writer can record the entries this branch installs as attributes. It is transaction-function input, never an entity map."}],
               :invalid-request-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/request-owner
                  :seon.effect/request-owner]]],
               :no-evaluation-context-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/missing-context-member
@@ -174,7 +174,7 @@
               :settled-at :inst,
               :request-identity [:string {:min 1}],
               :invalid-owner-error
-              [:and
+              [:merge
                :seon.error/base
                [:map
                 [:seon.effect/owner-class :seon.effect/owner-class]]],

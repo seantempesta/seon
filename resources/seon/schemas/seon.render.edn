@@ -65,7 +65,7 @@
                 :seon.render/output-schema]],
               :candidates [:vector {:min 2} :qualified-symbol],
               :selection-request
-              [:and
+              [:merge
                :seon.render/call-request
                [:map [:seon.render/output :seon.render/output]]],
               :selection-candidate-status
@@ -122,7 +122,7 @@
                 :seon.render.call/id]
                [:seon.error/value {:optional true} :seon.error/value]],
               :unknown
-              [:and :seon.error/base
+              [:merge :seon.error/base
  [:map {:seon.db/attributes true :seon.render/ai seon.render/unknown-ai :seon.render/html seon.render/unknown-html}
   [:seon.render.unknown/reason :seon.render/unknown-reason]
   [:seon.render.unknown/producer {:optional true} :qualified-symbol]
@@ -211,13 +211,13 @@
               :rendering [:set :qualified-symbol],
               :would-fall-to-floor? :boolean,
 
-              :ambiguous-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/candidates :seon.render/candidates]]]
+              :ambiguous-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/candidates :seon.render/candidates]]]
               :invalid-output :keyword
-              :invalid-output-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
+              :invalid-output-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -237,7 +237,7 @@
  :selection-observation :map
  :refused-member :qualified-keyword
 
- :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
+ :request-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
 
  :walk-operation :qualified-symbol
 

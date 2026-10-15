@@ -67,7 +67,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.message/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

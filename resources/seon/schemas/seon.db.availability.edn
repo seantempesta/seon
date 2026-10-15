@@ -5,7 +5,7 @@
  [:string {:min 1}]
 
  :seon.db.availability/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

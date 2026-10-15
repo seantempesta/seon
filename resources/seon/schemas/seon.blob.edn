@@ -37,5 +37,5 @@
             :store-root-absent :string
             :stored-content-mismatch :seon.blob/digest
             :input-stalled :seon.blob/size
-            :input-stalled-error [:and :seon.error/base [:map [:seon.blob/input-stalled :seon.blob/input-stalled]]]
+            :input-stalled-error [:merge :seon.error/base [:map [:seon.blob/input-stalled :seon.blob/input-stalled]]]
             :content-digest-mismatch :seon.blob/digest}

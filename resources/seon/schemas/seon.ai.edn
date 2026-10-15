@@ -17,7 +17,7 @@
 
           :output-observed? :boolean,
           :transport-failure-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must identify the endpoint whose transport failed"}
            :seon.error/base
@@ -25,7 +25,7 @@
            [:seon.ai/transport-failure :seon.ai/transport-failure]
            [:seon.error/message :seon.error/message]]],
           :token-starvation-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark an attempt with no usable output-token budget"}
            :seon.error/base
@@ -56,7 +56,7 @@
            [:seon.ai/primary :seon.ai/target]],
           :http-status [:int {:min 100, :max 599}],
           :reasoning-without-answer-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark a provider response with reasoning but no answer"}
            :seon.error/base
@@ -68,7 +68,7 @@
           :interrupted-text-count [:int {:min 0 :description "Assistant characters received before the stream ended without a terminal event. A measured value surviving attempt deletion."}],
           :reasoning-partial :string,
           :no-credential-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark an attempt with no provider credential"}
            :seon.error/base
@@ -96,7 +96,7 @@
 
           :api-key-variable [:string {:min 1}],
           :unparseable-body-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must identify the status of an unparseable provider response"}
            :seon.error/base
@@ -191,7 +191,7 @@
           :environment [:map-of {:description "The environment credential variable names resolve in, names to values; the process environment when absent. Never stored: only the name is data."}
                         :string :string],
           :stream-truncated-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark a provider stream that ended before its terminal event"}
            :seon.error/base
@@ -220,7 +220,7 @@
            [:seon.ai/inert :seon.ai/inert]],
           :tokens [:int {:min 0}],
           :extra-body-conflict-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark provider-specific data that conflicts with governed fields"}
            :seon.error/base
@@ -361,7 +361,7 @@
 
           :body-read-message :string,
           :invalid-extra-body-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must mark invalid provider-specific request data"}
            :seon.error/base
@@ -370,7 +370,7 @@
            [:seon.ai/extra-body-edn :seon.ai/extra-body-edn]
            [:seon.error/message :seon.error/message]]],
           :timeout-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must identify the elapsed provider request limit"}
            :seon.error/base
@@ -384,7 +384,7 @@
           :stream? :boolean,
           :protected-keys [:set {:min 1 :description "Request-builder field names the supplied extra body attempted to replace. Value observations survive request deletion."} :string],
           :provider-error-error
-          [:and {:seon.db/attributes true,
+          [:merge {:seon.db/attributes true,
             :error/message
             "must identify the status of a provider error response"}
            :seon.error/base
@@ -410,7 +410,7 @@
  [:string {:min 1}]
 
  :seon.ai/request-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

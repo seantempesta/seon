@@ -17,6 +17,6 @@
  :seon.schema.edn/unresolved-reference [:qualified-keyword {:description "The registry key a declaration names that no schema declares (the declaration itself is :seon.schema.edn/attribute)."}]
  :seon.schema.edn/attribute [:keyword {:description "The declaration a schema population refusal is about."}]
  :seon.schema.edn/population-refused-error
- [:and {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
+ [:merge {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
   :seon.error/base
   [:map [:seon.schema.edn/attribute :seon.schema.edn/attribute]]]}

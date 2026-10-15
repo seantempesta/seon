@@ -2,7 +2,7 @@
               :operator-root :string,
               :refused-test-run [:and {:seon.db/identity false :description "Identity of the test request whose admission or completion the source authority refused."} :seon.test.run/id],
               :test-evidence-error
-              [:and :seon.error/base
+              [:merge :seon.error/base
                [:map [:seon.source/refused-test-run :seon.source/refused-test-run]
                 [:seon.source/operator-root {:optional true} :seon.source/operator-root]
                 [:seon.test.run/branch {:optional true} :seon.test.run/branch]]],
@@ -92,7 +92,7 @@
                [:seon.source/reloaded-namespaces :seon.source/reloaded-namespaces]
                [:seon.source/arming-identities :seon.source/arming-identities]],
               :publication-error
-              [:and :seon.error/base
+              [:merge :seon.error/base
                [:map
                 [:seon.source/branch :seon.source/branch]
                 [:seon.source/expected-commit-id :seon.source/expected-commit-id]
@@ -154,7 +154,7 @@
               :uncontracted-error [:and {:description "accept-merge! refused: a function the merge carries declares no complete :malli/schema, or one with an unjustified :any or :some slot; the agent contracts it on its branch."} :seon.source/test-evidence-error [:map [:seon.source/uncontracted {:optional true :description "Always present; optional because a stored error keeps only storable members."} :seon.source/uncontracted] [:seon.source/contract-gaps {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/contract-gaps]]],
               :lint-finding [:map {:description "One clj-kondo error, under the checkout's .clj-kondo configuration, in a file a merge would publish. Producer: seon.cluster.source/lint-errors."} [:seon.source/path :seon.source/path] [:seon.lint/row :seon.lint/row] [:seon.lint/col :seon.lint/col] [:seon.lint/type :seon.lint/type] [:seon.lint/message :seon.lint/message]],
               :lint-findings [:vector {:min 1 :description "The clj-kondo errors in the files a merge would publish, in file and position order."} :seon.source/lint-finding],
-              :lint-error [:and {:description "prepare-merge! refused: clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],
+              :lint-error [:merge {:description "prepare-merge! refused: clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}
                            [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],
@@ -162,7 +162,7 @@
               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
-              :conflict-error [:and {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
+              :conflict-error [:merge {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
                                [:map [:seon.program/conflict :seon.program/conflict] [:seon.program/conflict-digests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]]],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
               :expected-digests
@@ -180,7 +180,7 @@
               [:enum {:description "Why a write-back installed nothing."}
                :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
               :write-back-error
-              [:and :seon.error/base
+              [:merge :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
                 [:seon.source/path {:optional true} :seon.source/path]
                 [:seon.program/conflict-digests {:optional true :description "A :conflict's declarations: the merge base (the branch's base), head (the file now, ours) and branch (theirs) digest of each."}

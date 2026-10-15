@@ -8,7 +8,7 @@
  :refused-function :qualified-symbol
  :interpretation-reason :string
  :interpretation-error
- [:and {:seon.db/attributes true}
+ [:merge {:seon.db/attributes true}
   :seon.error/base
   [:map
    [:seon.sci.eval/refused-function :seon.sci.eval/refused-function]
@@ -236,7 +236,7 @@
                  :seon.ns/name :seon.ns/ns],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
-                [:and {:seon.db/attributes true
+                [:merge {:seon.db/attributes true
                        :description "An evaluation requires exactly one reader event. This observation records the actual count; it does not claim a parsed form or a projected source."}
                  :seon.error/base
                  [:map {:seon.db/attributes true}
@@ -263,7 +263,7 @@
                   "must hold one immutable replacement environment",
                   :gen/gen seon.sci.eval/projection-state-generator}
                  seon.sci.eval/projection-state?],
-                :documentation-unavailable-error [:and {:seon.db/attributes true}
+                :documentation-unavailable-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.eval/documentation-unavailable :seon.sci.eval/documentation-unavailable]]],
                 :acquire-request
@@ -279,7 +279,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.eval/row-acquisition-error
- [:and
+ [:merge
   {:seon.db/attributes true,
    :description "Failure to acquire one observed program member. Owned by the error occurrence; no whole-program identity is asserted."}
   :seon.error/base
@@ -302,7 +302,7 @@
  [:qualified-keyword {:description "The schema key observed while acquiring a schema entity, stored as a native keyword. A value observation, never a ref."}]
 
  :seon.sci.eval/acquisition-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -322,7 +322,7 @@
  :seon.db/ref]
 
  :seon.sci.eval/evaluation-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -344,12 +344,12 @@
 
 :pending-namespaces [:set {:min 1} :symbol]
 :missing-declaration :qualified-keyword
-:declaration-absent-error [:and {:seon.db/attributes true}
+:declaration-absent-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
 
 :uncompilable-contract [:qualified-symbol {:description "The function whose stored contract Malli could not compile."}]
-:uncompilable-contract-error [:and {:seon.db/attributes true}
+:uncompilable-contract-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.eval/uncompilable-contract :seon.sci.eval/uncompilable-contract]]]
 

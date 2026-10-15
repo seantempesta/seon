@@ -4,7 +4,7 @@
  :recipient :seon.agent/id
  :intent [:or :seon.task/execution [:= :unknown]]
  :cause [:enum :no-graph :closed :full]
- :undeliverable [:and :seon.error/base
+ :undeliverable [:merge :seon.error/base
                  [:map [:seon.message/recipient :seon.message/recipient]
                        [:seon.message/intent :seon.message/intent]
                        [:seon.message/cause :seon.message/cause]]]
@@ -62,7 +62,7 @@
                  "Every message addressed to one agent, as the reverse of `to` pulls them."}
                 :seon.message/pulled],
                :no-limit-error
-               [:and {:seon.db/attributes true} :seon.error/base
+               [:merge {:seon.db/attributes true} :seon.error/base
                 [:map
                 {:error/message
                  "must mark a message chain with no configured limit"}
@@ -149,7 +149,7 @@
                :content [:string {:min 1}],
                :size [:int {:min 0}],
                :chain-limit-error
-               [:and {:seon.db/attributes true} :seon.error/base
+               [:merge {:seon.db/attributes true} :seon.error/base
                 [:map
                 {:error/message
                  "must identify the message-chain limit that was reached"}
@@ -163,7 +163,7 @@
                 [:seon.message/rows :seon.db/tx-data]
                 [:seon.error/values [:vector :seon.error/value]]],
                :unknown-recipient-error
-               [:and {:seon.db/attributes true} :seon.error/base
+               [:merge {:seon.db/attributes true} :seon.error/base
                 [:map
                 {:error/message
                  "must identify the unknown message recipient"}
@@ -176,7 +176,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.message/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

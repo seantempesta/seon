@@ -1,6 +1,6 @@
 #:seon.error{:unimplemented-function :qualified-symbol,
              :unimplemented
-             [:and {:description "A contracted stub has no implementation; its error is a designed red product test."}
+             [:merge {:description "A contracted stub has no implementation; its error is a designed red product test."}
               :seon.error/base [:map [:seon.error/unimplemented-function :seon.error/unimplemented-function]]],
              :throwable
              [:fn {:error/message "must be a JVM Throwable"
@@ -430,7 +430,7 @@
  [:qualified-keyword {:description "The error's variant: the registered schema key its producer declared (seon.error.refusal/error). It selects the variant's render pair and the recorder's declared schema; a key, so it survives merge, assoc and ex-data across a boundary."}]
  :seon.error/refused-schema :qualified-keyword
  :seon.error/normalization-error
- [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
+ [:merge :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
 
  :seon.error/in-namespace
  [:map-of {:description "When a name was not found: its namespace and the names declared there nearest to it by spelling, at most eight (seon.error/reply-value). Shown, never stored."}

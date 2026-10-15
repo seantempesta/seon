@@ -31,7 +31,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.turn/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

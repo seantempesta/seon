@@ -56,7 +56,7 @@
 
  :seon.config/error
  [:and
- [:and
+ [:merge
   {:seon.db/attributes true}
   :seon.error/base
   [:map
@@ -71,7 +71,7 @@
  :qualified-keyword
 
  :seon.config/rule-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.config/error
  [:map

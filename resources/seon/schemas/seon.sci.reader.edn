@@ -11,15 +11,15 @@
            [:edamame/column :int]
            [:edamame/elements [:vector :seon.schema/value]]]]
 
- :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true}
+ :seon.sci.reader/unreadable-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/unreadable-member :seon.sci.reader/unreadable-member]]]
 
- :seon.sci.reader/oversize-error [:and {:seon.db/attributes true}
+ :seon.sci.reader/oversize-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/length :seon.sci.reader/length] [:seon.sci.reader/source-bound :seon.sci.reader/source-bound]]]
 
- :seon.sci.reader/refused-tag-error [:and {:seon.db/attributes true}
+ :seon.sci.reader/refused-tag-error [:merge {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/refused-token :seon.sci.reader/refused-token]]]
 
@@ -27,7 +27,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.reader/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

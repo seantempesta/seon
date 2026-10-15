@@ -4,7 +4,7 @@
  [:map [:seon.fn/affected :seon.fn/affected] [:seon.fn/tests :seon.fn/tests]]
  :namespace-unresolvable [:= true]
           :namespace-unresolvable-error
-          [:and :seon.error/base
+          [:merge :seon.error/base
            [:map
             [:seon.fn/namespace-unresolvable :seon.fn/namespace-unresolvable]
             [:seon.fn/source :seon.fn/source]]]
@@ -234,7 +234,7 @@
  :seon.fn/index-refused-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused distinguishing member"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.cluster.source/phase {:optional true} :seon.cluster.source/phase] [:seon.error/message :seon.error/message]]
  :seon.fn/dependency-analysis-missing [:= true]
  :seon.fn/unresolved-targets [:vector {:min 1} :qualified-symbol]
- :seon.fn/dependency-analysis-missing-error [:and {:seon.db/attributes true}
+ :seon.fn/dependency-analysis-missing-error [:merge {:seon.db/attributes true}
   :seon.error/base
   [:map {:error/message "must name the call targets whose namespace clj-kondo never analyzed"} [:seon.fn/dependency-analysis-missing :seon.fn/dependency-analysis-missing] [:seon.fn/unresolved-targets :seon.fn/unresolved-targets]]]
  :seon.fn/signature-refused [:= true]
@@ -244,7 +244,7 @@
  :qualified-keyword
 
  :seon.fn/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

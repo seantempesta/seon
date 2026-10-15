@@ -129,13 +129,13 @@
               :unresolved-predicate :qualified-symbol
               :function-reference [:qualified-symbol {:description "A function a registered form named as a schema (seon.schema/register!); a predicate is [:fn sym]."}]
               :unloadable-predicate :qualified-symbol
-              :unloadable-predicate-error [:and {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
+              :unloadable-predicate-error [:merge {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
               :noncanonical-definition :seon.schema/key
               :noncanonical-projection-data [:= true]
               :unreadable-form :seon.schema/key
               :non-round-tripping-form :seon.schema/key
               :unregister-outside-delta :seon.schema/key
-              :unregister-outside-delta-error [:and {:error/message "must identify the schema unregistration requested outside an evaluation delta"} :seon.error/base [:map [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta]]]
+              :unregister-outside-delta-error [:merge {:error/message "must identify the schema unregistration requested outside an evaluation delta"} :seon.error/base [:map [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta]]]
               :malformed-projection-row [:= true]
               :malformed-projection-form [:= true]
               :duplicate-projection-row :seon.schema/key
@@ -171,7 +171,7 @@
   :seon.schema/key]
 
  :seon.schema/validation-refusal
- [:and {:seon.db/attributes false
+ [:merge {:seon.db/attributes false
         :description "Raw schema validation evidence. Recorder admission projects the refused and expected values into the existing stored schema error components."}
   :seon.error/base
   [:map
@@ -186,7 +186,7 @@
  :seon.db/ref]
 
  :seon.schema/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -205,7 +205,7 @@
  [:keyword {:description "The schema key whose registration the population refused (seon.schema/register!)."}]
 
  :seon.schema/registration-refused-error
- [:and {:description "What seon.schema/register! answers when the schema population refuses the registration: the refused kind as :seon.error/member (e.g. :seon.schema/nilable-value-schema, :seon.schema.edn/unresolved-reference), the refused key as :seon.schema/registration-refused, the authored form as :seon.error/offending and the population's refusal as the cause chain. Nothing was admitted."}
+ [:merge {:description "What seon.schema/register! answers when the schema population refuses the registration: the refused kind as :seon.error/member (e.g. :seon.schema/nilable-value-schema, :seon.schema.edn/unresolved-reference), the refused key as :seon.schema/registration-refused, the authored form as :seon.error/offending and the population's refusal as the cause chain. Nothing was admitted."}
   :seon.error/base
   [:map [:seon.error/member :seon.error/member] [:seon.schema/registration-refused :seon.schema/registration-refused]]]
 }

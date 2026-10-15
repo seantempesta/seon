@@ -109,7 +109,7 @@
                     {:optional true}
                     :seon.render.web/wanted-port]],
                   :stop-request
-                  [:and {:description "What seon.render.web/stop! joins: the served descriptor, the view's tab registration and the delivery bound its writers wait under."}
+                  [:merge {:description "What seon.render.web/stop! joins: the served descriptor, the view's tab registration and the delivery bound its writers wait under."}
                    :seon.render.web/server
                    [:map
                     [:seon.render.web/registration :seon.render.web/registration]
@@ -163,13 +163,13 @@
                   :value-unreadable :seon.blob/digest
                   :function-unavailable :qualified-symbol
                   :function-unavailable-error
-                  [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
+                  [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
 
 
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render.web/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -194,7 +194,7 @@
  :page-exception-class :symbol
  :refused-member :qualified-keyword
 
- :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
+ :request-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
 
 
  :context-error :seon.render.web/request-error

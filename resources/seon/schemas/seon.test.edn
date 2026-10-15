@@ -51,7 +51,7 @@
              seon.test.runner/var-reference?],
             :not-runnable :string,
             :not-runnable-error
-            [:and :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
+            [:merge :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
             :sym
             [:qualified-symbol
              { :seon.db/identity true,
@@ -88,7 +88,7 @@
               :seon.test/failure-message]],
             :results [:vector :seon.test/result],
             :result-unknown
-            [:and {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
+            [:merge {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
              :seon.error/base
              [:map [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test/run :seon.test/run]
               [:seon.test/execution-refusal :seon.test/execution-refusal]]],
@@ -237,7 +237,7 @@
   [:seon.test/command {:optional true} :seon.test/command]]
  :seon.test/unknown :string
  :seon.test/unknown-error
- [:and :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
+ [:merge :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
  :seon.test/next-tier
  [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
  :seon.test/command [:vector [:string {:min 1}]]
@@ -264,7 +264,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.test/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -283,23 +283,23 @@
 
  :seon.test/selection-refusal :qualified-keyword
  :seon.test/selection-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.test/selection-refusal :seon.test/selection-refusal]]]
  :seon.test/admission-refusal :qualified-keyword
  :seon.test/admission-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.test/admission-refusal :seon.test/admission-refusal]]]
  :seon.test/resolution-refusal :qualified-keyword
  :seon.test/resolution-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.test/resolution-refusal :seon.test/resolution-refusal]
    [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
  :seon.test/execution-refusal :qualified-keyword
  :seon.test/execution-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.test/execution-refusal :seon.test/execution-refusal]
    [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]

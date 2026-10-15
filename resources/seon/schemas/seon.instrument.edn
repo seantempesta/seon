@@ -80,7 +80,7 @@
 
  :seon.instrument/arity-error
  [:and
- [:and
+ [:merge
   {:seon.db/attributes true}
   :seon.error/base
   [:map
@@ -100,7 +100,7 @@
  [:enum :input :output :guard]
 
  :seon.instrument/contract-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -133,7 +133,7 @@
  :seon.instrument/arity-error ]
 
  :seon.instrument/registration-error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

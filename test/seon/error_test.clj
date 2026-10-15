@@ -18,6 +18,7 @@
             [seon.cluster.status]
             [seon.render.transcript]
             [malli.core]
+            [malli.generator]
             [seon.id]
             [sci.core]
             [seon.schema :as schema]
@@ -1948,3 +1949,12 @@
     (is (every? #(<= (count (:seon.error/frames %)) limit) shown))
     (is (= most (:seon.error/frames-count (first shown))))
     (is (= most (count (filter #(and (vector? %) (= :li (first %))) (tree-seq vector? seq (nth (error/render-chain-html {:seon.render/value chain}) 2))))))))
+
+(deftest an-error-variant-generates
+  ;; Variants were `[:and :seon.error/base [:map ...]]`: `:and` generates from its first
+  ;; child and filters, so every variant threw `:malli.generator/such-that-failure`.
+  (let [registry (:seon.schema.projection/registry (schema/handed-projection))]
+    (doseq [variant [:my.edit/no-match-error :my.shell/error]]
+      (let [compiled (mr/schema registry variant)
+            sample (malli.generator/generate compiled {:seed 0 :size 10})]
+        (is (malli.core/validate compiled sample))))))

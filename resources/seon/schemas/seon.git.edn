@@ -1,4 +1,4 @@
 #:seon.git{:commit [:string {:min 40 :max 40 :description "A git commit's full sha, as `git rev-parse` prints it: the commit a landing made (seon.cluster.source/commit!)."}],
            :paths [:vector {:description "The checkout-relative paths a landing asked git to commit."} :seon.source/path],
-           :commit-error [:and {:description "seon.cluster.source/commit! refused or could not verify a landing's git commit."} :seon.error/base
+           :commit-error [:merge {:description "seon.cluster.source/commit! refused or could not verify a landing's git commit."} :seon.error/base
                           [:map [:seon.git/paths :seon.git/paths]]]}

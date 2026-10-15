@@ -61,17 +61,17 @@
   [:my.edit/source-window-complete? :my.edit/source-window-complete?]
   [:my.edit/replacements {:optional true} :my.edit/replacements]],
  :my.edit/no-match :my.edit/path
- :my.edit/no-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/no-match {:optional true} :my.edit/no-match]]]
+ :my.edit/no-match-error [:merge :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/no-match {:optional true} :my.edit/no-match]]]
  :my.edit/ambiguous-match :my.edit/path
- :my.edit/ambiguous-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/ambiguous-match {:optional true} :my.edit/ambiguous-match]]]
+ :my.edit/ambiguous-match-error [:merge :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/ambiguous-match {:optional true} :my.edit/ambiguous-match]]]
  :my.edit/parse-byte-count [:int {:min 0}]
- :my.edit/parse-refused-error [:and :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
+ :my.edit/parse-refused-error [:merge :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
  :my.edit/unverified-char-span [:tuple [:int {:min 0}] [:int {:min 0}]]
- :my.edit/lossless-check-failed-error [:and :seon.error/base [:map [:my.edit/unverified-char-span :my.edit/unverified-char-span]]]
+ :my.edit/lossless-check-failed-error [:merge :seon.error/base [:map [:my.edit/unverified-char-span :my.edit/unverified-char-span]]]
  :my.edit/stale-source :my.edit/path
- :my.edit/stale-source-error [:and :seon.error/base [:map [:my.edit/stale-source :my.edit/stale-source]]]
+ :my.edit/stale-source-error [:merge :seon.error/base [:map [:my.edit/stale-source :my.edit/stale-source]]]
  :my.edit/not-utf8 :my.edit/path
- :my.edit/not-utf8-error [:and :seon.error/base [:map [:my.edit/not-utf8 :my.edit/not-utf8]]]
+ :my.edit/not-utf8-error [:merge :seon.error/base [:map [:my.edit/not-utf8 :my.edit/not-utf8]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :my.edit/edit-observation
@@ -81,7 +81,7 @@
  :seon.db/ref]
 
  :my.edit/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

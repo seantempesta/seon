@@ -1,5 +1,5 @@
 #:seon.step.prove{:check [:enum {:description "The handoff check a Prove step failed (TASK-CHAIN section 4): no proofs on the next task, a proof that is no deftest, a proof not red by design, a changed or cited function no proof reaches."}
                           :no-proofs :not-a-deftest :not-designed-red :unreached]
-                  :refusal [:and {:description "One failed Prove handoff check, naming what failed it."} :seon.error/base
+                  :refusal [:merge {:description "One failed Prove handoff check, naming what failed it."} :seon.error/base
                             [:map [:seon.step.prove/check :seon.step.prove/check]
                              [:seon.error/offending {:optional true} :seon.schema/value]]]}

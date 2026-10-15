@@ -49,14 +49,14 @@
                         :source-absent :seon.cluster/name
                         :refused :seon.cluster.registry/rule
  :seon.cluster.registry/branch-missing [:= true]
- :seon.cluster.registry/branch-missing-error [:and {:error/message "must name the store and a branch the store does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
+ :seon.cluster.registry/branch-missing-error [:merge {:error/message "must name the store and a branch the store does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
  :seon.cluster.registry/candidate-file-absent [:= true]
  :seon.cluster.registry/dry-run-barrier-absent [:= true]
  :seon.cluster.registry/dry-run-complete [:= true]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.cluster.registry/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

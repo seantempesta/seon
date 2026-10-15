@@ -69,17 +69,17 @@
                      :seon.db/tx-data]],
                    :units [:vector :seon.render.walk/unit],
 
-                   :elided-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html}
+                   :elided-error [:merge :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html}
  [:seon.print/bound-by :qualified-keyword]
  [:seon.render.walk/limit :seon.render.walk/limit]
  [:seon.render.walk/continuation-subject :seon.render.walk/continuation-subject]]]
 
-                   :no-such-entity-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
+                   :no-such-entity-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
 
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render.walk/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -124,7 +124,7 @@
  [:and {:description "A continued render's context: absent, the continuation renders without evaluating, and it is never supplied from the calling evaluation's world."}
   :seon.sci.eval/ctx]
  :seon.render.walk/continuation-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map [:seon.render.walk/continuation-reason :seon.render.walk/continuation-reason]
    [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]]]
 

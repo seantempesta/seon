@@ -79,7 +79,7 @@
                   [:my.turn/value {:optional true} :my.turn/value]],
                  :completion :seon.flow/channel,
                  :phase-failed-error
-                 [:and {:seon.db/attributes true} :seon.error/base
+                 [:merge {:seon.db/attributes true} :seon.error/base
                   [:map
                   {:error/message
                    "must carry the :seon.turn.loop/phase-failed distinguishing member"}
@@ -340,7 +340,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.turn.loop/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.turn/error
  [:map

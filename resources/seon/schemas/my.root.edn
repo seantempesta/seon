@@ -4,7 +4,7 @@
                             [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
                             [:seon.task/branch :seon.task/branch] [:seon.task/merge-base {:optional true} :seon.task/merge-base]
                             [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]]
-          :merge-request [:and {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
+          :merge-request [:merge {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
                           :my.root/open-assignment [:map [:seon.render/operations :seon.render/operations]]]
           :merge-requests [:vector :my.root/merge-request]
           :merge-request-read [:map [:seon.db/db :seon.db/database-value] [:seon.store/store {:optional true} :seon.store/store]]

@@ -252,7 +252,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.agent/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -269,7 +269,7 @@
  :seon.db/ref]
  :seon.agent/refused-source-agent [:string {:min 1}]
  :seon.agent/source-submission-refused-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map {:seon.db/attributes true}
    [:seon.agent/refused-source-agent :seon.agent/refused-source-agent]]]
 }

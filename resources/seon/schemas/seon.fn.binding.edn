@@ -29,7 +29,7 @@
  :seon.db/ref]
 
  :seon.fn.binding/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

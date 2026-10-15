@@ -112,7 +112,7 @@
             :proc-id :keyword,
  :seon.flow/submission-capacity :seon.flow/proc-id
  :seon.flow/submission-capacity-error
- [:and :seon.error/base
+ [:merge :seon.error/base
   [:map
    [:seon.flow/submission-capacity :seon.flow/submission-capacity]
    [:seon.flow/submission-id :seon.flow/submission-id]
@@ -131,7 +131,7 @@
  :seon.db/ref]
 
  :seon.flow/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -145,7 +145,7 @@
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
  :seon.flow/exception-error
- [:and :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
+ [:merge :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
 
  :seon.flow/thread-counters
  [:tuple {:description "One thread's allocated bytes and CPU nanoseconds (seon.flow/thread-counters); an unavailable reading is -1."} :int :int]

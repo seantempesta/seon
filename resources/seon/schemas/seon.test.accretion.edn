@@ -101,7 +101,7 @@
                           :seon.test.accretion/auto-check]],
                         :function-sym [:qualified-symbol {:description "The function name observed by an install refusal; never an upsert identity."}]
                         :install-refused-error
-                        [:and
+                        [:merge
                          {:seon.render/ai seon.test.accretion/render-ai
                           :seon.render/html seon.test.accretion/render-html
                           :error/message "must identify a refused green-to-install decision"}
@@ -155,7 +155,7 @@
 
  :seon.test.accretion/error
  [:and
- [:and
+ [:merge
   {:seon.db/attributes true}
   :seon.error/base
   [:map

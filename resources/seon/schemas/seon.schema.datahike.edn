@@ -26,7 +26,7 @@
  :seon.db/ref]
 
  :seon.schema.datahike/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -40,6 +40,6 @@
  :qualified-keyword
  :seon.schema.datahike/unstorable-attribute [:qualified-keyword {:description "The attribute seon.schema.datahike/attribute-declaration could not map to a native Datahike declaration."}]
  :seon.schema.datahike/unstorable-attribute-error
- [:and {:description "Why an attribute has no native Datahike declaration; the per-reason member (attribute-absent, literal-not-storable, enum-not-storable, nilable-attribute, value-type-unavailable, invalid-secondary-attribute) says which."}
+ [:merge {:description "Why an attribute has no native Datahike declaration; the per-reason member (attribute-absent, literal-not-storable, enum-not-storable, nilable-attribute, value-type-unavailable, invalid-secondary-attribute) says which."}
   :seon.error/base
   [:map [:seon.schema.datahike/unstorable-attribute :seon.schema.datahike/unstorable-attribute]]]}

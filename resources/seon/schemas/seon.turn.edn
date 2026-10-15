@@ -109,7 +109,7 @@
             :reply-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],
             :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.turn/turn :seon.wake/context-inert true}],
             :refused-error
-            [:and
+            [:merge
              {:seon.db/attributes true,
               :description "A transition refused its actual request under the named rule. Occurrences own this observation; no agent identity is inferred for a request that may name no existing agent."}
              :seon.error/base
@@ -142,7 +142,7 @@
  :seon.turn/invalid-disposition-source :string
  :seon.turn/compaction-agent-id :seon.agent/id
  :seon.turn/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

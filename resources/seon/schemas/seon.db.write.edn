@@ -2,7 +2,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.db.write/validation-refusal
- [:and
+ [:merge
   {:seon.db/attributes false
    :seon.render/ai seon.db/render-rejection-ai
    :seon.render/html seon.db/render-rejection-html
@@ -17,7 +17,7 @@
     [:map [:seon.db.write.attempt/transaction :seon.db.write.attempt/transaction]]]]]
 
  :seon.db.write/entity-refusal
- [:and
+ [:merge
   {:seon.db/attributes false
    :description "The writer's refusal of a resulting entity: every failing path is a problem with its own offending value (a missing key's is the map it is missing from), never a placeholder such as :seon.error/unknown. A transient refusal value, not a stored entity."}
   :seon.error/base
@@ -35,7 +35,7 @@
  :seon.db/ref]
 
  :seon.db.write/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map

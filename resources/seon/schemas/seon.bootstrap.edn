@@ -6,7 +6,7 @@
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.bootstrap/error
- [:and
+ [:merge
  {:seon.db/attributes true}
  :seon.error/base
  [:map
@@ -21,7 +21,7 @@
  :seon.bootstrap/missing-agent-id [:string {:description "The requested agent id that names no agent."}]
 
  :seon.bootstrap/agent-not-found-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:merge {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base
   [:map [:seon.bootstrap/missing-agent-id :seon.bootstrap/missing-agent-id]]]
 
