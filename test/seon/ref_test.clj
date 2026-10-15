@@ -8,8 +8,7 @@
             [seon.mcp :as mcp]
             [seon.ref :as ref]
             [seon.render :as render]
-            [seon.test-support :as test-support]
-            [clojure.test :refer [run-tests]]))
+            [seon.test-support :as test-support]))
 
 (defn- shown
   "The value of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."

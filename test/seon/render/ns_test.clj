@@ -9,11 +9,7 @@
             [seon.render.ns :as sut]
             [seon.render.schema :as render.schema]
             [seon.task :as task]
-            [seon.test-support :as support]
-            [clojure.test :refer [run-tests]]
-            [clojure.test :refer [test-vars]]
-            [clojure.test :refer [*test-out*]])
-  )
+            [seon.test-support :as support]))
 
 (deftest identity-reads-stewardship-from-the-namespace
   (support/with-database
