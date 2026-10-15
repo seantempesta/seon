@@ -541,6 +541,38 @@ handle))}}
                 "the page shows, as one unit, the eval request its branch holds and main does not"))
           (finally (d/release branch)))))))
 
+(deftest the-most-recently-changed-unit-is-the-focus-and-the-rail-follows-recency
+  ;; C0 slice 2b: the owner watches the unit that just changed in the main panel; the rest stay in the rail, most
+  ;; recently changed first. Recency is the transaction at which a unit's rendered content last changed, as this process
+  ;; rendered it.
+  (with-server
+    (fn [connection server _context]
+      (support/transacted! connection
+                           (cluster.agent/creation-tx
+                            {:seon.agent/id "focused" :seon.cluster/name "web-test" :seon.ns/name 'my.agents.focused}))
+      (doseq [run ["older-run" "newer-run"]]
+        (support/transacted! connection
+                             [{:seon.turn/id run :seon.turn/agent [:seon.agent/id "focused"]
+                               :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}]))
+      (let [page #(dom (.body (fetch server "/agent/focused")))
+            changed-t #(parse-long (.attr ^Element % "data-changed-t"))
+            run-t (fn [document run] (changed-t (.selectFirst document (str "article:has([data-turn=" run "])"))))]
+        (is (= 1 (count (.select (page) "article.seon-focus-unit")))
+            "on first sight every unit is new at this basis, and one of them is the focus")
+        (support/transacted! connection
+                             [{:seon.cluster.eval/id "late-eval" :seon.cluster.eval/run [:seon.turn/id "older-run"]
+                               :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+                               :seon.eval/shown "3" :seon.cluster.eval/source "(+ 1 2)"}])
+        (let [document (page)
+              latest (apply max (map changed-t (.select document "article.seon-walk-unit")))]
+          (is (= latest (run-t document "older-run")) "the run whose content changed holds the newest recency")
+          (is (< (run-t document "newer-run") (run-t document "older-run")) "the unchanged run keeps its older one")
+          (is (= latest (changed-t (.selectFirst document "article.seon-focus-unit")))
+              "the main panel holds a unit of the newest recency")
+          (is (every? #(= (str "order:" (- (changed-t %))) (.attr ^Element % "style"))
+                      (.select document "article.seon-walk-unit:not(.seon-focus-unit)"))
+              "the rail orders each unit by its recency, newest first"))))))
+
 (deftest static-resources-come-off-the-classpath
   (with-server
     (fn [_connection server _context]

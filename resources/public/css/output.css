@@ -2596,9 +2596,28 @@ details.tool-call-details[open] .tool-preview {
   overflow-wrap: anywhere;
 }
 .seon-rank-layout {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  align-items: start;
   gap: 0.65rem;
+}
+.seon-rank-layout > .seon-walk-unit {
+  grid-column: 2;
+}
+.seon-rank-layout > .seon-walk-unit.seon-focus-unit {
+  grid-column: 1;
+}
+@media (max-width: 900px) {
+  .seon-rank-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .seon-rank-layout > .seon-walk-unit, .seon-rank-layout > .seon-walk-unit.seon-focus-unit {
+    grid-column: 1;
+    grid-row: auto !important;
+  }
+  .seon-rank-layout > .seon-walk-unit.seon-focus-unit {
+    order: -2147483647 !important;
+  }
 }
 .seon-walk-unit {
   min-width: 0;

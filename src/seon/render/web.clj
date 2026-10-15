@@ -409,19 +409,27 @@
    (:seon.render.walk/path unit)))
 
 (defn surface-html
-  "Serialize one walked HTML unit into its stable morph wrapper."
+  "Serialize one walked HTML unit into its stable morph wrapper.
+
+  `placement` lays the unit out by recency (`unit-placements`): the focus unit takes the main panel and spans
+  the rail's rows, every other unit sits in the rail ordered by the transaction its content last changed at."
   {:malli/schema [:=> [:cat :seon.agent/id
                        :seon.render.walk/unit
-                       [:int {:min 0}]]
+                       [:int {:min 0}]
+                       [:map [:seon.render.web/changed-t :int] [:seon.render.web/focus? {:optional true} :boolean] [:seon.render.web/rail {:optional true} [:int {:min 0}]]]]
                   :string]}
-  [agent-id unit rank]
+  [agent-id unit rank {changed-t :seon.render.web/changed-t focus? :seon.render.web/focus? rail :seon.render.web/rail}]
   (let [failure (:seon.error/value unit)
         output (:seon.render/output unit)
         id (unit-id agent-id unit)
         attributes {:id id
-                    :class "seon-walk-unit"
-                    :style (str "order:" rank)
+                    :class (if focus? "seon-walk-unit seon-focus-unit" "seon-walk-unit")
+                    ;; CSS order is a 32-bit integer; a transaction id fits, so the rail needs no position of its own
+                    :style (if focus?
+                             (str "grid-row:1 / span " (max 1 rail))
+                             (str "order:" (- changed-t)))
                     :data-rank rank
+                    :data-changed-t changed-t
                     :data-unit-id id
                     :data-walk-path (pr-str (:seon.render.walk/path unit))}]
     (hiccup/->string
@@ -465,6 +473,37 @@
           (recur (inc index))
           step-order)))))
 
+(defn- unit-content
+  "What a unit shows: its render's output or its failure, the data its recency compares."
+  {:malli/schema [:=> [:cat :seon.render.walk/unit] :map]}
+  [unit]
+  (select-keys unit [:seon.render/output :seon.error/value]))
+
+(defn- unit-placements
+  "Each unit's placement by element id: the transaction its content last changed at (the retained fragment's when
+  its content is unchanged, else the database's basis: a unit this process has not rendered yet counts as changed
+  now); the focus (the most recent, the later walk rank on a tie) also carries the rail's size."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :string :map]
+                       [:vector [:tuple :string :seon.render.walk/unit]]]
+                  [:map-of :string [:map [:seon.render.web/changed-t :int] [:seon.render.web/focus? {:optional true} :boolean] [:seon.render.web/rail {:optional true} [:int {:min 0}]]]]]}
+  [database retained identified]
+  (let [changed (mapv (fn [[element-id unit]]
+                        (let [previous (get retained element-id)]
+                          [element-id
+                           ;; the retained evidence holds the unit it was serialized from
+                           (if (and previous (= (unit-content unit) (unit-content (first (:seon.render.fragment/evidence previous)))))
+                             (:seon.render.web/changed-t previous)
+                             (db/basis-t database))]))
+                      identified)
+        focus (first (reduce (fn [best entry] (if (<= (second best) (second entry)) entry best))
+                             [nil -1] changed))
+        rail (dec (count changed))]
+    (into {} (map (fn [[element-id t]]
+                    [element-id (cond-> {:seon.render.web/changed-t t}
+                                  ;; only the focus spans the rail, so a new unit re-serializes it alone
+                                  (= focus element-id) (assoc :seon.render.web/focus? true :seon.render.web/rail rail))]))
+          changed)))
+
 (defn- page-result
   "One namespace page and the durable owner messages its failures require.
 
@@ -495,18 +534,21 @@
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
                     units)
+        placements (unit-placements db retained (mapv #(vector (unit-id id %) %) units))
         rows (mapv (fn [unit]
                      (let [element-id (unit-id id unit)
                            rank (get ranks (:seon.render.walk/path unit))
-                           evidence [unit rank]
+                           placement (get placements element-id)
+                           evidence [unit rank placement]
                            previous (get retained element-id)]
-                       {:seon.render.web/element-id element-id
-                        :seon.render.walk/path (:seon.render.walk/path unit)
-                        :seon.render.fragment/evidence evidence
-                        :seon.render.web/html
-                        (if (= evidence (:seon.render.fragment/evidence previous))
-                          (:seon.render.web/html previous)
-                          (surface-html id unit rank))}))
+                       (merge placement
+                              {:seon.render.web/element-id element-id
+                               :seon.render.walk/path (:seon.render.walk/path unit)
+                               :seon.render.fragment/evidence evidence
+                               :seon.render.web/html
+                               (if (= evidence (:seon.render.fragment/evidence previous))
+                                 (:seon.render.web/html previous)
+                                 (surface-html id unit rank placement))})))
                    units)
         stream-evidence [stream-partial]
         previous-stream (get retained stream-strip-id)
