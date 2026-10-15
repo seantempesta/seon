@@ -1,6 +1,6 @@
 # node-weigher: the node cache weighs real retained bytes (lane node-weigher, Sonnet, 2026-10-15)
 
-Fork `seon/overlay-file-frontend` at `b19fa3c7` (on `1a149891`), `datahike.index.node-cache/node-bytes`. Calibrated on an APFS clone of `data/store` (`cp -c -R` then `cp -c -R -n`, 65 s) in throwaway JVMs on Seon's classpath with the fork worktree first. Default never touched. Clone, worktree and JVMs removed.
+Fork `seon/overlay-file-frontend` at `96000df8` (on `771a0c4b`; the first push `b19fa3c7` is replaced, see section 5), `datahike.index.node-cache/node-bytes`. Calibrated on an APFS clone of `data/store` (`cp -c -R` then `cp -c -R -n`, 65 s) in throwaway JVMs on Seon's classpath with the fork worktree first. Default never touched. Clone, worktree and JVMs removed.
 
 ## 1. Calibration (512 MB budget, scans of eavt, aevt, avet and history eavt)
 
@@ -43,3 +43,9 @@ Estimate / real on 5,924 sampled leaves (before the 1.05 margin): min 1.0009, p1
 - Dragon: heap use at a full cache is about 0.7 of budget on this data. A non-datom key (secondary index element, `ChunkEntry`) falls to the generic 128 B per value; unmeasured here. Strings: Latin-1 vs UTF-16 is exact; compact-string off or another JDK header layout is not covered. Shared symbol/string objects only make the estimate looser.
 - One store, one scan mix, JDK 26. The 1.05 margin covers the 0.9 % gap and per-entry Caffeine overhead; `cache-entry-bytes` 200 against about 150 measured.
 - Seon side: the deployed 512 MB dial now holds 1.45x the nodes at 1.4x the heap (254 to 365 MB); lower `:seon.config.db/store-cache-bytes` if the memory floor should stay where exp-a measured it.
+
+## 5. Correction: the test measurement, not the weigher (96000df8)
+
+Root's run on `771a0c4b` + `b19fa3c7` failed `:wide-string` 4.6 % under (real 12,860,232 vs weighed 12,290,245). Cause: the test measured real as live heap after the nodes minus live heap before building them, and in a full-suite JVM that delta picked up about 1.2 MB of other tests' garbage and caches settling. Isolated, the same measurement repeated 6 times gave real 11,651,664 to 11,675,480 for wide strings: weighed/real 1.053 to 1.055 every time (strings 1.058, symbols 1.425), so there is no under-count in `string-bytes` (UTF-16 strings, hash field and byte[] header are exact; the 1.05 margin is the only slack and was never consumed).
+
+Fix: the test now measures exactly the held nodes, live heap with them held minus live heap right after releasing them (median of 5), so unrelated garbage cancels. Verified: the test 11 times in one JVM (10 test-vars runs plus the namespace run) with no failure, and the full suite on `771a0c4b` + the change: 973 tests, 6471 assertions, 0 failures. The weigher and its 1.05 margin are unchanged; the margin stays because the worst measured case across repeats is 1.053 for wide strings, which is the cost model plus margin, not a shortfall.
