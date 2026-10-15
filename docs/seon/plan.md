@@ -41,8 +41,10 @@ terse, HTML full; one derivation, AGENTS.md "Choosing the design" 5). Garbage �
 producer itself says it cannot attribute, copies of values held elsewhere, JVM-internal frames — is removed from the
 producer's output, never hidden by a render: "The best solutions are the ones where the function is producing exactly
 what it wants and needs. We can always accrete more complicated outputs, but agents shouldn't be dumping MB worth of
-data unless it's intentional." If an agent is spending its context on mostly garbage, stop it and fix the producer
-first. For digging, the value printer's HTML face is already a nested expansion (`seon.print/emit-hiccup`: a
+data unless it's intentional." This binds Seon's own producers — its schemas, functions and tests, and everything they put in a reply or a
+block: by default Seon is efficient and computes and returns only what is relevant. An agent's own REPL values are its
+own: it may evaluate and print whatever it intends (intentional, self-inflicted cost), and they are never clipped. If
+an agent's context is mostly Seon-produced garbage, stop it and fix the producer first. For digging, the value printer's HTML face is already a nested expansion (`seon.print/emit-hiccup`: a
 `<details>` per collection with its summary, from the same operation stream as the text): a value with no render of
 its own is browsable in HTML by default. The live agent view comes first because it lets the owner judge the context
 directly. No live (provider) run until the context defects below are fixed and the owner has looked at the view.
