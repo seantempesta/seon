@@ -1706,7 +1706,7 @@
   (or (second (resolved [builder value-key]))
       (content-projection builder database ::value-projection [[builder value-key]])))
 
-(defn- as-of-key
+(defn as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
   point, which fix every datom it holds. Absent for an uncommitted origin."
   {:malli/schema [:=> [:cat :seon.db/database-value]

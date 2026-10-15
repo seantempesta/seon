@@ -507,6 +507,20 @@
                    (:seon.test/host (sut/host (db/db connection) test-symbol)))
                 "a changed call edge changes the answer")))))))
 
+(deftest a-host-answer-on-an-as-of-view-is-derived-once
+  (support/with-database
+    (fn [connection]
+      (with-destructive-test connection
+        (fn [test-symbol _ _]
+          (let [current (db/db connection)
+                view (db/as-of current (db/basis-t current))
+                first-answer (sut/host view test-symbol)
+                again (seon.profile/measure #(sut/host view test-symbol))]
+            (is (= :seon.test.host/isolated-snapshot (:seon.test/host first-answer)))
+            (is (= first-answer (:seon.profile/value again)))
+            (is (= 0 (:seon.profile/reads again))
+                "the second answer for the same as-of view reads no graph")))))))
+
 (deftest a-tests-render-pair-shows-where-it-runs-and-why
   (support/with-database
     (fn [connection]

@@ -473,7 +473,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:tuple] [:tuple :seon.schema/value [:map-of :qualified-keyword :uuid]]]]}
   [database]
-  (if-let [program (runner/program-revisions database)]
+  (if-let [program (or (runner/program-revisions database)
+                       (db/as-of-key database))]
     (let [edge-attributes (seon.cache/lookup ::edge-attributes program (comp #(+ 256 (* 64 %)) count)
                                              #(db/q '[:find [?attribute ...]
                                                       :where (or-join [?attribute]
