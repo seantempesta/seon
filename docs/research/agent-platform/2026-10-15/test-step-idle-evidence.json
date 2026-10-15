@@ -1,0 +1,102 @@
+[
+  {
+    "code": "(let [db (seon.db/db) execution (assoc (:seon.agent/context-source seon.batch/*world*) :seon.db/connection (:seon.db/connection seon.batch/*world*)) m (seon.profile/measure #(#'seon.turn/test-step execution \"test-step-idle\" {:seon.turn.loop/before db :seon.turn.loop/after db :seon.turn.loop/entities #{}}))] (dissoc m :seon.profile/called :seon.cost/jvm-window))",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/eaa619a26569c, :ms 119, :alloc-mb 167.0, :value #:seon.profile{:alloc-bytes 165743264,\n :alloc-scope :thread,\n :calls 11480,\n :gc-count 0,\n :gc-ms 0,\n :ms 113.37,\n :reads 179,\n :value nil,\n :ranked-by-calls\n   [#:seon.profile{:sym seon.db/database-value?,\n     :calls 2402,\n     :self-ms 0}\n    #:seon.profile{:sym seon.schema/projection-cache-value,\n     :calls 1349,\n     :self-ms 0}\n    #:seon.profile{:sym seon.cache/cache?, :calls 1010, :self-ms 0}\n    #:seon.profile{:sym seon.cache/present, :calls 673, :self-ms 0}\n    #:seon.profile{:sym seon.db/schema-database, :calls 513, :self-ms 0}\n    #:seon.profile{:sym seon.cache/kind-counters,\n     :calls 334,\n     :self-ms 0}\n    #:seon.profile{:sym seon.cache/claim, :calls 333, :self-ms 0}\n    #:seon.profile{:sym seon.cache/lookup, :calls 333, :self-ms 0}\n    #:seon.profile{:sym seon.cache/join, :calls 330, :self-ms 0}\n    #:seon.profile{:sym seon.schema.datahike/query-variable?,\n     :calls 203,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/read-declarations,\n     :calls 179,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/with-declarations,\n     :calls 179,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/projection-builder,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/carried-projection,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/resolved, :calls 168, :self-ms 0}\n    #:seon.profile{:sym seon.db/projection-cache-key,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/alias!, :calls 168, :self-ms 0}\n    #:seon.profile{:sym seon.schema/pull-selector?,\n     :calls 152,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/pull-call, :calls 151, :self-ms 0}\n    #:seon.profile{:sym seon.db/missing-pull-selector-error,\n     :calls 151,\n     :self-ms 0}],\n :ranked-by-self\n   [#:seon.profile{:sym seon.db/vector-query-call,\n     :calls 24,\n     :self-ms 134}\n    #:seon.profile{:sym seon.db/pull-logical, :calls 151, :self-ms 66}\n    #:seon.profile{:sym seon.cluster.source/commit-database,\n     :calls 2,\n     :self-ms 1}\n    #:seon.profile{:sym seon.db/database-value?,\n     :calls 2402,\n     :self-ms 0}\n    #:seon.profile{:sym seon.schema/projection-cache-value,\n     :calls 1349,\n     :self-ms 0}\n    #:seon.profile{:sym seon.cache/cache?, :calls 1010, :self-ms 0}\n    #:seon.profile{:sym seon.cache/present, :calls 673, :self-ms 0}\n    #:seon.profile{:sym seon.db/schema-database, :calls 513, :self-ms 0}\n    #:seon.profile{:sym seon.cache/kind-counters,\n     :calls 334,\n     :self-ms 0}\n    #:seon.profile{:sym seon.cache/claim, :calls 333, :self-ms 0}\n    #:seon.profile{:sym seon.cache/lookup, :calls 333, :self-ms 0}\n    #:seon.profile{:sym seon.cache/join, :calls 330, :self-ms 0}\n    #:seon.profile{:sym seon.schema.datahike/query-variable?,\n     :calls 203,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/read-declarations,\n     :calls 179,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/with-declarations,\n     :calls 179,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/projection-builder,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/carried-projection,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/resolved, :calls 168, :self-ms 0}\n    #:seon.profile{:sym seon.db/projection-cache-key,\n     :calls 168,\n     :self-ms 0}\n    #:seon.profile{:sym seon.db/alias!, :calls 168, :self-ms 0}]}}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/c8922d436fe93,\n :request #:seon.cost{:ms 284.5, :alloc-mb 167.0, :calls 50040}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  {
+    "code": "(let [db (seon.db/db) execution (assoc (:seon.agent/context-source seon.batch/*world*) :seon.db/connection (:seon.db/connection seon.batch/*world*)) measure (fn [f] (let [m (seon.profile/measure f)] (select-keys m [:seon.profile/value :seon.profile/alloc-bytes :seon.profile/ms])))] {:branch (measure #(seon.test/branch-tests execution (:seon.db/connection execution))) :stale (measure #(seon.test/stale db ['test.step.idle/amount-test])) :changes (measure #(seon.test/request-changes db db #{}))})",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e1c5ccd0000aa, :ms 55, :alloc-mb 82.6, :value {:branch\n   #:seon.profile{:value [test.step.idle/amount-test],\n    :alloc-bytes 16216520,\n    :ms 10.35},\n :stale #:seon.profile{:value [], :alloc-bytes 4437128, :ms 4.16},\n :changes #:seon.profile{:value [], :alloc-bytes 58328712, :ms 32.15}}}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/c8abdd5ccb898,\n :request #:seon.cost{:ms 168.6, :alloc-mb 82.6, :calls 12274}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  {
+    "code": "(in-ns 'test.step.idle) (let [db (seon.db/db) probe (fn [f] (let [m (seon.profile/measure #(f db db #{}))] (select-keys m [:seon.profile/value :seon.profile/alloc-bytes :seon.profile/ms :seon.profile/reads :seon.profile/ranked-by-self])))] {:parent (probe parent-changes) :change (probe seon.test/request-changes)})",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ee0fb730f1f1f, :ns test.step.idle, :ms 0, :alloc-mb 0.0, :value #namespace[test.step.idle]}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ed82322bf145d, :ms 50, :alloc-mb 74.5, :value {:parent\n   #:seon.profile{:value [],\n    :alloc-bytes 63998632,\n    :ms 35.26,\n    :reads 10,\n    :ranked-by-self\n      [#:seon.profile{:sym seon.db/vector-query-call,\n        :calls 10,\n        :self-ms 33}\n       #:seon.profile{:sym seon.schema.datahike/query-variable?,\n        :calls 94,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/database-value?,\n        :calls 86,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/query-binding-values,\n        :calls 52,\n        :self-ms 0}\n       #:seon.profile{:sym seon.cache/cache?, :calls 30, :self-ms 0}\n       #:seon.profile{:sym seon.db/schema-database,\n        :calls 26,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/nil-query-binding?,\n        :calls 24,\n        :self-ms 0}\n       #:seon.profile{:sym seon.cache/present, :calls 24, :self-ms 0}\n       #:seon.profile{:sym seon.db/query-input-values,\n        :calls 22,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/clause-variables,\n        :calls 16,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/query-source?,\n        :calls 14,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema/projection-cache-value,\n        :calls 14,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/lower-clause,\n        :calls 12,\n        :self-ms 0}\n       #:seon.profile{:sym seon.test/selection-read!,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/read-declarations,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/query-input-bindings,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/may-read-vectors?,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/append-read-evidence!,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/vector-position?,\n        :calls 10,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/encode-query-request,\n        :calls 10,\n        :self-ms 0}]},\n :change\n   #:seon.profile{:value [],\n    :alloc-bytes 7993392,\n    :ms 8.89,\n    :reads 11,\n    :ranked-by-self\n      [#:seon.profile{:sym seon.cache/claim, :calls 28, :self-ms 1}\n       #:seon.profile{:sym seon.sci.eval/loaded-database,\n        :calls 2,\n        :self-ms 1}\n       #:seon.profile{:sym seon.test/request-changes,\n        :calls 1,\n        :self-ms 1}\n       #:seon.profile{:sym seon.db/database-value?,\n        :calls 207,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema/projection-cache-value,\n        :calls 151,\n        :self-ms 0}\n       #:seon.profile{:sym seon.sci.eval/ctx?, :calls 135, :self-ms 0}\n       #:seon.profile{:sym seon.sci.kernel/held-apart-var,\n        :calls 109,\n        :self-ms 0}\n       #:seon.profile{:sym seon.cache/cache?, :calls 84, :self-ms 0}\n       #:seon.profile{:sym seon.cache/present, :calls 56, :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/ref-attr-in?,\n        :calls 42,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/vector-shaped-attr-in?,\n        :calls 36,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/vector-attribute-in?,\n        :calls 36,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/schema-database,\n        :calls 31,\n        :self-ms 0}\n       #:seon.profile{:sym seon.cache/lookup, :calls 28, :self-ms 0}\n       #:seon.profile{:sym seon.cache/join, :calls 28, :self-ms 0}\n       #:seon.profile{:sym seon.cache/kind-counters,\n        :calls 28,\n        :self-ms 0}\n       #:seon.profile{:sym seon.schema.datahike/decode-pulled,\n        :calls 21,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/append-read-evidence!,\n        :calls 14,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/projection-builder,\n        :calls 14,\n        :self-ms 0}\n       #:seon.profile{:sym seon.db/carried-projection,\n        :calls 14,\n        :self-ms 0}]}}}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/cee76b31950c6,\n :request #:seon.cost{:ms 225.9, :alloc-mb 74.6, :calls 55543}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  {
+    "code": "(let [db (seon.db/db) sink (:seon.batch/sink seon.batch/*world*) probe (fn [f] (let [before (seon.batch/executed sink) m (seon.profile/measure #(f db db #{})) calls (merge-with - (seon.batch/executed sink) before)] (assoc (select-keys m [:seon.profile/value :seon.profile/alloc-bytes :seon.profile/ms]) :probe/calls (reduce + (vals calls)))))] {:parent (probe parent-changes) :change (probe seon.test/request-changes)})",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e09c246407dc9, :ms 44, :alloc-mb 46.6, :value {:parent\n   {:seon.profile/value [],\n    :seon.profile/alloc-bytes 43377088,\n    :seon.profile/ms 34.79,\n    :probe/calls 752},\n :change\n   {:seon.profile/value [],\n    :seon.profile/alloc-bytes 289816,\n    :seon.profile/ms 0.73,\n    :probe/calls 226}}}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/c2cc6b8896d38,\n :request #:seon.cost{:ms 172.3, :alloc-mb 46.6, :calls 11917}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  {
+    "code": "(let [db (seon.db/db) execution (assoc (:seon.agent/context-source seon.batch/*world*) :seon.db/connection (:seon.db/connection seon.batch/*world*)) sink (seon.batch/sink)] (binding [seon.batch/*world* (assoc seon.batch/*world* :seon.batch/sink sink)] (let [m (seon.profile/measure #(#'seon.turn/test-step execution \"test-step-idle\" {:seon.turn.loop/before db :seon.turn.loop/after db :seon.turn.loop/entities #{}}))] {:measurement (select-keys m [:seon.profile/alloc-bytes :seon.profile/ms :seon.profile/value]) :costs (seon.profile/live-costs sink {} 0 15)})))",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e320c5a75d17a, :ms 66, :alloc-mb 78.3, :value {:measurement\n   #:seon.profile{:alloc-bytes 76401384, :ms 62.47, :value nil},\n :costs\n   [#:seon.fn.cost{:key\n       [seon.test/behavior-changed :seon.profile/context],\n     :warm-calls 1,\n     :warm-self-us 10.249,\n     :warm-total-us 20200.333,\n     :warm-digest\n       \"fb1cdcb38866b3cd977e5ec440089742fd8b4ac37313ad4f3b036d32376c7b2d\"}\n    #:seon.fn.cost{:key [seon.db/vector-query-call :seon.profile/host],\n     :warm-calls 35,\n     :warm-self-us 1458.3976,\n     :warm-total-us 1577.1868857142858,\n     :warm-digest\n       \"a989f2854e738d8b956c0614d76411a783f278fbb54e7ef9fff459fc96bd5f0b\"}\n    #:seon.fn.cost{:key [seon.profile/measure :seon.profile/host],\n     :warm-calls 1,\n     :warm-self-us 3320.918,\n     :warm-total-us 65876.667,\n     :warm-digest\n       \"e4a5fa038cebfb49e3219941e7f20895fda4d0f476af01ffbdf196f36127069f\"}\n    #:seon.fn.cost{:key\n       [seon.cluster.source/database :seon.profile/host],\n     :warm-calls 1,\n     :warm-self-us 1132.5,\n     :warm-total-us 1189.75,\n     :warm-digest\n       \"1882bd17529e9eb49f20ab704364080f4ed9c38f63893d7a796e9e4b5097e3bb\"}\n    #:seon.fn.cost{:key [seon.db/query-input-values :seon.profile/host],\n     :warm-calls 82,\n     :warm-self-us 10.952780487804878,\n     :warm-total-us 13.045780487804878,\n     :warm-digest\n       \"2a2cf266eeacfc18fb3b46a8404eb099020e54072a4471e31d20712abc72d082\"}\n    #:seon.fn.cost{:key [seon.db/pull-logical :seon.profile/host],\n     :warm-calls 10,\n     :warm-self-us 73.22460000000001,\n     :warm-total-us 100.9417,\n     :warm-digest\n       \"18e897a5d209600af59dd1d508b94e8d8b59725520cde271e30f0edcfd9fcdae\"}\n    #:seon.fn.cost{:key\n       [seon.db/query-index-patterns :seon.profile/host],\n     :warm-calls 31,\n     :warm-self-us 21.807774193548386,\n     :warm-total-us 21.807774193548386,\n     :warm-digest\n       \"94a7fdec2fa0c842092eecc4ca75e46edb4347f0bfe7b139de04cccdd28398d4\"}\n    #:seon.fn.cost{:key [seon.db/with-declarations :seon.profile/host],\n     :warm-calls 55,\n     :warm-self-us 8.152236363636364,\n     :warm-total-us 1062.9264727272728,\n     :warm-digest\n       \"b126d9f3f28ce000db554681cb215d68d6aa1c09d724fd8fb7eb5dd39378e9fd\"}\n    #:seon.fn.cost{:key [seon.db/may-read-vectors? :seon.profile/host],\n     :warm-calls 35,\n     :warm-self-us 12.5178,\n     :warm-total-us 36.16194285714286,\n     :warm-digest\n       \"027ad70609d583d1a31e1268b55dcd5174bf894cbead153f42b2842f539a6c8c\"}\n    #:seon.fn.cost{:key [seon.cache/present :seon.profile/host],\n     :warm-calls 138,\n     :warm-self-us 3.1533623188405797,\n     :warm-total-us 3.4027391304347825,\n     :warm-digest\n       \"57bb0f34050f80fb0d8aa2468710a8aa3706b821bc7226861c1c6f053ff937eb\"}\n    #:seon.fn.cost{:key [seon.db/q :seon.profile/host],\n     :warm-calls 35,\n     :warm-self-us 9.227314285714286,\n     :warm-total-us 1648.4952285714287,\n     :warm-digest\n       \"a165c6225a96b5cf4035734aab0765008181546d519b7cec9f1eb4065f662762\"}\n    #:seon.fn.cost{:key [seon.cache/lookup :seon.profile/host],\n     :warm-calls 87,\n     :warm-self-us 2.5359655172413795,\n     :warm-total-us 5.673436781609196,\n     :warm-digest\n       \"7db8af9b171f46b6010a3f6e5d039652751d741603b36163e7a341ce908db692\"}\n    #:seon.fn.cost{:key\n       [seon.db/query-value-type-error :seon.profile/host],\n     :warm-calls 35,\n     :warm-self-us 6.188228571428572,\n     :warm-total-us 6.781028571428571,\n     :warm-digest\n       \"eeb5a596e7456f60f4df6329058ae52ff3198c4b017b28bb1323b8ab7169f87d\"}\n    #:seon.fn.cost{:key [seon.db/projection-builder :seon.profile/host],\n     :warm-calls 34,\n     :warm-self-us 6.193529411764707,\n     :warm-total-us 10.242588235294118,\n     :warm-digest\n       \"e65af6a5da976d23858e59b57a04e9c89172592a6939a07de922b461f2b73628\"}\n    #:seon.fn.cost{:key\n       [seon.db/query-input-position :seon.profile/host],\n     :warm-calls 35,\n     :warm-self-us 5.499971428571429,\n     :warm-total-us 5.499971428571429,\n     :warm-digest\n       \"4ce1c79bc8c36253ee8bd33ec15d94c6d7ec11170425d1083f56abc9446fd024\"}]}}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/cb2525a6ea891,\n :request #:seon.cost{:ms 201.5, :alloc-mb 78.3, :calls 19954}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  {
+    "code": "(let [db (seon.db/db) e (seon.db/q '[:find ?e . :where [?e :seon.fn/sym test.step.idle/amount]] db) measure (fn [f entities] (let [sink (:seon.batch/sink seon.batch/*world*) before (seon.batch/executed sink) m (seon.profile/measure #(f db db entities)) calls (merge-with - (seon.batch/executed sink) before)] (assoc (select-keys m [:seon.profile/value :seon.profile/alloc-bytes :seon.profile/ms]) :probe/calls (reduce + (vals calls)))))] (mapv (fn [entities] {:entities entities :parent (measure parent-changes entities) :change (measure seon.test/request-changes entities)}) [#{} #{e}]))",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ea645aa57dda0, :ms 77, :alloc-mb 73.7, :value [{:entities #{},\n  :parent\n    {:seon.profile/value [],\n     :seon.profile/alloc-bytes 62901208,\n     :seon.profile/ms 49.63,\n     :probe/calls 752},\n  :change\n    {:seon.profile/value [],\n     :seon.profile/alloc-bytes 290392,\n     :seon.profile/ms 0.68,\n     :probe/calls 226}}\n {:entities #{1141361},\n  :parent\n    {:seon.profile/value [],\n     :seon.profile/alloc-bytes 4104760,\n     :seon.profile/ms 4.05,\n     :probe/calls 752},\n  :change\n    {:seon.profile/value [],\n     :seon.profile/alloc-bytes 432072,\n     :seon.profile/ms 1.07,\n     :probe/calls 230}}]}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:cost-result result/c11a2cbae14a2,\n :request #:seon.cost{:ms 264.7, :alloc-mb 73.7, :calls 14460}}"
+        }
+      ],
+      "isError": false
+    }
+  }
+]

@@ -682,17 +682,13 @@
                   [:map-of :qualified-symbol :seon.source/digest]]}
   [database symbols]
   (into {}
-        ;; One query per identity attribute: an `or` over both leaves the
-        ;; attribute unbound, which scans (38 ms current, 180 ms as-of, against
-        ;; about 1 ms with the attribute bound, 2026-09-26).
-        (mapcat (fn [attribute]
-                  (selection-read!
-                   (db/q '[:find ?symbol ?digest
-                           :in $ [?symbol ...] ?attribute
-                           :where [?entity ?attribute ?symbol]
-                                  [?entity :seon.program/definition-digest ?digest]]
-                         database symbols attribute)))
-                [:seon.fn/sym :seon.test/sym])))
+        (keep (fn [row]
+                (when-let [digest (:seon.program/definition-digest row)]
+                  [(or (:seon.fn/sym row) (:seon.test/sym row)) digest])))
+        (selection-read!
+         (db/pull-many database [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]
+                       (for [attribute [:seon.fn/sym :seon.test/sym] declaration symbols]
+                         [attribute declaration])))))
 
 (defn- behavior-of
   "`seon.db/behavior-digest` of the function or test `[attribute value]` on `database`; nil for another identity or none."
@@ -2184,16 +2180,20 @@
   keeps one) and the schemas it wrote."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :int]] :seon.test/changed]}
   [before after entities]
-  (let [entities (vec entities)
-        on-both (fn [query] (into #{} (mapcat #(selection-read! (db/q query % entities))) [before after]))
-        symbols (on-both '[:find [?symbol ...] :in $ [?e ...]
-                           :where (or [?e :seon.fn/sym ?symbol] [?e :seon.test/sym ?symbol])])
-        names (on-both '[:find [?name ...] :in $ [?e ...]
-                         :where (or-join [?e ?ns]
-                                  (and [?e :seon.ns/name] [(identity ?e) ?ns])
-                                  [?ns :seon.ns/aliases ?e] [?ns :seon.ns/refers ?e] [?ns :seon.ns/imports ?e])
-                                [?ns :seon.ns/name ?name]])
-        schemas (on-both '[:find [?key ...] :in $ [?e ...] :where [?e :seon.schema/form] [?e :seon.schema/key ?key]])]
+  (let [rows (mapcat #(selection-read!
+                      (db/pull-many % [:seon.fn/sym :seon.test/sym :seon.ns/name
+                                       {:seon.ns/_aliases [:seon.ns/name]}
+                                       {:seon.ns/_refers [:seon.ns/name]}
+                                       {:seon.ns/_imports [:seon.ns/name]}
+                                       :seon.schema/key :seon.schema/form]
+                                    (vec entities)))
+                     [before after])
+        symbols (into #{} (keep #(or (:seon.fn/sym %) (:seon.test/sym %))) rows)
+        names (into #{} (comp (mapcat #(vector % (:seon.ns/_aliases %)
+                                               (:seon.ns/_refers %)
+                                               (:seon.ns/_imports %)))
+                              (keep :seon.ns/name)) rows)
+        schemas (into #{} (comp (filter :seon.schema/form) (map :seon.schema/key)) rows)]
     (vec (sort print/compare-values
                (concat (behavior-changed before after (vec symbols))
                        (keep #(when (binding-lost? before after %) [:seon.ns/name %]) names)

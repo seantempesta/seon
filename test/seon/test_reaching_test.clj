@@ -787,6 +787,36 @@
          "a program write derives the set again")
      (finally (agent/release-context! child)))))))
 
+(deftest a-request-reads-only-the-entities-its-recording-changed
+  (support/with-database
+   (fn [connection]
+     (seed-reach-fixture! connection)
+     (let [before (db/db connection)
+           entity (db/q '[:find ?e . :where [?e :seon.fn/sym reach.fixture/b]] before)
+           _ (define! connection '[:seon.fn/sym reach.fixture/b]
+                      "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+           after (db/db connection)
+           sink (:seon.batch/sink seon.batch/*world*)
+           initial (sut/request-changes before after #{})
+           counts (seon.batch/executed sink)
+           measured (seon.profile/measure #(sut/request-changes before after #{}))
+           calls (merge-with - (seon.batch/executed sink) counts)]
+       (is (= [] initial (:seon.profile/value measured)))
+       (is (zero? (transduce (comp (filter #(= 'seon.db/q (ffirst %))) (map val)) + 0 calls))
+           "an empty recording reads no query population")
+       (is (= ['reach.fixture/b] (sut/request-changes before after #{entity})))
+       (is (= [] (sut/request-changes after after #{entity}))))
+     (support/transacted! connection [(namespace-with-aliases (db/db connection) {'s 'clojure.string})])
+     (let [before (db/db connection)
+           alias (db/q '[:find ?a . :where [?n :seon.ns/name reach.fixture]
+                                           [?n :seon.ns/aliases ?a]] before)]
+       (support/transacted! connection [[:db/retractEntity alias] (namespace-with-aliases before {})])
+       (is (= [[:seon.ns/name 'reach.fixture]]
+              (sut/request-changes before (db/db connection) #{alias})))
+       (let [schema (db/q '[:find ?e . :where [?e :seon.schema/key :seon.test/sym]] before)]
+         (is (= [[:seon.schema/key :seon.test/sym]]
+                (sut/request-changes before before #{schema}))))))))
+
 (deftest a-named-change-selects-by-current-reach-without-scanning-history
   (support/with-database
    (fn [connection]
