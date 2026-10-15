@@ -49,7 +49,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 | Phase | Owner | What | Red proof | Status |
 |---|---|---|---|---|
 | 0 | Sonnet | `seon.cluster.db-flow-test/every-agent-start-has-a-task` never exits and eats every check's 600 s | ends within its bound | in progress |
-| R1 | Haiku | dig: prior art (git commit-graph, upstream Datahike, earlier Seon attempts and why), rulings the design must keep | n/a | in progress |
+| R1 | Haiku | dig: prior art (git commit-graph, upstream Datahike, earlier Seon attempts and why), rulings the design must keep | n/a | done, b2ad9cd44 |
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | in progress |
 | C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | waiting on R1, R2 |
 | 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | waiting on C |
