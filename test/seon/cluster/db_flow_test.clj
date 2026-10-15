@@ -2133,3 +2133,127 @@
                                    (get-in [:seon.agent/started (str "attempt/" key-2)])))
                     "and the next attempt's agent starts on the chain branch"))
               (finally (release-chain! routing store branch))))))))))
+
+(defn- with-merge-template!
+  "Ingest the merge step's template (`resources/seon/tasks/seon.step.merge.edn`) into the chain world on `connection`,
+  as boot ingests the task files."
+  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
+  [connection]
+  (let [path "resources/seon/tasks/seon.step.merge.edn"
+        indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {path (slurp path)}})]
+    (when (:seon.error/at indexed) (throw (ex-info (:seon.error/message indexed) indexed)))
+    nil))
+
+(defn- merge-branches
+  "The store's merge branches (`:merge-<id>`)."
+  {:malli/schema [:=> [:cat :seon.store/store] [:set :keyword]]}
+  [store]
+  (into #{} (filter #(str/starts-with? (name %) "merge-")) (registry/branches store)))
+
+(deftest ^{:seon.test/long "One chain world: a chain green at its start ends done, root's pass refuses its final merge on a red gate and holds a merge step, then two more passes; measured with the S3c-1 row's world." :seon.test/long-ms 30000}
+  a-refused-final-merge-keeps-its-merge-branch-and-holds-a-merge-step
+  ;; MERGE-STEP (`docs/seon/schedule/cards/MERGE-STEP.md`), rows i and iv: main moves after the chain forks so the
+  ;; chain's proof is red on main's latest head; root's final merge refuses on its gate, keeps the merge branch it
+  ;; built and appends ONE held merge step to the chain carrying the refusal and that branch; nothing starts it
+  (binding [*space* "tq.mergestep"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (with-merge-template! connection)
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")}}])
+                branch (:seon.chain/branch chain)
+                [last-task] (:seon.task/handles chain)
+                key (id/id [last-task 1])
+                before (merge-branches store)]
+            ;; main moves after the fork: the chain's proof is red on main's latest head, green on the chain branch
+            (test-support/define! (world/world {:seon.db/connection connection :seon.boot/cluster-name "tq-chain"
+                                                :seon.sci.eval/ctx (sci.eval/fork-cluster-ctx (sci.eval/base-ctx (db/db connection))
+                                                                                              (db/db connection) connection)
+                                                :seon.batch/sink (seon.batch/sink)
+                                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
+                                                :seon.agent/id "tq-chain-author"})
+                                  (symbol (str *space* "-proofs"))
+                                  "(clojure.test/deftest proves-u (clojure.test/is (= 1 2)))\n")
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :done (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                           [?a :seon.task.attempt/end ?e]]
+                                                         (db/db on-branch) key)
+                                        ::chain-done))
+                    "the chain's last task, green at its start, ends done")
+                (pass! handle routing)
+                (let [kept (into #{} (remove before) (merge-branches store))
+                      chain-db (db/db on-branch)
+                      step (get-in (db/pull chain-db [{:seon.task/next [:seon.task/id]}] [:seon.task/id last-task])
+                                   [:seon.task/next :seon.task/id])
+                      held (when step (db/pull chain-db [:seon.task/execution :seon.task/branch :seon.task/refusal
+                                                         :seon.task/proofs :seon.task/instructions :seon.task/plan]
+                                               [:seon.task/id step]))]
+                  (is (= 1 (count kept)) "the refused merge keeps the one merge branch it built")
+                  (is (string? step) "root appends a task after the chain's last task")
+                  (is (= {:seon.task/execution :held :seon.task/branch (first kept)
+                          :seon.task/proofs '#{seon.step.merge-test/gate}}
+                         (select-keys held [:seon.task/execution :seon.task/branch :seon.task/proofs]))
+                      "the merge step is held, names the kept merge branch and carries the template's proof")
+                  (is (qualified-keyword? (:seon.task/refusal held)) "it carries the refusal's type")
+                  (is (= "Do c." (:seon.task/plan held)) "the last task's plan flows to it")
+                  (is (= :closed (:seon.task/outcome (db/pull chain-db [:seon.task/outcome] [:seon.task/assignment key])))
+                      "the refused terminal attempt is closed as a bail")
+                  ;; row iv: nothing starts it
+                  (pass! handle routing)
+                  (pass! handle routing)
+                  (is (and step (empty? (db/q '[:find ?a :in $ ?h :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t]]
+                                              (db/db on-branch) step)))
+                      "no attempt of the merge step starts by itself over repeated passes")
+                  (is (= kept (into #{} (remove before) (merge-branches store))) "and its merge branch stays")))
+              (finally
+                (doseq [kept (remove before (merge-branches store))]
+                  (registry/retire-branch! {:seon.store/store store :seon.store/branch kept}))
+                (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: a branch forked from main and a chain whose task names it, its attempt started by one db<->flow pass." :seon.test/long-ms 30000}
+  a-task-naming-a-branch-starts-its-attempt-there
+  ;; TASK-CHAIN §2.2 as MERGE-STEP amends it: a task selects its context by data; root starts the attempt of a task
+  ;; carrying `:seon.task/branch` on that branch (its agent homed and its graph running there), and a task naming none
+  ;; on its chain's branch (`root-starts-a-chains-first-task-on-its-branch`)
+  (binding [*space* "tq.taskbranch"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                main (db/db connection)
+                elsewhere :tq-elsewhere
+                forked (registry/fork! {:seon.store/store store :seon.store/branch elsewhere :seon.db/db main
+                                        :seon.branch/target (get-in main [:config :branch])
+                                        :seon.cluster.registry/from (get-in main [:config :branch])})
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(proof "u")} :seon.task/branch elsewhere}])
+                branch (:seon.chain/branch chain)
+                key (id/id [(first (:seon.task/handles chain)) 1])
+                agent-id (str "attempt/" key)]
+            (try
+              (is (not (:seon.error/at forked)) "the named branch exists")
+              (pass! handle routing)
+              (let [there (db/branch-database (db/db connection) elsewhere)]
+                (is (= elsewhere (:seon.task/branch (db/pull there [:seon.task/branch] [:seon.task/assignment key])))
+                    "the attempt's row names the task's branch, on that branch")
+                (is (= elsewhere (:seon.agent/branch (db/pull there [:seon.agent/branch] [:seon.agent/id agent-id])))
+                    "its agent is homed on the task's branch"))
+              (is (some? (some-> (get-in @routing [:seon.agent/children elsewhere]) deref (get-in [:seon.agent/started agent-id])))
+                  "its graph runs on the task's branch")
+              (is (nil? (some-> (get-in @routing [:seon.agent/children branch]) deref (get-in [:seon.agent/started agent-id])))
+                  "not on the chain's branch")
+              (finally
+                (release-chain! routing store elsewhere)
+                (release-chain! routing store branch))))))))))

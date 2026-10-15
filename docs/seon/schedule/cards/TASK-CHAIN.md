@@ -58,6 +58,7 @@ A task is one entity. Its members (all `:seon.task/*`):
 | `model` (new) | a provider model name, or `:outside`; absent means the cluster's `:seon.config.ai/model` | who works this task (§2.2) | content, **owned** |
 | `next` (new) | one non-component peer task ref (cardinality one) | the task that follows; absent on the last | link |
 | `execution` | `:held :running :paused :stopped :cancelled`, Malli `:default :held` | whether it runs; root is its only writer on a chain | control |
+| `branch` (optional) | a branch keyword, the attribute attempt rows carry | the branch this task's attempts check out; absent, its chain's branch (a merge step names its kept merge branch, `MERGE-STEP.md`) | control |
 
 `seon.task/declaration` (a task file entry, the content agents author) holds identity and content members only;
 `next` and `execution` are written by `chain!` and root, never declared. **Owned** content members carry
@@ -90,7 +91,8 @@ resumed task's next attempt has a new identity and a new agent id.
 Ordinary tasks, one file per stage so stage lanes never share a file (§7, "Parallel stages"):
 `resources/seon/tasks/seon.step.design.edn` (`seon.step.design/template`), `seon.step.prove.edn`
 (`seon.step.prove/template`), `seon.step.implement.edn` (`seon.step.implement/template`), each holding only owned
-content (`instructions`, `proofs`), `:held` so they never run. File admission accepts a task without a plan (today's
+content (`instructions`, `proofs`), `:held` so they never run. A fourth, `seon.step.merge.edn` (`seon.step.merge/template`),
+is never in a chain at creation: root appends it after a refused final merge (§2.7, `MERGE-STEP.md`). File admission accepts a task without a plan (today's
 non-parent `:intent` requirement goes). `seon.task/template` (new) answers a template's owned members as a map, from
 an explicit database (omitted, the caller's bound connection's database).
 
@@ -155,6 +157,8 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    attempt is neither `:done` nor `:merged`, and no attempt lacks an outcome. Root writes the attempt row on the chain
    branch, through a connection it opens for that action and releases when the action ends (the registry owner,
    `seon.cluster.registry/active-branch-connection`, else the store's open), then starts a NEW agent id on that branch
+   (the task's own `:seon.task/branch` when it names one, else the chain's: a task selects its context by data, and
+   the attempt's world, block and tests follow from its row; MERGE-STEP)
    (`seon.cluster.agent/acquire-context!` with `{:seon.agent/branch b}`: 3.9 ms while another agent holds the branch,
    22.7 ms when nobody does). It never forks a branch per task and never reuses an agent's SCI context.
    **The model is per task** (owner 2026-10-14): owned `:seon.task/model`, a model name (absent: the cluster's
@@ -232,7 +236,15 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
    after a recorded merge is cleaned up; one whose branch is gone otherwise is shown to root as unknown.
 7. **Bail or fail** — every end that is not done: `:capped` (turns spent; `seon.turn/turns-left` is the budget),
    `:stalled`, `:given-back`, `:sent-back` (`my.task/send-back!` with its reason), `:error`, a done that
-   `done-refusals` refuses, or a refused final merge. Root processes it once: first the problem task on main (its
+   `done-refusals` refuses, or a refused final merge. **A final merge refused by its gate** (a conflict, a red test on
+   the merge branch, or a file write-back would produce that does not analyze cleanly) keeps its merge branch
+   `:merge-<id>` (main's latest head plus the chain's merge list), and root's same bail appends a merge step: in ONE
+   transaction on the chain branch through the task writer, a task from `seon.step.merge/template` (named by position,
+   taking the last task's flowing members) carrying `:seon.task/branch` the merge branch, `:seon.task/refusal` and
+   `:seon.task/refused-tests`, `:held`, and the last task's `:seon.task/next` to it. Nothing starts it; root runs it
+   with `my.root/run!`, its agent works on the merge branch, its proof is the merge gate, and when it is done root
+   merges that branch like any finished chain (§2.6), the gate judging main's latest head again (`MERGE-STEP.md`).
+   A merge branch is retired only by the chain's publication or root's abandonment. Root processes it once: first the problem task on main (its
    identity derived from the terminal attempt, so a repeat writes no second one), then on the chain branch in one
    transaction the attempt's outcome `:closed` with its reason and the task's `:execution :held`. Two databases cannot
    share one transaction; this order makes each stopping point derivable on restart without an outbox. Nothing else
@@ -494,6 +506,13 @@ contract.
 
 `proofs` is absent on the template; Prove writes the real set. No predicate: the done rule is the whole check.
 
+### Merge: `seon.step.merge/template`
+
+Instructions and proofs in `resources/seon/tasks/seon.step.merge.edn`; root appends it after a refused final merge
+(§2.7). Its proof `seon.step.merge-test/gate` is the merge gate over the supplied branch (`seon.step.merge/gate`):
+every refused test green, every changed file analyzing cleanly, no conflicted declaration left as refused
+(`MERGE-STEP.md`).
+
 The user conversation (today's Survey, I1–I3) becomes a task before Design after the MVP: its proof will be that the
 user's latest answer approves the current plan.
 
@@ -593,6 +612,7 @@ lifecycle, runner and restart cuts until their red proofs and contracts exist; S
 | S3e | Delete the task tree (`children`, `needs`, `effective`) with their last readers (§6) | no live reader; retained reds unchanged | Sonnet | — |
 | S4a | Stage preparation: `seon.step` shared helpers, the task-input fixture in `seon.test-support`, the three template files, deletion of `seon.step.edn`, `step_test.clj` and their readers, a grading form for live runs | each helper's contract; each template ingests | Sonnet (after S2a, S2b, S3a) | done 619c73d14, 840d175a8 (templates), 99997d214 (a task without a plan) |
 | S4b-design / S4b-prove / S4b-implement | One lane per stage, in parallel: its predicate and deftest table (rows from the stage tables), its template's instructions, and its live runs (one-task Design chains; Prove followed by a held Implement; Implement from hand-written proofs once S3b lands) | each predicate's table: Design rows (sections, problem changed, unresolved reference, producer not cited, data not modeled, existing-schema bug fix, registered-schema new feature) and Prove rows (no successor, empty proofs, not a deftest, missing or green result, world error, unreached changed or cited function, assertion-red and body-error success); refusal sets asserted exactly | Sonnet per stage; Opus run lane for live runs | design and prove done: 38cca803d, 14cc74ab4 (reach on the tested closure 65f4c292e); Implement has no predicate; live runs S5 1-4 (`../research/agent-platform/2026-10-14/s5-run-*.md`) |
+| S6 (A-E) | The merge step (`MERGE-STEP.md`): keep the refused merge branch, hold a merge step for root, a task's own branch | `MERGE-STEP.md` § Phases | Opus | A done (card, template, schema member, red deftests); B-E in `MERGE-STEP.md` |
 | S5 | Run 26: the full Design → Prove → Implement chain, live DeepSeek | 0 hand acts after `chain!`, one merge, the defect fixed | Opus run lane | run 4 (2026-10-14): Design and Prove done and advanced with 0 hand acts; Implement bailed and was rerun by `my.root/run!` three times (capped twice, one stall); context and REPL defects fixed since; no merge yet |
 
 **Parallel stages.** After S4a, each stage lane owns `src/seon/step/<stage>.clj` (`seon.step.<stage>/handoff`; none
