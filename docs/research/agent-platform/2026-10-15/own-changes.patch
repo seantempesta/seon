@@ -1,0 +1,251 @@
+diff --git a/src/seon/cluster/agent.clj b/src/seon/cluster/agent.clj
+index af78c818d..97c8ab02d 100644
+--- a/src/seon/cluster/agent.clj
++++ b/src/seon/cluster/agent.clj
+@@ -1850,7 +1850,7 @@
+         base-commit (registry/base-commit-id at-end branch)
+         base (when base-commit (db/commit-database at-end base-commit))
+         delta (if base
+-                (try (program/changed-identities (db/basis-t base) at-end source/merge-bound) (finally (source/release! [base])))
++                (try (program/own-changed-identities base at-end source/merge-bound) (finally (source/release! [base])))
+                 #{})
+         of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
+         reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
+diff --git a/src/seon/context.clj b/src/seon/context.clj
+index 1334f96eb..14ca04fa2 100644
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -313,7 +313,8 @@
+ (defn- change
+   "The declaration identities the agent `agent-id`'s branch `database` changed since its task's merge base: the
+   one its attempt row holds (a relaunched attempt keeps its predecessor's, so the change is the task's across
+-  attempts), for a row holding none the commit the branch forked at (`seon.turn/fork-commit`); empty on main."
++  attempts), for a row holding none the branch's base ref (`seon.turn/fork-commit`): git's diff of that merge base and
++  the branch (`seon.program/own-changed-identities`); empty on main."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.program/identity-set :seon.error/value]]}
+   [database agent-id]
+   (let [held (db/q '[:find ?m . :in $ ?id :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/merge-base ?m]]
+@@ -322,7 +323,7 @@
+         base (when commit (db/commit-database database commit))]
+     (cond (:seon.error/at held) held
+           (nil? base) #{}
+-          :else (try (program/changed-identities (db/basis-t base) database source/merge-bound)
++          :else (try (program/own-changed-identities base database source/merge-bound)
+                      (finally (source/release! [base]))))))
+ 
+ (defn current-results
+diff --git a/src/seon/merge.clj b/src/seon/merge.clj
+index 70375eec6..2719fd305 100644
+--- a/src/seon/merge.clj
++++ b/src/seon/merge.clj
+@@ -458,9 +458,8 @@
+            target (get-in main [:config :branch])
+            head (db/db chain-connection)
+            base (source/merge-base (registry/branches store) head main target branch)
+-           since (source/branch-base-t head main target branch)
+-           changed (when-not (some :seon.error/at [base since])
+-                     (let [ours (program/changed-identities since head source/merge-bound)
++           changed (when-not (:seon.error/at base)
++                     (let [ours (program/own-changed-identities base head source/merge-bound)
+                            theirs (program/changed-identities base main source/merge-bound)]
+                        (or (some #(when (:seon.error/at %) %) [ours theirs]) (into ours theirs))))
+            maps (when (set? changed)
+@@ -477,7 +476,6 @@
+        (try
+          (cond
+            (:seon.error/at base) base
+-           (:seon.error/at since) since
+            (not (set? changed)) changed
+            (not three) (some #(when (:seon.error/at %) %) maps)
+            (not (vector? record)) record
+diff --git a/src/seon/program.cljc b/src/seon/program.cljc
+index bccb069af..f9994996d 100644
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -891,6 +891,26 @@
+                                 (entities-changed-after database since attribute))))
+               (changed-attributes base database attributes))))))
+ 
++#?(:clj
++   (defn own-changed-identities
++     "The declarations `head`, a branch, holds at another digest than `merge-base` (its base ref's value), among those
++  its own history changed since its fork (its fork entity's `:seon.branch/base-t`, read on `head`, so the walk never
++  starts on another branch's counter; a branch with no fork entity, the cluster's own, walks from the merge base's
++  t): git's diff of the merge base and HEAD. After a forward merge, what main moved in is at the merge base's digest
++  and is not the branch's."
++     {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
++                          [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
++                     [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
++     [merge-base head bounds]
++     (let [fork ((requiring-resolve 'seon.cluster.registry/fork-of) head (get-in head [:config :branch]))
++           touched (changed-identities (or (:seon.branch/base-t fork) merge-base) head bounds)
++           [before after] (when (set? touched)
++                            (map #(digest-map % (assoc bounds :seon.program/identities touched)) [merge-base head]))]
++       (cond (not (set? touched)) touched
++             (:seon.error/at before) before
++             (:seon.error/at after) after
++             :else (into #{} (remove #(= (get before %) (get after %))) touched)))))
++
+ (defn three-way
+   "Classify branch and head declaration identities relative to base.
+ 
+diff --git a/src/seon/step.clj b/src/seon/step.clj
+index 5f712dc11..b721fabbe 100644
+--- a/src/seon/step.clj
++++ b/src/seon/step.clj
+@@ -50,8 +50,9 @@
+ 
+ (defn changed
+   "The values of identity `attribute` (`:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`, `:seon.schema/key`) whose
+-  declarations `database`, a branch, changed since the commit it was forked at (its base ref,
+-  `seon.cluster.registry/base-commit-id`, the base `seon.context` judges the done rule over): `seon.test/branch-delta`, the one history walk `seon.program/changed-identities`; empty on a value with no fork."
++  declarations `database`, a branch, holds at another digest than its merge base (its base ref,
++  `seon.cluster.registry/base-commit-id`, the base `seon.context` judges the done rule over), among those its own
++  history changed: `seon.test/branch-delta` over `seon.program/own-changed-identities`; empty on a value with no fork."
+   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:set :seon.schema/value]]}
+   [database attribute]
+   (let [commit (registry/base-commit-id database (get-in database [:config :branch]))
+diff --git a/src/seon/test.clj b/src/seon/test.clj
+index e9eb0911a..909206600 100644
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -2065,40 +2065,18 @@
+ 
+ (declare request-refusal)
+ 
+-(defn- commit-facts
+-  "The branch `commit-id` was written on and its parent commits; nil when the store lacks the commit."
+-  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
+-                  [:maybe [:tuple :seon.store/branch [:vector :seon.source/commit-id]]]]}
+-  [store commit-id]
+-  (seon.cache/lookup ::commit-facts commit-id (constantly 160)
+-                     #(when-let [database (source/commit-database store commit-id)]
+-                        (try [(get-in database [:config :branch]) (vec (get-in database [:meta :datahike/parents]))]
+-                             (finally (source/release! [database]))))))
+-
+-(defn- fork-commit
+-  "The commit `candidate`'s branch was forked at: the nearest ancestor of its head written on another
+-  branch (its own head when it has written nothing); nil when its history is unavailable."
+-  {:malli/schema [:=> [:cat :seon.store/store :seon.db/database-value] [:maybe :seon.source/commit-id]]}
+-  [store candidate]
+-  (let [branch (get-in candidate [:config :branch])]
+-    (loop [commit (db/commit-id candidate)]
+-      (when-let [[written parents] (when commit (commit-facts store commit))]
+-        (if (not= branch written)
+-          commit
+-          ;; A commit written here has one parent written here, unless it was the first.
+-          (recur (or (some #(when (= branch (first (commit-facts store %))) %) parents)
+-                     (first parents))))))))
+-
+ (defn- change-base
+   "The commit a check of `candidate` compares against: the adopted source commit `recorded` for the
+-  cluster's own branch; for any other branch the commit it was forked at, so what its source branch
+-  changed before the fork is never this branch's change."
+-  {:malli/schema [:=> [:cat :seon.store/store :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
++  cluster's own branch; for a work branch its merge base, the commit its base ref retains
++  (`seon.cluster.registry/base-commit-id`), which a forward merge advances, so what main changed before the fork
++  or moved in since is never this branch's change; `recorded` for a branch forked with no base ref."
++  {:malli/schema [:=> [:cat :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
+                   :seon.source/commit-id]}
+-  [store cluster candidate recorded]
+-  (if (= (cluster.branch/cluster-branch cluster) (get-in candidate [:config :branch]))
+-    recorded
+-    (or (fork-commit store candidate) recorded)))
++  [cluster candidate recorded]
++  (let [branch (get-in candidate [:config :branch])]
++    (if (= (cluster.branch/cluster-branch cluster) branch)
++      recorded
++      (or (registry/base-commit-id candidate branch) recorded))))
+ 
+ (defn- bindings
+   "The names namespace `ns-name` binds on `database`: its requires and its alias, refer and import bindings; none when it is absent."
+@@ -2126,13 +2104,13 @@
+   (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
+ 
+ (defn branch-delta
+-  "The pure branch delta: the declarations `candidate` changed after `base` (a committed value on its lineage, its
+-  change base), read once by `seon.program/changed-identities` (the history walk the done rule reads), less a
++"The pure branch delta: the declarations `candidate` holds at another digest than `base` (its merge base), among
++  those its own history changed (`seon.program/own-changed-identities`, the derivation the done rule reads), less a
+   function or test both hold at one behavior digest (a docstring-only change is none) and a namespace that lost no
+   binding (`binding-lost?`), in print order; empty when nothing changed, a refused read its refusal."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.test/changed :seon.error/value]]}
+   [base candidate]
+-  (let [changed (program/changed-identities (db/basis-t base) candidate source/merge-bound)]
++  (let [changed (program/own-changed-identities base candidate source/merge-bound)]
+     (if (:seon.error/at changed)
+       changed
+       (vec (sort print/compare-values
+@@ -2145,7 +2123,7 @@
+ 
+ (defn branch-changes
+   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
+-  cluster's own branch, the commit it was forked at on any other), the `branch-delta`: empty when nothing changed;
++  cluster's own branch, the merge base on a work branch), the `branch-delta`: empty when nothing changed;
+   a cluster recording no adopted source commit refuses by name."
+   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
+                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
+@@ -2159,7 +2137,7 @@
+                        cluster)
+       (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+             candidate (db/db (:seon.db/connection execution))]
+-        (branch-delta (source/database store (change-base store cluster candidate recorded)) candidate)))))
++        (branch-delta (source/database store (change-base cluster candidate recorded)) candidate)))))
+ 
+ (defn branch-tests
+   "The tests `execution`'s branch defined or changed since its base (`branch-changes`), sorted: empty when none."
+diff --git a/test/seon/merge_forward_test.clj b/test/seon/merge_forward_test.clj
+index 5a2626bea..cabd1adf6 100644
+--- a/test/seon/merge_forward_test.clj
++++ b/test/seon/merge_forward_test.clj
+@@ -1,6 +1,9 @@
+ (ns seon.merge-forward-test
+   (:require [clojure.test :refer [deftest is]]
+             [seon.merge :as merge]
++            [seon.cluster.source :as source]
++            [seon.program :as program]
++            [seon.step :as step]
+             [seon.cluster.registry :as registry]
+             [seon.db :as db]
+             [seon.id :as id]
+@@ -67,3 +70,40 @@
+         (is (= adopted (record (on-chain db/db))) "the branch is built on main's adoption record"))
+       (finally
+         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
++
++(deftest after-a-forward-merge-the-branch-changed-only-its-own-declarations
++  ;; git diff merge-base HEAD: after `git merge main`, what main moved in sits at the merge base's digest, so the
++  ;; branch's change (`seon.step/changed`, and the identities the done rule judges,
++  ;; `seon.program/own-changed-identities`) is the one function it defined, not main's
++  (let [target (support/execution-handle nil)
++        store (:seon.store/store target)
++        main-conn (:seon.db/connection target)
++        suffix (id/id)
++        own (symbol "seon.merge-forward-test" (str "own-" suffix))
++        theirs (mapv #(symbol "seon.merge-forward-test" (str "theirs-" % "-" suffix)) (range 8))
++        defined (fn [database sym] (support/program-entity database [:seon.fn/sym sym]
++                                                           (str "(defn " (name sym) " {:malli/schema [:=> [:cat] :int]} [] 1)")))
++        _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
++            (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
++        {chain :seon.chain/branch}
++        (task/chain! {:seon.db/connection main-conn :seon.store/store store}
++                     [{:seon.task/ns 'fixture.forward :seon.task/name (str "own-" suffix)
++                       :seon.task/plan "Judge only the branch's own change after `seon.merge/merge-main!`."}])
++        on-chain (fn [f] (registry/on-branch store chain f))
++        functions (fn [identities] (into #{} (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) identities))]
++    (try
++      (on-chain #(support/transacted! % [(defined (db/db %) own)]))
++      ;; main moves on further than the branch did: its t passes every t the branch wrote
++      (doseq [sym theirs] (support/transacted! main-conn [(defined (db/db main-conn) sym)]))
++      (let [merged (merge/merge-main! target chain)]
++        (is (= (set theirs) (functions (:seon.program/identities merged))) "main's functions moved forward")
++        (on-chain
++         (fn [connection]
++           (let [after (db/db connection)
++                 base (db/commit-database after (registry/base-commit-id after chain))]
++             (is (= #{own} (step/changed after :seon.fn/sym)) "the step's change is the branch's own function")
++             (is (= #{own} (functions (program/own-changed-identities base after source/merge-bound)))
++                 "the done rule judges the branch's own function")
++             (source/release! [base])))))
++      (finally
++        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
