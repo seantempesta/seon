@@ -1859,6 +1859,35 @@
                   (:seon.program/not-found error))]
     (when (symbol? found) found)))
 
+(defn- guessed-schema
+  "The schema key the failure could not compile, as Malli declared it: the
+  `:schema` of the `:malli.core/invalid-schema` cause's data, when it is a
+  keyword or symbol."
+  {:malli/schema [:=> [:cat :map] [:maybe [:or :keyword :symbol]]]}
+  [error]
+  (let [found (some #(let [data (:seon.error/data %)]
+                       (when (= :malli.core/invalid-schema (:type data))
+                         (get-in data [:data :schema])))
+                    (:seon.error/chain error))]
+    (when (or (keyword? found) (symbol? found)) found)))
+
+(defn- nearest-schemas
+  "The keys of the registry `options` name (Malli's default when absent)
+  nearest `guessed` by spelling of their names (`malli.error/levenshtein`),
+  nearest first, at most eight: only those within half the name's length
+  (two at least), so a guess nothing resembles has none."
+  {:malli/schema [:=> [:cat [:or :keyword :symbol] [:maybe :map]] [:vector [:or :keyword :symbol]]]}
+  [guessed options]
+  (let [wanted (name guessed)
+        limit (max 2 (quot (count wanted) 2))]
+    (->> (keys (mr/schemas (m/-registry options)))
+         (filter #(or (keyword? %) (symbol? %)))
+         (keep (fn [key] (let [distance (me/levenshtein wanted (name key))]
+                           (when (and (<= distance limit) (not= key guessed))
+                             [[distance (str key)] key]))))
+         (sort-by first)
+         (into [] (comp (map second) (take 8))))))
+
 (def ^:private binding-vector-heads
   "The forms whose first argument is a binding vector: its even positions are
   patterns whose symbols are locals in the body."
@@ -2234,7 +2263,8 @@
          locals (when (and missing (simple-symbol? missing))
                   (nearest-locals missing (get-in error [:seon.error/data :seon.sci.eval/locals])))
          calls (when (and database missing) (nearest-calls database missing namespace-name))
-         nearest (into (vec locals) calls)]
+         schemas (when-let [guessed (guessed-schema error)] (nearest-schemas guessed options))
+         nearest (-> (vec locals) (into calls) (into schemas))]
      (cond-> (if options (variant-members options error) {})
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
