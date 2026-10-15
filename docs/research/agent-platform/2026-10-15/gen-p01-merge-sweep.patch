@@ -1,0 +1,1984 @@
+diff --git a/resources/seon/schemas/my.background.edn b/resources/seon/schemas/my.background.edn
+index c99a8038c..4e274e777 100644
+--- a/resources/seon/schemas/my.background.edn
++++ b/resources/seon/schemas/my.background.edn
+@@ -22,9 +22,9 @@
+                 :call-source [:string {:min 1 :description "Value observation of the macro forms refused before a background request exists; it outlives no target and has value deletion semantics."}]
+                 :result-observation [:string {:min 1 :description "Value observation of an invalid result reference supplied to poll; it outlives no target and has value deletion semantics."}]
+                 :missing-result-ref [:and {:description "Value observation of the valid effect lookup ref for which no receipt exists; it is not an entity relation and has value deletion semantics."} :my.background/result]
+-                :invalid-call-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the refused macro call source"} :seon.error/base [:map [:my.background/call-source :my.background/call-source]]]
+-                :invalid-result-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the offending background result observation"} :seon.error/base [:map [:my.background/result-observation :my.background/result-observation]]]
+-                :missing-result-error [:and {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the valid lookup ref whose receipt is absent"} :seon.error/base [:map [:my.background/missing-result-ref :my.background/missing-result-ref]]]
++                :invalid-call-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the refused macro call source"} :seon.error/base [:map [:my.background/call-source :my.background/call-source]]]
++                :invalid-result-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the offending background result observation"} :seon.error/base [:map [:my.background/result-observation :my.background/result-observation]]]
++                :missing-result-error [:merge {:seon.db/attributes true :seon.render/ai seon.background/render-ai :seon.render/html seon.background/render-html :error/message "must carry the valid lookup ref whose receipt is absent"} :seon.error/base [:map [:my.background/missing-result-ref :my.background/missing-result-ref]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.background/authored-form
+@@ -34,7 +34,7 @@
+  :seon.db/ref]
+ 
+  :my.background/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/my.edit.edn b/resources/seon/schemas/my.edit.edn
+index 86d397de4..7c33b9fef 100644
+--- a/resources/seon/schemas/my.edit.edn
++++ b/resources/seon/schemas/my.edit.edn
+@@ -61,17 +61,17 @@
+   [:my.edit/source-window-complete? :my.edit/source-window-complete?]
+   [:my.edit/replacements {:optional true} :my.edit/replacements]],
+  :my.edit/no-match :my.edit/path
+- :my.edit/no-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/no-match {:optional true} :my.edit/no-match]]]
++ :my.edit/no-match-error [:merge :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/no-match {:optional true} :my.edit/no-match]]]
+  :my.edit/ambiguous-match :my.edit/path
+- :my.edit/ambiguous-match-error [:and :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/ambiguous-match {:optional true} :my.edit/ambiguous-match]]]
++ :my.edit/ambiguous-match-error [:merge :seon.error/base [:map [:my.edit/replacements :my.edit/replacements] [:my.edit/ambiguous-match {:optional true} :my.edit/ambiguous-match]]]
+  :my.edit/parse-byte-count [:int {:min 0}]
+- :my.edit/parse-refused-error [:and :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
++ :my.edit/parse-refused-error [:merge :seon.error/base [:map [:my.edit/parse-byte-count :my.edit/parse-byte-count]]]
+  :my.edit/unverified-char-span [:tuple [:int {:min 0}] [:int {:min 0}]]
+- :my.edit/lossless-check-failed-error [:and :seon.error/base [:map [:my.edit/unverified-char-span :my.edit/unverified-char-span]]]
++ :my.edit/lossless-check-failed-error [:merge :seon.error/base [:map [:my.edit/unverified-char-span :my.edit/unverified-char-span]]]
+  :my.edit/stale-source :my.edit/path
+- :my.edit/stale-source-error [:and :seon.error/base [:map [:my.edit/stale-source :my.edit/stale-source]]]
++ :my.edit/stale-source-error [:merge :seon.error/base [:map [:my.edit/stale-source :my.edit/stale-source]]]
+  :my.edit/not-utf8 :my.edit/path
+- :my.edit/not-utf8-error [:and :seon.error/base [:map [:my.edit/not-utf8 :my.edit/not-utf8]]]
++ :my.edit/not-utf8-error [:merge :seon.error/base [:map [:my.edit/not-utf8 :my.edit/not-utf8]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.edit/edit-observation
+@@ -81,7 +81,7 @@
+  :seon.db/ref]
+ 
+  :my.edit/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/my.fs.edn b/resources/seon/schemas/my.fs.edn
+index 5b1b4f984..b54d2d635 100644
+--- a/resources/seon/schemas/my.fs.edn
++++ b/resources/seon/schemas/my.fs.edn
+@@ -152,7 +152,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.fs/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/my.message.edn b/resources/seon/schemas/my.message.edn
+index 13c8bd030..f3931f331 100644
+--- a/resources/seon/schemas/my.message.edn
++++ b/resources/seon/schemas/my.message.edn
+@@ -67,7 +67,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.message/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/my.shell.edn b/resources/seon/schemas/my.shell.edn
+index 08219620c..4b0fa0953 100644
+--- a/resources/seon/schemas/my.shell.edn
++++ b/resources/seon/schemas/my.shell.edn
+@@ -35,7 +35,7 @@
+  :my.shell/stdin-blob-digest :seon.blob/digest
+  :my.shell/stdin-blob-offset [:int {:min 0}]
+  :my.shell/blob-unavailable-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:my.shell/stdin-blob-digest :my.shell/stdin-blob-digest]
+    [:my.shell/stdin-blob-offset :my.shell/stdin-blob-offset]
+@@ -43,7 +43,7 @@
+  :my.shell/stdin-byte-limit [:int {:min 0}]
+  :my.shell/observed-stdin-bytes [:int {:min 0}]
+  :my.shell/stdin-limit-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:my.shell/stdin-byte-limit :my.shell/stdin-byte-limit]
+    [:my.shell/observed-stdin-bytes :my.shell/observed-stdin-bytes]
+@@ -54,7 +54,7 @@
+  :my.shell/process-exception-data :map
+  :my.shell/refused-cwd :my.fs/path
+  :my.shell/cwd-refused-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:my.shell/refused-cwd :my.shell/refused-cwd]
+    [:my.shell/cwd-observation {:optional true} :my.shell/cwd-observation]
+@@ -62,14 +62,14 @@
+  :my.shell/terminated-pid :int
+  :my.shell/limiting-config-key :qualified-keyword
+  :my.shell/time-limit-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:my.shell/terminated-pid :my.shell/terminated-pid]
+    [:my.shell/limiting-config-key :my.shell/limiting-config-key]
+ ]]
+  :my.shell/failed-argv :my.shell/argv
+  :my.shell/start-failed-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:my.shell/failed-argv :my.shell/failed-argv]
+    [:my.shell/process-exception-data {:optional true} :my.shell/process-exception-data]
+@@ -77,7 +77,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.shell/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/my.task.edn b/resources/seon/schemas/my.task.edn
+index dfca4af73..d7a9e71fa 100644
+--- a/resources/seon/schemas/my.task.edn
++++ b/resources/seon/schemas/my.task.edn
+@@ -30,6 +30,6 @@
+                            [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                            [:my.task/task :my.task/task] [:my.task/member :my.task/member]
+                            [:my.task/function :my.task/function] [:my.task/arguments :my.task/arguments]]
+-          :no-task-error [:and {:description "my.task/send-back! was called by an agent that holds no task, so there is nothing to give back; it names the reason that went undelivered."} :seon.error/base [:map [:my.task/reason :my.task/reason]]]
+-          :invalid-member-error [:and {:description "my.task/update! computed a value that does not satisfy the task declaration's schema."} :seon.error/base [:map [:my.task/member :my.task/member]]]
+-          :unknown-task-error [:and {:description "my.task/update! named a task that does not exist."} :seon.error/base [:map [:my.task/task :my.task/task]]]}
++          :no-task-error [:merge {:description "my.task/send-back! was called by an agent that holds no task, so there is nothing to give back; it names the reason that went undelivered."} :seon.error/base [:map [:my.task/reason :my.task/reason]]]
++          :invalid-member-error [:merge {:description "my.task/update! computed a value that does not satisfy the task declaration's schema."} :seon.error/base [:map [:my.task/member :my.task/member]]]
++          :unknown-task-error [:merge {:description "my.task/update! named a task that does not exist."} :seon.error/base [:map [:my.task/task :my.task/task]]]}
+diff --git a/resources/seon/schemas/my.turn.edn b/resources/seon/schemas/my.turn.edn
+index ef17c3b8d..5ac4f7f6b 100644
+--- a/resources/seon/schemas/my.turn.edn
++++ b/resources/seon/schemas/my.turn.edn
+@@ -31,7 +31,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :my.turn/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.agent.edn b/resources/seon/schemas/seon.agent.edn
+index 17335ddec..b5f85ba3c 100644
+--- a/resources/seon/schemas/seon.agent.edn
++++ b/resources/seon/schemas/seon.agent.edn
+@@ -252,7 +252,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.agent/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -269,7 +269,7 @@
+  :seon.db/ref]
+  :seon.agent/refused-source-agent [:string {:min 1}]
+  :seon.agent/source-submission-refused-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.agent/refused-source-agent :seon.agent/refused-source-agent]]]
+ }
+diff --git a/resources/seon/schemas/seon.agent.graph.edn b/resources/seon/schemas/seon.agent.graph.edn
+index b04a15b18..6b921b98c 100644
+--- a/resources/seon/schemas/seon.agent.graph.edn
++++ b/resources/seon/schemas/seon.agent.graph.edn
+@@ -8,7 +8,7 @@
+  :seon.db/ref]
+ 
+  :seon.agent.graph/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.ai.edn b/resources/seon/schemas/seon.ai.edn
+index 10959ad5f..13fb1bc5e 100644
+--- a/resources/seon/schemas/seon.ai.edn
++++ b/resources/seon/schemas/seon.ai.edn
+@@ -17,7 +17,7 @@
+ 
+           :output-observed? :boolean,
+           :transport-failure-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must identify the endpoint whose transport failed"}
+            :seon.error/base
+@@ -25,7 +25,7 @@
+            [:seon.ai/transport-failure :seon.ai/transport-failure]
+            [:seon.error/message :seon.error/message]]],
+           :token-starvation-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark an attempt with no usable output-token budget"}
+            :seon.error/base
+@@ -56,7 +56,7 @@
+            [:seon.ai/primary :seon.ai/target]],
+           :http-status [:int {:min 100, :max 599}],
+           :reasoning-without-answer-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark a provider response with reasoning but no answer"}
+            :seon.error/base
+@@ -68,7 +68,7 @@
+           :interrupted-text-count [:int {:min 0 :description "Assistant characters received before the stream ended without a terminal event. A measured value surviving attempt deletion."}],
+           :reasoning-partial :string,
+           :no-credential-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark an attempt with no provider credential"}
+            :seon.error/base
+@@ -96,7 +96,7 @@
+ 
+           :api-key-variable [:string {:min 1}],
+           :unparseable-body-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must identify the status of an unparseable provider response"}
+            :seon.error/base
+@@ -191,7 +191,7 @@
+           :environment [:map-of {:description "The environment credential variable names resolve in, names to values; the process environment when absent. Never stored: only the name is data."}
+                         :string :string],
+           :stream-truncated-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark a provider stream that ended before its terminal event"}
+            :seon.error/base
+@@ -220,7 +220,7 @@
+            [:seon.ai/inert :seon.ai/inert]],
+           :tokens [:int {:min 0}],
+           :extra-body-conflict-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark provider-specific data that conflicts with governed fields"}
+            :seon.error/base
+@@ -361,7 +361,7 @@
+ 
+           :body-read-message :string,
+           :invalid-extra-body-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must mark invalid provider-specific request data"}
+            :seon.error/base
+@@ -370,7 +370,7 @@
+            [:seon.ai/extra-body-edn :seon.ai/extra-body-edn]
+            [:seon.error/message :seon.error/message]]],
+           :timeout-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must identify the elapsed provider request limit"}
+            :seon.error/base
+@@ -384,7 +384,7 @@
+           :stream? :boolean,
+           :protected-keys [:set {:min 1 :description "Request-builder field names the supplied extra body attempted to replace. Value observations survive request deletion."} :string],
+           :provider-error-error
+-          [:and {:seon.db/attributes true,
++          [:merge {:seon.db/attributes true,
+             :error/message
+             "must identify the status of a provider error response"}
+            :seon.error/base
+@@ -410,7 +410,7 @@
+  [:string {:min 1}]
+ 
+  :seon.ai/request-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.await.edn b/resources/seon/schemas/seon.await.edn
+index 7d782532a..342e89574 100644
+--- a/resources/seon/schemas/seon.await.edn
++++ b/resources/seon/schemas/seon.await.edn
+@@ -8,7 +8,7 @@
+              [:enum {:description "The actual channel operation that observed closure before completion; a bounded operation vocabulary, not an entity discriminator."} :put :take]
+              :operation-index [:int {:min 0}]
+              :timeout-error
+-             [:and {:seon.db/attributes true}
++             [:merge {:seon.db/attributes true}
+               :seon.error/base
+               [:map
+                [:seon.await/config-attribute :seon.await/config-attribute]
+@@ -19,7 +19,7 @@
+                [:seon.await/subject {:optional true} :seon.await/subject]
+                [:seon.await/requested-member {:optional true} :seon.await/requested-member]]]
+              :closed-error
+-             [:and {:seon.db/attributes true}
++             [:merge {:seon.db/attributes true}
+               :seon.error/base
+               [:map
+                [:seon.await/closed-operation :seon.await/closed-operation]
+diff --git a/resources/seon/schemas/seon.blob.edn b/resources/seon/schemas/seon.blob.edn
+index 0b73dad18..857f4c873 100644
+--- a/resources/seon/schemas/seon.blob.edn
++++ b/resources/seon/schemas/seon.blob.edn
+@@ -37,5 +37,5 @@
+             :store-root-absent :string
+             :stored-content-mismatch :seon.blob/digest
+             :input-stalled :seon.blob/size
+-            :input-stalled-error [:and :seon.error/base [:map [:seon.blob/input-stalled :seon.blob/input-stalled]]]
++            :input-stalled-error [:merge :seon.error/base [:map [:seon.blob/input-stalled :seon.blob/input-stalled]]]
+             :content-digest-mismatch :seon.blob/digest}
+diff --git a/resources/seon/schemas/seon.boot.edn b/resources/seon/schemas/seon.boot.edn
+index 59f09c417..527f3d93f 100644
+--- a/resources/seon/schemas/seon.boot.edn
++++ b/resources/seon/schemas/seon.boot.edn
+@@ -160,7 +160,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.boot/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.bootstrap.edn b/resources/seon/schemas/seon.bootstrap.edn
+index 811583f29..e06ad0b40 100644
+--- a/resources/seon/schemas/seon.bootstrap.edn
++++ b/resources/seon/schemas/seon.bootstrap.edn
+@@ -6,7 +6,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.bootstrap/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -21,7 +21,7 @@
+  :seon.bootstrap/missing-agent-id [:string {:description "The requested agent id that names no agent."}]
+ 
+  :seon.bootstrap/agent-not-found-error
+- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
++ [:merge {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+   :seon.error/base
+   [:map [:seon.bootstrap/missing-agent-id :seon.bootstrap/missing-agent-id]]]
+ 
+diff --git a/resources/seon/schemas/seon.call-preparation.edn b/resources/seon/schemas/seon.call-preparation.edn
+index 82bc204f8..aad8b8a67 100644
+--- a/resources/seon/schemas/seon.call-preparation.edn
++++ b/resources/seon/schemas/seon.call-preparation.edn
+@@ -200,18 +200,18 @@
+  :thrown-supplier :qualified-symbol
+  :invalid-key :qualified-keyword
+  :incoherent-supplier-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.call-preparation/incoherent-key :seon.call-preparation/incoherent-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key] [:seon.call-preparation/coherence-expectation :seon.call-preparation/coherence-expectation]]]
+  :unavailable-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/unavailable-key :seon.call-preparation/unavailable-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.fn.argument/index :seon.fn.argument/index]]]
+  :unresolved-supplier-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.call-preparation/unresolved-symbol :seon.call-preparation/unresolved-symbol]]]
+  :invalid-supplied-value-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]
+  :ambiguous-call-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidate-count :seon.call-preparation/candidate-count] [:seon.call-preparation/candidates {:optional true} :seon.call-preparation/candidates] [:seon.call-preparation/offending-arguments {:optional true} :seon.call-preparation/offending-arguments]]]
+ }
+diff --git a/resources/seon/schemas/seon.cluster.boot.edn b/resources/seon/schemas/seon.cluster.boot.edn
+index 85c0fab2b..ff259ea4e 100644
+--- a/resources/seon/schemas/seon.cluster.boot.edn
++++ b/resources/seon/schemas/seon.cluster.boot.edn
+@@ -1,6 +1,6 @@
+ #:seon.cluster.boot
+ {:disposition [:enum :refused :boot-failed :operation-failed]
+  :operation-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.cluster.boot/disposition :seon.cluster.boot/disposition]]]}
+diff --git a/resources/seon/schemas/seon.cluster.edn b/resources/seon/schemas/seon.cluster.edn
+index 6771bfc71..fed64693e 100644
+--- a/resources/seon/schemas/seon.cluster.edn
++++ b/resources/seon/schemas/seon.cluster.edn
+@@ -34,7 +34,7 @@
+   :seon.cluster/servable
+   [:map [:seon.render.web/served :seon.render.web/server]]]
+  :seon.cluster/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.cluster.host.edn b/resources/seon/schemas/seon.cluster.host.edn
+index 5dca1ec36..dade0a70a 100644
+--- a/resources/seon/schemas/seon.cluster.host.edn
++++ b/resources/seon/schemas/seon.cluster.host.edn
+@@ -1,5 +1,5 @@
+ #:seon.cluster.host{:refused-error
+-                    [:and {:description "A host decision refused by name: a closed admission, another home branch, another agent hosted on the branch; :seon.error/member names which."}
++                    [:merge {:description "A host decision refused by name: a closed admission, another home branch, another agent hosted on the branch; :seon.error/member names which."}
+                      :seon.error/base
+                      [:map [:seon.cluster.host/refused-agent :seon.cluster.host/refused-agent]]],
+                     :refused-agent [:string {:min 1 :description "The agent id a host decision refused, as a value (not the agent's identity)."}],
+diff --git a/resources/seon/schemas/seon.cluster.registry.edn b/resources/seon/schemas/seon.cluster.registry.edn
+index f6df00db7..81504876b 100644
+--- a/resources/seon/schemas/seon.cluster.registry.edn
++++ b/resources/seon/schemas/seon.cluster.registry.edn
+@@ -49,14 +49,14 @@
+                         :source-absent :seon.cluster/name
+                         :refused :seon.cluster.registry/rule
+  :seon.cluster.registry/branch-missing [:= true]
+- :seon.cluster.registry/branch-missing-error [:and {:error/message "must name the store and a branch the store does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
++ :seon.cluster.registry/branch-missing-error [:merge {:error/message "must name the store and a branch the store does not hold"} :seon.error/base [:map [:seon.cluster.registry/branch-missing :seon.cluster.registry/branch-missing] [:seon.store/dir :seon.store/dir] [:seon.store/branch :seon.store/branch]]]
+  :seon.cluster.registry/candidate-file-absent [:= true]
+  :seon.cluster.registry/dry-run-barrier-absent [:= true]
+  :seon.cluster.registry/dry-run-complete [:= true]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.cluster.registry/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.cluster.reply.edn b/resources/seon/schemas/seon.cluster.reply.edn
+index 666a0b146..54075f2e9 100644
+--- a/resources/seon/schemas/seon.cluster.reply.edn
++++ b/resources/seon/schemas/seon.cluster.reply.edn
+@@ -16,7 +16,7 @@
+                      :no-forms [:= true]
+                      :commented-forms [:vector :string]
+                      :dropped-markup [:vector {:description "The tool-call markup (DSML or antml tags) the scan dropped from a reply with no form, in text order."} :string]
+-                     :no-forms-error [:and {:error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.cluster.reply/commented-forms {:optional true} :seon.cluster.reply/commented-forms] [:seon.cluster.reply/dropped-markup {:optional true} :seon.cluster.reply/dropped-markup] [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls] [:seon.error/message :seon.error/message]]]
++                     :no-forms-error [:merge {:error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.cluster.reply/commented-forms {:optional true} :seon.cluster.reply/commented-forms] [:seon.cluster.reply/dropped-markup {:optional true} :seon.cluster.reply/dropped-markup] [:seon.ai/unknown-tool-calls {:optional true} :seon.ai/unknown-tool-calls] [:seon.error/message :seon.error/message]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.cluster.reply/authored-reply
+@@ -26,7 +26,7 @@
+  :seon.db/ref]
+ 
+  :seon.cluster.reply/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.cluster.source.edn b/resources/seon/schemas/seon.cluster.source.edn
+index 99018e778..7cab30d87 100644
+--- a/resources/seon/schemas/seon.cluster.source.edn
++++ b/resources/seon/schemas/seon.cluster.source.edn
+@@ -10,7 +10,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.cluster.source/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.cluster.status.edn b/resources/seon/schemas/seon.cluster.status.edn
+index f82b9da4c..897a198cc 100644
+--- a/resources/seon/schemas/seon.cluster.status.edn
++++ b/resources/seon/schemas/seon.cluster.status.edn
+@@ -1,6 +1,6 @@
+ {:seon.cluster.status/unavailable-observation :string
+  :seon.cluster.status/unavailable-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map [:seon.cluster.status/unavailable-observation
+          :seon.cluster.status/unavailable-observation]]]
+  :seon.cluster.status/root
+diff --git a/resources/seon/schemas/seon.cluster.store.edn b/resources/seon/schemas/seon.cluster.store.edn
+index 5ebb10593..ba42c476b 100644
+--- a/resources/seon/schemas/seon.cluster.store.edn
++++ b/resources/seon/schemas/seon.cluster.store.edn
+@@ -14,7 +14,7 @@
+  :seon.db/ref]
+ 
+  :seon.cluster.store/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.cluster.wake.edn b/resources/seon/schemas/seon.cluster.wake.edn
+index 64ae03339..2c4de9541 100644
+--- a/resources/seon/schemas/seon.cluster.wake.edn
++++ b/resources/seon/schemas/seon.cluster.wake.edn
+@@ -32,11 +32,11 @@
+                       :seon.db/connection]
+                      [:seon.cluster.wake/key :seon.cluster.wake/key]],
+                     :undeliverable-wake [:or :seon.agent/id :seon.cluster.wake/key]
+-                    :undeliverable-wake-error [:and {:error/message "must identify the registration whose wake could not be delivered"} :seon.error/base [:map [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake]]]
++                    :undeliverable-wake-error [:merge {:error/message "must identify the registration whose wake could not be delivered"} :seon.error/base [:map [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.cluster.wake/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -50,7 +50,7 @@
+  [:string {:min 1}]
+ 
+  :seon.cluster.wake/unroutable-declarations-error
+- [:and {:description "The installed wake declarations cannot carry a cluster (no listened or inside attribute, a listened attribute outside :avet) or can never arm a created agent; the attributes concerned. seon.cluster.wake/route! answers it and registers nothing."}
++ [:merge {:description "The installed wake declarations cannot carry a cluster (no listened or inside attribute, a listened attribute outside :avet) or can never arm a created agent; the attributes concerned. seon.cluster.wake/route! answers it and registers nothing."}
+   :seon.error/base
+   [:map [:seon.cluster.wake/attributes :seon.cluster.wake/attributes]]]
+ 
+diff --git a/resources/seon/schemas/seon.config.edn b/resources/seon/schemas/seon.config.edn
+index 3ae9503ea..dd4d7a21b 100644
+--- a/resources/seon/schemas/seon.config.edn
++++ b/resources/seon/schemas/seon.config.edn
+@@ -56,7 +56,7 @@
+ 
+  :seon.config/error
+  [:and
+- [:and
++ [:merge
+   {:seon.db/attributes true}
+   :seon.error/base
+   [:map
+diff --git a/resources/seon/schemas/seon.db.availability.edn b/resources/seon/schemas/seon.db.availability.edn
+index 93394f00b..2be3c541e 100644
+--- a/resources/seon/schemas/seon.db.availability.edn
++++ b/resources/seon/schemas/seon.db.availability.edn
+@@ -5,7 +5,7 @@
+  [:string {:min 1}]
+ 
+  :seon.db.availability/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.db.edn b/resources/seon/schemas/seon.db.edn
+index 58bf7e5a0..48aa03134 100644
+--- a/resources/seon/schemas/seon.db.edn
++++ b/resources/seon/schemas/seon.db.edn
+@@ -317,7 +317,7 @@
+           :conflict-owner :seon.db/entity-id,
+           :transaction-refused [:= true]
+           :transaction-refused-error
+-          [:and :seon.error/base
++          [:merge :seon.error/base
+            [:map {:seon.db/attributes true}
+             [:seon.db/transaction-refused :seon.db/transaction-refused]
+             [:seon.db/owned-value-refusal {:optional true} :seon.db/owned-value-refusal]
+@@ -334,9 +334,9 @@
+           :transaction-outcome-unknown [:= true]
+  :seon.db/refused-read-operation :qualified-symbol
+  :seon.db/invalid-read [:= true]
+- :seon.db/invalid-read-error [:and :seon.error/base [:map {:error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
++ :seon.db/invalid-read-error [:merge :seon.error/base [:map {:error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
+  :seon.db/pull-budget-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:datahike.budget/name :datahike.budget/name]
+    [:datahike.budget/observed :datahike.budget/observed]
+@@ -344,7 +344,7 @@
+  :seon.db/invalid-request [:= true]
+  :seon.db/missing-request-member :keyword
+  :seon.db/invalid-request-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.db/invalid-request :seon.db/invalid-request]
+    [:seon.db/missing-request-member :seon.db/missing-request-member]]]
+diff --git a/resources/seon/schemas/seon.db.read.edn b/resources/seon/schemas/seon.db.read.edn
+index 8222e6627..74092acb3 100644
+--- a/resources/seon/schemas/seon.db.read.edn
++++ b/resources/seon/schemas/seon.db.read.edn
+@@ -3,7 +3,7 @@
+ 
+  :seon.db.read/error
+  [:and
+- [:and
++ [:merge
+   {:seon.db/attributes true}
+   :seon.error/base
+   [:map
+@@ -26,7 +26,7 @@
+ 
+  :seon.db.read/unreadable-declarations :qualified-symbol
+  :seon.db.read/unreadable-declarations-error
+- [:and :seon.error/base :seon.db/invalid-read-error
++ [:merge :seon.error/base :seon.db/invalid-read-error
+   [:map {:seon.db/attributes true}
+    [:seon.db.read/unreadable-declarations :seon.db.read/unreadable-declarations]]]
+ 
+diff --git a/resources/seon/schemas/seon.db.write.edn b/resources/seon/schemas/seon.db.write.edn
+index cb90aea18..866d21934 100644
+--- a/resources/seon/schemas/seon.db.write.edn
++++ b/resources/seon/schemas/seon.db.write.edn
+@@ -2,7 +2,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.db.write/validation-refusal
+- [:and
++ [:merge
+   {:seon.db/attributes false
+    :seon.render/ai seon.db/render-rejection-ai
+    :seon.render/html seon.db/render-rejection-html
+@@ -17,7 +17,7 @@
+     [:map [:seon.db.write.attempt/transaction :seon.db.write.attempt/transaction]]]]]
+ 
+  :seon.db.write/entity-refusal
+- [:and
++ [:merge
+   {:seon.db/attributes false
+    :description "The writer's refusal of a resulting entity: every failing path is a problem with its own offending value (a missing key's is the map it is missing from), never a placeholder such as :seon.error/unknown. A transient refusal value, not a stored entity."}
+   :seon.error/base
+@@ -35,7 +35,7 @@
+  :seon.db/ref]
+ 
+  :seon.db.write/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.dev.mcp.edn b/resources/seon/schemas/seon.dev.mcp.edn
+index 072136d5b..9cc276ba6 100644
+--- a/resources/seon/schemas/seon.dev.mcp.edn
++++ b/resources/seon/schemas/seon.dev.mcp.edn
+@@ -5,7 +5,7 @@
+  :seon.dev.mcp/projection-failure-message :string
+  :seon.dev.mcp/projection-offending-class [:string {:min 1}]
+  :seon.dev.mcp/projection-failed-error
+- [:and
++ [:merge
+   {:seon.db/attributes true
+    :seon.render/ai seon.error/mcp-prose}
+   :seon.error/base
+@@ -21,7 +21,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.dev.mcp/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.effect.edn b/resources/seon/schemas/seon.effect.edn
+index 322df57f9..485f4eb6b 100644
+--- a/resources/seon/schemas/seon.effect.edn
++++ b/resources/seon/schemas/seon.effect.edn
+@@ -6,7 +6,7 @@
+                 :seon.db/index true}
+                :seon.db/ref],
+               :handler-failed-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/failed-owner
+@@ -20,7 +20,7 @@
+               :request-edn [:string #:seon.db{:no-history? true}],
+               :result-edn [:string #:seon.db{:no-history? true}],
+               :error
+-              [:and
++              [:merge
+                #:seon.db{:attributes true}
+                :seon.error/base
+                [:map
+@@ -54,7 +54,7 @@
+                 :seon.db/index true}
+                :seon.db/ref],
+               :invalid-time-limit-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/time-limit-attribute
+@@ -63,7 +63,7 @@
+               :time-limit-attribute :qualified-keyword,
+               :unavailable-handler-symbol :qualified-symbol,
+               :request-too-large-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/unadmitted-owner
+@@ -91,7 +91,7 @@
+                :seon.db/ref],
+               :interrupted-effect-id [:string {:min 1}],
+               :undeclared-owner-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/owner-without-handler
+@@ -130,7 +130,7 @@
+                          [:cat [:fn clojure.core/ifn?] :qualified-symbol :string :seon.schema/value :map] :seon.schema/value],
+               :notify [:and #:seon.db{:index true} :seon.db/ref],
+               :interrupted-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/interrupted-effect-id
+@@ -139,14 +139,14 @@
+               :failed-owner :qualified-symbol,
+               :missing-bound :qualified-keyword,
+               :unavailable-handler-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/unavailable-handler-symbol
+                  :seon.effect/unavailable-handler-symbol]]],
+               :missing-effect-id [:string {:min 1}],
+               :missing-background-time-limit-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/missing-bound
+@@ -159,13 +159,13 @@
+                {:description
+                 "The admitted request or result map, handed to the writer beside the receipt so the writer can record the entries this branch installs as attributes. It is transaction-function input, never an entity map."}],
+               :invalid-request-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/request-owner
+                  :seon.effect/request-owner]]],
+               :no-evaluation-context-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/missing-context-member
+@@ -174,7 +174,7 @@
+               :settled-at :inst,
+               :request-identity [:string {:min 1}],
+               :invalid-owner-error
+-              [:and
++              [:merge
+                :seon.error/base
+                [:map
+                 [:seon.effect/owner-class :seon.effect/owner-class]]],
+diff --git a/resources/seon/schemas/seon.env.edn b/resources/seon/schemas/seon.env.edn
+index 60aef617b..3da2ae322 100644
+--- a/resources/seon/schemas/seon.env.edn
++++ b/resources/seon/schemas/seon.env.edn
+@@ -89,7 +89,7 @@
+  :seon.env/available-members [:set :qualified-keyword]
+  :seon.env/provided-member-count [:int {:min 0}]
+  :seon.env/absent-environment-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.env/boundary :seon.env/boundary]
+    [:seon.env/provided-member-count :seon.env/provided-member-count]
+@@ -97,13 +97,13 @@
+ ]]
+  :seon.env/agent-environment :seon.boot/cluster-name
+  :seon.env/agent-id-absent-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.env/agent-environment :seon.env/agent-environment]
+ ]]
+  :seon.env/missing-member :qualified-keyword
+  :seon.env/incomplete-environment-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.env/missing-member :seon.env/missing-member]
+    [:seon.env/provided-member-count :seon.env/provided-member-count]
+@@ -111,21 +111,21 @@
+ ]]
+  :seon.env/expected-schema :keyword
+  :seon.env/invalid-value-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.env/expected-schema :seon.env/expected-schema]
+ ]]
+  :seon.env/missing-schema :qualified-keyword
+  :seon.env/unscopable-members [:vector {:min 1} :qualified-keyword]
+  :seon.env/unscopable-member-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.env/unscopable-members :seon.env/unscopable-members]
+ ]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.env/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.error.edn b/resources/seon/schemas/seon.error.edn
+index b3564b709..925963736 100644
+--- a/resources/seon/schemas/seon.error.edn
++++ b/resources/seon/schemas/seon.error.edn
+@@ -1,6 +1,6 @@
+ #:seon.error{:unimplemented-function :qualified-symbol,
+              :unimplemented
+-             [:and {:description "A contracted stub has no implementation; its error is a designed red product test."}
++             [:merge {:description "A contracted stub has no implementation; its error is a designed red product test."}
+               :seon.error/base [:map [:seon.error/unimplemented-function :seon.error/unimplemented-function]]],
+              :throwable
+              [:fn {:error/message "must be a JVM Throwable"
+@@ -430,7 +430,7 @@
+  [:qualified-keyword {:description "The error's variant: the registered schema key its producer declared (seon.error.refusal/error). It selects the variant's render pair and the recorder's declared schema; a key, so it survives merge, assoc and ex-data across a boundary."}]
+  :seon.error/refused-schema :qualified-keyword
+  :seon.error/normalization-error
+- [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
++ [:merge :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
+ 
+  :seon.error/in-namespace
+  [:map-of {:description "When a name was not found: its namespace and the names declared there nearest to it by spelling, at most eight (seon.error/reply-value). Shown, never stored."}
+diff --git a/resources/seon/schemas/seon.eval.drive.edn b/resources/seon/schemas/seon.eval.drive.edn
+index 5834b2d3a..a232de94d 100644
+--- a/resources/seon/schemas/seon.eval.drive.edn
++++ b/resources/seon/schemas/seon.eval.drive.edn
+@@ -61,7 +61,7 @@
+  :seon.db/ref]
+ 
+  :seon.eval.drive/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.flow.edn b/resources/seon/schemas/seon.flow.edn
+index 8df81ba07..92b94a3a0 100644
+--- a/resources/seon/schemas/seon.flow.edn
++++ b/resources/seon/schemas/seon.flow.edn
+@@ -112,7 +112,7 @@
+             :proc-id :keyword,
+  :seon.flow/submission-capacity :seon.flow/proc-id
+  :seon.flow/submission-capacity-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map
+    [:seon.flow/submission-capacity :seon.flow/submission-capacity]
+    [:seon.flow/submission-id :seon.flow/submission-id]
+@@ -131,7 +131,7 @@
+  :seon.db/ref]
+ 
+  :seon.flow/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -145,7 +145,7 @@
+   :seon.db/component-schema :seon.error.projection/entity}
+  :seon.db/ref]
+  :seon.flow/exception-error
+- [:and :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
++ [:merge :seon.error/base [:map [:seon.error/exception-class :seon.error/exception-class]]]
+ 
+  :seon.flow/thread-counters
+  [:tuple {:description "One thread's allocated bytes and CPU nanoseconds (seon.flow/thread-counters); an unavailable reading is -1."} :int :int]
+diff --git a/resources/seon/schemas/seon.fn.binding.edn b/resources/seon/schemas/seon.fn.binding.edn
+index 7ebe40596..9eda93167 100644
+--- a/resources/seon/schemas/seon.fn.binding.edn
++++ b/resources/seon/schemas/seon.fn.binding.edn
+@@ -29,7 +29,7 @@
+  :seon.db/ref]
+ 
+  :seon.fn.binding/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.fn.edn b/resources/seon/schemas/seon.fn.edn
+index b404d3f00..5638e7c65 100644
+--- a/resources/seon/schemas/seon.fn.edn
++++ b/resources/seon/schemas/seon.fn.edn
+@@ -4,7 +4,7 @@
+  [:map [:seon.fn/affected :seon.fn/affected] [:seon.fn/tests :seon.fn/tests]]
+  :namespace-unresolvable [:= true]
+           :namespace-unresolvable-error
+-          [:and :seon.error/base
++          [:merge :seon.error/base
+            [:map
+             [:seon.fn/namespace-unresolvable :seon.fn/namespace-unresolvable]
+             [:seon.fn/source :seon.fn/source]]]
+@@ -234,7 +234,7 @@
+  :seon.fn/index-refused-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused distinguishing member"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.cluster.source/phase {:optional true} :seon.cluster.source/phase] [:seon.error/message :seon.error/message]]
+  :seon.fn/dependency-analysis-missing [:= true]
+  :seon.fn/unresolved-targets [:vector {:min 1} :qualified-symbol]
+- :seon.fn/dependency-analysis-missing-error [:and {:seon.db/attributes true}
++ :seon.fn/dependency-analysis-missing-error [:merge {:seon.db/attributes true}
+   :seon.error/base
+   [:map {:error/message "must name the call targets whose namespace clj-kondo never analyzed"} [:seon.fn/dependency-analysis-missing :seon.fn/dependency-analysis-missing] [:seon.fn/unresolved-targets :seon.fn/unresolved-targets]]]
+  :seon.fn/signature-refused [:= true]
+@@ -244,7 +244,7 @@
+  :qualified-keyword
+ 
+  :seon.fn/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.git.edn b/resources/seon/schemas/seon.git.edn
+index 253c5e370..11d45bff8 100644
+--- a/resources/seon/schemas/seon.git.edn
++++ b/resources/seon/schemas/seon.git.edn
+@@ -1,4 +1,4 @@
+ #:seon.git{:commit [:string {:min 40 :max 40 :description "A git commit's full sha, as `git rev-parse` prints it: the commit a landing made (seon.cluster.source/commit!)."}],
+            :paths [:vector {:description "The checkout-relative paths a landing asked git to commit."} :seon.source/path],
+-           :commit-error [:and {:description "seon.cluster.source/commit! refused or could not verify a landing's git commit."} :seon.error/base
++           :commit-error [:merge {:description "seon.cluster.source/commit! refused or could not verify a landing's git commit."} :seon.error/base
+                           [:map [:seon.git/paths :seon.git/paths]]]}
+diff --git a/resources/seon/schemas/seon.health.edn b/resources/seon/schemas/seon.health.edn
+index dbf045ad8..647732b18 100644
+--- a/resources/seon/schemas/seon.health.edn
++++ b/resources/seon/schemas/seon.health.edn
+@@ -80,7 +80,7 @@
+            [:seon.health/wake {:optional true} [:fn {:error/message "must be a function of no arguments"} clojure.core/ifn?]]]
+  :deadline-ms [:int {:min 0}]
+  :wake [:fn clojure.core/ifn?]
+- :missing-cluster-error [:and :seon.error/base [:map [:seon.health/cluster :seon.health/cluster]]]
++ :missing-cluster-error [:merge :seon.error/base [:map [:seon.health/cluster :seon.health/cluster]]]
+ 
+  :view [:map {:description "The AI face: state, basis, each unit's counts, the top findings with their clues and tasks, and the reads that dig further."}
+         [:seon.health/cluster :seon.health/cluster]
+diff --git a/resources/seon/schemas/seon.id.edn b/resources/seon/schemas/seon.id.edn
+index c40bfa1d7..10d7c8cc0 100644
+--- a/resources/seon/schemas/seon.id.edn
++++ b/resources/seon/schemas/seon.id.edn
+@@ -1,4 +1,4 @@
+ {:seon.id/character char?
+  :seon.id/class [:string {:min 1 :description "The class of a value seon.id/id has no structural encoding for."}]
+- :seon.id/unhashable-error [:and {:description "seon.id/id was handed a host object: hash its data (id, name or EDN fields) instead."}
++ :seon.id/unhashable-error [:merge {:description "seon.id/id was handed a host object: hash its data (id, name or EDN fields) instead."}
+                             :seon.error/base [:map [:seon.id/class :seon.id/class]]]}
+diff --git a/resources/seon/schemas/seon.instrument.edn b/resources/seon/schemas/seon.instrument.edn
+index d5e028798..781052db3 100644
+--- a/resources/seon/schemas/seon.instrument.edn
++++ b/resources/seon/schemas/seon.instrument.edn
+@@ -80,7 +80,7 @@
+ 
+  :seon.instrument/arity-error
+  [:and
+- [:and
++ [:merge
+   {:seon.db/attributes true}
+   :seon.error/base
+   [:map
+@@ -100,7 +100,7 @@
+  [:enum :input :output :guard]
+ 
+  :seon.instrument/contract-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -133,7 +133,7 @@
+  :seon.instrument/arity-error ]
+ 
+  :seon.instrument/registration-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.maintenance.edn b/resources/seon/schemas/seon.maintenance.edn
+index ff6d0ac04..4e13cc307 100644
+--- a/resources/seon/schemas/seon.maintenance.edn
++++ b/resources/seon/schemas/seon.maintenance.edn
+@@ -40,22 +40,22 @@
+                     :seon.maintenance/result-projection-unresolved-error
+                     :seon.maintenance/result-projection-failed-error] :seon.maintenance/matching-producer-count [:int {:min 2}]
+  :seon.maintenance/ambiguous-result-projection-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.maintenance/matching-producer-count :seon.maintenance/matching-producer-count]]]
+  :seon.maintenance/unresolved-producer :qualified-symbol
+  :seon.maintenance/result-projection-unresolved-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.maintenance/unresolved-producer :seon.maintenance/unresolved-producer]]]
+  :seon.maintenance/failed-producer :qualified-symbol
+  :seon.maintenance/result-projection-failed-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.maintenance/failed-producer :seon.maintenance/failed-producer]]]
+  :seon.maintenance/disabled-collection-flag :qualified-keyword
+  :seon.maintenance/collection-disabled-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.maintenance/disabled-collection-flag :seon.maintenance/disabled-collection-flag]]]
+  :seon.maintenance/uncollected-root :string
+  :seon.maintenance/root-never-collected-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.maintenance/uncollected-root :seon.maintenance/uncollected-root]]]
+ }
+diff --git a/resources/seon/schemas/seon.message.edn b/resources/seon/schemas/seon.message.edn
+index 16b8a03f2..dd76c5c7c 100644
+--- a/resources/seon/schemas/seon.message.edn
++++ b/resources/seon/schemas/seon.message.edn
+@@ -4,7 +4,7 @@
+  :recipient :seon.agent/id
+  :intent [:or :seon.task/execution [:= :unknown]]
+  :cause [:enum :no-graph :closed :full]
+- :undeliverable [:and :seon.error/base
++ :undeliverable [:merge :seon.error/base
+                  [:map [:seon.message/recipient :seon.message/recipient]
+                        [:seon.message/intent :seon.message/intent]
+                        [:seon.message/cause :seon.message/cause]]]
+@@ -62,7 +62,7 @@
+                  "Every message addressed to one agent, as the reverse of `to` pulls them."}
+                 :seon.message/pulled],
+                :no-limit-error
+-               [:and {:seon.db/attributes true} :seon.error/base
++               [:merge {:seon.db/attributes true} :seon.error/base
+                 [:map
+                 {:error/message
+                  "must mark a message chain with no configured limit"}
+@@ -149,7 +149,7 @@
+                :content [:string {:min 1}],
+                :size [:int {:min 0}],
+                :chain-limit-error
+-               [:and {:seon.db/attributes true} :seon.error/base
++               [:merge {:seon.db/attributes true} :seon.error/base
+                 [:map
+                 {:error/message
+                  "must identify the message-chain limit that was reached"}
+@@ -163,7 +163,7 @@
+                 [:seon.message/rows :seon.db/tx-data]
+                 [:seon.error/values [:vector :seon.error/value]]],
+                :unknown-recipient-error
+-               [:and {:seon.db/attributes true} :seon.error/base
++               [:merge {:seon.db/attributes true} :seon.error/base
+                 [:map
+                 {:error/message
+                  "must identify the unknown message recipient"}
+@@ -176,7 +176,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.message/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.operator.collect.edn b/resources/seon/schemas/seon.operator.collect.edn
+index 2931c175e..9ffdfb2dc 100644
+--- a/resources/seon/schemas/seon.operator.collect.edn
++++ b/resources/seon/schemas/seon.operator.collect.edn
+@@ -94,7 +94,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.operator.collect/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.operator.edn b/resources/seon/schemas/seon.operator.edn
+index f37bc9d96..79a7f0a67 100644
+--- a/resources/seon/schemas/seon.operator.edn
++++ b/resources/seon/schemas/seon.operator.edn
+@@ -1,6 +1,6 @@
+ #:seon.operator{:disposition [:enum :refused :client-failed :argv-failed],
+                 :operation-error
+-                [:and :seon.error/base
++                [:merge :seon.error/base
+                  [:map {:seon.db/attributes true}
+                   [:seon.operator/disposition :seon.operator/disposition]]],
+                 :census
+@@ -121,7 +121,7 @@
+                   :seon.operator/managed-root]],
+                 :error-root [:string {:min 1}],
+                 :failed-error
+-                [:and
++                [:merge
+                  :seon.error/base
+                  [:map
+                   [:seon.operator/exception-class
+@@ -147,7 +147,7 @@
+                  [:seon.config.maintenance/log-retained-files
+                   :seon.config.maintenance/log-retained-files]],
+                 :error
+-                [:and
++                [:merge
+                  #:seon.db{:attributes true}
+                  :seon.error/base
+                  [:map
+diff --git a/resources/seon/schemas/seon.problems.edn b/resources/seon/schemas/seon.problems.edn
+index bd2634908..b08f7b0cd 100644
+--- a/resources/seon/schemas/seon.problems.edn
++++ b/resources/seon/schemas/seon.problems.edn
+@@ -163,7 +163,7 @@
+  :seon.db/ref]
+ 
+  :seon.problems/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.program.edn b/resources/seon/schemas/seon.program.edn
+index 1bd22ad38..28e1214fe 100644
+--- a/resources/seon/schemas/seon.program.edn
++++ b/resources/seon/schemas/seon.program.edn
+@@ -52,7 +52,7 @@
+  :seon.program/undigested-declarations
+  [:set {:min 1} :seon.program/declaration-identity]
+  :seon.program/digest-map-refusal
+- [:and
++ [:merge
+   :seon.error/base
+   [:map
+    [:seon.program/missing-evidence :seon.program/missing-evidence]
+@@ -170,7 +170,7 @@
+   :seon.program/identity-attribute :seon.program/shape]
+  :seon.program/position [:int {:min 0}]
+ 
+- :seon.program/no-declaration-at-error [:and {:seon.db/attributes true}
++ :seon.program/no-declaration-at-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.program/position :seon.program/position] [:seon.program/declarations-examined :seon.program/declarations-examined]]]
+  :seon.program/referrers
+@@ -182,7 +182,7 @@
+    [:seon.program/referrer [:map-of :qualified-keyword :seon.schema/value]]
+    [:db/id :int]]]
+  :seon.program/deletion-refused-error
+- [:and {:seon.db/attributes false
++ [:merge {:seon.db/attributes false
+         :description "Transient final-transaction evidence; the write recorder owns durable projection of the refused request and its referrers."}
+   :seon.error/base
+   [:map {:description "A final program still names a removed declaration. Referrers identify the surviving writers, callers or schema dependencies."}
+@@ -293,16 +293,16 @@
+  :seon.program/native-operation :qualified-symbol
+  :seon.program/advised-operation :qualified-symbol
+  :seon.program/read-refused-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.program/read-operation :seon.program/read-operation] [:seon.error/exception-class :seon.error/exception-class]]]
+  :seon.program/not-found-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.program/not-found :seon.program/not-found]]]
+  :seon.program/context-unavailable-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.program/missing-context-members :seon.program/missing-context-members]]]
+  :seon.program/mutation-refused-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.program/blocked-subject :seon.program/blocked-subject] [:seon.program/affected :seon.program/affected]]]
+  :seon.program/affected [:set :seon.program/subject]
+  :seon.program/change
+@@ -314,7 +314,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.program/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.reconcile.edn b/resources/seon/schemas/seon.reconcile.edn
+index a16799a65..8068cd777 100644
+--- a/resources/seon/schemas/seon.reconcile.edn
++++ b/resources/seon/schemas/seon.reconcile.edn
+@@ -44,7 +44,7 @@
+  :seon.db/ref]
+ 
+  :seon.reconcile/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.ref.edn b/resources/seon/schemas/seon.ref.edn
+index bb8490079..45002bcae 100644
+--- a/resources/seon/schemas/seon.ref.edn
++++ b/resources/seon/schemas/seon.ref.edn
+@@ -132,6 +132,6 @@
+                      [:seon.ref/below :seon.ref/below] [:seon.ref/pin {:optional true} :seon.ref/pin]]
+            :section-missing [:enum :file :heading]
+            :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
+-           :section-error [:and :seon.error/base
++           :section-error [:merge :seon.error/base
+                            [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path {:optional true} :seon.ref/path]
+                             [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}
+diff --git a/resources/seon/schemas/seon.render.data.edn b/resources/seon/schemas/seon.render.data.edn
+index 8d725b6d0..14c3bd396 100644
+--- a/resources/seon/schemas/seon.render.data.edn
++++ b/resources/seon/schemas/seon.render.data.edn
+@@ -28,13 +28,13 @@
+                      {:optional true}
+                      :seon.render.data/offset]],
+                    :no-such-path-error
+-                   [:and :seon.error/base
++                   [:merge :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.render.data/root-description :seon.render.data/root-description]
+   [:seon.render.data/requested-path-length :seon.render.data/requested-path-length]]]
+  :refused-member :qualified-keyword
+  :observation-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.render.data/refused-member :seon.render.data/refused-member]]]
+ 
+@@ -92,7 +92,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.render.data/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.render.edn b/resources/seon/schemas/seon.render.edn
+index 3e9417494..01d270ec0 100644
+--- a/resources/seon/schemas/seon.render.edn
++++ b/resources/seon/schemas/seon.render.edn
+@@ -122,7 +122,7 @@
+                 :seon.render.call/id]
+                [:seon.error/value {:optional true} :seon.error/value]],
+               :unknown
+-              [:and :seon.error/base
++              [:merge :seon.error/base
+  [:map {:seon.db/attributes true :seon.render/ai seon.render/unknown-ai :seon.render/html seon.render/unknown-html}
+   [:seon.render.unknown/reason :seon.render/unknown-reason]
+   [:seon.render.unknown/producer {:optional true} :qualified-symbol]
+@@ -211,13 +211,13 @@
+               :rendering [:set :qualified-symbol],
+               :would-fall-to-floor? :boolean,
+ 
+-              :ambiguous-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/candidates :seon.render/candidates]]]
++              :ambiguous-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/candidates :seon.render/candidates]]]
+               :invalid-output :keyword
+-              :invalid-output-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
++              :invalid-output-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.render/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -237,7 +237,7 @@
+  :selection-observation :map
+  :refused-member :qualified-keyword
+ 
+- :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
++ :request-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
+ 
+  :walk-operation :qualified-symbol
+ 
+diff --git a/resources/seon/schemas/seon.render.hiccup.edn b/resources/seon/schemas/seon.render.hiccup.edn
+index 548ab3470..2b24f9d8f 100644
+--- a/resources/seon/schemas/seon.render.hiccup.edn
++++ b/resources/seon/schemas/seon.render.hiccup.edn
+@@ -1,3 +1,3 @@
+ {:seon.render.hiccup/tag :string
+  :seon.render.hiccup/unparseable-tag :seon.render.hiccup/tag
+- :seon.render.hiccup/unparseable-tag-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag]]]}
++ :seon.render.hiccup/unparseable-tag-error [:merge {:seon.db/attributes true} :seon.error/base [:map [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag]]]}
+diff --git a/resources/seon/schemas/seon.render.transcript.edn b/resources/seon/schemas/seon.render.transcript.edn
+index 4b5b721a0..f6b28c0c1 100644
+--- a/resources/seon/schemas/seon.render.transcript.edn
++++ b/resources/seon/schemas/seon.render.transcript.edn
+@@ -52,7 +52,7 @@
+  :selection-identities :map
+  :refused-member :qualified-keyword
+ 
+- :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.transcript/refused-member :seon.render.transcript/refused-member] [:seon.render.transcript/selection-identities {:optional true} :seon.render.transcript/selection-identities]]]
++ :request-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.transcript/refused-member :seon.render.transcript/refused-member] [:seon.render.transcript/selection-identities {:optional true} :seon.render.transcript/selection-identities]]]
+ 
+  :error-result [:or :seon.render.transcript/request-error :seon.db/error-result]
+ }
+diff --git a/resources/seon/schemas/seon.render.value.edn b/resources/seon/schemas/seon.render.value.edn
+index 24c402bef..0a1c35ee7 100644
+--- a/resources/seon/schemas/seon.render.value.edn
++++ b/resources/seon/schemas/seon.render.value.edn
+@@ -77,14 +77,14 @@
+  ; The floor's B cannot show a value's root or a page's first member (one-render-path §3c).
+  :seon.render.value/budget [:int {:min 0 :description "The floor's character budget B."}]
+  :seon.render.value/needed [:int {:min 0 :description "Characters the root, or the root with its first member and legend, needs."}]
+- :seon.render.value/insufficient-floor-budget-error [:and :seon.error/base [:map [:seon.render.value/budget :seon.render.value/budget] [:seon.render.value/needed :seon.render.value/needed]]]
++ :seon.render.value/insufficient-floor-budget-error [:merge :seon.error/base [:map [:seon.render.value/budget :seon.render.value/budget] [:seon.render.value/needed :seon.render.value/needed]]]
+  :seon.render.value/unreadable-artifact [:string {:min 1 :description "Why stored content is not a value artifact: the one reader's refusal, or the shape it read."}]
+- :seon.render.value/unreadable-artifact-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/unreadable-artifact :seon.render.value/unreadable-artifact]]]
+- :seon.render.value/missing-root-identity-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/root-description :seon.render.value/root-description]]]
++ :seon.render.value/unreadable-artifact-error [:merge {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/unreadable-artifact :seon.render.value/unreadable-artifact]]]
++ :seon.render.value/missing-root-identity-error [:merge {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/root-description :seon.render.value/root-description]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.render.value/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.render.walk.edn b/resources/seon/schemas/seon.render.walk.edn
+index e8b685e11..34b6897d0 100644
+--- a/resources/seon/schemas/seon.render.walk.edn
++++ b/resources/seon/schemas/seon.render.walk.edn
+@@ -69,17 +69,17 @@
+                      :seon.db/tx-data]],
+                    :units [:vector :seon.render.walk/unit],
+ 
+-                   :elided-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html}
++                   :elided-error [:merge :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html}
+  [:seon.print/bound-by :qualified-keyword]
+  [:seon.render.walk/limit :seon.render.walk/limit]
+  [:seon.render.walk/continuation-subject :seon.render.walk/continuation-subject]]]
+ 
+-                   :no-such-entity-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
++                   :no-such-entity-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
+ 
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.render.walk/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -124,7 +124,7 @@
+  [:and {:description "A continued render's context: absent, the continuation renders without evaluating, and it is never supplied from the calling evaluation's world."}
+   :seon.sci.eval/ctx]
+  :seon.render.walk/continuation-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map [:seon.render.walk/continuation-reason :seon.render.walk/continuation-reason]
+    [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]]]
+ 
+diff --git a/resources/seon/schemas/seon.render.web.edn b/resources/seon/schemas/seon.render.web.edn
+index e598cf50d..6f45f835a 100644
+--- a/resources/seon/schemas/seon.render.web.edn
++++ b/resources/seon/schemas/seon.render.web.edn
+@@ -163,13 +163,13 @@
+                   :value-unreadable :seon.blob/digest
+                   :function-unavailable :qualified-symbol
+                   :function-unavailable-error
+-                  [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
++                  [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
+ 
+ 
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.render.web/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -194,7 +194,7 @@
+  :page-exception-class :symbol
+  :refused-member :qualified-keyword
+ 
+- :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
++ :request-error [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
+ 
+ 
+  :context-error :seon.render.web/request-error
+diff --git a/resources/seon/schemas/seon.schedule.edn b/resources/seon/schemas/seon.schedule.edn
+index d5f165e29..d8f68773d 100644
+--- a/resources/seon/schemas/seon.schedule.edn
++++ b/resources/seon/schemas/seon.schedule.edn
+@@ -45,12 +45,12 @@
+  :seon.schedule/missing-receipt-id :string
+  :seon.schedule/unresolved-handler-symbol :qualified-symbol
+  :seon.schedule/unresolved-handler-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base [:map [:seon.schedule/unresolved-handler-symbol :seon.schedule/unresolved-handler-symbol]]]
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.schedule/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -74,6 +74,6 @@
+  :seon.schedule/handler-exception-data :map
+  :seon.schedule/failed-handler-symbol :qualified-symbol
+  :seon.schedule/handler-failed-error
+- [:and :seon.error/base [:map [:seon.schedule/failed-handler-symbol :seon.schedule/failed-handler-symbol]
++ [:merge :seon.error/base [:map [:seon.schedule/failed-handler-symbol :seon.schedule/failed-handler-symbol]
+   [:seon.schedule/handler-exception-data {:optional true} :seon.schedule/handler-exception-data]]]
+ }
+diff --git a/resources/seon/schemas/seon.schema.datahike.edn b/resources/seon/schemas/seon.schema.datahike.edn
+index d788dd06c..378fbb24e 100644
+--- a/resources/seon/schemas/seon.schema.datahike.edn
++++ b/resources/seon/schemas/seon.schema.datahike.edn
+@@ -26,7 +26,7 @@
+  :seon.db/ref]
+ 
+  :seon.schema.datahike/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -40,6 +40,6 @@
+  :qualified-keyword
+  :seon.schema.datahike/unstorable-attribute [:qualified-keyword {:description "The attribute seon.schema.datahike/attribute-declaration could not map to a native Datahike declaration."}]
+  :seon.schema.datahike/unstorable-attribute-error
+- [:and {:description "Why an attribute has no native Datahike declaration; the per-reason member (attribute-absent, literal-not-storable, enum-not-storable, nilable-attribute, value-type-unavailable, invalid-secondary-attribute) says which."}
++ [:merge {:description "Why an attribute has no native Datahike declaration; the per-reason member (attribute-absent, literal-not-storable, enum-not-storable, nilable-attribute, value-type-unavailable, invalid-secondary-attribute) says which."}
+   :seon.error/base
+   [:map [:seon.schema.datahike/unstorable-attribute :seon.schema.datahike/unstorable-attribute]]]}
+diff --git a/resources/seon/schemas/seon.schema.edn b/resources/seon/schemas/seon.schema.edn
+index 28aada775..a4fff4269 100644
+--- a/resources/seon/schemas/seon.schema.edn
++++ b/resources/seon/schemas/seon.schema.edn
+@@ -129,13 +129,13 @@
+               :unresolved-predicate :qualified-symbol
+               :function-reference [:qualified-symbol {:description "A function a registered form named as a schema (seon.schema/register!); a predicate is [:fn sym]."}]
+               :unloadable-predicate :qualified-symbol
+-              :unloadable-predicate-error [:and {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
++              :unloadable-predicate-error [:merge {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
+               :noncanonical-definition :seon.schema/key
+               :noncanonical-projection-data [:= true]
+               :unreadable-form :seon.schema/key
+               :non-round-tripping-form :seon.schema/key
+               :unregister-outside-delta :seon.schema/key
+-              :unregister-outside-delta-error [:and {:error/message "must identify the schema unregistration requested outside an evaluation delta"} :seon.error/base [:map [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta]]]
++              :unregister-outside-delta-error [:merge {:error/message "must identify the schema unregistration requested outside an evaluation delta"} :seon.error/base [:map [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta]]]
+               :malformed-projection-row [:= true]
+               :malformed-projection-form [:= true]
+               :duplicate-projection-row :seon.schema/key
+@@ -171,7 +171,7 @@
+   :seon.schema/key]
+ 
+  :seon.schema/validation-refusal
+- [:and {:seon.db/attributes false
++ [:merge {:seon.db/attributes false
+         :description "Raw schema validation evidence. Recorder admission projects the refused and expected values into the existing stored schema error components."}
+   :seon.error/base
+   [:map
+@@ -186,7 +186,7 @@
+  :seon.db/ref]
+ 
+  :seon.schema/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -205,7 +205,7 @@
+  [:keyword {:description "The schema key whose registration the population refused (seon.schema/register!)."}]
+ 
+  :seon.schema/registration-refused-error
+- [:and {:description "What seon.schema/register! answers when the schema population refuses the registration: the refused kind as :seon.error/member (e.g. :seon.schema/nilable-value-schema, :seon.schema.edn/unresolved-reference), the refused key as :seon.schema/registration-refused, the authored form as :seon.error/offending and the population's refusal as the cause chain. Nothing was admitted."}
++ [:merge {:description "What seon.schema/register! answers when the schema population refuses the registration: the refused kind as :seon.error/member (e.g. :seon.schema/nilable-value-schema, :seon.schema.edn/unresolved-reference), the refused key as :seon.schema/registration-refused, the authored form as :seon.error/offending and the population's refusal as the cause chain. Nothing was admitted."}
+   :seon.error/base
+   [:map [:seon.error/member :seon.error/member] [:seon.schema/registration-refused :seon.schema/registration-refused]]]
+ }
+diff --git a/resources/seon/schemas/seon.schema.edn.edn b/resources/seon/schemas/seon.schema.edn.edn
+index 6cb85875e..a1bea0408 100644
+--- a/resources/seon/schemas/seon.schema.edn.edn
++++ b/resources/seon/schemas/seon.schema.edn.edn
+@@ -17,6 +17,6 @@
+  :seon.schema.edn/unresolved-reference [:qualified-keyword {:description "The registry key a declaration names that no schema declares (the declaration itself is :seon.schema.edn/attribute)."}]
+  :seon.schema.edn/attribute [:keyword {:description "The declaration a schema population refusal is about."}]
+  :seon.schema.edn/population-refused-error
+- [:and {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
++ [:merge {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
+   :seon.error/base
+   [:map [:seon.schema.edn/attribute :seon.schema.edn/attribute]]]}
+diff --git a/resources/seon/schemas/seon.sci.admit.edn b/resources/seon/schemas/seon.sci.admit.edn
+index 463c603b7..05ff27031 100644
+--- a/resources/seon/schemas/seon.sci.admit.edn
++++ b/resources/seon/schemas/seon.sci.admit.edn
+@@ -81,7 +81,7 @@
+  [:int {:min 1}]
+ 
+  :seon.sci.admit/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.sci.eval.edn b/resources/seon/schemas/seon.sci.eval.edn
+index 66284ebd6..c7812f0a5 100644
+--- a/resources/seon/schemas/seon.sci.eval.edn
++++ b/resources/seon/schemas/seon.sci.eval.edn
+@@ -8,7 +8,7 @@
+  :refused-function :qualified-symbol
+  :interpretation-reason :string
+  :interpretation-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base
+   [:map
+    [:seon.sci.eval/refused-function :seon.sci.eval/refused-function]
+@@ -236,7 +236,7 @@
+                  :seon.ns/name :seon.ns/ns],
+                 :schema-refused :seon.schema/key,
+                 :reader-event-count-error
+-                [:and {:seon.db/attributes true
++                [:merge {:seon.db/attributes true
+                        :description "An evaluation requires exactly one reader event. This observation records the actual count; it does not claim a parsed form or a projected source."}
+                  :seon.error/base
+                  [:map {:seon.db/attributes true}
+@@ -263,7 +263,7 @@
+                   "must hold one immutable replacement environment",
+                   :gen/gen seon.sci.eval/projection-state-generator}
+                  seon.sci.eval/projection-state?],
+-                :documentation-unavailable-error [:and {:seon.db/attributes true}
++                :documentation-unavailable-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.eval/documentation-unavailable :seon.sci.eval/documentation-unavailable]]],
+                 :acquire-request
+@@ -279,7 +279,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.sci.eval/row-acquisition-error
+- [:and
++ [:merge
+   {:seon.db/attributes true,
+    :description "Failure to acquire one observed program member. Owned by the error occurrence; no whole-program identity is asserted."}
+   :seon.error/base
+@@ -302,7 +302,7 @@
+  [:qualified-keyword {:description "The schema key observed while acquiring a schema entity, stored as a native keyword. A value observation, never a ref."}]
+ 
+  :seon.sci.eval/acquisition-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -322,7 +322,7 @@
+  :seon.db/ref]
+ 
+  :seon.sci.eval/evaluation-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -344,12 +344,12 @@
+ 
+ :pending-namespaces [:set {:min 1} :symbol]
+ :missing-declaration :qualified-keyword
+-:declaration-absent-error [:and {:seon.db/attributes true}
++:declaration-absent-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
+ 
+ :uncompilable-contract [:qualified-symbol {:description "The function whose stored contract Malli could not compile."}]
+-:uncompilable-contract-error [:and {:seon.db/attributes true}
++:uncompilable-contract-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.eval/uncompilable-contract :seon.sci.eval/uncompilable-contract]]]
+ 
+diff --git a/resources/seon/schemas/seon.sci.kernel.edn b/resources/seon/schemas/seon.sci.kernel.edn
+index 54dc0e19a..a38f1ba98 100644
+--- a/resources/seon/schemas/seon.sci.kernel.edn
++++ b/resources/seon/schemas/seon.sci.kernel.edn
+@@ -13,7 +13,7 @@
+  ; A kernel guard's refusal: it names the guard's observation (a deadline
+  ; that fired, a symbol with no installed Var, an unadmittable failure).
+  :seon.sci.kernel/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -27,7 +27,7 @@
+  ; author stacktrace; its pair selects what an agent sees. No bookkeeping:
+  ; duration, allocation and outcome stay on the evaluation record.
+  :seon.sci.kernel/execution-error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -52,7 +52,7 @@
+   [:seon.sci.kernel/entered-at :seon.sci.kernel/entered-at]
+   [:seon.sci.kernel/in-flight :seon.sci.kernel/in-flight]]
+  :seon.sci.kernel/memory-pressure-error
+- [:and :seon.error/base :seon.sci.kernel/memory-pressure]
++ [:merge :seon.error/base :seon.sci.kernel/memory-pressure]
+ 
+  :seon.sci.kernel/guard-observation
+  [:and
+diff --git a/resources/seon/schemas/seon.sci.reader.edn b/resources/seon/schemas/seon.sci.reader.edn
+index 95cd72038..16d905d90 100644
+--- a/resources/seon/schemas/seon.sci.reader.edn
++++ b/resources/seon/schemas/seon.sci.reader.edn
+@@ -11,15 +11,15 @@
+            [:edamame/column :int]
+            [:edamame/elements [:vector :seon.schema/value]]]]
+ 
+- :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true}
++ :seon.sci.reader/unreadable-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.reader/unreadable-member :seon.sci.reader/unreadable-member]]]
+ 
+- :seon.sci.reader/oversize-error [:and {:seon.db/attributes true}
++ :seon.sci.reader/oversize-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.reader/length :seon.sci.reader/length] [:seon.sci.reader/source-bound :seon.sci.reader/source-bound]]]
+ 
+- :seon.sci.reader/refused-tag-error [:and {:seon.db/attributes true}
++ :seon.sci.reader/refused-tag-error [:merge {:seon.db/attributes true}
+  :seon.error/base
+  [:map [:seon.sci.reader/refused-token :seon.sci.reader/refused-token]]]
+ 
+@@ -27,7 +27,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.sci.reader/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.source.edn b/resources/seon/schemas/seon.source.edn
+index 30786d022..7a3950b0b 100644
+--- a/resources/seon/schemas/seon.source.edn
++++ b/resources/seon/schemas/seon.source.edn
+@@ -2,7 +2,7 @@
+               :operator-root :string,
+               :refused-test-run [:and {:seon.db/identity false :description "Identity of the test request whose admission or completion the source authority refused."} :seon.test.run/id],
+               :test-evidence-error
+-              [:and :seon.error/base
++              [:merge :seon.error/base
+                [:map [:seon.source/refused-test-run :seon.source/refused-test-run]
+                 [:seon.source/operator-root {:optional true} :seon.source/operator-root]
+                 [:seon.test.run/branch {:optional true} :seon.test.run/branch]]],
+@@ -92,7 +92,7 @@
+                [:seon.source/reloaded-namespaces :seon.source/reloaded-namespaces]
+                [:seon.source/arming-identities :seon.source/arming-identities]],
+               :publication-error
+-              [:and :seon.error/base
++              [:merge :seon.error/base
+                [:map
+                 [:seon.source/branch :seon.source/branch]
+                 [:seon.source/expected-commit-id :seon.source/expected-commit-id]
+@@ -154,7 +154,7 @@
+               :uncontracted-error [:and {:description "accept-merge! refused: a function the merge carries declares no complete :malli/schema, or one with an unjustified :any or :some slot; the agent contracts it on its branch."} :seon.source/test-evidence-error [:map [:seon.source/uncontracted {:optional true :description "Always present; optional because a stored error keeps only storable members."} :seon.source/uncontracted] [:seon.source/contract-gaps {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/contract-gaps]]],
+               :lint-finding [:map {:description "One clj-kondo error, under the checkout's .clj-kondo configuration, in a file a merge would publish. Producer: seon.cluster.source/lint-errors."} [:seon.source/path :seon.source/path] [:seon.lint/row :seon.lint/row] [:seon.lint/col :seon.lint/col] [:seon.lint/type :seon.lint/type] [:seon.lint/message :seon.lint/message]],
+               :lint-findings [:vector {:min 1 :description "The clj-kondo errors in the files a merge would publish, in file and position order."} :seon.source/lint-finding],
+-              :lint-error [:and {:description "prepare-merge! refused: clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],
++              :lint-error [:merge {:description "prepare-merge! refused: clj-kondo reports an error in a file the merge would publish, the bar a lane commit holds; the agent fixes it on its branch."} :seon.error/base [:map [:seon.source/path {:description "The first file with an error."} :seon.source/path] [:seon.source/lint-findings {:optional true :description "Always present; optional because a stored error keeps only storable members, and this vector of maps has no attribute."} :seon.source/lint-findings]]],
+               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
+               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}
+                            [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],
+@@ -162,7 +162,7 @@
+               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
+                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
+                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
+-              :conflict-error [:and {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
++              :conflict-error [:merge {:description "seon.merge/merge! refused: the source branch and main changed the same declarations since the merge base (seon.program/three-way)."} :seon.error/base
+                                [:map [:seon.program/conflict :seon.program/conflict] [:seon.program/conflict-digests {:optional true :description "Always present; optional because a stored error keeps only storable members, and this map has no attribute."} :seon.program/conflict-digests]]],
+               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
+               :expected-digests
+@@ -180,7 +180,7 @@
+               [:enum {:description "Why a write-back installed nothing."}
+                :root-refused :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
+               :write-back-error
+-              [:and :seon.error/base
++              [:merge :seon.error/base
+                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
+                 [:seon.source/path {:optional true} :seon.source/path]
+                 [:seon.program/conflict-digests {:optional true :description "A :conflict's declarations: the merge base (the branch's base), head (the file now, ours) and branch (theirs) digest of each."}
+diff --git a/resources/seon/schemas/seon.step.design.edn b/resources/seon/schemas/seon.step.design.edn
+index 7047ac6bb..2809c37c7 100644
+--- a/resources/seon/schemas/seon.step.design.edn
++++ b/resources/seon/schemas/seon.step.design.edn
+@@ -1,5 +1,5 @@
+ #:seon.step.design{:check [:enum {:description "The handoff check a Design step failed (TASK-CHAIN section 4): a missing or blank What exists or Approach, a changed Problem, a reference that does not resolve, no producer or test cited, no schema key modeled."}
+                            :sections :problem-changed :references :producer-not-cited :data-not-modeled]
+-                   :refusal [:and :seon.error/base
++                   :refusal [:merge :seon.error/base
+                              [:map [:seon.step.design/check :seon.step.design/check]
+                               [:seon.error/offending {:optional true} :seon.schema/value]]]}
+diff --git a/resources/seon/schemas/seon.step.prove.edn b/resources/seon/schemas/seon.step.prove.edn
+index bca2b0299..fd1df3263 100644
+--- a/resources/seon/schemas/seon.step.prove.edn
++++ b/resources/seon/schemas/seon.step.prove.edn
+@@ -1,5 +1,5 @@
+ #:seon.step.prove{:check [:enum {:description "The handoff check a Prove step failed (TASK-CHAIN section 4): no proofs on the next task, a proof that is no deftest, a proof not red by design, a changed or cited function no proof reaches."}
+                           :no-proofs :not-a-deftest :not-designed-red :unreached]
+-                  :refusal [:and {:description "One failed Prove handoff check, naming what failed it."} :seon.error/base
++                  :refusal [:merge {:description "One failed Prove handoff check, naming what failed it."} :seon.error/base
+                             [:map [:seon.step.prove/check :seon.step.prove/check]
+                              [:seon.error/offending {:optional true} :seon.schema/value]]]}
+diff --git a/resources/seon/schemas/seon.task.edn b/resources/seon/schemas/seon.task.edn
+index 121c264a9..e484675db 100644
+--- a/resources/seon/schemas/seon.task.edn
++++ b/resources/seon/schemas/seon.task.edn
+@@ -188,7 +188,7 @@
+            :unknown-task :unassigned :revised-since-assignment :needs-cycle :no-proofs :no-world :proofs-green :proof-run-failed :proofs-unobserved :unproven]
+  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
+  :explanation :seon.schema/value
+- :refused-error [:and :seon.error/base
++ :refused-error [:merge :seon.error/base
+                  [:map [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending {:optional true} :seon.schema/value]
+                   [:seon.task/explanation {:optional true} :seon.task/explanation]]]
+  :base :seon.task/declaration :current :seon.task/declaration :proposed :seon.task/declaration
+diff --git a/resources/seon/schemas/seon.test.accretion.edn b/resources/seon/schemas/seon.test.accretion.edn
+index 3ee5a1777..ce578f55c 100644
+--- a/resources/seon/schemas/seon.test.accretion.edn
++++ b/resources/seon/schemas/seon.test.accretion.edn
+@@ -101,7 +101,7 @@
+                           :seon.test.accretion/auto-check]],
+                         :function-sym [:qualified-symbol {:description "The function name observed by an install refusal; never an upsert identity."}]
+                         :install-refused-error
+-                        [:and
++                        [:merge
+                          {:seon.render/ai seon.test.accretion/render-ai
+                           :seon.render/html seon.test.accretion/render-html
+                           :error/message "must identify a refused green-to-install decision"}
+@@ -155,7 +155,7 @@
+ 
+  :seon.test.accretion/error
+  [:and
+- [:and
++ [:merge
+   {:seon.db/attributes true}
+   :seon.error/base
+   [:map
+diff --git a/resources/seon/schemas/seon.test.edn b/resources/seon/schemas/seon.test.edn
+index fd3c325ff..e984841f0 100644
+--- a/resources/seon/schemas/seon.test.edn
++++ b/resources/seon/schemas/seon.test.edn
+@@ -51,7 +51,7 @@
+              seon.test.runner/var-reference?],
+             :not-runnable :string,
+             :not-runnable-error
+-            [:and :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
++            [:merge :seon.error/base [:map [:seon.test/not-runnable :seon.test/not-runnable]]],
+             :sym
+             [:qualified-symbol
+              { :seon.db/identity true,
+@@ -88,7 +88,7 @@
+               :seon.test/failure-message]],
+             :results [:vector :seon.test/result],
+             :result-unknown
+-            [:and {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
++            [:merge {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
+              :seon.error/base
+              [:map [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test/run :seon.test/run]
+               [:seon.test/execution-refusal :seon.test/execution-refusal]]],
+@@ -237,7 +237,7 @@
+   [:seon.test/command {:optional true} :seon.test/command]]
+  :seon.test/unknown :string
+  :seon.test/unknown-error
+- [:and :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
++ [:merge :seon.error/base [:map [:seon.test/unknown :seon.test/unknown]]]
+  :seon.test/next-tier
+  [:or [:= :none] [:vector [:vector [:string {:min 1}]]]]
+  :seon.test/command [:vector [:string {:min 1}]]
+@@ -264,7 +264,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.test/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+@@ -283,23 +283,23 @@
+ 
+  :seon.test/selection-refusal :qualified-keyword
+  :seon.test/selection-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.test/selection-refusal :seon.test/selection-refusal]]]
+  :seon.test/admission-refusal :qualified-keyword
+  :seon.test/admission-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.test/admission-refusal :seon.test/admission-refusal]]]
+  :seon.test/resolution-refusal :qualified-keyword
+  :seon.test/resolution-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.test/resolution-refusal :seon.test/resolution-refusal]
+    [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
+  :seon.test/execution-refusal :qualified-keyword
+  :seon.test/execution-error
+- [:and :seon.error/base
++ [:merge :seon.error/base
+   [:map {:seon.db/attributes true}
+    [:seon.test/execution-refusal :seon.test/execution-refusal]
+    [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
+diff --git a/resources/seon/schemas/seon.test.run.edn b/resources/seon/schemas/seon.test.run.edn
+index de306d005..9a77284fe 100644
+--- a/resources/seon/schemas/seon.test.run.edn
++++ b/resources/seon/schemas/seon.test.run.edn
+@@ -80,18 +80,18 @@
+                   [:seon.test.run/terminated? :seon.test.run/terminated?]]],
+                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
+                 :immutable-error
+-                [:and :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
++                [:merge :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
+                 :retracted-definitions
+                 [:vector {:min 1 :description "The test symbols a completion recorded results for whose test definitions the writer's database no longer holds."}
+                  :seon.test/sym],
+                 :retracted-definition-error
+-                [:and :seon.error/base
++                [:merge :seon.error/base
+                  [:map [:seon.test.run/retracted-definitions :seon.test.run/retracted-definitions]
+                   [:seon.db/basis-t :seon.db/basis-t]]],
+                 :unavailable [:= true],
+                 :provenance-failure [:string {:min 1}],
+                 :unavailable-error
+-                [:and :seon.error/base
++                [:merge :seon.error/base
+                  [:map [:seon.test.run/unavailable :seon.test.run/unavailable]
+                   [:seon.test.run/provenance-failure :seon.test.run/provenance-failure]]],
+                 :provenance
+@@ -144,7 +144,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.test.run/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.test.runner.edn b/resources/seon/schemas/seon.test.runner.edn
+index 3211aaca5..e1a611a30 100644
+--- a/resources/seon/schemas/seon.test.runner.edn
++++ b/resources/seon/schemas/seon.test.runner.edn
+@@ -87,19 +87,19 @@
+  :worker-error-log [:string {:min 1 :description "The worker error-log path observed when process launch failed."}]
+  :test-sym [:qualified-symbol {:description "The observed test name; a value, never an upsert identity."}]
+  :invalid-marker-reason-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base
+   [:map [:seon.test.runner/test-sym :seon.test.runner/test-sym]
+    [:seon.test.runner/marker-key :seon.test.runner/marker-key]
+    [:seon.error/offending {:optional true} :seon.schema/value]]]
+  :unknown-worker-command-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base
+   [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
+    [:seon.test.runner/worker-command-key :seon.test.runner/worker-command-key]
+    [:seon.error/offending {:optional true} :seon.schema/value]]]
+  :worker-launch-failure-error
+- [:and {:seon.db/attributes true}
++ [:merge {:seon.db/attributes true}
+   :seon.error/base
+   [:map [:seon.test.runner/worker-id :seon.test.runner/worker-id]
+    [:seon.test.runner/worker-error-log :seon.test.runner/worker-error-log]
+@@ -107,7 +107,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.test.runner/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.test.seed.edn b/resources/seon/schemas/seon.test.seed.edn
+index 71a6c296e..b72d56abf 100644
+--- a/resources/seon/schemas/seon.test.seed.edn
++++ b/resources/seon/schemas/seon.test.seed.edn
+@@ -22,5 +22,5 @@
+            :contract-mismatch :undeclared-attribute :invalid-attribute-value]
+  :preparation [:enum {:description "Why one seed entry could not prepare the member's world before its body."} :no-member :invalid-value :write-refused :changes-test]
+  :preparation-error
+- [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
++ [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
+   [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test.seed/ordinal {:optional true} :seon.test.seed/ordinal]]]}
+diff --git a/resources/seon/schemas/seon.turn.edn b/resources/seon/schemas/seon.turn.edn
+index be2ffa8b0..044f614e5 100644
+--- a/resources/seon/schemas/seon.turn.edn
++++ b/resources/seon/schemas/seon.turn.edn
+@@ -109,7 +109,7 @@
+             :reply-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],
+             :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.turn/turn :seon.wake/context-inert true}],
+             :refused-error
+-            [:and
++            [:merge
+              {:seon.db/attributes true,
+               :description "A transition refused its actual request under the named rule. Occurrences own this observation; no agent identity is inferred for a request that may name no existing agent."}
+              :seon.error/base
+@@ -142,7 +142,7 @@
+  :seon.turn/invalid-disposition-source :string
+  :seon.turn/compaction-agent-id :seon.agent/id
+  :seon.turn/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+diff --git a/resources/seon/schemas/seon.turn.loop.edn b/resources/seon/schemas/seon.turn.loop.edn
+index 5943db13a..3f48e0158 100644
+--- a/resources/seon/schemas/seon.turn.loop.edn
++++ b/resources/seon/schemas/seon.turn.loop.edn
+@@ -79,7 +79,7 @@
+                   [:my.turn/value {:optional true} :my.turn/value]],
+                  :completion :seon.flow/channel,
+                  :phase-failed-error
+-                 [:and {:seon.db/attributes true} :seon.error/base
++                 [:merge {:seon.db/attributes true} :seon.error/base
+                   [:map
+                   {:error/message
+                    "must carry the :seon.turn.loop/phase-failed distinguishing member"}
+diff --git a/test/seon/error_test.clj b/test/seon/error_test.clj
+index 46bf2f7a9..3849584d6 100644
+--- a/test/seon/error_test.clj
++++ b/test/seon/error_test.clj
+@@ -18,6 +18,7 @@
+             [seon.cluster.status]
+             [seon.render.transcript]
+             [malli.core]
++            [malli.generator]
+             [seon.id]
+             [sci.core]
+             [seon.schema :as schema]
+@@ -1948,3 +1949,12 @@
+     (is (every? #(<= (count (:seon.error/frames %)) limit) shown))
+     (is (= most (:seon.error/frames-count (first shown))))
+     (is (= most (count (filter #(and (vector? %) (= :li (first %))) (tree-seq vector? seq (nth (error/render-chain-html {:seon.render/value chain}) 2))))))))
++
++(deftest an-error-variant-generates
++  ;; Variants were `[:and :seon.error/base [:map ...]]`: `:and` generates from its first
++  ;; child and filters, so every variant threw `:malli.generator/such-that-failure`.
++  (let [registry (:seon.schema.projection/registry (schema/handed-projection))]
++    (doseq [variant [:my.edit/no-match-error :my.shell/error]]
++      (let [compiled (mr/schema registry variant)
++            sample (malli.generator/generate compiled {:seed 0 :size 10})]
++        (is (malli.core/validate compiled sample))))))

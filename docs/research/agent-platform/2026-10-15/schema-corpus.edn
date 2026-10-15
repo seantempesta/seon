@@ -311,4 +311,85 @@
    [:seon.source/test-recording-request
     :seon.test.run/claim-completion
     :seon.test.run/completion
+    :seon.turn/record-evaluated-call-request]}},
+ :after-merge-sweep
+ {:seed 0,
+  :size 10,
+  :timeout-ms 3000,
+  :keys 3817,
+  :totals
+  {:invalid 7, :no-generator 34, :ok 3754, :such-that 17, :timeout 5},
+  :ms
+  {:invalid 2,
+   :no-generator 24,
+   :ok 2617,
+   :such-that 6749,
+   :timeout 15021},
+  :failing
+  {:invalid
+   [:seon.await/accept?
+    :seon.await/port-request
+    :seon.await/request
+    :seon.cluster.store/writer-operation
+    :seon.effect/result-validator
+    :seon.sci.eval/function
+    :seon.sci.eval/invocation-request],
+   :no-generator
+   [:my.edit/form-request
+    :my.task/function
+    :my.task/update-request
+    :seon.cache/cache
+    :seon.call-preparation/argument-validators
+    :seon.call-preparation/arity-plan
+    :seon.call-preparation/arity-plans
+    :seon.call-preparation/plan
+    :seon.call-preparation/snapshot
+    :seon.call-preparation/validators
+    :seon.cluster.wake/channels
+    :seon.cluster.wake/fenced?
+    :seon.cluster.wake/route-request
+    :seon.cost/writer-meter
+    :seon.edit/request
+    :seon.health/request
+    :seon.health/wake
+    :seon.profile/accumulator
+    :seon.profile/adder
+    :seon.profile/cell
+    :seon.profile/counts
+    :seon.profile/entered
+    :seon.profile/entry-counter
+    :seon.profile/histogram
+    :seon.profile/max-counter
+    :seon.profile/ordinal
+    :seon.profile/self-counter
+    :seon.profile/throw-counts
+    :seon.profile/total-counter
+    :seon.profile/world-counter
+    :seon.schema/compiled-validator
+    :seon.source/candidate-bytes
+    :seon.source/file-bytes
+    :seon.source/proof],
+   :such-that
+   [:my.root/merge-request
+    :my.task/sent-back
+    :seon.cluster/served
+    :seon.config/rule-error
+    :seon.render/selection-request
+    :seon.render.web/stop-request
+    :seon.schema.finding/any
+    :seon.schema.finding/bare-value
+    :seon.schema.finding/maybe
+    :seon.schema.finding/some
+    :seon.schema.finding/stored-nil
+    :seon.schema.finding/unguarded-tail
+    :seon.schema.finding/value-tail
+    :seon.source/refresh-result
+    :seon.test.selection/result
+    :seon.test.selection/reused
+    :seon.turn.loop/error],
+   :timeout
+   [:seon.context/step-verdict
+    :seon.source/test-recording-request
+    :seon.test.run/claim-completion
+    :seon.test.run/completion
     :seon.turn/record-evaluated-call-request]}}}
