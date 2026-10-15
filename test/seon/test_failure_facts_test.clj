@@ -179,7 +179,7 @@
            connection s "(clojure.test/deftest probe (stub))"
            "(defn stub {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"Not implemented.\" (seon.error.refusal/error :seon.error/unimplemented {:seon.error/operation 'tq.stub/stub :seon.error/message \"Not implemented.\" :seon.error/unimplemented-function 'tq.stub/stub}))))")
           (let [result (run-probe connection s)
-                head (#'context/head-entries (db/db connection) #{s})]
+                head (#'context/head-entries (db/db connection) #{s} nil)]
             (is (= 1 (:seon.test/error-count result)))
             (is (= :seon.error/unimplemented (:seon.error/type (first (reports result)))))
             (is (= :done (:seon.task/status
@@ -200,7 +200,7 @@
            connection s "(clojure.test/deftest probe (clojure.test/is (false? (stub))))"
            "(defn stub {:malli/schema [:=> [:cat] :boolean]} [] (throw (IllegalArgumentException. \"odd map\")))")
           (let [result (run-probe connection s)
-                head (#'context/head-entries (db/db connection) #{s})]
+                head (#'context/head-entries (db/db connection) #{s} nil)]
             (is (= 1 (:seon.test/error-count result)) "the thrown exception is the test's one error")
             (is (true? (runner/designed-red? (first (runner/latest-results (db/db connection) [s])))) "the merge gate's predicate counts it")
             (is (= :done (:seon.task/status
