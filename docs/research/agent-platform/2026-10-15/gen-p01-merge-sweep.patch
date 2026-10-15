@@ -87,6 +87,19 @@ index 13c8bd030..f3931f331 100644
   {:seon.db/attributes true}
   :seon.error/base
   [:map
+diff --git a/resources/seon/schemas/my.root.edn b/resources/seon/schemas/my.root.edn
+index 556c38d8d..5ef4d50c7 100644
+--- a/resources/seon/schemas/my.root.edn
++++ b/resources/seon/schemas/my.root.edn
+@@ -4,7 +4,7 @@
+                             [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
+                             [:seon.task/branch :seon.task/branch] [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+                             [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]]
+-          :merge-request [:and {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
++          :merge-request [:merge {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
+                           :my.root/open-assignment [:map [:seon.render/operations :seon.render/operations]]]
+           :merge-requests [:vector :my.root/merge-request]
+           :merge-request-read [:map [:seon.db/db :seon.db/database-value] [:seon.store/store {:optional true} :seon.store/store]]
 diff --git a/resources/seon/schemas/my.shell.edn b/resources/seon/schemas/my.shell.edn
 index 08219620c..4b0fa0953 100644
 --- a/resources/seon/schemas/my.shell.edn
@@ -145,9 +158,18 @@ index 08219620c..4b0fa0953 100644
   :seon.error/base
   [:map
 diff --git a/resources/seon/schemas/my.task.edn b/resources/seon/schemas/my.task.edn
-index dfca4af73..d7a9e71fa 100644
+index dfca4af73..66f71c508 100644
 --- a/resources/seon/schemas/my.task.edn
 +++ b/resources/seon/schemas/my.task.edn
+@@ -11,7 +11,7 @@
+           :send-back-request [:map {:description "A send-back's request: the reason, target and counterexample the caller named, and the connection and agent the evaluation's world supplies."}
+                               [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id] [:my.task/reason :my.task/reason] [:my.task/target {:optional true} :my.task/target]
+                               [:my.task/counterexample {:optional true} :my.task/counterexample]]
+-          :sent-back [:and {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it, and the end it recorded on the attempt for root to process."}
++          :sent-back [:merge {:description "A send-back as my.task/send-back! answers it: the completed disposition whose reply is the reason, with the target and counterexample beside it, and the end it recorded on the attempt for root to process."}
+                       :my.turn/completed
+                       [:map [:my.task/target {:optional true} :my.task/target]
+                        [:my.task/counterexample {:optional true} :my.task/counterexample]
 @@ -30,6 +30,6 @@
                             [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                             [:my.task/task :my.task/task] [:my.task/member :my.task/member]
@@ -418,10 +440,15 @@ index 85c0fab2b..ff259ea4e 100644
    [:map {:seon.db/attributes true}
     [:seon.cluster.boot/disposition :seon.cluster.boot/disposition]]]}
 diff --git a/resources/seon/schemas/seon.cluster.edn b/resources/seon/schemas/seon.cluster.edn
-index 6771bfc71..fed64693e 100644
+index 6771bfc71..31d0f996b 100644
 --- a/resources/seon/schemas/seon.cluster.edn
 +++ b/resources/seon/schemas/seon.cluster.edn
-@@ -34,7 +34,7 @@
+@@ -30,11 +30,11 @@
+   [:seon.boot/cluster-connection :seon.store/connection-object]
+   [:seon.render.web/view :map]]
+  :seon.cluster/served
+- [:and {:description "An instance serve! has bound: its web descriptor published beside its advertisement."}
++ [:merge {:description "An instance serve! has bound: its web descriptor published beside its advertisement."}
    :seon.cluster/servable
    [:map [:seon.render.web/served :seon.render.web/server]]]
   :seon.cluster/error
@@ -562,6 +589,19 @@ index 3ae9503ea..dd4d7a21b 100644
    {:seon.db/attributes true}
    :seon.error/base
    [:map
+diff --git a/resources/seon/schemas/seon.context.edn b/resources/seon/schemas/seon.context.edn
+index e0c91e12a..6ed893b8b 100644
+--- a/resources/seon/schemas/seon.context.edn
++++ b/resources/seon/schemas/seon.context.edn
+@@ -89,7 +89,7 @@
+                :step-status [:map {:description "A step judged by the done rule (seon.cluster.source/done-refusals) for a chain's task, else by its merge's preview (seon.cluster.source/results-verdict): done exactly when it refuses nothing. Producer: seon.context/step-status."}
+                              [:seon.task/status [:enum :done :working]]
+                              [:seon.source/refusals :seon.source/refusals]]
+-               :step-verdict [:and {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
++               :step-verdict [:merge {:description "A step's observation with its status. Producer: seon.context/step-verdict."}
+                               :seon.context/step-observation :seon.context/step-status]
+                :refusal [:map {:description "One done or merge refusal as the step section shows it: its variant's members without the read's stamps (:seon.error/at, :seon.error/layer), the agent's branch or the tests it names (shown once under proofs or the step's entries). Producer: seon.context/shown-refusal; the whole refusal is seon.context/step-verdict's."}
+                          [:seon.error/type :seon.error/type] [:seon.error/message :seon.error/message]]
 diff --git a/resources/seon/schemas/seon.db.availability.edn b/resources/seon/schemas/seon.db.availability.edn
 index 93394f00b..2be3c541e 100644
 --- a/resources/seon/schemas/seon.db.availability.edn
@@ -1264,9 +1304,18 @@ index 8d725b6d0..14c3bd396 100644
   :seon.error/base
   [:map
 diff --git a/resources/seon/schemas/seon.render.edn b/resources/seon/schemas/seon.render.edn
-index 3e9417494..01d270ec0 100644
+index 3e9417494..ce8ac2af8 100644
 --- a/resources/seon/schemas/seon.render.edn
 +++ b/resources/seon/schemas/seon.render.edn
+@@ -65,7 +65,7 @@
+                 :seon.render/output-schema]],
+               :candidates [:vector {:min 2} :qualified-symbol],
+               :selection-request
+-              [:and
++              [:merge
+                :seon.render/call-request
+                [:map [:seon.render/output :seon.render/output]]],
+               :selection-candidate-status
 @@ -122,7 +122,7 @@
                  :seon.render.call/id]
                 [:seon.error/value {:optional true} :seon.error/value]],
@@ -1382,9 +1431,18 @@ index e8b685e11..34b6897d0 100644
     [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]]]
  
 diff --git a/resources/seon/schemas/seon.render.web.edn b/resources/seon/schemas/seon.render.web.edn
-index e598cf50d..6f45f835a 100644
+index e598cf50d..fd250effc 100644
 --- a/resources/seon/schemas/seon.render.web.edn
 +++ b/resources/seon/schemas/seon.render.web.edn
+@@ -109,7 +109,7 @@
+                     {:optional true}
+                     :seon.render.web/wanted-port]],
+                   :stop-request
+-                  [:and {:description "What seon.render.web/stop! joins: the served descriptor, the view's tab registration and the delivery bound its writers wait under."}
++                  [:merge {:description "What seon.render.web/stop! joins: the served descriptor, the view's tab registration and the delivery bound its writers wait under."}
+                    :seon.render.web/server
+                    [:map
+                     [:seon.render.web/registration :seon.render.web/registration]
 @@ -163,13 +163,13 @@
                    :value-unreadable :seon.blob/digest
                    :function-unavailable :qualified-symbol
@@ -1517,6 +1575,28 @@ index 6cb85875e..a1bea0408 100644
 + [:merge {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
    :seon.error/base
    [:map [:seon.schema.edn/attribute :seon.schema.edn/attribute]]]}
+diff --git a/resources/seon/schemas/seon.schema.finding.edn b/resources/seon/schemas/seon.schema.finding.edn
+index 97b9e7561..8096e6375 100644
+--- a/resources/seon/schemas/seon.schema.finding.edn
++++ b/resources/seon/schemas/seon.schema.finding.edn
+@@ -5,10 +5,10 @@
+                        [:seon.schema/schema-type {:optional true} :keyword]
+                        [:seon.schema/justified? {:optional true} :boolean]
+                        [:seon.schema.admission/reason {:optional true} :string]]
+-                      :any [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/any]]]]
+-                      :some [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/some]]]]
+-                      :maybe [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/maybe]]]]
+-                      :stored-nil [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/stored-nil]]]]
+-                      :bare-value [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/bare-value]]]]
+-                      :value-tail [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/value-tail]]]]
+-                      :unguarded-tail [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/unguarded-tail]]]]}
++                      :any [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/any]]]]
++                      :some [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/some]]]]
++                      :maybe [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/maybe]]]]
++                      :stored-nil [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/stored-nil]]]]
++                      :bare-value [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/bare-value]]]]
++                      :value-tail [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/value-tail]]]]
++                      :unguarded-tail [:merge :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/unguarded-tail]]]]}
 diff --git a/resources/seon/schemas/seon.sci.admit.edn b/resources/seon/schemas/seon.sci.admit.edn
 index 463c603b7..05ff27031 100644
 --- a/resources/seon/schemas/seon.sci.admit.edn
@@ -1667,7 +1747,7 @@ index 95cd72038..16d905d90 100644
   :seon.error/base
   [:map
 diff --git a/resources/seon/schemas/seon.source.edn b/resources/seon/schemas/seon.source.edn
-index 30786d022..7a3950b0b 100644
+index 30786d022..31ca43d23 100644
 --- a/resources/seon/schemas/seon.source.edn
 +++ b/resources/seon/schemas/seon.source.edn
 @@ -2,7 +2,7 @@
@@ -1715,6 +1795,15 @@ index 30786d022..7a3950b0b 100644
                 [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
                  [:seon.source/path {:optional true} :seon.source/path]
                  [:seon.program/conflict-digests {:optional true :description "A :conflict's declarations: the merge base (the branch's base), head (the file now, ours) and branch (theirs) digest of each."}
+@@ -203,7 +203,7 @@
+                [:seon.source/replaced :seon.source/replaced]
+                [:seon.source/added {:optional true} :seon.source/added]
+                [:seon.source/retracted {:optional true} :seon.source/retracted]],
+-              :refresh-result [:or [:and :seon.source/published :seon.source/adoption-result]
++              :refresh-result [:or [:merge :seon.source/published :seon.source/adoption-result]
+                                :seon.source/publication-error],
+               :published
+               [:map
 diff --git a/resources/seon/schemas/seon.step.design.edn b/resources/seon/schemas/seon.step.design.edn
 index 7047ac6bb..2809c37c7 100644
 --- a/resources/seon/schemas/seon.step.design.edn
@@ -1922,6 +2011,19 @@ index 71a6c296e..b72d56abf 100644
 - [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
 + [:merge :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
    [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test.seed/ordinal {:optional true} :seon.test.seed/ordinal]]]}
+diff --git a/resources/seon/schemas/seon.test.selection.edn b/resources/seon/schemas/seon.test.selection.edn
+index 3a28a94ee..7c994f516 100644
+--- a/resources/seon/schemas/seon.test.selection.edn
++++ b/resources/seon/schemas/seon.test.selection.edn
+@@ -30,7 +30,7 @@
+   [:seon.test.selection/requested-inputs [:map-of :string :seon.source/digest]]]
+  :seon.test.selection/widening [:enum :missing-basis :removed-file :outside-program-graph]
+  :seon.test.selection/reused
+- [:and :seon.test/result
++ [:merge :seon.test/result
+   [:map
+    [:seon.test/unchanged [:= true]]
+    [:seon.test.run/basis-t :seon.test.run/basis-t]
 diff --git a/resources/seon/schemas/seon.turn.edn b/resources/seon/schemas/seon.turn.edn
 index be2ffa8b0..044f614e5 100644
 --- a/resources/seon/schemas/seon.turn.edn
@@ -1945,7 +2047,7 @@ index be2ffa8b0..044f614e5 100644
   :seon.error/base
   [:map
 diff --git a/resources/seon/schemas/seon.turn.loop.edn b/resources/seon/schemas/seon.turn.loop.edn
-index 5943db13a..3f48e0158 100644
+index 5943db13a..376badc3c 100644
 --- a/resources/seon/schemas/seon.turn.loop.edn
 +++ b/resources/seon/schemas/seon.turn.loop.edn
 @@ -79,7 +79,7 @@
@@ -1957,6 +2059,15 @@ index 5943db13a..3f48e0158 100644
                    [:map
                    {:error/message
                     "must carry the :seon.turn.loop/phase-failed distinguishing member"}
+@@ -340,7 +340,7 @@
+  ; Additive error declaration manifest, 2026-09-18.
+ 
+  :seon.turn.loop/error
+- [:and
++ [:merge
+  {:seon.db/attributes true}
+  :seon.turn/error
+  [:map
 diff --git a/test/seon/error_test.clj b/test/seon/error_test.clj
 index 46bf2f7a9..3849584d6 100644
 --- a/test/seon/error_test.clj

@@ -392,4 +392,74 @@
     :seon.source/test-recording-request
     :seon.test.run/claim-completion
     :seon.test.run/completion
+    :seon.turn/record-evaluated-call-request]}},
+ :after-merge-and-generators
+ {:seed 0,
+  :size 10,
+  :timeout-ms 3000,
+  :keys 3819,
+  :totals
+  {:invalid 7,
+   :invalid-sample 1,
+   :no-generator 34,
+   :ok 3772,
+   :such-that 1,
+   :timeout 4},
+  :ms
+  {:invalid 5,
+   :invalid-sample 0,
+   :no-generator 22,
+   :ok 1686,
+   :such-that 116,
+   :timeout 12019},
+  :failing
+  {:invalid
+   [:seon.await/accept?
+    :seon.await/port-request
+    :seon.await/request
+    :seon.cluster.store/writer-operation
+    :seon.effect/result-validator
+    :seon.sci.eval/function
+    :seon.sci.eval/invocation-request],
+   :invalid-sample [:seon.config/rule-error],
+   :no-generator
+   [:my.edit/form-request
+    :my.task/function
+    :my.task/update-request
+    :seon.cache/cache
+    :seon.call-preparation/argument-validators
+    :seon.call-preparation/arity-plan
+    :seon.call-preparation/arity-plans
+    :seon.call-preparation/plan
+    :seon.call-preparation/snapshot
+    :seon.call-preparation/validators
+    :seon.cluster.wake/channels
+    :seon.cluster.wake/fenced?
+    :seon.cluster.wake/route-request
+    :seon.cost/writer-meter
+    :seon.edit/request
+    :seon.health/request
+    :seon.health/wake
+    :seon.profile/accumulator
+    :seon.profile/adder
+    :seon.profile/cell
+    :seon.profile/counts
+    :seon.profile/entered
+    :seon.profile/entry-counter
+    :seon.profile/histogram
+    :seon.profile/max-counter
+    :seon.profile/ordinal
+    :seon.profile/self-counter
+    :seon.profile/throw-counts
+    :seon.profile/total-counter
+    :seon.profile/world-counter
+    :seon.schema/compiled-validator
+    :seon.source/candidate-bytes
+    :seon.source/file-bytes
+    :seon.source/proof],
+   :such-that [:seon.source/refresh-result],
+   :timeout
+   [:seon.source/test-recording-request
+    :seon.test.run/claim-completion
+    :seon.test.run/completion
     :seon.turn/record-evaluated-call-request]}}}
