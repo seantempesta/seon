@@ -48,7 +48,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 
 | Phase | Owner | What | Red proof | Status |
 |---|---|---|---|---|
-| 0 | Sonnet | `seon.cluster.db-flow-test/every-agent-start-has-a-task` never exits and eats every check's 600 s | ends within its bound | in progress |
+| 0 | Sonnet | `seon.cluster.db-flow-test/every-agent-start-has-a-task` never exits and eats every check's 600 s | ends within its bound | hang fixed `734e0aed7` (cause `b77f17413`: `var-process` built the world outside its catch on stop); the test now exits in ~12 s but is still red: its `chain-world` teardown calls `seon.cluster.registry/retire-branch!` with a vector branch (contract refusal), plus 2 assertions (root started without an assignment). `retire-branch!` is in a phase-2/4 file, so this is folded into phase 2 |
 | R1 | Haiku | dig: prior art (git commit-graph, upstream Datahike, earlier Seon attempts and why), rulings the design must keep | n/a | done, b2ad9cd44 |
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | done, a41868d3a |
 | C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | done, claims 1-5 confirmed with corrections (this commit) |
