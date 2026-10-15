@@ -1,7 +1,7 @@
 ---
 title: "Merge by reach closure: one merge list for the block, the done rule and the merge (rulings 5, 5a, 5b, 6)"
 type: plan
-status: "phase 0 done (c8215bfe1); phase 1a done (49b2ac05d: merge-list, reach-closure); 1b (merge-onto selection inside prepare-merge!), 2, 3 open"
+status: "phase 0 done (c8215bfe1); 1a done (49b2ac05d); 1b done (3c5f650a0); 2 a patch (63bca068d, waits for src/seon/context.clj); 3 open (design below)"
 created: 2026-10-15
 ---
 
@@ -59,7 +59,14 @@ merged, test it.
    staying item with its include form (a test reaching it) and drop form (`my.program/ns-unmap!`); the done rule's
    report names the same list. `seon.context` is held by lane prompt-prefix: a patch until it is free. Proof: a row in
    `seon.context-test` asserting the block's `:seon.context/changes` equals `merge-list` for the fixture.
-3. **Clean or not, then CI (5b, 6).** A conflict among `stays` never blocks; the candidate runs only seeds whose reach
+3. **Clean or not, then CI (5b, 6).** Found 10-15: the candidate gate (`seon.cluster/candidate-gate!` →
+   `reaching-run` → `seon.test/run` `:named`) selects and reuses on the candidate S alone: `seon.test`'s selection
+   reads `latest` results and their member facts from S, a fork of main plus the delta, so the chain branch's
+   recorded results are never seen and every seed reruns. Reuse needs the selection to read evidence from the source
+   branch head by reach digest computed on S (ruling 1 makes the identities equal), and every later reader of a
+   reused member (`merge-verdict`, `accept-merge!`'s run checks, `done-refusals` over the run) to resolve the run it
+   names on the branch that recorded it, not S. That is runner selection plus merge acceptance, critical path: an
+   Opus slice with a measured proof. Originally: A conflict among `stays` never blocks; the candidate runs only seeds whose reach
    digest on the candidate differs from the branch's recorded result (`current-results` on the candidate: a reused
    green is absent from the run); not clean stays as the merge branch, offered back to the agent through
    `merge-main!` + its block. Help (5c) lands with it. Proof: a measured `seon.profile/measure` row that a merge whose
