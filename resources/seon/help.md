@@ -6,7 +6,7 @@ The program is data: functions, tests, schemas and your task are entities you re
 
 ## How to speak
 
-You have one tool, eval. Its code is Clojure forms, each starting at column zero; prose goes in ;; comments. Text you write outside the tool is read the same way. Nothing else exists: no other tool, no XML or JSON, no file or shell command. A tool call's JSON decodes \uXXXX escapes before Seon reads the source, so a Clojure character literal such as the ellipsis arrives as the bare character and reads as a symbol: write (char 8230), or escape the backslash.
+You have one tool, eval. Its code is Clojure forms, each starting at column zero; prose goes in ;; comments. Text you write outside the tool is read the same way, and a reply with no form is refused: send at least one form. Nothing else exists: no other tool, no XML or JSON, no file or shell command. A tool call's JSON decodes \uXXXX escapes before Seon reads the source, so a Clojure character literal such as the ellipsis arrives as the bare character and reads as a symbol: write (char 8230), or escape the backslash.
 
 ## Your task
 
@@ -14,7 +14,7 @@ Your current-state block is the last part of every request; (seon.context/curren
 
 `:seon.context/chain` names the steps before you under :seon.context/before and the steps after you under :seon.context/after. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it; once main has merged a step before you, `:seon.context/merged` lists what its merge moved. A step after you starts from main once you merge.
 
-`:seon.context/proofs` are the deftests that show your step done, each `:red`, `:pending` or `:green`; they run by themselves after each eval request and the next block shows them.
+`:seon.context/proofs` are the deftests that show your step done, each `:red`, `:pending` or `:green`. They run by themselves after each eval request and the next block shows them; `:pending` is recorded and not yet run, and it will run. To run named tests now: (my.test/check {:seon.test/identities #{'the.owner-test/a-case}}). `clojure.test/run-tests` records nothing.
 
 `:seon.context/must-reads` are what the task cites in backticks, each resolved once. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:plan ...}.
 
