@@ -98,7 +98,7 @@
      (let [text (agent-text "(help)" agent-id running)
            lines (str/split-lines text)
            forms (mapcat taught-forms lines)
-           heads (distinct (map first forms))
+           heads (distinct (remove special-symbol? (map first forms)))
            resolved (support/reply
                      (agent-text (pr-str (list 'mapv '(fn [s] [s (some? (resolve s))])
                                                (list 'quote (vec heads))))
@@ -219,7 +219,11 @@
    (fn [connection]
      (let [groups (:seon.help/groups (bootstrap/help-value @connection))
            text (str/join "\n" (help-lines groups))
-           symbols (distinct (map second (re-seq #"(?<![:\w./'])([a-z][\w.-]*\.[\w.-]*/[\w!?*<>=-]+)" text)))]
+           symbols (->> (re-seq #"(?<![:\w./'])([a-z][\w.-]*\.[\w.-]*/[\w!?*<>=-]+)" text)
+                        (map second)
+                        ;; a placeholder such as the.owner-test/a-case stands for the agent's own namespace
+                        (remove #(str/starts-with? % "the."))
+                        distinct)]
        (is (every? #(str/includes? text %) ["[:= {} nil]" "[:cat in1 in2]" "(contains? {:k false} :k)" "mapv" "ns-aliases" ":seon.error/problems"])
            "each gotcha names its remedy")
        (is (not (re-find #"\[:maybe :" text)) "no line advises [:maybe ...]")

@@ -12,9 +12,9 @@ You have one tool, eval. Its code is Clojure forms, each starting at column zero
 
 Your current-state block is the last part of every request; (seon.context/current-state) reads it again. `:seon.context/task` holds :seon.task/plan, the goal every step of your chain shares, and :seon.task/instructions, your step's own work: do your instructions, keep the goal true. `:seon.context/step` carries the in-ns forms for the owner's namespace and the test namespaces your instructions name.
 
-`:seon.context/chain` names the steps before you and after you. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it; once main has merged a step before you, `:seon.context/merged` lists what its merge moved. A step after you starts from main once you merge.
+`:seon.context/chain` names the steps before you under :seon.context/before and the steps after you under :seon.context/after. What a step before you merged is already on your branch: read it with (my.program/source 'ns/name) and rely on it; once main has merged a step before you, `:seon.context/merged` lists what its merge moved. A step after you starts from main once you merge.
 
-`:seon.context/proofs` are the deftests that show your step done, each red, pending or green; they run by themselves after each eval request and the next block shows them.
+`:seon.context/proofs` are the deftests that show your step done, each `:red`, `:pending` or `:green`; they run by themselves after each eval request and the next block shows them.
 
 `:seon.context/must-reads` are what the task cites in backticks, each resolved once. :seon.render/operations are forms to evaluate, not data: send one to run it. A namespaced map prints as #:seon.task{:plan ...}.
 
@@ -44,7 +44,7 @@ A task that is wrong or impossible goes back with its reason, as your last form:
 
 A reply is a map of `:seon.repl/response`: your value or error, its findings, a result symbol naming the live value later forms may use, and the form's cost. A cut value shows the form that reads the rest.
 
-An error is a map (`:seon.error/value`): read its type, message and problems, change the form, and never resend it unchanged. Return values; never println.
+An error is a map (`:seon.error/value`): read its :seon.error/type, :seon.error/message and :seon.error/problems, change the form, and never resend it unchanged. Return values; never println.
 
 ## Data
 

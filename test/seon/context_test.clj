@@ -292,12 +292,13 @@
    (fn [running agent-id connection]
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'missing 'tq.cs/missing)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
-                                            :seon.task/name "missing" :seon.task/plan "Fix `tq.cs/absent`."}))]
+                                            :seon.task/name "missing" :seon.task/plan "Fix `seon.ref/absent`."}))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-       ;; the task itself is tq.cs/missing, a name that resolves to it; the intent names one that resolves to nothing
-       (is (= [{:seon.ref/name 'tq.cs/absent :seon.ref/problem-kind :unresolved}]
-              (mapv #(dissoc % :seon.ref/message) (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
+       ;; the intent names a function missing from a known namespace; a name in an unknown namespace is an alias form (seon.ref/alias-form?)
+       (is (= [{:seon.ref/name 'seon.ref/absent :seon.ref/problem-kind :unresolved}]
+              (mapv #(select-keys % [:seon.ref/name :seon.ref/problem-kind])
+                    (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
        (is (string? (:seon.ref/message (first (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))"))))
            "the problem says what failed and what to do")))))
 
@@ -319,9 +320,9 @@
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task running connection agent-id)
-     (is (= [{:seon.ref/name 'tq.cs/absent :seon.ref/problem-kind :unresolved}]
+     (is (= [{:seon.ref/name 'seon.ref/absent :seon.ref/problem-kind :unresolved}]
             (mapv #(select-keys % [:seon.ref/name :seon.ref/problem-kind])
-                  (:my.task/problems (shown running agent-id "(my.task/update! 'tq.cs/shape :seon.task/plan (constantly \"Fix `tq.cs/absent`.\"))"))))))))
+                  (:my.task/problems (shown running agent-id "(my.task/update! 'tq.cs/shape :seon.task/plan (constantly \"Fix `seon.ref/absent`.\"))"))))))))
 
 (deftest a-proof-the-intent-names-is-shown-once-beside-its-status
   (test-support/with-running-agent
@@ -355,11 +356,11 @@
    (fn [running agent-id connection]
      (let [_ (test-support/declare-proof! connection 'tq.cs-test 'kinds 'tq.cs/kinds)
            base {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs}
-           _ (task/create! (assoc base :seon.task/name "cited" :seon.task/plan "A cited task."))
+           _ (task/create! (assoc base :seon.task/ns 'seon.ref :seon.task/name "cited" :seon.task/plan "A cited task."))
            id (:seon.task/id (task/create! (assoc base :seon.task/name "kinds"
                                                   :seon.task/plan (str "Change `seon.context/step-start`, proven like "
                                                                          "`seon.context-test/the-block-resolves-the-names-a-task-references`; "
-                                                                         "the key `:seon.task/plan`; after `tq.cs/cited`; read "
+                                                                         "the key `:seon.task/plan`; after `seon.ref/cited`; read "
                                                                          "`docs/seon/schedule/cards/TASK-CHAIN.md#7-slices`; validate with `malli.core/validator`."))))]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
