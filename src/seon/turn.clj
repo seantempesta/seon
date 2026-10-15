@@ -2563,18 +2563,34 @@
                        "Your reply began with a response; send a form."
                        "Your reply had no form; only comments/prose. Send a form.")))
 
+(defn- reply-error?
+  "Whether `completion` is a model reply that held reasoning and no answer, or ran out of completion budget: a reply
+  the next context shows, not a failed call."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [completion]
+  (boolean (or (:seon.ai/unanswered-reasoning-count completion)
+               (:seon.ai/exhausted-finish-reason completion))))
+
 (defn- reply-sources
   "The ordered forms of a model `completion`'s reply text (`planned-sources`).
   A reply with no form whose tool calls named tools that do not exist answers
   the no-forms refusal naming them; a reply whose body cannot be read answers
   its own unparseable-body error."
   {:malli/schema
-   [:=> [:cat [:or :seon.ai/successful-completion :seon.ai/unparseable-body-error] :seon.ns/name :seon.config.eval.result/max-source]
-    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error]]}
+   [:=> [:cat [:or :seon.ai/successful-completion :seon.ai/unparseable-body-error :seon.ai/reasoning-without-answer-error :seon.ai/token-starvation-error] :seon.ns/name :seon.config.eval.result/max-source]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error :seon.ai/reasoning-without-answer-error :seon.ai/token-starvation-error]]}
   [{text :seon.ai/text unknown :seon.ai/unknown-tool-calls :as completion} namespace-name max-source]
-  (let [planned (if (:seon.ai/unreadable-response-member completion)
-                  completion
-                  (planned-sources text namespace-name max-source))]
+  (let [planned (cond
+                  (:seon.ai/unreadable-response-member completion) completion
+                  ;; the reply held reasoning and no forms: the producer's variant is the reader error, its members
+                  ;; are counts and the finish reason; the reasoning itself stays on the attempt
+                  (reply-error? completion) (-> completion
+                                                (update :seon.error/data dissoc :seon.ai/reasoning-content)
+                                                (assoc :seon.error/offending
+                                                       (select-keys (:seon.error/data completion)
+                                                                    [:seon.ai/finish-reason :seon.ai/usage
+                                                                     :seon.ai/reasoning-received])))
+                  :else (planned-sources text namespace-name max-source))]
     (if (and unknown (:seon.cluster.reply/no-forms planned))
       (assoc planned
              :seon.ai/unknown-tool-calls unknown
@@ -4029,7 +4045,7 @@
                            (empty? reply-text))
                     []
                     (reply-sources completion namespace-name max-source))
-                  no-forms? (or (:seon.cluster.reply/no-forms prepared) (:seon.ai/unreadable-response-member prepared))
+                  no-forms? (not (vector? prepared))
                   sources (cond
                             (vector? prepared) prepared
                             ; Evaluation source is nonempty by contract. An empty
@@ -4112,11 +4128,9 @@
                                          {:seon.ai/exchanges (:seon.context/exchanges model-context)})
                             sink (assoc :seon.ai/stream? true
                                         :seon.ai/sink sink)))
-              ;; An unparseable body is the model's reply, not a failed call: `freeze!` evaluates it as that
+              ;; An unparseable body, or a reply of reasoning and no answer (`reply-error?`), is the model's reply, not a failed call: `freeze!` evaluates it as that
               ;; turn's one reader error (`reply-sources`), so the next context shows it and the next turn opens.
-              failure (when (or (:seon.ai/unanswered-reasoning-count completion)
-                                (:seon.ai/exhausted-finish-reason completion)
-                                (:seon.ai/interrupted-text-count completion)
+              failure (when (or (:seon.ai/interrupted-text-count completion)
                                 (:seon.ai/provider-error completion)
                                 (:seon.ai/timeout completion)
                                 (:seon.ai/transport-failure completion)
@@ -4603,7 +4617,7 @@
                [:seon.turn.loop/work :seon.turn.work/next]
                [:seon.turn.loop/now :inst]
                [:seon.sci.eval/event {:optional true}
-                [:map [:seon.sci.reader/error [:or :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error]]]]
+                [:map [:seon.sci.reader/error [:or :seon.cluster.reply/no-forms-error :seon.ai/unparseable-body-error :seon.ai/reasoning-without-answer-error :seon.ai/token-starvation-error]]]]
                [:seon.turn.loop/report
                 [:function
                  [:=> [:cat :seon.turn.loop/outcome :int] :seon.turn.loop/turn-report]

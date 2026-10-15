@@ -1727,6 +1727,40 @@
           (is (str/includes? (str (:seon.ai/reply (first unreadable))) (:seon.error/message truncated))
               "its reply is the producer's error"))))))
 
+(deftest a-reply-of-reasoning-and-no-answer-is-delivered-as-its-own-error-with-its-members
+  ;; C9: DeepSeek spent its budget on reasoning (finish "length") or stopped with empty content. The reply held
+  ;; reasoning and no forms; the next context says exactly that, as the producer's variant, never "began with a response".
+  (doseq [finish ["length"]]
+    (with-cluster
+      (fn [cluster]
+        (let [usage {"prompt_tokens" 104 "completion_tokens" 8 "total_tokens" 112
+                     "completion_tokens_details" {"reasoning_tokens" 8}}
+              starved (ai/completion-text
+                       {"choices" [{"message" {"role" "assistant" "reasoning_content" "all reasoning" "content" ""}
+                                    "finish_reason" finish}]
+                        "usage" usage})
+              replies (atom [starved {:seon.ai/text "(seon.run/complete \"done\")"}])
+              requests (atom [])
+              cluster (assoc cluster :seon.turn.loop/complete
+                             (fn [_projection request]
+                               (swap! requests conj request)
+                               (let [reply (first @replies)] (swap! replies rest) reply)))]
+          (is (= :seon.ai/reasoning-without-answer-error (:seon.error/type starved)) "the real producer's variant")
+          (let [reports (drive-agent! cluster "agent-a" 4)
+                delivered (some #(get-in % [:seon.turn.loop/evaluated-sources 0
+                                            :seon.turn.loop/admitted-form :seon.sci.eval/event :seon.sci.reader/error])
+                                reports)]
+          (is (= 2 (count @requests)) "the turn after the starved reply calls the model with no outside wake")
+          (let [[exchange] (:seon.ai/exchanges (nth @requests 1 nil))]
+            (is (str/includes? (str (:seon.ai/reply (first exchange))) (:seon.error/message starved))
+                "the next context shows the producer's message")
+            (is (= :seon.ai/reasoning-without-answer-error (:seon.error/type delivered)))
+            (is (= 13 (:seon.ai/unanswered-reasoning-count delivered)))
+            (is (= finish (get-in delivered [:seon.error/offending :seon.ai/finish-reason])))
+            (is (= usage (get-in delivered [:seon.error/offending :seon.ai/usage])))
+            (is (not (contains? (:seon.error/data delivered) :seon.ai/reasoning-content))
+                "the reasoning stays on the attempt; the reply error holds its count"))))))))
+
 (deftest a-combined-evaluation-projects-every-terminal-receipt-datom
   (with-cluster
     (fn [cluster]
@@ -1985,7 +2019,7 @@
               "the already-arrived completion still settles as the plan"))))))
 
 (deftest ^{:seon/tasks #{'seon.turn/the-turn-settlement-and-schema-tests-are-red}}
-  reasoning-starvation-persists-usage-finish-and-the-named-error
+  reasoning-starvation-persists-usage-finish-and-reasoning-on-the-attempt
   (doseq [retain? [false true]]
     (with-cluster
     (fn [cluster]
@@ -2015,12 +2049,7 @@
                                       {:seon.config.ai/retain-reasoning true}}])))))
         (let [cluster (assoc cluster :seon.turn.loop/complete (recording-completer requests [failure]))]
           (drive-agent! cluster "agent-a" 2))
-        (let [[entity :as entities] (attempt-entities @connection)
-              ;; the attempt points at the error fact; its declared diagnostic
-              ;; attributes are stored on the fact's occurrence (6fbfe21cb)
-              error-fact (first (:seon.error/occurrences
-                                 (db/pull @connection '[{:seon.error/occurrences [*]}]
-                                          (:db/id (:seon.ai.attempt/error entity)))))]
+        (let [[entity :as entities] (attempt-entities @connection)]
           (is (= 1 (count entities)))
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn entity))))
@@ -2029,8 +2058,8 @@
                 (= "all reasoning" (:seon.ai.attempt/reasoning entity))
                 (not (contains? entity :seon.ai.attempt/reasoning)))
               "reasoning-only starvation still persists the settled trace")
-          (is (string? (:seon.ai/exhausted-finish-reason error-fact))
-              "the attempt points at the named starvation error fact")))))))
+          (is (not (contains? entity :seon.ai.attempt/error))
+              "a starved reply is the model's reply, delivered to the next context, not a failed attempt")))))))
 
 (deftest a-provider-failure-is-one-call-and-an-error-value
   (with-cluster fake-evaluate
