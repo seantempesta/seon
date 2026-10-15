@@ -891,6 +891,28 @@
                                 (entities-changed-after database since attribute))))
               (changed-attributes base database attributes))))))
 
+#?(:clj
+   (defn own-changed-identities
+     "The declarations `head`, a branch, holds at another digest than `merge-base` (the value at its merge base,
+  `seon.cluster.source/merge-base`), among those its own lineage changed: git's diff of the merge base and HEAD.
+  The walk starts at the branch's fork, the `:seon.branch/base-t` its own fork entity records (read on `head`, a
+  position on `head`'s lineage, so no t of another branch is ever compared); a value with no fork entity, the
+  cluster's own branch, walks from the merge base's t. What a forward merge moved in holds the merge base's digest,
+  so it is never the branch's change."
+     {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+                          [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+                     [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
+     [merge-base head bounds]
+     (let [fork ((requiring-resolve 'seon.cluster.registry/fork-of) head (get-in head [:config :branch]))
+           touched (changed-identities (or (:seon.branch/base-t fork) merge-base) head bounds)
+           [before after] (when (seq touched)
+                            (map #(digest-map % (assoc bounds :seon.program/identities touched)) [merge-base head]))]
+       (cond (not (set? touched)) touched
+             (empty? touched) touched
+             (:seon.error/at before) before
+             (:seon.error/at after) after
+             :else (into #{} (remove #(= (get before %) (get after %))) touched)))))
+
 (defn three-way
   "Classify branch and head declaration identities relative to base.
 

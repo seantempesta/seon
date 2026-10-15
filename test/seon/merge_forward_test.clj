@@ -1,6 +1,10 @@
 (ns seon.merge-forward-test
   (:require [clojure.test :refer [deftest is]]
             [seon.merge :as merge]
+            [seon.step :as step]
+            [seon.cluster.source :as source]
+            [seon.program :as program]
+            [datahike.api :as d]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
@@ -39,21 +43,21 @@
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
 
-(deftest a-forward-merge-moves-the-branch-onto-mains-adoption-record
-  ;; git merge main moves what the branch is built on: after main adopts a newer program, the chain branch's
-  ;; adoption record names main's, so its test world's overlay (`seon.test/program-overlay-tx`) compares the branch
-  ;; with the program it now holds, not its fork point's (a function main deleted since would be retracted from a
-  ;; world that never held it)
+(deftest a-forward-merge-is-a-merge-commit-on-mains-head
+  ;; git merge main: the branch's new head has main's head as a parent, so Datahike's commit graph makes main's head
+  ;; the merge base (`seon.cluster.source/merge-base`) and nothing stores it; the branch is built on main's adoption
+  ;; record at that base; a relaunch forked from the branch's end has the same base
   (let [target (support/execution-handle nil)
         store (:seon.store/store target)
         main-conn (:seon.db/connection target)
         suffix (id/id)
+        relaunch (keyword (str "relaunch-" suffix))
         _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
             (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
         {chain :seon.chain/branch}
         (task/chain! {:seon.db/connection main-conn :seon.store/store store}
                      [{:seon.task/ns 'fixture.forward :seon.task/name (str "record-" suffix)
-                       :seon.task/plan "Move the chain onto main's adoption record in `seon.merge/merge-main!`."}])
+                       :seon.task/plan "Merge main forward as a merge commit in `seon.merge/merge-main!`."}])
         record (fn [database] (into {} (db/q '[:find ?n ?c :where [?e :seon.cluster/name ?n] [?e :seon.source/commit-id ?c]]
                                             database)))
         [cluster-name] (first (record (db/db main-conn)))
@@ -62,8 +66,57 @@
       (support/transacted! main-conn [[:db/add [:seon.cluster/name cluster-name] :seon.source/commit-id
                                        (db/commit-id (db/db main-conn))]])
       (let [adopted (record (db/db main-conn))
-            merged (merge/merge-main! target chain)]
-        (is (nil? (:seon.error/type merged)) "the forward merge is accepted")
-        (is (= adopted (record (on-chain db/db))) "the branch is built on main's adoption record"))
+            main-commit (db/commit-id (db/db main-conn))
+            merged (merge/merge-main! target chain)
+            head (on-chain db/db)
+            base (source/merge-base head (db/commit-id head) main-commit)]
+        (is (= main-commit (:seon.source/commit-id merged)) "the forward merge is accepted onto main's head")
+        (is (contains? (set (d/parent-commit-ids head)) main-commit) "the branch's head is a merge commit naming main's")
+        (is (= main-commit base) "the merge base is main's head, from the commit graph")
+        (is (= adopted (record (db/commit-database head base))) "the branch is built on main's record at its merge base")
+        (is (= #{} (:seon.program/identities (merge/merge-main! target chain))) "an up-to-date branch merges nothing")
+        (is (= (db/commit-id head) (db/commit-id (on-chain db/db))) "and writes no commit")
+        (registry/fork! {:seon.store/store store :seon.store/branch relaunch :seon.branch/target (get-in (db/db main-conn) [:config :branch])
+                         :seon.cluster.registry/from chain :seon.db/db head})
+        (let [forked (registry/on-branch store relaunch db/db)]
+          (is (= main-commit (source/branch-merge-base forked)) "a relaunch forked from the branch's end has the same base")))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch relaunch})
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
+
+(deftest after-a-forward-merge-the-branch-changed-only-its-own-declarations
+  ;; git diff merge-base HEAD: after `git merge main`, what main moved in sits at the merge base's digest, so the
+  ;; branch's change (`seon.step/changed`, what the done rule judges) is the one function it defined, not main's
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        suffix (id/id)
+        own (symbol "seon.merge-forward-test" (str "own-" suffix))
+        theirs (mapv #(symbol "seon.merge-forward-test" (str "theirs-" % "-" suffix)) (range 8))
+        defined (fn [database sym] (support/program-entity database [:seon.fn/sym sym]
+                                                           (str "(defn " (name sym) " {:malli/schema [:=> [:cat] :int]} [] 1)")))
+        _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
+            (support/transacted! main-conn (support/agent-tx (db/db main-conn) "root")))
+        {chain :seon.chain/branch}
+        (task/chain! {:seon.db/connection main-conn :seon.store/store store}
+                     [{:seon.task/ns 'fixture.forward :seon.task/name (str "own-" suffix)
+                       :seon.task/plan "Judge only the branch's own change after `seon.merge/merge-main!`."}])
+        on-chain (fn [f] (registry/on-branch store chain f))
+        functions (fn [identities] (into #{} (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) identities))]
+    (try
+      (on-chain #(support/transacted! % [(defined (db/db %) own)]))
+      ;; main moves on further than the branch did: its t passes every t the branch wrote
+      (doseq [sym theirs] (support/transacted! main-conn [(defined (db/db main-conn) sym)]))
+      (let [merged (merge/merge-main! target chain)]
+        (is (= (set theirs) (functions (:seon.program/identities merged))) "main's functions moved forward")
+        (is (= #{own} (on-chain #(step/changed (db/db %) :seon.fn/sym)))
+            "the step's change is the branch's own function")
+        (on-chain
+         (fn [connection]
+           (let [after (db/db connection)
+                 base (source/merge-base-database after (db/db main-conn))]
+             (is (= #{own} (functions (program/own-changed-identities base after source/merge-bound)))
+                 "the done rule judges the branch's own function")
+             (source/release! [base])))))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))

@@ -44,8 +44,7 @@
             [seon.task :as task]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]
-            [seon.sci.reader :as reader]
-            [seon.cluster.registry :as registry])
+            [seon.sci.reader :as reader])
   (:import [java.util Date]
            [java.util.concurrent Executor]))
 
@@ -5552,15 +5551,6 @@
           (pos-int? (get config/defaults dial)) (get config/defaults dial)
           :else (let [absent (dial-absent (:seon.cluster/name cluster) agent-id dial)]
                   (throw (ex-info (:seon.error/message absent) absent))))))
-
-(defn fork-commit
-  "The commit a step is judged against, read on `database`, the agent's branch: the branch's merge base, its
-  retained base ref (`seon.cluster.registry/base-commit-id`), the commit it forked at until a merge advances it;
-  nil on main itself. The branch's copy of its assignment row predates the merge base main records for it
-  (`seon.cluster.agent/start-attempt!` forks, then writes it), so the base ref is the one place the branch holds it."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.source/commit-id]]}
-  [database]
-  (registry/base-commit-id database (get-in database [:config :branch])))
 
 (defn- step-reds
   "The tests the step of the task `agent-id` holds leaves red as its change's own, sorted: those the preview of

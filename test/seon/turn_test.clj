@@ -2238,7 +2238,7 @@
            :seon.test/long-ms 30000}
   a-branch-judges-its-step-at-its-merge-base
   ;; `seon.task/attempt-tx` writes the merge base with the assignment on main (the commit the branch forked at);
-  ;; the branch reads the same commit from its own base ref (`fork-commit`)
+  ;; the branch derives the same commit from Datahike's commit graph (`seon.cluster.source/branch-merge-base`)
   (support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "base-" (id/id))
@@ -2257,5 +2257,5 @@
            on-main (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base]
                                                    [:seon.task/assignment (:seon.task/assignment assignment)]))]
        (is (uuid? on-main) "the assignment on main carries the commit its branch forked at")
-       (is (= on-main (turn/fork-commit (db/db target)))
+       (is (= on-main ((requiring-resolve 'seon.cluster.source/branch-merge-base) (db/db target)))
            "the branch judges its step at the merge base its assignment row carries")))))

@@ -2065,40 +2065,17 @@
 
 (declare request-refusal)
 
-(defn- commit-facts
-  "The branch `commit-id` was written on and its parent commits; nil when the store lacks the commit."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
-                  [:maybe [:tuple :seon.store/branch [:vector :seon.source/commit-id]]]]}
-  [store commit-id]
-  (seon.cache/lookup ::commit-facts commit-id (constantly 160)
-                     #(when-let [database (source/commit-database store commit-id)]
-                        (try [(get-in database [:config :branch]) (vec (get-in database [:meta :datahike/parents]))]
-                             (finally (source/release! [database]))))))
-
-(defn- fork-commit
-  "The commit `candidate`'s branch was forked at: the nearest ancestor of its head written on another
-  branch (its own head when it has written nothing); nil when its history is unavailable."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.db/database-value] [:maybe :seon.source/commit-id]]}
-  [store candidate]
-  (let [branch (get-in candidate [:config :branch])]
-    (loop [commit (db/commit-id candidate)]
-      (when-let [[written parents] (when commit (commit-facts store commit))]
-        (if (not= branch written)
-          commit
-          ;; A commit written here has one parent written here, unless it was the first.
-          (recur (or (some #(when (= branch (first (commit-facts store %))) %) parents)
-                     (first parents))))))))
-
 (defn- change-base
   "The commit a check of `candidate` compares against: the adopted source commit `recorded` for the
-  cluster's own branch; for any other branch the commit it was forked at, so what its source branch
-  changed before the fork is never this branch's change."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
-                  :seon.source/commit-id]}
-  [store cluster candidate recorded]
+  cluster's own branch; for a work branch its merge base with its target (`seon.cluster.source/branch-merge-base`,
+  Datahike's commit graph), so what main changed before the fork or moved in since is never this branch's change;
+  `recorded` for a branch with no fork entity. A refused merge base is answered."
+  {:malli/schema [:=> [:cat :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
+                  [:or :seon.source/commit-id :seon.error/value]]}
+  [cluster candidate recorded]
   (if (= (cluster.branch/cluster-branch cluster) (get-in candidate [:config :branch]))
     recorded
-    (or (fork-commit store candidate) recorded)))
+    (or (source/branch-merge-base candidate) recorded)))
 
 (defn- bindings
   "The names namespace `ns-name` binds on `database`: its requires and its alias, refer and import bindings; none when it is absent."
@@ -2126,13 +2103,14 @@
   (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
 
 (defn branch-delta
-  "The pure branch delta: the declarations `candidate` changed after `base` (a committed value on its lineage, its
-  change base), read once by `seon.program/changed-identities` (the history walk the done rule reads), less a
+  "The pure branch delta: the declarations `candidate` holds at another digest than `base` (its merge base, or the
+  published commit on the cluster's own branch), among those its own lineage changed
+  (`seon.program/own-changed-identities`, the derivation the done rule reads), less a
   function or test both hold at one behavior digest (a docstring-only change is none) and a namespace that lost no
   binding (`binding-lost?`), in print order; empty when nothing changed, a refused read its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.test/changed :seon.error/value]]}
   [base candidate]
-  (let [changed (program/changed-identities (db/basis-t base) candidate source/merge-bound)]
+  (let [changed (program/own-changed-identities base candidate source/merge-bound)]
     (if (:seon.error/at changed)
       changed
       (vec (sort print/compare-values
@@ -2145,7 +2123,7 @@
 
 (defn branch-changes
   "Every declaration `execution`'s program changed since its base (`change-base`: the published commit on the
-  cluster's own branch, the commit it was forked at on any other), the `branch-delta`: empty when nothing changed;
+  cluster's own branch, the merge base on a work branch), the `branch-delta`: empty when nothing changed;
   a cluster recording no adopted source commit refuses by name."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
@@ -2158,8 +2136,9 @@
                        "The cluster records no adopted source commit to compare my program against: there is no change to check."
                        cluster)
       (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-            candidate (db/db (:seon.db/connection execution))]
-        (branch-delta (source/database store (change-base store cluster candidate recorded)) candidate)))))
+            candidate (db/db (:seon.db/connection execution))
+            base (change-base cluster candidate recorded)]
+        (if (:seon.error/at base) base (branch-delta (source/database store base) candidate))))))
 
 (defn branch-tests
   "The tests `execution`'s branch defined or changed since its base (`branch-changes`), sorted: empty when none."
@@ -2231,7 +2210,7 @@
   branch in the overlay, off the checkpoint commit: the durable checkpoint
   branch roots that commit on disk, and the overlay branch roots only the
   request's in-memory commits. It writes `program-overlay-tx`'s rows there: the candidate's changes since
-  the loaded program it was built on (its adoption record), so a branch forked
+  the loaded program it was built on (the adoption record at its merge base), so a branch forked
   before a restart runs the loaded program, not the one it was forked at, with
   its own and its source branch's changes. Its context interprets
   those definitions over the loaded program (`seon.sci.eval/base-ctx`), so a test
@@ -2250,8 +2229,13 @@
         ;; the base apply unchanged on its checkpoint's descendants.
         ;; The program the candidate was built on: its own adoption record,
         ;; which a branch keeps from its fork point.
+        ;; a work branch is built on main's record at its merge base; the cluster's own branch on its own record
+        merge-base (source/branch-merge-base candidate)
+        _ (when (:seon.error/at merge-base) (throw (world-refusal "merge base read" merge-base)))
+        recorded-on (if merge-base (db/commit-database candidate merge-base) candidate)
         built-on (or (:seon.source/commit-id
-                      (db/pull candidate [:seon.source/commit-id] [:seon.cluster/name cluster]))
+                      (try (db/pull recorded-on [:seon.source/commit-id] [:seon.cluster/name cluster])
+                           (finally (when merge-base (source/release! [recorded-on])))))
                      base)
         world (source/database store base)
         overlay (program-overlay-tx world (if (= built-on base) world (source/database store built-on)) candidate)

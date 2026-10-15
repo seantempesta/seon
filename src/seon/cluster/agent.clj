@@ -1838,7 +1838,8 @@
 (defn- done-judged
   "What the done rule (`seon.cluster.source/done-refusals`) judges for chain task `handle` at `at-end`, its chain
   `branch` at the attempt's end commit: its proofs field, the next task's, the tests the branch defines or changes
-  and those reaching the functions it changed since its fork (`seon.fn/gate-sets`), their current results there
+  and those reaching the functions it changed since its merge base with main (`seon.cluster.source/merge-base`,
+  `seon.program/own-changed-identities`; `seon.fn/gate-sets`), their current results there
   (`seon.context/current-results`), those main `database` holds green at its own reach, and the newest run they
   came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle]
@@ -1847,11 +1848,12 @@
   (let [task (db/pull at-end [:seon.task/sym :seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
         proofs (set (:seon.task/proofs task))
         next-proofs (set (get-in task [:seon.task/next :seon.task/proofs]))
-        base-commit (registry/base-commit-id at-end branch)
-        base (when base-commit (db/commit-database at-end base-commit))
-        delta (if base
-                (try (program/changed-identities (db/basis-t base) at-end source/merge-bound) (finally (source/release! [base])))
-                #{})
+        base-commit (source/merge-base database (db/commit-id at-end) (db/commit-id database))
+        base (when (uuid? base-commit) (db/commit-database at-end base-commit))
+        delta (cond (:seon.error/at base-commit) base-commit
+                    base (try (program/own-changed-identities base at-end source/merge-bound)
+                              (finally (source/release! [base])))
+                    :else #{})
         of (fn [attribute] (into #{} (keep (fn [[a s]] (when (= attribute a) s))) (when (set? delta) delta)))
         reached (if (seq (of :seon.fn/sym)) (seon.fn/gate-sets {:seon.db/db at-end :seon.fn/seeds (of :seon.fn/sym)}) [])
         members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))

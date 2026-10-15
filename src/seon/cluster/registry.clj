@@ -143,6 +143,14 @@
   [database]
   (set (head-record (:store (db/schema-database database)) :branches)))
 
+(defn head-commit-id
+  "The commit `branch` of `database`'s store names now, read from its head record; nil when the store's branches
+  hold no such branch."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.source/commit-id]]}
+  [database branch]
+  (when (contains? (held-branches database) branch)
+    (get-in (head-record (:store (db/schema-database database)) branch) [:meta :datahike/commit-id])))
+
 (defn branch-commit-id
   "The commit ID currently named by a branch. A branch the store does not
   hold answers `:seon.cluster.registry/branch-missing-error`, naming the store
@@ -359,37 +367,18 @@
                        [attribute value])))
           (db/undecoded-datoms database :eavt [(:e (apply max-key :tx named))]))))
 
-(defn advanced-base-t
-  "The base-t attribute a merge recorded in `target` (a database) for the fork
-  `fork-id`, or nil when no merge advanced it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.branch/fork-id] [:maybe :seon.db/basis-t]]}
-  [target fork-id]
-  (db/q '[:find ?t . :in $ ?id :where [?e :seon.branch/fork-id ?id] [?e :seon.branch/base-t ?t]]
-        target fork-id))
-
-(defn- target-advanced-base-t
-  "`advanced-base-t` of `fork-id` on `target`'s head in `store`; nil when the
-  store holds no such branch."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.branch/fork-id] [:maybe :seon.db/basis-t]]}
-  [store target fork-id]
-  (let [head (branch-commit-id {:seon.store/store store :seon.store/branch target})
-        database (when-not (:seon.error/at head) (d/commit-as-db (:seon.store/connection-object store) head))]
-    (when database
-      (try (advanced-base-t database fork-id)
-           (finally (d/release-materialized-db database))))))
-
 (defn branch-fork-entity
   "The fork entity of `branch`, forked from the branch `parent` toward
   `target` with `database` its value at the fork: a fresh fork id, the target
   and its base-t attribute. Forked from its target, the base-t is the fork's
   t. Forked from a work branch toward that branch's own target (a nested
-  fork), it inherits that branch's base toward it (the base a merge advanced,
-  else that branch's own): a t in the history the fork inherited. A parent
+  fork), it inherits that branch's own base-t: a t in the history the fork inherited, so a walk of the fork's own
+  lineage from it never reads another branch's counter. A parent
   with no fork entity toward `target` gives no base and refuses by name."
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.store/branch :seon.store/branch
                        :seon.db/database-value]
                   [:or :seon.branch/fork :seon.error/value]]}
-  [store parent target branch database]
+  [_store parent target branch database]
   (let [inherited (when (not= parent target) (fork-of database parent))]
     (cond
       (= parent target)
@@ -398,8 +387,7 @@
 
       (= target (:seon.branch/target inherited))
       {:seon.branch/fork-id (id/id) :seon.branch/name branch :seon.branch/target target
-       :seon.branch/base-t (or (target-advanced-base-t store target (:seon.branch/fork-id inherited))
-                               (:seon.branch/base-t inherited))}
+       :seon.branch/base-t (:seon.branch/base-t inherited)}
 
       :else
       (error.refusal/diagnostic
@@ -781,8 +769,11 @@
   a branch head's facts name when that is earlier. Datahike marks every
   commit newer than `remove-before` along each branch's ancestry, so a commit
   the facts still name (`named-commits`) is never pruned by a retention
-  window (`retention-cutoff`). A current branch head is always marked, so
-  naming one moves nothing."
+  window (`retention-cutoff`). A work branch's merge base with its target
+  (`seon.cluster.source/branch-merge-base`) counts as named, so the commit and
+  every commit the graph walks to reach it survive, and the merge base stays
+  derivable. A current branch head is always marked, so naming one moves
+  nothing."
   {:malli/schema [:=> [:cat :seon.store/store :inst] :inst]}
   [store remove-before]
   (let [connection (:seon.store/connection-object store)
@@ -790,8 +781,11 @@
         heads (into #{} (map :seon.source/commit-id) (branch-heads store (branches store)))
         named (into #{}
                     (comp (mapcat (fn [branch]
-                                    (let [database (d/branch-as-db connection branch)]
-                                      (try (named-commits database)
+                                    (let [database (d/branch-as-db connection branch)
+                                          ;; a work branch's merge base with its target: Datahike's commit graph,
+                                          ;; walked through every commit between it and both heads
+                                          base ((requiring-resolve 'seon.cluster.source/branch-merge-base) database)]
+                                      (try (cond-> (named-commits database) (uuid? base) (conj base))
                                            (finally (d/release-materialized-db database))))))
                           (remove heads))
                     (branches store))

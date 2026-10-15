@@ -16,6 +16,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.cache]
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn :as fn]
@@ -731,40 +732,51 @@
   [missing message members]
   (assoc (program/digest-map-refusal missing message members) :seon.error/operation 'seon.cluster.source/prepare-merge!))
 
-(defn branch-base-t
-  "The base-t attribute toward `head` (the target's database) of `candidate`'s
-  own fork entity in `branch` (`seon.cluster.registry/fork-of`): the one a
-  merge recorded on the target under that fork's id, else the fork's own. A
-  branch with no fork entity, or one whose target is not `target` (the branch
-  `head` is read from), refuses by name."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.store/branch :seon.store/branch]
-                  [:or :seon.db/basis-t :seon.program/digest-map-refusal]]}
-  [branch head target candidate]
-  (let [fork (registry/fork-of branch candidate)]
-    (cond
-      (nil? fork)
-      (refused :seon.program/history "The branch has no fork entity, so it has no merge base."
-               {:seon.store/branch candidate})
-      (not= target (:seon.branch/target fork))
-      (refused :seon.program/history "The branch's fork entity names another target, so it has no merge base with this one."
-               {:seon.store/branch candidate :seon.error/expected (:seon.branch/target fork) :seon.error/offending target})
-      :else (or (registry/advanced-base-t head (:seon.branch/fork-id fork)) (:seon.branch/base-t fork)))))
+(def ^:private merge-base-refusals
+  "The `datahike.api/merge-base` refusals that answer as data: they say this pair of commits has no one merge base."
+  #{:merge-base-criss-cross :commit-not-found :branch-does-not-exist :commit-graph-disabled})
 
 (defn merge-base
-  "The immutable commit held by candidate's retained base ref among the store's
-  `branches` (the caller's basis), preserving values whose attributes omit
-  history. The caller releases the database."
-  {:malli/schema [:=> [:cat :seon.cluster.registry/branches :seon.db/database-value :seon.db/database-value
-                       :seon.store/branch :seon.store/branch]
+  "The merge base of the commits `a` and `b` of `database`'s store, git's `merge-base`: their best common ancestor
+  in Datahike's commit graph (`datahike.api/merge-base`), a commit id. A pure function of two immutable ids, so it
+  is cached by them (`seon.cache`) and never invalidated. Two commits with no common ancestor, a criss-cross with
+  several best ones, or an unknown commit refuse by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.source/commit-id]
+                  [:or :seon.source/commit-id :seon.program/digest-map-refusal]]}
+  [database a b]
+  (let [found (try (seon.cache/lookup ::merge-base (vec (sort [a b])) (constantly 64)
+                                      #(d/merge-base (db/schema-database database) a b))
+                   (catch clojure.lang.ExceptionInfo failure
+                     ;; a deliberate translation: Datahike's named refusal, answered as this reader's
+                     (if (merge-base-refusals (:type (ex-data failure)))
+                       (assoc (refused :seon.program/history (ex-message failure)
+                                       {:seon.error/offending (:type (ex-data failure)) :seon.error/expected [a b]})
+                              :seon.error/operation 'seon.cluster.source/merge-base)
+                       (throw failure))))]
+    (or found
+        (assoc (refused :seon.program/history "The two commits share no ancestor, so they have no merge base."
+                        {:seon.error/expected [a b]})
+               :seon.error/operation 'seon.cluster.source/merge-base))))
+
+(defn merge-base-database
+  "The database at the merge base (`merge-base`) of the values `a` and `b`, opened by `seon.db/commit-database`; the
+  caller releases it. A refused merge base is answered."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
-  [branches branch head target candidate]
-  (let [t (branch-base-t branch head target candidate)]
-    (if (:seon.error/at t)
-      t
-      (if-let [commit (registry/base-commit-id branch branches candidate)]
-        (d/commit-as-db branch commit)
-        (refused :seon.program/history "The branch has no retained base ref."
-                 {:seon.store/branch candidate})))))
+  [a b]
+  (let [base (merge-base a (db/commit-id a) (db/commit-id b))]
+    (if (:seon.error/at base) base (db/commit-database a base))))
+
+(defn branch-merge-base
+  "The merge base of the branch value `database` with its target's head (its fork entity's `:seon.branch/target`,
+  `seon.cluster.registry/fork-of`): `git merge-base HEAD main`, a commit id; nil on a value with no fork entity
+  (main itself) or whose target the store no longer holds; a refused merge base is answered."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :nil :seon.source/commit-id :seon.program/digest-map-refusal]]}
+  [database]
+  (let [target (:seon.branch/target (registry/fork-of database (get-in database [:config :branch])))
+        head (when target (registry/head-commit-id database target))]
+    (when head (merge-base database (db/commit-id database) head))))
 
 (defn- replacement
   "Exact replacement transaction data onto `onto` for `delta`'s entities in `from`."
@@ -917,11 +929,11 @@
 
 (defn compare-branch
   "Compare `candidate`'s committed program with `head` (a database value of the
-  branch `target`) on their merge base: the candidate's changed identities, the base, candidate and
+  branch `target`) on their merge base (`merge-base-database`, Datahike's commit graph): the candidate's own changed
+  identities (`seon.program/own-changed-identities`), the base, candidate and
   head digest maps and their `seon.program/three-way` classification. The one
-  comparison merge and `my.program/diff` share. The candidate's head and base
-  ref come from one read of the store's branches, the caller's `branches` when
-  it holds them. The base and branch values are
+  comparison merge and `my.program/diff` share. The candidate's head comes from one read of the store's branches,
+  the caller's `branches` when it holds them. The base and branch values are
   materialized: the caller releases them. Refusals sit in `:c-id`, `:changed`
   or `:maps`."
   {:malli/schema [:function
@@ -930,18 +942,17 @@
                         :seon.store/branch] :map]]}
   ([held-store candidate head target]
    (compare-branch held-store (registry/branches held-store) candidate head target))
-  ([held-store branches candidate head target]
+  ([held-store branches candidate head _target]
   (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate
                                          :seon.cluster.registry/branches branches})]
     (if (:seon.error/at c-id)
       {:c-id c-id}
       (let [bound merge-bound
             branch (commit-database held-store c-id)
-            base (merge-base branches branch head target candidate)
-            ;; Only what the candidate changed since its base can merge or
-            ;; conflict, read on the candidate's own lineage.
-            changed (if (:seon.error/at base) base
-                        (program/changed-identities (branch-base-t branch head target candidate) branch bound))
+            base (merge-base-database branch head)
+            ;; Only what the candidate changed since its merge base can merge or conflict: git's diff of the base
+            ;; and the candidate, walked on the candidate's own lineage.
+            changed (if (:seon.error/at base) base (program/own-changed-identities base branch bound))
             ;; an agent's own namespace is its compartment, never the branch's program (`agent-owned`)
             changed (if (set? changed) (into #{} (remove (agent-owned branch head changed)) changed) changed)
             maps (when (set? changed)
@@ -1137,10 +1148,7 @@
                                             :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                                             :seon.task/proofs proofs
                                             :seon.source/tested-task-basis (assoc tested :seon.test.run/id (:seon.test.run/id run))
-                                            :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
-                                            ;; The merge advances the branch's base to the value it merged.
-                                            :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
-                                                                              :seon.branch/base-t (db/basis-t branch)))
+                                            :seon.source/expected-digests (held-digests head delta) :parents #{c-id})
                                (seq product) (assoc :seon.task/product product)
                                listed (assoc :seon.merge/stays (into #{} (remove delta) (:seon.merge/stays listed)))
                                (some true? (vals on-main)) (assoc :seon.source/red-on-target
@@ -1410,8 +1418,8 @@
   head, the candidate and their merge base refuses nothing; else answer its first refusal. The writer refuses,
   before any datom lands, a merged declaration whose digest on the head moved from the prepared merge's
   `:seon.source/expected-digests`; writes to other rows never stale it. The merge commit's parents add the
-  candidate and S's head, and it writes the merged branch's fork entity with its advanced base-t, so the next
-  comparison's merge base is the value merged. The writer, first, recomputes the tested task basis
+  candidate and S's head, so Datahike's commit graph makes the value merged the next comparison's merge base
+  (`merge-base`). The writer, first, recomputes the tested task basis
   (`task-basis-held-tx`) on the head before this merge's own writes, so a task or tag moved between the verdict and
   the write refuses as `:seon.source/test-evidence-error`. Answers the accepted merge `write-back!` takes: its
   identities, the commit before it, its merge commit and the run. The `merging` transaction data and metadata
@@ -1429,15 +1437,15 @@
                    [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]]}
   ([source held-store prepared] (accept-merge! source held-store prepared {:tx-data []}))
   ([source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      merged :parents advanced :seon.source/advanced-base basis :seon.source/tested-task-basis :as prepared}
+                      merged :parents basis :seon.source/tested-task-basis :as prepared}
    {merging :tx-data meta :tx-meta}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
       (let [head (db/db (:seon.db/connection source))
             candidate (commit-database held-store (first merged))
-            base (merge-base (registry/branches held-store) candidate head (get-in head [:config :branch]) (:seon.branch/name advanced))
-            base-commit (registry/base-commit-id candidate (:seon.branch/name advanced))
+            base-commit (merge-base head (first merged) (db/commit-id head))
+            base (if (:seon.error/at base-commit) base-commit (db/commit-database head base-commit))
             tested (commit-database held-store e-id)
             delta (set (keys expected))]
         (try
@@ -1452,23 +1460,18 @@
                                          ;; the facts precede the program, whose refs (a namespace's steward agent)
                                          ;; name entities the facts admit
                                          (cond-> {:tx-data (-> [[:db.fn/call declarations-held-tx expected]
-                                                                [:db.fn/call task-basis-held-tx basis (first merged) base-commit]
-                                                                advanced]
+                                                                [:db.fn/call task-basis-held-tx basis (first merged) base-commit]]
                                                                   (into merging) (into tx))
                                                   :parents (conj merged e-id)}
                                            meta (assoc :tx-meta meta)))]
                 (if (:db-after report)
-                  (do
-                    (let [merged-db (commit-database held-store (first merged))]
-                      (try (registry/advance-base! merged-db (:seon.branch/name advanced))
-                           (finally (d/release-materialized-db merged-db))))
-                    {:seon.program/identities delta :seon.test.run/id run-id
-                     ;; The head this commit merged into is its parent other than the merged ones: Datahike's own
-                     ;; lineage. A report's `:db-before` is the writer's uncommitted value and can name an older
-                     ;; commit (datahike writer.cljc:210).
-                     :seon.source/base-commit-id
-                     (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
-                     :seon.source/commit-id (db/commit-id (:db-after report))})
+                  {:seon.program/identities delta :seon.test.run/id run-id
+                   ;; The head this commit merged into is its parent other than the merged ones: Datahike's own
+                   ;; lineage. A report's `:db-before` is the writer's uncommitted value and can name an older
+                   ;; commit (datahike writer.cljc:210).
+                   :seon.source/base-commit-id
+                   (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
+                   :seon.source/commit-id (db/commit-id (:db-after report))}
                   report))))
           (finally (release! [candidate base tested]))))))))
 

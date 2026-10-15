@@ -295,16 +295,13 @@
   the-merge-base-is-the-merge-requests
   (support/with-database
    (fn [connection]
-     (let [base (db/db connection)
-           target (get-in base [:config :branch])]
+     (let [base (db/db connection)]
        (with-fork
         connection
         (fn [fork branch]
           (let [head (db/db connection)
                 candidate (db/db fork)
-                merge-base (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)
-                basis (source/branch-base-t candidate head target branch)]
-            (is (= (db/basis-t base) basis))
+                merge-base (source/merge-base-database candidate head)]
             (try
               (is (= (db/commit-id base) (db/commit-id merge-base)))
               (is (= (registry/base-commit-id candidate branch) (db/commit-id merge-base)))
@@ -392,25 +389,20 @@
   (support/with-database
    (fn [connection]
      (support/transacted! connection (occurrence-tx (db/db connection)))
-     (let [target (get-in (db/db connection) [:config :branch])]
+     (do
        (with-fork
         connection
-        (fn [fork branch]
+        (fn [fork _branch]
           (support/transacted! fork (occurrence-tx (db/db fork)))
           (let [candidate (db/db fork)
                 head (db/db connection)
-                base (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)
+                base (source/merge-base-database candidate head)
                 entity (:e (first (d/datoms candidate :aevt :seon.error.occurrence/id)))
                 result (merge/squash-merge candidate base head (schema/handed-projection))
                 copied (checked-value head (:tx-data result))]
             (is (= 1 (:seon.error.occurrence/count (db/pull base [:seon.error.occurrence/count] entity))))
             (try
               (is (= 2 (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
-              (registry/advance-base! candidate branch)
-              (let [advanced (source/merge-base (registry/branches (:seon.store/store (support/execution-handle connection))) candidate head target branch)]
-                (try
-                  (is (= 2 (:seon.error.occurrence/count (db/pull advanced [:seon.error.occurrence/count] entity))))
-                  (finally (source/release! [advanced]))))
               (finally (source/release! [base]))))))))))
 
 (deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
@@ -655,7 +647,7 @@
             after (on-chain db/db)
             moved (into #{} (comp (remove #(= (:e %) (:tx %))) (map :a))
                         (d/datoms (db/since after (db/basis-t before)) :eavt))
-            base (db/commit-database after (registry/base-commit-id after chain))
+            base (db/commit-database after (source/merge-base after (db/commit-id after) (db/commit-id main)))
             forked (db/commit-database main fork-commit)]
         (is (nil? (:seon.error/type merged)) "a chain no process holds open merges forward")
         (is (= (digest main "forward-g") (digest after "forward-g")) "g is main's")
@@ -669,9 +661,10 @@
         (is (= (db/commit-id main) (:seon.source/commit-id merged)) "the merge names main's commit")
         (is (= (map #(digest main %) ["forward-f" "forward-g" "forward-h"])
                (map #(digest base %) ["forward-f" "forward-g" "forward-h"]))
-            "the branch's merge base holds main's program")
+            "the branch's merge base, from the commit graph, holds main's program")
+        (is (= (db/commit-id main) (db/commit-id base)) "the forward merge's base is main's head")
         (is (= (registry/base-commit-id after chain) (:seon.task/merge-base (#'merge/assignment-row main attempt)))
-            "the chain's final merge starts from the merge base the forward merge advanced")
+            "the chain's squash of its facts starts from its fork commit: a forward merge moves no task fact")
         (is (nil? (db/pull after [:db/id] [:seon.task/id handle])) "main's task never moved")
         (is (seq moved) "the forward merge wrote the branch")
         (is (every? (program/program-attributes (db/carried-projection after)) moved)

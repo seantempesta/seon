@@ -413,31 +413,18 @@
         (empty? missing) entities
         :else (recur (into identities missing))))))
 
-(defn- adoption-record-tx
-  "The datoms moving `head`'s adoption records (`:seon.source/commit-id` on each `:seon.cluster/name` entity, the
-  program it is built on) to `main`'s where they differ: after `git merge main` the branch is built on main's program."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
-  [main head]
-  (let [records #(db/q '[:find ?n ?c :where [?e :seon.cluster/name ?n] [?e :seon.source/commit-id ?c]] %)
-        [theirs ours] (map records [main head])]
-    (or (some #(when (:seon.error/at %) %) [theirs ours])
-        (into [] (keep (fn [[cluster-name commit]]
-                         (when (not= commit (get (into {} ours) cluster-name))
-                           [:db/add [:seon.cluster/name cluster-name] :seon.source/commit-id commit])))
-              (sort theirs)))))
-
 (defn merge-main!
   "Merge main forward into chain `branch` as `git merge main` does, through `execution` (root's world: main's
   connection and its store): the program declarations main changed since the branch's merge base and the branch
   did not (`seon.program/three-way` of the base, the branch head and main's head) replace the branch's rows in one
-  transaction on the branch's connection, held for this one action (`seon.cluster.registry/on-branch`), whether or
-  not a running graph holds it open, and the branch's merge base advances
-  to main's head (`seon.cluster.registry/advance-base!`). Only program entities and the adoption record
-  (`adoption-record-tx`, the program the branch is now built on) move: tasks, attempts, evaluations, messages and
-  config never do. A declaration both sides changed differently is a conflict: it stays
-  the branch's and is answered as `:seon.program/conflict` (by symbol) with its three digests
-  (`:seon.program/conflict-digests`). Answers the moved declarations, the conflicts and main's commit, or the
-  first refusal as data with nothing written.
+  merge commit on the branch's connection whose parents add main's head (`:parents`, Datahike's `merge-db!`), held
+  for this one action (`seon.cluster.registry/on-branch`), whether or not a running graph holds it open. The merge
+  base is Datahike's commit graph (`seon.cluster.source/merge-base`), so after the merge it is main's head and
+  nothing records it. Only program entities move: tasks, attempts, evaluations, messages and config never do. A
+  branch whose merge base is already main's head is up to date and nothing is written. A declaration both sides
+  changed differently is a conflict: it stays the branch's and is answered as `:seon.program/conflict` (by symbol)
+  with its three digests (`:seon.program/conflict-digests`). Answers the moved declarations, the conflicts and
+  main's commit, or the first refusal as data with nothing written.
 
   ## Example
 
@@ -455,12 +442,15 @@
    store branch
    (fn [chain-connection]
      (let [main (db/db connection)
-           target (get-in main [:config :branch])
+           main-commit (db/commit-id main)
            head (db/db chain-connection)
-           base (source/merge-base (registry/branches store) head main target branch)
-           since (source/branch-base-t head main target branch)
-           changed (when-not (some :seon.error/at [base since])
-                     (let [ours (program/changed-identities since head source/merge-bound)
+           base-commit (source/merge-base main (db/commit-id head) main-commit)
+           current? (= base-commit main-commit)
+           base (cond (:seon.error/at base-commit) base-commit
+                      current? nil
+                      :else (db/commit-database head base-commit))
+           changed (when (and base (not (:seon.error/at base)))
+                     (let [ours (program/own-changed-identities base head source/merge-bound)
                            theirs (program/changed-identities base main source/merge-bound)]
                        (or (some #(when (:seon.error/at %) %) [ours theirs]) (into ours theirs))))
            maps (when (set? changed)
@@ -468,28 +458,25 @@
            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
            delta (:seon.program/changed-on-head three)
            entities (when (seq delta) (carried-entities main head delta))
-           moved (when (vector? entities) (fn/reconcile-tx head entities (vec delta)))
-           record (when three (adoption-record-tx main head))
-           tx (cond (not (vector? record)) nil (empty? delta) record (vector? moved) (into moved record) :else moved)
-           written (when (and (vector? tx) (seq tx))
+           tx (cond (not three) nil (empty? delta) [] (vector? entities) (fn/reconcile-tx head entities (vec delta)) :else nil)
+           written (when (vector? tx)
                      (db/with-branch {:seon.db/connection chain-connection}
-                                     #(db/transact! chain-connection {:tx-data tx})))]
+                                     #(db/transact! chain-connection {:tx-data tx :parents #{main-commit}})))]
        (try
          (cond
+           current? {:seon.store/branch branch :seon.source/commit-id main-commit :seon.program/identities #{}
+                     :seon.program/conflict #{} :seon.program/conflict-digests {}}
            (:seon.error/at base) base
-           (:seon.error/at since) since
            (not (set? changed)) changed
            (not three) (some #(when (:seon.error/at %) %) maps)
-           (not (vector? record)) record
            (and (seq delta) (not (vector? entities))) entities
-           (and (seq delta) (not (vector? tx))) tx
-           (and written (not (:db-after written))) written
+           (not (vector? tx)) tx
+           (not (:db-after written)) written
            :else
-           (do (registry/advance-base! main branch)
-               {:seon.store/branch branch :seon.source/commit-id (db/commit-id main)
-                :seon.program/identities delta
-                :seon.program/conflict (into #{} (map second) (:seon.program/conflict three))
-                :seon.program/conflict-digests (:seon.program/conflict-digests three)}))
+           {:seon.store/branch branch :seon.source/commit-id main-commit
+            :seon.program/identities delta
+            :seon.program/conflict (into #{} (map second) (:seon.program/conflict three))
+            :seon.program/conflict-digests (:seon.program/conflict-digests three)})
          (finally (source/release! [base])))))))
 
 (defn checkout

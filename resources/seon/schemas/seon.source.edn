@@ -119,8 +119,7 @@
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:seon.source/tested-task-basis :seon.source/tested-task-basis]
                [:seon.source/red-on-target {:optional true} :seon.source/red-on-target]
-               [:parents [:set :seon.source/commit-id]]
-               [:seon.source/advanced-base :seon.source/advanced-base]],
+               [:parents [:set :seon.source/commit-id]]],
               :tested-task-basis
               [:map {:description "What selected a merge's run: the task, its seon.task/obligations over main, the candidate and their merge base, and the declarations main held for it and its ancestors, with the run it selected. Producer: seon.cluster.source/tested-task-basis; the merge's writer recomputes it (seon.cluster.source/task-basis-held-tx)."}
                [:seon.task/sym :seon.task/sym] [:seon.task/obligations :seon.task/obligations] [:seon.task/basis :seon.task/basis]
@@ -129,7 +128,6 @@
               :refusals [:vector {:description "Every refusal of a merge's candidate (seon.cluster.source/merge-verdict, its judgment seon.cluster.source/results-verdict); empty only for acceptance."} :seon.error/value],
               :merging [:map {:description "Transaction data and metadata accept-merge! carries in its transaction: root's merge of the assignment's facts (seon.merge/merge!)."}
                         [:tx-data :seon.store/transaction-data] [:tx-meta {:optional true} :map]],
-              :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
               :green-on-target [:set {:description "The judged tests main's head holds green at its own current reach (seon.context/current-results over main): seon.cluster.source/done-refusals refuses each of them red on the branch. Absent: main holds none green."} :seon.test/sym],
               :next-proofs [:set {:description "The proofs of the task that follows the judged one (its :seon.task/next): seon.cluster.source/done-refusals leaves them red, the next task's work. Absent on the chain's last task."} :seon.test/sym],
               :red [:vector {:min 1 :description "The run's members that are not green, by symbol; any refuses acceptance."} :seon.test/sym],

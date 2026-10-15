@@ -755,11 +755,11 @@
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
   an-idle-branch-keeps-the-commit-it-forked-from-through-collection
   ;; The lane forks from `src`'s head F and commits once; `src` then moves on.
-  ;; A collection whose cutoff is past every commit (the window an idle branch
-  ;; outlives) keeps each branch head but follows no parent, so F's commit
-  ;; goes. The merge base, which `seon.cluster.source/compare-branch` (and so
-  ;; `my.program/diff` and `my.program/write-branch!`) needs, is the lane's
-  ;; own value as of its recorded fork t, which history keeps.
+  ;; A collection whose window is past every commit (the window an idle branch
+  ;; outlives) keeps each branch head, and `seon.cluster.registry/retained-before`
+  ;; moves its cutoff back to the lane's merge base, so the commit graph still
+  ;; answers F, which `seon.cluster.source/compare-branch` (and so
+  ;; `my.program/diff` and `my.program/write-branch!`) needs.
   (with-source-store
     (fn [opened]
       (let [src-connection (store/open-branch! opened source-branch)
@@ -776,10 +776,10 @@
                    (finally (store/release-branch! lane-connection))))
             (write-marker! src-connection "after-1")
             (write-marker! src-connection "after-2")
-            (registry/collect! opened (java.util.Date. (+ (System/currentTimeMillis) 60000)) {})
+            (registry/collect! opened (registry/retained-before opened (java.util.Date. (+ (System/currentTimeMillis) 60000))) {})
             (let [head (source/commit-database opened (head-of source-branch))
                   branch (source/commit-database opened (head-of lane))
-                  base (#'source/merge-base (registry/branches opened) branch head source-branch lane)
+                  base (source/merge-base-database branch head)
                   compared (source/compare-branch opened lane head source-branch)]
               (try
                 (is (= fork (when-not (:seon.error/at base) (marker-set base)))
@@ -790,16 +790,15 @@
           (finally (store/release-branch! src-connection)))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
-  a-branch-without-its-own-fork-entity-refuses-its-merge-base-by-name
+  a-branch-without-its-own-fork-entity-has-no-merge-base-to-judge
   (with-source-store
     (fn [opened]
       (registry/branch! {:seon.store/store opened :seon.cluster.registry/from source-branch
                          :seon.store/branch :bare})
       (let [branch (source/commit-database opened (registry/branch-commit-id {:seon.store/store opened :seon.store/branch :bare}))]
         (try
-          (is (= {:seon.program/missing-evidence :seon.program/history :seon.store/branch :bare}
-                 (select-keys (#'source/merge-base (registry/branches opened) branch branch source-branch :bare)
-                              [:seon.program/missing-evidence :seon.store/branch])))
+          (is (nil? (source/branch-merge-base branch))
+              "a branch with no fork entity names no target, so it has no merge base to judge against")
           (finally (source/release! [branch])))))))
 
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
@@ -821,7 +820,7 @@
             base-markers (fn []
                            (let [head (source/commit-database opened (head-of source-branch))
                                  branch (source/commit-database opened (head-of :lane))
-                                 base (#'source/merge-base (registry/branches opened) branch head source-branch :lane)]
+                                 base (source/merge-base-database branch head)]
                              (try [(registry/fork-of branch :lane) (when-not (:seon.error/at base) (marker-set base))]
                                   (finally (source/release! [head branch])))))
             retire! #(registry/retire-branch! {:seon.store/store opened :seon.store/branch :lane})]

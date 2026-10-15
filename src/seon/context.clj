@@ -311,18 +311,17 @@
       [])))
 
 (defn- change
-  "The declaration identities the agent `agent-id`'s branch `database` changed since its task's merge base: the
-  one its attempt row holds (a relaunched attempt keeps its predecessor's, so the change is the task's across
-  attempts), for a row holding none the commit the branch forked at (`seon.turn/fork-commit`); empty on main."
+  "The declaration identities the agent's branch `database` changed since its merge base with its target
+  (`seon.cluster.source/branch-merge-base`, Datahike's commit graph: a relaunched attempt forks its predecessor's end,
+  so the change is the task's across attempts): git's diff of that base and the branch
+  (`seon.program/own-changed-identities`); empty on main."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :seon.program/identity-set :seon.error/value]]}
-  [database agent-id]
-  (let [held (db/q '[:find ?m . :in $ ?id :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/merge-base ?m]]
-                   database agent-id)
-        commit (if (uuid? held) held (turn/fork-commit database))
-        base (when commit (db/commit-database database commit))]
-    (cond (:seon.error/at held) held
+  [database _agent-id]
+  (let [commit (source/branch-merge-base database)
+        base (when (uuid? commit) (db/commit-database database commit))]
+    (cond (:seon.error/at commit) commit
           (nil? base) #{}
-          :else (try (program/changed-identities (db/basis-t base) database source/merge-bound)
+          :else (try (program/own-changed-identities base database source/merge-bound)
                      (finally (source/release! [base]))))))
 
 (defn current-results

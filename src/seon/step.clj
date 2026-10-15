@@ -3,7 +3,6 @@
   pure functions of a plan's text and a database's entities and recorded results."
   (:require [clojure.string :as str]
             [seon.db :as db]
-            [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.ref :as ref]
             [seon.test :as test]
@@ -50,11 +49,13 @@
 
 (defn changed
   "The values of identity `attribute` (`:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`, `:seon.schema/key`) whose
-  declarations `database`, a branch, changed since the commit it was forked at (its base ref,
-  `seon.cluster.registry/base-commit-id`, the base `seon.context` judges the done rule over): `seon.test/branch-delta`, the one history walk `seon.program/changed-identities`; empty on a value with no fork."
+  declarations `database`, a branch, holds at another digest than its merge base with its target
+  (`seon.cluster.source/branch-merge-base`, the base `seon.context` judges the done rule over), among those its own
+  lineage changed: `seon.test/branch-delta` over `seon.program/own-changed-identities`; empty on a value with no fork."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:set :seon.schema/value]]}
   [database attribute]
-  (let [commit (registry/base-commit-id database (get-in database [:config :branch]))
+  (let [commit (source/branch-merge-base database)
+        _ (when (:seon.error/at commit) (throw (ex-info (:seon.error/message commit) commit)))
         base (when commit (db/commit-database database commit))]
     (if (nil? base)
       #{}
