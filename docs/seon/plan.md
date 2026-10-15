@@ -75,7 +75,7 @@ shrunk example inputs and outputs when they view a function; the live view lists
 functions with their check results and data present; every function the branch changed must be checked green to exit a
 stage (this also clears scratch). Pipeline: Haiku library dig (§1) → Sonnet web research (§2) → Opus design (§3) in
 docs/research/agent-platform/2026-10-15/generative-schemas.md; it supersedes the measured-gates hybrid (both plans feed
-§3). Infrastructure first where the whole cannot land now.
+§3). Infrastructure first where the whole cannot land now. Design: §3 of that document (0c9113f8e), phases 0-9; root's decisions: derived checks judge but do not decide what merges; an unknown check is satisfied only by a green test reaching the function; Seon writes its own seeded property now (Malli's `function-checker` passes no seed); at the last task a changed function no test reaches blocks exit (test it or unmap it). Status: phases 0-1 in flight (corpus count; `:merge` sweep of ~208 error variants with their readers).
 
 **The order (owner rulings 2026-10-15, `../research/agent-platform/2026-10-15/branch-model-rulings.md`):** a branch's
 program is its own writes over main's HEAD; merge by reach closure, reusing the branch's results; the writer follows the
