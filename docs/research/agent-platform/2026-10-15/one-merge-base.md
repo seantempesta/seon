@@ -52,7 +52,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 | R1 | Haiku | dig: prior art (git commit-graph, upstream Datahike, earlier Seon attempts and why), rulings the design must keep | n/a | done, b2ad9cd44 |
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | done, a41868d3a |
 | C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | done, claims 1-5 confirmed with corrections (this commit) |
-| 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | waiting on C |
+| 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | done, fork `593a8276` (pushed; submodule pointer not bumped) |
 | 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | waiting |
 | 3 | Opus | own change by address-skipping index diff; history walks (`commit-at-t`, `basis-revisions`, `commit-facts`) replaced | `seon.profile/measure` on `merge-main!` and the step's change set, parent vs change | waiting |
 | 4 | Sonnet | delete what is left: base refs, `advance-base!`, the 125 `:base/*` branches, `base-t`, fork-commits, `change-base`, stored merge-base copies | ledger all converted/deleted; HEAD boots | waiting |
@@ -330,3 +330,103 @@ filter, with generation numbers (1 + max parent) added in the reader.
 ## Implementation notes
 
 (Opus writes here per phase: the decisions made, anything that differed from the plan and why.)
+
+### Phase 1
+
+Lane `omb-p1` (Opus), 2026-10-15. Fork commit **`593a8276`** on `seon/overlay-file-frontend` (parent `62f94893`),
+pushed to origin. The Seon submodule pointer is not bumped; root bumps it in a restart batch.
+
+**API.** `(datahike.versioning/merge-base conn-or-store a b)`, also `datahike.api/merge-base` (the JVM host API, so
+no generated Java/JS/Python surface). `a` and `b` are commit ids or branch keywords. It returns the best common
+ancestor commit id (a uuid), or nil when the two share no ancestor. It raises by `:type`:
+- `:merge-base-criss-cross`, with `:merge-bases` naming every best base, when there is more than one (root's ruling:
+  no virtual base);
+- `:commit-graph-disabled` on a `:commit-graph? false` store;
+- `:commit-not-found` or `:branch-does-not-exist` for an unknown input.
+
+The walk is git's `paint_down_to_common` (flags PARENT1, PARENT2 and STALE; a queue ordered by generation, highest
+first; it stops when only stale entries remain), then `remove_redundant`, pruned by generation. It is a pure function
+of two commit ids and holds no state across calls: a per-call reader memoizes the records it reads, and nothing in
+the fork caches. Seon caches it in `seon.cache`.
+
+**Record format.** Key `[:datahike/commit-graph cid]`, value `{:datahike/parents #{cid} :datahike/generation n}`.
+Generation is v1, the topological level: 1 + the greatest parent generation, 1 for a root.
+- **Writers.** `datahike.writing/commit!`, `datahike.versioning/force-branch!` and `create-database` write it.
+- **Atomicity.** It goes into the same ordered konserve batch, after the index nodes and before the commit record.
+  A torn batch therefore leaves at most an orphan record, which is collectable, and never a commit without its
+  record.
+- **GC.** `datahike.gc/reachable-in-branch` marks the record of every commit it walks, so the record is swept with
+  its commit. This is one mark, not a second sweep.
+- **Opt-out.** A `:commit-graph? false` store writes no record.
+- **Helpers.** `datahike.writing/commit-graph-key`, `commit-graph-records` and `commit-graph-writes`.
+
+**Legacy decision: a read never writes.** A commit without a record gets its generation derived from the parents in
+its full commit record. The derivation runs recursively down to commits that have a record; a commit whose full
+record is gone too (swept, or never written) ends its lineage.
+- **`merge-base` derives in memory and writes nothing.** In Datahike's model, writes go through the writer.
+  `gc-storage!`'s note says readers are unconstrained and may run in a process with no writer (a remote writer, a
+  sync replica). A read path that writes would put writes outside the writer and race the GC guard.
+- **The writer converges the store.** `commit-graph-writes` adds the derived records of the new commit's ancestors to
+  that commit's batch. So the first commit on each lineage after the bump backfills it once, under the writer's GC
+  guard, and every later commit reads one small parent record.
+- **Untouched branches stay legacy.** A branch that never commits again keeps its old segment without records, and
+  each `merge-base` over it re-derives that segment. Seon's cache by the two ids covers this.
+
+**Tests.** The command is `clojure -M:test -m kaocha.runner clj-pss` in `reference-code/datahike`, the `:test`
+alias with kaocha's `:clj-pss` suite, as in `2026-10-14/datahike-asof-bump.md`.
+- **Change:** 967 tests, 5,624 assertions, 0 failures.
+- **Parent `62f94893`**, run in a `git archive` copy: 959 tests, 5,592 assertions, 0 failures.
+- **New namespace,** `test/datahike/test/merge_base_test.clj`, 8 deftests on in-memory stores:
+  - fork then advance: the fork point;
+  - forward merge via `merge-db!` with `:parents #{main-head}`: that main commit;
+  - main advances: the base is unchanged;
+  - relaunch from the chain's end commit: the same base;
+  - the ancestor and self cases;
+  - criss-cross refuses naming both;
+  - legacy: all records deleted gives the same answer and writes nothing; the next commit writes records equal to the
+    originals for its whole lineage, and only that lineage;
+  - the random-history property against brute-force best common ancestors, 6 seeds;
+  - gc reclaims the record (file store);
+  - `:commit-graph? false` refuses, for both a connection and a raw store;
+  - unknown inputs refuse by name.
+- **Two existing tests changed** because they count store objects, which now include one more per commit:
+  - `datahike.test.gc-test/datahike-gc-test`: 7 to 8, 12 to 14, and 2 to 3 swept;
+  - `datahike.test.fusion-test/fusion-write-reduction-and-roundtrip`: 20 to 40 objects over 20 commits.
+- **Flake.** `datahike.test.optimistic-test/tx-report-happy-path-converges-to-conn` failed once in a full run, then
+  passed 3 of 3 alone on the change and 2 of 2 alone on the parent. It is the timing flake `datahike-asof-bump.md`
+  already records, and it is unrelated.
+
+**Cost.** Measured on an APFS clone of `data/store` (2.2 GB) in a throwaway JVM on the fork; nothing touched
+default. The first clone was torn (main's head named a record the copy lacked), and a second `cp -cRn` pass
+completed it. Heads: main `:cluster-default` `6ad05d39`, chain `:chain-f1f6dc8e6652` `6ad047ad`. The answer was
+`6acf6fed` every time, the base claim 1 found. Values are thread ms / MB, one run each.
+
+| case | ms | MB |
+|---|---|---|
+| no records (legacy derivation, 2,826 commits read whole), cold | 2,341 | 4,349 |
+| no records, warm (nothing is cached across calls) | 1,617 | 4,339 |
+| first commit on main after the bump (backfills main's lineage) | 1,407 | (writer thread) |
+| first commit on the chain after that (backfills its segment) | 873 | (writer thread) |
+| next ordinary commit on main | 17 | (writer thread) |
+| records present, fresh JVM, cold | 352 | 408 |
+| records present, warm | 110 | 403 |
+
+**What differed from the plan.**
+1. **The legacy cold walk costs more than claim 1's 1,451 ms.** A generation needs the depth to the root, so every
+   ancestor is read (2,826 commits, not the walk's 1,975). It is paid once per lineage by its first commit
+   (1.4 s on main), then never.
+   - That first commit is over one second. It is a one-time conversion in the writer, so it is a finding for root's
+     restart batch, not a recurring cost.
+   - Alternative if it matters: root runs one empty commit per live branch right after the bump.
+2. **With records, a warm walk is 110 ms and 403 MB, not claim 1's 3.6 ms over an in-memory map.** Each record read
+   pays about 0.2 MB of konserve per-read overhead (C1 measured the same 0.19 MB). Two follow-ups would cut it, and
+   neither is needed for correctness:
+   - a bulk read, one key per branch segment;
+   - konserve's per-read allocation itself.
+   Seon's cache by the two commit ids makes the walk a once-per-pair cost.
+3. **The criss-cross rule follows root's ruling, not C1's.** C1 suggested "greatest generation, ties refused".
+   Root ruled that any several best bases refuse.
+4. **The record is a separate key, not a field in the commit meta.** Stamping `:datahike/generation` into meta would
+   change commit ids' content and would need the writer to thread the generation, as it threads `known-head-cid`.
+   Instead an ordinary commit reads its parent's small record. On S3 that is one extra GET per commit; threading the
+   generation in the writer loop removes it, which is a follow-up if S3 matters.
