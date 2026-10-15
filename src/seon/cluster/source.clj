@@ -846,6 +846,28 @@
   "The bound on the changed entities one merge comparison reads (`seon.program/changed-identities`)."
   {:seon.program/max-datoms 10000})
 
+(defn merge-list
+  "What a merge of branch head `database` carries: of `changed` (the program identities the branch changed since
+  its merge base), `:seon.merge/will-merge` holds those the `seeds` (the tests that curate the merge) reach through
+  every hop (`seon.test.runner/reach-closure`: calls, references, the schemas their contracts name and the schemas
+  those name; a reached name carries its namespace), and every declaration the branch removed; `:seon.merge/stays`
+  holds the rest, which stays on the branch. One walk of the cached reach graph; no test runs."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set [:set :seon.test/sym]]
+                  [:or [:map [:seon.merge/will-merge :seon.program/identity-set] [:seon.merge/stays :seon.program/identity-set]]
+                   :seon.test/unknown-error]]}
+  [database changed seeds]
+  (let [closure ((requiring-resolve 'seon.test.runner/reach-closure) database (vec (sort seeds)))]
+    (if (:seon.error/at closure)
+      closure
+      (let [names (:seon.test/names closure)
+            reached (into (into #{} (map #(vector :seon.schema/key %)) (:seon.schema/keys closure))
+                          (mapcat (fn [n] (cond-> [[:seon.fn/sym n] [:seon.test/sym n]]
+                                            (namespace n) (conj [:seon.ns/name (symbol (namespace n))]))))
+                          names)
+            held? (fn [[attribute value]] (seq (d/datoms database :avet attribute value)))
+            will (into #{} (filter #(or (reached %) (not (held? %)))) changed)]
+        {:seon.merge/will-merge will :seon.merge/stays (into #{} (remove will) changed)}))))
+
 (defn- agent-owned
   "The identities of `changed` that belong to an agent the destination `head` lacks: a namespace born on `branch`
   (the destination holds none of its name) stewarded by such an agent (`:seon.ns/steward`), and each declaration

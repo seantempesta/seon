@@ -1475,6 +1475,27 @@
       (into {} (keep (fn [s] (when (get nodes s) [s (disj (reach-names nodes [s]) s)]))) test-symbols))
     (catch Exception failure (reach-unavailable `reach-memberships failure test-symbols))))
 
+(defn reach-closure
+  "Everything the closures of `test-symbols` reach, the tests included: the names (functions, tests, defs and
+  unresolved targets) and the schema keys their declarations and contracts name, closed through the schemas
+  those keys name. One walk of the cached reach graph from the tests."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:or [:map [:seon.test/names [:set :symbol]] [:seon.schema/keys [:set :qualified-keyword]]]
+                   :seon.test/unknown-error]]}
+  [database test-symbols]
+  (try
+    (let [{::keys [nodes schemas]} (when (seq test-symbols) (reach-graph database test-symbols))
+          names (reach-names nodes (filterv #(get nodes %) test-symbols))
+          named (into #{} (comp (mapcat #(::keys (get nodes %))) (filter qualified-keyword?)) names)
+          ks (loop [pending (vec named) seen (transient #{})]
+               (if-let [k (peek pending)]
+                 (if (contains? seen k)
+                   (recur (pop pending) seen)
+                   (recur (into (pop pending) (::keys (get schemas k))) (conj! seen k)))
+                 (persistent! seen)))]
+      {:seon.test/names (into #{} (filter symbol?) names) :seon.schema/keys ks})
+    (catch Exception failure (reach-unavailable `reach-closure failure test-symbols))))
+
 (defn tests-reaching
   "The tests among `test-symbols` whose closure holds `target` (a test never
   counts as reaching itself): one walk of the reached graph's reversed edges

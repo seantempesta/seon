@@ -677,3 +677,34 @@
         (source/release! (filter some? [base forked])))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
+
+(deftest a-merge-carries-only-what-its-tests-reach
+  ;; ruling 5a: a tested change and its closure merge; a scratch def, a probe schema and a `user` namespace stay
+  (support/with-database
+   (fn [connection]
+     (let [sym #(symbol "seon.merge-test" %)
+           base (db/db connection)
+           _ (support/transacted! connection (support/schema-entities base [[:fixture.reach/value :int] [:tmp/probe :string]]))
+           program (fn [identity source] (support/program-entity (db/db connection) identity source))
+           _ (support/transacted! connection [(program [:seon.fn/sym (sym "reach-f")]
+                                                       "(defn reach-f {:malli/schema [:=> [:cat] :fixture.reach/value]} [] 1)")])
+           _ (support/transacted! connection [(program [:seon.fn/sym (sym "reach-scratch")]
+                                                       "(defn reach-scratch {:malli/schema [:=> [:cat] :int]} [] 2)")])
+           _ (support/transacted! connection [(program [:seon.test/sym (sym "reach-check")]
+                                                       "(clojure.test/deftest reach-check (clojure.test/is (= 1 (seon.merge-test/reach-f))))")])
+           _ (support/transacted! connection [(support/namespace-entity (db/db connection) 'user)])
+           after (db/db connection)
+           changed (program/changed-identities (db/basis-t base) after source/merge-bound)
+           listed (source/merge-list after changed #{(sym "reach-check")})
+           will (:seon.merge/will-merge listed)
+           stays (:seon.merge/stays listed)]
+       (is (every? changed [[:seon.fn/sym (sym "reach-f")] [:seon.fn/sym (sym "reach-scratch")]
+                            [:seon.schema/key :tmp/probe] [:seon.ns/name 'user]])
+           "the fixture changed each of them")
+       (is (= #{} (set (remove will [[:seon.fn/sym (sym "reach-f")] [:seon.test/sym (sym "reach-check")]
+                                     [:seon.schema/key :fixture.reach/value]])))
+           "the tested change, its test and the schema its contract names merge")
+       (is (= #{} (set (remove stays [[:seon.fn/sym (sym "reach-scratch")] [:seon.schema/key :tmp/probe]
+                                      [:seon.ns/name 'user]])))
+           "the scratch def, the probe schema and the user namespace stay")
+       (is (= changed (into will stays)) "every change is listed once")))))
