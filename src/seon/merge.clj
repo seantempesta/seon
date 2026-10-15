@@ -156,10 +156,11 @@
     nil))
 
 (defn- merged
-  "Assignment `a`'s three-way on main `database` from its merge base commit `base-commit` to the source commit `commit`, under `projection`'s rules, with the end the
-  source holds for `a`: nothing when the base already is `commit`."
+  "Assignment `a`'s three-way on main `database` from its branch's fork point `base-commit`
+  (`seon.cluster.registry/fork-point`) to the source commit `commit`, under `projection`'s rules, with the end the
+  source holds for `a`: nothing when the fork point already is `commit`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
-                       :seon.task/merge-base]
+                       :seon.merge/fork-point]
                   [:map [:tx-data :seon.store/transaction-data] [:conflicts :seon.merge/conflicts]
                    [:end {:optional true} :seon.task.attempt/end]]]}
   [database a commit projection base-commit]
@@ -174,32 +175,23 @@
 
 (defn merge-tx
   "Assignment `a`'s squash merge of the source commit `commit` onto main, computed inside main's writer on its own
-  `database` under main's `projection`: the three-way from its merge base (`:seon.task/merge-base`, else `fork`,
-  the commit its branch forked at) to `commit` against `database`, with the base moved to `commit` in the same
-  transaction, so a repeat adds nothing; [] when the base already is `commit`. An assignment with no outcome is
+  `database` under main's `projection`: the three-way of its cluster facts from `fork`, the commit its branch forked
+  at (`seon.cluster.registry/fork-point`; a forward merge never moves these facts, so main's changes to them since
+  are kept), to `commit` against `database`; [] when `fork` is `commit`. An assignment with no outcome is
   closed in the same transaction by its source's end: `:closed` when it ended `:sent-back` (its work goes back to
   its target), `:merged` when it ended `:done`, which `merge!` carries only inside an accepted candidate's
   transaction (`seon.cluster.source/accept-merge!`); any other source, one not yet ended among them, merges its
   facts and stays open. A `:root` conflict keeps main's value (`merge!` answers it)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection]
-                   :seon.store/transaction-data]
-                  [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
-                        :seon.task/merge-base]
-                   :seon.store/transaction-data]]}
-  ([database a commit projection]
-   (if-some [stored (:v (first (d/datoms database :eavt a :seon.task/merge-base)))]
-     (merge-tx database a commit projection stored)
-     (throw (ex-info "The assignment has no merge base." {:seon.error/message "The assignment has no merge base."
-                                                         :db/id a :seon.squash/source-commit commit}))))
-  ([database a commit projection fork]
-   (let [base-commit (or (:v (first (d/datoms database :eavt a :seon.task/merge-base))) fork)]
-     (if (= base-commit commit)
-       []
-       (let [{:keys [tx-data end]} (merged database a commit projection base-commit)
-             outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))]
-         (cond-> (conj tx-data [:db/add a :seon.task/merge-base commit])
-           outcome (conj [:db/add a :seon.task/outcome outcome])))))))
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :seon.source/commit-id :seon.schema/projection
+                       :seon.merge/fork-point]
+                  :seon.store/transaction-data]}
+  [database a commit projection fork]
+  (if (= fork commit)
+    []
+    (let [{:keys [tx-data end]} (merged database a commit projection fork)
+          outcome (when (empty? (d/datoms database :eavt a :seon.task/outcome)) ({:sent-back :closed :done :merged} end))]
+      (cond-> tx-data
+        outcome (conj [:db/add a :seon.task/outcome outcome])))))
 
 (defn- assigned-task
   "The symbol of the task assignment `a` assigns, read on the source head `database`."
@@ -212,37 +204,47 @@
   "Assignment `key`'s row on the head of the chain branch that holds it, among the chain facts main `database`
   holds (`:seon.chain/branch`), else {}: a chain's attempts live on its branch, never on main, until its one merge."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
-                  [:map [:db/id {:optional true} :seon.db/entity-id] [:seon.task/branch {:optional true} :seon.task/branch]
-                   [:seon.task/merge-base {:optional true} :seon.task/merge-base]]]}
+                  [:map [:db/id {:optional true} :seon.db/entity-id] [:seon.task/branch {:optional true} :seon.task/branch]]]}
   [database key]
   (or (some (fn [branch]
           (when-let [head (db/branch-database database branch)]
-            (try (let [row (db/pull head [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])]
+            (try (let [row (db/pull head [:db/id :seon.task/branch] [:seon.task/assignment key])]
                    (when (:seon.task/branch row) row))
                  (finally (source/release! [head])))))
         (sort (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] database)))
       {}))
 
+(defn merged?
+  "Whether main `database` records a squash merge of the source commit `commit`: the transaction metadata
+  `seon.merge/merge!` writes in the merge's own transaction (`:seon.squash/source-commit`), main's history of what it
+  merged, as git's commit message records a squash."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id] :boolean]}
+  [database commit]
+  (boolean (seq (d/datoms database :avet :seon.squash/source-commit commit))))
+
 (defn- assignment-row
-  "Assignment `key`'s row, with its merge base: main's, with its stored base, else the commit its branch forked at
-  (`seon.cluster.registry/base-commit-id`), which the merge stores; else, for a chain's attempt, its chain branch
-  head's (`chain-row`), with the chain branch's base ref, the one merge base `merge-main!` also reads and advances."
+  "Assignment `key`'s row, main's, else, for a chain's attempt, its chain branch head's (`chain-row`), with the base
+  of the cluster facts the merge carries: the newest commit of the head's first-parent history main already merged
+  (`merged?`), else the commit its branch forked from main at (`seon.cluster.registry/fork-point`); a forward merge
+  never moves these facts, so main's changes to them since are kept."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment]
                   [:or [:map [:db/id :seon.db/entity-id] [:seon.task/branch :seon.task/branch]
-                        [:seon.task/merge-base :seon.task/merge-base]] :seon.error/value]]}
+                        [:seon.merge/fork-point :seon.merge/fork-point]] :seon.error/value]]}
   [database key]
-  (let [on-main (db/pull database [:db/id :seon.task/branch :seon.task/merge-base] [:seon.task/assignment key])
+  (let [on-main (db/pull database [:db/id :seon.task/branch] [:seon.task/assignment key])
         row (if (:seon.task/branch on-main) on-main (chain-row database key))
-        ;; a chain's merge base is its branch's base ref, the one `merge-main!` advances
-        base (if (:seon.task/branch on-main)
-               (or (:seon.task/merge-base row) (registry/base-commit-id database (:seon.task/branch row)))
-               (some->> (:seon.task/branch row) (registry/base-commit-id database)))
+        head (some->> (:seon.task/branch row) (registry/head-commit-id database))
+        main (get-in database [:config :branch])
+        ;; the branch's facts since main last took them: the newest commit of its first-parent history main merged
+        ;; (`merged?`), else the commit it forked from main at (`seon.cluster.registry/fork-point`)
+        fork (when (uuid? head)
+               (registry/first-parent-where database head (fn [c branch] (or (= branch main) (merged? database c)))))
         refuse #(refusal/diagnostic (java.util.Date.) :seon.program/write 'seon.merge/merge!
                                     {:seon.error/message % :seon.error/member :seon.task/assignment :seon.error/offending key})]
     (cond
       (not (:seon.task/branch row)) (refuse (str "Assignment " key " is neither on main nor on a chain's branch."))
-      (not base) (refuse (str "Assignment " key "'s branch retains no fork commit to merge from."))
-      :else (assoc row :seon.task/merge-base base))))
+      (not fork) (refuse (str "Assignment " key "'s branch history no longer reaches the commit it forked from main at."))
+      :else (assoc row :seon.merge/fork-point fork))))
 
 (defn- acceptance
   "What the git commit of assignment `key`'s merge names: the assignment, its task and agent, the run and the merge commit."
@@ -271,12 +273,14 @@
         row (assignment-row (db/db connection) key)]
     (if (:seon.error/at row)
       row
-      (let [{a :db/id branch :seon.task/branch base :seon.task/merge-base} row
+      (let [{a :db/id branch :seon.task/branch base :seon.merge/fork-point} row
             ;; one read of the store's branches: the head and the comparison below read the same basis
             branches (registry/branches store)
             commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch
                                                :seon.cluster.registry/branches branches})
             target (db/db connection)
+            ;; main's history records the merge of this commit, or the branch wrote nothing since its fork point
+            merged? (and (uuid? commit) (or (= base commit) (merged? target commit)))
             ;; the source head holds the attempt's end and its task (a chain's live only there):
             ;; prepare-merge! selects the proofs of that task over its assigned basis (main, the
             ;; branch head, the merge base), a Prove step's product beside them;
@@ -285,12 +289,12 @@
             ;; its facts alone, or its declarations through an accepted candidate when it changed any
             on-head (fn [f] (let [head (db/commit-database target commit)]
                               (try (f head) (finally (source/release! [head])))))
-            end (when (and (uuid? commit) (not= base commit))
+            end (when (and (uuid? commit) (not merged?))
                   (on-head #(:v (first (d/datoms % :eavt a :seon.task.attempt/end)))))
             accepted? (case end
                         :done true
                         :sent-back false
-                        (and (uuid? commit) (not= base commit) (pos? (source/unmerged-count target store branches branch))))
+                        (and (uuid? commit) (not merged?) (pos? (source/unmerged-count target store branches branch))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]
@@ -306,13 +310,13 @@
                          (not (:db-after recorded)) recorded
                          :else
                          (let [outcome (:seon.task/outcome (db/pull after [:seon.task/outcome] a))]
-                           (cond-> {:seon.task/assignment key :seon.task/merge-base commit
+                           (cond-> {:seon.task/assignment key
                                     :seon.task/merge-commit (db/commit-id after)
                                     :seon.merge/conflicts (:conflicts (merged before a commit projection base))}
                              outcome (assoc :seon.task/outcome outcome))))))]
         (cond
           (not (uuid? commit)) commit
-          (= base commit) {:seon.task/assignment key :seon.task/merge-base commit :seon.merge/conflicts []}
+          merged? {:seon.task/assignment key :seon.merge/conflicts []}
           (not accepted?)
           (let [report (db/transact! connection {:tx-data merge-call :tx-meta meta})]
             (if (:db-after report)
@@ -349,8 +353,9 @@
 (defn merge!
   "Merge assignment `key`'s branch head C onto main through `execution` (root's world: main's connection, and
   the store it holds or its SCI context's environment holds) as ONE
-  transaction from its merge base (`:seon.task/merge-base`, else the commit its branch forked at): the cluster
-  facts by `merge-tx`, inside the writer, with the base moved to C and the assignment closed by its end; and,
+  transaction whose metadata names C (`merged?`): the cluster facts by `merge-tx`, inside the writer, three-way from the commit its
+  branch forked from main at (`seon.cluster.registry/fork-point`), so main's changes to them since are kept, and
+  the assignment closed by its end; and,
   when its source ended `:done`, or did not end `:sent-back` and changed declarations main lacks
   (`seon.cluster.source/unmerged-count`), whatever declarations it changed, none included, gated first: `seon.cluster.source/prepare-merge!` tests them with the proofs of the assignment's task
   over main, C and the merge base (`seon.cluster.source/tested-task-basis`), a Prove step's product beside them,
@@ -361,7 +366,7 @@
   `:seon.task/merged-declarations`, how many declarations and tasks it moved
   (`seon.cluster.source/merge-accepted`) when any, on either path; publishing the
   merged declarations into the checkout is the next pass's due work (`publish!`), never a step of the merge.
-  A base already at C merges nothing and transacts nothing. Answers the merge, or the first refusal as data
+  A C main already merged (`merged?`) or a branch that wrote nothing merges nothing and transacts nothing. Answers the merge, or the first refusal as data
   with nothing merged. A `:root` conflict of the facts keeps main's value and is answered beside them.
 
   ## Example

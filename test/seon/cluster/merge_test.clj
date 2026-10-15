@@ -927,7 +927,7 @@
       (let [prepared (source/prepare-merge! target store c 'tq.accept/fix)
             _ (some->> (:seon.source/candidate prepared) (vswap! made conj))
             main (db/db h-conn)
-            base (db/commit-database main (registry/base-commit-id main c))]
+            base (db/commit-database main (source/merge-base main (db/commit-id (db/db c-conn)) (db/commit-id main)))]
         (is (true? (:seon.test/passed? prepared)) "the candidate's tested program is green")
         (is (= {:seon.task/sym 'tq.accept/fix}
                (select-keys (:seon.source/tested-task-basis prepared) [:seon.task/sym]))

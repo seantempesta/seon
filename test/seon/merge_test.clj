@@ -298,13 +298,15 @@
      (let [base (db/db connection)]
        (with-fork
         connection
-        (fn [fork branch]
+        (fn [fork _]
           (let [head (db/db connection)
                 candidate (db/db fork)
                 merge-base (source/merge-base-database candidate head)]
             (try
               (is (= (db/commit-id base) (db/commit-id merge-base)))
-              (is (= (registry/base-commit-id candidate branch) (db/commit-id merge-base)))
+              (is (= (registry/fork-point candidate (db/commit-id candidate) (get-in head [:config :branch]))
+                     (db/commit-id merge-base))
+                  "with no forward merge, the fork point is the merge base")
               (is (= (set (d/datoms base :eavt)) (set (d/datoms merge-base :eavt))))
               (finally (source/release! [merge-base]))))))))))
 
@@ -405,45 +407,10 @@
               (is (= 2 (:seon.error.occurrence/count (db/pull copied [:seon.error.occurrence/count] entity))))
               (finally (source/release! [base]))))))))))
 
-(deftest ^{:seon/tasks #{'seon.merge/an-attempts-cluster-facts-copy-onto-main-by-identity}}
-  a-base-ref-keeps-the-fork-commit-only-until-retirement
-  (let [root (str "tmp/sol-p1-squash/retention-" (random-uuid))
-        opened (store/open-store! {:seon.store/dir (str root "/store")})
-        connection (:seon.store/connection-object opened)
-        base @connection
-        commit (d/commit-id base)
-        branch :squash-retention
-        cutoff (java.util.Date. (+ (System/currentTimeMillis) 60000))]
-    (try
-      ;; Exercise the same two branches refs without a schema population: GC
-      ;; owns native commits, independently of Seon's entity validation.
-      (doseq [ref [branch (registry/base-branch branch)]]
-        (registry/branch! {:seon.store/store opened :seon.store/branch ref
-                           :seon.cluster.registry/from commit}))
-      (registry/retire-unclaimed! opened #{branch})
-      (is (contains? (registry/branches opened) (registry/base-branch branch)))
-      (d/transact connection [])
-      @(d/gc-storage connection cutoff)
-      (let [retained (d/commit-as-db connection commit)]
-        (try
-          (is (= commit (d/commit-id retained)))
-          (is (= commit (registry/base-commit-id base branch)))
-          (finally (source/release! [retained]))))
-      (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch})
-      @(d/gc-storage connection cutoff)
-      (is (not (contains? (registry/branches opened) branch)))
-      (is (not (contains? (registry/branches opened) (registry/base-branch branch))))
-      (is (nil? (k/get (:store @connection) commit nil {:sync? true})))
-      (is (nil? (d/commit-as-db connection commit)))
-      (finally
-        (registry/retire-branch! {:seon.store/store opened :seon.store/branch branch})
-        (store/release-store! opened)
-        (support/delete-recursively! root)))))
-
-;;; M3: the merge runs in main's writer and advances the assignment's merge base in the same transaction.
+;;; M3: the merge runs in main's writer, three-way from the branch's fork point, as a merge commit with the source as a parent.
 
 (defn- with-assigned-fork
-  "Run `proof` on a fork of main whose assignment main holds with the fork commit as its merge base:
+  "Run `proof` on a fork of main whose assignment main holds:
   task `handle` (intent \"a\") and its agent on main, then the fork, then the assignment written on main.
   Calls (proof fork branch a) with `a` the assignment's entity id on main."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle [:fn clojure.core/ifn?]] :nil]}
@@ -457,9 +424,8 @@
     (with-fork
      connection
      (fn [fork branch]
-       (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)
-             based (assoc row :seon.task/merge-base (registry/base-commit-id (db/db fork) branch))]
-         (db/with-branch {:seon.db/connection connection} #(support/transacted! connection [based]))
+       (let [[row] (task/attempt-tx (db/db connection) handle agent-id branch)]
+         (db/with-branch {:seon.db/connection connection} #(support/transacted! connection [row]))
          (proof fork branch (:db/id (db/pull (db/db connection) [:db/id]
                                              [:seon.task/assignment (:seon.task/assignment row)]))))))))
 
@@ -479,11 +445,6 @@
   [connection handle]
   (:seon.task/plan (db/pull (db/db connection) [:seon.task/plan] [:seon.task/id handle])))
 
-(defn- merge-base-on
-  "The merge base main holds on assignment `a`."
-  {:malli/schema [:=> [:cat :seon.db/connection :int] [:maybe :uuid]]}
-  [connection a]
-  (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base] a)))
 
 (deftest a-repeated-merge-adds-nothing
   (support/with-database
@@ -497,14 +458,11 @@
                 first-merge (merged! connection a)]
             (is (uuid? (:seon.task/merge-commit first-merge)) "the merge transacted")
             (is (= "b" (plan-on connection handle)))
-            (is (= commit (merge-base-on connection a)) "the merge base moved to the merged source commit")
-            (is (= [] (merge/merge-tx (db/db connection) a commit (db/carried-projection (db/db connection))))
-                "the writer's transaction data for a repeat is empty")
+            (is (merge/merged? (db/db connection) commit) "main's history records the merge of the source commit")
             (let [main (db/commit-id (db/db connection))
                   second-merge (merged! connection a)]
               (is (nil? (:seon.task/merge-commit second-merge)) "a repeat transacts nothing")
-              (is (= main (db/commit-id (db/db connection))) "main is unchanged")
-              (is (= commit (merge-base-on connection a)))))))))))
+              (is (= main (db/commit-id (db/db connection))) "main is unchanged")))))))))
 
 (deftest a-facts-only-merge-is-never-due-for-publication
   (support/with-database
@@ -590,9 +548,10 @@
         (fn [fork _ a]
           (support/transacted! fork [{:db/id [:seon.task/id handle] :seon.task/plan "b"}])
           (let [main (db/db connection)
+                fork-point (:seon.merge/fork-point (#'merge/assignment-row main (:seon.task/assignment (db/pull main [:seon.task/assignment] a))))
                 measured (profile/measure #(merge/merge-tx main a (db/commit-id (db/db fork))
-                                                            (db/carried-projection main)))]
-            (is (= 3 (count (:seon.profile/value measured))) "the intent's retraction and assertion and the moved base: an unended source writes no outcome")
+                                                            (db/carried-projection main) fork-point))]
+            (is (= 2 (count (:seon.profile/value measured))) "the intent's retraction and assertion: an unended source writes no outcome")
             (is (<= (:seon.profile/ms measured) 20)))))))))
 
 (defn- maybe-schemas
@@ -624,6 +583,11 @@
         digest (fn [database n] (:seon.program/definition-digest
                                  (db/pull database [:seon.program/definition-digest] [:seon.fn/sym (sym n)])))
         handle (task/task-handle 'fixture.tasks "forward-main-task")
+        ;; T and U exist at the fork: root changes T on main after it, the chain changes U
+        t-handle (task/task-handle 'fixture.tasks (str "forward-t-" (id/id)))
+        u-handle (task/task-handle 'fixture.tasks (str "forward-u-" (id/id)))
+        plan (fn [database h] (:seon.task/plan (db/pull database [:seon.task/plan] [:seon.task/id h])))
+        _ (write! main-conn [(support/task-row t-handle "T v1") (support/task-row u-handle "U v1")])
         _ (when-not (db/pull (db/db main-conn) [:db/id] [:seon.agent/id "root"])
             (write! main-conn (support/agent-tx (db/db main-conn) "root")))
         _ (write! main-conn (map #(fn-entity main-conn % 1) ["forward-f" "forward-g" "forward-h"]))
@@ -639,8 +603,10 @@
                              (:seon.task/assignment (first tx))))]
     (try
       (write! main-conn [(fn-entity main-conn "forward-g" 2) (fn-entity main-conn "forward-h" 3)
-                         (support/task-row handle "Main's task, written after the fork")])
-      (on-chain #(write! % [(fn-entity % "forward-f" 4) (fn-entity % "forward-h" 5)]))
+                         (support/task-row handle "Main's task, written after the fork")
+                         {:db/id [:seon.task/id t-handle] :seon.task/plan "T v2, root's on main"}])
+      (on-chain #(write! % [(fn-entity % "forward-f" 4) (fn-entity % "forward-h" 5)
+                            {:db/id [:seon.task/id u-handle] :seon.task/plan "U, the chain's"}]))
       (let [main (db/db main-conn)
             before (on-chain db/db)
             merged (merge/merge-main! target chain)
@@ -663,8 +629,16 @@
                (map #(digest base %) ["forward-f" "forward-g" "forward-h"]))
             "the branch's merge base, from the commit graph, holds main's program")
         (is (= (db/commit-id main) (db/commit-id base)) "the forward merge's base is main's head")
-        (is (= (registry/base-commit-id after chain) (:seon.task/merge-base (#'merge/assignment-row main attempt)))
-            "the chain's squash of its facts starts from its fork commit: a forward merge moves no task fact")
+        (let [main (db/db main-conn)
+              {a :db/id fork-point :seon.merge/fork-point} (#'merge/assignment-row main attempt)
+              ;; the chain's final merge lands on main's latest head: its facts three-way from its fork point
+              landed (checked-value main (merge/merge-tx main a (db/commit-id after) (db/carried-projection main) fork-point))]
+          (is (not= (db/commit-id base) fork-point)
+              "the facts' base is the fork point, not the merge base the forward merge moved to main's head")
+          (is (= "T v1" (plan forked t-handle)) "T was v1 at the fork")
+          (is (= "T v1" (plan after t-handle)) "the forward merge never moved T onto the chain")
+          (is (= "T v2, root's on main" (plan landed t-handle)) "main's change to T since the fork is kept")
+          (is (= "U, the chain's" (plan landed u-handle)) "the chain's own change to U lands on main"))
         (is (nil? (db/pull after [:db/id] [:seon.task/id handle])) "main's task never moved")
         (is (seq moved) "the forward merge wrote the branch")
         (is (every? (program/program-attributes (db/carried-projection after)) moved)

@@ -488,6 +488,55 @@ any more, so it now always names the fork commit). Options for root:
   base: two bases by design. Recommended: (a) — the fork point is a real, different fact for facts that never
   merge forward, and it comes from the graph, so nothing is stored.
 
+### Phase 2b
+
+Lane `omb-p2b` (Opus), 2026-10-15, on root's ruling: the chain's final merge lands on main's latest head; program
+entities three-way from the graph merge base; cluster facts (tasks, attempts), which a forward merge never moves,
+three-way from the chain's **fork point**; option (b) rejected.
+
+**The fork point.** `seon.cluster.registry/fork-point` (in registry, not beside `merge-base`: `seon.task` needs it
+and `seon.cluster.source` requires `seon.task`). Datahike's `:datahike/parents` is a set and the phase-1 graph
+record holds only parents and generation, so first-parent order is not recorded. It is derived from what each
+commit record already holds, `[:config :branch]` (the branch that wrote it): a commit's first parent is the parent
+written on its own branch, else its one parent. The walk goes back from the head to the first commit written on
+the target branch. That is "first commit whose parent was written on another branch" generalised so that a
+relaunch keeps the fork point: the relaunch branch forks the predecessor's end commit, which is on the
+predecessor's branch, so the walk continues through that branch to main. Cached per commit in `seon.cache`
+(`::commit-step`, branch and first parent of an immutable commit), so each commit is read once per process. No
+fork change was needed.
+- Cost (read-only JVM probe on default, `:chain-f1f6dc8e6652`): about 1.05 ms and 2.5 MB per commit record read
+  cold (300 commits: 314 ms, 750 MB). The whole 1,126-commit chain costs about 1.2 s and 2.8 GB once per process.
+  After that, each new head reads one record. A smaller per-commit record is possible but needs a fork change:
+  add `:datahike/branch` to the phase-1 graph record (0.05 ms a read). That is a follow-up for a restart batch.
+- `retained-before` names the fork point beside the merge base, so collection keeps it once the base refs go.
+
+**Converted.**
+- `seon.merge`: `merged`, `merge-tx` (5-arity only), `chain-row`, `assignment-row` (`:seon.merge/fork-point`,
+  registered), `merge-onto`, `merge!`. Idempotence was the stored base moving to C in `merge-tx`. It is now
+  `seon.merge/merged?`: main's history records a squash of C (the `:seon.squash/source-commit` tx-meta every merge
+  writes in its own transaction, AVET).
+  - A facts-only merge stays a plain transaction. Giving it `:parents #{C}` would pin the deleted branch's commits
+    from main (`seon.cluster.registry-test/a-deleted-attempts-storage-is-reclaimed-by-the-next-collection`), the GC
+    question phase 4 already holds for `accept-merge!`.
+- `seon.task`: `attempt-tx`, `relaunched` (the commit only), `attempt-rows-tx`, `assigned-obligations` (the fork
+  point, because task facts never move forward).
+- `seon.cluster.agent`: `fork-attempt!` (returns nil), `start-attempt!`; `write-merge-base!` is deleted.
+  `lifecycle-facts` now carries `:seon.flow.actions/merged?` (`seon.merge/merged?` of the head) in place of the
+  base. `assignment-actions` lost the `:merge-base` action and `copied?`, and `apply-lifecycle!` and `failed-pass!`
+  lost the `:merge-base` op, from the code and the enum.
+- `my.root/merge-requests`.
+- Deleted: `seon.cluster.registry/base-commit-id`, `advance-base!`, and `fork!`'s base-ref creation.
+  `base-branch` stays for `retire-branch!` and `retire-unclaimed!` until phase 4 removes the stored `:base/*`
+  branches.
+- The `:seon.task/merge-base` attribute stays in the schema, marked retired, because stored values carry it.
+  Phase 4 deletes it with them. It is gone from every function contract (`seon.merge/merged`, `my.root`, the flow
+  action schemas).
+
+**Known gap (not fenced).** A branch merged twice re-squashes from its fork point, so an `:add` count it moved
+before the first merge adds again. Today that needs root to merge an assignment's facts by hand (`my.root/merge!`)
+before it ends and is merged again. No run has hit it. The old stored base handled it. The graph answer would be
+"the newest first-parent commit main already squashed", which needs the squash tx-meta joined to the walk.
+
 **Inherited by phase 3.** `own-changed-identities`'s walk (and `merge-main!`'s `theirs` walk on main from the base's
 t, which is cross-lineage only in the rare case that the base is a chain commit, after the chain merged into
 main) become the diff of two values; `squash-merge`'s walk; `commit-at-t`.

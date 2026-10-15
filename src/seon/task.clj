@@ -614,14 +614,14 @@
 
 (defn assigned-obligations
   "Task `sym`'s `obligations` as the agent on the branch `database` is held to them: over main's head (`main-head`),
-  the branch and the commit its base ref retains (`seon.cluster.registry/base-commit-id`), the merge base. On main,
-  where no base ref is held, the obligations at `database`."
+  the branch and the commit it forked from main at (`seon.cluster.registry/fork-point`), the base of its task facts,
+  which a forward merge never moves. On main, the obligations at `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
                   [:or :seon.task/obligations :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database sym]
-  (let [commit (registry/base-commit-id database (get-in database [:config :branch]))
-        main (when commit (main-head database))
-        base (when main (db/commit-database database commit))]
+  (let [main (main-head database)
+        commit (when main (registry/fork-point database (db/commit-id database) (get-in main [:config :branch])))
+        base (when commit (db/commit-database database commit))]
     (if base (obligations main database base sym) (obligations database sym))))
 
 (defn task-edges
@@ -1061,47 +1061,42 @@
           [number (id/id [handle number])]))))
 
 (defn relaunched
-  "The end commit and merge base of task `handle`'s latest attempt in `database` when db<->flow relaunched it
+  "The end commit of task `handle`'s latest attempt in `database` when db<->flow relaunched it
   (`:seon.task.attempt/relaunch`, `seon.cluster.agent/close!`): its next attempt forks that commit, so the work
-  carries over, and keeps that merge base, so its merge takes both attempts' changes; nil otherwise."
+  carries over and its fork point stays the predecessor's (`seon.cluster.registry/fork-point` walks through it), so
+  its merge takes both attempts' changes; nil otherwise."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
-                  [:or :nil [:map [:seon.task.attempt/commit :seon.task.attempt/commit]
-                             [:seon.task/merge-base :seon.task/merge-base]]
+                  [:or :nil [:map [:seon.task.attempt/commit :seon.task.attempt/commit]]
                    :seon.db/invalid-read-error]]}
   [database handle]
   (let [latest (db/q '[:find (max ?n) . :in $ ?h
                        :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
                      database handle)
         row (when (int? latest)
-              (db/q '[:find (pull ?a [:seon.task.attempt/relaunch :seon.task.attempt/commit :seon.task/merge-base]) .
+              (db/q '[:find (pull ?a [:seon.task.attempt/relaunch :seon.task.attempt/commit]) .
                       :in $ ?h ?n :where [?t :seon.task/id ?h] [?a :seon.task/attempt-of ?t] [?a :seon.task.attempt/number ?n]]
                     database handle latest))]
     (or (read-error latest) (read-error row)
-        (when (:seon.task.attempt/relaunch row) (select-keys row [:seon.task.attempt/commit :seon.task/merge-base])))))
+        (when (:seon.task.attempt/relaunch row) (select-keys row [:seon.task.attempt/commit])))))
 
 (defn attempt-tx
   "The transaction data writing the next attempt of task `handle` by `agent-id` on `branch` at main
   `database`: its row, numbered one more than the task's `:seon.task/attempts-made` (written beside it) and identified by
-  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value and the merge base: the
-  commit the branch forked at when the branch exists, else a relaunched predecessor's (`relaunched`); [] when that
+  `seon.id/id [handle number]`, with `:seon.task/attempt-of` beside the handle value; [] when that
   attempt is already written. The agent it names may be created in the same transaction. An unknown
   task refuses `:unknown-task`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.agent/id :seon.store/branch]
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database handle agent-id branch]
   (let [[number attempt :as next] (next-attempt database handle)
-        revision (task-revision database handle)
-        predecessor (relaunched database handle)
-        base (or (registry/base-commit-id database branch) (:seon.task/merge-base predecessor))]
+        revision (task-revision database handle)]
     (cond (read-error next) next
           (read-error revision) revision
-          (read-error predecessor) predecessor
           (nil? revision) (refused 'seon.task/attempt-tx :unknown-task 'seon.task handle)
           (:db/id (db/pull database [:db/id] [:seon.task/assignment attempt])) []
-          :else [(cond-> {:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
-                          :seon.task.attempt/number number :seon.task/revision revision
-                          :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}
-                   base (assoc :seon.task/merge-base base))
+          :else [{:seon.task/assignment attempt :seon.task/assigned handle :seon.task/attempt-of [:seon.task/id handle]
+                  :seon.task.attempt/number number :seon.task/revision revision
+                  :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}
                  [:db/add [:seon.task/id handle] :seon.task/attempts-made number]])))
 
 (defn attempt-rows-tx
@@ -1114,7 +1109,7 @@
                   [:or :seon.store/transaction-data :seon.task/refused-error :seon.error/value]]}
   [database branch-db key]
   (let [row (db/pull database [:db/id :seon.task/assignment :seon.task/assigned :seon.task/revision :seon.task/branch
-                               :seon.task.attempt/number :seon.task/merge-base
+                               :seon.task.attempt/number
                                {:seon.task/agent [:seon.agent/id]}]
                      [:seon.task/assignment key])
         handle (:seon.task/assigned row)

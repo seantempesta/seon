@@ -1,8 +1,8 @@
 #:my.root{:instructions [:map {:description "The laws root applies to merge requests and agents, as data (my.root/instructions)."}
                          [:my.root/laws [:vector [:string {:min 1}]]]]
-          :open-assignment [:map {:description "An open assignment as root reads it: its key, task, branch, merge base and the end main holds."}
+          :open-assignment [:map {:description "An open assignment as root reads it: its key, task, branch and the end main holds."}
                             [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
-                            [:seon.task/branch :seon.task/branch] [:seon.task/merge-base {:optional true} :seon.task/merge-base]
+                            [:seon.task/branch :seon.task/branch]
                             [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]]
           :merge-request [:merge {:description "An open merge request, the assignment, as root reads it, with the merge and the close offered."}
                           :my.root/open-assignment [:map [:seon.render/operations :seon.render/operations]]]

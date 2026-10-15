@@ -151,11 +151,13 @@
   each-ended-assignment-derives-its-lifecycle-from-its-facts
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [facts] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
-                                 :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
+                                 :seon.task/branch (keyword (str "attempt-" key-a))
                                  :seon.flow.actions/head c1 :seon.flow.actions/started? false :seon.flow.actions/kept? false
                                  :seon.flow.actions/allowance-left 0 :seon.flow.actions/work-left? false :seon.flow.actions/refused? false}
                                 facts
-                                {:seon.flow.actions/exited? (not (:seon.flow.actions/started? facts))}))]
+                                ;; main merged c1: its history records that merge (`seon.merge/merged?`)
+                                {:seon.flow.actions/exited? (not (:seon.flow.actions/started? facts))
+                                 :seon.flow.actions/merged? (= c1 (:seon.flow.actions/head facts c1))}))]
     (doseq [[facts expected why]
             [[{:seon.flow.actions/head c2 :seon.flow.actions/started? true} [] "running: no end anywhere"]
              [{:seon.flow.actions/head c2 :seon.flow.actions/started? true :seon.flow.actions/publish? true} [:publish]
@@ -171,10 +173,7 @@
              [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/kept? true} [] "merged and kept"]
              [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c2} [:merge]
               "written after its merge: merged again"]
-             [{:seon.task.attempt/end :sent-back :seon.task/merge-base nil :seon.flow.actions/head c2} [:merge-base :merge]
-              "no merge base yet: written first"]
-             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.task/merge-base nil :seon.flow.actions/head c2}
-              [:delete-branch] "copied to main before merge bases existed"]
+             [{:seon.task.attempt/end :sent-back :seon.flow.actions/head c2} [:merge] "a sent-back end merges its facts"]
              [{:seon.task.attempt/end :capped :seon.flow.actions/head c2 :seon.flow.actions/started? true} [:stop]
               "an end that merges nothing stops first"]
              [{:seon.task.attempt/end :capped :seon.flow.actions/head c2} [:problem :close]
@@ -1369,8 +1368,7 @@
                   _ (landed! handle connection "g" ::g-ended)
                   database (db/db connection)
                   head (db/branch-database database branch)]
-              (is (not= (db/commit-id head) (:seon.task/merge-base (db/pull database [:seon.task/merge-base] a)))
-                  "its base did not move")
+              (is (not (merge/merged? database (db/commit-id head))) "main records no merge of its head")
               (is (= {:seon.task.attempt/end :done :seon.task/refusal :seon.source/write-back-error}
                      (select-keys (db/pull database [:seon.task.attempt/end :seon.task/outcome :seon.task/refusal] a)
                                   [:seon.task.attempt/end :seon.task/outcome :seon.task/refusal]))
@@ -1505,10 +1503,8 @@
             (pass! handle routing)
             (let [[[key-c branch-c agent-c] :as cs] (seq (attempts connection "c"))
                   main (db/db connection)
-                  base (:seon.task/merge-base (db/pull main [:seon.task/merge-base] [:seon.task/assignment key-c]))]
+                  base (registry/fork-point main (registry/head-commit-id main branch-c) (get-in main [:config :branch]))]
               (is (= 1 (count cs)) "both needs merged: c is assigned")
-              (is (= (registry/base-commit-id main branch-c) base)
-                  "its merge base is the commit its branch forked at")
               (is (some? (:db/id (db/pull (db/commit-database main base) [:db/id] [:seon.task/assignment key-c])))
                   "a commit of main holding its own assignment: it forked main after its row was written")
               (is (some? (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]
@@ -1796,12 +1792,11 @@
                 _ (pass! handle routing)
                 [[key-i branch-i agent-i] :as assigned] (seq (attempts connection "i"))
                 main (db/db connection)
-                base (:seon.task/merge-base (db/pull main [:seon.task/merge-base] [:seon.task/assignment key-i]))
+                base (registry/fork-point main (registry/head-commit-id main branch-i) (get-in main [:config :branch]))
                 i-connection (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-i})]
             (is (= :done p-end) "the Prove step ended itself: its product is red by design")
             (is (= :merged (outcome key-p)) "the Prove step's designed reds merge as its product")
             (is (= 1 (count assigned)) "its successor is assigned once it merged")
-            (is (= (registry/base-commit-id main branch-i) base) "forked from main, its merge base")
             (is (seq (db/datoms (db/commit-database main base) :avet :seon.test/sym (symbol rows "twice-doubles")))
                 "whose commit holds the Prove step's red deftest")
             ;; the Implement step's work: the stub's body, then its end at that commit
@@ -1887,7 +1882,7 @@
   "Attempt `key`'s merge base, end commit and relaunch reason on main `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/assignment] :map]}
   [database key]
-  (db/pull database [:seon.task/merge-base :seon.task.attempt/commit :seon.task.attempt/relaunch] [:seon.task/assignment key]))
+  (db/pull database [:seon.task.attempt/commit :seon.task.attempt/relaunch] [:seon.task/assignment key]))
 
 (deftest a-capped-attempt-with-changes-relaunches-from-its-commit
   (binding [*space* "tq.relaunch"]
@@ -1916,10 +1911,9 @@
                 (is (string? (:seon.task.attempt/relaunch first-row)) "the capped end with work is relaunched")
                 (is (nil? (problem key-1)) "with no problem task")
                 (is (and (string? key-2) (not= key-1 key-2) (not= branch-1 branch-2)) "a new assignment and branch")
-                (is (= (:seon.task/merge-base first-row) (:seon.task/merge-base (relaunch-row main key-2)))
-                    "keeping the first attempt's merge base")
-                (is (= (:seon.task/merge-base first-row) (registry/base-commit-id main branch-2))
-                    "its branch's merge base is the first attempt's, so its merge takes both attempts' changes")
+                (is (= (registry/fork-point main (registry/head-commit-id main branch-1) (get-in main [:config :branch]))
+                       (registry/fork-point main (registry/head-commit-id main branch-2) (get-in main [:config :branch])))
+                    "its branch keeps the first attempt's fork point, so its merge takes both attempts' changes")
                 (let [on-2 (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch-2})
                       [row agent :as ids] (row-ids (db/db on-2) key-2 agent-2)]
                   (is (and (int? row) (int? agent) (= (row-ids main key-2 agent-2) ids))
@@ -1947,9 +1941,9 @@
   ends-share-one-action-owner
   (let [c1 (random-uuid) c2 (random-uuid)
         held (fn [observed] (merge {:db/id 1 :seon.task/assignment key-a :seon.task/assigned a :seon.agent/id agent-a
-                                 :seon.task/branch (keyword (str "attempt-" key-a)) :seon.task/merge-base c1
+                                 :seon.task/branch (keyword (str "attempt-" key-a))
                                  :seon.flow.actions/head c2 :seon.flow.actions/started? false :seon.flow.actions/kept? false
-                                 :seon.flow.actions/allowance-left 1 :seon.flow.actions/exited? true
+                                 :seon.flow.actions/merged? false :seon.flow.actions/allowance-left 1 :seon.flow.actions/exited? true
                                  :seon.flow.actions/work-left? true :seon.flow.actions/refused? false}
                                 observed))
         actions #(agent/next-actions [(held %)])
@@ -1965,10 +1959,10 @@
               "spent allowance leaves the unfinished work visible: closed with a problem, never relaunched or deleted"]
              [{:seon.task.attempt/end :sent-back :seon.task.attempt/reason "The proof is wrong."}
               #{:merge} "a send-back merges its work, whose merge reopens its target, never relaunching the sender"]
-             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/exited? false
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/merged? true :seon.flow.actions/exited? false
                :seon.flow.actions/work-left? false}
               #{} "an accepted end retires only after its graph exits"]
-             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/work-left? false}
+             [{:seon.task.attempt/end :done :seon.flow.actions/main-end :done :seon.flow.actions/head c1 :seon.flow.actions/merged? true :seon.flow.actions/work-left? false}
               #{:delete-branch} "and then retires"]]]
       (is (= expected (op-set observed)) why))
     (is (= #{:unfinished-task} (set (keep :seon.flow.actions/class (actions {:seon.task.attempt/end :capped :seon.flow.actions/allowance-left 0}))))

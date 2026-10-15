@@ -2237,8 +2237,8 @@
 (deftest ^{:seon.test/long "An own-branch agent's setup and one assignment."
            :seon.test/long-ms 30000}
   a-branch-judges-its-step-at-its-merge-base
-  ;; `seon.task/attempt-tx` writes the merge base with the assignment on main (the commit the branch forked at);
-  ;; the branch derives the same commit from Datahike's commit graph (`seon.cluster.source/branch-merge-base`)
+  ;; with no forward merge, the branch's merge base (`seon.cluster.source/branch-merge-base`) is the commit it forked
+  ;; from main at (`seon.cluster.registry/fork-point`): both from Datahike's commit graph, nothing stored
   (support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "base-" (id/id))
@@ -2254,8 +2254,9 @@
                                             :seon.task/ns 'tq.base :seon.task/name "area" :seon.task/plan "Square."}))
            assignment (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
                                      :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
-           on-main (:seon.task/merge-base (db/pull (db/db connection) [:seon.task/merge-base]
-                                                   [:seon.task/assignment (:seon.task/assignment assignment)]))]
-       (is (uuid? on-main) "the assignment on main carries the commit its branch forked at")
-       (is (= on-main ((requiring-resolve 'seon.cluster.source/branch-merge-base) (db/db target)))
-           "the branch judges its step at the merge base its assignment row carries")))))
+           fork ((requiring-resolve 'seon.cluster.registry/fork-point)
+                 (db/db target) (db/commit-id (db/db target)) (get-in (db/db connection) [:config :branch]))]
+       (is (string? (:seon.task/assignment assignment)) "the assignment is written")
+       (is (uuid? fork) "the branch forked from main at a commit the graph answers")
+       (is (= fork ((requiring-resolve 'seon.cluster.source/branch-merge-base) (db/db target)))
+           "the branch judges its step at the commit it forked at")))))

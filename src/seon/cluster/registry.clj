@@ -401,33 +401,50 @@
   [branch]
   (keyword "base" (str (when-let [space (namespace branch)] (str space "/")) (name branch))))
 
-(defn base-commit-id
-  "The commit retained by a work branch's base ref, or nil when the store's
-  branches (`held`, the caller's basis, else read now) hold no such ref:
-  `delete-branch!` leaves a deleted ref's head record until collection, and
-  that record is no merge base."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :seon.store/branch] [:maybe :seon.source/commit-id]]
-                  [:=> [:cat :seon.db/database-value :seon.cluster.registry/branches :seon.store/branch]
-                   [:maybe :seon.source/commit-id]]]}
-  ([database branch] (base-commit-id database (held-branches database) branch))
-  ([database held branch]
-   (let [base (base-branch branch)]
-     (when (contains? held base)
-       (get-in (head-record (:store (db/schema-database database)) base) [:meta :datahike/commit-id])))))
+(defn- commit-step
+  "The branch `commit` was written on and its first parent: the parent written on that same branch, else its one
+  parent (the commit its branch forked at), git's first parent; nil when the store no longer holds the commit. An
+  immutable commit's record, so it is cached by the commit (`seon.cache`) and read once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id]
+                  [:maybe [:tuple :seon.store/branch [:maybe :seon.source/commit-id]]]]}
+  [database commit]
+  (seon.cache/lookup ::commit-step commit (constantly 96)
+                     #(let [konserve (:store (db/schema-database database))
+                            written (fn [c] (get-in (head-record konserve c) [:config :branch]))]
+                        (when-let [record (head-record konserve commit)]
+                          (let [branch (get-in record [:config :branch])
+                                parents (get-in record [:meta :datahike/parents])]
+                            [branch (if (next parents)
+                                      (some (fn [parent] (when (= branch (written parent)) parent)) parents)
+                                      (first parents))])))))
 
-(defn advance-base!
-  "Move a work branch's retained base to the immutable value just merged."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch] :seon.source/commit-id]}
-  [database branch]
-  (d/force-branch! database (base-branch branch) (d/parent-commit-ids database)))
+(defn first-parent-where
+  "The newest commit of `commit`'s first-parent history (git's `log --first-parent`) for which `found?` holds of the
+  commit and the branch that wrote it; nil when the walk reaches a commit the store no longer holds. Each commit is
+  read once (`commit-step`); a forward merge's other parent is never followed."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id [:fn clojure.core/ifn?]]
+                  [:maybe :seon.source/commit-id]]}
+  [database commit found?]
+  (loop [c commit]
+    (when-let [[branch parent] (when c (commit-step database c))]
+      (if (found? c branch) c (recur parent)))))
+
+(defn fork-point
+  "The commit the branch whose head is `commit` forked from `target` at: the first commit of its first-parent
+  history written on `target` (`first-parent-where`), the head itself when the branch wrote nothing. A relaunch
+  forked from another work branch's commit walks through that branch to the same commit. The facts a forward merge
+  never moves (tasks, attempts) are the branch's own changes since this commit. Derived from the commit graph,
+  never stored; nil when the walk reaches a commit the store no longer holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.store/branch]
+                  [:maybe :seon.source/commit-id]]}
+  [database commit target]
+  (first-parent-where database commit (fn [_ branch] (= branch target))))
 
 (defn fork!
   "Create a work branch as `branch!` does and, when this call created it,
-  retain its immutable base commit in `base-branch` and write its fork entity
-  (`branch-fork-entity`): its merge base
-  toward `:seon.branch/target` (default: the parent) until a merge advances
-  it. The parent is `::from` when it names a branch, else the branch of the
+  write its fork entity (`branch-fork-entity`) naming its `:seon.branch/target`
+  (default: the parent); its merge base and fork point come from the commit
+  graph (`seon.cluster.source/merge-base`, `fork-point`). The parent is `::from` when it names a branch, else the branch of the
   source value `:seon.db/db`. A commit with no source value refuses before
   creating anything; a fork with no base toward its target, or a refused
   write, retires the new branch and answers the error value."
@@ -453,18 +470,11 @@
                                    (schema/projection-from-database database))]
                 (if (:seon.error/at fork)
                   fork
-                  (let [retained (branch! {:seon.store/store store :seon.store/branch (base-branch branch)
-                                           :seon.cluster.registry/from
-                                           (if (= parent (or target parent))
-                                             (db/commit-id database)
-                                             (base-commit-id database parent))})]
-                    (if (:seon.error/at retained)
-                      retained
-                      (db/with-branch
-                       {:seon.db/connection connection}
-                       #(schema/call-with-projection
-                         projection
-                         (fn [] (db/transact! connection {:tx-data [fork]}))))))))
+                  (db/with-branch
+                   {:seon.db/connection connection}
+                   #(schema/call-with-projection
+                     projection
+                     (fn [] (db/transact! connection {:tx-data [fork]}))))))
               (finally (store/release-branch! connection)))]
         (if (:db-after written)
           result
@@ -770,9 +780,9 @@
   commit newer than `remove-before` along each branch's ancestry, so a commit
   the facts still name (`named-commits`) is never pruned by a retention
   window (`retention-cutoff`). A work branch's merge base with its target
-  (`seon.cluster.source/branch-merge-base`) counts as named, so the commit and
-  every commit the graph walks to reach it survive, and the merge base stays
-  derivable. A current branch head is always marked, so naming one moves
+  (`seon.cluster.source/branch-merge-base`) and its fork point toward it
+  (`fork-point`) count as named, so those commits and every commit the graph
+  walks to reach them survive, and both stay derivable. A current branch head is always marked, so naming one moves
   nothing."
   {:malli/schema [:=> [:cat :seon.store/store :inst] :inst]}
   [store remove-before]
@@ -784,8 +794,11 @@
                                     (let [database (d/branch-as-db connection branch)
                                           ;; a work branch's merge base with its target: Datahike's commit graph,
                                           ;; walked through every commit between it and both heads
-                                          base ((requiring-resolve 'seon.cluster.source/branch-merge-base) database)]
-                                      (try (cond-> (named-commits database) (uuid? base) (conj base))
+                                          base ((requiring-resolve 'seon.cluster.source/branch-merge-base) database)
+                                          ;; and its fork point, the base of the facts a forward merge never moves
+                                          target (:seon.branch/target (fork-of database branch))
+                                          fork (when target (fork-point database (db/commit-id database) target))]
+                                      (try (cond-> (named-commits database) (uuid? base) (conj base) (uuid? fork) (conj fork))
                                            (finally (d/release-materialized-db database))))))
                           (remove heads))
                     (branches store))

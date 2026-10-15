@@ -2,8 +2,9 @@
 {:execution [:map {:description "Root's world a merge runs through: main's connection, and the store it holds (else its SCI context's environment holds it); the gate of requested declarations acquires its merge branch through it as a cluster handle."}
              [:seon.db/connection :seon.db/connection] [:seon.store/store {:optional true} :seon.store/store]]
  :conflicts [:vector {:description "The :root conflicts one merge met, each kept as main's value."} :seon.squash/conflict]
- :merged [:map {:description "What root's merge of an assignment did (seon.merge/merge!): its merge base, now the source commit C, and, when it transacted, main's merge commit, the outcome it closed the assignment with and the conflicts it met; a merge of requested declarations adds the acceptance, whose publication is due work (seon.merge/publish!)."}
-          [:seon.task/assignment :seon.task/assignment] [:seon.task/merge-base :seon.task/merge-base]
+ :fork-point [:and {:description "The base of the cluster facts an assignment's merge carries (seon.merge/merge-tx), derived from the commit graph, never stored: the newest commit of its branch head's first-parent history main already merged (seon.merge/merged?), else the commit its branch forked from main at (seon.cluster.registry/fork-point)."} :seon.source/commit-id]
+ :merged [:map {:description "What root's merge of an assignment did (seon.merge/merge!): when it transacted, main's merge commit, the outcome it closed the assignment with and the conflicts it met; a merge of requested declarations adds the acceptance, whose publication is due work (seon.merge/publish!)."}
+          [:seon.task/assignment :seon.task/assignment]
           [:seon.task/merge-commit {:optional true} :seon.task/merge-commit]
           [:seon.task/outcome {:optional true} :seon.task/outcome]
           [:seon.merge/conflicts :seon.merge/conflicts]

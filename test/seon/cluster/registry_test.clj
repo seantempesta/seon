@@ -724,8 +724,8 @@
 
 (deftest a-chain-fact-keeps-its-branch-and-base-through-retirement
   ;; A chain's work branch is claimed by the chain fact on main (TASK-CHAIN 2.1):
-  ;; it and its retained base survive boot's retirement, held or not; a branch no
-  ;; fact names is retired.
+  ;; it survives boot's retirement, held or not, and its fork point is its commit
+  ;; graph's (`seon.cluster.registry/fork-point`); a branch no fact names is retired.
   (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "alice"))
@@ -741,13 +741,12 @@
            connection
            {:tx-data [{:seon.chain/first "aaaaaaaaaaaa" :seon.chain/branch :chain-named}
                       {:seon.chain/first "bbbbbbbbbbbb" :seon.chain/branch :chain-held}]})
-          (is (= #{:chain-unnamed (registry/base-branch :chain-unnamed)}
-                 (registry/retire-unclaimed! opened #{source-branch}))
-              "only the branch no chain fact names, with its base, is retired")
-          (is (every? (registry/branches opened)
-                      [:chain-named (registry/base-branch :chain-named)
-                       :chain-held (registry/base-branch :chain-held)])
-              "a named chain, held or not, keeps its branch and base")
+          (is (= #{:chain-unnamed} (registry/retire-unclaimed! opened #{source-branch}))
+              "only the branch no chain fact names is retired")
+          (is (every? (registry/branches opened) [:chain-named :chain-held])
+              "a named chain, held or not, keeps its branch")
+          (is (not-any? (registry/branches opened) (map registry/base-branch [:chain-named :chain-held :chain-unnamed]))
+              "a fork retains no base ref: the commit graph is the record of where it starts")
           (finally
             (d/release held)
             (d/release connection)))))))
@@ -897,9 +896,8 @@
            [row] (task/attempt-tx (db/db connection) handle "reclaimed" branch)
            _ (test-support/transacted! connection [row])
            base (db/db connection)
+           ;; the fork below is taken at `base`, so `base` is the assignment's fork point
            a (:db/id (db/pull base [:db/id] [:seon.task/assignment (:seon.task/assignment row)]))
-           ;; the fork below is taken at `base`, so `base` is the assignment's merge base
-           _ (test-support/transacted! connection [[:db/add a :seon.task/merge-base (db/commit-id base)]])
            baseline (clean-key-count store)]
        (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch branch
                                                      :seon.cluster.registry/from (db/commit-id base) :seon.db/db base})))
@@ -931,24 +929,61 @@
 (deftest
   a-re-forked-branch-answers-its-own-fork-commit-as-its-merge-base
   ;; `datahike.api/delete-branch!` leaves a deleted branch's head record in the store until collection; the
-  ;; merge base is the base ref the store's branches hold, so a retired branch has none and a re-fork under
-  ;; the same name answers the commit that fork made
+  ;; fork point is read from the head the store's branches hold (`seon.cluster.registry/fork-point`), so a retired
+  ;; branch has none and a re-fork under the same name answers the commit that fork made
   (with-program-store
    (fn [store connection]
      (let [branch :attempt-re-forked
            fork! #(registry/fork! {:seon.store/store store :seon.store/branch branch
                                    :seon.cluster.registry/from :db :seon.db/db (db/db connection)})
+           fork-point #(some-> (registry/head-commit-id (db/db connection) branch)
+                               (as-> head (registry/fork-point (db/db connection) head :db)))
            first-fork (db/commit-id (db/db connection))
            _ (is (:seon.cluster/created? (fork!)))
-           _ (is (= first-fork (registry/base-commit-id (db/db connection) branch)))
+           _ (is (= first-fork (fork-point)))
            _ (d/transact connection [])
            second-fork (db/commit-id (db/db connection))]
        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
-       (is (nil? (registry/base-commit-id (db/db connection) branch)) "a retired branch has no merge base")
+       (is (nil? (fork-point)) "a retired branch has no fork point")
        (is (:seon.cluster/created? (fork!)))
-       (is (= second-fork (registry/base-commit-id (db/db connection) branch))
-           "the re-fork's merge base is the commit it forked at")
+       (is (= second-fork (fork-point))
+           "the re-fork's fork point is the commit it forked at")
        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})
+       nil))))
+
+(deftest
+  a-relaunch-fork-keeps-the-fork-point
+  ;; a relaunched attempt forks its predecessor's end commit, a commit of the predecessor's branch
+  ;; (`seon.cluster.agent/fork-attempt!`); its first-parent history walks through that branch to the main commit
+  ;; the predecessor forked at, so both share one fork point, and main moving on changes neither
+  (with-program-store
+   (fn [store connection]
+     (let [first-branch :attempt-relaunch-1
+           second-branch :attempt-relaunch-2
+           forked-at (db/commit-id (db/db connection))
+           fork-point #(registry/fork-point (db/db connection) (registry/head-commit-id (db/db connection) %) :db)
+           write! (fn [branch]
+                    (let [held (store/open-branch! store branch)]
+                      (try (d/transact held [{:seon.agent/id (str "relaunch-" (random-uuid))}])
+                           (db/commit-id (db/db held))
+                           (finally (store/release-branch! held)))))]
+       (try
+         (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch first-branch
+                                                       :seon.cluster.registry/from :db :seon.db/db (db/db connection)})))
+         (let [end (write! first-branch)
+               _ (d/transact connection [{:seon.agent/id "main-moves-on"}])
+               end-db (db/commit-database (db/db connection) end)]
+           (try
+             (is (:seon.cluster/created? (registry/fork! {:seon.store/store store :seon.store/branch second-branch
+                                                           :seon.branch/target :db :seon.cluster.registry/from end
+                                                           :seon.db/db end-db})))
+             (finally (source/release! [end-db])))
+           (write! second-branch)
+           (is (= forked-at (fork-point first-branch)) "the first attempt forked from main at its commit")
+           (is (= forked-at (fork-point second-branch)) "the relaunch keeps that fork point"))
+         (finally
+           (doseq [b [first-branch second-branch]]
+             (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))
        nil))))
 
 (deftest

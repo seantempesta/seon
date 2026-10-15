@@ -24,7 +24,7 @@
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
    "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."
-   "Merge main forward into a chain branch, as git merge main into a feature branch, at each restart batch and before a chain's final merge: (my.root/merge-main! {:seon.chain/branch b}) moves the declarations main changed since the branch's merge base and the branch did not, then advances that merge base to main's head, so the branch interprets only its own changes; a declaration both changed is answered in :seon.program/conflict and stays the branch's for its agent to resolve; tasks, attempts and config never move."
+   "Merge main forward into a chain branch, as git merge main into a feature branch, at each restart batch and before a chain's final merge: (my.root/merge-main! {:seon.chain/branch b}) moves the declarations main changed since the branch's merge base and the branch did not, as one merge commit with main's head as a parent, which is then its merge base, so the branch interprets only its own changes; a declaration both changed is answered in :seon.program/conflict and stays the branch's for its agent to resolve; tasks, attempts and config never move, so the chain's final merge carries its own changes to them since its fork point and keeps main's."
    "A branch reads its own config and a merge never carries it: apply a changed dial to a chain branch with bin/seon config apply [NAME] PATH --branch B (or --chains for every chain branch a running graph holds); the agent's next dial read there sees it and main's is unchanged."])
 
 (defn instructions
@@ -77,7 +77,7 @@
 
 (defn merge-requests
   "The open merge requests on my cluster: every assignment with no outcome yet (`seon.task/close!`,
-  `seon.merge/merge-tx`), on main and every ended chain attempt on its chain branch, with its task, branch, merge base
+  `seon.merge/merge-tx`), on main and every ended chain attempt on its chain branch, with its task, branch
   and its end (main's, else its branch head's), each offering its merge and its close.
 
   ## Example
@@ -87,8 +87,7 @@
   ```"
   {:malli/schema [:=> [:cat :my.root/merge-request-read] [:or :my.root/merge-requests :seon.db/error-result]]}
   [{database :seon.db/db store :seon.store/store}]
-  (let [found (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned :seon.task/branch :seon.task/merge-base
-                                       :seon.task.attempt/end]) ...]
+  (let [found (db/q '[:find [(pull ?a [:seon.task/assignment :seon.task/assigned :seon.task/branch :seon.task.attempt/end]) ...]
                       :where [?a :seon.task/assignment] [?a :seon.task/branch] (not [?a :seon.task/outcome])]
                     database)
         chained (if store (when-not (db/read-refusal? found) (chain-requests database store)) [])]
