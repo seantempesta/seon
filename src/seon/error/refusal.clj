@@ -14,7 +14,12 @@
   the host are recognized from the classpath (`authored-namespace?`)."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [^String frame-ns]
-  (or (contains? #{"seon.error" "seon.error.refusal" "seon.instrument"} frame-ns)
+  (or (contains? #{"seon.error" "seon.error.refusal" "seon.instrument"
+                   ;; the entrant boundary: the evaluator, turn and flow plumbing
+                   ;; beneath every call, where a failure is carried, not made
+                   "seon.sci.eval" "seon.sci.kernel" "seon.sci.observe" "seon.sci.batch"
+                   "seon.turn" "seon.turn.world" "seon.batch" "seon.flow" "seon.cluster.agent"}
+                 frame-ns)
       (.startsWith frame-ns "seon.operator.")))
 
 (def ^:private basis

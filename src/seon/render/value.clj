@@ -84,7 +84,8 @@
 ;;; few members and levels, host objects as class and identity, a Throwable
 ;;; as its cause chain with each link's nearest non-host frames.
 
-(def ^:private text-limits
+(def text-limits
+  "The core text's fixed limits; a cause chain's render pair shows at most `:frames` per link."
   {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 10 :suppressed 3 :throwable-chars 8192})
 
 (defn- datum

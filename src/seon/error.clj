@@ -2414,6 +2414,36 @@
                (map (fn [frame] [:li [:code (render.value/core-text frame)]]))
                frames)])))))
 
+(defn render-chain-ai
+  "A cause chain's AI face: per link its class, message and data, the first
+  `:frames` first-party frames (where it was raised) and, when there are
+  more, how many. The chain itself stays whole behind its result handle."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
+  [unit]
+  (let [shown (:frames render.value/text-limits)]
+    (mapv (fn [link]
+            (let [frames (:seon.error/frames link)]
+              (cond-> (dissoc link :seon.error/frames)
+                (seq frames) (assoc :seon.error/frames (vec (take shown frames)))
+                (> (count frames) shown) (assoc :seon.error/frames-count (count frames)))))
+          (:seon.render/value unit))))
+
+(defn render-chain-html
+  "A cause chain's HTML face: every link with its whole first-party stack."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (into [:section {:class "seon-error-chain"}]
+        (map (fn [link]
+               [:article {:class "seon-error-link"}
+                [:h4 [:code (:seon.error/throwable-class link)]]
+                (when-let [message (:seon.error/message link)] [:p message])
+                (when (contains? link :seon.error/data)
+                  [:pre (render.value/core-text (:seon.error/data link))])
+                (into [:ol {:class "seon-error-frames"}]
+                      (map (fn [frame] [:li [:code (render.value/core-text frame)]]))
+                      (:seon.error/frames link))]))
+        (:seon.render/value unit)))
+
 ;;; SCHEMA PAIRS AS REPL ENTRIES (owner 2026-09-26, "Three points"). An
 ;;; error value stays whole; its schema's pair selects what the agent needs
 ;;; as runnable reads over the held value (its result handle), whose results

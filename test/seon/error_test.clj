@@ -14,6 +14,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.problems]
+            [seon.render.value]
             [seon.cluster.status]
             [seon.render.transcript]
             [malli.core]
@@ -1926,3 +1927,24 @@
         (is (string? answer) what)
         (is (not (re-matches #"\s*" answer)) what)
         (is (= expected answer) what)))))
+
+(defn- thrown-below
+  "A throwable `depth` first-party frames deep, three causes deep."
+  [depth]
+  (if (pos? depth)
+    (let [result (thrown-below (dec depth))] result)
+    (ex-info "outer" {:k 1} (ex-info "middle" {} (ex-info "root" {})))))
+
+(deftest a-cause-chain-render-shows-few-frames-and-the-chain-stays-whole
+  (let [chain (error.refusal/chain (thrown-below 40))
+        shown (error/render-chain-ai {:seon.render/value chain})
+        limit (:frames seon.render.value/text-limits)
+        most (apply max (map #(count (:seon.error/frames %)) chain))]
+    (is (= 3 (count chain)))
+    (is (not-any? #(re-find #"^(seon\.turn|seon\.sci\.eval|seon\.flow)" (str (first %)))
+                  (mapcat :seon.error/frames chain))
+        "evaluator plumbing is not part of the error")
+    (is (< limit most) "the whole chain keeps every first-party frame")
+    (is (every? #(<= (count (:seon.error/frames %)) limit) shown))
+    (is (= most (:seon.error/frames-count (first shown))))
+    (is (= most (count (filter #(and (vector? %) (= :li (first %))) (tree-seq vector? seq (nth (error/render-chain-html {:seon.render/value chain}) 2))))))))
