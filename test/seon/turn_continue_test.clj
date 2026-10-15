@@ -547,3 +547,33 @@
                  200)))
        (is (= [:stalled] (attempt-ends (db/db target) agent-id))
            "the turn that closed on the provider's error ended the attempt")))))
+
+(deftest ^{:seon.test/long "An own-branch agent's setup with its test step, two more eval requests, one turn pass."
+           :seon.test/long-ms 60000}
+  an-outside-agent-holding-a-task-is-not-stalled-after-its-eval-requests
+  ;; an :outside agent has no model loop: its turns are its eval requests, so a closed turn of one is no stall
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           agent-id (str "outside-" (seon.id/id))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           _ (support/declare-source! connection 'tq.outs
+                                      (str "(ns tq.outs (:require [clojure.test :refer [deftest is]]))\n"
+                                           "(defn area {:malli/schema [:=> [:cat :int] :int]} [r] r)\n"
+                                           "(deftest ^{:seon/tasks #{'tq.outs/area}} area-test (is (= 25 (area 5))))\n"))
+           {branch :seon.store/branch target :seon.db/connection} (support/own-branch-agent! running agent-id "(ns tq.outs)")
+           id (support/running! connection (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                            :seon.task/ns 'tq.outs :seon.task/name "area" :seon.task/plan "Square."})))
+           _ (support/transacted! connection [[:db/add [:seon.task/id id] :seon.task/model :outside]])]
+       (is (string? (:seon.task/assignment (task/assign! {:seon.agent/context-source (support/running-cluster running)
+                                                          :seon.db/connection connection :seon.task/assigned id
+                                                          :seon.task/agent [:seon.agent/id agent-id]
+                                                          :seon.task/branch branch}))))
+       (agent-eval running agent-id "(+ 1 1)")
+       (agent-eval running agent-id "(+ 1 2)")
+       (let [database (db/db target)]
+         (is (nil? (turn/task-end database agent-id)) "its closed eval-request turn is no stall")
+         (is (nil? (:seon.agent/admission-closed-tx
+                    (db/pull database [:seon.agent/admission-closed-tx] [:seon.agent/id agent-id])))
+             "its admission stays open"))))))

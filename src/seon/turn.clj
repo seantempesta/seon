@@ -2109,6 +2109,13 @@
   [database agent-id]
   (closed-on? database agent-id))
 
+(defn- outside?
+  "True when the task `handle` names on `database`, the agent's own branch, is worked from outside Seon
+  (`:seon.task/model` `:outside`, TASK-CHAIN 2.2): an agent through MCP `eval_clj` as the attempt's agent id."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
+  [database handle]
+  (= :outside (:seon.task/model (db/pull database [:seon.task/model] [:seon.task/id handle]))))
+
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task is not done: its latest closed
   turn chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an error before any reply,
@@ -2154,7 +2161,7 @@
   nothing (`seon.context/step-verdict`: a chain's task by the done rule, `seon.cluster.source/done-refusals`), a
   proposal root re-judges, `:sent-back` once a turn completed naming the task that owns the mistake
   (`my.task/send-back!` with `:my.task/target`, `sent-back-to`), `:given-back` once a turn completed without one, `:capped` with no
-  turns left, `:stalled` once the loop stops calling it (`stalled?`); nil while it runs, when it holds no task or
+  turns left, `:stalled` once Seon's own loop stops calling it (`stalled?`; never an `outside?` task's agent, whose turns are its eval requests); nil while it runs, when it holds no task or
   its admission is already closed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.task/end]]}
   [database agent-id]
@@ -2168,7 +2175,7 @@
                       [?turn :seon.turn/disposition :completed]]
                     database agent-id) :given-back
               (= 0 (turns-left database agent-id)) :capped
-              (stalled? database agent-id) :stalled)))))
+              (and (not (outside? database held)) (stalled? database agent-id)) :stalled)))))
 
 (defn end-task-call
   "Record the end of the task `agent-id` holds at the writer on `database`, the agent's own world (its
@@ -2259,13 +2266,6 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
   [database handle]
   (= :running (task/execution database handle)))
-
-(defn- outside?
-  "True when the task `handle` names on `database`, the agent's own branch, is worked from outside Seon
-  (`:seon.task/model` `:outside`, TASK-CHAIN 2.2): an agent through MCP `eval_clj` as the attempt's agent id."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] :boolean]}
-  [database handle]
-  (= :outside (:seon.task/model (db/pull database [:seon.task/model] [:seon.task/id handle]))))
 
 (defn- proved-unanswered?
   "True when the task `agent-id` holds is a :running attempt whose step is proved on `database`, its branch
