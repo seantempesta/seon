@@ -10,6 +10,8 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster-agent]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.contracts-compile-test :as contracts-compile]
             [seon.reconcile :as reconcile]
@@ -913,3 +915,31 @@
         dials (config/dial-attributes projection)]
     (is (contains? dials :seon.config.agent/turn-completion-backstop-ms))
     (is (identical? dials (config/dial-attributes projection)))))
+
+(deftest root-applies-config-to-a-chain-branch-and-the-running-agent-reads-it
+  ;; Branch-model ruling 4 (S5 run 8 read run 4's cap 40 because root applied 100 to main only).
+  (test-support/with-database
+   (fn [connection]
+     (let [dial :seon.config.run/max-episode-runs
+           request {:seon.db/connection connection :seon.boot/cluster-name "chain-config"}
+           document (doto (java.io.File/createTempFile "chain-config" ".edn")
+                      (spit (pr-str {dial 100})))
+           backing (:seon.store/store (test-support/execution-handle connection))
+           branch (keyword (str "chain-config-proof-" (random-uuid)))
+           reads (fn [conn] (config/agent-cluster-dial (db/db conn) "attempt/chain-config" dial))]
+       (config/apply! (assoc request :seon.config/manifest {dial 40}))
+       (test-support/transacted! connection (cluster-agent/creation-tx {:seon.agent/id "attempt/chain-config" :seon.ns/name 'user
+                                                                        :seon.cluster/name "chain-config"}))
+       (is (not (:seon.error/at (registry/fork!
+                                 {:seon.store/store backing :seon.store/branch branch
+                                  :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                  :seon.db/db (db/db connection)}))))
+       (let [on-branch (store/open-branch! backing branch)]
+         (try
+           (is (= 40 (reads on-branch)) "the branch forked with main's cap")
+           (config/apply-to-branches! request [branch] (.getCanonicalPath document))
+           (is (= 100 (reads on-branch)) "the agent's next dial read on the branch is the applied value")
+           (is (= 40 (reads connection)) "main's row is unchanged")
+           (finally
+             (store/release-branch! on-branch)
+             (registry/retire-branch! {:seon.store/store backing :seon.store/branch branch}))))))))

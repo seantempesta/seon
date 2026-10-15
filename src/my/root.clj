@@ -23,7 +23,8 @@
    "A merge request is an assignment: (my.root/merge-requests) lists the open ones. Merge one with (my.root/merge! {:seon.task/assignment key}); the branch is deleted once merged, closing the agent."
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
-   "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."])
+   "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."
+   "A branch reads its own config and a merge never carries it: apply a changed dial to a chain branch with bin/seon config apply [NAME] PATH --branch B (or --chains for every chain branch a running graph holds); the agent's next dial read there sees it and main's is unchanged."])
 
 (defn instructions
   "The laws root applies to merge requests and agents, as data.

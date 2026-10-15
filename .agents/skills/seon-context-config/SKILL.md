@@ -30,6 +30,11 @@ the `:config-apply` branch of `seon.cluster.boot/request!`. `seon.config/apply!`
 reconciles the selected document; `seon.config/effective`
 reads from the database.
 
+A branch reads its own config row and a merge never carries it. `bin/seon config apply [NAME] PATH --branch B`
+(or `--chains`: every `:seon.chain/branch` main names that this JVM holds open) applies the document over that
+branch's own connection (`seon.config/apply-to-branches!`, `seon.db/branch-connection`); the agent's next dial
+read there sees it, main's row is unchanged.
+
 Boot applies the checkout's compiled entities to a branch that may not have
 reloaded the checkout's declarations. `apply-compiled!` installs an added
 dial's attribute (`accrete-entity-attributes!`) and keeps the current value of

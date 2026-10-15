@@ -756,11 +756,16 @@
                   {:seon.operator/stopped-processes [identity]
                    :seon.operator/process-exit? (empty? @running-instances)})
         :config-apply
-        (let [result (config/apply! {:seon.db/connection (connection (or name "default"))
-                                    :seon.boot/cluster-name (or name "default")}
-                                   (:seon.config/path request))]
-          (if (:seon.error/at result) result
-              {:seon.boot/cluster-name (or name "default") :seon.reconcile/result result}))
+        (let [cluster (or name "default")
+              apply-request {:seon.db/connection (connection cluster) :seon.boot/cluster-name cluster}
+              path (:seon.config/path request)
+              branches (cond (:seon.operator/branch request) [(:seon.operator/branch request)]
+                             (:seon.operator/chains? request) (config/chain-branches (db/db (:seon.db/connection apply-request))))]
+          (if branches
+            {:seon.boot/cluster-name cluster :seon.config/branches (config/apply-to-branches! apply-request branches path)}
+            (let [result (config/apply! apply-request path)]
+              (if (:seon.error/at result) result
+                  {:seon.boot/cluster-name cluster :seon.reconcile/result result}))))
         ;; Will a candidate program boot? Its publication and this cluster's
         ;; adoption run here on disposable branches (`bin/seon check`).
         :check (merge identity

@@ -2230,7 +2230,7 @@
    [:reset "reset [NAME] --force"]
    [:nuke "nuke --force"]
    [:logs "logs [NAME]"]
-   [:config-apply "config apply [NAME] PATH"]
+   [:config-apply "config apply [NAME] PATH [--branch B | --chains]"]
    [:check "check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]])
 
 (defn parse-argv
@@ -2276,6 +2276,12 @@
                      (recur (nnext args) (update request :seon.operator/tests (fnil conj []) (second args))
                             positionals)
                      (fail! "--test NS or --test NS/NAME is supported only by check." request))
+          "--branch" (if (and (= :config-apply command) (seq (next args)))
+                       (recur (nnext args) (assoc request :seon.operator/branch (keyword (valid-name (second args)))) positionals)
+                       (fail! "--branch B is supported only by config apply." request))
+          "--chains" (if (= :config-apply command)
+                       (recur (next args) (assoc request :seon.operator/chains? true) positionals)
+                       (fail! "--chains is supported only by config apply." request))
           "--dev" (recur (nnext args) (assoc request :seon.operator/development-cluster (valid-name (second args))) positionals)
           "--config" (let [_ (when-not (= :start command)
                                         (fail! "--config is supported only by start." request))
@@ -2301,6 +2307,8 @@
                                 (fail! "Use config apply [NAME] PATH." request))
                   manifest (edn/read-string (slurp path))]
               (when-not (map? manifest) (fail! "Manifest must be an EDN map." request))
+              (when (and (:seon.operator/branch request) (:seon.operator/chains? request))
+                (fail! "config apply takes --branch B or --chains, not both." request))
               ;; The JVM reads the document itself (`seon.config/apply!`'s path
               ;; arity): the shipped document applies as itself, its smart and
               ;; initialization decisions included, which no manifest admits.

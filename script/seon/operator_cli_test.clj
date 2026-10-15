@@ -9,13 +9,13 @@
            [["start" "--config" "does-not-exist.edn" "-h"] "start [NAME] [--config PATH] | start --head"]
            [["reset" "--help"] "reset [NAME] --force"]
            [["nuke" "-h"] "nuke --force"]
-           [["config" "--help"] "config apply [NAME] PATH"]
-           [["config" "apply" "--help"] "config apply [NAME] PATH"]]]
+           [["config" "--help"] "config apply [NAME] PATH [--branch B | --chains]"]
+           [["config" "apply" "--help"] "config apply [NAME] PATH [--branch B | --chains]"]]]
     (is (= {:seon.operator/command :help :seon.operator/help (str "seon [--root PATH] " usage)}
            (select-keys (operator/parse-argv arguments) [:seon.operator/command :seon.operator/help])))))
 
 (deftest general-help-keeps-its-command-list-for-every-alias
-  (let [expected "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]
+  (let [expected "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH [--branch B | --chains] | check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"]
     (doseq [arguments [[] ["help"] ["--help"] ["-h"]]]
       (is (= expected (:seon.operator/help (operator/parse-argv arguments)))))))
 
@@ -28,3 +28,13 @@
                 root (operator/operator-silence-backstop-ms {}))]
     (is (= (:seon.operator/help (operator/parse-argv ["check" "--help"]))
            (str/trim output)))))
+
+(deftest config-apply-names-one-branch-or-every-chain
+  (let [document (.getPath (java.io.File/createTempFile "branch-apply" ".edn"))
+        _ (spit document "{}")
+        parse #(select-keys (operator/parse-argv (into ["config" "apply"] %))
+                            [:seon.boot/cluster-name :seon.operator/branch :seon.operator/chains?])]
+    (is (= {:seon.boot/cluster-name "default" :seon.operator/branch :chain-f1f6dc8e6652}
+           (parse [document "--branch" "chain-f1f6dc8e6652"])))
+    (is (= {:seon.boot/cluster-name "default" :seon.operator/chains? true} (parse [document "--chains"])))
+    (is (thrown? Exception (parse [document "--chains" "--branch" "chain-a"])))))
