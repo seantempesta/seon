@@ -44,7 +44,9 @@ The change, from the data outward:
    separate gate deftest (`seon.step.merge-test/gate`, 7e84ba763) is deleted: it only restated the refused tests' state,
    nothing at the start ran those tests, and on S5's merge branch it errored (2026-10-15, attempt 32da963e358d).
    Each attempt's start places the task as the chain branch holds it now (`seon.task/task-placed!`), so root's change
-   to a held step reaches its merge branch.
+   to a held step reaches its merge branch. An attempt whose start pass could not run its proofs (S5 attempt 3: a
+   branch test whose namespace no longer loads, run `c85f90457863` `:request-threw`) ends `:stalled` and bails to root,
+   never waiting with no turn and no end (`seon.turn/stalled?`).
 6. **Root merges the repaired branch.** A merge step that ends done is the chain's last task: root's pass merges its
    attempt's branch (the merge branch) like any finished chain; the gate runs again on main's latest head, so a moved
    main is judged again, and a new refusal holds a new merge step the same way.

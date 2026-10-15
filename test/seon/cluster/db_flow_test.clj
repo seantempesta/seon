@@ -2448,3 +2448,35 @@
                 (doseq [kept (remove before (merge-branches store))]
                   (release-chain! routing store kept))
                 (release-chain! routing store branch))))))))))
+
+(deftest ^{:seon.test/long "One chain world: an attempt whose proofs cannot be run, its prove pass and two db<->flow passes." :seon.test/long-ms 30000}
+  an-attempt-whose-proofs-never-ran-ends-stalled-and-bails
+  ;; S5 merge step attempt 3 (2026-10-15): the start prove pass's run could not happen (a branch test whose
+  ;; namespace no longer loads), so its proof had no result, no model turn opened and no end was written: the
+  ;; attempt waited silently. Every end that is not done bails to root (TASK-CHAIN §2.7): an attempt that took no turn
+  ;; and has nothing to open is stalled
+  (binding [*space* "tq.neverproved"]
+    (test-support/with-database
+     (fn [connection]
+       (chain-world
+        connection {"u" [#{} "(clojure.test/is (= 1 1))"]}
+        (fn [handle]
+          (let [routing (:seon.agent/routing handle)
+                store (agent/handle-store handle)
+                chain (task/chain! {:seon.db/connection connection :seon.store/store store}
+                                   [{:seon.task/ns (symbol *space*) :seon.task/name "c" :seon.task/plan "Do c."
+                                     :seon.task/proofs #{(symbol (str *space* "-proofs") "proves-nothing-defined")}}])
+                branch (:seon.chain/branch chain)
+                key (id/id [(first (:seon.task/handles chain)) 1])]
+            (try
+              (pass! handle routing)
+              (let [on-branch (registry/active-branch-connection {:seon.store/store store :seon.store/branch branch})]
+                (is (= :stalled (await-on! on-branch #(db/q '[:find ?e . :in $ ?k :where [?a :seon.task/assignment ?k]
+                                                              [?a :seon.task.attempt/end ?e]]
+                                                            (db/db on-branch) key)
+                                           ::never-proved))
+                    "an attempt whose proofs never ran ends stalled instead of waiting")
+                (pass! handle routing)
+                (is (= :closed (:seon.task/outcome (db/pull (db/db on-branch) [:seon.task/outcome] [:seon.task/assignment key])))
+                    "and root bails it"))
+              (finally (release-chain! routing store branch))))))))))

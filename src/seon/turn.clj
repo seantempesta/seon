@@ -2119,10 +2119,12 @@
 
 (defn- stalled?
   "True when the loop has stopped calling `agent-id` on `database` while its task `handle` is not done: its latest
-  closed turn chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an error before any
-  reply, a refused context or a failed provider call, never does) and nothing opens a turn: opening waits for a new
-  outside wake (`opening-deferred?`, as after a failed provider call), or no wake is unanswered and no red proving
-  is unanswered (`proved-unanswered?`, a fresh attempt's work after its prove pass), as `next-agent-work` opens."
+  closed turn, if it took any, chose no disposition, it does not continue (`continuing-reply?`: a turn closed on an
+  error before any reply, a refused context or a failed provider call, never does) and nothing opens a turn: opening
+  waits for a new outside wake (`opening-deferred?`, as after a failed provider call), or no wake is unanswered and no
+  red proving is unanswered (`proved-unanswered?`, a fresh attempt's work after its prove pass), as `next-agent-work`
+  opens. An attempt that took no turn is stalled the same way: a prove pass whose run could not happen leaves its
+  proofs unproved, so no turn ever opens (S5 merge step attempt 3, 2026-10-15)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/handle] :boolean]}
   [database agent-id handle]
   (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
@@ -2134,7 +2136,7 @@
                             :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
                             [?turn :seon.turn/id _ ?t] [?turn :seon.turn/disposition _]]
                           database agent-id latest-t))]
-    (boolean (and latest-t (not disposed?)
+    (boolean (and (not disposed?)
                   (not (continuing-reply? database agent-id))
                   (or (true? (opening-deferred? database agent-id))
                       (and (empty? (unanswered-wakes database agent-id {}))
