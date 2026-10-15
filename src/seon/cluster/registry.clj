@@ -221,6 +221,36 @@
   (let [acquired (store/acquire-branch! store branch)]
     (try (f acquired) (finally (store/release-branch! acquired)))))
 
+(defn apply-config-to-branches!
+  "`seon.config/apply!` the document at `path` on each of `branches` of `request`'s store, each held for its one
+  action (`on-branch`) whether or not a graph runs there: a branch reads its own config row, so root applies
+  explicitly per branch and a merge never carries config. Answers each branch's apply result.
+
+  ## Example
+
+  ```clojure
+  (seon.cluster.registry/apply-config-to-branches!
+   {:seon.db/connection connection :seon.boot/cluster-name \"default\" :seon.store/store store}
+   [:chain-f1f6dc8e6652] \"cap.edn\")
+  ```"
+  {:malli/schema [:=> [:cat [:map [:seon.store/store :seon.store/store]
+                                  [:seon.db/connection :seon.db/connection]
+                                  [:seon.boot/cluster-name :seon.boot/cluster-name]]
+                       [:sequential :seon.store/branch] :seon.config/path]
+                  [:vector [:map [:seon.store/branch :seon.store/branch]
+                            [:seon.reconcile/result :seon.reconcile/result]]]]}
+  [request branches path]
+  (mapv (fn [branch]
+          {:seon.store/branch branch
+           :seon.reconcile/result
+           (on-branch (:seon.store/store request) branch
+                      (fn [connection]
+                        (db/with-branch {:seon.db/connection connection}
+                          #(config/apply! (assoc (select-keys request [:seon.boot/cluster-name])
+                                                 :seon.db/connection connection)
+                                          path))))})
+        branches))
+
 (defn- branch-connected?
   "True when THIS process already holds a connection to `branch`."
   [store branch]

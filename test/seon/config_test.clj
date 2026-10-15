@@ -934,10 +934,10 @@
                                  {:seon.store/store backing :seon.store/branch branch
                                   :seon.cluster.registry/from (db/commit-id (db/db connection))
                                   :seon.db/db (db/db connection)}))))
-       (let [on-branch (store/open-branch! backing branch)]
+       (is (nil? (db/branch-connection (db/db connection) branch)) "no graph or test holds the branch open")
+       (registry/apply-config-to-branches! (assoc request :seon.store/store backing) [branch] (.getCanonicalPath document))
+       (let [on-branch (store/acquire-branch! backing branch)]
          (try
-           (is (= 40 (reads on-branch)) "the branch forked with main's cap")
-           (config/apply-to-branches! request [branch] (.getCanonicalPath document))
            (is (= 100 (reads on-branch)) "the agent's next dial read on the branch is the applied value")
            (is (= 40 (reads connection)) "main's row is unchanged")
            (finally

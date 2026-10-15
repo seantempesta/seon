@@ -871,46 +871,6 @@
                         (compile-manifest (select-keys request [:seon.boot/cluster-name])))
        (apply! (assoc request :seon.config/manifest document))))))
 
-(defn chain-branches
-  "The branches `database` (main) names as chains (`:seon.chain/branch`) that this process holds open: the branches
-  a running graph reads config from."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.store/branch]]}
-  [database]
-  (into [] (comp (filter #(db/branch-connection database %)))
-        (sort (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] database))))
-
-(defn apply-to-branches!
-  "`apply!` the document at `path` over each of `branches`' own open connection (`seon.db/branch-connection` of the
-  request's database): a branch reads its own config row, so root applies explicitly per branch and a merge never
-  carries config. A branch with no open connection is refused by name. Answers each branch's apply result.
-
-  ## Example
-
-  ```clojure
-  (seon.config/apply-to-branches! {:seon.db/connection connection :seon.boot/cluster-name \"default\"}
-                                  [:chain-f1f6dc8e6652] \"cap.edn\")
-  ```"
-  {:malli/schema [:=> [:cat :seon.config/apply-request [:sequential :seon.store/branch] :seon.config/path]
-                  [:vector [:map [:seon.store/branch :seon.store/branch]
-                            [:seon.reconcile/result :seon.reconcile/result]]]]}
-  [request branches path]
-  (let [main (db/db (:seon.db/connection request))]
-    (mapv (fn [branch]
-            (let [connection (or (db/branch-connection main branch)
-                                 (refuse! {:seon.error/at (java.util.Date.)
-                                           :seon.error/layer :seon.config/compile
-                                           :seon.error/operation 'seon.config/apply-to-branches!
-                                           :seon.error/message "Config applies to a branch this process holds open."
-                                           :seon.config/error-key :seon.store/branch
-                                           :seon.config/rule ::branch-not-open
-                                           :seon.error/expected-key :seon.store/branch
-                                           :seon.error/offending branch}
-                                          nil))]
-              {:seon.store/branch branch
-               :seon.reconcile/result (db/with-branch {:seon.db/connection connection}
-                                       #(apply! (assoc request :seon.db/connection connection) path))}))
-          branches)))
-
 (defn agent-cluster
   "The cluster `agent-id` was created in (`:seon.agent/cluster`), whose
   config is the agent's config; for an agent created before agents named

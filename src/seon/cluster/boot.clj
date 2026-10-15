@@ -27,6 +27,7 @@
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
+            [seon.task :as task]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]))
 
@@ -760,9 +761,11 @@
               apply-request {:seon.db/connection (connection cluster) :seon.boot/cluster-name cluster}
               path (:seon.config/path request)
               branches (cond (:seon.operator/branch request) [(:seon.operator/branch request)]
-                             (:seon.operator/chains? request) (config/chain-branches (db/db (:seon.db/connection apply-request))))]
+                             (:seon.operator/chains? request) (task/chain-branches (db/db (:seon.db/connection apply-request))))]
           (if branches
-            {:seon.boot/cluster-name cluster :seon.config/branches (config/apply-to-branches! apply-request branches path)}
+            {:seon.boot/cluster-name cluster :seon.config/branches (registry/apply-config-to-branches!
+                                                   (assoc apply-request :seon.store/store (:seon.store/store (selected-instance cluster)))
+                                                   branches path)}
             (let [result (config/apply! apply-request path)]
               (if (:seon.error/at result) result
                   {:seon.boot/cluster-name cluster :seon.reconcile/result result}))))
