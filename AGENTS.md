@@ -122,6 +122,31 @@ root.
   against a failure that has not been observed; when one is observed, fix its root cause, add its regression and
   delete any fence standing in for it. A fence found in the code is a defect: file a task naming its root cause.
 
+## Choosing the design
+
+How the owner chooses between designs (distilled from his rulings of 2026-10-15). Solve each concept once, as a
+composable value-level mechanism, and reuse it everywhere it applies. Ask these in order before writing a design:
+
+1. **Which proven system already solved this? Take its model whole.** Branch drift is git's (`git merge main`, a
+   merge base, three-way, CI after the merge); a checkout runs its own HEAD; Clojure's `ns-unmap` fixes the arity.
+   Copy the model, its words and its edge-case answers, not a lookalike.
+2. **What immutable value already holds the answer?** Read it instead of comparing against history. A design that
+   compares each item with another branch's past is missing a value to hold (a pointer, a commit, a digest).
+3. **Key it by content.** The same definition with the same input is computed once for every branch and agent that
+   has it; sharing is the goal, not a leak. Never key by an agent, context or place when content is available.
+4. **Do the work when its data exists, no earlier.** Resolve a name when it is written; run a predicate when there is
+   data to validate; render when a viewer looks. Eager work done "to be safe" is waste and usually wrong.
+5. **One derivation, every consumer.** What the agent sees, what the done rule judges and what the merge carries are
+   one function's result (the merge list; the AI and HTML faces of one render). Two derivations of one fact drift.
+6. **Curate with the proof that already exists.** Tests decide what merges; contracts decide what is admitted. Never
+   add a hand list, filter or heuristic beside them.
+7. **Make effects explicit writes by their actor.** Root applies config to a branch and merges main forward; nobody
+   reads another branch's state implicitly. An exception that reaches across is a missing explicit write.
+8. **Accept only the exceptions physics imposes.** The one here: host-bound code that SCI cannot interpret runs as
+   loaded. Every other exception is a sign the model is wrong.
+9. **A fix that grows means the model is wrong.** Patching reader after reader, threading a value through every
+   layer, or a several-hundred-line patch still red: stop, return to 1-2, and ask the owner if needed.
+
 ## Words and where they come from
 
 **The language is written down, and everyone uses it.** Shared words keep agents, code, schemas and documents
