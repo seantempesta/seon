@@ -342,12 +342,23 @@
   ;; lint and every lane commit was refused. The merge holds the lane commit's bar.
   (merge-world! "wblint" "lint-check"
                 [(fn [_] "(clojure.test/deftest ^{:seon/tasks #{'tq.write-back/fix}} lint-check (clojure.test/is (= 1 1) (pr-str :x)))")]
-                (fn [{:keys [target store c proofs root file made]}]
+                (fn [{:keys [target store c proofs root file fixture-ns made]}]
                   (let [before (slurp file)
-                        refused (do (committed! {:seon.fn/root root}) (source/prepare-merge! target store c proofs {:root root}))
+                        h-conn (:seon.db/connection target)
+                        check (symbol (str fixture-ns) "lint-check")
+                        ;; the done rule's input: what the branch alone decides of the merge (TASK-CHAIN §2.4)
+                        published (do (committed! {:seon.fn/root root})
+                                      (let [main (db/db h-conn) branch (db/branch-database main c)]
+                                        (try (source/publication main branch #{[:seon.test/sym check]} #{check} proofs root)
+                                             (finally (source/release! [branch])))))
+                        refused (source/prepare-merge! target store c proofs {:root root})
                         finding (first (:seon.source/lint-findings refused))]
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
                     (is (= :seon.source/lint-error (:seon.error/type refused)))
+                    (is (= (:seon.source/lint-findings refused)
+                           (:seon.source/lint-findings (:seon.source/lint-refusal published)))
+                        "the branch's done judgment reads the finding the merge gate refuses, from the same derivation")
+                    (is (= #{[:seon.test/sym check]} (:seon.source/merge-identities published)))
                     (is (= [(subs (.getPath ^java.io.File file) (inc (count root))) :seon/unbounded-assertion-message]
                            ((juxt :seon.source/path :seon.lint/type) finding)))
                     (is (pos-int? (:seon.lint/row finding)))

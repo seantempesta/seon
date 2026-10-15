@@ -1851,10 +1851,12 @@
   and those reaching the functions it changed since its merge base with main (`seon.cluster.source/merge-base`,
   `seon.program/own-changed-identities`; `seon.fn/gate-sets`), their current results there
   (`seon.context/current-results`), those main `database` holds green at its own reach, and the newest run they
-  came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle]
+  came from, else the newest the branch holds (an attempt's start runs its tests, so a done end always has one), and
+  what its merge would publish under the checkout `root` (`seon.cluster.source/publication`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.chain/branch :seon.task/handle
+                       [:maybe :seon.fn/root]]
                   :seon.source/judged]}
-  [database at-end branch handle]
+  [database at-end branch handle root]
   (let [task (db/pull at-end [:seon.task/sym :seon.task/proofs {:seon.task/next [:seon.task/proofs]}] [:seon.task/id handle])
         proofs (set (:seon.task/proofs task))
         next-proofs (set (get-in task [:seon.task/next :seon.task/proofs]))
@@ -1869,7 +1871,9 @@
         members (when (sequential? reached) (-> proofs (into (of :seon.test/sym)) (into reached)))
         results (when members (context/current-results at-end members (:seon.task/sym task)))
         held (when (vector? results) (context/current-results database members nil))
-        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held])
+        published (when (and (vector? results) (set? delta))
+                    (source/publication database at-end delta proofs (:seon.task/sym task) root))
+        failure (some #(when (and (map? %) (:seon.error/at %)) %) [task delta reached results held published])
         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
         run-id (when (vector? results)
                  (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
@@ -1879,8 +1883,9 @@
       (throw (ex-info "A chain task ended done on a branch that recorded no test run."
                       {:seon.error/message "A chain task ended done on a branch that recorded no test run."
                        :seon.task/assigned handle :seon.chain/branch branch})))
-    (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs proofs
-               :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
+    (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs
+                    :seon.program/identities delta :seon.test.run/id run-id :seon.test.run/branch branch}
+                   published)
         (seq next-proofs) (assoc :seon.source/next-proofs next-proofs)
         (seq held) (assoc :seon.source/green-on-target
                           (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0)))
@@ -2274,7 +2279,9 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source] :nil]}
   [handle]
   (let [store (handle-store handle)
-        database @(:seon.db/connection handle)]
+        database @(:seon.db/connection handle)
+        ;; the checkout a merge publishes into: the done rule judges what the branch's merge would write there
+        root (let [checkout (merge/checkout database (:seon.cluster/name handle))] (when (string? checkout) checkout))]
     (doseq [{branch :seon.chain/branch key :seon.task/assignment h :seon.task/assigned commit :seon.task.attempt/commit}
             (chain-ends database (registry/branches store))]
       (let [refusals (registry/on-branch store branch
@@ -2284,7 +2291,7 @@
                                       (throw (ex-info "The chain branch retains no end commit of its finished attempt."
                                                       {:seon.error/message "The chain branch retains no end commit of its finished attempt."
                                                        :seon.task/assignment key :seon.chain/branch branch})))
-                                    (let [refusals (try (source/done-refusals at-end (done-judged database at-end branch h))
+                                    (let [refusals (try (source/done-refusals at-end (done-judged database at-end branch h root))
                                                         (finally (source/release! [at-end])))]
                                       (when (empty? refusals) (write! on-chain [[:db.fn/call #'task/advance-tx key]]))
                                       refusals))))]
@@ -2371,7 +2378,8 @@
   [handle]
   (let [store (handle-store handle)
         connection (:seon.db/connection handle)
-        database @connection]
+        database @connection
+        root (let [checkout (merge/checkout database (:seon.cluster/name handle))] (when (string? checkout) checkout))]
     (boolean
      (some identity
            (doall
@@ -2382,14 +2390,13 @@
               (let [refusals (registry/on-branch store works-on
                                         (fn [on-chain]
                                           (let [at-end (db/commit-database (db/db on-chain) commit)]
-                                            (try (source/done-refusals at-end (done-judged database at-end works-on h))
+                                            (try (source/done-refusals at-end (done-judged database at-end works-on h root))
                                                  (finally (source/release! [at-end]))))))]
                 (if (seq refusals)
                   (do (bail-chain! handle branch key h (refused-reason refusals) []) false)
-                  (let [root (merge/checkout database (:seon.cluster/name handle))
-                        merged (db/with-branch {:seon.db/connection connection}
+                  (let [merged (db/with-branch {:seon.db/connection connection}
                                                #(apply merge/merge! (assoc handle :seon.store/store store) key
-                                                       (when (string? root) [root])))]
+                                                       (when root [root])))]
                     (if (:seon.error/at merged)
                       (let [step (merge-step database merged
                                              (set (registry/on-branch store branch

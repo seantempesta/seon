@@ -464,7 +464,10 @@
                      (update :seon.source/results conj (recorded test-symbol false))
                      (as-> j (reduce (fn [j [k v]] (assoc j k v)) j (partition 2 more)))))
            new-red (fn [judged] (-> (red judged 'tq.done-test/new)
-                                    (update :seon.program/identities conj [:seon.test/sym 'tq.done-test/new])))]
+                                    (update :seon.program/identities conj [:seon.test/sym 'tq.done-test/new])))
+           lint-refused (source/lint-refusal [{:seon.source/path "test/tq/done_test.clj" :seon.lint/row 3 :seon.lint/col 9
+                                               :seon.lint/type :seon/unbounded-assertion-message
+                                               :seon.lint/message "An is message is prose."}])]
        (doseq [[row judged expected]
                [["own proof green: done" base []]
                 ["own proof red: refused"
@@ -487,7 +490,15 @@
                 ["a new function with an :any slot: refused"
                  (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/loose]) [:seon.source/uncontracted-error]]
                 ["a contracted stub no test reaches: done"
-                 (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/stub]) []]]]
+                 (update base :seon.program/identities conj [:seon.fn/sym 'tq.done/stub]) []]
+                ["green proofs, a clj-kondo error in a file the merge would publish: refused"
+                 (assoc base :seon.source/lint-refusal lint-refused) [:seon.source/lint-error]]
+                ["the last task: a function its merge carries that no green test reaches: refused"
+                 (assoc base :seon.source/merge-identities #{[:seon.fn/sym 'tq.done/stub]}) [:seon.source/test-evidence-error]]
+                ["a middle task: the same function waits for the next task's proofs: done"
+                 (assoc base :seon.source/merge-identities #{[:seon.fn/sym 'tq.done/stub]}
+                        :seon.source/next-proofs #{'tq.done-test/other})
+                 []]]]
          (is (= expected (mapv :seon.error/type (source/done-refusals branch judged))) row))
        (is (= [['tq.done-test/new]]
               (mapv #(mapv :seon.test/sym (:seon.source/red-tests %)) (source/done-refusals branch (new-red base))))

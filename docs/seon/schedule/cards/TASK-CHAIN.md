@@ -219,9 +219,23 @@ as its `:seon.cluster.registry/from`, selecting only the starting head, so the b
      task's proofs (`:seon.source/stray-red-error`: on the last task, which has no next, every such red refuses, as the
      final merge does);
    - a function new or changed on the branch with a contract gap (`seon.cluster.source/contract-gaps`, the installed
-     merge completeness rule: missing spec, `:any`, `:some`; value `def`s are not functions, de1f48c23).
+     merge completeness rule: missing spec, `:any`, `:some`; value `def`s are not functions, de1f48c23);
+   - what the branch alone decides of its merge, judged by the merge gate's own functions
+     (`seon.cluster.source/publication`, data in `judged`, cached by main's commit and the branch's changed
+     digests): its `:seon.source/lint-refusal`, when the files its merge list writes under the cluster's
+     checkout (`seon.merge/checkout`; none, nothing to write) hold a clj-kondo error
+     (`seon.cluster.source/lint-refusal`, `:seon.source/lint-error` with each finding's file, row, column and type);
+     and on the last task (no next proofs) each function of its `:seon.source/merge-identities` no green test
+     reaches (`:seon.source/test-evidence-error`, the merge's coverage clause). Files that do not prove at all (no
+     file for a namespace, a conflict with the checkout, a namespace form missing a require) leave nothing to lint and
+     stay the gate's refusals (MERGE-STEP 2). Done and merge are one judgment: a
+     task the merge would refuse for what its branch holds is not done, so its agent gets a turn with the refusal as
+     data (owner 2026-10-15: chain b7ab51e090d5's merge refused a lint error its done rule never saw, and the merge
+     step, green at its start, ended with no turn and re-merged into the same refusal). Measured on that branch:
+     about 280 ms and 0.7 GB allocated per uncached judgment (the file proof re-analyzes each written file), a
+     cache hit about 2 ms.
    A test main holds no result for is unknown, not a regression: the final merge runs its baselines
-   (`prepare-merge!`). Measured: about 2 ms per judgment, plus about 7 ms to build the judged input. Refusals reuse
+   (`prepare-merge!`). Mid-chain a function no test reaches is not refused: the next task's proofs cover it. Measured: about 2 ms per judgment, plus about 7 ms to build the judged input. Refusals reuse
    existing variants where their meanings match; the one new variant, `:seon.source/stray-red-error`, is registered in
    `seon.source.edn`.
    The agent's turn proposes `:done` (`seon.turn/task-end`); root re-judges `done-refusals` over the branch value at the

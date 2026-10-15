@@ -348,7 +348,8 @@
   its proofs, the tests reaching the functions it changed since its merge base (`change`, `seon.fn/gate-sets`),
   their results at their current reach on the branch (`current-results`) and the newest run they came from. A
   chain's task adds the tests the branch defines or changes, passes its product as `:seon.source/next-proofs` and
-  the tests main holds green as `:seon.source/green-on-target` (`seon.cluster.source/done-refusals`); any other
+  the tests main holds green as `:seon.source/green-on-target` and what its merge would publish
+  (`seon.cluster.source/publication`) (`seon.cluster.source/done-refusals`); any other
   joins its product to its proofs and passes the reds main holds as `:seon.source/red-on-target`
   (`seon.cluster.source/results-verdict`). A branch that recorded no run has nothing to judge, so it carries no
   judgment input. The head shows each judged test's status."
@@ -387,15 +388,22 @@
         run-id (when (vector? results)
                  (or (newest (keep #(when-let [[_ id] (:seon.test/run %)] [id (:seon.test/run-basis-t %)]) results))
                      (newest (db/q '[:find ?id ?t :where [?r :seon.test.run/id ?id] [?r :seon.test.run/basis-t ?t]] database))))
+        ;; what the branch alone decides of its merge, judged by the merge gate's own check under the agent's
+        ;; cluster checkout (`seon.merge/checkout`)
+        cluster (when (and run-id chained?) (config/agent-cluster database agent-id))
+        root (when (string? cluster) ((requiring-resolve 'seon.merge/checkout) main cluster))
+        published (when (and run-id chained? (set? delta))
+                    (source/publication main database delta proofs sym (when (string? root) root)))
         judged (when run-id
                  (if chained?
-                   (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
+                   (cond-> (merge {:seon.source/members members :seon.source/results results :seon.task/proofs proofs}
+                                  (when-not (:seon.error/at published) published))
                      (seq product) (assoc :seon.source/next-proofs product)
                      (seq on-target) (assoc :seon.source/green-on-target on-target))
                    (cond-> {:seon.source/members members :seon.source/results results :seon.task/proofs (into proofs product)}
                      (seq product) (assoc :seon.task/product product)
                      (seq on-target) (assoc :seon.source/red-on-target on-target))))]
-    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta reached results held head])
+    (or (some #(when (:seon.error/at %) %) [owed following previous first-of delta reached results held head published])
         (cond-> (assoc owed :seon.task/product product :seon.context/chained chained?
                        :seon.context/head head :seon.context/candidate database :seon.context/main main)
           (set? delta) (assoc :seon.program/identities delta)

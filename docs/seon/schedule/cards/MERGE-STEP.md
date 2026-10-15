@@ -39,8 +39,13 @@ The change, from the data outward:
    chain's task names (`seon.cluster.registry/cluster-claims`).
 5. **Its proofs are the merge gate's judgment.** The tests the gate found red (`:seon.task/refused-tests`) are the
    step's `:seon.task/proofs`, so the attempt's start runs them on the merge branch and the done rule
-   (`seon.cluster.source/done-refusals`, unchanged) needs them green; a refusal with no red test (a conflict, a file that
-   does not analyze) takes the chain's last task's proofs, and root's merge of the branch judges the rest (6). A
+   (`seon.cluster.source/done-refusals`) needs them green; a refusal with no red test (a conflict, a file that
+   does not analyze, a clj-kondo error, an uncovered function) takes the chain's last task's proofs. The done rule
+   judges what the merge branch alone decides of its merge with the gate's own functions (TASK-CHAIN §2.4,
+   `seon.cluster.source/publication`): a clj-kondo error in a file the merge writes and an uncovered function are
+   its refusals, so the step's agent gets a turn with the refusal as data instead of ending done at its start and
+   re-merging into the same refusal; root's merge of the branch judges the rest (a conflict, a file that does not
+   analyze) (6). A
    separate gate deftest (`seon.step.merge-test/gate`, 7e84ba763) is deleted: it only restated the refused tests' state,
    nothing at the start ran those tests, and on S5's merge branch it errored (2026-10-15, attempt 32da963e358d).
    Each attempt's start places the task as the chain branch holds it now (`seon.task/task-placed!`), so root's change
