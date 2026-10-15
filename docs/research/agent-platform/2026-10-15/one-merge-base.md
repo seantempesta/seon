@@ -129,6 +129,29 @@ Root must reconcile these before phase 4 deletes them.
 - **Git itself** (`commit-reach.c`, cited above) is the reference algorithm. Shelling out to git is not a fit for the database, which owns the commit graph.
 - **Datahike's own `datahike.versioning`** has no LCA. `branch-history` walks every ancestor, which the plan rules out.
 
+### Root's reconciliation of the R1 flags (2026-10-15, verified against source)
+
+- **GC and `:parents` (`6521ded43`).** Checked against source: `datahike.gc` keeps every commit reachable through
+  `:datahike/parents` from a live branch head.
+  - A forward merge's extra parent is a main commit, already reachable from main, so it pins nothing new. The
+    constraint does not apply to phase 2.
+  - What it does apply to is the chain→main merge commit, which `accept-merge!` already writes with the chain head
+    as a parent. That pins a deleted chain's history from main. It is an existing, separate question; it is listed
+    for phase 4 and not solved here.
+  - Upstream #951 (online GC with diff-buf is sound only for linear history) is noted for the same reason.
+- **`:commit-graph? false` (`50d4b3ac`).** It is an opt-out that Seon never sets (no use in `src` or `resources`), so
+  commit records exist. `datahike-internals.md` walked 1,896 of them on the live store. Phase 1 may still make
+  `merge-base` refuse by name on an opt-out store.
+- **Ruling 9 ("each with its `base/` merge-base ref, a pointer, not a copy").** The plan keeps the ruling's intent
+  and goes further: the pointer is the commit graph itself, so no `base/` ref is needed. Ruling 9 is revised in place
+  in `branch-model-rulings.md` in the phase 4 commit that deletes the refs.
+- **Relaunch keeps the predecessor's base (`4cfa03eab`).** This falls out of the graph. A relaunched attempt forks
+  its predecessor's end commit, so `merge-base(new head, main)` walks back to the same commit. No stored copy is
+  needed. Phase C must confirm it on a disposable fork.
+- **`:seon.task/merge-base` on attempt rows (`c264da25e`; `merge-closure-plan.md` L93).** It is deleted; every reader
+  derives the base from the graph. TASK-CHAIN L538 already deletes the per-attempt write, so no TASK-CHAIN
+  amendment is needed beyond the S3b note.
+- **`d9eb15c05` `base-t` on the fork entity.** It is deleted: a *t* is a position on one lineage only (finding 1).
 
 ## C: REPL confirmation
 
