@@ -18,6 +18,7 @@
             [seon.eval.drive :as drive]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.test-support :as support]
             [seon.turn :as turn]
             [seon.task :as task]
@@ -767,6 +768,40 @@
                 "and no :delete-branch is derived for it"))
           (finally
             (doseq [branch [ended unmerged]]
+              (some-> (host/hosted handle branch) host/retire!)
+              (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
+
+(deftest a-lifecycle-pass-after-one-branch-wrote-reads-only-that-branch
+  ;; root's pass reads each taskless agent's end and unmerged change as functions of its branch commit (and main's):
+  ;; after one agent writes on its own branch only that commit is new, so the pass opens that one branch database
+  ;; and compares nothing again, however many agents are admitted
+  (with-host-world {}
+    (fn [{:keys [handle connection]}]
+      (let [store (:seon.store/store handle)
+            routing (:seon.agent/routing handle)
+            fork! (fn [] (:seon.store/branch (registry/fork! {:seon.store/store store :seon.store/branch (keyword (str "host-test-" (id/id)))
+                                                              :seon.cluster.registry/from (db/commit-id (db/db connection))
+                                                              :seon.db/db (db/db connection)})))
+            branches (vec (repeatedly 4 fork!))
+            ids (mapv #(str "mcp/pass-" %) (range (count branches)))
+            pass #(filterv (comp (set ids) :seon.agent/id)
+                           (agent/lifecycle-facts (db/db connection) store (registry/branches store) (agent/registry-facts routing)))]
+        (try
+          (let [hosted (mapv #(host-on! handle %1 %2) branches ids)
+                ended (peek hosted)]
+            (hosted-run! ended "(defn pass-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+            (is (= ["true"] (hosted-run! ended (str "(:my.agent/retiring? (my.agent/retire-branch! {:seon.store/branch "
+                                                     (peek branches) "}))")))
+                "the last agent ends holding a definition main lacks")
+            (is (= 1 (count (filter :seon.flow.actions/unmerged (pass)))) "the first pass reads its end and its unmerged change")
+            (is (= ["3"] (hosted-run! (first hosted) "(+ 1 2)")) "the first agent writes on its own branch")
+            (let [measured (profile/measure pass)]
+              (is (= (count branches) (count (:seon.profile/value measured))))
+              (is (= 1 (profile/calls-of measured 'seon.db/commit-database)) "only the branch that wrote is opened")
+              (is (zero? (profile/calls-of measured 'seon.cluster.source/merge-base-database))
+                  "the unmerged change of the unchanged ended branch is not compared again")))
+          (finally
+            (doseq [branch branches]
               (some-> (host/hosted handle branch) host/retire!)
               (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))))
 

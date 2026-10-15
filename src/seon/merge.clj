@@ -302,7 +302,7 @@
             accepted? (case end
                         :done true
                         :sent-back false
-                        (and (uuid? commit) (not merged?) (pos? (source/unmerged-count target store branches branch))))
+                        (and (uuid? commit) (not merged?) (pos? (source/unmerged-count target store commit))))
             projection (or (db/carried-projection target) (schema/handed-projection))
             meta {:seon.squash/source-branch branch :seon.squash/source-commit commit}
             merge-call [[:db.fn/call merge-tx a commit projection base]]

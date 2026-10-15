@@ -932,6 +932,23 @@
                                  (when (qualified-symbol? value) (symbol (namespace value)))))))
           changed)))
 
+(defn- compare-commit
+  "`compare-branch` of the candidate's commit `c-id`, already read from the store's branches."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id :seon.db/database-value] :map]}
+  [held-store c-id head]
+  (let [bound merge-bound
+        branch (commit-database held-store c-id)
+        base (merge-base-database branch head)
+        ;; Only what the candidate changed since its merge base can merge or conflict: git's diff of the base
+        ;; and the candidate, walked on the candidate's own lineage.
+        changed (if (:seon.error/at base) base (program/own-changed-identities base branch bound))
+        ;; an agent's own namespace is its compartment, never the branch's program (`agent-owned`)
+        changed (if (set? changed) (into #{} (remove (agent-owned branch head changed)) changed) changed)
+        maps (when (set? changed)
+               (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
+    {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
+     :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))
+
 (defn compare-branch
   "Compare `candidate`'s committed program with `head` (a database value of the
   branch `target`) on their merge base (`merge-base-database`, Datahike's commit graph): the candidate's own changed
@@ -948,40 +965,28 @@
   ([held-store candidate head target]
    (compare-branch held-store (registry/branches held-store) candidate head target))
   ([held-store branches candidate head _target]
-  (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate
-                                         :seon.cluster.registry/branches branches})]
-    (if (:seon.error/at c-id)
-      {:c-id c-id}
-      (let [bound merge-bound
-            branch (commit-database held-store c-id)
-            base (merge-base-database branch head)
-            ;; Only what the candidate changed since its merge base can merge or conflict: git's diff of the base
-            ;; and the candidate, walked on the candidate's own lineage.
-            changed (if (:seon.error/at base) base (program/own-changed-identities base branch bound))
-            ;; an agent's own namespace is its compartment, never the branch's program (`agent-owned`)
-            changed (if (set? changed) (into #{} (remove (agent-owned branch head changed)) changed) changed)
-            maps (when (set? changed)
-                   (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
-        {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
-         :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))})))))
+   (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate
+                                          :seon.cluster.registry/branches branches})]
+     (if (:seon.error/at c-id) {:c-id c-id} (compare-commit held-store c-id head)))))
 
 (def ^:private unmerged-sets
   "The `seon.program/three-way` sets a branch holds that main lacks."
   [:seon.program/added :seon.program/changed-on-branch :seon.program/retracted :seon.program/conflict])
 
 (defn unmerged-count
-  "How many declarations `branch` changed that main `database` lacks (`compare-branch` against main's head), read
-  from the store's `branches` the caller holds; a refused comparison is thrown."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.cluster.registry/branches :seon.store/branch]
+  "How many declarations branch commit `c-id` changed that main `database` lacks (`compare-branch` against main's
+  head); a refused comparison is thrown. A function of the two commits, so it is derived once per pair."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.source/commit-id]
                   :seon.flow.actions/unmerged]}
-  [database store branches branch]
-  (let [{three :three :as compared} (compare-branch store branches branch database (get-in database [:config :branch]))]
-    (try (if three
-           (reduce + (map #(count (get three %)) unmerged-sets))
-           (let [refusal (some #(when (:seon.error/at %) %)
-                               (concat [(:c-id compared) (:base compared) (:changed compared)] (:maps compared)))]
-             (throw (ex-info (:seon.error/message refusal "Could not compare the branch with main.") refusal))))
-         (finally (release! [(:base compared) (:branch compared)])))))
+  [database store c-id]
+  (seon.cache/lookup ::unmerged [c-id (db/commit-id database)] (constantly 256)
+    #(let [{three :three :as compared} (compare-commit store c-id database)]
+       (try (if three
+              (reduce + (map (fn [k] (count (get three k))) unmerged-sets))
+              (let [refusal (some (fn [v] (when (:seon.error/at v) v))
+                                  (concat [(:base compared) (:changed compared)] (:maps compared)))]
+                (throw (ex-info (:seon.error/message refusal "Could not compare the branch with main.") refusal))))
+            (finally (release! [(:base compared) (:branch compared)]))))))
 
 (defn tested-task-basis
   "What selects task `sym`'s merge run: its `seon.task/obligations` over `main`, the `candidate` and their merge

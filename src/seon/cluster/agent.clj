@@ -2422,19 +2422,20 @@
   nil)
 
 (defn- branch-end
-  "The end and reason `branch`'s head records on attempt `key`, read from main `database`'s store; {} when the head
-  records none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.task/assignment]
+  "The end and reason branch commit `commit` records on attempt `key`, read from main `database`'s store; {} when
+  it records none. A function of the commit, so each commit is opened once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.task/assignment]
                   [:map [:seon.task.attempt/end {:optional true} :seon.task.attempt/end]
                    [:seon.task.attempt/reason {:optional true} :seon.task.attempt/reason]]]}
-  [database branch key]
-  (if-let [head (db/branch-database database branch)]
-    (try (let [row (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/reason]) . :in $ ?k
-                           :where [?a :seon.task/assignment ?k]]
-                         head key)]
-           (if (keyword? (:seon.task.attempt/end row)) (select-keys row [:seon.task.attempt/end :seon.task.attempt/reason]) {}))
-         (finally (source/release! [head])))
-    {}))
+  [database commit key]
+  (cache/lookup ::branch-end [commit key] (constantly 256)
+    #(if-let [head (db/commit-database database commit)]
+       (try (let [row (db/q '[:find (pull ?a [:seon.task.attempt/end :seon.task.attempt/reason]) . :in $ ?k
+                              :where [?a :seon.task/assignment ?k]]
+                            head key)]
+              (if (keyword? (:seon.task.attempt/end row)) (select-keys row [:seon.task.attempt/end :seon.task.attempt/reason]) {}))
+            (finally (source/release! [head])))
+       {})))
 
 (defn- kept?
   "Whether `agent-id`'s merged branch stays on main `database`: its agent's cluster keeps ended branches. A
@@ -2454,18 +2455,25 @@
   (boolean (and commit moved (not git) (not refused))))
 
 (defn- branch-admission-end
-  "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on `branch`'s head, read from main
-  `database`'s store; nil when it holds none."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch :seon.agent/id] [:maybe :seon.agent/admission-closed-tx]]}
-  [database branch agent-id]
-  (when-let [head (db/branch-database database branch)]
-    (try (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]] head agent-id)
-         (finally (source/release! [head])))))
+  "The `:seon.agent/admission-closed-tx` agent `agent-id`'s row holds on branch commit `commit`, read from main
+  `database`'s store; {} when it holds none. A function of the commit, so each commit is opened once."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id :seon.agent/id]
+                  [:map [:seon.agent/admission-closed-tx {:optional true} :seon.agent/admission-closed-tx]]]}
+  [database commit agent-id]
+  (cache/lookup ::admission-end [commit agent-id] (constantly 256)
+    #(if-let [head (db/commit-database database commit)]
+       (try (if-let [t (db/q '[:find ?t . :in $ ?id :where [?g :seon.agent/id ?id] [?g :seon.agent/admission-closed-tx ?t]]
+                             head agent-id)]
+              {:seon.agent/admission-closed-tx t}
+              {})
+            (finally (source/release! [head])))
+       {})))
 
 (defn- taskless-agents
   "Every agent on main `database` whose branch the store's `branches` holds, is not main's and that no assignment
   names: its end, main's row's else its branch head's, whether `started` runs its graph and, once ended, how
-  many declarations its branch holds unmerged."
+  many declarations its branch holds unmerged. Both reads of a branch are functions of its head commit (and
+  main's), so a pass after one branch wrote opens only that branch."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store :seon.cluster.registry/branches :seon.flow.actions/started]
                   [:vector :seon.flow.actions/held-agent]]}
   [database store branches started]
@@ -2476,12 +2484,16 @@
         _ (when (map? rows) (throw (ex-info (:seon.error/message rows "db<->flow could not read the taskless agents.") rows)))]
     (into [] (keep (fn [[g id b]]
                      (when (contains? branches b)
-                       (let [end (or (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] g))
-                                     (branch-admission-end database b id))]
+                       (let [commit (registry/branch-commit-id {:seon.store/store store :seon.store/branch b
+                                                                :seon.cluster.registry/branches branches})
+                             _ (when (:seon.error/at commit)
+                                 (throw (ex-info (:seon.error/message commit "db<->flow could not read the branch head.") commit)))
+                             end (or (:seon.agent/admission-closed-tx (db/pull database [:seon.agent/admission-closed-tx] g))
+                                     (:seon.agent/admission-closed-tx (branch-admission-end database commit id)))]
                          (cond-> {:db/id g :seon.agent/id id :seon.task/branch b
                                   :seon.flow.actions/started? (contains? started id)}
                            end (assoc :seon.agent/admission-closed-tx end
-                                      :seon.flow.actions/unmerged (source/unmerged-count database store branches b)))))))
+                                      :seon.flow.actions/unmerged (source/unmerged-count database store commit)))))))
           (sort-by second rows))))
 
 (defn- allowance-left
@@ -2531,7 +2543,7 @@
                              merged? (and (uuid? head) (merge/merged? database head))
                              ;; the branch is read while it holds something unmerged
                              {on-branch :seon.task.attempt/end reason :seon.task.attempt/reason}
-                             (when (or (nil? main-end) (not merged?)) (branch-end database b k))
+                             (when (and (uuid? head) (or (nil? main-end) (not merged?))) (branch-end database head k))
                              ;; a cancelled task's attempt holding no end of its own is closed :cancelled
                              end (or main-end on-branch
                                      (when (= :cancelled (task/execution database h))
@@ -2548,7 +2560,7 @@
                                     :seon.flow.actions/started? started? :seon.flow.actions/exited? (not started?)
                                     :seon.flow.actions/merged? merged?
                                     :seon.flow.actions/refused? refused?
-                                    :seon.flow.actions/work-left? (boolean (and judged? (pos-int? (source/unmerged-count database store branches b))))
+                                    :seon.flow.actions/work-left? (boolean (and judged? (pos-int? (source/unmerged-count database store head))))
                                     :seon.flow.actions/allowance-left (if judged? (allowance-left database h id) 0)
                                     :seon.flow.actions/kept? (boolean (and (= :merge kind) (kept? database id)))}
                              end (assoc :seon.task.attempt/end end)
