@@ -670,20 +670,20 @@
 
 (defn- step-start
   "Where the step of `held` begins: the form that enters the namespace owning it and the form that enters the
-  namespace of each test its instructions cite (`seon.ref/names`); each must-read carries the form that reads its
-  source."
+  namespace of each test its instructions cite (`seon.ref/names`), except the namespace `current` the agent already
+  ended in; nil when it is in all of them."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map [:seon.task/sym :seon.task/sym] [:seon.task/instructions {:optional true} :seon.task/instructions]]]
-                  :seon.context/start]}
-  [database {:seon.task/keys [sym instructions]}]
+                       [:map [:seon.task/sym :seon.task/sym] [:seon.task/instructions {:optional true} :seon.task/instructions]]
+                       [:maybe :seon.ns/name]]
+                  [:maybe :seon.context/start]]}
+  [database {:seon.task/keys [sym instructions]} current]
   (let [owner (symbol (namespace sym))
         tests (when instructions
                 (->> (ref/names instructions)
                      (filter #(map? (db/pull database [:db/id] [:seon.test/sym %])))
                      (into (sorted-set) (map (comp symbol namespace)))))]
-    {:seon.render/operations (into [(list 'in-ns (list 'quote owner))]
-                                   (map #(list 'in-ns (list 'quote %)))
-                                   (disj tests owner))}))
+    (when-let [entering (seq (remove #{current} (cons owner (disj tests owner))))]
+      {:seon.render/operations (mapv #(list 'in-ns (list 'quote %)) entering)})))
 
 (defn attempt-start
   "`database` as of the transaction that assigned `agent-id` its held task: the attempt's starting value, which its
@@ -761,8 +761,10 @@
                             (update proven :seon.context/proof-list
                                     (partial mapv #(merge (dissoc (resolution (:seon.test/sym %)) :seon.ref/name :seon.render/ai :seon.render/html) %))))
               verdict (assoc :seon.context/step
-                             (assoc (step-section verdict)
-                                    :seon.context/start (step-start database held)))
+                             (let [current (some->> (:db/id (db/pull database [:db/id] [:seon.agent/id agent-id]))
+                                                      (turn/previous-ending-namespace database))
+                                    start (step-start database held current)]
+                                (cond-> (step-section verdict) start (assoc :seon.context/start start))))
               (seq sent-back) (assoc :seon.context/send-backs sent-back)
               (seq earlier) (assoc :seon.context/attempts earlier)
               (seq changes) (assoc :seon.context/changes changes)

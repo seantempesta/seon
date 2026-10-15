@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
+            [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
             [seon.id]
@@ -566,6 +567,17 @@
        (is (not (contains? (context/exchange-form emission :newest 400) :seon.context/reference))
            "the newest unit is shown whole")))))
 
+(deftest an-older-source-read-is-shown-whole-under-the-shipped-dial
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (evaluate running agent-id "(my.program/source 'seon.ref/span-candidate)")
+     (let [database (db/db connection)
+           [evaluation] (seon.eval/of-agent database agent-id '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}])
+           emission (repl/entity-emission (assoc evaluation :seon.db/db database))
+           older (context/exchange-form emission :older (:seon.config.context/reference-tokens config/defaults))]
+       (is (> (tokens/estimate (:seon.ai/reply older)) 400) "the source read is over the old 400-token dial")
+       (is (not (contains? older :seon.context/reference)) "the agent's own read stays in its history whole")))))
+
 (deftest the-block-shows-the-agents-cost-against-main
   (test-support/with-running-agent
    (fn [running agent-id connection]
@@ -877,7 +889,7 @@
                                   :seon.task/instructions "Make the rows green."))
            _ (task/create! (assoc base :seon.task/name "subject" :seon.task/plan "Goal."
                                   :seon.task/children #{[:seon.task/sym 'tq.cs/prove] [:seon.task/sym 'tq.cs/implement]}))
-           start #(#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions %})]
+           start #(#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions %} nil)]
        (task/assign! {:seon.agent/context-source (test-support/running-cluster running) :seon.db/connection connection
                       :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id]
                       :seon.task/branch (get-in (db/db connection) [:config :branch])})
@@ -885,7 +897,12 @@
               (:seon.context/start (:seon.context/step (block running agent-id))))
            "the block's Prove step offers the owner's namespace, then the test namespace its instructions name")
        (is (= {:seon.render/operations ['(in-ns 'tq.cs)]} (start "Add a row for the empty input."))
-           "instructions naming no test offer only the owner's namespace")))))
+           "instructions naming no test offer only the owner's namespace")
+       (is (= {:seon.render/operations ['(in-ns 'tq.cs-test)]}
+              (#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove :seon.task/instructions "Add a row to `tq.cs-test/shape`."} 'tq.cs))
+           "the namespace the agent already ended in is not offered again")
+       (is (nil? (#'context/step-start (db/db connection) {:seon.task/sym 'tq.cs/prove} 'tq.cs))
+           "a step whose namespaces the agent is already in offers no start")))))
 
 (deftest ^{:seon.test/long "An own-branch agent's setup, an earlier attempt's assignment and end, one eval request with its test step, and one read of its block."
            :seon.test/long-ms 30000}
