@@ -1484,7 +1484,7 @@
                    :seon.test/unknown-error]]}
   [database test-symbols]
   (try
-    (let [{::keys [nodes schemas]} (when (seq test-symbols) (reach-graph database test-symbols))
+    (let [{::keys [nodes schemas]} (if (seq test-symbols) (reach-graph database test-symbols) {::nodes {} ::schemas {}})
           names (reach-names nodes (filterv #(get nodes %) test-symbols))
           named (into #{} (comp (mapcat #(::keys (get nodes %))) (filter qualified-keyword?)) names)
           ks (loop [pending (vec named) seen (transient #{})]
