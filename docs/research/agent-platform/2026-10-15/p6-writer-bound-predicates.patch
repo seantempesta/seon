@@ -1,0 +1,374 @@
+diff --git a/resources/seon/tasks/seon.schema.edn b/resources/seon/tasks/seon.schema.edn
+index 659e7c5dc..a6ad63c44 100644
+--- a/resources/seon/tasks/seon.schema.edn
++++ b/resources/seon/tasks/seon.schema.edn
+@@ -34,6 +34,4 @@
+  #:seon.task{:name "a-schema-naming-a-branch-predicate-breaks-the-test-step"
+              :plan "On a branch, `(defn ok? ...)` then `(seon.schema/register! :n/thing '[:map [:n/x n/ok?]])` is admitted (the bare symbol resolves as the branch's program predicate). From then on the declared reads of that branch's test step refuse `:malli.core/invalid-schema` naming `n/ok?` from `seon.schema/direct-reference-keys-in` (reached through `seon.db/carried-projection` from `seon.test/definition-digests`), on every later eval request, while reads of the branch head itself answer: a projection built for another value of the branch lacks the branch's predicates. Chain experiment 4 (J1): attempt `ee6cfaeb5c0b` sat 4 min with no end; default's recorded error 7c40461fc9f6 when root's stop read that branch's open turn; reproduced at HEAD 7ef4967db on lane faults-rc's branch (`docs/research/agent-platform/2026-10-12/db-clean/root-causes.md`). A bare qualified symbol is a Malli reference, and only a projection carrying function contracts resolves it, to the function's contract; the writer's schema-only projection does not. One admission decision: `register!` refuses a function named as a schema (`:seon.schema/function-reference`, `seon.schema/function-references`). The proof's order matters: register! in the eval request that defines the function refuses as an unresolved reference; only a later one admitted it. Done when the test step of such a branch reads it. Read `seon.schema/register!` and `docs/research/agent-platform/2026-10-12/chain-experiment-4.md`."}
+  #:seon.task{:name "contracts-declare-absence-as-no-key"
+-             :plan "Owner rule: absence is no key, never nil; no `[:maybe ...]` in a function contract. `seon.merge-test/merge-and-agent-facing-contracts-declare-absence-as-no-key` holds it green for `seon.merge` and every `my.*` namespace; the remaining 460-odd uses in src/ (largest: `seon.turn`, `seon.error`, `seon.db`, `seon.cluster.agent`, `seon.fn`, `seon.render`, `seon.sci.eval`, `seon.render.value`, `seon.error.refusal`, `seon.test.runner`) and resources/seon/schemas (`seon.render.walk`, `seon.print`, `seon.render.value`, `seon.flow`, `seon.source`, `seon.batch`, `seon.render.ns`, `seon.render.var`, `seon.render.test`) convert at their producers one namespace per slice: an optional input becomes an optional map key or another arity, a nil-returning function returns no key or another shape, callers convert in the same commit. Proof to write: widen `maybe-schemas` in that test from the two namespace sets to every first-party namespace as each converts. Read `seon.cluster.source/prepare-merge!`, `seon.merge/merge!`, `seon.merge/merge-tx`, `seon.schema/register!`, `docs/research/agent-platform/2026-10-12/context-review/review-3-implement-merge.md` and `docs/research/agent-platform/2026-10-12/context-review/review-4-cross-task.md`."}
+- #:seon.task{:name "a-contract-naming-a-branch-predicate-is-refused-at-the-writer"
+-             :plan "A function contract naming a predicate defined on the agent's branch, `(defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"...\" :gen/elements [0 2]} n/even-int?]] :int]} ...)` after `(defn n/even-int? ...)`, derives and arms at the REPL (`seon.sci.kernel/context-bound-projection` binds it to the agent's SCI Var), but the writer refuses its facts: `seon.schema/compilable-form` resolves `[:fn sym]` only through the projection's predicate functions or a loaded JVM Var (`seon.schema/loaded-predicate-var`), and the branch's predicate is neither (`:seon.schema/unresolved-predicate`). The writer's projection must resolve a predicate the branch's program defines, with its real callable, never a stand-in: a projection that holds the contract is reused for arming (`seon.instrument/compiled-wrapper`, `retained`)."}]
++             :plan "Owner rule: absence is no key, never nil; no `[:maybe ...]` in a function contract. `seon.merge-test/merge-and-agent-facing-contracts-declare-absence-as-no-key` holds it green for `seon.merge` and every `my.*` namespace; the remaining 460-odd uses in src/ (largest: `seon.turn`, `seon.error`, `seon.db`, `seon.cluster.agent`, `seon.fn`, `seon.render`, `seon.sci.eval`, `seon.render.value`, `seon.error.refusal`, `seon.test.runner`) and resources/seon/schemas (`seon.render.walk`, `seon.print`, `seon.render.value`, `seon.flow`, `seon.source`, `seon.batch`, `seon.render.ns`, `seon.render.var`, `seon.render.test`) convert at their producers one namespace per slice: an optional input becomes an optional map key or another arity, a nil-returning function returns no key or another shape, callers convert in the same commit. Proof to write: widen `maybe-schemas` in that test from the two namespace sets to every first-party namespace as each converts. Read `seon.cluster.source/prepare-merge!`, `seon.merge/merge!`, `seon.merge/merge-tx`, `seon.schema/register!`, `docs/research/agent-platform/2026-10-12/context-review/review-3-implement-merge.md` and `docs/research/agent-platform/2026-10-12/context-review/review-4-cross-task.md`."}]
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index 1d74c2d8d..061da5cdd 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -1907,19 +1907,31 @@
+   held object. `advanced-key` and the value's revision key are aliases of it,
+   so its later reads and its commit (`hold-committed-projection!`) share the
+   derivation. Nil when it wrote no declaration or the basis holds no
+-  projection; the caller then derives as before."
+-  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
+-  [{before :db-before after :db-after :as report}]
+-  (when-let [written (written-declarations report)]
+-    (let [builder (projection-builder after)
+-          advanced (advanced-key builder before written)]
+-      (or (second (resolved advanced))
+-          (when-let [base (held-projection builder before)]
+-            (content-projection builder after ::value-projection
+-                                [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]
+-                                #(or (schema/advance-projection before after base written)
+-                                     (schema/load-projection after base))
+-                                (delay base)))))))
++  projection; the caller then derives as before.
++
++  With a `supplied` base (the caller's context-bound projection) the report
++  advances from it and the answer is held in that base's own holder
++  (`schema/projection-cache-value`), never under the shared content key, so a
++  context's predicate bindings reach no other context."
++  {:malli/schema [:function
++                  [:=> [:cat :map] [:maybe :seon.schema/projection]]
++                  [:=> [:cat :map [:maybe :seon.schema/projection]] [:maybe :seon.schema/projection]]]}
++  ([report] (speculative-report-projection report nil))
++  ([{before :db-before after :db-after :as report} supplied]
++   (when-let [written (written-declarations report)]
++     (if supplied
++       (schema/projection-cache-value
++        supplied [::advanced (projection-cache-key before) (mapv (juxt :e :a :v :tx :added) written)]
++        #(schema/advance-projection before after supplied written))
++       (let [builder (projection-builder after)
++             advanced (advanced-key builder before written)]
++         (or (second (resolved advanced))
++             (when-let [base (held-projection builder before)]
++               (content-projection builder after ::value-projection
++                                   [advanced [builder (assoc (projection-cache-key after) ::builder builder)]]
++                                   #(or (schema/advance-projection before after base written)
++                                        (schema/load-projection after base))
++                                   (delay base)))))))))
+ 
+ (defn- hold-committed-projection!
+   "Hold the committed value's already derived projection under its commit.
+@@ -5826,13 +5838,13 @@
+   the declarations this report changed are admitted here, by the projection
+   it leaves (`schema/admit-declarations!`): completeness and renderer
+   coherence judge writes, never reads."
+-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
++  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :seon.schema/projection] :seon.db/transaction-report]
+                   [:or :nil :seon.db/error-result]]}
+-  [prepared report]
++  [prepared supplied report]
+   (let [database (:db-after report)
+         declared? (declares-program? database)
+         projection (if declared?
+-                     (or (speculative-report-projection report) (carried-projection database))
++                     (or (speculative-report-projection report supplied) (carried-projection database))
+                      prepared)]
+     (when declared?
+       (let [[schema-keys function-symbols] (written-declaration-identities report)]
+@@ -6092,6 +6104,17 @@
+   (let [output (digested-calls projection (vec (apply f database args)))]
+     (into output (namespace-derivation projection database output))))
+ 
++(defn- bound-base
++  "`base` judged under the predicate `bound` (`[callable digest]` by symbol) a
++  caller's context defines: the projection `base` with those callables, derived
++  once per set of definition digests (`schema/with-bound-predicates`). Nil when
++  nothing is bound."
++  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe [:map-of :qualified-symbol [:tuple :seon.instrument/callable :string]]]]
++                  [:maybe :seon.schema/projection]]}
++  [base bound]
++  (when (seq bound)
++    (schema/with-bound-predicates base (update-vals bound first) (update-vals bound second))))
++
+ (defn- prepared-write
+   "The request the writer applies for `transaction` on `database`: JDK
+   integers as longs, the final-report validator in its metadata, values
+@@ -6100,8 +6123,13 @@
+   publication installs attributes, then writes its rows); before that, the
+   members a transaction writes move into cells at its end
+   (`vector-migration-tx`), once it installs them."
+-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.store/transaction] :map]}
+-  [projection database transaction]
++  {:malli/schema [:function
++                  [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.store/transaction] :map]
++                  [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.store/transaction
++                        [:maybe :seon.schema/projection]]
++                   :map]]}
++  ([projection database transaction] (prepared-write projection database transaction nil))
++  ([projection database transaction supplied]
+   (let [installed? (every? #(get (dbi/-schema database) %)
+                            [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present])
+         declared? (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+@@ -6110,7 +6138,7 @@
+                  encoding #'vectors-tx
+                  (jdk-integers->long
+                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
+-                            [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
++                            [:tx-meta :datahike/validate-report] #(validate-write-report projection supplied %))))
+         derivation (namespace-derivation projection database (:tx-data request))]
+     (cond-> (update request :tx-data #(digested-calls projection %))
+       ;; A transaction on a store without the bridge attributes may install
+@@ -6118,7 +6146,7 @@
+       ;; transactions wrote move into cells at its end, once installed.
+       (not (or installed? declared?))
+       (update :tx-data #(conj (vec %) [:db.fn/call vector-migration-tx projection]))
+-      (seq derivation) (update :tx-data into derivation))))
++      (seq derivation) (update :tx-data into derivation)))))
+ 
+ (defn- write-refusal
+   "The declared value of a write that threw: the validator's refusal, a Seon
+@@ -6194,7 +6222,11 @@
+     [:or :seon.db/transaction-report :seon.db/error-result]]}
+   [database connection transaction]
+   (try
+-    (let [projection (carried-projection database)]
++    (let [bound (when (map? transaction) (:seon.db/predicate-bindings transaction))
++          transaction (cond-> transaction bound (dissoc :seon.db/predicate-bindings))
++          base (carried-projection database)
++          supplied (bound-base base bound)
++          projection (or supplied base)]
+       (or (write-error database projection transaction)
+           (let [;; Every write, system writes included, is bounded by the
+                 ;; branch's dial (lane-flow-owns-running-machinery.md N3,
+@@ -6209,7 +6241,8 @@
+                 :seon.error/fix "Declare :seon.config.db/write-time-limit-ms in the store's schema facts before writing a program."
+                 :seon.error/data {:seon.error/member :seon.config.db/write-time-limit-ms}})
+           (let [request (prepared-write projection database
+-                                        (stamp-transaction database projection transaction batch/*world*))
++                                        (stamp-transaction database projection transaction batch/*world*)
++                                        supplied)
+                 timeout (Object.)
+                 ;; One deadline covers admission and acknowledgement: the
+                 ;; writer's put! into its transaction queue runs inside the
+@@ -6268,17 +6301,30 @@
+   "The value `transaction` would leave on `database`, never committed: the
+   writer's own checks and final-report validator (`prepared-write`), applied
+   by Datahike's `with`, carrying `database`'s projection state. A refusal is
+-  the writer's declared value (`write-refusal`)."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction]
+-                  [:or :seon.db/database-value :seon.db/error-result]]}
+-  [database transaction]
+-  (try
+-    (let [projection (carried-projection database)]
+-      (or (write-error database projection transaction)
+-          (carry-projection-state (:db-after (d/with database (prepared-write projection database transaction)))
+-                                  (:seon.sci.eval/projection-state (meta database)))))
+-    (catch Throwable throwable
+-      (write-refusal database transaction throwable))))
++  the writer's declared value (`write-refusal`).
++
++  With `bound`, the predicates the caller's context defines (`[callable
++  digest]` by symbol, `seon.turn.batch/writer-bindings`), the write is judged
++  and its declarations advanced from `database`'s projection bound to them, so
++  a contract naming a predicate the context defines is admitted."
++  {:malli/schema [:function
++                  [:=> [:cat :seon.db/database-value :seon.store/transaction]
++                   [:or :seon.db/database-value :seon.db/error-result]]
++                  [:=> [:cat :seon.db/database-value :seon.store/transaction
++                        [:maybe [:map-of :qualified-symbol [:tuple :seon.instrument/callable :string]]]]
++                   [:or :seon.db/database-value :seon.db/error-result]]]}
++  ([database transaction] (with database transaction nil))
++  ([database transaction bound]
++   (try
++     (let [base (carried-projection database)
++           supplied (bound-base base bound)
++           projection (or supplied base)]
++       (or (write-error database projection transaction)
++           (carry-projection-state
++            (:db-after (d/with database (prepared-write projection database transaction supplied)))
++            (:seon.sci.eval/projection-state (meta database)))))
++     (catch Throwable throwable
++       (write-refusal database transaction throwable)))))
+ 
+ (defn- missing-transaction-data-error
+   {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}
+diff --git a/src/seon/schema.clj b/src/seon/schema.clj
+index a7493c293..74fab9e02 100644
+--- a/src/seon/schema.clj
++++ b/src/seon/schema.clj
+@@ -2912,26 +2912,32 @@
+    Bindings `projection` already holds answer `projection` itself. Otherwise
+    the declarations and contracts naming a rebound predicate recompile
+    ([[projection-with-declarations]]), retained in `projection`'s own holder
+-   by `bindings`, so one base and one set of bindings derive once."
++   by `identity`, so one base and one set of bindings derive once. `identity`
++   defaults to `bindings`; a caller whose callables are context objects names
++   the content they stand for (their definitions' digests), so equal
++   definitions share one derivation."
+   {:malli/schema
+-   [:=> [:catn [:seon.schema/projection :seon.schema/projection]
+-               [:seon.schema/predicate-functions
+-                [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]]
+-    :seon.schema/projection]}
+-  [projection bindings]
+-  (let [held (predicate-functions-in projection)]
+-    (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
+-      projection
+-      (projection-cache-value
+-       projection [::bound-predicates bindings]
+-       #(projection-with-declarations
+-         'seon.schema/with-bound-predicates projection
+-         (:seon.schema.projection/forms projection)
+-         (get projection :seon.schema.projection/function-contracts {})
+-         (assoc (population-options projection)
+-                :seon.schema/predicate-functions (merge held bindings)
+-                :seon.schema/admission? false
+-                :seon.schema/validate-render-contracts? false))))))
++   [:function
++    [:=> [:cat :seon.schema/projection [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]
++     :seon.schema/projection]
++    [:=> [:cat :seon.schema/projection [:map-of :qualified-symbol [:fn clojure.core/ifn?]]
++          :seon.schema/value]
++     :seon.schema/projection]]}
++  ([projection bindings] (with-bound-predicates projection bindings bindings))
++  ([projection bindings identity]
++   (let [held (predicate-functions-in projection)]
++     (if (every? (fn [[predicate bound]] (identical? bound (get held predicate))) bindings)
++       projection
++       (projection-cache-value
++        projection [::bound-predicates identity]
++        #(projection-with-declarations
++          'seon.schema/with-bound-predicates projection
++          (:seon.schema.projection/forms projection)
++          (get projection :seon.schema.projection/function-contracts {})
++          (assoc (population-options projection)
++                 :seon.schema/predicate-functions (merge held bindings)
++                 :seon.schema/admission? false
++                 :seon.schema/validate-render-contracts? false)))))))
+ 
+ (defn- projection-entities
+   "Join attribute ranges, retaining historical values for duplicate refusal."
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index b9605b144..89e79982f 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -3122,6 +3122,7 @@
+         ;; carries, or the phase's refusal value alone
+         commit
+         (fn [program prepared]
++        (let [bound (turn.batch/writer-bindings program-request (db/db connection) program)]
+         (phase
+          #(let [receipts (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))
+                 transaction (with-submission cluster (transaction program prepared receipts))]
+@@ -3135,9 +3136,10 @@
+              ;; settlement hands them back for the next commit
+              (fn [] (let [folded (seon.fault/folded-tx connection)
+                           outcome (db/transact!
+-                                   connection {:tx-data (into (vec (:seon.db/tx-data transaction)) folded)})]
++                                   connection (cond-> {:tx-data (into (vec (:seon.db/tx-data transaction)) folded)}
++                                                (seq bound) (assoc :seon.db/predicate-bindings bound)))]
+                       (when-not (:db-after outcome) (seon.fault/unfold! connection folded))
+-                      outcome)))])))
++                      outcome)))]))))
+         attempt (fn [program prepared]
+                   (let [answer (commit program prepared)]
+                     (if (vector? answer) answer [nil answer])))
+diff --git a/src/seon/turn/batch.clj b/src/seon/turn/batch.clj
+index 4874cb58f..ac3a614a1 100644
+--- a/src/seon/turn/batch.clj
++++ b/src/seon/turn/batch.clj
+@@ -608,6 +608,39 @@
+             (into (mapcat #(entity-facts db' %)) entities)
+             (into cat removed)))))
+ 
++(declare rows-bindings)
++
++(defn writer-bindings
++  "The predicates the folded `program` declares contracts or schemas over that
++  `request`'s context defines apart from `head`, each as `[callable digest]`:
++  the context's SCI Var and the digest of the definition it stands for (the
++  program's own row, else `head`'s), so equal definitions share one derived
++  projection (`seon.schema/with-bound-predicates`). The writer judges the
++  settlement under these bindings (`seon.db/transact!`)."
++  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :map]
++                  [:map-of :qualified-symbol [:tuple :seon.instrument/callable :string]]]}
++  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} head program]
++  (rows-bindings ctx head (filter map? (vals (:entities program)))))
++
++(defn- rows-bindings
++  "[[writer-bindings]] over declaration `rows`."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:sequential :any]]
++                  [:map-of :qualified-symbol [:tuple :seon.instrument/callable :string]]]}
++  [ctx head rows]
++  (let [declared (into [] (comp (keep #(or (:seon.fn/spec %) (:seon.schema/form %))) (map edn/read-string)) rows)
++        digests (into {} (keep (fn [r] (when-let [d (:seon.program/definition-digest r)]
++                                         [(:seon.fn/sym r) d])))
++                      rows)]
++    (into {}
++          (keep (fn [predicate]
++                  (when-let [held (kernel/held-apart-var ctx predicate)]
++                    (when-let [digest (or (get digests predicate)
++                                          (:seon.program/definition-digest
++                                           (db/pull head [:seon.program/definition-digest]
++                                                    [:seon.fn/sym predicate])))]
++                      [predicate [held digest]]))))
++          (#'schema/predicate-symbols-in declared))))
++
+ (defn apply-facts
+   "`tx` on `working` through the writer's own validation. A refusal is the
+   form's facts error. The REPL admits every definition the writer accepts; a
+@@ -615,10 +648,10 @@
+   (`seon.render.var`), and merge acceptance is the one refusal point."
+   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.store/transaction-data :seon.batch/change]
+                   [:or [:map [:seon.batch/working :seon.db/database-value]] [:map [:seon.batch/refusal :map]]]]}
+-  [_request working tx _change]
++  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} working tx _change]
+   (if (empty? tx)
+     {:seon.batch/working working}
+-    (let [after (db/with working tx)]
++    (let [after (db/with working tx (rows-bindings ctx working (filter map? tx)))]
+       (if (and (map? after) (:seon.error/message after))
+         {:seon.batch/refusal after}
+         {:seon.batch/working after}))))
+diff --git a/test/seon/turn/batch_test.clj b/test/seon/turn/batch_test.clj
+index e77065e7e..409d35089 100644
+--- a/test/seon/turn/batch_test.clj
++++ b/test/seon/turn/batch_test.clj
+@@ -300,14 +300,34 @@
+      'f40.named-predicate/takes-ifn '[:=> [:cat [:fn {:error/message "must be callable" :gen/elements [:k]} clojure.core/ifn?]] :int]
+      "(takes-ifn inc)" 2 "(takes-ifn 1)"]]))
+ 
+-(deftest ^{:seon/tasks #{'seon.schema/a-contract-naming-a-branch-predicate-is-refused-at-the-writer}}
+-  a-contract-naming-a-predicate-defined-on-the-branch-is-admitted-and-armed
++(deftest a-contract-naming-a-predicate-defined-on-the-branch-is-admitted-and-armed
+   (named-predicate-contract-is-armed
+    [["(defn even-int? {:malli/schema [:=> [:cat :int] :boolean]} [x] (even? x))
+       (defn halve {:malli/schema [:=> [:cat [:fn {:error/message \"must be an even integer\" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]} [x] (quot x 2))"
+      'f40.named-predicate/halve '[:=> [:cat [:fn {:error/message "must be an even integer" :gen/elements [0 2]} f40.named-predicate/even-int?]] :int]
+      "(halve 4)" 2 "(halve 3)"]]))
+ 
++(deftest two-contexts-with-different-predicate-bindings-share-no-admitted-contract
++  ;; each agent defines the same-named predicate and the same contract text
++  ;; differently; the writer's advanced projection is held by the context-bound
++  ;; base, so neither sees the other's callable.
++  ((requiring-resolve 'seon.test-support/with-running-agent)
++   (fn [running agent-id _]
++     (let [sibling (str agent-id "-sibling")
++           define (fn [agent predicate]
++                    (eval! "(in-ns 'f40.two-contexts)" agent running)
++                    (eval! (str "(defn same? {:malli/schema [:=> [:cat :int] :boolean]} [x] " predicate ")
++                                 (defn halve {:malli/schema [:=> [:cat [:fn {:gen/elements [0 2]} f40.two-contexts/same?]] :int]} [x] (quot x 2))")
++                           agent running))
++           call (fn [agent code] ((requiring-resolve 'seon.test-support/mcp-reply) (eval! code agent running)))
++           refused? (fn [reply] (= :seon.instrument/contract-error (get-in reply [:seon.repl/error :seon.error/type])))]
++       (is (false? (get (define agent-id "(even? x)") "isError")) "the first context's definitions are admitted")
++       (is (false? (get (define sibling "(odd? x)") "isError")) "the second context's definitions are admitted")
++       (is (= 2 (:seon.repl/value (call agent-id "(halve 4)"))) "the first context calls its own predicate")
++       (is (refused? (call agent-id "(halve 3)")) "the first context refuses what its predicate refuses")
++       (is (= 1 (:seon.repl/value (call sibling "(halve 3)"))) "the second context calls its own predicate")
++       (is (refused? (call sibling "(halve 4)")) "the second context refuses what its predicate refuses")))))
++
+ (def ^:private form-request-taker
+   "An interpreted function contracted on `:my.edit/form-request`, whose predicate
+   `seon.edit/valid-form-operation?` the registry reaches."
