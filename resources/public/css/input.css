@@ -2189,3 +2189,16 @@ pre.seon-debug-candidate-preview,
   background: var(--color-base-900);
   font-size: 0.72rem;
 }
+
+/* --- the chains page (/chains): seon.task/chain-html in a slot ordered by state, bailed chains first --- */
+.seon-main:has(.seon-chain-slot, .seon-chains-header) { display: flex; flex-direction: column; gap: 0.65rem; }
+.seon-chains-header { padding: 0.5rem 0; }
+.seon-chains-header h1 { font-size: 1rem; }
+.seon-chain { padding: 0.75rem; border: 1px solid var(--color-base-800); background: var(--color-base-950); }
+.seon-chain > header { display: flex; gap: 0.75rem; align-items: baseline; }
+.seon-chain-tasks, .seon-chain-attempts { list-style: none; margin: 0; padding: 0; }
+.seon-chain-task { padding: 0.35rem 0; border-top: 1px solid var(--color-base-800); }
+.seon-chain-task > span, .seon-chain-attempt > span, .seon-chain-attempt > a { margin-right: 0.75rem; font-size: 0.75rem; }
+.seon-chain-attempts { margin-left: 1.25rem; }
+.seon-chain-held { opacity: 0.7; }
+.seon-chain-loud, .seon-chain-bailed { border-left: 3px solid #e5484d; color: #ff9592; }

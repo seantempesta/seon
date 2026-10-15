@@ -19,6 +19,7 @@
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.ref :as ref]
+            [seon.render.route :as route]
             [seon.schema :as schema]))
 
 ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
@@ -1444,3 +1445,151 @@
     (cond (:seon.error/at task) task
           (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
           (and (seq (:seon.task/children task)) (done? database handle)) {:seon.task/closed-by :seon.task/children})))
+
+;;; THE CHAINS PAGE (/chains): every chain on main, its tasks along `:seon.task/next`, each task's attempts. The data is
+;;; read from main and from each chain's branch value, and the render pairs below are declared on the `:seon.chain/*`
+;;; view schemas (resources/seon/schemas/seon.chain.edn); the page composes them.
+
+(def ^:private bailed-ends
+  "How an agent's task ended without finishing it."
+  #{:given-back :capped :stalled :sent-back})
+
+(defn- attempt-view
+  "`row` (an attempt row as pulled) as :seon.chain/attempt-view: its agent named by id."
+  {:malli/schema [:=> [:cat :map] :seon.chain/attempt-view]}
+  [row]
+  (let [agent-id (get-in row [:seon.task/agent :seon.agent/id])]
+    (cond-> (dissoc row :db/id :seon.task/agent :seon.task/assigned)
+      agent-id (assoc :seon.agent/id agent-id))))
+
+(defn- attempt-rows
+  "The attempt rows of `handles` that `database` holds, by task handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.task/handle]] [:map-of :seon.task/handle [:vector :map]]]}
+  [database handles]
+  (let [attempts (db/q '[:find [?a ...] :in $ [?h ...] :where [?a :seon.task/assigned ?h]] database handles)
+        _ (when-let [failure (read-error attempts)] (throw (ex-info (:seon.error/message failure) failure)))
+        rows (mapv #(db/pull database [:seon.task/assignment :seon.task/assigned :seon.task.attempt/number
+                                       :seon.task.attempt/end :seon.task.attempt/reason
+                                       :seon.task/outcome :seon.task/reason {:seon.task/agent [:seon.agent/id]}] %)
+                   attempts)]
+    (when-let [failure (some read-error rows)] (throw (ex-info (:seon.error/message failure) failure)))
+    (group-by :seon.task/assigned rows)))
+
+(defn- task-rows
+  "The tasks of the chain starting at `handle` that `database` holds, in order along `:seon.task/next`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:vector :map]]}
+  [database handle]
+  (loop [handle handle rows []]
+    (let [row (db/pull database [:seon.task/id :seon.task/ns :seon.task/name :seon.task/step :seon.task/execution
+                                 {:seon.task/next [:seon.task/id]}]
+                       [:seon.task/id handle])]
+      (when-let [failure (read-error row)] (throw (ex-info (:seon.error/message failure) failure)))
+      (if-let [after (and (:seon.task/id row) (get-in row [:seon.task/next :seon.task/id]))]
+        (recur after (conj rows row))
+        (cond-> rows (:seon.task/id row) (conj row))))))
+
+(defn bailed?
+  "Whether `task`'s latest attempt ended without finishing it: root closed it, or its agent gave up (a cap, a
+  stall, a given-back or sent-back end) with no outcome."
+  {:malli/schema [:=> [:cat :seon.chain/task-view] :boolean]}
+  [task]
+  (let [attempt (peek (:seon.chain/attempts task))]
+    (boolean (and attempt
+                  (or (= :closed (:seon.task/outcome attempt))
+                      (and (nil? (:seon.task/outcome attempt)) (contains? bailed-ends (:seon.task.attempt/end attempt))))))))
+
+(defn- chain-state
+  "A chain's state from its `tasks`: unread without any, bailed when any task is, done when the last task's latest
+  attempt finished, else running."
+  {:malli/schema [:=> [:cat [:vector :seon.chain/task-view]] :seon.chain/state]}
+  [tasks]
+  (cond (empty? tasks) :unread
+        (some bailed? tasks) :bailed
+        (contains? #{:done :merged} (:seon.task/outcome (peek (:seon.chain/attempts (peek tasks))))) :done
+        :else :running))
+
+(defn- chain-view
+  "The chain starting at `first-handle` on `branch`: tasks and `:seon.task/next` from the branch value
+  `branch-database` (main's, when the branch is gone), attempts from main (which holds each row and root's outcome)
+  overlaid by the branch's (which holds the agent's end), main's values winning."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.db/database-value] :seon.chain/branch :seon.task/handle]
+                  :seon.chain/view]}
+  [database branch-database branch first-handle]
+  (let [rows (task-rows (or branch-database database) first-handle)
+        handles (mapv :seon.task/id rows)
+        on-main (attempt-rows database handles)
+        on-branch (when branch-database (attempt-rows branch-database handles))
+        attempts (fn [handle]
+                   (->> (concat (get on-branch handle) (get on-main handle))
+                        (map attempt-view)
+                        (group-by :seon.task/assignment)
+                        vals
+                        (map #(apply merge %))
+                        (sort-by (juxt :seon.task.attempt/number :seon.task/assignment))
+                        vec))
+        tasks (mapv (fn [row]
+                      (cond-> {:seon.task/id (:seon.task/id row) :seon.task/ns (:seon.task/ns row) :seon.task/name (:seon.task/name row)
+                               :seon.chain/kind (case (:seon.task/step row) :prove :prove :implement :implement :design)
+                               :seon.chain/attempts (attempts (:seon.task/id row))}
+                        (:seon.task/execution row) (assoc :seon.task/execution (:seon.task/execution row))))
+                    rows)]
+    {:seon.chain/branch branch :seon.chain/first first-handle :seon.chain/state (chain-state tasks) :seon.chain/tasks tasks}))
+
+(defn chain-branches
+  "The branch of every chain fact on main `database`, in order."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:vector :seon.chain/branch] :seon.db/invalid-read-error]]}
+  [database]
+  (let [branches (db/q '[:find [?b ...] :where [_ :seon.chain/branch ?b]] database)]
+    (or (read-error branches) (vec (sort branches)))))
+
+(defn chain-views
+  "Every chain fact on main `database` as :seon.chain/view, in branch order. `databases` holds the database value of
+  each chain branch that has one."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :seon.chain/branch :seon.db/database-value]]
+                  [:or [:vector :seon.chain/view] :seon.db/invalid-read-error]]}
+  [database databases]
+  (let [chains (db/q '[:find ?b ?h :where [?c :seon.chain/branch ?b] [?c :seon.chain/first ?h]] database)]
+    (or (read-error chains)
+        (mapv (fn [[branch first-handle]] (chain-view database (get databases branch) branch first-handle))
+              (sort chains)))))
+
+(defn attempt-html
+  "`:seon.render/html` of :seon.chain/attempt-view: its number, how it ended, root's outcome and reasons, and a link
+  to its agent's page."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [{attempt :seon.render/value}]
+  (let [{:seon.task.attempt/keys [number end] agent-id :seon.agent/id outcome :seon.task/outcome} attempt]
+    [:li {:class (str "seon-chain-attempt" (when (= :closed outcome) " seon-chain-loud")) :data-attempt (str number)}
+     [:span {:class "seon-chain-attempt-number"} (str "attempt " number)]
+     [:span {:class "seon-chain-attempt-end"} (if end (name end) "no end")]
+     [:span {:class "seon-chain-attempt-outcome"} (if outcome (name outcome) "open")]
+     (when-let [reason (:seon.task.attempt/reason attempt)] [:span {:class "seon-chain-attempt-reason"} reason])
+     (when-let [reason (:seon.task/reason attempt)] [:span {:class "seon-chain-attempt-reason"} reason])
+     (when agent-id [:a {:class "seon-chain-attempt-agent" :href (route/path ::route/agent {:id agent-id})} agent-id])]))
+
+(defn chain-task-html
+  "`:seon.render/html` of :seon.chain/task-view: its name, its kind (Design, Prove or Implement), whether it is held
+  and then its attempts, each through `attempt-html`."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [{task :seon.render/value :as unit}]
+  (let [held? (= :held (:seon.task/execution task))]
+    [:li {:class (str "seon-chain-task" (when held? " seon-chain-held") (when (bailed? task) " seon-chain-loud"))
+          :data-task (:seon.task/id task)}
+     [:span {:class "seon-chain-task-name"} (str (:seon.task/ns task) "/" (:seon.task/name task))]
+     [:span {:class "seon-chain-task-kind"} (str/capitalize (name (:seon.chain/kind task)))]
+     [:span {:class "seon-chain-task-execution"} (name (:seon.task/execution task :held))]
+     (into [:ol {:class "seon-chain-attempts"}]
+           (map #(attempt-html (assoc unit :seon.render/value %)))
+           (:seon.chain/attempts task))]))
+
+(defn chain-html
+  "`:seon.render/html` of :seon.chain/view: the chain's branch and state, then its tasks in order, each through
+  `chain-task-html`."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [{chain :seon.render/value :as unit}]
+  [:article {:class (str "seon-chain seon-chain-" (name (:seon.chain/state chain)))
+             :data-chain (name (:seon.chain/branch chain)) :data-state (name (:seon.chain/state chain))}
+   [:header [:h2 (name (:seon.chain/branch chain))] [:span {:class "seon-chain-state"} (name (:seon.chain/state chain))]]
+   (into [:ol {:class "seon-chain-tasks"}]
+         (map #(chain-task-html (assoc unit :seon.render/value %)))
+         (:seon.chain/tasks chain))])

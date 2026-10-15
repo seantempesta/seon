@@ -75,6 +75,7 @@
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
+            [seon.task :as task]
             [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
@@ -379,10 +380,13 @@
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
       [:main {:class "seon-main"}
-       (when (and id (not (::session? request)) (not (::agent-header? request)))
+       (when-not (::session? request)
          [:nav {:class "seon-agent-routes"}
-          [:a {:href (route/path ::route/agent {:id id})} "agent"]
-          [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
+          (when (and id (not (::agent-header? request)))
+            (list [:a {:href (route/path ::route/agent {:id id})} "agent"]
+                  [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]))
+          [:a {:href (route/path ::route/chains)} "chains"]
+          [:a {:href (route/path ::route/health)} "health"]])
        (when (and id (not (::session? request)) (not (::agent-header? request))) (message-bar-html (with-database {:seon.agent/id id} request)))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
@@ -2031,11 +2035,72 @@
            {health-surface (hiccup/->string [:div {:id health-surface}
                                              (health/render-html {:seon.render/value report :seon.db/db database})])})))
 
+(def ^:private chains-header-id
+  "The chains page's header morph target."
+  "seon-chains-header")
+
+(def ^:private chain-state-rank
+  "Where a chain state sits on the chains page: bailed chains lead, loud, then the running ones."
+  {:bailed 0 :running 1 :unread 2 :done 3})
+
+(defn- chain-database
+  "A chain branch's database value: this process's open connection to it (the freshest), else its committed head."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/branch] [:maybe :seon.db/database-value]]}
+  [database branch]
+  (or (some-> (db/branch-connection database branch) db/db)
+      (db/branch-database database branch)))
+
+(defn- chain-fragment
+  "One chain's morph target at its recency-free place: the `seon.task/chain-html` face of `view` in a slot ordered by
+  state. Reuses the retained fragment's bytes when the view it was serialized from is equal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.chain/view [:maybe :map]] :map]}
+  [database view previous]
+  (let [element-id (str "seon-chain-" (name (:seon.chain/branch view)))
+        order (get chain-state-rank (:seon.chain/state view))]
+    {:seon.render.web/element-id element-id
+     :seon.render.fragment/evidence [view]
+     :seon.render.web/html
+     (if (= [view] (:seon.render.fragment/evidence previous))
+       (:seon.render.web/html previous)
+       (hiccup/->string [:div {:id element-id :class "seon-chain-slot" :style (str "order:" order)
+                               :data-chain-slot (name (:seon.chain/branch view))}
+                         (task/chain-html {:seon.render/value view :seon.db/db database})]))}))
+
+(defn- chains-page-result
+  "The chains page at main `database`: every chain read through its branch's own database value, bailed chains
+  first, and a header counting those that need attention. The reads' evidence is the page's interest, so a commit
+  of main or of a chain branch that touches an attribute read here wakes the render proc; an unchanged chain keeps
+  its retained bytes."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :string :map]] :map]}
+  [database retained]
+  (let [captured (atom [])
+        views (binding [db/*read-evidence-sink* captured]
+                (task/chain-views database (into {} (keep (fn [branch] (some->> (chain-database database branch) (vector branch))))
+                                                 (task/chain-branches database))))
+        rows (mapv #(chain-fragment database % (get retained (str "seon-chain-" (name (:seon.chain/branch %))))) views)
+        bailed (count (filter #(= :bailed (:seon.chain/state %)) views))
+        header-evidence [(count views) bailed]
+        header {:seon.render.web/element-id chains-header-id
+                :seon.render.fragment/evidence header-evidence
+                :seon.render.web/html
+                (hiccup/->string [:header {:id chains-header-id :class (str "seon-chains-header" (when (pos? bailed) " seon-chain-loud"))
+                                           :style "order:-1" :data-bailed (str bailed)}
+                                  [:h1 (str (count views) " chains")]
+                                  [:p (if (pos? bailed) (str bailed " bailed or held") "none bailed or held")]])}
+        rows (conj rows header)]
+    {:seon.render.web/page (into {} (map (juxt :seon.render.web/element-id :seon.render.web/html)) rows)
+     :seon.render.web/fragments (into {} (map (juxt :seon.render.web/element-id identity)) rows)
+     :seon.render/captured-calls
+     {[::chains-acquisition]
+      {:seon.render.call/id [::chains-acquisition]
+       :seon.render.call/read-evidence (db/read-evidence @captured)
+       :seon.render.call/basis-transaction (db/basis-t database)}}}))
+
 (defn- derive-page
   "One page at `database`: derive the blocks whose retained calls are
   candidates, or return the retained calls alone."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
-                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab] :map]] :map :boolean :boolean :boolean]
+                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab ::chains-tab] :map]] :map :boolean :boolean :boolean]
                   :map]}
   [handle database streams profile registration-key retained-values derive-all? invalidate-calls? confirmed?]
   (let [connection (:seon.db/connection handle)
@@ -2046,6 +2111,8 @@
     (cond
       (= [::health-tab {}] registration-key)
       (health-page-result handle database)
+      (= [::chains-tab {}] registration-key)
+      (chains-page-result database (get-in retained-values [::fragments registration-key] {}))
       debug?
       (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database confirmed?)
@@ -2149,7 +2216,7 @@
   committed value they were last derived or checked at: an unchanged head asks
   no read evidence and derives no block."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
-                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab] :map]] :boolean :boolean]
+                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab ::chains-tab] :map]] :boolean :boolean]
                   :map]}
   [handle database streams profile registration-key derive-all? invalidate-calls?]
   (let [;; an agent's page reads its own world: the branch it runs on, through that branch's connection
@@ -2694,12 +2761,14 @@
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
         health? (= "true" (get query "health"))
+        chains? (= "true" (get query "chains"))
         viewer-namespace (when debug?
                            (or (some-> (get query "viewer") route-namespace)
                                (agent-namespace (db/db connection) id)))
         registration-key
         (cond
           health? [::health-tab {}]
+          chains? [::chains-tab {}]
           debug?
           [::debug-tab
            (debug-query query [:seon.agent/id id] viewer-namespace
@@ -3257,6 +3326,21 @@
                  :seon.render/page [(hiccup/raw (get page health-surface))]
                  :seon.render.web/feed-url (route/path ::route/feed {:id root} {:health "true"})}))))))
 
+(defn- chains-response
+  "The chains page: every chain, its tasks and their attempts, then the render proc's packages on the feed."
+  {:malli/schema [:=> [:cat :seon.render.web/service :map]
+                  [:map [:status :int] [:headers [:map-of :string :string]] [:body :string]]]}
+  [{connection :seon.store/connection-object root :seon.agent/id :as service} _request]
+  (let [database (db/db connection)]
+    (if (:seon.error/at database)
+      (text-response 503 (:seon.error/message database))
+      (let [page (current-page service database [::chains-tab {}])]
+        (html-response
+         (shell {:seon.agent/id root
+                 ::agent-header? true
+                 :seon.render/page (mapv (comp hiccup/raw val) page)
+                 :seon.render.web/feed-url (route/path ::route/feed {:id root} {:chains "true"})}))))))
+
 (defn- root-alias-response
   [service request]
   (agent-alias-response service false
@@ -3476,6 +3560,7 @@
                   ::route/agent-context #(context-response service %)
                   ::route/feed #(feed-response service %)
                   ::route/health #(health-response service %)
+                  ::route/chains #(chains-response service %)
                   ::route/data #(data-response service %)
                   ::route/css #(static-response "css" %)
                   ::route/js #(static-response "js" %)}

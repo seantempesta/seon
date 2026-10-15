@@ -28,6 +28,7 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.data.json :as json]
             [clojure.edn :as edn]
+            [clojure.set]
             [clojure.string :as str]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -38,6 +39,7 @@
             [seon.agent :as agent]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.registry :as registry]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.context :as seon.context]
@@ -49,6 +51,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
+            [seon.task :as task]
             [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -589,6 +592,53 @@ handle))}}
             focus (.select document "article.seon-focus-unit")]
         (is (= [true] (mapv #(some? (.selectFirst ^Element % "[data-turn=newest-run]")) focus))
             "the one main-panel unit holds the newest run, not a derived unit with no entity")))))
+
+(deftest the-chains-page-lists-every-chain-and-repaints-on-main-commits
+  ;; The chains page: each chain's tasks in order with their kind, each task's attempts linking to their agents; a
+  ;; commit on main that bails an attempt reaches the open tab through the existing wake, and the page's reads are its
+  ;; interest.
+  (with-server
+    (fn [connection server _context]
+      (let [store (:seon.store/store (support/execution-handle connection))
+            {branch :seon.chain/branch first-task :seon.chain/first}
+            (task/chain! {:seon.db/connection connection :seon.store/store store}
+                         [{:seon.task/ns 'tq.page :seon.task/name "design" :seon.task/plan "Design it."}
+                          {:seon.task/ns 'tq.page :seon.task/step :implement :seon.task/plan "Implement it."}])
+            ;; attempts and their outcomes are written on the chain's branch
+            on-chain! (fn [f] (registry/on-branch store branch f))
+            key (on-chain! (fn [on-chain]
+                             (let [tx (task/attempt-tx (db/db on-chain) first-task agent-id branch)]
+                               (support/transacted! on-chain tx)
+                               (:seon.task/assignment (first tx)))))
+            close! #(on-chain! (fn [on-chain]
+                                 (support/transacted! on-chain [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :capped]
+                                                                [:db/add [:seon.task/assignment key] :seon.task/outcome :closed]
+                                                                [:db/add [:seon.task/assignment key] :seon.task/reason "Out of turns."]])))
+            html (.body (fetch server "/chains"))]
+        (try
+          (is (= ["tq.page/design" "tq.page/design-2"] (texts html ".seon-chain-task-name")) "the chain's tasks in next order")
+          (is (= ["Design" "Implement"] (texts html ".seon-chain-task-kind")) "each task's kind")
+          (is (= ["/agent/root"] (mapv #(.attr ^Element % "href") (.select (dom html) "a.seon-chain-attempt-agent")))
+              "the attempt links to its agent's page")
+          (is (some? (element html "nav a[href=\"/chains\"]")) "the shell's nav links the chains page")
+          (is (clojure.set/subset? #{:seon.chain/branch :seon.task/assigned :seon.task/next :seon.task.attempt/end :seon.task/outcome}
+                                   (let [calls (:seon.render/captured-calls ((web-private 'chains-page-result) (db/db connection) {}))]
+                                     ((web-private 'calls-interest) calls)))
+              "the chain reads are the page's interest: named attributes, never all")
+          (let [stream (open-feed server "/feed/root?chains=true")]
+            (try
+              (read-patches! stream 1)
+              ;; the branch's commit wakes nothing here (its route is a hosted agent's); the next commit of main does,
+              ;; and the pass reads every chain at its branch's head
+              (close!)
+              (task/chain! {:seon.db/connection connection :seon.store/store store}
+                           [{:seon.task/ns 'tq.page :seon.task/name "later" :seon.task/plan "A later chain."}])
+              (is (str/includes? (read-until! stream "seon-chain-bailed") "seon-chain-bailed")
+                  "a new chain on main repaints the page with the first chain, closed on its branch, bailed")
+              (finally (.close stream))))
+          (finally
+            (doseq [b (registry/branches store) :when (str/starts-with? (name b) "chain-")]
+              (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server

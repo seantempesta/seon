@@ -22,6 +22,8 @@
                                  :handler ::agent-context}}]
    ["/health" {:name ::health
                 :get {:handler ::health}}]
+   ["/chains" {:name ::chains
+                :get {:handler ::chains}}]
    ["/feed/{id}" {:name ::feed
                    :get {:handler ::feed}}]
    ["/data" {:name ::data

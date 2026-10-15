@@ -760,3 +760,64 @@
            (is (= branch (try (deref inner 5000 ::timeout) (catch Exception e (ex-message (ex-cause e)))))
                "the second call still reads its branch after the first released its own"))
          (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
+
+(deftest the-chains-view-reads-main-and-each-chain-branch
+  ;; the chains page: tasks in `:seon.task/next` order with their kind, attempts with main's outcome and the branch's end
+  (test-support/with-database
+   (fn [connection]
+     (let [store (:seon.store/store (test-support/execution-handle connection))
+           _ (test-support/transacted! connection (test-support/agent-tx (db/db connection) "root"))
+           {branch :seon.chain/branch first-task :seon.chain/first}
+           (task/chain! {:seon.db/connection connection :seon.store/store store}
+                        [{:seon.task/ns 'tq.view :seon.task/name "design" :seon.task/plan "Design it."}
+                         {:seon.task/ns 'tq.view :seon.task/step :prove :seon.task/plan "Prove it."}
+                         {:seon.task/ns 'tq.view :seon.task/step :implement :seon.task/plan "Implement it."}])
+           views #(task/chain-views (db/db connection) {branch (db/branch-database (db/db connection) branch)})
+           chain-view #(first (filter (fn [view] (= branch (:seon.chain/branch view))) (views)))]
+       (try
+         (is (= [["design" :design :running []] ["design-2" :prove :held []] ["design-3" :implement :held []]]
+                (mapv (juxt :seon.task/name :seon.chain/kind :seon.task/execution :seon.chain/attempts)
+                      (:seon.chain/tasks (chain-view))))
+             "the chain's tasks come in next order, each with its kind and execution")
+         (is (= :running (:seon.chain/state (chain-view))) "a chain no attempt bailed is running")
+         (let [key (registry/on-branch store branch
+                                       (fn [on-chain]
+                                         (let [tx (task/attempt-tx (db/db on-chain) first-task "root" branch)
+                                               key (:seon.task/assignment (first tx))]
+                                           (test-support/transacted! on-chain tx)
+                                           (test-support/transacted! on-chain [[:db/add [:seon.task/assignment key] :seon.task.attempt/end :capped]
+                                                                               [:db/add [:seon.task/assignment key] :seon.task/outcome :closed]
+                                                                               [:db/add [:seon.task/assignment key] :seon.task/reason "Out of turns."]])
+                                           key)))]
+           (is (= [{:seon.task.attempt/number 1 :seon.task.attempt/end :capped :seon.task/outcome :closed
+                    :seon.task/reason "Out of turns." :seon.agent/id "root" :seon.task/assignment key}]
+                  (:seon.chain/attempts (first (:seon.chain/tasks (chain-view)))))
+               "an attempt joins its end, outcome and reason, and names its agent")
+           (is (= :bailed (:seon.chain/state (chain-view))) "a task whose latest attempt root closed bails its chain"))
+         (is (= [:unread []] ((juxt :seon.chain/state :seon.chain/tasks)
+                              (first (task/chain-views (db/db connection) {}))))
+             "a chain whose branch has no database and whose tasks main lacks is unread")
+         (finally
+           (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))))
+
+(deftest the-chain-face-composes-its-tasks-and-attempts-with-links-to-their-agents
+  (test-support/with-database
+   (fn [connection]
+  (let [attempt {:seon.task/assignment "aaaaaaaaaaaa" :seon.task.attempt/number 1 :seon.task.attempt/end :capped
+                 :seon.task/outcome :closed :seon.task/reason "Out of turns." :seon.agent/id "attempt/one"}
+        view {:seon.chain/branch :chain-x :seon.chain/first "bbbbbbbbbbbb" :seon.chain/state :bailed
+              :seon.chain/tasks [{:seon.task/id "bbbbbbbbbbbb" :seon.task/ns 'tq.face :seon.task/name "first"
+                                  :seon.chain/kind :design :seon.task/execution :held :seon.chain/attempts [attempt]}
+                                 {:seon.task/id "cccccccccccc" :seon.task/ns 'tq.face :seon.task/name "second"
+                                  :seon.chain/kind :implement :seon.task/execution :held :seon.chain/attempts []}]}
+        html (task/chain-html {:seon.render/value view :seon.db/db (db/db connection)})
+        nodes (tree-seq coll? seq html)
+        elements (filter #(and (vector? %) (keyword? (first %))) nodes)
+        attributes (fn [tag] (keep #(when (and (= tag (first %)) (map? (second %))) (second %)) elements))]
+    (is (= ["bbbbbbbbbbbb" "cccccccccccc"] (mapv :data-task (filter :data-task (attributes :li))))
+        "the chain's tasks render in order, one item each")
+    (is (= ["/agent/attempt%2Fone"] (mapv :href (attributes :a))) "an attempt links to its agent's page")
+    (is (= ["bailed"] (mapv :data-state (filter :data-state (attributes :article)))) "the chain states its state")
+    (is (some #(re-find #"seon-chain-loud" (:class %)) (filter :data-task (attributes :li)))
+        "a bailed task is marked loud")
+    (is (some #{"Design" "Implement"} nodes) "each task states its kind")))))
