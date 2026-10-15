@@ -24,6 +24,7 @@
    "Close an assignment that must not merge with (my.root/close! {:seon.task/assignment key :seon.task/reason why}); it deletes the source branch, closing the agent."
    "An agent's end reaches you as a message; (my.root/ended) shows each with its proofs, calls and merge request."
    "A chain attempt that ends other than done bails to you: its problem task names it, the attempt is :closed and its task :held on the chain branch. Change the task there and run it again with (my.root/run! {:seon.task/assigned handle})."
+   "Merge main forward into a chain branch, as git merge main into a feature branch, at each restart batch and before a chain's final merge: (my.root/merge-main! {:seon.chain/branch b}) moves the declarations main changed since the branch's merge base and the branch did not, then advances that merge base to main's head, so the branch interprets only its own changes; a declaration both changed is answered in :seon.program/conflict and stays the branch's for its agent to resolve; tasks, attempts and config never move."
    "A branch reads its own config and a merge never carries it: apply a changed dial to a chain branch with bin/seon config apply [NAME] PATH --branch B (or --chains for every chain branch a running graph holds); the agent's next dial read there sees it and main's is unchanged."])
 
 (defn instructions
@@ -176,6 +177,26 @@
                    :seon.error/value]]}
   [{context :my.program/context handle :seon.task/assigned}]
   (task/run-held! (select-keys context [:seon.db/connection :seon.store/store]) handle))
+
+(defn merge-main!
+  "Merge my cluster's main forward into chain branch `:seon.chain/branch` (`seon.merge/merge-main!`): the program
+  declarations main changed since the branch's merge base and the branch did not move onto the branch, and its
+  merge base advances to main's head. A declaration both changed stays the branch's and is answered in
+  `:seon.program/conflict`. Answers what moved, the conflicts and main's commit, or the refusal as data.
+
+  ## Example
+
+  ```clojure
+  (my.root/merge-main! {:seon.chain/branch :chain-f1f6dc8e6652})
+  ```"
+  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.chain/branch :seon.chain/branch]]]
+                  [:or [:map [:seon.store/branch :seon.chain/branch] [:seon.source/commit-id :seon.source/commit-id]
+                        [:seon.program/identities :seon.program/identity-set]
+                        [:seon.program/conflict :seon.program/conflict]
+                        [:seon.program/conflict-digests :seon.program/conflict-digests]]
+                   :seon.error/value]]}
+  [{context :my.program/context branch :seon.chain/branch}]
+  (merge/merge-main! context branch))
 
 (defn ended
   "The task ends in my unread inbox, each as the value its end message stands

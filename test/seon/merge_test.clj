@@ -615,3 +615,58 @@
   (let [agent-facing (filter #(.startsWith (str (ns-name %)) "my.") (all-ns))]
     (is (= [] (maybe-schemas (concat [(the-ns 'seon.merge)] agent-facing))))
     (is (seq agent-facing) "the my.* namespaces were loaded")))
+
+(deftest root-merges-main-forward-into-a-chain-branch
+  ;; main changes g, the chain changes f, both change h differently; main also writes a task after the fork
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        main-conn (:seon.db/connection target)
+        sym #(symbol "seon.merge-test" %)
+        fn-entity (fn [connection n body]
+                    (support/program-entity (db/db connection) [:seon.fn/sym (sym n)]
+                                            (str "(defn " n " {:malli/schema [:=> [:cat] :int]} [] " body ")")))
+        write! (fn [connection entities] (support/transacted! connection (vec entities)))
+        digest (fn [database n] (:seon.program/definition-digest
+                                 (db/pull database [:seon.program/definition-digest] [:seon.fn/sym (sym n)])))
+        chain (keyword (str "chain-forward-" (id/id)))
+        handle (task/task-handle 'fixture.tasks "forward-main-task")
+        _ (write! main-conn (map #(fn-entity main-conn % 1) ["forward-f" "forward-g" "forward-h"]))
+        fork-commit (db/commit-id (db/db main-conn))
+        _ (registry/fork! {:seon.store/store store :seon.store/branch chain
+                           :seon.cluster.registry/from fork-commit :seon.db/db (db/db main-conn)})
+        context (cluster.agent/acquire-context! target nil {:seon.agent/branch chain})
+        chain-conn (:seon.db/connection context)]
+    (try
+      (write! main-conn [(fn-entity main-conn "forward-g" 2) (fn-entity main-conn "forward-h" 3)
+                         (support/task-row handle "Main's task, written after the fork")])
+      (write! chain-conn [(fn-entity chain-conn "forward-f" 4) (fn-entity chain-conn "forward-h" 5)])
+      (let [main (db/db main-conn)
+            before (db/db chain-conn)
+            merge-main! (ns-resolve 'seon.merge 'merge-main!)
+            merged (when merge-main! (merge-main! target chain))
+            after (db/db chain-conn)
+            moved (into #{} (comp (remove #(= (:e %) (:tx %))) (map :a))
+                        (d/datoms (db/since after (db/basis-t before)) :eavt))
+            base (db/commit-database after (registry/base-commit-id after chain))
+            forked (db/commit-database main fork-commit)]
+        (is (some? merge-main!) "seon.merge/merge-main! exists")
+        (is (= (digest main "forward-g") (digest after "forward-g")) "g is main's")
+        (is (= (digest before "forward-f") (digest after "forward-f")) "f stays the branch's")
+        (is (= (digest before "forward-h") (digest after "forward-h")) "h stays the branch's")
+        (is (= #{(sym "forward-h")} (:seon.program/conflict merged)) "h is a listed conflict")
+        (is (= {:seon.program/base-digest (digest forked "forward-h")
+                :seon.program/branch-digest (digest before "forward-h") :seon.program/head-digest (digest main "forward-h")}
+               (get (:seon.program/conflict-digests merged) [:seon.fn/sym (sym "forward-h")]))
+            "the conflict keeps its three digests")
+        (is (= (db/commit-id main) (:seon.source/commit-id merged)) "the merge names main's commit")
+        (is (= (map #(digest main %) ["forward-f" "forward-g" "forward-h"])
+               (map #(digest base %) ["forward-f" "forward-g" "forward-h"]))
+            "the branch's merge base holds main's program")
+        (is (nil? (db/pull after [:db/id] [:seon.task/id handle])) "main's task never moved")
+        (is (seq moved) "the forward merge wrote the branch")
+        (is (every? (program/program-attributes (db/carried-projection after)) moved)
+            "only program attributes moved")
+        (source/release! [base forked]))
+      (finally
+        (cluster.agent/release-context! context)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch chain})))))
