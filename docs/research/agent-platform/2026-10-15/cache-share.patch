@@ -1,0 +1,165 @@
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -737,15 +737,16 @@
+       (or held {})
+       (let [proven (proofs database (:seon.task/sym held))
+             verdict (step-verdict database agent-id)
+-            sent-back (send-backs database (:seon.task/id held))
+-            steps (chain database (:seon.task/id held))
+-            earlier (earlier-attempts database (:seon.task/id held) agent-id)
+             proof-names (into #{} (map :seon.test/sym) (:seon.context/proof-list proven))
+             changes (when (and verdict (not (:seon.error/at verdict)) (seq (:seon.program/identities verdict)))
+                       (branch-changes database (:seon.program/identities verdict) proof-names (:seon.task/sym held)))
+             reads (when-not (:seon.error/at proven) (ref/references database {:seon.ref/text "" :seon.ref/names proof-names}))
+             resolution (into {} (keep #(when (proof-names (:seon.ref/name %)) [(:seon.ref/name %) %])) reads)
+             start (attempt-start database agent-id)
++            attempt-db (if (or (nil? start) (:seon.error/at start)) database start)
++            sent-back (send-backs attempt-db (:seon.task/id held))
++            steps (chain attempt-db (:seon.task/id held))
++            earlier (earlier-attempts attempt-db (:seon.task/id held) agent-id)
+             others (when-not (or (nil? start) (:seon.error/at start)) (must-reads start held proof-names))]
+         (or (some #(when (:seon.error/at %) %) (concat [proven verdict steps earlier changes start] reads others))
+             (cond-> {:seon.context/task (select-keys held [:seon.task/id :seon.task/sym :seon.task/plan :seon.task/instructions])}
+@@ -804,19 +805,34 @@
+           (seq unread) (assoc :seon.context/unread {:seon.context/items unread
+                                                     :seon.render/operations ['(my.message/inbox)]})))))
+ 
++(defn- strip-error-instants
++  "Project any nested error map inside an attempt-level must-read through `seon.error/reply-value` so no per-call
++  wall-clock `:seon.error/at` enters the attempt's cached prefix."
++  [database value]
++  (cond
++    (and (map? value) (:seon.error/at value) (:seon.error/message value))
++    (error/reply-value database value)
++    (map? value)
++    (into (empty value) (map (fn [[k v]] [k (strip-error-instants database v)])) value)
++    (vector? value)
++    (mapv #(strip-error-instants database %) value)
++    :else value))
++
+ (defn- must-read-ai
+   "One must-read as the agent reads it: a value at the level its citation chose as it is, or an entity through the
+   render it declares (`seon.render/render-call`), beside its name, level and the references its content makes; a
+   problem as it is."
+   {:malli/schema [:=> [:cat :seon.render/unit [:or :seon.ref/resolved :seon.ref/problem]] :seon.context/must-read-view]}
+   [unit entry]
+-  (if-not (:seon.render/ai entry)
+-    entry
+-    (let [shown (seon.render/render-call (-> unit
+-                                             (dissoc :seon.render/distance)
+-                                             (assoc :seon.render/value entry :seon.render/output :seon.render/ai)))
+-          kept (select-keys entry [:seon.ref/name :seon.ref/level :seon.ref/references])]
+-      (if (map? shown) (merge shown kept) (assoc kept :seon.context/rendered shown)))))
++  (strip-error-instants
++   (:seon.db/db unit)
++   (if-not (:seon.render/ai entry)
++     entry
++     (let [shown (seon.render/render-call (-> unit
++                                              (dissoc :seon.render/distance)
++                                              (assoc :seon.render/value entry :seon.render/output :seon.render/ai)))
++           kept (select-keys entry [:seon.ref/name :seon.ref/level :seon.ref/references])]
++       (if (map? shown) (merge shown kept) (assoc kept :seon.context/rendered shown))))))
+ 
+ (defn current-state-ai
+   "The block's sections as the agent reads them: the task by symbol and declaration, without its handle, and each
+@@ -872,8 +888,8 @@
+ 
+ (defn- exchanges
+   "The agent's own model exchanges in agent order: one per call row carrying a model attempt, each unit by its age
+-  (`exchange-form`): the newest exchange, the `:seon.config.context/history-whole` before it shown whole, and the
+-  older ones."
++  (`exchange-form`): the newest exchange (paired with the volatile turn block at the tail) and the older ones before
++  it (which stay fixed in the cached prefix)."
+   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.config/effective]
+                   [:or :seon.context/exchanges :seon.error/value]]}
+   [database agent-id dials]
+@@ -885,9 +901,7 @@
+                       (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
+                       vec)
+             newest (dec (count runs))
+-            age #(cond (= % newest) :newest
+-                       (< (- newest %) (inc (:seon.config.context/history-whole dials))) :recent
+-                       :else :older)]
++            age #(if (= % newest) :newest :older)]
+         (into [] (map-indexed (fn [index run]
+                                 (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database)) (age index)
+                                                      (:seon.config.context/reference-tokens dials))
+--- a/src/seon/sci/lookup.clj
++++ b/src/seon/sci/lookup.clj
+@@ -164,7 +164,7 @@
+          'record-fixtures agent-record-fixtures}))
+ 
+ (def ^:private program-documentation-selector
+-  [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
++  [:seon.fn/sym :seon.fn/defined-by :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
+    :seon.schema.admission/source
+    {:seon.fn/arities
+     [:seon.fn.arity/arity
+@@ -381,14 +381,17 @@
+   JVM-boundary note."
+   {:malli/schema [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]}
+   [database row overridden?]
+-  (let [arglists (when-let [text (:seon.fn/arglists row)]
++  (let [value-def? (= 'clojure.core/def (:seon.fn/defined-by row))
++        arglists (when-let [text (:seon.fn/arglists row)]
+                    ((arglists-reader database (symbol (namespace (:seon.fn/sym row)))) text))]
+     (merge (when-let [doc (:seon.fn/doc row)]
+              (ref/docstring doc))
+-           {:arglists (if arglists
+-                        (agent-arglists database (:seon.fn/sym row) arglists)
+-                        (declaration-absent :seon.fn/arglists))}
+-           (agent-documentation-contract database row)
++           (when-not value-def?
++             {:arglists (if arglists
++                          (agent-arglists database (:seon.fn/sym row) arglists)
++                          (declaration-absent :seon.fn/arglists))})
++           (when-not value-def?
++             (agent-documentation-contract database row))
+            (when-let [schemas (not-empty (schema-descriptions database row))]
+              {:schemas schemas})
+            (when overridden?
+--- a/test/seon/context_test.clj
++++ b/test/seon/context_test.clj
+@@ -899,3 +899,42 @@
+        (evaluate running agent-id "(my.turn/wait {:my.turn/note \"Stopped at the cycle probe.\"})")
+        (is (= "Stopped at the cycle probe." (#'context/last-step (db/db target) agent-id))
+            "an attempt's last step is the note of its last wait")))))
++
++(deftest consecutive-prompts-of-one-attempt-share-their-prefix-up-to-the-volatile-tail
++  (test-support/with-running-agent
++   (fn [running agent-id connection]
++     (let [handle (test-support/running-cluster running)
++           _ (evaluate running agent-id "(ns tq.prefix) (def ^:private limit \"Cap.\" 8) (defn step \"One.\" {:malli/schema [:=> [:cat :int] :int]} [n] (+ n limit))")
++           _ (test-support/declare-proof! connection 'tq.prefix-test 'holds 'tq.prefix/step)
++           _ (evaluate running agent-id "(ns tq.prefix-test (:require [clojure.test :refer [deftest is]])) (deftest cited-red (is (= 1 2)))")
++           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.prefix
++                                            :seon.task/name "holds"
++                                            :seon.task/plan "Use `tq.prefix/limit`, `tq.prefix/step` and `tq.prefix-test/cited-red`."}))
++           _ (task/assign! {:seon.agent/context-source handle :seon.db/connection connection :seon.task/assigned id
++                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
++           world #(hash-map :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps handle)
++                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle))
++           turn! (fn [n code]
++                   (let [tid (str "turn-prefix-" n)
++                         aid (str "att-prefix-" n)]
++                     (db/transact! connection [{:db/id "t" :seon.turn/id tid :seon.turn/agent [:seon.agent/id agent-id]
++                                                :seon.turn/opened-tx "datomic.tx"
++                                                :seon.turn/attempts [{:db/id "a" :seon.ai.attempt/id aid :seon.ai.attempt/ordinal 0
++                                                                      :seon.ai.attempt/at (java.util.Date.)
++                                                                      :seon.ai/endpoint "https://example.invalid" :seon.ai/model "m"}]}])
++                     (evaluate running agent-id code tid)
++                     (db/transact! connection [[:db/add [:seon.turn/id tid] :seon.turn/closed-tx "datomic.tx"]])
++                     (context/model-context (db/db connection) (world) agent-id)))
++           c1 (turn! 1 "(vec (range 500))")
++           _ (Thread/sleep 5)
++           c2 (turn! 2 "(+ 1 2)")
++           _ (Thread/sleep 5)
++           c3 (turn! 3 "(+ 3 4)")
++           m2 (seon.ai/messages :chat (:seon.ai/system c2) (:seon.context/exchanges c2) (:seon.ai/prompt c2))
++           m3 (seon.ai/messages :chat (:seon.ai/system c3) (:seon.context/exchanges c3) (:seon.ai/prompt c3))]
++       (is (= (:seon.ai/system c1) (:seon.ai/system c2) (:seon.ai/system c3))
++           "system text (help + attempt sections) is identical across consecutive turns, even with a cited def and red test")
++       (is (= (butlast (:seon.context/exchanges c2)) (take 1 (:seon.context/exchanges c3)))
++           "completed exchanges before the newest one stay identical on the next turn")
++       (is (= (butlast m2) (take (dec (count m2)) m3))
++           "two consecutive chat prompts share their exact message prefix up to the volatile tail")))))

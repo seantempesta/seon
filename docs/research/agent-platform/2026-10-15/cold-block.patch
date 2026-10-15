@@ -1,0 +1,115 @@
+--- a/src/seon/program.cljc
++++ b/src/seon/program.cljc
+@@ -584,9 +584,14 @@
+   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]}
+   [entity resolver-context]
+   (if-let [doc (:seon.fn/doc entity)]
+-    (definition-digest (cond-> (dissoc entity :seon.fn/doc :seon.fn/doc-order)
+-                         (:seon.fn/source entity) (update :seon.fn/source without-docstring doc))
+-                       resolver-context)
++    (let [stripped (cond-> (dissoc entity :seon.fn/doc :seon.fn/doc-order)
++                     (:seon.fn/source entity) (update :seon.fn/source without-docstring doc))
++          parts (cond-> {:seon.program/declaration
++                         (apply dissoc stripped definition-digest-excluded-attributes)}
++                  resolver-context
++                  (assoc :seon.program/resolver-context
++                         (used-resolver-context entity resolver-context)))]
++      (id/id parts 64))
+     (definition-digest entity resolver-context)))
+ 
+ #?(:clj
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -1706,7 +1706,7 @@
+   (or (second (resolved [builder value-key]))
+       (content-projection builder database ::value-projection [[builder value-key]])))
+ 
+-(defn- as-of-key
++(defn as-of-key
+   "An as-of view's exact identity: its committed origin's commit and its time
+   point, which fix every datom it holds. Absent for an uncommitted origin."
+   {:malli/schema [:=> [:cat :seon.db/database-value]
+@@ -5644,13 +5644,20 @@
+              identity-attrs (identity-attributes database)
+              entity-map (declaration-value projection database identity-attrs entity-id)
+              namespace-name (second (or (:seon.fn/ns entity-map) (:seon.test/ns entity-map)))
+-             namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)]
++             namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
++             ns-digest (when namespace-entity
++                         (:v (first (d/datoms database :eavt namespace-entity :seon.program/definition-digest))))
++             ns-ctx (when namespace-entity
++                      (let [derive #(@stored-namespace-context
++                                     (declaration-value projection database identity-attrs namespace-entity))]
++                        (if ns-digest
++                          (seon.cache/lookup ::namespace-resolver-context ns-digest (constantly 1024) derive)
++                          (derive))))]
+          (@program-behavior-digest
+           (@program-canonical-entity
+            (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+            entity-map)
+-          (some->> namespace-entity (declaration-value projection database identity-attrs)
+-                   (@stored-namespace-context))))))))
++          ns-ctx))))))
+ 
+ (defn- namespace-digests-tx
+   "Transaction data re-deriving, on the transaction's own value `database`, the
+--- a/src/seon/test.clj
++++ b/src/seon/test.clj
+@@ -473,7 +473,8 @@
+   {:malli/schema [:=> [:cat :seon.db/database-value]
+                   [:or [:tuple] [:tuple :seon.schema/value [:map-of :qualified-keyword :uuid]]]]}
+   [database]
+-  (if-let [program (runner/program-revisions database)]
++  (if-let [program (or (runner/program-revisions database)
++                       (db/as-of-key database))]
+     (let [edge-attributes (seon.cache/lookup ::edge-attributes program (comp #(+ 256 (* 64 %)) count)
+                                              #(db/q '[:find [?attribute ...]
+                                                       :where (or-join [?attribute]
+--- a/src/seon/context.clj
++++ b/src/seon/context.clj
+@@ -124,18 +124,23 @@
+ (defn- head-entries
+   "Each of `names` `database` holds, by symbol, with its status at its current reach judging `task` (nil: none)
+   and, when red, its failing assertions; the reads' refusal when one refuses."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
+-                  [:or :seon.context/head :seon.error/value]]}
+-  [database names task]
+-  (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))
+-        by-sym (if (seq names) (runner/current-results database names task) {})]
+-    (or (when (:seon.error/at by-sym) by-sym)
+-        (into {} (for [s names
+-                       :let [result (get by-sym s)
+-                             status (proof-status result)
+-                             failures (when (= :red status) (proof-failures result))]]
+-                   [s (cond-> {:seon.context/proof-status status}
+-                        failures (assoc :seon.context/proof-failures failures))])))))
++  {:malli/schema [:function
++                  [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym]]
++                   [:or :seon.context/head :seon.error/value]]
++                  [:=> [:cat :seon.db/database-value [:set :seon.test/sym] [:maybe :seon.task/sym] :map]
++                   [:or :seon.context/head :seon.error/value]]]}
++  ([database names task]
++   (let [present (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
++     (head-entries database names task (if (seq present) (runner/current-results database present task) {}))))
++  ([database names _task by-sym]
++   (let [names (into [] (filter #(seq (db/datoms database :avet :seon.test/sym %))) (sort names))]
++     (or (when (:seon.error/at by-sym) by-sym)
++         (into {} (for [s names
++                        :let [result (get by-sym s)
++                              status (proof-status result)
++                              failures (when (= :red status) (proof-failures result))]]
++                    [s (cond-> {:seon.context/proof-status status}
++                         failures (assoc :seon.context/proof-failures failures))]))))))
+ 
+ (defn proofs
+   "The proofs section for the task `sym` on `database` (the agent's branch), its assigned obligations'
+@@ -391,7 +396,8 @@
+                       (into #{} (comp (remove runner/red-result?) (filter #(pos? (:seon.test/pass-count % 0))) (map :seon.test/sym)) held)
+                       (let [reds (into #{} (comp (filter runner/red-result?) (map :seon.test/sym)) results)]
+                         (into #{} (comp (filter runner/red-result?) (map :seon.test/sym) (filter reds)) held))))
+-        head (when members (head-entries database members sym))
++        head (when members
++               (head-entries database members sym (if (vector? results) (into {} (map (juxt :seon.test/sym identity)) results) results)))
+         ;; the run the refusals name: the newest its results came from, else the newest the branch holds
+         newest (fn [runs] (some->> (seq runs) (apply max-key second) first))
+         run-id (when (vector? results)
