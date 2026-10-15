@@ -920,7 +920,6 @@
 
       (and (string? reasoning-content)
            (seq reasoning-content)
-           (not= "stop" finish-reason)
            (str/blank? text)
            (empty? unknown))
       (declared-error :seon.ai/reasoning-without-answer-error 'seon.ai/parsed-completion

@@ -4263,9 +4263,10 @@
     frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms}
    {:seon.batch/keys [value error evaluation form ns-before source] :as entry}]
   (let [request (cond-> (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
-                               :seon.cluster.eval/source (or source "")
                                ;; the form's working value: its render reads what it read
                                :seon.db/db working)
+                  ;; absence is no key: a read that failed on a blank reply has no source
+                  (seq source) (assoc :seon.cluster.eval/source source)
                   ;; the form prints under its own evaluation's print options
                   (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation))
                   ;; its printed output shares the reply's one budget

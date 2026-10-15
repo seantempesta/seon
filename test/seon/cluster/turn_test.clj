@@ -1730,7 +1730,7 @@
 (deftest a-reply-of-reasoning-and-no-answer-is-delivered-as-its-own-error-with-its-members
   ;; C9: DeepSeek spent its budget on reasoning (finish "length") or stopped with empty content. The reply held
   ;; reasoning and no forms; the next context says exactly that, as the producer's variant, never "began with a response".
-  (doseq [finish ["length"]]
+  (doseq [finish ["length" "stop"]]
     (with-cluster
       (fn [cluster]
         (let [usage {"prompt_tokens" 104 "completion_tokens" 8 "total_tokens" 112
@@ -1752,8 +1752,10 @@
                                 reports)]
           (is (= 2 (count @requests)) "the turn after the starved reply calls the model with no outside wake")
           (let [[exchange] (:seon.ai/exchanges (nth @requests 1 nil))]
-            (is (str/includes? (str (:seon.ai/reply (first exchange))) (:seon.error/message starved))
-                "the next context shows the producer's message")
+            (is (str/includes? (str (:seon.ai/reply (first exchange))) (str (:seon.ai/unanswered-reasoning-count delivered)))
+                "the next context shows the error's members, not only its message")
+            (is (str/includes? (str (:seon.ai/reply (first exchange))) (name :reasoning-without-answer-error))
+                "and its variant")
             (is (= :seon.ai/reasoning-without-answer-error (:seon.error/type delivered)))
             (is (= 13 (:seon.ai/unanswered-reasoning-count delivered)))
             (is (= finish (get-in delivered [:seon.error/offending :seon.ai/finish-reason])))

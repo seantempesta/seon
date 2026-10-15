@@ -1083,9 +1083,10 @@
         (let [settled (deref outcome 2000 ::did-not-settle)]
           (is (not= ::did-not-settle settled)
               "finish evidence settles without waiting for EOF or timeout")
-          (is (= "" (:seon.ai/text settled)))
-          (is (= "stop" (:seon.ai/finish-reason settled)))
-          (is (= 8 (count (:seon.ai/reasoning-content settled))))))
+          (is (= :seon.ai/reasoning-without-answer-error (:seon.error/type settled))
+              "a stop with reasoning and no text is the named reply error (7a996ed48 superseded)")
+          (is (= "stop" (get-in settled [:seon.error/data :seon.ai/finish-reason])))
+          (is (= 8 (count (get-in settled [:seon.error/data :seon.ai/reasoning-content]))))))
       (finally (stop-custody-stub! stub)))))
 
 (deftest closing-one-attempts-body-cannot-close-its-concurrent-peer
@@ -1102,9 +1103,9 @@
         (let [reasoning (future (complete! "/reasoning"))]
           (is (.await ^java.util.concurrent.CountDownLatch reasoning-finished
                       15 java.util.concurrent.TimeUnit/SECONDS))
-          (is (= ""
-                 (:seon.ai/text (deref reasoning 2000
-                                      {::timed-out true})))
+          (is (= :seon.ai/reasoning-without-answer-error
+                 (:seon.error/type (deref reasoning 2000
+                                          {::timed-out true})))
               "the finished attempt closes its own body")
           (.countDown ^java.util.concurrent.CountDownLatch release-peer)
           (let [peer-outcome (deref peer 2000 {::timed-out true})]
