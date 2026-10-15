@@ -51,7 +51,7 @@ the right answer is 24, and three live attempts failed, one per reader patched.
 | 0 | Sonnet | `seon.cluster.db-flow-test/every-agent-start-has-a-task` never exits and eats every check's 600 s | ends within its bound | in progress |
 | R1 | Haiku | dig: prior art (git commit-graph, upstream Datahike, earlier Seon attempts and why), rulings the design must keep | n/a | done, b2ad9cd44 |
 | R2 | Haiku | call-site ledger, src + test + script + resources + docs/skills, each row verified | n/a | done, a41868d3a |
-| C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | waiting on R1, R2 |
+| C | Sonnet | REPL confirmation of the approach on real data before any implementation (section below) | numbers below | done, claims 1-5 confirmed with corrections (this commit) |
 | 1 | Opus | fork: generation + small parents record per commit; `datahike.versioning/merge-base` | fork tests: fork, after merge from main, criss-cross | waiting on C |
 | 2 | Opus | `merge-main!` writes a merge commit; one Seon reader of the merge base; every ledger reader converts | `seon.merge-forward-test/after-a-forward-merge-the-branch-changed-only-its-own-declarations`; S5: 24, `done-refusals` [] | waiting |
 | 3 | Opus | own change by address-skipping index diff; history walks (`commit-at-t`, `basis-revisions`, `commit-facts`) replaced | `seon.profile/measure` on `merge-main!` and the step's change set, parent vs change | waiting |
@@ -155,7 +155,177 @@ Root must reconcile these before phase 4 deletes them.
 
 ## C: REPL confirmation
 
-(Sonnet writes here: each claim of the model above, its form, its measured value and its verdict.)
+Lane `omb-c1` (Sonnet), 2026-10-15, at `e7b19b902`. Every probe is in
+[one-merge-base-probes.clj](one-merge-base-probes.clj) (the file's head says which are A and which are B). Two
+environments, neither wrote to default:
+- **A**: default's JVM through `eval_clj` (jvm mode), read-only, bounded (claims 2 and 3 on the real chain
+  `:chain-f1f6dc8e6652`). Requests allocated 418-447 MB each (`:seon.cost/alloc-mb`).
+- **B**: a throwaway JVM on the fork (`cd reference-code/datahike && clojure -M:test`, socket REPL), opened on an
+  APFS clone (`cp -cR data/store`, 40 s) of the real store for the walks, because the cold walk allocates 2.4 GB, above
+  the 1 GB stop line for default; and on in-memory stores for everything that writes. Both are gone.
+  Main's branch is `:cluster-default` (not `:db`); the clone's main head was `6ad05319`, the chain head
+  `6ad047ad`. Timings are one run each; "thread" MB is `ThreadMXBean`, which undercounts konserve reads by about half.
+
+| # | Claim | Verdict |
+|---|---|---|
+| 1 | The merge base comes from the commit graph | **confirmed**, with two corrections: it is the fork point, not the base ref, and `:datahike/created-at` cannot order the walk |
+| 2 | Own change by diff gives 24 | **confirmed** for a base that is main at the last forward merge; **refuted** for the base the graph answers today (701) |
+| 3 | The address-skipping diff is correct | **confirmed** (0 mismatches over 1,183 attributes and 4 pairs); the identities must be read from the entities, not from the diff's sym datoms |
+| 4 | A forward merge as a merge commit yields the right base | **confirmed**; relaunch confirmed; criss-cross yields two bases |
+| 5 | Datahike's own `merge!` path works | **confirmed**; the record carries parents, not a generation |
+
+### Claim 1: the merge base from the commit graph
+
+Form (B, probes "claim 1"): `paint-down` is git's `paint_down_to_common` (flags P1, P2, stale, result; queue by commit
+instant) over `node-of`, which reads a commit record with `(konserve.core/get kstore cid nil {:sync? true})` and keeps
+`[:meta :datahike/parents]`, `[:meta :datahike/updated-at]`, `:max-tx`, `[:config :branch]`.
+
+| | value |
+|---|---|
+| answer | one base, `6acf6fed-6b55-5297-9f31-af2c339648cb`: written on `:cluster-default` (main), max-tx 536872008, txInstant 2026-10-14 19:05:01 +07 (12:05:01 UTC) |
+| cold (1,975 record reads) | **1,451 ms, 2,419 MB thread** |
+| warm (cid to node map) | **2.4 ms, 2.3 MB** |
+| commits on each side of it | chain 1,126 (0 with more than one parent), main 848 (1 merge commit), 1,975 pops in all |
+
+- **It is what history says.** The chain's first own commit (`6acf6fef`) has exactly one parent, `6acf6fed`: the chain was
+  forked there. All 1,126 chain commits are `:chain-f1f6dc8e6652` single-parent commits, because `merge-main!` wrote
+  plain transactions. So the graph still places the base at the original fork point, as expected, and not at the S5
+  base ref.
+- **The S5 base ref is not on the lineage** (finding 4 of `datahike-internals.md` confirmed): `6ad046d3` is a commit
+  on `:base/chain-f1f6dc8e6652` with max-tx 536872709 whose only parent `6ad046cc` is a main commit; it is an ancestor of
+  neither main nor the chain, and `merge-base(base-ref, main)` is `6ad046cc`, 122 pops. Its database content equals main at
+  `6ad046cc`, which is why claim 2 can use it as the stand-in.
+- **Correction 1: `:datahike/created-at` is constant.** It is the database's creation date (2026-10-10T03:05:48Z) on every
+  commit; only 2 distinct values over 1,975 commits. The per-commit instant is `:datahike/updated-at` (ms). Even that ties
+  within a millisecond, so phase 1's generation number is not optional: the ordering must not be a clock. (My first walk
+  ordered by `created-at` and returned 713 results; with `(= 3 flags)` excluding stale and `updated-at` it returns one.)
+- **Size of the parents record (phase 1).** Per commit, uncached, 60 heads each:
+
+| read | ms each | MB thread each |
+|---|---|---|
+| whole record, `get` then `:meta` | 0.63 | 1.15 |
+| `konserve.core/get-in` on `[cid :meta :datahike/parents]` | 0.63 | 1.15 |
+| `konserve.core/get-meta` (header only; has no parents) | 0.14 | 0.16 |
+| sidecar key `[:omb/commit-graph cid]` `{:parents :at}` (1,975 keys) | **0.05** (92-110 ms cold for all) | 0.19 (372 MB for all) |
+
+  `get-in` does not help: konserve decodes the whole value. The sidecar makes the cold walk **1,451 ms to about 100 ms
+  and 2,419 MB to 372 MB** (13x and 6.5x), and a map of the sidecars walks in 3.6 ms. The remaining 0.19 MB per tiny read is
+  konserve's per-read overhead, so a sidecar per commit is the right shape but a bulk read (one key holding a branch's
+  parent records) would be cheaper still; that is a phase 1 measurement.
+- **Not run on default**: the cold walk (2.4 GB). The A-side evidence for the graph is the head/parents/base-ref reads
+  (11 ms, 10.9 MB request) that agree with the clone.
+
+### Claim 2: own change by diff (24 identities)
+
+Form (A, probes "claim 2"): `pss-diff` of the base's and the head's `:aevt` limited to `:seon.program/definition-digest`;
+the entities of the differing datoms; their identities `[:seon.fn/sym|:seon.test/sym|:seon.ns/name|:seon.schema/key value]`
+read from each database; `seon.program/digest-map` of base and head over those identities; keep the identities whose
+digest differs. Base = `(seon.cluster.registry/base-commit-id chain-db :chain-f1f6dc8e6652)` = `6ad046d3`.
+
+| phase (warm, thread) | ms | MB |
+|---|---|---|
+| `commit-as-db` of the base | 0.64 | 1.6 |
+| diff (digest attribute, 289 nodes by attribute; 662 only in base, 682 only in head) | 13.5 | 20.5 |
+| identities from the 1,344 differing entities | 105 | 132 |
+| `digest-map` on both over 682 candidates | 16.6 | 42.9 |
+| **total, in the form** | **about 136** | **about 197** |
+
+Request level for the whole probe: 205 ms, 432 MB. The first (cold) run: 515 ms in the form, 829 MB request. **Result: 24
+identities**, the set `own-changes-notes.md` expects: 8 `seon.error/*` functions (`alias-candidates`, `alias-target`,
+`candidate-calling-form`, `config-expectation-present-generator`, `core-namespace`, `library-calling-form`,
+`library-names`, `nearest-calls`), 14 `:seon.ns/name` rows (12 `my.attempt-*`, `seon.error`, `user`), `[:seon.schema/key
+:tmp/probe]`, and the test `seon.error-test/an-unresolved-alias-name-is-answered-with-its-nearest-core-name`. Verdict: **confirmed**.
+
+- **Refuted for today's graph base.** With the commit graph's own base (`6acf6fed`, the fork point) the same pipeline
+  answers **701** changed identities (677 entities on the head side), not 24: `merge-main!` wrote main's declarations into
+  the chain as plain transactions with fresh entity ids, so against the fork point they are the chain's change. The graph
+  answers 24 only once the forward merge is a merge commit (claim 4): the merge base then is main at the merge, and the
+  carried rows equal the base's digests. This is the whole reason phase 2 precedes phase 3.
+- **Correction 2: read identities from the entities.** Taking the identities from the diff of all five attributes (the sym
+  datoms) answered 302 candidates and 20 changed, not 682 and 24: an entity edited in place changes its digest datom and
+  leaves its sym datom out of the diff. The identity must be looked up on the entity (as the form does). The lookup is now
+  the dominant cost (105 ms, 132 MB); phase 3 should read it with one AEVT slice per identity attribute or lookup only the
+  entities whose sym datom is not in the diff.
+- The diff itself is not the saving here: the plain alternative for five attributes costs the same order (claim 3).
+
+### Claim 3: the diff is correct
+
+Form (A and B, probes "claim 3"): `pss-diff` (address-skipping; range pruned by attribute; every slot datom a candidate;
+every candidate decided by membership in both full sets) against a plain symmetric difference of `(d/datoms db {:index :aevt
+:components [attribute]})` as `[e a v tx]` tuples.
+
+| pair | attributes | differing datoms | equal? |
+|---|---|---|---|
+| base ref vs chain head (A and B) | 5 program attributes (29,446 / 29,486 datoms) | 944 / 984 | **yes** |
+| main head vs chain head (A and B) | same | 944 / 984 | **yes** |
+| base ref vs main head (A and B) | same | 0 / 0 | **yes** (main moved no declaration since the last forward merge) |
+| main head vs chain head (B) | **all 1,183 schema attributes**, 711,069 datoms, 424 attributes differ | 50,429 / 68,877 | **yes, 0 mismatches** |
+| 6 + 8 random histories (B, memory) | `:k/n`, `:k/who` for 144 commit pairs each | n/a | **yes, 0 wrong of 2,016** |
+
+- The slot path is exercised only on the real store (98 to 251 slot datoms per diff, e.g. the digest attribute pair has
+  `:extras 251`); the in-memory fixtures never produced a slot (`:slot-datoms-seen 0`, also with a 3,000 row tree), so the
+  property test does not cover slots and the real-store equality is the evidence.
+- **Cost**, base vs chain: one range per attribute, 289 nodes, **about 20 ms and 27 MB warm** (the first call in a JVM
+  with cold nodes: 114 ms in A); the plain slices cost 41-50 ms and 46 MB. One contiguous range from the first to the last
+  attribute spans every attribute alphabetically between them: 2,069 nodes, 195 ms/181 MB warm, 1,758 ms/777 MB cold. So
+  **the bound must be one range per attribute**. Over all 1,183 attributes the diff took 18.4 s and 5.5 GB in B (plain
+  slices included); that is the unbounded case and not a design target.
+- Honest size of the win: for program attributes (29k datoms) the diff is about 2x cheaper than the plain slice, not
+  proportional-to-change, because the rows main moved into the chain differ by entity id (944 and 984 datoms for 24
+  identities). The saving the diff buys is correctness without a *t*, and cost that does not grow with history length.
+
+### Claim 4: a forward merge as a merge commit
+
+Form (B, probes "claims 4 and 5"): in-memory fork store. `main = connect`, `chain = branch! main`, transactions on both,
+`@(d/merge-db! chain {:parents #{(d/commit-id @main)} :tx-data [...]})` (the call `seon.db/transact!` makes for a request
+with `:parents`), more transactions on main and chain. Walk: `merge-base` = `paint-down` plus the redundant-ancestor
+filter, with generation numbers (1 + max parent) added in the reader.
+
+| step | merge base of (chain head, main head) |
+|---|---|
+| 3 transactions on both, no merge | the fork commit |
+| 4 the forward merge | the chain commit's parents are `#{previous chain commit, main's commit}`; base is main's commit `m4` |
+| 5 more transactions on main (2) and chain (1) | **`m4`** (generations: fork 3, `m4` 4, main head 6, chain head 7) |
+| relaunch: `d/branch!` from the chain's end commit, 3 transactions | **`m4`** again, nothing stored |
+| relaunch from a chain with no forward merge yet | the original fork commit, for chain and relaunch alike |
+| criss-cross: main merges the chain's commit while the chain merges main's | **two bases**, both parents; `paint-down` returns both, neither is redundant |
+
+- **Property**, 14 random histories (transactions, branches, cross merges; 3,237+ head pairs in the larger run): the
+  generation-ordered walk equalled a brute-force lowest-common-ancestor set for **every pair (0 wrong)**; the
+  instant-ordered walk was also right (0 wrong), but the memory store's commits are milliseconds apart; the real store's
+  1 ms ties and the constant `created-at` argue for the generation. 752 of 3,237 pairs had several bases, so criss-cross is
+  not a corner of random merging.
+- **Criss-cross in Seon.** Seon only merges the chain into main once, at the end, and main into the chain forward; a
+  crossing needs main to take a commit of a chain that is still taking main's. Phase 1 still needs a rule: git's
+  `merge-base` without `--all` leaves it unspecified and its merge machinery builds a virtual base. The simplest rule
+  that is deterministic: the base with the greatest generation, ties refused by name (a typed error).
+- Verdict: **confirmed**, including the relaunch case (no stored copy), which settles root's flag on `4cfa03eab`.
+
+### Claim 5: Datahike's own `merge!` path
+
+- `@(d/merge-db! branch-connection {:parents #{commit-uuid} :tx-data ...})` on the `:chain` branch connection worked
+  as Seon calls it: the report has `:db-before :db-after :tx-data :tempids :tx-meta :datahike/commit`; the commit's
+  `[:meta :datahike/parents]` is `#{previous head, the given commit}`; the parent was a **commit uuid of another branch
+  (main)**, not a branch keyword, which is what `merge-main!` has in hand.
+- The record of the merge commit has 15 keys (`:config :meta :hash :max-tx :max-eid :op-count :merkle-roots
+  :cache-revisions :schema-meta-key` and the six index keys; the real store adds the fused roots) and `:meta` keys
+  `:datahike/commit-id :created-at :updated-at :id :parents :version`. **Missing for the walk: a generation.** Nothing else:
+  parents are there, `:config :branch` says which branch wrote it. Phase 1 adds the generation (and the small parents
+  record) and nothing else.
+- Not exercised here: the basis fence `:datahike/expected-basis-t` on the merge request, and GC (`datahike.gc` follows
+  `:datahike/parents`; root's reconciliation already covers it: main's commit is reachable from main).
+
+### What changes in the plan
+
+1. Phase 1 orders the walk by a stamped generation, not by `:datahike/created-at` or the clock, and ships the sidecar
+   (cold walk 1,451 ms to about 100 ms measured) with `merge-base` returning a set that the Seon reader narrows by
+   greatest generation, refusing ties by name.
+2. Phase 2 is the only thing that makes the answer 24: until `merge-main!` writes a merge commit the graph base is the
+   fork point and the pipeline answers 701. The S5 attempt after the restart must show the merge base moving to a main
+   commit.
+3. Phase 3 reads identities from entities, bounds the diff with one range per attribute, and measures the lookup, which
+   dominates (105 of 136 ms).
+
 
 ## Implementation notes
 
